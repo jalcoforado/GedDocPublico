@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Brand */
+    --aprimora: 213 53% 25%;
+    --aprimora-light: 215 47% 34%;
+
+    /* Surfaces */
+    --background: 210 17% 96%;
+    --foreground: 218 18% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 218 18% 15%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 215 14% 34%;
+    --border: 220 13% 88%;
+    --input: 220 13% 85%;
+    --ring: 213 53% 25%;
+
+    /* Intents */
+    --primary: 213 53% 25%;
+    --primary-foreground: 0 0% 100%;
+
+    --danger: 0 72% 51%;
+    --danger-foreground: 0 0% 100%;
+    --danger-soft: 0 86% 97%;
+    --danger-soft-foreground: 0 70% 35%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --success-soft: 138 76% 96%;
+    --success-soft-foreground: 158 64% 22%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 26 83% 14%;
+    --warning-soft: 48 96% 95%;
+    --warning-soft-foreground: 31 78% 28%;
+
+    --info-soft: 214 95% 93%;
+    --info-soft-foreground: 217 91% 25%;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
+  }
+  .pt-safe {
+    padding-top: max(env(safe-area-inset-top), 0.5rem);
+  }
+  .min-h-dvh {
+    min-height: 100dvh;
+  }
+  .h-dvh {
+    height: 100dvh;
+  }
+}

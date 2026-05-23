@@ -1,0 +1,271 @@
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..auth.deps import get_current_user
+from ..auth.password import hash_md5, hash_password
+from ..config import get_settings
+from ..database import get_db
+from ..models import Usuario, UsuarioGrupo, UsuarioUnidadeTrabalho
+from ..schemas.common import Paginated
+from ..schemas.usuario import (
+    UsuarioCreate,
+    UsuarioDetail,
+    UsuarioOut,
+    UsuarioUpdate,
+)
+
+router = APIRouter(prefix="/usuarios", tags=["usuarios"])
+
+
+@router.get("", response_model=Paginated[UsuarioOut])
+async def list_usuarios(
+    _: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    q: str | None = Query(None, description="Busca por nome ou email"),
+) -> Paginated[UsuarioOut]:
+    base = select(Usuario).where(Usuario.excluido.is_(False))
+    if q:
+        like = f"%{q.lower()}%"
+        base = base.where(
+            or_(func.lower(Usuario.nome).like(like), func.lower(Usuario.email).like(like))
+        )
+
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+
+    stmt = base.order_by(Usuario.nome).offset((page - 1) * page_size).limit(page_size)
+    items = [UsuarioOut.model_validate(u) for u in (await db.execute(stmt)).scalars().all()]
+
+    return Paginated(items=items, total=total, page=page, page_size=page_size)
+
+
+async def _load_links(db: AsyncSession, usuario_id: int) -> tuple[list[int], list[int]]:
+    grupos = (
+        await db.execute(
+            select(UsuarioGrupo.id_grupo).where(
+                UsuarioGrupo.id_usuario == usuario_id,
+                UsuarioGrupo.excluido.is_(False),
+            )
+        )
+    ).scalars().all()
+    unidades = (
+        await db.execute(
+            select(UsuarioUnidadeTrabalho.id_unidade_trabalho).where(
+                UsuarioUnidadeTrabalho.id_usuario == usuario_id,
+                UsuarioUnidadeTrabalho.excluido.is_(False),
+            )
+        )
+    ).scalars().all()
+    return list(grupos), list(unidades)
+
+
+@router.get("/{usuario_id}", response_model=UsuarioDetail)
+async def get_usuario(
+    usuario_id: int,
+    _: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UsuarioDetail:
+    user = (
+        await db.execute(
+            select(Usuario).where(
+                Usuario.id == usuario_id, Usuario.excluido.is_(False)
+            )
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+    grupos, unidades = await _load_links(db, usuario_id)
+    return UsuarioDetail(
+        **UsuarioOut.model_validate(user).model_dump(),
+        grupos=grupos,
+        unidades_extras=unidades,
+    )
+
+
+@router.post("", response_model=UsuarioDetail, status_code=status.HTTP_201_CREATED)
+async def create_usuario(
+    payload: UsuarioCreate,
+    _: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UsuarioDetail:
+    dup = (
+        await db.execute(
+            select(Usuario).where(
+                Usuario.email == payload.email, Usuario.excluido.is_(False)
+            )
+        )
+    ).scalar_one_or_none()
+    if dup:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="E-mail já cadastrado")
+
+    # Grava MD5 (compat PHP) E bcrypt (Python prefere). Ver Fase 9.2.
+    user = Usuario(
+        nome=payload.nome,
+        email=payload.email,
+        cpf=payload.cpf,
+        senha=hash_md5(payload.senha),
+        senha_bcrypt=hash_password(payload.senha),
+        id_unidade_trabalho=payload.id_unidade_trabalho,
+        cargo=payload.cargo,
+        ativo=payload.ativo,
+        excluido=False,
+        app=get_settings().app_name,
+    )
+    db.add(user)
+    await db.flush()
+
+    for gid in payload.grupos:
+        db.add(
+            UsuarioGrupo(
+                id_usuario=user.id,
+                id_grupo=gid,
+                ativo=True,
+                excluido=False,
+                app=get_settings().app_name,
+            )
+        )
+    await db.commit()
+    await db.refresh(user)
+    grupos, unidades = await _load_links(db, user.id)
+    return UsuarioDetail(
+        **UsuarioOut.model_validate(user).model_dump(),
+        grupos=grupos,
+        unidades_extras=unidades,
+    )
+
+
+@router.put("/{usuario_id}", response_model=UsuarioDetail)
+async def update_usuario(
+    usuario_id: int,
+    payload: UsuarioUpdate,
+    _: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UsuarioDetail:
+    user = (
+        await db.execute(
+            select(Usuario).where(
+                Usuario.id == usuario_id, Usuario.excluido.is_(False)
+            )
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+
+    data = payload.model_dump(exclude_unset=True)
+    if "senha" in data and data["senha"]:
+        plain = data["senha"]
+        data["senha"] = hash_md5(plain)
+        data["senha_bcrypt"] = hash_password(plain)
+    elif "senha" in data:
+        data.pop("senha")
+
+    for k, v in data.items():
+        setattr(user, k, v)
+    await db.commit()
+    await db.refresh(user)
+    grupos, unidades = await _load_links(db, user.id)
+    return UsuarioDetail(
+        **UsuarioOut.model_validate(user).model_dump(),
+        grupos=grupos,
+        unidades_extras=unidades,
+    )
+
+
+@router.delete("/{usuario_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_usuario(
+    usuario_id: int,
+    current: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    if usuario_id == current.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Não pode excluir a si mesmo")
+    user = (
+        await db.execute(
+            select(Usuario).where(
+                Usuario.id == usuario_id, Usuario.excluido.is_(False)
+            )
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+    user.excluido = True
+    user.ativo = False
+    await db.commit()
+
+
+@router.put("/{usuario_id}/grupos", response_model=UsuarioDetail)
+async def set_grupos(
+    usuario_id: int,
+    grupos: list[int],
+    _: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UsuarioDetail:
+    user = (
+        await db.execute(
+            select(Usuario).where(
+                Usuario.id == usuario_id, Usuario.excluido.is_(False)
+            )
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+
+    await db.execute(
+        delete(UsuarioGrupo).where(UsuarioGrupo.id_usuario == usuario_id)
+    )
+    for gid in grupos:
+        db.add(
+            UsuarioGrupo(
+                id_usuario=usuario_id,
+                id_grupo=gid,
+                ativo=True,
+                excluido=False,
+                app=get_settings().app_name,
+            )
+        )
+    await db.commit()
+    g, u = await _load_links(db, usuario_id)
+    return UsuarioDetail(
+        **UsuarioOut.model_validate(user).model_dump(),
+        grupos=g,
+        unidades_extras=u,
+    )
+
+
+@router.put("/{usuario_id}/unidades", response_model=UsuarioDetail)
+async def set_unidades(
+    usuario_id: int,
+    unidades: list[int],
+    _: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UsuarioDetail:
+    user = (
+        await db.execute(
+            select(Usuario).where(
+                Usuario.id == usuario_id, Usuario.excluido.is_(False)
+            )
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+
+    await db.execute(
+        delete(UsuarioUnidadeTrabalho).where(UsuarioUnidadeTrabalho.id_usuario == usuario_id)
+    )
+    for uid in unidades:
+        db.add(
+            UsuarioUnidadeTrabalho(
+                id_usuario=usuario_id,
+                id_unidade_trabalho=uid,
+                excluido=False,
+            )
+        )
+    await db.commit()
+    g, u = await _load_links(db, usuario_id)
+    return UsuarioDetail(
+        **UsuarioOut.model_validate(user).model_dump(),
+        grupos=g,
+        unidades_extras=u,
+    )

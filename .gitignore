@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+.env
+
+# Node / Next
+node_modules/
+.next/
+.next-dev/
+out/
+dist/
+
+# IDE
+.vscode/
+.idea/
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Uploads (dev local)
+uploads/
+
+# Secrets — NUNCA commitar chaves JWT
+keys/*.pem
+keys/*.key
+
+# Reports / outputs locais
+jobs/

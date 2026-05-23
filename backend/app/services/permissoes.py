@@ -1,0 +1,122 @@
+"""Mirrors Positiv\\Usuario::permissions() in aprimora/app/models/Usuario.php.
+
+Rules:
+- Find the user's groups for the current APP (filter usuario_grupo + grupo.sistema.app == APP).
+- The user's "highest level" is the group with the lowest `nivel.valor` (0 = Super Usuário).
+- If isSU: return all transactions of the user's sistema (via sistema_transacao) with full perms.
+- Otherwise: union of grupo_transacao across the user's groups for this APP.
+"""
+from dataclasses import dataclass
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..config import get_settings
+from ..models import (
+    Grupo,
+    GrupoTransacao,
+    Nivel,
+    Sistema,
+    SistemaTransacao,
+    Transacao,
+    UsuarioGrupo,
+)
+
+
+@dataclass
+class PermItem:
+    codigo: str
+    transacao: str
+    inserir: bool
+    atualizar: bool
+    excluir: bool
+
+
+@dataclass
+class UserPermissions:
+    is_super_usuario: bool
+    nivel_valor: int | None
+    items: list[PermItem]
+
+
+async def load_permissions(db: AsyncSession, usuario_id: int) -> UserPermissions:
+    settings = get_settings()
+    app = settings.app_name
+
+    grupos_stmt = (
+        select(Grupo, Nivel, Sistema)
+        .join(UsuarioGrupo, UsuarioGrupo.id_grupo == Grupo.id)
+        .join(Nivel, Nivel.id == Grupo.id_nivel)
+        .join(Sistema, Sistema.id == Grupo.id_sistema)
+        .where(
+            UsuarioGrupo.id_usuario == usuario_id,
+            UsuarioGrupo.excluido.is_(False),
+            UsuarioGrupo.ativo.is_(True),
+            Grupo.excluido.is_(False),
+            Sistema.excluido.is_(False),
+            Sistema.app == app,
+        )
+    )
+    rows = (await db.execute(grupos_stmt)).all()
+
+    if not rows:
+        return UserPermissions(is_super_usuario=False, nivel_valor=None, items=[])
+
+    rows.sort(key=lambda r: r[1].valor)
+    higher_grupo, higher_nivel, higher_sistema = rows[0]
+    is_su = higher_nivel.valor == 0
+
+    if is_su:
+        stmt = (
+            select(Transacao)
+            .join(SistemaTransacao, SistemaTransacao.id_transacao == Transacao.id)
+            .where(
+                SistemaTransacao.id_sistema == higher_sistema.id,
+                SistemaTransacao.excluido.is_(False),
+                Transacao.excluido.is_(False),
+            )
+        )
+        transacoes = (await db.execute(stmt)).scalars().all()
+        items = [
+            PermItem(
+                codigo=t.codigo,
+                transacao=t.transacao,
+                inserir=True,
+                atualizar=True,
+                excluir=True,
+            )
+            for t in transacoes
+        ]
+    else:
+        grupo_ids = [g.id for g, _, _ in rows]
+        stmt = (
+            select(Transacao, GrupoTransacao)
+            .join(GrupoTransacao, GrupoTransacao.id_transacao == Transacao.id)
+            .where(
+                GrupoTransacao.id_grupo.in_(grupo_ids),
+                GrupoTransacao.excluido.is_(False),
+                Transacao.excluido.is_(False),
+            )
+        )
+        merged: dict[str, PermItem] = {}
+        for transacao, gt in (await db.execute(stmt)).all():
+            existing = merged.get(transacao.codigo)
+            if existing:
+                existing.inserir = existing.inserir or gt.inserir
+                existing.atualizar = existing.atualizar or gt.atualizar
+                existing.excluir = existing.excluir or gt.excluir
+            else:
+                merged[transacao.codigo] = PermItem(
+                    codigo=transacao.codigo,
+                    transacao=transacao.transacao,
+                    inserir=gt.inserir,
+                    atualizar=gt.atualizar,
+                    excluir=gt.excluir,
+                )
+        items = sorted(merged.values(), key=lambda p: p.codigo)
+
+    return UserPermissions(
+        is_super_usuario=is_su,
+        nivel_valor=higher_nivel.valor,
+        items=items,
+    )
