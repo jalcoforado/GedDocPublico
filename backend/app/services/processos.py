@@ -3,6 +3,8 @@
 Trazer nomes (manifestante, assunto, unidade) numa única query evita o problema
 de N+1 ao listar. Para a timeline usamos selects separados que rodam após o
 detalhe — é mais simples e suficientemente rápido em escala normal de UI.
+
+Fase 13a: todas as funções recebem `tenant_id` e filtram pelo escopo.
 """
 from datetime import datetime
 
@@ -10,6 +12,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from ..database import tenant_filter
 from ..models import (
     Acao,
     Anexo,
@@ -36,9 +39,9 @@ from ..schemas.processo import (
 )
 
 
-def _base_select():
+def _base_select(tenant_id: int):
     LocalAtual = aliased(UnidadeTrabalho, name="local_atual")
-    return (
+    stmt = (
         select(
             Processo,
             Assunto.assunto.label("assunto_nome"),
@@ -59,11 +62,13 @@ def _base_select():
         .join(LocalAtual, LocalAtual.id == Processo.id_local_atual, isouter=True)
         .where(Processo.excluido.is_(False))
     )
+    return tenant_filter(stmt, Processo, tenant_id)
 
 
 async def list_processos(
     db: AsyncSession,
     *,
+    tenant_id: int,
     page: int,
     page_size: int,
     q: str | None = None,
@@ -74,7 +79,7 @@ async def list_processos(
     desde: datetime | None = None,
     ate: datetime | None = None,
 ) -> tuple[list[ProcessoListItem], int]:
-    base = _base_select()
+    base = _base_select(tenant_id)
 
     if q:
         like = f"%{q.lower()}%"
@@ -139,16 +144,18 @@ def _row_to_list(r) -> ProcessoListItem:
     )
 
 
-async def get_processo_detail(db: AsyncSession, processo_id: int) -> ProcessoDetail | None:
+async def get_processo_detail(
+    db: AsyncSession, processo_id: int, *, tenant_id: int
+) -> ProcessoDetail | None:
     row = (
-        await db.execute(_base_select().where(Processo.id == processo_id))
+        await db.execute(_base_select(tenant_id).where(Processo.id == processo_id))
     ).first()
     if row is None:
         return None
     p: Processo = row[0]
     base_item = _row_to_list(row)
-    movimentacoes = await _load_movimentacoes(db, processo_id)
-    anexos = await _load_anexos(db, processo_id)
+    movimentacoes = await _load_movimentacoes(db, processo_id, tenant_id)
+    anexos = await _load_anexos(db, processo_id, tenant_id)
 
     return ProcessoDetail(
         **base_item.model_dump(),
@@ -162,14 +169,20 @@ async def get_processo_detail(db: AsyncSession, processo_id: int) -> ProcessoDet
     )
 
 
-async def _load_movimentacoes(db: AsyncSession, processo_id: int) -> list[MovimentacaoItem]:
+async def _load_movimentacoes(
+    db: AsyncSession, processo_id: int, tenant_id: int
+) -> list[MovimentacaoItem]:
     UnidadeResp = aliased(UnidadeTrabalho, name="u_resp")
     stmt = (
         select(Movimentacao, Acao, UnidadeResp, Usuario)
         .join(Acao, Acao.id == Movimentacao.id_acao)
         .join(UnidadeResp, UnidadeResp.id == Movimentacao.id_unidade_responsavel, isouter=True)
         .join(Usuario, Usuario.id == Movimentacao.id_usuario, isouter=True)
-        .where(Movimentacao.id_processo == processo_id, Movimentacao.excluido.is_(False))
+        .where(
+            Movimentacao.id_processo == processo_id,
+            Movimentacao.tenant_id == tenant_id,
+            Movimentacao.excluido.is_(False),
+        )
         .order_by(Movimentacao.data_hora_movimentacao.desc())
     )
     rows = (await db.execute(stmt)).all()
@@ -181,6 +194,7 @@ async def _load_movimentacoes(db: AsyncSession, processo_id: int) -> list[Movime
             await db.execute(
                 select(Despacho).where(
                     Despacho.id_movimentacao.in_(mov_ids),
+                    Despacho.tenant_id == tenant_id,
                     Despacho.excluido.is_(False),
                 )
             )
@@ -200,6 +214,7 @@ async def _load_movimentacoes(db: AsyncSession, processo_id: int) -> list[Movime
                 .join(Prioridade, Prioridade.id == Encaminhamento.id_prioridade, isouter=True)
                 .where(
                     Encaminhamento.id_movimentacao.in_(mov_ids),
+                    Encaminhamento.tenant_id == tenant_id,
                     Encaminhamento.excluido.is_(False),
                 )
             )
@@ -212,7 +227,10 @@ async def _load_movimentacoes(db: AsyncSession, processo_id: int) -> list[Movime
     if desp_user_ids:
         urows = (
             await db.execute(
-                select(Usuario.id, Usuario.nome).where(Usuario.id.in_(desp_user_ids))
+                select(Usuario.id, Usuario.nome).where(
+                    Usuario.id.in_(desp_user_ids),
+                    Usuario.tenant_id == tenant_id,
+                )
             )
         ).all()
         users_by_id = {uid: nome for uid, nome in urows}
@@ -261,13 +279,16 @@ async def _load_movimentacoes(db: AsyncSession, processo_id: int) -> list[Movime
     return items
 
 
-async def _load_anexos(db: AsyncSession, processo_id: int) -> list[AnexoNoProcesso]:
+async def _load_anexos(
+    db: AsyncSession, processo_id: int, tenant_id: int
+) -> list[AnexoNoProcesso]:
     stmt = (
         select(Anexo, AnexoProcesso, TipoAnexo.tipo_anexo)
         .join(AnexoProcesso, AnexoProcesso.id_anexo == Anexo.id)
         .join(TipoAnexo, TipoAnexo.id == Anexo.id_tipo_anexo, isouter=True)
         .where(
             AnexoProcesso.id_processo == processo_id,
+            AnexoProcesso.tenant_id == tenant_id,
             AnexoProcesso.excluido.is_(False),
             and_(Anexo.excluido.is_(False), Anexo.ativo.is_(True)),
         )

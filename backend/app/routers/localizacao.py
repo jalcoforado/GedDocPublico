@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user
+from ..auth.deps import get_current_user, require_tenant_id
 from ..database import get_db
 from ..models import Bairro, Cidade, Endereco, Estado, Usuario
 from ..schemas.common import Paginated
@@ -23,7 +23,7 @@ from ._crud import get_or_404, paginated_list
 router = APIRouter(tags=["localizacao"])
 
 
-# --- Estado (read only) -------------------------------------------------------
+# --- Estado (read only, catálogo GLOBAL) -------------------------------------
 @router.get("/estados", response_model=list[EstadoOut])
 async def list_estados(
     _: Usuario = Depends(get_current_user),
@@ -33,7 +33,7 @@ async def list_estados(
     return [EstadoOut.model_validate(e) for e in (await db.execute(stmt)).scalars().all()]
 
 
-# --- Cidade -------------------------------------------------------------------
+# --- Cidade (catálogo GLOBAL — IBGE) -----------------------------------------
 @router.get("/cidades", response_model=Paginated[CidadeOut])
 async def list_cidades(
     _: Usuario = Depends(get_current_user),
@@ -47,6 +47,7 @@ async def list_cidades(
     return await paginated_list(
         db,
         Cidade,
+        tenant_id=None,
         out_model=CidadeOut,
         page=page,
         page_size=page_size,
@@ -77,7 +78,7 @@ async def update_cidade(
     _: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    c = await get_or_404(db, Cidade, cidade_id, label="Cidade")
+    c = await get_or_404(db, Cidade, cidade_id, tenant_id=None, label="Cidade")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(c, k, v)
     await db.commit()
@@ -91,12 +92,12 @@ async def delete_cidade(
     _: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    c = await get_or_404(db, Cidade, cidade_id, label="Cidade")
+    c = await get_or_404(db, Cidade, cidade_id, tenant_id=None, label="Cidade")
     c.excluido = True
     await db.commit()
 
 
-# --- Bairro -------------------------------------------------------------------
+# --- Bairro (catálogo GLOBAL) ------------------------------------------------
 @router.get("/bairros", response_model=Paginated[BairroOut])
 async def list_bairros(
     _: Usuario = Depends(get_current_user),
@@ -110,6 +111,7 @@ async def list_bairros(
     return await paginated_list(
         db,
         Bairro,
+        tenant_id=None,
         out_model=BairroOut,
         page=page,
         page_size=page_size,
@@ -140,7 +142,7 @@ async def update_bairro(
     _: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    b = await get_or_404(db, Bairro, bairro_id, label="Bairro")
+    b = await get_or_404(db, Bairro, bairro_id, tenant_id=None, label="Bairro")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(b, k, v)
     await db.commit()
@@ -154,15 +156,16 @@ async def delete_bairro(
     _: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    b = await get_or_404(db, Bairro, bairro_id, label="Bairro")
+    b = await get_or_404(db, Bairro, bairro_id, tenant_id=None, label="Bairro")
     b.excluido = True
     await db.commit()
 
 
-# --- Endereco -----------------------------------------------------------------
+# --- Endereco (TENANTED) -----------------------------------------------------
 @router.get("/enderecos", response_model=Paginated[EnderecoOut])
 async def list_enderecos(
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -179,6 +182,7 @@ async def list_enderecos(
     return await paginated_list(
         db,
         Endereco,
+        tenant_id=tenant_id,
         out_model=EnderecoOut,
         page=page,
         page_size=page_size,
@@ -193,9 +197,10 @@ async def list_enderecos(
 async def create_endereco(
     payload: EnderecoCreate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    e = Endereco(**payload.model_dump(), excluido=False)
+    e = Endereco(**payload.model_dump(), tenant_id=tenant_id, excluido=False)
     db.add(e)
     await db.commit()
     await db.refresh(e)
@@ -207,9 +212,10 @@ async def update_endereco(
     endereco_id: int,
     payload: EnderecoUpdate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    e = await get_or_404(db, Endereco, endereco_id, label="Endereço")
+    e = await get_or_404(db, Endereco, endereco_id, tenant_id=tenant_id, label="Endereço")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(e, k, v)
     await db.commit()
@@ -221,8 +227,9 @@ async def update_endereco(
 async def delete_endereco(
     endereco_id: int,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    e = await get_or_404(db, Endereco, endereco_id, label="Endereço")
+    e = await get_or_404(db, Endereco, endereco_id, tenant_id=tenant_id, label="Endereço")
     e.excluido = True
     await db.commit()

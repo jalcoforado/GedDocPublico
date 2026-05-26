@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user
+from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
 from ..database import get_db
 from ..models import AnexoProcesso, Processo, Usuario
 from ..schemas.processo import AnexoNoProcesso
@@ -33,6 +33,8 @@ async def upload_endpoint(
     id_tipo_anexo: int | None = Form(None),
     publico: bool = Form(True),
     current: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ) -> AnexoNoProcesso:
     try:
@@ -40,6 +42,8 @@ async def upload_endpoint(
             db,
             processo_id,
             file,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
             descricao=descricao,
             id_tipo_anexo=id_tipo_anexo,
             publico=publico,
@@ -62,14 +66,17 @@ async def download_endpoint(
     anexo_id: int,
     inline: bool = Query(False, description="Quando true, serve o arquivo inline (para iframe/visualizador)"),
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        anexo, path = await get_anexo_path(db, anexo_id)
+        anexo, path = await get_anexo_path(
+            db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug
+        )
     except AnexoError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
-    # Nome bonito para o usuário, com fallback no ID.
     download_name = (anexo.descricao or anexo.e_doc or f"anexo-{anexo.id}").strip()
     if anexo.e_doc and "." in anexo.e_doc and "." not in download_name:
         download_name += "." + anexo.e_doc.rsplit(".", 1)[1]
@@ -80,7 +87,6 @@ async def download_endpoint(
     return FileResponse(
         path=str(path),
         media_type=media_type or "application/octet-stream",
-        # Não passar `filename=` aqui — o FileResponse forçaria attachment.
         headers={"Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_name}"},
     )
 
@@ -93,13 +99,15 @@ async def delete_endpoint(
     processo_id: int,
     anexo_id: int,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     try:
-        await delete_anexo(db, processo_id, anexo_id)
+        await delete_anexo(db, processo_id, anexo_id, tenant_id=tenant_id)
     except AnexoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    invalidate_cache(anexo_id)
+    invalidate_cache(anexo_id, tenant_slug=tenant_slug)
 
 
 @router.get("/anexos/{anexo_id}/carimbado.pdf")
@@ -107,10 +115,14 @@ async def carimbado_endpoint(
     anexo_id: int,
     inline: bool = Query(True),
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        anexo, source_path = await get_anexo_path(db, anexo_id)
+        anexo, source_path = await get_anexo_path(
+            db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug
+        )
     except AnexoError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
@@ -120,14 +132,15 @@ async def carimbado_endpoint(
             detail="Carimbamento disponível apenas para anexos PDF",
         )
 
-    # Pega número do processo a partir do vínculo ativo.
     row = (
         await db.execute(
             select(Processo.numero_processo)
             .join(AnexoProcesso, AnexoProcesso.id_processo == Processo.id)
             .where(
                 AnexoProcesso.id_anexo == anexo_id,
+                AnexoProcesso.tenant_id == tenant_id,
                 AnexoProcesso.excluido.is_(False),
+                Processo.tenant_id == tenant_id,
             )
         )
     ).first()
@@ -139,6 +152,7 @@ async def carimbado_endpoint(
             source_pdf_path=source_path,
             numero_processo=numero_processo,
             e_doc=anexo.e_doc,
+            tenant_slug=tenant_slug,
         )
     except CarimboError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

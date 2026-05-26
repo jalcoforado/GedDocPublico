@@ -5,6 +5,8 @@ Espelha o fluxo do PHP Processo::abrir (em aprimora/app/services/Processo.php):
 2. Cria movimentação inicial com ação ABERTURA, vinculada ao processo + usuário + unidade proprietária.
 3. Atualiza id_ultima_movimentacao e id_local_atual do processo.
 4. Tudo em uma única transação.
+
+Fase 13a: recebe `tenant_id` e propaga em Processo + Movimentacao.
 """
 from datetime import datetime
 
@@ -23,6 +25,7 @@ async def abrir_processo(
     db: AsyncSession,
     payload: ProcessoCreate,
     *,
+    tenant_id: int,
     usuario_id: int,
 ) -> Processo:
     # 1. Gera número de processo via função PG (mesma lógica do PHP).
@@ -33,7 +36,7 @@ async def abrir_processo(
         raise AberturaError("Falha ao gerar número de processo")
     numero_processo = numero_row.num
 
-    # 2. Localiza ação de abertura (flag = 'ABERTURA').
+    # 2. Localiza ação de abertura (flag = 'ABERTURA'). Acao é catálogo global.
     acao_abertura = (
         await db.execute(
             select(Acao).where(
@@ -52,6 +55,7 @@ async def abrir_processo(
 
     # 3. Cria processo.
     processo = Processo(
+        tenant_id=tenant_id,
         id_assunto=payload.id_assunto,
         id_manifestante=payload.id_manifestante,
         id_unidade_proprietaria=payload.id_unidade_proprietaria,
@@ -74,6 +78,7 @@ async def abrir_processo(
 
     # 4. Cria movimentação de abertura.
     movimentacao = Movimentacao(
+        tenant_id=tenant_id,
         id_processo=processo.id,
         id_unidade_responsavel=payload.id_unidade_proprietaria,
         id_acao=acao_abertura.id,
@@ -88,6 +93,33 @@ async def abrir_processo(
     # 5. Aponta id_ultima_movimentacao no processo.
     processo.id_ultima_movimentacao = movimentacao.id
 
+    # Audit (Fase 24)
+    from .audit import log as audit_log
+
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="processo.aberto",
+        entidade="processo",
+        id_entidade=processo.id,
+        payload={
+            "numero_processo": processo.numero_processo,
+            "id_assunto": processo.id_assunto,
+            "id_manifestante": processo.id_manifestante,
+            "id_unidade_proprietaria": processo.id_unidade_proprietaria,
+            "externo": processo.externo,
+            "publico": processo.publico,
+        },
+    )
+
     await db.commit()
     await db.refresh(processo)
+
+    # 6. (Fase 20b) Auto-instancia workflow se tipo_processo tem mapeamento.
+    # Falha silenciosamente — workflow é opt-in.
+    from .workflow_integration import auto_iniciar_workflow_se_aplicavel
+
+    await auto_iniciar_workflow_se_aplicavel(db, processo, usuario_id)
+
     return processo

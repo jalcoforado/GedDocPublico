@@ -84,9 +84,11 @@ def _get_public_key() -> str | None:
     return _cached_public_key
 
 
-def build_payload(usuario_id: int, usuario_email: str) -> dict[str, Any]:
+def build_payload(
+    usuario_id: int, usuario_email: str, tenant_id: int | None = None
+) -> dict[str, Any]:
     now = int(time.time())
-    return {
+    payload: dict[str, Any] = {
         "iss": _settings.jwt_iss,
         "aud": _settings.jwt_aud,
         "iat": now,
@@ -96,11 +98,16 @@ def build_payload(usuario_id: int, usuario_email: str) -> dict[str, Any]:
         "conexao": _settings.cidade_conn,
         "app": _settings.app_name,
     }
+    if tenant_id is not None:
+        payload["tenant_id"] = tenant_id
+    return payload
 
 
-def build_cidadao_payload(cidadao_id: int, cpf_cnpj: str) -> dict[str, Any]:
+def build_cidadao_payload(
+    cidadao_id: int, cpf_cnpj: str, tenant_id: int | None = None
+) -> dict[str, Any]:
     now = int(time.time())
-    return {
+    payload: dict[str, Any] = {
         "iss": _settings.jwt_iss,
         "aud": _settings.jwt_aud,
         "iat": now,
@@ -111,6 +118,9 @@ def build_cidadao_payload(cidadao_id: int, cpf_cnpj: str) -> dict[str, Any]:
         "app": _settings.app_name,
         "tipo": "cidadao",
     }
+    if tenant_id is not None:
+        payload["tenant_id"] = tenant_id
+    return payload
 
 
 def encode_token(payload: dict[str, Any], hs_secret: str) -> str:

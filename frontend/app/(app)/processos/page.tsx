@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Lock, Pause } from "lucide-react";
+import { CheckCircle2, FileText, Lock, Pause, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { api, type ProcessoListFilters } from "@/lib/api";
@@ -69,12 +70,19 @@ export default function ProcessosPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold text-primary">Processos</h1>
-        <Link href="/processos/novo">
-          <Button>Novo processo</Button>
-        </Link>
-      </div>
+      <PageHeader
+        icon={FileText}
+        title="Processos"
+        description="Liste, filtre e abra processos administrativos. Use a busca avançada nos filtros abaixo ou tecle / para busca global."
+        actions={
+          <Link href="/processos/novo">
+            <Button>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Novo processo
+            </Button>
+          </Link>
+        }
+      />
 
       <Card>
         <CardContent>

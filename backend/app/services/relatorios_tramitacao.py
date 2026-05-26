@@ -37,8 +37,8 @@ from ..schemas.relatorio_tramitacao import (
 )
 
 
-def _filter_processos(stmt, f: RelatorioFiltro):
-    stmt = stmt.where(Processo.excluido.is_(False))
+def _filter_processos(stmt, f: RelatorioFiltro, tenant_id: int):
+    stmt = stmt.where(Processo.excluido.is_(False), Processo.tenant_id == tenant_id)
     if f.id_unidade:
         stmt = stmt.where(
             (Processo.id_unidade_proprietaria == f.id_unidade)
@@ -64,7 +64,7 @@ def _delta_min(a: datetime | None, b: datetime | None) -> int | None:
 
 
 async def gerar_tramitacao(
-    db: AsyncSession, f: RelatorioFiltro, *, max_processos: int = 200
+    db: AsyncSession, f: RelatorioFiltro, *, tenant_id: int, max_processos: int = 200
 ) -> RelatorioTramitacaoResposta:
     LocalAtual = aliased(UnidadeTrabalho, name="la")
 
@@ -86,14 +86,14 @@ async def gerar_tramitacao(
         )
         .join(LocalAtual, LocalAtual.id == Processo.id_local_atual, isouter=True)
     )
-    proc_stmt = _filter_processos(proc_stmt, f)
+    proc_stmt = _filter_processos(proc_stmt, f, tenant_id)
     proc_stmt = proc_stmt.order_by(Processo.data_hora_abertura.desc()).limit(max_processos)
     proc_rows = (await db.execute(proc_stmt)).all()
     processo_ids = [row[0].id for row in proc_rows]
     if not processo_ids:
         return RelatorioTramitacaoResposta(
             filtros_aplicados=f,
-            nome_unidade=await _nome_unidade(db, f.id_unidade),
+            nome_unidade=await _nome_unidade(db, f.id_unidade, tenant_id),
             qtd_processos=0,
             qtd_processos_com_atraso=0,
             minutos_medio_por_processo=0.0,
@@ -107,6 +107,7 @@ async def gerar_tramitacao(
         .join(Acao, Acao.id == Movimentacao.id_acao)
         .where(
             Movimentacao.id_processo.in_(processo_ids),
+            Movimentacao.tenant_id == tenant_id,
             Movimentacao.excluido.is_(False),
         )
         .order_by(Movimentacao.data_hora_movimentacao.asc())
@@ -123,6 +124,7 @@ async def gerar_tramitacao(
         .join(UDest, UDest.id == Encaminhamento.id_unidade_destino)
         .where(
             Encaminhamento.id_processo.in_(processo_ids),
+            Encaminhamento.tenant_id == tenant_id,
             Encaminhamento.excluido.is_(False),
             Encaminhamento.cancelado.is_(False),
         )
@@ -280,7 +282,7 @@ async def gerar_tramitacao(
 
     return RelatorioTramitacaoResposta(
         filtros_aplicados=f,
-        nome_unidade=await _nome_unidade(db, f.id_unidade),
+        nome_unidade=await _nome_unidade(db, f.id_unidade, tenant_id),
         qtd_processos=n,
         qtd_processos_com_atraso=qtd_com_atraso,
         minutos_medio_por_processo=media,
@@ -289,13 +291,16 @@ async def gerar_tramitacao(
     )
 
 
-async def _nome_unidade(db: AsyncSession, id_unidade: int | None) -> str | None:
+async def _nome_unidade(
+    db: AsyncSession, id_unidade: int | None, tenant_id: int
+) -> str | None:
     if not id_unidade:
         return None
     return (
         await db.execute(
             select(UnidadeTrabalho.unidade_trabalho).where(
-                UnidadeTrabalho.id == id_unidade
+                UnidadeTrabalho.id == id_unidade,
+                UnidadeTrabalho.tenant_id == tenant_id,
             )
         )
     ).scalar_one_or_none()

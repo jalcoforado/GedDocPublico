@@ -15,6 +15,14 @@ export interface LoginResponse {
   nome: string;
 }
 
+// Fase 15 — branding/white-label do tenant atual (resolvido pelo Host header).
+export interface BrandingResponse {
+  slug: string;
+  nome: string;
+  cor_primaria: string | null;
+  logo_url: string | null;
+}
+
 export interface MeResponse {
   id: number;
   nome: string;
@@ -776,6 +784,8 @@ export const api = {
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   me: (token?: string) => request<MeResponse>("/auth/me", {}, token),
+  // Fase 15 — branding público (não exige login)
+  branding: () => request<BrandingResponse>("/branding/me"),
   permissoes: () => request<PermissaoMeResponse>("/permissoes/me"),
   modulos: () => request<ModulosMeResponse>("/modulos/me"),
 
@@ -1008,6 +1018,445 @@ export const api = {
         body: JSON.stringify(data),
       }),
   },
+};
+
+// ===== Fase 19-21: Workflow =====
+
+export interface PosicaoXY {
+  x: number;
+  y: number;
+}
+
+export interface WorkflowEstado {
+  slug: string;
+  nome: string;
+  descricao: string | null;
+  final: boolean;
+  sla_dias: number | null;
+  posicao?: PosicaoXY | null;
+  /** Unidade responsável (UX fix workflow↔org).
+   * - Auto-encaminhamento na transição quando setado e diferente do local atual.
+   * - Transição só visível para usuários lotados nessa unidade (admins ven todas).
+   */
+  id_unidade_responsavel?: number | null;
+}
+
+export interface WorkflowTransicao {
+  de: string;
+  para: string;
+  label: string;
+  descricao: string | null;
+  condicao: string | null;
+  grupos_permitidos: string[];
+  evento: "manual" | "abertura" | "encaminhamento" | "recebimento";
+}
+
+export interface WorkflowDSL {
+  version: string;
+  estado_inicial: string;
+  estados: WorkflowEstado[];
+  transicoes: WorkflowTransicao[];
+}
+
+export interface WorkflowDefinitionListItem {
+  id: number;
+  slug: string;
+  nome: string;
+  versao: number;
+  ativo: boolean;
+  criado_em: string;
+}
+
+export interface WorkflowDefinition {
+  id: number;
+  slug: string;
+  nome: string;
+  descricao: string | null;
+  versao: number;
+  ativo: boolean;
+  dsl: WorkflowDSL;
+  criado_em: string;
+  atualizado_em: string | null;
+  id_usuario_criador: number | null;
+}
+
+export interface WorkflowTransicaoLog {
+  id: number;
+  estado_de: string;
+  estado_para: string;
+  transicao_label: string;
+  id_usuario: number | null;
+  executada_em: string;
+  contexto_snapshot: Record<string, unknown> | null;
+}
+
+export interface TransicaoDisponivel {
+  de: string;
+  para: string;
+  label: string;
+  descricao: string | null;
+  grupos_permitidos: string[];
+}
+
+export interface WorkflowInstance {
+  id: number;
+  id_workflow_definition: number;
+  id_processo: number;
+  estado_atual: string;
+  ativa: boolean;
+  iniciada_em: string;
+  finalizada_em: string | null;
+  id_usuario_inicio: number | null;
+}
+
+export interface WorkflowInstanceDetail extends WorkflowInstance {
+  transicoes_disponiveis: TransicaoDisponivel[];
+  log: WorkflowTransicaoLog[];
+  contexto_atual: Record<string, unknown>;
+}
+
+// ===== Fase 17: Notificações =====
+
+export interface Notificacao {
+  id: number;
+  canal: "in_app" | "email" | "whatsapp";
+  tipo: string;
+  titulo: string;
+  mensagem: string;
+  link_url: string | null;
+  payload: Record<string, unknown> | null;
+  prioridade: "baixa" | "normal" | "alta";
+  criado_em: string;
+  lido_em: string | null;
+  enviado_em: string | null;
+  erro: string | null;
+}
+
+export interface NotificacaoListResponse {
+  items: Notificacao[];
+  nao_lidas: number;
+}
+
+// ===== Fase 18a: Dashboard =====
+
+export interface DashboardBreakdownItem {
+  label: string;
+  count: number;
+}
+
+export interface DashboardKpis {
+  periodo_dias: number;
+  id_unidade: number | null;
+  volume: {
+    abertos_periodo: number;
+    ativos_hoje: number;
+    externos_periodo: number;
+    sigilosos_periodo: number;
+  };
+  conclusao: {
+    arquivados_periodo: number;
+    taxa_conclusao_pct: number | null;
+    tempo_medio_dias: number | null;
+  };
+  sla: {
+    pendentes: number;
+    resolvidos_periodo: number;
+  };
+  /** Fase 18b — contadores do período anterior (mesma duração). UI calcula delta. */
+  comparativo: {
+    abertos_anterior: number;
+    externos_anterior: number;
+    sigilosos_anterior: number;
+    arquivados_anterior: number;
+    tempo_medio_dias_anterior: number | null;
+    taxa_conclusao_pct_anterior: number | null;
+    sla_resolvidos_anterior: number;
+  };
+  por_tipo: DashboardBreakdownItem[];
+  por_assunto: DashboardBreakdownItem[];
+  por_unidade: DashboardBreakdownItem[];
+  serie_temporal: { dia: string; count: number }[];
+}
+
+export const dashboardApi = {
+  kpis: (params?: { periodo?: number; id_unidade?: number }) =>
+    request<DashboardKpis>(`/dashboard/kpis${qs(params ?? {})}`),
+};
+
+export function dashboardExportCsvUrl(params?: {
+  periodo?: number;
+  id_unidade?: number;
+}): string {
+  return `${BROWSER_API_URL}/dashboard/export.csv${qs(params ?? {})}`;
+}
+
+export function dashboardExportPdfUrl(
+  params?: { periodo?: number; id_unidade?: number },
+  inline = true,
+): string {
+  const baseQs = qs(params ?? {});
+  if (inline) return `${BROWSER_API_URL}/dashboard/export.pdf${baseQs}`;
+  const sep = baseQs ? "&" : "?";
+  return `${BROWSER_API_URL}/dashboard/export.pdf${baseQs}${sep}inline=false`;
+}
+
+// ===== Organograma =====
+
+export interface OrganogramaNo {
+  id: number;
+  id_unidade_pai: number | null;
+  unidade_trabalho: string;
+  sigla: string | null;
+  processos_ativos: number;
+  usuarios: number;
+  sla_pendentes: number;
+  tempo_medio_dias: number | null;
+}
+
+export const organogramaApi = {
+  tree: () => request<OrganogramaNo[]>(`/organograma`),
+};
+
+// ===== Auditoria (Fase 24) =====
+
+export interface AuditLogItem {
+  id: number;
+  id_usuario: number | null;
+  nome_usuario: string | null;
+  acao: string;
+  entidade: string;
+  id_entidade: number | null;
+  payload: Record<string, unknown> | null;
+  request_id: string | null;
+  ip: string | null;
+  criado_em: string;
+}
+
+export interface AuditLogPage {
+  items: AuditLogItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface AuditFilters {
+  acao?: string;
+  entidade?: string;
+  id_entidade?: number;
+  id_usuario?: number;
+  desde?: string;
+  ate?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export const auditApi = {
+  list: (filters?: AuditFilters) =>
+    request<AuditLogPage>(`/audit${qs(filters ?? {})}`),
+};
+
+// ===== Busca global (Fase 24) =====
+
+export interface BuscaResultado {
+  q: string;
+  processos: { id: number; numero: string; data_abertura: string | null }[];
+  manifestantes: { id: number; nome: string; cpf_cnpj: string | null }[];
+  usuarios: { id: number; nome: string; email: string }[];
+}
+
+export const buscaApi = {
+  global: (q: string) => request<BuscaResultado>(`/busca${qs({ q })}`),
+};
+
+// ===== Trail do processo (caminho percorrido) =====
+
+export interface TrailStep {
+  ordem: number;
+  id_unidade: number;
+  unidade_nome: string;
+  unidade_sigla: string | null;
+  tipo: "abertura" | "encaminhamento";
+  data: string | null;
+  recebido_em: string | null;
+  cancelado: boolean;
+  atual: boolean;
+}
+
+export const processosApi = {
+  trail: (processoId: number) =>
+    request<TrailStep[]>(`/processos/${processoId}/trail`),
+};
+
+export interface NotificacaoPreferencias {
+  in_app: boolean;
+  email: boolean;
+  whatsapp: boolean;
+}
+
+export const notificacoesApi = {
+  listarMinhas: (params?: { apenas_nao_lidas?: boolean; limit?: number }) =>
+    request<NotificacaoListResponse>(`/notificacoes/me${qs(params ?? {})}`),
+  marcarLida: (id: number) =>
+    request<Notificacao>(`/notificacoes/${id}/marcar-lida`, { method: "POST" }),
+  marcarTodasLidas: () =>
+    request<{ atualizadas: number }>(`/notificacoes/marcar-todas-lidas`, {
+      method: "POST",
+    }),
+  getPreferencias: () =>
+    request<NotificacaoPreferencias>(`/notificacoes/preferencias`),
+  setPreferencias: (p: Partial<NotificacaoPreferencias>) =>
+    request<NotificacaoPreferencias>(`/notificacoes/preferencias`, {
+      method: "PUT",
+      body: JSON.stringify(p),
+    }),
+  // Fase 16 — telefone do usuário corrente
+  getTelefone: () => request<{ telefone: string | null }>(`/notificacoes/telefone`),
+  setTelefone: (telefone: string | null) =>
+    request<{ telefone: string | null }>(`/notificacoes/telefone`, {
+      method: "PUT",
+      body: JSON.stringify({ telefone }),
+    }),
+  whatsappTest: (telefone: string, mensagem: string) =>
+    request<{
+      id_notificacao: number;
+      enviado_em: string | null;
+      erro: string | null;
+      provider: string;
+    }>(`/notificacoes/whatsapp-test`, {
+      method: "POST",
+      body: JSON.stringify({ telefone, mensagem }),
+    }),
+};
+
+export interface WorkflowSlaAlerta {
+  id: number;
+  id_workflow_instance: number;
+  estado: string;
+  sla_dias: number;
+  dias_no_estado: number;
+  criado_em: string;
+  resolvido_em: string | null;
+  resolucao: string | null;
+  notificado_em: string | null;
+  id_processo: number;
+  numero_processo: string | null;
+  estado_atual: string;
+  instance_ativa: boolean;
+}
+
+export interface WorkflowDefinitionCreateInput {
+  slug: string;
+  nome: string;
+  descricao?: string | null;
+  dsl: WorkflowDSL;
+}
+
+export interface WorkflowDefinitionUpdateInput {
+  nome?: string;
+  descricao?: string | null;
+  dsl?: WorkflowDSL;
+  ativo?: boolean;
+}
+
+export interface TestExprResult {
+  resultado: boolean | number | string | null;
+  truthy: boolean;
+  erro: string | null;
+}
+
+export interface TipoProcessoWorkflow {
+  id: number;
+  id_tipo_processo: number;
+  slug_workflow: string;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export const workflowApi = {
+  listDefinitions: (apenasAtivos = true) =>
+    request<WorkflowDefinitionListItem[]>(
+      `/workflow-definitions${qs({ apenas_ativos: apenasAtivos })}`,
+    ),
+  getDefinition: (id: number) =>
+    request<WorkflowDefinition>(`/workflow-definitions/${id}`),
+  createDefinition: (data: WorkflowDefinitionCreateInput) =>
+    request<WorkflowDefinition>("/workflow-definitions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateDefinition: (id: number, data: WorkflowDefinitionUpdateInput) =>
+    request<WorkflowDefinition>(`/workflow-definitions/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  testExpr: (expressao: string, contexto: Record<string, unknown>) =>
+    request<TestExprResult>("/workflow-definitions/test-expr", {
+      method: "POST",
+      body: JSON.stringify({ expressao, contexto }),
+    }),
+  getProcessoWorkflow: (processoId: number) =>
+    request<WorkflowInstanceDetail | null>(`/processos/${processoId}/workflow`),
+  transicionar: (instanceId: number, para: string) =>
+    request<WorkflowInstanceDetail>(
+      `/workflow-instances/${instanceId}/transicao`,
+      { method: "POST", body: JSON.stringify({ para, contexto_extra: {} }) },
+    ),
+  listAlertas: (params?: { apenas_pendentes?: boolean; id_processo?: number }) =>
+    request<WorkflowSlaAlerta[]>(`/workflow-alertas${qs(params ?? {})}`),
+  resolverAlerta: (alertaId: number, resolucao: string) =>
+    request<WorkflowSlaAlerta>(`/workflow-alertas/${alertaId}/resolver`, {
+      method: "POST",
+      body: JSON.stringify({ resolucao }),
+    }),
+  verificarAgora: () =>
+    request<{ task_id: string; tenant_id: number }>(
+      `/workflow-alertas/verificar-agora`,
+      { method: "POST" },
+    ),
+  // Mapeamento tipo_processo → workflow (Fase 20b + UX fix)
+  listMapeamentos: () =>
+    request<TipoProcessoWorkflow[]>(`/tipo-processo-workflow`),
+  setMapeamento: (idTipoProcesso: number, slugWorkflow: string | null) =>
+    request<TipoProcessoWorkflow | null>(
+      `/tipo-processo-workflow/${idTipoProcesso}`,
+      { method: "PUT", body: JSON.stringify({ slug_workflow: slugWorkflow }) },
+    ),
+  // Instância manual (sem mapeamento)
+  iniciarInstance: (idWorkflowDefinition: number, idProcesso: number) =>
+    request<WorkflowInstance>(`/workflow-instances`, {
+      method: "POST",
+      body: JSON.stringify({
+        id_workflow_definition: idWorkflowDefinition,
+        id_processo: idProcesso,
+      }),
+    }),
+  // Fase 22c — versões + migração
+  listVersoes: (wfId: number) =>
+    request<
+      {
+        id: number;
+        slug: string;
+        nome: string;
+        versao: number;
+        ativo: boolean;
+        criado_em: string;
+        instances_ativas: number;
+      }[]
+    >(`/workflow-definitions/${wfId}/versoes`),
+  migrarInstance: (
+    instanceId: number,
+    idDestino: number,
+    mapaEstados?: Record<string, string>,
+  ) =>
+    request<WorkflowInstance>(`/workflow-instances/${instanceId}/migrar`, {
+      method: "POST",
+      body: JSON.stringify({
+        id_workflow_definition_destino: idDestino,
+        mapa_estados: mapaEstados ?? null,
+      }),
+    }),
+  listInstances: (params?: { id_workflow_definition?: number; apenas_ativas?: boolean }) =>
+    request<WorkflowInstance[]>(`/workflow-instances${qs(params ?? {})}`),
 };
 
 // Backward-compat exports

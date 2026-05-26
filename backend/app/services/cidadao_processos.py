@@ -1,12 +1,13 @@
 """Operações de processo do cidadão (usuário externo).
 
-- listar: processos cujo manifestante tem o mesmo CPF/CNPJ do cidadão logado.
-- detalhe: idem + timeline simplificada (só campos públicos).
-- abrir: cria/reusa Manifestante por CPF/CNPJ, abre processo com `externo=true`,
-  `publico=true`, sem `id_usuario` (cidadão não é `utils.usuario`).
+- listar: processos cujo manifestante tem o mesmo CPF/CNPJ do cidadão logado,
+  dentro do tenant.
+- detalhe: idem.
+- abrir: cria/reusa Manifestante por CPF/CNPJ DENTRO do tenant; abre processo
+  com `externo=true, publico=true`, sem `id_usuario`.
 
-A unidade proprietária default vem da primeira unidade ativa — em produção
-isso seria parametrizável (tabela `configuracoes`).
+A unidade proprietária default vem da primeira unidade ativa do tenant — em
+produção isso seria parametrizável (tabela `configuracoes`).
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ class CidadaoProcessoError(Exception):
     pass
 
 
-def _base_select():
+def _base_select(tenant_id: int):
     LocalAtual = aliased(UnidadeTrabalho, name="la")
     return (
         select(
@@ -51,19 +52,22 @@ def _base_select():
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
         .join(LocalAtual, LocalAtual.id == Processo.id_local_atual, isouter=True)
-        .where(Processo.excluido.is_(False))
+        .where(Processo.excluido.is_(False), Processo.tenant_id == tenant_id)
     )
 
 
 async def listar_meus(
-    db: AsyncSession, cidadao: UsuarioExterno
+    db: AsyncSession, cidadao: UsuarioExterno, *, tenant_id: int
 ) -> list[ProcessoCidadaoListItem]:
     if not cidadao.cpf_cnpj:
         return []
     stmt = (
-        _base_select()
+        _base_select(tenant_id)
         .join(Manifestante, Manifestante.id == Processo.id_manifestante)
-        .where(Manifestante.cpf_cnpj == cidadao.cpf_cnpj)
+        .where(
+            Manifestante.cpf_cnpj == cidadao.cpf_cnpj,
+            Manifestante.tenant_id == tenant_id,
+        )
         .order_by(Processo.data_hora_abertura.desc())
     )
     rows = (await db.execute(stmt)).all()
@@ -85,16 +89,21 @@ def _row_to_list(r) -> ProcessoCidadaoListItem:
 
 
 async def get_meu_detail(
-    db: AsyncSession, cidadao: UsuarioExterno, processo_id: int
+    db: AsyncSession,
+    cidadao: UsuarioExterno,
+    processo_id: int,
+    *,
+    tenant_id: int,
 ) -> ProcessoCidadaoDetail | None:
     if not cidadao.cpf_cnpj:
         return None
     stmt = (
-        _base_select()
+        _base_select(tenant_id)
         .join(Manifestante, Manifestante.id == Processo.id_manifestante)
         .where(
             Processo.id == processo_id,
             Manifestante.cpf_cnpj == cidadao.cpf_cnpj,
+            Manifestante.tenant_id == tenant_id,
         )
     )
     row = (await db.execute(stmt)).first()
@@ -113,6 +122,7 @@ async def get_meu_detail(
         )
         .where(
             Movimentacao.id_processo == processo_id,
+            Movimentacao.tenant_id == tenant_id,
             Movimentacao.excluido.is_(False),
         )
         .order_by(Movimentacao.data_hora_movimentacao.desc())
@@ -124,7 +134,7 @@ async def get_meu_detail(
             data_hora_movimentacao=mov.data_hora_movimentacao,
             acao=acao.acao,
             unidade_responsavel=ut.unidade_trabalho if ut else None,
-            despacho_publico=None,  # Despachos ficam ocultos do cidadão por padrão
+            despacho_publico=None,
         )
         for mov, acao, ut in movs
     ]
@@ -140,6 +150,8 @@ async def abrir_processo_cidadao(
     db: AsyncSession,
     cidadao: UsuarioExterno,
     payload: AbrirProcessoCidadaoRequest,
+    *,
+    tenant_id: int,
 ) -> Processo:
     if not cidadao.cpf_cnpj or not cidadao.nome:
         raise CidadaoProcessoError("Cadastro do cidadão incompleto (CPF/nome)")
@@ -147,7 +159,9 @@ async def abrir_processo_cidadao(
     assunto = (
         await db.execute(
             select(Assunto).where(
-                Assunto.id == payload.id_assunto, Assunto.ativo.is_(True)
+                Assunto.id == payload.id_assunto,
+                Assunto.tenant_id == tenant_id,
+                Assunto.ativo.is_(True),
             )
         )
     ).scalar_one_or_none()
@@ -157,7 +171,10 @@ async def abrir_processo_cidadao(
     unidade = (
         await db.execute(
             select(UnidadeTrabalho)
-            .where(UnidadeTrabalho.excluido.is_(False))
+            .where(
+                UnidadeTrabalho.tenant_id == tenant_id,
+                UnidadeTrabalho.excluido.is_(False),
+            )
             .order_by(UnidadeTrabalho.id)
             .limit(1)
         )
@@ -169,6 +186,7 @@ async def abrir_processo_cidadao(
         await db.execute(
             select(Manifestante).where(
                 Manifestante.cpf_cnpj == cidadao.cpf_cnpj,
+                Manifestante.tenant_id == tenant_id,
                 Manifestante.excluido.is_(False),
             )
         )
@@ -178,7 +196,10 @@ async def abrir_processo_cidadao(
         tipo_pf = (
             await db.execute(
                 select(TipoManifestante)
-                .where(TipoManifestante.ativo.is_(True))
+                .where(
+                    TipoManifestante.tenant_id == tenant_id,
+                    TipoManifestante.ativo.is_(True),
+                )
                 .order_by(TipoManifestante.id)
                 .limit(1)
             )
@@ -186,6 +207,7 @@ async def abrir_processo_cidadao(
         if tipo_pf is None:
             raise CidadaoProcessoError("Nenhum tipo de manifestante cadastrado")
         manifestante = Manifestante(
+            tenant_id=tenant_id,
             id_tipo_manifestante=tipo_pf.id,
             cpf_cnpj=cidadao.cpf_cnpj,
             nome=cidadao.nome,
@@ -197,7 +219,6 @@ async def abrir_processo_cidadao(
         db.add(manifestante)
         await db.flush()
 
-    # Número de processo via função PG (mesma do PHP).
     numero = (
         await db.execute(text("SELECT protocolos.gerar_numero_processo_string() AS n"))
     ).first()
@@ -205,6 +226,7 @@ async def abrir_processo_cidadao(
         raise CidadaoProcessoError("Falha ao gerar número de processo")
     numero_processo = numero.n
 
+    # Acao é catálogo global — sem tenant_id.
     acao_abertura = (
         await db.execute(
             select(Acao).where(
@@ -219,6 +241,7 @@ async def abrir_processo_cidadao(
 
     now = datetime.now()
     processo = Processo(
+        tenant_id=tenant_id,
         id_assunto=payload.id_assunto,
         id_manifestante=manifestante.id,
         id_unidade_proprietaria=unidade.id,
@@ -239,6 +262,7 @@ async def abrir_processo_cidadao(
     await db.flush()
 
     movimentacao = Movimentacao(
+        tenant_id=tenant_id,
         id_processo=processo.id,
         id_unidade_responsavel=unidade.id,
         id_acao=acao_abertura.id,

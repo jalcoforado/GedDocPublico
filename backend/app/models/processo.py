@@ -37,6 +37,9 @@ class Processo(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_assunto: Mapped[int] = mapped_column(ForeignKey("protocolos.assunto.id"), nullable=False)
     virtual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     data_hora_abertura: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -68,6 +71,9 @@ class Movimentacao(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_processo: Mapped[int] = mapped_column(
         ForeignKey("protocolos.processo.id"), nullable=False
     )
@@ -91,6 +97,9 @@ class Despacho(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_processo: Mapped[int] = mapped_column(
         ForeignKey("protocolos.processo.id"), nullable=False
     )
@@ -108,6 +117,9 @@ class Encaminhamento(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_processo: Mapped[int] = mapped_column(
         ForeignKey("protocolos.processo.id"), nullable=False
     )
@@ -139,6 +151,9 @@ class Arquivamento(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_status_arquivamento: Mapped[int] = mapped_column(Integer, nullable=False)
     motivo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     local: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -155,6 +170,9 @@ class Anexo(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_tipo_anexo: Mapped[int | None] = mapped_column(
         ForeignKey("protocolos.tipo_anexo.id"), nullable=True
     )
@@ -174,6 +192,9 @@ class AnexoProcesso(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_processo: Mapped[int] = mapped_column(
         ForeignKey("protocolos.processo.id"), nullable=False
     )

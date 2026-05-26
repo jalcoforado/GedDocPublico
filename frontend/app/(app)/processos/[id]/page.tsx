@@ -17,7 +17,11 @@ import { useState } from "react";
 import { AcoesProcesso } from "@/components/AcoesProcesso";
 import { AnexosProcesso } from "@/components/AnexosProcesso";
 import { AssinaturasProcesso } from "@/components/AssinaturasProcesso";
+import { ProcessoTrail } from "@/components/ProcessoTrail";
+import { ProcessoWorkflowPanel } from "@/components/ProcessoWorkflowPanel";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
+import { PageHeader } from "@/components/ui/page-header";
+import { RichTextView } from "@/components/ui/rich-text-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -215,95 +219,119 @@ export default function ProcessoDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Link href="/processos" className="text-sm text-primary hover:underline">
-          ← Voltar
-        </Link>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() =>
-              setViewer({
-                title: `Capa — ${p.numero_processo}`,
-                src: processoCapaUrl(p.id),
-                downloadUrl: processoCapaUrl(p.id, false),
-              })
-            }
-          >
-            <FileText className="h-4 w-4" aria-hidden="true" /> Capa
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() =>
-              setViewer({
-                title: `Etiqueta — ${p.numero_processo}`,
-                src: etiquetaUnicaUrl(p.id),
-                downloadUrl: etiquetaUnicaUrl(p.id, false),
-              })
-            }
-          >
-            <Tags className="h-4 w-4" aria-hidden="true" /> Etiqueta
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() =>
-              setViewer({
-                title: `Etiquetas (dupla) — ${p.numero_processo}`,
-                src: etiquetaDuplaUrl(p.id),
-                downloadUrl: etiquetaDuplaUrl(p.id, false),
-              })
-            }
-          >
-            <Tags className="h-4 w-4" aria-hidden="true" /> Etiqueta dupla
-          </Button>
-          <Button
-            size="sm"
-            onClick={() =>
-              setViewer({
-                title: `Processo completo — ${p.numero_processo}`,
-                src: processoCompletoUrl(p.id),
-                downloadUrl: processoCompletoUrl(p.id, false),
-              })
-            }
-          >
-            <FileText className="h-4 w-4" aria-hidden="true" /> Completo
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => gerarBg.mutate()}
-            disabled={gerarBg.isPending}
-            title="Gera o PDF em background e abre a fila de jobs"
-          >
-            {gerarBg.isPending ? "Enfileirando..." : "Em background"}
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {p.ativo ? (
-          <Badge intent="success" icon={CheckCircle2}>
-            Ativo
-          </Badge>
-        ) : (
-          <Badge intent="neutral" icon={Pause}>
-            Inativo
-          </Badge>
-        )}
-        {!p.publico && (
-          <Badge intent="warning" icon={Lock}>
-            Sigiloso
-          </Badge>
-        )}
-        {p.externo && (
-          <Badge intent="info" icon={Eye}>
-            Externo
-          </Badge>
-        )}
-      </div>
+      <PageHeader
+        icon={FileText}
+        breadcrumbs={[
+          { label: "Processos", href: "/processos" },
+          { label: p.numero_processo },
+        ]}
+        title={
+          <span className="font-mono">
+            {p.numero_processo}
+          </span>
+        }
+        description={
+          <span className="text-foreground-muted">
+            Aberto em {fmtDateTime(p.data_hora_abertura)}
+            {p.manifestante && ` · ${p.manifestante}`}
+          </span>
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap gap-1">
+              {p.ativo ? (
+                <Badge intent="success" icon={CheckCircle2}>
+                  Ativo
+                </Badge>
+              ) : (
+                <Badge intent="neutral" icon={Pause}>
+                  Inativo
+                </Badge>
+              )}
+              {!p.publico && (
+                <Badge intent="warning" icon={Lock}>
+                  Sigiloso
+                </Badge>
+              )}
+              {p.externo && (
+                <Badge intent="info" icon={Eye}>
+                  Externo
+                </Badge>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  setViewer({
+                    title: `Capa — ${p.numero_processo}`,
+                    src: processoCapaUrl(p.id),
+                    downloadUrl: processoCapaUrl(p.id, false),
+                  })
+                }
+                title="Ver capa"
+              >
+                <FileText className="h-4 w-4" aria-hidden="true" />
+                Capa
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  setViewer({
+                    title: `Etiqueta — ${p.numero_processo}`,
+                    src: etiquetaUnicaUrl(p.id),
+                    downloadUrl: etiquetaUnicaUrl(p.id, false),
+                  })
+                }
+                title="Ver etiqueta"
+              >
+                <Tags className="h-4 w-4" aria-hidden="true" />
+                Etiqueta
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  setViewer({
+                    title: `Etiquetas (dupla) — ${p.numero_processo}`,
+                    src: etiquetaDuplaUrl(p.id),
+                    downloadUrl: etiquetaDuplaUrl(p.id, false),
+                  })
+                }
+                title="Etiqueta dupla"
+              >
+                <Tags className="h-4 w-4" aria-hidden="true" />
+                Dupla
+              </Button>
+              <Button
+                size="sm"
+                onClick={() =>
+                  setViewer({
+                    title: `Processo completo — ${p.numero_processo}`,
+                    src: processoCompletoUrl(p.id),
+                    downloadUrl: processoCompletoUrl(p.id, false),
+                  })
+                }
+                title="PDF do processo completo"
+              >
+                <FileText className="h-4 w-4" aria-hidden="true" />
+                Completo
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => gerarBg.mutate()}
+                disabled={gerarBg.isPending}
+                title="Gera o PDF em background e abre a fila de jobs"
+              >
+                {gerarBg.isPending ? "Enfileirando..." : "Em fila"}
+              </Button>
+            </div>
+          </div>
+        }
+      />
 
       <Card>
         <CardHeader>
@@ -366,7 +394,13 @@ export default function ProcessoDetailPage() {
             {p.corpo && (
               <div className="md:col-span-2">
                 <dt className="text-xs uppercase tracking-wide text-muted-foreground">Corpo</dt>
-                <dd className="whitespace-pre-wrap">{p.corpo}</dd>
+                <dd>
+                  {/^\s*<[a-zA-Z]/.test(p.corpo) ? (
+                    <RichTextView html={p.corpo} />
+                  ) : (
+                    <p className="whitespace-pre-wrap text-sm">{p.corpo}</p>
+                  )}
+                </dd>
               </div>
             )}
           </dl>
@@ -416,6 +450,24 @@ export default function ProcessoDetailPage() {
         </CardHeader>
         <CardContent>
           <AssinaturasProcesso processo={p} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Trajeto entre unidades</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ProcessoTrail processoId={p.id} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Workflow</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ProcessoWorkflowPanel processoId={p.id} />
         </CardContent>
       </Card>
 

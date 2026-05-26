@@ -1,7 +1,10 @@
 """Auth do cidadão (usuário externo).
 
 Senha em MD5, espelhando `Positiv\\Hash` (mesma compatibilidade do admin login).
-Cadastro busca duplicidade por CPF/CNPJ — não permite criar dois.
+Cadastro busca duplicidade por CPF/CNPJ DENTRO do tenant atual — a mesma pessoa
+pode existir como cidadão em mais de uma prefeitura, mas no mesmo tenant é único.
+
+Fase 13a: cadastrar e login operam dentro de um tenant.
 """
 from __future__ import annotations
 
@@ -25,7 +28,11 @@ def _normaliza_cpf_cnpj(s: str) -> str:
 
 
 async def cadastrar(
-    db: AsyncSession, payload: CadastroCidadaoRequest, *, app: str
+    db: AsyncSession,
+    payload: CadastroCidadaoRequest,
+    *,
+    tenant_id: int,
+    app: str,
 ) -> UsuarioExterno:
     cpf_cnpj = _normaliza_cpf_cnpj(payload.cpf_cnpj)
     if len(cpf_cnpj) not in (11, 14):
@@ -35,6 +42,7 @@ async def cadastrar(
         await db.execute(
             select(UsuarioExterno).where(
                 UsuarioExterno.cpf_cnpj == cpf_cnpj,
+                UsuarioExterno.tenant_id == tenant_id,
                 UsuarioExterno.excluido.is_(False),
             )
         )
@@ -42,8 +50,8 @@ async def cadastrar(
     if existe is not None:
         raise CidadaoAuthError("Já existe cadastro para este CPF/CNPJ")
 
-    # Grava MD5 em `senha` (compat PHP) E bcrypt em `senha_bcrypt` (Python prefere).
     cidadao = UsuarioExterno(
+        tenant_id=tenant_id,
         nome=payload.nome.strip(),
         cpf_cnpj=cpf_cnpj,
         email=payload.email.strip().lower(),
@@ -66,13 +74,14 @@ async def cadastrar(
 
 
 async def login(
-    db: AsyncSession, *, cpf_cnpj: str, senha: str
+    db: AsyncSession, *, tenant_id: int, cpf_cnpj: str, senha: str
 ) -> UsuarioExterno:
     cpf_cnpj_norm = _normaliza_cpf_cnpj(cpf_cnpj)
     cidadao = (
         await db.execute(
             select(UsuarioExterno).where(
                 UsuarioExterno.cpf_cnpj == cpf_cnpj_norm,
+                UsuarioExterno.tenant_id == tenant_id,
                 UsuarioExterno.excluido.is_(False),
                 UsuarioExterno.ativo.is_(True),
             )

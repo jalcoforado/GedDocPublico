@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user
-from ..database import get_db
+from ..auth.deps import get_current_user, require_tenant_id
+from ..database import get_db, tenant_filter
 from ..models import Manifestante, TipoManifestante, Usuario
 from ..schemas.common import Paginated
 from ..schemas.manifestante import (
@@ -23,13 +23,11 @@ router = APIRouter(tags=["manifestantes"])
 @router.get("/tipos-manifestante", response_model=list[TipoManifestanteOut])
 async def list_tipos_manifestante(
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = (
-        select(TipoManifestante)
-        .where(TipoManifestante.excluido.is_(False))
-        .order_by(TipoManifestante.tipo_manifestante)
-    )
+    stmt = select(TipoManifestante).where(TipoManifestante.excluido.is_(False))
+    stmt = tenant_filter(stmt, TipoManifestante, tenant_id).order_by(TipoManifestante.tipo_manifestante)
     return [
         TipoManifestanteOut.model_validate(t)
         for t in (await db.execute(stmt)).scalars().all()
@@ -44,9 +42,10 @@ async def list_tipos_manifestante(
 async def create_tipo_manifestante(
     payload: TipoManifestanteCreate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    t = TipoManifestante(**payload.model_dump(), excluido=False)
+    t = TipoManifestante(**payload.model_dump(), tenant_id=tenant_id, excluido=False)
     db.add(t)
     await db.commit()
     await db.refresh(t)
@@ -58,9 +57,10 @@ async def update_tipo_manifestante(
     tipo_id: int,
     payload: TipoManifestanteUpdate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    t = await get_or_404(db, TipoManifestante, tipo_id, label="Tipo de manifestante")
+    t = await get_or_404(db, TipoManifestante, tipo_id, tenant_id=tenant_id, label="Tipo de manifestante")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(t, k, v)
     await db.commit()
@@ -72,9 +72,10 @@ async def update_tipo_manifestante(
 async def delete_tipo_manifestante(
     tipo_id: int,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    t = await get_or_404(db, TipoManifestante, tipo_id, label="Tipo de manifestante")
+    t = await get_or_404(db, TipoManifestante, tipo_id, tenant_id=tenant_id, label="Tipo de manifestante")
     t.excluido = True
     await db.commit()
 
@@ -83,6 +84,7 @@ async def delete_tipo_manifestante(
 @router.get("/manifestantes", response_model=Paginated[ManifestanteOut])
 async def list_manifestantes(
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -97,6 +99,7 @@ async def list_manifestantes(
     return await paginated_list(
         db,
         Manifestante,
+        tenant_id=tenant_id,
         out_model=ManifestanteOut,
         page=page,
         page_size=page_size,
@@ -113,9 +116,10 @@ async def list_manifestantes(
 async def create_manifestante(
     payload: ManifestanteCreate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    m = Manifestante(**payload.model_dump(), excluido=False)
+    m = Manifestante(**payload.model_dump(), tenant_id=tenant_id, excluido=False)
     db.add(m)
     await db.commit()
     await db.refresh(m)
@@ -127,9 +131,10 @@ async def update_manifestante(
     manif_id: int,
     payload: ManifestanteUpdate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    m = await get_or_404(db, Manifestante, manif_id, label="Manifestante")
+    m = await get_or_404(db, Manifestante, manif_id, tenant_id=tenant_id, label="Manifestante")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(m, k, v)
     await db.commit()
@@ -141,8 +146,9 @@ async def update_manifestante(
 async def delete_manifestante(
     manif_id: int,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    m = await get_or_404(db, Manifestante, manif_id, label="Manifestante")
+    m = await get_or_404(db, Manifestante, manif_id, tenant_id=tenant_id, label="Manifestante")
     m.excluido = True
     await db.commit()

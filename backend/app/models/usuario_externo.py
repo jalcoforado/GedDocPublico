@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +13,9 @@ class UsuarioExterno(Base):
     __table_args__ = {"schema": "utils"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     nome: Mapped[str | None] = mapped_column(String(100), nullable=True)
     senha: Mapped[str | None] = mapped_column(String(150), nullable=True)
     senha_bcrypt: Mapped[str | None] = mapped_column(String(255), nullable=True)

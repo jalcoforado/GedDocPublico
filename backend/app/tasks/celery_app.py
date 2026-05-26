@@ -25,6 +25,7 @@ celery_app = Celery(
         "app.tasks.carimbar_anexos",
         "app.tasks.relatorio_tramitacao_bg",
         "app.tasks.limpar_jobs_antigos",
+        "app.tasks.verificar_sla_workflows",
     ],
 )
 
@@ -46,5 +47,12 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.limpar_jobs_antigos.run",
         "schedule": crontab(hour=3, minute=0),  # 03:00 todos os dias
         "kwargs": {"dias": 30},
+    },
+    # Fase 21 — varre workflows ativos e cria alertas de SLA estourado.
+    # 4x ao dia (06, 12, 18, 00) — granularidade de horas é overkill já
+    # que SLA é em dias.
+    "verificar-sla-workflows": {
+        "task": "app.tasks.verificar_sla_workflows.run",
+        "schedule": crontab(hour="0,6,12,18", minute=0),
     },
 }

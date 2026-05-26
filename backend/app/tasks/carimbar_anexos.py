@@ -1,25 +1,25 @@
 """Task: pré-carimba todos os anexos PDF de um processo (aquece cache).
 
-Útil quando o processo tem dezenas de anexos novos: faz numa só rodada em
-background em vez de carimbar on-demand na 1ª visualização do "processo completo".
-
-Resultado: relatório de quantos foram carimbados, pulados ou falharam.
-A task NÃO produz um arquivo PDF — o `resultado_path` aponta para um `.txt`
-com o sumário.
+Fase 14: cache de carimbados e arquivos lidos vão por tenant
+(tenant_carimbados_dir + resolve_anexo_path).
 """
 from __future__ import annotations
 
 import asyncio
-import os
 import traceback
 from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import and_, select
 
-from ..config import get_settings
+from ..config import (
+    get_settings,
+    resolve_anexo_path,
+    tenant_carimbados_dir,
+    tenant_jobs_dir,
+)
 from ..models import Anexo, AnexoProcesso, Job, Processo
-from ..services.pdf_carimbo import _cache_path, carimbar_pdf_bytes
+from ..services.pdf_carimbo import carimbar_pdf_bytes
 from ._task_db import task_session_scope
 from .celery_app import celery_app
 
@@ -27,12 +27,18 @@ settings = get_settings()
 
 
 @celery_app.task(name="app.tasks.carimbar_anexos.run", bind=True)
-def run(self, job_id: int, processo_id: int) -> str | None:
-    return asyncio.run(_run_async(self, job_id, processo_id))
+def run(
+    self, job_id: int, processo_id: int, tenant_id: int, tenant_slug: str
+) -> str | None:
+    return asyncio.run(
+        _run_async(self, job_id, processo_id, tenant_id, tenant_slug)
+    )
 
 
-async def _run_async(task, job_id: int, processo_id: int) -> str | None:
-    async with task_session_scope() as (_engine, Session):
+async def _run_async(
+    task, job_id: int, processo_id: int, tenant_id: int, tenant_slug: str
+) -> str | None:
+    async with task_session_scope(tenant_id=tenant_id) as (_engine, Session):
         async with Session() as db:
             job = await db.get(Job, job_id)
             if job is None:
@@ -44,7 +50,14 @@ async def _run_async(task, job_id: int, processo_id: int) -> str | None:
 
         try:
             async with Session() as db:
-                proc = await db.get(Processo, processo_id)
+                proc = (
+                    await db.execute(
+                        select(Processo).where(
+                            Processo.id == processo_id,
+                            Processo.tenant_id == tenant_id,
+                        )
+                    )
+                ).scalar_one_or_none()
                 if proc is None:
                     raise RuntimeError(f"Processo {processo_id} não encontrado")
                 numero = proc.numero_processo
@@ -55,8 +68,10 @@ async def _run_async(task, job_id: int, processo_id: int) -> str | None:
                         .join(AnexoProcesso, AnexoProcesso.id_anexo == Anexo.id)
                         .where(
                             AnexoProcesso.id_processo == processo_id,
+                            AnexoProcesso.tenant_id == tenant_id,
                             AnexoProcesso.excluido.is_(False),
                             and_(Anexo.excluido.is_(False), Anexo.ativo.is_(True)),
+                            Anexo.tenant_id == tenant_id,
                             Anexo.e_doc.isnot(None),
                         )
                         .order_by(AnexoProcesso.ordem.nulls_last(), Anexo.id)
@@ -69,17 +84,17 @@ async def _run_async(task, job_id: int, processo_id: int) -> str | None:
             nao_pdf = 0
             falhas: list[str] = []
 
-            uploads = Path(settings.uploads_dir)
+            carimbados_dir = tenant_carimbados_dir(tenant_slug)
             for anexo in rows:
-                cache = _cache_path(anexo.id)
+                cache = carimbados_dir / f"{anexo.id}.pdf"
                 if cache.exists():
                     cacheados += 1
                     continue
                 if not anexo.e_doc or not anexo.e_doc.lower().endswith(".pdf"):
                     nao_pdf += 1
                     continue
-                src = uploads / anexo.e_doc
-                if not src.exists():
+                src = resolve_anexo_path(tenant_slug, anexo.e_doc)
+                if src is None:
                     sem_arquivo += 1
                     continue
                 try:
@@ -105,12 +120,11 @@ async def _run_async(task, job_id: int, processo_id: int) -> str | None:
             if falhas:
                 sumario += "\nDetalhes das falhas:\n" + "\n".join(f"  - {f}" for f in falhas)
 
-            os.makedirs(settings.jobs_results_dir, exist_ok=True)
-            out_dir = os.path.join(settings.jobs_results_dir, str(job_id))
-            os.makedirs(out_dir, exist_ok=True)
-            out_path = os.path.join(out_dir, f"carimbar-anexos-{processo_id}.txt")
+            out_dir = tenant_jobs_dir(tenant_slug) / str(job_id)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / f"carimbar-anexos-{processo_id}.txt"
             Path(out_path).write_text(sumario, encoding="utf-8")
-            rel = os.path.relpath(out_path, settings.jobs_results_dir)
+            rel = str(out_path.relative_to(settings.tenants_storage_root))
 
             async with Session() as db:
                 job = await db.get(Job, job_id)

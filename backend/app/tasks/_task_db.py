@@ -6,11 +6,16 @@ RuntimeError "Future attached to a different loop".
 
 Solução: cada task cria um engine novo (NullPool → nenhuma conexão é reaproveitada)
 e o descarta no fim. Não compartilhar este engine entre tasks distintas.
+
+Fase 13b: o listener global em `app.database` (registrado em `_SyncSession`)
+dispara `SET LOCAL app.tenant_id` em qualquer Session sync que tenha
+`session.info["tenant_id"]`. Quando o caller passa `tenant_id` ao scope,
+populamos esse info em cada session retornada.
 """
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import AsyncIterator, Callable
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -20,6 +25,8 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
+# Importa o listener global; basta importar para o event handler estar registrado.
+from .. import database as _database_ensure_listener  # noqa: F401
 from ..config import get_settings
 
 
@@ -28,13 +35,27 @@ def make_task_engine() -> AsyncEngine:
 
 
 @asynccontextmanager
-async def task_session_scope() -> AsyncIterator[
-    tuple[AsyncEngine, async_sessionmaker[AsyncSession]]
-]:
-    """Gera (engine, Session) e garante `engine.dispose()` ao final."""
+async def task_session_scope(
+    tenant_id: int | None = None,
+) -> AsyncIterator[tuple[AsyncEngine, Callable[[], AsyncSession]]]:
+    """Gera (engine, SessionFactory) e garante `engine.dispose()` ao final.
+
+    Se `tenant_id` for passado, cada sessão criada via `Session()` terá
+    `session.info["tenant_id"]` setado — o listener global em `database.py`
+    fará `SET LOCAL app.tenant_id` em cada BEGIN.
+    """
     engine = make_task_engine()
-    Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    base_maker = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
+
+    def session_factory() -> AsyncSession:
+        s = base_maker()
+        if tenant_id is not None:
+            s.info["tenant_id"] = int(tenant_id)
+        return s
+
     try:
-        yield engine, Session
+        yield engine, session_factory
     finally:
         await engine.dispose()

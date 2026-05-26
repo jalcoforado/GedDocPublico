@@ -1,18 +1,15 @@
 """Task: gera o PDF do Relatório de Tramitação em background.
 
-Útil para recortes grandes (muitos processos × muitas movimentações) onde
-gerar síncrono no request HTTP estouraria o timeout do nginx ou prenderia
-o worker uvicorn.
+Fase 14: storage por tenant (tenant_jobs_dir).
 """
 from __future__ import annotations
 
 import asyncio
-import os
 import traceback
 from datetime import datetime
 from typing import Any
 
-from ..config import get_settings
+from ..config import get_settings, tenant_jobs_dir
 from ..models import Job
 from ..schemas.relatorio import RelatorioFiltro
 from ..services.pdf_relatorio_tramitacao import gerar_tramitacao_pdf
@@ -24,14 +21,28 @@ settings = get_settings()
 
 
 @celery_app.task(name="app.tasks.relatorio_tramitacao_bg.run", bind=True)
-def run(self, job_id: int, filtros: dict[str, Any], max_processos: int) -> str | None:
-    return asyncio.run(_run_async(self, job_id, filtros, max_processos))
+def run(
+    self,
+    job_id: int,
+    filtros: dict[str, Any],
+    max_processos: int,
+    tenant_id: int,
+    tenant_slug: str,
+) -> str | None:
+    return asyncio.run(
+        _run_async(self, job_id, filtros, max_processos, tenant_id, tenant_slug)
+    )
 
 
 async def _run_async(
-    task, job_id: int, filtros: dict[str, Any], max_processos: int
+    task,
+    job_id: int,
+    filtros: dict[str, Any],
+    max_processos: int,
+    tenant_id: int,
+    tenant_slug: str,
 ) -> str | None:
-    async with task_session_scope() as (_engine, Session):
+    async with task_session_scope(tenant_id=tenant_id) as (_engine, Session):
         async with Session() as db:
             job = await db.get(Job, job_id)
             if job is None:
@@ -44,18 +55,18 @@ async def _run_async(
         try:
             f = RelatorioFiltro.model_validate(filtros)
             async with Session() as db:
-                resposta = await gerar_tramitacao(db, f, max_processos=max_processos)
+                resposta = await gerar_tramitacao(
+                    db, f, tenant_id=tenant_id, max_processos=max_processos
+                )
             pdf_bytes = gerar_tramitacao_pdf(resposta)
 
-            os.makedirs(settings.jobs_results_dir, exist_ok=True)
-            out_dir = os.path.join(settings.jobs_results_dir, str(job_id))
-            os.makedirs(out_dir, exist_ok=True)
-            out_path = os.path.join(
-                out_dir, f"tramitacao-{datetime.now().strftime('%Y%m%d-%H%M')}.pdf"
+            out_dir = tenant_jobs_dir(tenant_slug) / str(job_id)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = (
+                out_dir / f"tramitacao-{datetime.now().strftime('%Y%m%d-%H%M')}.pdf"
             )
-            with open(out_path, "wb") as f_out:
-                f_out.write(pdf_bytes)
-            rel = os.path.relpath(out_path, settings.jobs_results_dir)
+            out_path.write_bytes(pdf_bytes)
+            rel = str(out_path.relative_to(settings.tenants_storage_root))
 
             async with Session() as db:
                 job = await db.get(Job, job_id)

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
@@ -9,6 +9,9 @@ class Usuario(Base):
     __table_args__ = {"schema": "utils"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     nome: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     senha: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -19,3 +22,5 @@ class Usuario(Base):
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     cargo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     app: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # Fase 16 — necessário pra canal whatsapp. Formato livre (sugerido E.164).
+    telefone: Mapped[str | None] = mapped_column(String(20), nullable=True)

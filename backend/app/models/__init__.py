@@ -5,6 +5,7 @@ from .assinatura import (
     UsuarioAssinatura,
 )
 from .assunto import Assunto, AssuntoTipoProcessoTipoAnexo, TipoAnexo, TipoProcesso
+from .audit import AuditLog
 from .configuracao import Configuracao
 from .processo import (
     Acao,
@@ -29,11 +30,20 @@ from .grupo import (
 from .localizacao import Bairro, Cidade, Endereco, Estado
 from .manifestante import Manifestante, TipoManifestante
 from .modulo import ConfiguracoesModulos, Modulo
+from .notificacao import Notificacao, NotificacaoPreferencia
 from .nivel import Nivel
 from .sistema import Sistema
+from .tenant import Tenant
 from .unidade_trabalho import TipoUnidadeTrabalho, UnidadeTrabalho
 from .usuario import Usuario
 from .usuario_externo import UsuarioExterno
+from .workflow import (
+    TipoProcessoWorkflow,
+    WorkflowDefinition,
+    WorkflowInstance,
+    WorkflowSlaAlerta,
+    WorkflowTransicaoLog,
+)
 
 __all__ = [
     "Acao",
@@ -43,6 +53,7 @@ __all__ = [
     "AssinaturaAnexo",
     "Assunto",
     "AssuntoTipoProcessoTipoAnexo",
+    "AuditLog",
     "Bairro",
     "Cidade",
     "Despacho",
@@ -62,9 +73,13 @@ __all__ = [
     "Manifestante",
     "Modulo",
     "Nivel",
+    "Notificacao",
+    "NotificacaoPreferencia",
     "Sistema",
     "SistemaTransacao",
+    "Tenant",
     "TipoAnexo",
+    "TipoProcessoWorkflow",
     "TipoManifestante",
     "TipoProcesso",
     "TipoUnidadeTrabalho",
@@ -74,4 +89,8 @@ __all__ = [
     "UsuarioExterno",
     "UsuarioGrupo",
     "UsuarioUnidadeTrabalho",
+    "WorkflowDefinition",
+    "WorkflowInstance",
+    "WorkflowSlaAlerta",
+    "WorkflowTransicaoLog",
 ]

@@ -28,6 +28,9 @@ class SolicitacaoAssinatura(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_processo: Mapped[int] = mapped_column(
         ForeignKey("protocolos.processo.id"), nullable=False
     )
@@ -51,6 +54,9 @@ class UsuarioAssinatura(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_solicitacao_assinatura: Mapped[int | None] = mapped_column(
         ForeignKey("protocolos.solicitacao_assinatura.id"), nullable=True
     )
@@ -75,6 +81,9 @@ class AssinaturaAnexo(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_usuario_assinatura: Mapped[int] = mapped_column(
         ForeignKey("protocolos.usuario_assinatura.id"), nullable=False
     )

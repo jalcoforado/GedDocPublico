@@ -1,20 +1,34 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  ArrowRight,
+  CheckCircle2,
+  FilePlus2,
+  Globe,
+  Hash,
+  Info,
+  Loader2,
+  Lock,
+  Tag,
+  Users,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { UnidadePicker } from "@/components/UnidadePicker";
 import { api, type ProcessoCreateInput } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { cn } from "@/lib/utils";
 
 type FormState = {
   id_tipo_processo: number | "";
@@ -27,6 +41,108 @@ type FormState = {
   publico: boolean;
   externo: boolean;
 };
+
+const DRAFT_KEY = "aprimora.novo-processo.draft.v1";
+
+function SectionCard({
+  step,
+  title,
+  description,
+  icon: Icon,
+  children,
+}: {
+  step: number;
+  title: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-border bg-card shadow-xs">
+      <header className="flex items-start gap-3 border-b border-border px-5 py-4">
+        <span
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand/8 text-brand"
+          aria-hidden="true"
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-surface-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-foreground-muted">
+              passo {step}
+            </span>
+            <h2 className="text-sm font-semibold tracking-tight text-foreground">
+              {title}
+            </h2>
+          </div>
+          <p className="mt-0.5 text-xs text-foreground-muted">{description}</p>
+        </div>
+      </header>
+      <div className="space-y-4 p-5">{children}</div>
+    </section>
+  );
+}
+
+function ToggleCard({
+  checked,
+  onChange,
+  icon: Icon,
+  title,
+  description,
+  iconBgClass,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+  iconBgClass: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "group flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-all duration-fast",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        checked
+          ? "border-brand/40 bg-brand/5 shadow-xs"
+          : "border-border bg-surface-1 hover:border-border-strong hover:bg-surface-2",
+      )}
+    >
+      <span
+        className={cn(
+          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors",
+          checked ? iconBgClass : "bg-surface-3 text-foreground-muted",
+        )}
+        aria-hidden="true"
+      >
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-medium text-foreground">{title}</span>
+          <span
+            className={cn(
+              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+              checked ? "bg-brand" : "bg-border",
+            )}
+          >
+            <span
+              className={cn(
+                "inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+                checked ? "translate-x-4" : "translate-x-0.5",
+              )}
+            />
+          </span>
+        </div>
+        <p className="mt-0.5 text-xs text-foreground-muted">{description}</p>
+      </div>
+    </button>
+  );
+}
 
 export default function NovoProcessoPage() {
   const router = useRouter();
@@ -45,6 +161,34 @@ export default function NovoProcessoPage() {
     externo: false,
   });
   const [err, setErr] = useState<string | null>(null);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+
+  // Hydrate from localStorage draft once on mount
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<FormState>;
+        setForm((f) => ({ ...f, ...parsed }));
+      }
+    } catch {
+      // ignore corrupted drafts
+    }
+    setDraftHydrated(true);
+  }, []);
+
+  // Persist draft (debounced)
+  useEffect(() => {
+    if (!draftHydrated) return;
+    const t = setTimeout(() => {
+      try {
+        window.localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
+      } catch {
+        // localStorage may be unavailable
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [form, draftHydrated]);
 
   const tiposProcessoQ = useQuery({
     queryKey: ["tipos-processo"],
@@ -52,49 +196,72 @@ export default function NovoProcessoPage() {
   });
   const assuntosQ = useQuery({
     queryKey: ["assuntos-all"],
-    queryFn: () => api.assuntos.list({ page_size: 200 }),
+    queryFn: () => api.assuntos.list({ page_size: 500 }),
   });
   const manifestantesQ = useQuery({
     queryKey: ["manifestantes-all"],
-    queryFn: () => api.manifestantes.list({ page_size: 200 }),
-  });
-  const unidadesQ = useQuery({
-    queryKey: ["unidades-all"],
-    queryFn: () => api.unidades.list({ page_size: 200 }),
+    queryFn: () => api.manifestantes.list({ page_size: 500 }),
   });
 
-  const assuntosFiltrados = useMemo(() => {
+  const tipoOptions = useMemo<ComboboxOption<{ id: number }>[]>(() => {
+    return (tiposProcessoQ.data ?? []).map((t) => ({
+      value: t.id,
+      label: t.tipo_processo,
+    }));
+  }, [tiposProcessoQ.data]);
+
+  const manifestanteOptions = useMemo<ComboboxOption[]>(() => {
+    return (manifestantesQ.data?.items ?? []).map((m) => ({
+      value: m.id,
+      label: m.nome ?? "(sem nome)",
+      hint: m.cpf_cnpj ?? undefined,
+    }));
+  }, [manifestantesQ.data]);
+
+  const assuntoOptions = useMemo<ComboboxOption<{ id_tipo_processo: number }>[]>(() => {
     const all = assuntosQ.data?.items ?? [];
-    if (!form.id_tipo_processo) return all;
-    return all.filter((a) => a.id_tipo_processo === form.id_tipo_processo);
+    const filtered = form.id_tipo_processo
+      ? all.filter((a) => a.id_tipo_processo === form.id_tipo_processo)
+      : all;
+    return filtered.map((a) => ({
+      value: a.id,
+      label: a.assunto,
+      data: { id_tipo_processo: a.id_tipo_processo },
+    }));
   }, [assuntosQ.data, form.id_tipo_processo]);
 
-  function handleTipoChange(v: string) {
-    const id = v ? Number(v) : "";
-    const novoAssunto =
-      typeof id === "number" && form.id_assunto
-        ? assuntosQ.data?.items.find((a) => a.id === form.id_assunto)
-            ?.id_tipo_processo === id
-          ? form.id_assunto
-          : ""
-        : "";
-    setForm({ ...form, id_tipo_processo: id, id_assunto: novoAssunto });
+  function handleTipoChange(v: number | string | null) {
+    const id = typeof v === "number" ? v : "";
+    // Clear assunto if it doesn't belong to this tipo
+    const currentAssunto = assuntosQ.data?.items.find((a) => a.id === form.id_assunto);
+    const keepAssunto =
+      currentAssunto && (id === "" || currentAssunto.id_tipo_processo === id);
+    setForm({ ...form, id_tipo_processo: id, id_assunto: keepAssunto ? form.id_assunto : "" });
   }
 
   const createM = useMutation({
     mutationFn: (data: ProcessoCreateInput) => api.processos.create(data),
     onSuccess: (p) => {
+      try {
+        window.localStorage.removeItem(DRAFT_KEY);
+      } catch {
+        // ignore
+      }
       toast.success(`Processo ${p.numero_processo} criado.`);
       router.push(`/processos/${p.id}`);
     },
-    onError: (e: Error) => setErr(e.message),
+    onError: (e: Error) => {
+      setErr(e.message);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    },
   });
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
     if (!form.id_assunto || !form.id_manifestante || !form.id_unidade_proprietaria) {
-      setErr("Preencha assunto, manifestante e unidade proprietária.");
+      setErr("Preencha manifestante, assunto e unidade proprietária.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
     createM.mutate({
@@ -110,185 +277,283 @@ export default function NovoProcessoPage() {
     });
   }
 
+  function descartarRascunho() {
+    try {
+      window.localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      // ignore
+    }
+    setForm({
+      id_tipo_processo: "",
+      id_assunto: "",
+      id_manifestante: "",
+      id_unidade_proprietaria: user?.id_unidade_trabalho ?? "",
+      observacao: "",
+      corpo: "",
+      numero_origem: "",
+      publico: true,
+      externo: false,
+    });
+    setErr(null);
+    toast.info("Rascunho descartado.");
+  }
+
+  const hasDraft =
+    draftHydrated &&
+    (form.id_assunto !== "" ||
+      form.id_manifestante !== "" ||
+      form.observacao !== "" ||
+      form.corpo !== "" ||
+      form.numero_origem !== "");
+
   return (
-    <div className="max-w-3xl space-y-4">
-      <div className="flex items-center justify-between">
-        <Link href="/processos" className="text-sm text-primary hover:underline">
-          ← Voltar
-        </Link>
-      </div>
+    <div className="mx-auto max-w-3xl space-y-4">
+      <PageHeader
+        variant="hero"
+        icon={FilePlus2}
+        breadcrumbs={[
+          { label: "Processos", href: "/processos" },
+          { label: "Novo" },
+        ]}
+        title="Abrir novo processo"
+        description="O número definitivo será gerado automaticamente ao salvar. Suas alterações ficam em rascunho local enquanto você preenche."
+        actions={
+          hasDraft && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={descartarRascunho}
+              title="Limpa todos os campos e remove o rascunho salvo no navegador"
+            >
+              Descartar rascunho
+            </Button>
+          )
+        }
+      />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Novo processo</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Número será gerado automaticamente após salvar.
-          </p>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={submit} className="grid grid-cols-1 gap-4 sm:grid-cols-2" noValidate>
-            <div className="sm:col-span-2">
-              <Label htmlFor="manif" required>
-                Manifestante
-              </Label>
-              <Select
-                id="manif"
-                value={form.id_manifestante}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    id_manifestante: e.target.value ? Number(e.target.value) : "",
-                  })
-                }
-                required
-              >
-                <option value="">—</option>
-                {manifestantesQ.data?.items.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.nome ?? "(sem nome)"} {m.cpf_cnpj ? `· ${m.cpf_cnpj}` : ""}
-                  </option>
-                ))}
-              </Select>
-            </div>
+      {err && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger-soft-foreground"
+        >
+          <Info className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{err}</span>
+        </div>
+      )}
 
+      <form onSubmit={submit} className="space-y-4" noValidate>
+        {/* === Passo 1: Identificação === */}
+        <SectionCard
+          step={1}
+          icon={Users}
+          title="Identificação"
+          description="Quem está abrindo o processo e onde ele vai tramitar."
+        >
+          <div>
+            <Label htmlFor="manif" required>
+              Manifestante
+            </Label>
+            <Combobox
+              id="manif"
+              options={manifestanteOptions}
+              value={form.id_manifestante === "" ? null : form.id_manifestante}
+              onChange={(v) =>
+                setForm({ ...form, id_manifestante: typeof v === "number" ? v : "" })
+              }
+              placeholder="Buscar por nome ou CPF/CNPJ…"
+              searchPlaceholder="Nome, CPF ou CNPJ…"
+              loading={manifestantesQ.isLoading}
+              footer={
+                <Link
+                  href="/cadastros/manifestantes/novo"
+                  className="inline-flex items-center gap-1 text-brand hover:underline"
+                >
+                  <span aria-hidden="true">+</span> Cadastrar novo manifestante
+                </Link>
+              }
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <Label htmlFor="tipo">Tipo de processo</Label>
-              <Select
+              <Combobox
                 id="tipo"
-                value={form.id_tipo_processo}
-                onChange={(e) => handleTipoChange(e.target.value)}
-              >
-                <option value="">— Todos —</option>
-                {tiposProcessoQ.data?.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.tipo_processo}
-                  </option>
-                ))}
-              </Select>
+                options={tipoOptions}
+                value={form.id_tipo_processo === "" ? null : form.id_tipo_processo}
+                onChange={handleTipoChange}
+                placeholder="(todos)"
+                searchPlaceholder="Buscar tipo…"
+                emptyText="Nenhum tipo de processo."
+                loading={tiposProcessoQ.isLoading}
+              />
+              <p className="mt-1 text-xs text-foreground-subtle">
+                Opcional. Filtra a lista de assuntos abaixo.
+              </p>
             </div>
 
             <div>
               <Label htmlFor="assunto" required>
                 Assunto
               </Label>
-              <Select
+              <Combobox
                 id="assunto"
-                value={form.id_assunto}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    id_assunto: e.target.value ? Number(e.target.value) : "",
-                  })
+                options={assuntoOptions}
+                value={form.id_assunto === "" ? null : form.id_assunto}
+                onChange={(v) =>
+                  setForm({ ...form, id_assunto: typeof v === "number" ? v : "" })
                 }
-                required
-              >
-                <option value="">—</option>
-                {assuntosFiltrados.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.assunto.length > 70 ? a.assunto.slice(0, 70) + "…" : a.assunto}
-                  </option>
-                ))}
-              </Select>
-            </div>
-
-            <div className="sm:col-span-2">
-              <Label htmlFor="unidade" required>
-                Unidade proprietária
-              </Label>
-              <Select
-                id="unidade"
-                value={form.id_unidade_proprietaria}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    id_unidade_proprietaria: e.target.value ? Number(e.target.value) : "",
-                  })
+                placeholder="Buscar assunto…"
+                searchPlaceholder="Buscar assunto…"
+                emptyText={
+                  form.id_tipo_processo
+                    ? "Nenhum assunto neste tipo."
+                    : "Nenhum assunto cadastrado."
                 }
-                required
-              >
-                <option value="">—</option>
-                {unidadesQ.data?.items.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.unidade_trabalho}
-                  </option>
-                ))}
-              </Select>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Sugerida: unidade do usuário ({user?.id_unidade_trabalho ?? "—"})
-              </p>
-            </div>
-
-            <div className="sm:col-span-2">
-              <Label htmlFor="obs">Observação</Label>
-              <Textarea
-                id="obs"
-                value={form.observacao}
-                onChange={(e) => setForm({ ...form, observacao: e.target.value })}
-                rows={3}
-                placeholder="Descreva brevemente o pedido"
+                loading={assuntosQ.isLoading}
               />
             </div>
+          </div>
 
-            <div className="sm:col-span-2">
-              <Label htmlFor="corpo">Corpo (opcional)</Label>
-              <Textarea
-                id="corpo"
-                value={form.corpo}
-                onChange={(e) => setForm({ ...form, corpo: e.target.value })}
-                rows={5}
-                placeholder="Conteúdo do processo (texto longo)"
-              />
-            </div>
+          <div>
+            <Label required>Unidade proprietária</Label>
+            <UnidadePicker
+              value={
+                form.id_unidade_proprietaria === ""
+                  ? null
+                  : form.id_unidade_proprietaria
+              }
+              onChange={(v) =>
+                setForm({ ...form, id_unidade_proprietaria: v ?? "" })
+              }
+              placeholder="Escolher unidade proprietária no organograma"
+            />
+            <p className="mt-1 text-xs text-foreground-subtle">
+              Sugerida: sua unidade
+              {user?.id_unidade_trabalho ? ` (#${user.id_unidade_trabalho})` : ""}.
+            </p>
+          </div>
+        </SectionCard>
 
-            <div>
-              <Label htmlFor="origem">Número de origem</Label>
-              <Input
-                id="origem"
-                value={form.numero_origem}
-                onChange={(e) => setForm({ ...form, numero_origem: e.target.value })}
-                placeholder="Ex: protocolo externo"
-              />
-            </div>
+        {/* === Passo 2: Conteúdo === */}
+        <SectionCard
+          step={2}
+          icon={Tag}
+          title="Conteúdo"
+          description="Descrição breve e corpo completo do processo."
+        >
+          <div>
+            <Label htmlFor="obs">Observação</Label>
+            <Textarea
+              id="obs"
+              value={form.observacao}
+              onChange={(e) => setForm({ ...form, observacao: e.target.value })}
+              rows={2}
+              placeholder="Resumo curto que aparece nas listagens (uma linha basta)."
+            />
+            <p className="mt-1 text-xs text-foreground-subtle">
+              Texto simples. Usado em buscas e listagens.
+            </p>
+          </div>
 
-            <div className="flex flex-wrap items-end gap-4">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={form.publico}
-                  onChange={(e) => setForm({ ...form, publico: e.target.checked })}
-                />
-                Público
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={form.externo}
-                  onChange={(e) => setForm({ ...form, externo: e.target.checked })}
-                />
-                Externo
-              </label>
-            </div>
+          <div>
+            <Label htmlFor="corpo">Corpo do processo</Label>
+            <RichTextEditor
+              ariaLabel="Corpo do processo"
+              value={form.corpo}
+              onChange={(html) => setForm({ ...form, corpo: html })}
+              placeholder="Descreva o pedido com detalhes. Use Ctrl+B / Ctrl+I, listas, títulos…"
+              minHeight={200}
+            />
+            <p className="mt-1 text-xs text-foreground-subtle">
+              Texto formatado. Aparece no PDF e na ficha do processo.
+            </p>
+          </div>
+        </SectionCard>
 
-            {err && (
-              <div
-                role="alert"
-                className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground sm:col-span-2"
-              >
-                {err}
-              </div>
+        {/* === Passo 3: Configurações === */}
+        <SectionCard
+          step={3}
+          icon={Hash}
+          title="Configurações"
+          description="Visibilidade, origem externa e número de protocolo prévio."
+        >
+          <div>
+            <Label htmlFor="origem">
+              Número de origem
+              <span className="ml-1 font-normal text-foreground-subtle">(opcional)</span>
+            </Label>
+            <Input
+              id="origem"
+              value={form.numero_origem}
+              onChange={(e) => setForm({ ...form, numero_origem: e.target.value })}
+              placeholder="Ex: protocolo externo, ofício, número de outro sistema"
+            />
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ToggleCard
+              checked={form.publico}
+              onChange={(v) => setForm({ ...form, publico: v })}
+              icon={form.publico ? Globe : Lock}
+              iconBgClass="bg-success-soft text-success"
+              title={form.publico ? "Público" : "Sigiloso"}
+              description={
+                form.publico
+                  ? "Qualquer servidor pode visualizar este processo."
+                  : "Apenas usuários autorizados poderão ver. Audit log marcará acessos."
+              }
+            />
+            <ToggleCard
+              checked={form.externo}
+              onChange={(v) => setForm({ ...form, externo: v })}
+              icon={Users}
+              iconBgClass="bg-info-soft text-info"
+              title={form.externo ? "Origem externa" : "Origem interna"}
+              description={
+                form.externo
+                  ? "Processo iniciado por cidadão ou orgão externo."
+                  : "Processo aberto por servidor interno da prefeitura."
+              }
+            />
+          </div>
+        </SectionCard>
+
+        {/* === Sticky footer com ações === */}
+        <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-1/95 px-4 py-3 backdrop-blur-md sm:mx-0 sm:rounded-xl sm:border">
+          <span className="text-xs text-foreground-subtle">
+            {hasDraft ? (
+              <span className="inline-flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3 text-success" aria-hidden="true" />
+                Rascunho salvo automaticamente.
+              </span>
+            ) : (
+              "Preencha os campos obrigatórios para abrir o processo."
             )}
-
-            <div className="flex flex-wrap justify-end gap-2 sm:col-span-2">
-              <Link href="/processos">
-                <Button variant="secondary" type="button">
-                  Cancelar
-                </Button>
-              </Link>
-              <Button type="submit" disabled={createM.isPending}>
-                {createM.isPending ? "Abrindo..." : "Abrir processo"}
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/processos">
+              <Button variant="ghost" type="button">
+                Cancelar
               </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+            </Link>
+            <Button type="submit" disabled={createM.isPending} size="md">
+              {createM.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  Abrindo…
+                </>
+              ) : (
+                <>
+                  Abrir processo
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </form>
     </div>
   );
 }

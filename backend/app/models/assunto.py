@@ -9,6 +9,9 @@ class TipoProcesso(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     tipo_processo: Mapped[str | None] = mapped_column(String(200), nullable=True)
     exige_processo_pai: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -20,6 +23,9 @@ class Assunto(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     assunto: Mapped[str] = mapped_column(String(1000), nullable=False)
     id_tipo_processo: Mapped[int] = mapped_column(
         ForeignKey("protocolos.tipo_processo.id"), nullable=False
@@ -34,6 +40,9 @@ class TipoAnexo(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     tipo_anexo: Mapped[str | None] = mapped_column(String(150), nullable=True)
     excluido: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
 
@@ -43,6 +52,9 @@ class AssuntoTipoProcessoTipoAnexo(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_assunto: Mapped[int | None] = mapped_column(
         ForeignKey("protocolos.assunto.id"), nullable=True
     )

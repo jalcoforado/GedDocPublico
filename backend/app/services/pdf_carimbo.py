@@ -21,7 +21,7 @@ from pypdf import PdfReader, PdfWriter
 from reportlab.lib.colors import HexColor
 from reportlab.pdfgen import canvas
 
-from ..config import get_settings
+from ..config import get_settings, tenant_carimbados_dir
 
 APRIMORA = HexColor("#1e3a5f")
 GRAY = HexColor("#6b7280")
@@ -116,11 +116,15 @@ def carimbar_pdf_bytes(
     return out.getvalue()
 
 
-def _cache_path(anexo_id: int) -> Path:
+def _cache_path(anexo_id: int, tenant_slug: str | None = None) -> Path:
+    """Path do cache carimbado. Se tenant_slug, usa storage por tenant;
+    senão fallback ao path legacy global."""
+    if tenant_slug:
+        return tenant_carimbados_dir(tenant_slug) / f"{anexo_id}.pdf"
     settings = get_settings()
-    cache_dir = Path(settings.uploads_dir) / "carimbados"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / f"{anexo_id}.pdf"
+    legacy = Path(settings.uploads_dir) / "carimbados"
+    legacy.mkdir(parents=True, exist_ok=True)
+    return legacy / f"{anexo_id}.pdf"
 
 
 def carimbar_anexo_com_cache(
@@ -129,9 +133,10 @@ def carimbar_anexo_com_cache(
     source_pdf_path: Path,
     numero_processo: str,
     e_doc: str,
+    tenant_slug: str | None = None,
 ) -> Path:
     """Retorna o path do PDF carimbado, gerando e cacheando se necessário."""
-    cache = _cache_path(anexo_id)
+    cache = _cache_path(anexo_id, tenant_slug)
     if cache.exists():
         return cache
 
@@ -145,8 +150,13 @@ def carimbar_anexo_com_cache(
     return cache
 
 
-def invalidate_cache(anexo_id: int) -> None:
+def invalidate_cache(anexo_id: int, tenant_slug: str | None = None) -> None:
     """Remove cache se existir (chamar no delete do anexo)."""
-    cache = _cache_path(anexo_id)
+    cache = _cache_path(anexo_id, tenant_slug)
     if cache.exists():
         cache.unlink(missing_ok=True)
+    # Também tenta o legacy global
+    if tenant_slug:
+        legacy = _cache_path(anexo_id, None)
+        if legacy.exists():
+            legacy.unlink(missing_ok=True)

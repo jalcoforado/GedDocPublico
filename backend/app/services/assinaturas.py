@@ -6,14 +6,7 @@ Modelo (espelha o PHP):
 - assinatura_anexo: cada par (destinatário × anexo); é onde o "assinado"
   efetivamente é registrado.
 
-Regras:
-- Validação da senha do usuário no momento de assinar (MD5, igual ao PHP).
-- `usuario_assinatura.realizada` vira true quando todos os anexos daquele
-  destinatário estão assinados.
-- `solicitacao_assinatura.realizada` vira true quando TODOS os destinatários
-  realizaram. Dispara `dt_fim`.
-- Cancelar: só o solicitante OU o usuário que criou. Não permite cancelar
-  solicitação já realizada.
+Fase 13a: todas as funções recebem `tenant_id` e propagam.
 """
 from __future__ import annotations
 
@@ -45,11 +38,15 @@ class AssinaturaError(Exception):
     pass
 
 
-async def _carregar_processo(db: AsyncSession, processo_id: int) -> Processo:
+async def _carregar_processo(
+    db: AsyncSession, processo_id: int, tenant_id: int
+) -> Processo:
     p = (
         await db.execute(
             select(Processo).where(
-                Processo.id == processo_id, Processo.excluido.is_(False)
+                Processo.id == processo_id,
+                Processo.tenant_id == tenant_id,
+                Processo.excluido.is_(False),
             )
         )
     ).scalar_one_or_none()
@@ -65,16 +62,17 @@ async def solicitar_assinatura(
     processo_id: int,
     payload: SolicitarAssinaturaRequest,
     *,
+    tenant_id: int,
     usuario_id: int,
     unidade_solicitante_id: int | None,
 ) -> SolicitacaoAssinatura:
-    processo = await _carregar_processo(db, processo_id)
+    processo = await _carregar_processo(db, processo_id, tenant_id)
 
-    # Valida assinantes existem.
     assinantes = (
         await db.execute(
             select(Usuario).where(
                 Usuario.id.in_(payload.id_assinantes),
+                Usuario.tenant_id == tenant_id,
                 Usuario.excluido.is_(False),
                 Usuario.ativo.is_(True),
             )
@@ -83,15 +81,16 @@ async def solicitar_assinatura(
     if len(assinantes) != len(set(payload.id_assinantes)):
         raise AssinaturaError("Algum assinante não foi encontrado ou está inativo")
 
-    # Valida anexos pertencem ao processo e estão ativos.
     vinculo_rows = (
         await db.execute(
             select(AnexoProcesso, Anexo)
             .join(Anexo, Anexo.id == AnexoProcesso.id_anexo)
             .where(
                 AnexoProcesso.id_processo == processo_id,
+                AnexoProcesso.tenant_id == tenant_id,
                 AnexoProcesso.id_anexo.in_(payload.id_anexos),
                 AnexoProcesso.excluido.is_(False),
+                Anexo.tenant_id == tenant_id,
                 Anexo.excluido.is_(False),
                 Anexo.ativo.is_(True),
             )
@@ -106,6 +105,7 @@ async def solicitar_assinatura(
 
     now = datetime.now()
     solicitacao = SolicitacaoAssinatura(
+        tenant_id=tenant_id,
         id_processo=processo_id,
         id_solicitante=usuario_id,
         id_usuario=usuario_id,
@@ -119,10 +119,10 @@ async def solicitar_assinatura(
     db.add(solicitacao)
     await db.flush()
 
-    # Cria 1 usuario_assinatura por assinante; ordem por posição no array recebido.
     for ordem, id_assin in enumerate(payload.id_assinantes, start=1):
         assinante = next(a for a in assinantes if a.id == id_assin)
         ua = UsuarioAssinatura(
+            tenant_id=tenant_id,
             id_solicitacao_assinatura=solicitacao.id,
             id_assinante=id_assin,
             id_tipo_assinatura=payload.id_tipo_assinatura,
@@ -135,10 +135,10 @@ async def solicitar_assinatura(
         )
         db.add(ua)
         await db.flush()
-        # E 1 assinatura_anexo por anexo, pendente.
         for id_anexo in payload.id_anexos:
             db.add(
                 AssinaturaAnexo(
+                    tenant_id=tenant_id,
                     id_usuario_assinatura=ua.id,
                     id_anexo=id_anexo,
                     assinado=False,
@@ -158,6 +158,7 @@ async def assinar(
     db: AsyncSession,
     assinatura_anexo_id: int,
     *,
+    tenant_id: int,
     usuario_id: int,
     senha: str,
 ) -> AssinaturaAnexo:
@@ -165,6 +166,7 @@ async def assinar(
         await db.execute(
             select(AssinaturaAnexo).where(
                 AssinaturaAnexo.id == assinatura_anexo_id,
+                AssinaturaAnexo.tenant_id == tenant_id,
                 AssinaturaAnexo.excluido.is_(False),
             )
         )
@@ -176,15 +178,21 @@ async def assinar(
 
     ua = (
         await db.execute(
-            select(UsuarioAssinatura).where(UsuarioAssinatura.id == aa.id_usuario_assinatura)
+            select(UsuarioAssinatura).where(
+                UsuarioAssinatura.id == aa.id_usuario_assinatura,
+                UsuarioAssinatura.tenant_id == tenant_id,
+            )
         )
     ).scalar_one()
     if ua.id_assinante != usuario_id:
         raise AssinaturaError("Você não é o destinatário desta solicitação")
 
-    # Valida a senha (MD5) do usuário corrente.
     usuario = (
-        await db.execute(select(Usuario).where(Usuario.id == usuario_id))
+        await db.execute(
+            select(Usuario).where(
+                Usuario.id == usuario_id, Usuario.tenant_id == tenant_id
+            )
+        )
     ).scalar_one()
     if not verify_md5(senha, usuario.senha):
         raise AssinaturaError("Senha incorreta")
@@ -193,14 +201,14 @@ async def assinar(
     aa.dt_assinatura = datetime.now()
     aa.id_usuario = usuario_id
 
-    # Marca usuario_assinatura como realizada se todos anexos dele estão assinados.
     pendentes_user = (
         await db.execute(
             select(AssinaturaAnexo).where(
                 AssinaturaAnexo.id_usuario_assinatura == ua.id,
+                AssinaturaAnexo.tenant_id == tenant_id,
                 AssinaturaAnexo.excluido.is_(False),
                 and_(
-                    AssinaturaAnexo.id != aa.id,  # esse aqui acabou de assinar
+                    AssinaturaAnexo.id != aa.id,
                     AssinaturaAnexo.assinado.is_not(True),
                 ),
             )
@@ -209,11 +217,11 @@ async def assinar(
     if not pendentes_user:
         ua.realizada = True
 
-        # Promove solicitação se todos os destinatários realizaram.
         solic = (
             await db.execute(
                 select(SolicitacaoAssinatura).where(
-                    SolicitacaoAssinatura.id == ua.id_solicitacao_assinatura
+                    SolicitacaoAssinatura.id == ua.id_solicitacao_assinatura,
+                    SolicitacaoAssinatura.tenant_id == tenant_id,
                 )
             )
         ).scalar_one()
@@ -221,6 +229,7 @@ async def assinar(
             await db.execute(
                 select(UsuarioAssinatura).where(
                     UsuarioAssinatura.id_solicitacao_assinatura == solic.id,
+                    UsuarioAssinatura.tenant_id == tenant_id,
                     UsuarioAssinatura.excluido.is_(False),
                     UsuarioAssinatura.realizada.is_(False),
                     UsuarioAssinatura.id != ua.id,
@@ -240,12 +249,14 @@ async def cancelar_solicitacao(
     db: AsyncSession,
     solicitacao_id: int,
     *,
+    tenant_id: int,
     usuario_id: int,
 ) -> SolicitacaoAssinatura:
     solic = (
         await db.execute(
             select(SolicitacaoAssinatura).where(
                 SolicitacaoAssinatura.id == solicitacao_id,
+                SolicitacaoAssinatura.tenant_id == tenant_id,
                 SolicitacaoAssinatura.excluido.is_(False),
             )
         )
@@ -269,27 +280,30 @@ async def cancelar_solicitacao(
 # ---------- Queries ----------
 
 async def _hidratar_solicitacao(
-    db: AsyncSession, solic: SolicitacaoAssinatura
+    db: AsyncSession, solic: SolicitacaoAssinatura, tenant_id: int
 ) -> SolicitacaoOut:
-    # Solicitante + processo
     solicitante_nome = (
         await db.execute(
-            select(Usuario.nome).where(Usuario.id == solic.id_solicitante)
+            select(Usuario.nome).where(
+                Usuario.id == solic.id_solicitante, Usuario.tenant_id == tenant_id
+            )
         )
     ).scalar_one_or_none()
     numero_processo = (
         await db.execute(
-            select(Processo.numero_processo).where(Processo.id == solic.id_processo)
+            select(Processo.numero_processo).where(
+                Processo.id == solic.id_processo, Processo.tenant_id == tenant_id
+            )
         )
     ).scalar_one_or_none()
 
-    # Assinantes + anexos
     uas = (
         await db.execute(
             select(UsuarioAssinatura, Usuario.nome)
             .join(Usuario, Usuario.id == UsuarioAssinatura.id_assinante, isouter=True)
             .where(
                 UsuarioAssinatura.id_solicitacao_assinatura == solic.id,
+                UsuarioAssinatura.tenant_id == tenant_id,
                 UsuarioAssinatura.excluido.is_(False),
             )
             .order_by(UsuarioAssinatura.ordem)
@@ -304,6 +318,7 @@ async def _hidratar_solicitacao(
                 .join(Anexo, Anexo.id == AssinaturaAnexo.id_anexo)
                 .where(
                     AssinaturaAnexo.id_usuario_assinatura == ua.id,
+                    AssinaturaAnexo.tenant_id == tenant_id,
                     AssinaturaAnexo.excluido.is_(False),
                 )
                 .order_by(AssinaturaAnexo.id)
@@ -345,23 +360,24 @@ async def _hidratar_solicitacao(
 
 
 async def listar_do_processo(
-    db: AsyncSession, processo_id: int
+    db: AsyncSession, processo_id: int, *, tenant_id: int
 ) -> list[SolicitacaoOut]:
     rows = (
         await db.execute(
             select(SolicitacaoAssinatura)
             .where(
                 SolicitacaoAssinatura.id_processo == processo_id,
+                SolicitacaoAssinatura.tenant_id == tenant_id,
                 SolicitacaoAssinatura.excluido.is_(False),
             )
             .order_by(SolicitacaoAssinatura.id.desc())
         )
     ).scalars().all()
-    return [await _hidratar_solicitacao(db, s) for s in rows]
+    return [await _hidratar_solicitacao(db, s, tenant_id) for s in rows]
 
 
 async def listar_minhas_pendentes(
-    db: AsyncSession, usuario_id: int
+    db: AsyncSession, usuario_id: int, *, tenant_id: int
 ) -> list[PendenciaAssinatura]:
     rows = (
         await db.execute(
@@ -379,6 +395,7 @@ async def listar_minhas_pendentes(
             .join(Usuario, Usuario.id == SolicitacaoAssinatura.id_solicitante, isouter=True)
             .where(
                 UsuarioAssinatura.id_assinante == usuario_id,
+                AssinaturaAnexo.tenant_id == tenant_id,
                 AssinaturaAnexo.assinado.is_not(True),
                 AssinaturaAnexo.excluido.is_(False),
                 SolicitacaoAssinatura.cancelada.is_(False),

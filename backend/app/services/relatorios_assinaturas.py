@@ -50,7 +50,7 @@ def _delta_min(a: datetime | None, b: datetime | None) -> int | None:
 
 
 async def gerar_assinaturas(
-    db: AsyncSession, f: AssinaturasFiltro, *, max_rows: int = 500
+    db: AsyncSession, f: AssinaturasFiltro, *, tenant_id: int, max_rows: int = 500
 ) -> RelatorioAssinaturasResposta:
     Solicitante = aliased(Usuario, name="solic")
     sol_stmt = (
@@ -61,7 +61,10 @@ async def gerar_assinaturas(
         )
         .join(Processo, Processo.id == SolicitacaoAssinatura.id_processo)
         .join(Solicitante, Solicitante.id == SolicitacaoAssinatura.id_solicitante, isouter=True)
-        .where(SolicitacaoAssinatura.excluido.is_(False))
+        .where(
+            SolicitacaoAssinatura.tenant_id == tenant_id,
+            SolicitacaoAssinatura.excluido.is_(False),
+        )
     )
     if f.desde:
         sol_stmt = sol_stmt.where(SolicitacaoAssinatura.dt_inicio >= f.desde)
@@ -96,6 +99,7 @@ async def gerar_assinaturas(
             .join(Usuario, Usuario.id == UsuarioAssinatura.id_assinante, isouter=True)
             .where(
                 UsuarioAssinatura.id_solicitacao_assinatura.in_(solic_ids),
+                UsuarioAssinatura.tenant_id == tenant_id,
                 UsuarioAssinatura.excluido.is_(False),
             )
             .order_by(UsuarioAssinatura.ordem)
@@ -109,6 +113,7 @@ async def gerar_assinaturas(
     if ua_ids:
         an_stmt = select(AssinaturaAnexo).where(
             AssinaturaAnexo.id_usuario_assinatura.in_(ua_ids),
+            AssinaturaAnexo.tenant_id == tenant_id,
             AssinaturaAnexo.excluido.is_(False),
         )
         for aa in (await db.execute(an_stmt)).scalars().all():

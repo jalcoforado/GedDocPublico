@@ -13,15 +13,29 @@ import { cn } from "@/lib/utils";
 
 type Intent = "success" | "error" | "info" | "warning";
 
+interface ToastAction {
+  label: string;
+  /** Ao clicar, executa e dispensa o toast. */
+  onClick: () => void;
+}
+
 interface Toast {
   id: string;
   message: string;
   intent: Intent;
+  action?: ToastAction;
+}
+
+interface ToastInput {
+  message: string;
+  intent?: Intent;
+  duration?: number;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
-  toast: (input: { message: string; intent?: Intent; duration?: number }) => void;
-  success: (message: string) => void;
+  toast: (input: ToastInput) => void;
+  success: (message: string, opts?: { action?: ToastAction; duration?: number }) => void;
   error: (message: string) => void;
   info: (message: string) => void;
   warning: (message: string) => void;
@@ -51,19 +65,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const toast = useCallback(
-    ({
-      message,
-      intent = "info",
-      duration = 4000,
-    }: {
-      message: string;
-      intent?: Intent;
-      duration?: number;
-    }) => {
+    ({ message, intent = "info", duration = 4000, action }: ToastInput) => {
       const id = Math.random().toString(36).slice(2, 9);
-      setToasts((cur) => [...cur, { id, message, intent }]);
-      if (duration > 0) {
-        window.setTimeout(() => dismiss(id), duration);
+      setToasts((cur) => [...cur, { id, message, intent, action }]);
+      // Toasts com ação ficam por mais tempo (6s default) — undo precisa de janela maior
+      const finalDuration =
+        action && duration === 4000 ? 6000 : duration;
+      if (finalDuration > 0) {
+        window.setTimeout(() => dismiss(id), finalDuration);
       }
     },
     [dismiss],
@@ -72,7 +81,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<ToastContextValue>(
     () => ({
       toast,
-      success: (m) => toast({ message: m, intent: "success" }),
+      success: (m, opts) =>
+        toast({
+          message: m,
+          intent: "success",
+          action: opts?.action,
+          duration: opts?.duration,
+        }),
       error: (m) => toast({ message: m, intent: "error", duration: 6000 }),
       info: (m) => toast({ message: m, intent: "info" }),
       warning: (m) => toast({ message: m, intent: "warning" }),
@@ -101,6 +116,18 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             >
               <Icon className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
               <p className="flex-1 text-sm">{t.message}</p>
+              {t.action && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    t.action!.onClick();
+                    dismiss(t.id);
+                  }}
+                  className="rounded border border-current/30 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide transition-colors hover:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
+                >
+                  {t.action.label}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => dismiss(t.id)}

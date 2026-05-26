@@ -43,6 +43,9 @@ class Endereco(Base):
     __table_args__ = {"schema": "utils"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_cidade: Mapped[int | None] = mapped_column(
         ForeignKey("utils.cidade.id"), nullable=True
     )

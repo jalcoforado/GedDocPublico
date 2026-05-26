@@ -1,12 +1,14 @@
-"""Task assíncrona que gera o PDF 'processo completo' em background."""
+"""Task assíncrona que gera o PDF 'processo completo' em background.
+
+Fase 14: storage por tenant. `resultado_path` é relativo a `tenants_storage_root`.
+"""
 from __future__ import annotations
 
 import asyncio
-import os
 import traceback
 from datetime import datetime
 
-from ..config import get_settings
+from ..config import get_settings, tenant_jobs_dir
 from ..models import Job
 from ..services.pdf_montagem import gerar_processo_completo_pdf
 from ..services.processos import get_processo_detail
@@ -17,12 +19,18 @@ settings = get_settings()
 
 
 @celery_app.task(name="app.tasks.processo_completo.run", bind=True)
-def run(self, job_id: int, processo_id: int) -> str | None:
-    return asyncio.run(_run_async(self, job_id, processo_id))
+def run(
+    self, job_id: int, processo_id: int, tenant_id: int, tenant_slug: str
+) -> str | None:
+    return asyncio.run(
+        _run_async(self, job_id, processo_id, tenant_id, tenant_slug)
+    )
 
 
-async def _run_async(task, job_id: int, processo_id: int) -> str | None:
-    async with task_session_scope() as (_engine, Session):
+async def _run_async(
+    task, job_id: int, processo_id: int, tenant_id: int, tenant_slug: str
+) -> str | None:
+    async with task_session_scope(tenant_id=tenant_id) as (_engine, Session):
         async with Session() as db:
             job = await db.get(Job, job_id)
             if job is None:
@@ -34,20 +42,19 @@ async def _run_async(task, job_id: int, processo_id: int) -> str | None:
 
         try:
             async with Session() as db:
-                detail = await get_processo_detail(db, processo_id)
+                detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
                 if detail is None:
                     raise RuntimeError(f"Processo {processo_id} não encontrado")
                 pdf_bytes = gerar_processo_completo_pdf(detail)
                 numero_safe = detail.numero_processo.replace("/", "_")
 
-            os.makedirs(settings.jobs_results_dir, exist_ok=True)
-            out_dir = os.path.join(settings.jobs_results_dir, str(job_id))
-            os.makedirs(out_dir, exist_ok=True)
-            out_path = os.path.join(out_dir, f"processo-completo-{numero_safe}.pdf")
-            with open(out_path, "wb") as f:
-                f.write(pdf_bytes)
+            out_dir = tenant_jobs_dir(tenant_slug) / str(job_id)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / f"processo-completo-{numero_safe}.pdf"
+            out_path.write_bytes(pdf_bytes)
 
-            rel_path = os.path.relpath(out_path, settings.jobs_results_dir)
+            # Path relativo a tenants_storage_root → "sobral/jobs/123/processo-completo-X.pdf"
+            rel_path = str(out_path.relative_to(settings.tenants_storage_root))
 
             async with Session() as db:
                 job = await db.get(Job, job_id)

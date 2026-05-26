@@ -1,47 +1,88 @@
 "use client";
 
-import { LogOut, Menu } from "lucide-react";
+import { Menu } from "lucide-react";
+import Link from "next/link";
 
-import { Button } from "@/components/ui/button";
-import { useAuth } from "@/lib/auth";
+import { AvatarDropdown } from "@/components/AvatarDropdown";
+import { BuscaGlobal } from "@/components/BuscaGlobal";
+import { NotificacoesBell } from "@/components/NotificacoesBell";
+import { useBranding } from "@/lib/branding";
 
 interface HeaderProps {
   onOpenSidebar: () => void;
 }
 
 export function Header({ onOpenSidebar }: HeaderProps) {
-  const { user, logout, perms } = useAuth();
-
   return (
-    <header className="flex items-center justify-between gap-2 border-b border-border bg-card px-4 py-3 pt-safe sm:px-6">
+    <header
+      className="
+        sticky top-0 z-30
+        flex items-center gap-3 border-b border-border
+        bg-surface-1/85 px-4 py-2.5 pt-safe backdrop-blur-md
+        sm:px-6
+      "
+    >
+      {/* Mobile menu trigger */}
       <button
         type="button"
         onClick={onOpenSidebar}
         aria-label="Abrir menu"
-        className="inline-flex h-11 w-11 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:hidden"
+        className="
+          inline-flex h-10 w-10 items-center justify-center rounded-md
+          text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground
+          lg:hidden
+        "
       >
         <Menu className="h-5 w-5" aria-hidden="true" />
       </button>
-      <div className="flex flex-1 items-center justify-end gap-4">
-        {user && (
-          <div className="hidden text-right sm:block">
-            <div className="text-sm font-medium text-foreground">{user.nome}</div>
-            <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
-              <span className="max-w-[260px] truncate">{user.email}</span>
-              {perms?.is_super_usuario && (
-                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold uppercase text-primary">
-                  Super
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-        <Button variant="secondary" size="sm" onClick={logout} className="gap-2">
-          <LogOut className="h-4 w-4" aria-hidden="true" />
-          <span className="hidden sm:inline">Sair</span>
-          <span className="sr-only sm:hidden">Sair</span>
-        </Button>
+
+      {/* Brand mark — visível em mobile (sidebar tem o logo grande no desktop) */}
+      <Link
+        href="/home"
+        className="flex items-center gap-2 lg:hidden"
+        aria-label="Início"
+      >
+        <BrandMark />
+        <span className="text-sm font-semibold tracking-tight">Aprimora</span>
+      </Link>
+
+      {/* Busca global ocupa o centro */}
+      <div className="hidden flex-1 md:block">
+        <BuscaGlobal />
+      </div>
+      <div className="flex-1 md:hidden" />
+
+      {/* Right cluster */}
+      <div className="flex items-center gap-1.5">
+        <NotificacoesBell />
+        <AvatarDropdown />
       </div>
     </header>
+  );
+}
+
+/** Marca pequena: monogram do tenant ou ícone gradient. */
+function BrandMark() {
+  const branding = useBranding();
+  if (branding?.logo_url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return (
+      <img
+        src={branding.logo_url}
+        alt={branding.nome ?? "Aprimora"}
+        className="h-7 w-7 rounded-md object-cover"
+      />
+    );
+  }
+  return (
+    <div
+      className="
+        inline-flex h-7 w-7 items-center justify-center rounded-md
+        bg-brand-gradient text-[11px] font-bold text-white shadow-brand
+      "
+      aria-hidden="true"
+    >
+      A
+    </div>
   );
 }

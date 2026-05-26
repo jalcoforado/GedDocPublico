@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import * as React from "react";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
+type Variant = "primary" | "secondary" | "ghost" | "danger" | "accent";
 type Size = "sm" | "md" | "lg" | "icon";
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -11,12 +11,15 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    "bg-primary text-primary-foreground hover:bg-aprimora-light focus-visible:ring-ring",
+    "bg-brand text-primary-foreground shadow-sm hover:bg-brand-light hover:shadow-md focus-visible:ring-ring",
   secondary:
-    "bg-card text-primary border border-primary hover:bg-muted focus-visible:ring-ring",
-  ghost: "bg-transparent text-foreground hover:bg-muted focus-visible:ring-ring",
+    "bg-surface-1 text-foreground border border-border-strong shadow-xs hover:bg-muted hover:border-foreground/30 focus-visible:ring-ring",
+  ghost:
+    "bg-transparent text-foreground hover:bg-muted focus-visible:ring-ring",
   danger:
-    "bg-danger text-danger-foreground hover:bg-danger/90 focus-visible:ring-danger",
+    "bg-danger text-danger-foreground shadow-sm hover:bg-danger/90 hover:shadow-md focus-visible:ring-danger",
+  accent:
+    "bg-accent text-accent-foreground shadow-sm hover:bg-accent-light hover:shadow-accent focus-visible:ring-accent",
 };
 
 const SIZES: Record<Size, string> = {
@@ -33,8 +36,9 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       type={type}
       className={cn(
         "inline-flex items-center justify-center rounded-md font-medium whitespace-nowrap",
-        "transition-[background-color,box-shadow,transform] duration-150 active:scale-[0.98]",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+        "transition-[background-color,box-shadow,transform,border-color] duration-fast ease-out",
+        "active:scale-[0.98]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         "disabled:pointer-events-none disabled:opacity-50",
         SIZES[size],
         VARIANTS[variant],

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,16 +17,20 @@ _settings = get_settings()
 @router.post("/login", response_model=LoginResponse)
 async def login(
     payload: LoginRequest,
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
-    result = await db.execute(
-        select(Usuario).where(
-            Usuario.email == payload.email,
-            Usuario.excluido.is_(False),
-            Usuario.ativo.is_(True),
-        )
+    # Login restringido ao tenant resolvido pelo middleware (Fase 13a).
+    tenant_id = getattr(request.state, "tenant_id", None)
+    stmt = select(Usuario).where(
+        Usuario.email == payload.email,
+        Usuario.excluido.is_(False),
+        Usuario.ativo.is_(True),
     )
+    if tenant_id is not None:
+        stmt = stmt.where(Usuario.tenant_id == tenant_id)
+    result = await db.execute(stmt)
     user = result.scalar_one_or_none()
 
     ok = False
@@ -44,17 +48,14 @@ async def login(
             detail="Credenciais inválidas",
         )
 
-    # Rehash transparente: popula senha_bcrypt sem tocar `senha` (PHP continua funcionando com MD5).
     if needs_rehash:
         user.senha_bcrypt = hash_password(payload.senha)
         await db.commit()
 
     secret = await get_jwt_secret(db)
-    jwt_payload = build_payload(user.id, user.email)
+    jwt_payload = build_payload(user.id, user.email, tenant_id=tenant_id)
     token = encode_token(jwt_payload, secret)
 
-    # Cookie HttpOnly (Fase 9.4.3 #8) — JS não lê, mas é enviado automaticamente
-    # em requests same-origin. Token continua no JSON para clientes API (curl/scripts).
     response.set_cookie(
         key="aprimora_token",
         value=token,

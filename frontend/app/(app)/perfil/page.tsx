@@ -1,5 +1,8 @@
 "use client";
 
+import { Bell } from "lucide-react";
+import Link from "next/link";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth";
 
@@ -34,6 +37,21 @@ export default function PerfilPage() {
               <dd className="text-foreground">{user.id_unidade_trabalho ?? "—"}</dd>
             </div>
           </dl>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Configurações</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Link
+            href="/perfil/notificacoes"
+            className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+          >
+            <Bell className="h-4 w-4" aria-hidden="true" />
+            Preferências de notificações
+          </Link>
         </CardContent>
       </Card>
 

@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user
-from ..database import get_db
+from ..auth.deps import get_current_user, require_tenant_id
+from ..database import get_db, tenant_filter
 from ..models import Nivel, Prioridade, Sistema, TipoUnidadeTrabalho, Transacao, Usuario
 from ..schemas.grupo import NivelOut, SistemaOut, TransacaoOut
 from ..schemas.processo import PrioridadeOut
@@ -47,12 +47,12 @@ async def list_transacoes(
 @router.get("/tipos-unidade", response_model=list[TipoUnidadeOut])
 async def list_tipos_unidade(
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[TipoUnidadeOut]:
-    stmt = (
-        select(TipoUnidadeTrabalho)
-        .where(TipoUnidadeTrabalho.excluido.is_(False))
-        .order_by(TipoUnidadeTrabalho.tipo_unidade_trabalho)
+    stmt = select(TipoUnidadeTrabalho).where(TipoUnidadeTrabalho.excluido.is_(False))
+    stmt = tenant_filter(stmt, TipoUnidadeTrabalho, tenant_id).order_by(
+        TipoUnidadeTrabalho.tipo_unidade_trabalho
     )
     return [
         TipoUnidadeOut.model_validate(t)

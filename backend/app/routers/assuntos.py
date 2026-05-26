@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user
-from ..database import get_db
+from ..auth.deps import get_current_user, require_tenant_id
+from ..database import get_db, tenant_filter
 from ..models import Assunto, AssuntoTipoProcessoTipoAnexo, TipoAnexo, TipoProcesso, Usuario
 from ..schemas.assunto import (
     AssuntoCreate,
@@ -29,13 +29,11 @@ router = APIRouter(tags=["assuntos"])
 @router.get("/tipos-processo", response_model=list[TipoProcessoOut])
 async def list_tipos_processo(
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = (
-        select(TipoProcesso)
-        .where(TipoProcesso.excluido.is_(False))
-        .order_by(TipoProcesso.tipo_processo)
-    )
+    stmt = select(TipoProcesso).where(TipoProcesso.excluido.is_(False))
+    stmt = tenant_filter(stmt, TipoProcesso, tenant_id).order_by(TipoProcesso.tipo_processo)
     return [TipoProcessoOut.model_validate(t) for t in (await db.execute(stmt)).scalars().all()]
 
 
@@ -43,9 +41,10 @@ async def list_tipos_processo(
 async def create_tipo_processo(
     payload: TipoProcessoCreate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    t = TipoProcesso(**payload.model_dump(), excluido=False)
+    t = TipoProcesso(**payload.model_dump(), tenant_id=tenant_id, excluido=False)
     db.add(t)
     await db.commit()
     await db.refresh(t)
@@ -57,9 +56,10 @@ async def update_tipo_processo(
     tipo_id: int,
     payload: TipoProcessoUpdate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    t = await get_or_404(db, TipoProcesso, tipo_id, label="Tipo de processo")
+    t = await get_or_404(db, TipoProcesso, tipo_id, tenant_id=tenant_id, label="Tipo de processo")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(t, k, v)
     await db.commit()
@@ -71,9 +71,10 @@ async def update_tipo_processo(
 async def delete_tipo_processo(
     tipo_id: int,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    t = await get_or_404(db, TipoProcesso, tipo_id, label="Tipo de processo")
+    t = await get_or_404(db, TipoProcesso, tipo_id, tenant_id=tenant_id, label="Tipo de processo")
     t.excluido = True
     await db.commit()
 
@@ -82,6 +83,7 @@ async def delete_tipo_processo(
 @router.get("/assuntos", response_model=Paginated[AssuntoOut])
 async def list_assuntos(
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -92,6 +94,7 @@ async def list_assuntos(
     return await paginated_list(
         db,
         Assunto,
+        tenant_id=tenant_id,
         out_model=AssuntoOut,
         page=page,
         page_size=page_size,
@@ -106,9 +109,10 @@ async def list_assuntos(
 async def create_assunto(
     payload: AssuntoCreate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    a = Assunto(**payload.model_dump(), excluido=False)
+    a = Assunto(**payload.model_dump(), tenant_id=tenant_id, excluido=False)
     db.add(a)
     await db.commit()
     await db.refresh(a)
@@ -120,9 +124,10 @@ async def update_assunto(
     assunto_id: int,
     payload: AssuntoUpdate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    a = await get_or_404(db, Assunto, assunto_id, label="Assunto")
+    a = await get_or_404(db, Assunto, assunto_id, tenant_id=tenant_id, label="Assunto")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(a, k, v)
     await db.commit()
@@ -134,9 +139,10 @@ async def update_assunto(
 async def delete_assunto(
     assunto_id: int,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    a = await get_or_404(db, Assunto, assunto_id, label="Assunto")
+    a = await get_or_404(db, Assunto, assunto_id, tenant_id=tenant_id, label="Assunto")
     a.excluido = True
     await db.commit()
 
@@ -145,13 +151,11 @@ async def delete_assunto(
 @router.get("/tipos-anexo", response_model=list[TipoAnexoOut])
 async def list_tipos_anexo(
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = (
-        select(TipoAnexo)
-        .where(TipoAnexo.excluido.is_(False))
-        .order_by(TipoAnexo.tipo_anexo)
-    )
+    stmt = select(TipoAnexo).where(TipoAnexo.excluido.is_(False))
+    stmt = tenant_filter(stmt, TipoAnexo, tenant_id).order_by(TipoAnexo.tipo_anexo)
     return [TipoAnexoOut.model_validate(t) for t in (await db.execute(stmt)).scalars().all()]
 
 
@@ -159,9 +163,10 @@ async def list_tipos_anexo(
 async def create_tipo_anexo(
     payload: TipoAnexoCreate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    t = TipoAnexo(**payload.model_dump(), excluido=False)
+    t = TipoAnexo(**payload.model_dump(), tenant_id=tenant_id, excluido=False)
     db.add(t)
     await db.commit()
     await db.refresh(t)
@@ -173,9 +178,10 @@ async def update_tipo_anexo(
     tipo_id: int,
     payload: TipoAnexoUpdate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    t = await get_or_404(db, TipoAnexo, tipo_id, label="Tipo de anexo")
+    t = await get_or_404(db, TipoAnexo, tipo_id, tenant_id=tenant_id, label="Tipo de anexo")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(t, k, v)
     await db.commit()
@@ -187,9 +193,10 @@ async def update_tipo_anexo(
 async def delete_tipo_anexo(
     tipo_id: int,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    t = await get_or_404(db, TipoAnexo, tipo_id, label="Tipo de anexo")
+    t = await get_or_404(db, TipoAnexo, tipo_id, tenant_id=tenant_id, label="Tipo de anexo")
     t.excluido = True
     await db.commit()
 
@@ -198,6 +205,7 @@ async def delete_tipo_anexo(
 @router.get("/assunto-tipo-anexo", response_model=list[AssuntoTipoAnexoOut])
 async def list_assunto_tipo_anexo(
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     id_assunto: int | None = None,
     id_tipo_anexo: int | None = None,
@@ -205,6 +213,7 @@ async def list_assunto_tipo_anexo(
     stmt = select(AssuntoTipoProcessoTipoAnexo).where(
         AssuntoTipoProcessoTipoAnexo.excluido.is_(False)
     )
+    stmt = tenant_filter(stmt, AssuntoTipoProcessoTipoAnexo, tenant_id)
     if id_assunto:
         stmt = stmt.where(AssuntoTipoProcessoTipoAnexo.id_assunto == id_assunto)
     if id_tipo_anexo:
@@ -223,9 +232,10 @@ async def list_assunto_tipo_anexo(
 async def create_assunto_tipo_anexo(
     payload: AssuntoTipoAnexoCreate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    r = AssuntoTipoProcessoTipoAnexo(**payload.model_dump(), excluido=False)
+    r = AssuntoTipoProcessoTipoAnexo(**payload.model_dump(), tenant_id=tenant_id, excluido=False)
     db.add(r)
     await db.commit()
     await db.refresh(r)
@@ -237,9 +247,10 @@ async def update_assunto_tipo_anexo(
     rel_id: int,
     payload: AssuntoTipoAnexoUpdate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    r = await get_or_404(db, AssuntoTipoProcessoTipoAnexo, rel_id, label="Vínculo")
+    r = await get_or_404(db, AssuntoTipoProcessoTipoAnexo, rel_id, tenant_id=tenant_id, label="Vínculo")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(r, k, v)
     await db.commit()
@@ -251,8 +262,9 @@ async def update_assunto_tipo_anexo(
 async def delete_assunto_tipo_anexo(
     rel_id: int,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    r = await get_or_404(db, AssuntoTipoProcessoTipoAnexo, rel_id, label="Vínculo")
+    r = await get_or_404(db, AssuntoTipoProcessoTipoAnexo, rel_id, tenant_id=tenant_id, label="Vínculo")
     r.excluido = True
     await db.commit()

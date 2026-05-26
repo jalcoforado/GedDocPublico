@@ -13,6 +13,9 @@ class Job(Base):
     __table_args__ = {"schema": "aprimora_py"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     tipo: Mapped[str] = mapped_column(String(60), nullable=False)
     descricao: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente")

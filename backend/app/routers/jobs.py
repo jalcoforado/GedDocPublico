@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user
+from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
 from ..config import get_settings
 from ..database import get_db
 from ..models import Usuario
@@ -34,19 +34,21 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 @router.get("", response_model=list[JobOut])
 async def list_jobs_endpoint(
-    todos: bool = Query(False, description="Se True, retorna jobs de todos os usuários"),
+    todos: bool = Query(False, description="Se True, retorna jobs de todos os usuários do tenant"),
     limit: int = Query(50, ge=1, le=500),
     current: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[JobOut]:
-    return await listar_jobs(db, usuario_id=current.id, todos=todos, limit=limit)
+    return await listar_jobs(
+        db, tenant_id=tenant_id, usuario_id=current.id, todos=todos, limit=limit
+    )
 
 
 @router.get("/agenda", response_model=list[AgendaItem])
 async def listar_agenda_endpoint(
     _: Usuario = Depends(get_current_user),
 ) -> list[AgendaItem]:
-    # Import tardio para não exigir o broker no startup da API.
     from ..tasks.celery_app import celery_app
 
     items: list[AgendaItem] = []
@@ -66,9 +68,10 @@ async def listar_agenda_endpoint(
 async def get_job_endpoint(
     job_id: int,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> JobOut:
-    row = await get_job(db, job_id)
+    row = await get_job(db, job_id, tenant_id=tenant_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job não encontrado")
     job, nome = row
@@ -85,15 +88,16 @@ async def get_job_endpoint(
 async def disparar_processo_completo(
     payload: DispararProcessoCompletoRequest,
     current: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ) -> JobOut:
-    # Import tardio para não puxar Celery no startup da API caso o worker esteja fora.
     from ..tasks.processo_completo import run as run_task
 
     job = await criar_job_processo_completo(
-        db, processo_id=payload.id_processo, usuario_id=current.id
+        db, tenant_id=tenant_id, processo_id=payload.id_processo, usuario_id=current.id
     )
-    run_task.delay(job.id, payload.id_processo)
+    run_task.delay(job.id, payload.id_processo, tenant_id, tenant_slug)
     out = JobOut.model_validate(job)
     out.nome_usuario = current.nome
     return out
@@ -107,14 +111,16 @@ async def disparar_processo_completo(
 async def disparar_carimbar_anexos(
     payload: DispararCarimbarAnexosRequest,
     current: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ) -> JobOut:
     from ..tasks.carimbar_anexos import run as run_task
 
     job = await criar_job_carimbar_anexos(
-        db, processo_id=payload.id_processo, usuario_id=current.id
+        db, tenant_id=tenant_id, processo_id=payload.id_processo, usuario_id=current.id
     )
-    run_task.delay(job.id, payload.id_processo)
+    run_task.delay(job.id, payload.id_processo, tenant_id, tenant_slug)
     out = JobOut.model_validate(job)
     out.nome_usuario = current.nome
     return out
@@ -128,6 +134,8 @@ async def disparar_carimbar_anexos(
 async def disparar_relatorio_tramitacao(
     payload: DispararRelatorioTramitacaoRequest,
     current: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ) -> JobOut:
     from ..tasks.relatorio_tramitacao_bg import run as run_task
@@ -142,11 +150,12 @@ async def disparar_relatorio_tramitacao(
     }
     job = await criar_job_relatorio_tramitacao(
         db,
+        tenant_id=tenant_id,
         filtros=filtros,
         max_processos=payload.max_processos,
         usuario_id=current.id,
     )
-    run_task.delay(job.id, filtros, payload.max_processos)
+    run_task.delay(job.id, filtros, payload.max_processos, tenant_id, tenant_slug)
     out = JobOut.model_validate(job)
     out.nome_usuario = current.nome
     return out
@@ -160,12 +169,16 @@ async def disparar_relatorio_tramitacao(
 async def disparar_limpeza(
     payload: DispararLimpezaRequest,
     current: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ) -> JobOut:
     from ..tasks.limpar_jobs_antigos import run as run_task
 
-    job = await criar_job_limpeza(db, dias=payload.dias, usuario_id=current.id)
-    run_task.delay(job.id, payload.dias)
+    job = await criar_job_limpeza(
+        db, tenant_id=tenant_id, dias=payload.dias, usuario_id=current.id
+    )
+    run_task.delay(job.id, payload.dias, tenant_id, tenant_slug)
     out = JobOut.model_validate(job)
     out.nome_usuario = current.nome
     return out
@@ -174,10 +187,11 @@ async def disparar_limpeza(
 @router.get("/{job_id}/resultado")
 async def baixar_resultado(
     job_id: int,
-    current: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    row = await get_job(db, job_id)
+    row = await get_job(db, job_id, tenant_id=tenant_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job não encontrado")
     job, _ = row
@@ -186,7 +200,10 @@ async def baixar_resultado(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Job ainda não concluído (status={job.status})",
         )
-    full = os.path.join(settings.jobs_results_dir, job.resultado_path)
+    # Resolve em ambos os roots: novo (tenants_storage_root) e legacy (jobs_results_dir).
+    full_new = os.path.join(settings.tenants_storage_root, job.resultado_path)
+    full_legacy = os.path.join(settings.jobs_results_dir, job.resultado_path)
+    full = full_new if os.path.exists(full_new) else full_legacy
     if not os.path.exists(full):
         raise HTTPException(
             status_code=status.HTTP_410_GONE,

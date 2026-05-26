@@ -39,7 +39,9 @@ class UserPermissions:
     items: list[PermItem]
 
 
-async def load_permissions(db: AsyncSession, usuario_id: int) -> UserPermissions:
+async def load_permissions(
+    db: AsyncSession, usuario_id: int, *, tenant_id: int
+) -> UserPermissions:
     settings = get_settings()
     app = settings.app_name
 
@@ -50,8 +52,10 @@ async def load_permissions(db: AsyncSession, usuario_id: int) -> UserPermissions
         .join(Sistema, Sistema.id == Grupo.id_sistema)
         .where(
             UsuarioGrupo.id_usuario == usuario_id,
+            UsuarioGrupo.tenant_id == tenant_id,
             UsuarioGrupo.excluido.is_(False),
             UsuarioGrupo.ativo.is_(True),
+            Grupo.tenant_id == tenant_id,
             Grupo.excluido.is_(False),
             Sistema.excluido.is_(False),
             Sistema.app == app,
@@ -94,6 +98,7 @@ async def load_permissions(db: AsyncSession, usuario_id: int) -> UserPermissions
             .join(GrupoTransacao, GrupoTransacao.id_transacao == Transacao.id)
             .where(
                 GrupoTransacao.id_grupo.in_(grupo_ids),
+                GrupoTransacao.tenant_id == tenant_id,
                 GrupoTransacao.excluido.is_(False),
                 Transacao.excluido.is_(False),
             )

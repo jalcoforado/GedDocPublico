@@ -2,10 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user
+from ..auth.deps import get_current_user, require_tenant_id
 from ..auth.password import hash_md5, hash_password
 from ..config import get_settings
-from ..database import get_db
+from ..database import get_db, tenant_filter
 from ..models import Usuario, UsuarioGrupo, UsuarioUnidadeTrabalho
 from ..schemas.common import Paginated
 from ..schemas.usuario import (
@@ -21,12 +21,14 @@ router = APIRouter(prefix="/usuarios", tags=["usuarios"])
 @router.get("", response_model=Paginated[UsuarioOut])
 async def list_usuarios(
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     q: str | None = Query(None, description="Busca por nome ou email"),
 ) -> Paginated[UsuarioOut]:
     base = select(Usuario).where(Usuario.excluido.is_(False))
+    base = tenant_filter(base, Usuario, tenant_id)
     if q:
         like = f"%{q.lower()}%"
         base = base.where(
@@ -41,11 +43,14 @@ async def list_usuarios(
     return Paginated(items=items, total=total, page=page, page_size=page_size)
 
 
-async def _load_links(db: AsyncSession, usuario_id: int) -> tuple[list[int], list[int]]:
+async def _load_links(
+    db: AsyncSession, usuario_id: int, tenant_id: int
+) -> tuple[list[int], list[int]]:
     grupos = (
         await db.execute(
             select(UsuarioGrupo.id_grupo).where(
                 UsuarioGrupo.id_usuario == usuario_id,
+                UsuarioGrupo.tenant_id == tenant_id,
                 UsuarioGrupo.excluido.is_(False),
             )
         )
@@ -54,6 +59,7 @@ async def _load_links(db: AsyncSession, usuario_id: int) -> tuple[list[int], lis
         await db.execute(
             select(UsuarioUnidadeTrabalho.id_unidade_trabalho).where(
                 UsuarioUnidadeTrabalho.id_usuario == usuario_id,
+                UsuarioUnidadeTrabalho.tenant_id == tenant_id,
                 UsuarioUnidadeTrabalho.excluido.is_(False),
             )
         )
@@ -61,22 +67,32 @@ async def _load_links(db: AsyncSession, usuario_id: int) -> tuple[list[int], lis
     return list(grupos), list(unidades)
 
 
-@router.get("/{usuario_id}", response_model=UsuarioDetail)
-async def get_usuario(
-    usuario_id: int,
-    _: Usuario = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> UsuarioDetail:
+async def _get_usuario_or_404(
+    db: AsyncSession, usuario_id: int, tenant_id: int
+) -> Usuario:
     user = (
         await db.execute(
             select(Usuario).where(
-                Usuario.id == usuario_id, Usuario.excluido.is_(False)
+                Usuario.id == usuario_id,
+                Usuario.tenant_id == tenant_id,
+                Usuario.excluido.is_(False),
             )
         )
     ).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
-    grupos, unidades = await _load_links(db, usuario_id)
+    return user
+
+
+@router.get("/{usuario_id}", response_model=UsuarioDetail)
+async def get_usuario(
+    usuario_id: int,
+    _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> UsuarioDetail:
+    user = await _get_usuario_or_404(db, usuario_id, tenant_id)
+    grupos, unidades = await _load_links(db, usuario_id, tenant_id)
     return UsuarioDetail(
         **UsuarioOut.model_validate(user).model_dump(),
         grupos=grupos,
@@ -88,12 +104,15 @@ async def get_usuario(
 async def create_usuario(
     payload: UsuarioCreate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> UsuarioDetail:
     dup = (
         await db.execute(
             select(Usuario).where(
-                Usuario.email == payload.email, Usuario.excluido.is_(False)
+                Usuario.email == payload.email,
+                Usuario.tenant_id == tenant_id,
+                Usuario.excluido.is_(False),
             )
         )
     ).scalar_one_or_none()
@@ -112,6 +131,7 @@ async def create_usuario(
         ativo=payload.ativo,
         excluido=False,
         app=get_settings().app_name,
+        tenant_id=tenant_id,
     )
     db.add(user)
     await db.flush()
@@ -121,6 +141,7 @@ async def create_usuario(
             UsuarioGrupo(
                 id_usuario=user.id,
                 id_grupo=gid,
+                tenant_id=tenant_id,
                 ativo=True,
                 excluido=False,
                 app=get_settings().app_name,
@@ -128,7 +149,7 @@ async def create_usuario(
         )
     await db.commit()
     await db.refresh(user)
-    grupos, unidades = await _load_links(db, user.id)
+    grupos, unidades = await _load_links(db, user.id, tenant_id)
     return UsuarioDetail(
         **UsuarioOut.model_validate(user).model_dump(),
         grupos=grupos,
@@ -141,17 +162,10 @@ async def update_usuario(
     usuario_id: int,
     payload: UsuarioUpdate,
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> UsuarioDetail:
-    user = (
-        await db.execute(
-            select(Usuario).where(
-                Usuario.id == usuario_id, Usuario.excluido.is_(False)
-            )
-        )
-    ).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+    user = await _get_usuario_or_404(db, usuario_id, tenant_id)
 
     data = payload.model_dump(exclude_unset=True)
     if "senha" in data and data["senha"]:
@@ -165,7 +179,7 @@ async def update_usuario(
         setattr(user, k, v)
     await db.commit()
     await db.refresh(user)
-    grupos, unidades = await _load_links(db, user.id)
+    grupos, unidades = await _load_links(db, user.id, tenant_id)
     return UsuarioDetail(
         **UsuarioOut.model_validate(user).model_dump(),
         grupos=grupos,
@@ -177,19 +191,12 @@ async def update_usuario(
 async def delete_usuario(
     usuario_id: int,
     current: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     if usuario_id == current.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Não pode excluir a si mesmo")
-    user = (
-        await db.execute(
-            select(Usuario).where(
-                Usuario.id == usuario_id, Usuario.excluido.is_(False)
-            )
-        )
-    ).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+    user = await _get_usuario_or_404(db, usuario_id, tenant_id)
     user.excluido = True
     user.ativo = False
     await db.commit()
@@ -200,33 +207,30 @@ async def set_grupos(
     usuario_id: int,
     grupos: list[int],
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> UsuarioDetail:
-    user = (
-        await db.execute(
-            select(Usuario).where(
-                Usuario.id == usuario_id, Usuario.excluido.is_(False)
-            )
-        )
-    ).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+    user = await _get_usuario_or_404(db, usuario_id, tenant_id)
 
     await db.execute(
-        delete(UsuarioGrupo).where(UsuarioGrupo.id_usuario == usuario_id)
+        delete(UsuarioGrupo).where(
+            UsuarioGrupo.id_usuario == usuario_id,
+            UsuarioGrupo.tenant_id == tenant_id,
+        )
     )
     for gid in grupos:
         db.add(
             UsuarioGrupo(
                 id_usuario=usuario_id,
                 id_grupo=gid,
+                tenant_id=tenant_id,
                 ativo=True,
                 excluido=False,
                 app=get_settings().app_name,
             )
         )
     await db.commit()
-    g, u = await _load_links(db, usuario_id)
+    g, u = await _load_links(db, usuario_id, tenant_id)
     return UsuarioDetail(
         **UsuarioOut.model_validate(user).model_dump(),
         grupos=g,
@@ -239,31 +243,28 @@ async def set_unidades(
     usuario_id: int,
     unidades: list[int],
     _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> UsuarioDetail:
-    user = (
-        await db.execute(
-            select(Usuario).where(
-                Usuario.id == usuario_id, Usuario.excluido.is_(False)
-            )
-        )
-    ).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+    user = await _get_usuario_or_404(db, usuario_id, tenant_id)
 
     await db.execute(
-        delete(UsuarioUnidadeTrabalho).where(UsuarioUnidadeTrabalho.id_usuario == usuario_id)
+        delete(UsuarioUnidadeTrabalho).where(
+            UsuarioUnidadeTrabalho.id_usuario == usuario_id,
+            UsuarioUnidadeTrabalho.tenant_id == tenant_id,
+        )
     )
     for uid in unidades:
         db.add(
             UsuarioUnidadeTrabalho(
                 id_usuario=usuario_id,
                 id_unidade_trabalho=uid,
+                tenant_id=tenant_id,
                 excluido=False,
             )
         )
     await db.commit()
-    g, u = await _load_links(db, usuario_id)
+    g, u = await _load_links(db, usuario_id, tenant_id)
     return UsuarioDetail(
         **UsuarioOut.model_validate(user).model_dump(),
         grupos=g,

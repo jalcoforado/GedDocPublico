@@ -9,6 +9,9 @@ class TipoManifestante(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     tipo_manifestante: Mapped[str | None] = mapped_column(String(150), nullable=True)
     id_categoria: Mapped[int] = mapped_column(Integer, nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -20,6 +23,9 @@ class Manifestante(Base):
     __table_args__ = {"schema": "protocolos"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
     id_tipo_manifestante: Mapped[int] = mapped_column(
         ForeignKey("protocolos.tipo_manifestante.id"), nullable=False
     )

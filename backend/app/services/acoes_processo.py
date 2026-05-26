@@ -8,6 +8,8 @@ Espelha o fluxo de aprimora/app/models/Processo.php:
   cria nova movimentação, e SÓ ENTÃO atualiza id_local_atual.
 - Cancelar (sem flag dedicada — usa registro lógico): só permite cancelar
   encaminhamento ainda não recebido. Mantém histórico (não deleta).
+
+Fase 13a: recebe `tenant_id` e propaga em todas as escritas e filtra leituras.
 """
 from datetime import datetime
 
@@ -23,6 +25,7 @@ class AcaoError(Exception):
 
 
 async def _get_acao(db: AsyncSession, flag: str) -> Acao:
+    """Acao é catálogo global — sem tenant_id."""
     acao = (
         await db.execute(
             select(Acao).where(
@@ -37,11 +40,15 @@ async def _get_acao(db: AsyncSession, flag: str) -> Acao:
     return acao
 
 
-async def _get_processo(db: AsyncSession, processo_id: int) -> Processo:
+async def _get_processo(
+    db: AsyncSession, processo_id: int, tenant_id: int
+) -> Processo:
     p = (
         await db.execute(
             select(Processo).where(
-                Processo.id == processo_id, Processo.excluido.is_(False)
+                Processo.id == processo_id,
+                Processo.tenant_id == tenant_id,
+                Processo.excluido.is_(False),
             )
         )
     ).scalar_one_or_none()
@@ -57,15 +64,17 @@ async def encaminhar(
     processo_id: int,
     payload: EncaminharRequest,
     *,
+    tenant_id: int,
     usuario_id: int,
 ) -> Encaminhamento:
-    processo = await _get_processo(db, processo_id)
+    processo = await _get_processo(db, processo_id, tenant_id)
 
     # Bloqueia se há encaminhamento pendente (não recebido e não cancelado).
     pendente = (
         await db.execute(
             select(Encaminhamento).where(
                 Encaminhamento.id_processo == processo_id,
+                Encaminhamento.tenant_id == tenant_id,
                 Encaminhamento.excluido.is_(False),
                 Encaminhamento.recebido.is_(False),
                 Encaminhamento.cancelado.is_(False),
@@ -82,6 +91,7 @@ async def encaminhar(
     unidade_origem = processo.id_local_atual or processo.id_unidade_proprietaria
 
     movimentacao = Movimentacao(
+        tenant_id=tenant_id,
         id_processo=processo_id,
         id_unidade_responsavel=unidade_origem,
         id_acao=acao.id,
@@ -94,6 +104,7 @@ async def encaminhar(
     await db.flush()
 
     encaminhamento = Encaminhamento(
+        tenant_id=tenant_id,
         id_processo=processo_id,
         id_unidade_origem=unidade_origem,
         id_unidade_destino=payload.id_unidade_destino,
@@ -113,6 +124,7 @@ async def encaminhar(
     if payload.despacho:
         db.add(
             Despacho(
+                tenant_id=tenant_id,
                 id_processo=processo_id,
                 despacho=payload.despacho,
                 id_usuario=usuario_id,
@@ -127,6 +139,12 @@ async def encaminhar(
 
     await db.commit()
     await db.refresh(encaminhamento)
+
+    # (Fase 20b) Dispara evento de workflow, se houver instance ativa
+    from .workflow_integration import disparar_evento
+
+    await disparar_evento(db, processo, "encaminhamento", usuario_id)
+
     return encaminhamento
 
 
@@ -134,15 +152,17 @@ async def receber(
     db: AsyncSession,
     processo_id: int,
     *,
+    tenant_id: int,
     usuario_id: int,
 ) -> Encaminhamento:
-    processo = await _get_processo(db, processo_id)
+    processo = await _get_processo(db, processo_id, tenant_id)
 
     enc = (
         await db.execute(
             select(Encaminhamento)
             .where(
                 Encaminhamento.id_processo == processo_id,
+                Encaminhamento.tenant_id == tenant_id,
                 Encaminhamento.excluido.is_(False),
                 Encaminhamento.recebido.is_(False),
                 Encaminhamento.cancelado.is_(False),
@@ -160,6 +180,7 @@ async def receber(
     enc.data_hora_recebimento = now
 
     movimentacao = Movimentacao(
+        tenant_id=tenant_id,
         id_processo=processo_id,
         id_unidade_responsavel=enc.id_unidade_destino,
         id_acao=acao.id,
@@ -176,8 +197,30 @@ async def receber(
     processo.id_local_atual = enc.id_unidade_destino
     processo.id_ultima_movimentacao = movimentacao.id
 
+    # Audit (Fase 24)
+    from .audit import log as audit_log
+
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="processo.recebido",
+        entidade="processo",
+        id_entidade=processo_id,
+        payload={
+            "id_encaminhamento": enc.id,
+            "id_unidade_destino": enc.id_unidade_destino,
+        },
+    )
+
     await db.commit()
     await db.refresh(enc)
+
+    # (Fase 20b) Dispara evento de workflow
+    from .workflow_integration import disparar_evento
+
+    await disparar_evento(db, processo, "recebimento", usuario_id)
+
     return enc
 
 
@@ -186,12 +229,14 @@ async def cancelar_encaminhamento(
     encaminhamento_id: int,
     payload: CancelarEncaminhamentoRequest,
     *,
+    tenant_id: int,
     usuario_id: int,
 ) -> Encaminhamento:
     enc = (
         await db.execute(
             select(Encaminhamento).where(
                 Encaminhamento.id == encaminhamento_id,
+                Encaminhamento.tenant_id == tenant_id,
                 Encaminhamento.excluido.is_(False),
             )
         )
@@ -209,6 +254,7 @@ async def cancelar_encaminhamento(
     if payload.despacho:
         db.add(
             Despacho(
+                tenant_id=tenant_id,
                 id_processo=enc.id_processo,
                 despacho=f"[Cancelamento de encaminhamento] {payload.despacho}",
                 id_usuario=usuario_id,

@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import { UnidadePicker } from "@/components/UnidadePicker";
 import { api, type UnidadeTrabalho } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
@@ -258,26 +259,19 @@ export default function UnidadesPage() {
             </Select>
           </div>
           <div>
-            <Label htmlFor="ut-pai">Unidade Pai</Label>
-            <Select
-              id="ut-pai"
-              value={form.id_unidade_pai ?? ""}
-              onChange={(e) =>
+            <Label>Unidade Pai</Label>
+            <UnidadePicker
+              value={form.id_unidade_pai}
+              onChange={(v) =>
                 setForm({
                   ...form,
-                  id_unidade_pai: e.target.value ? Number(e.target.value) : null,
+                  // Não permite escolher a própria unidade como pai —
+                  // o picker não filtra, então fazemos a checagem aqui.
+                  id_unidade_pai: v === editing?.id ? null : v,
                 })
               }
-            >
-              <option value="">—</option>
-              {todasQ.data?.items
-                .filter((u) => u.id !== editing?.id)
-                .map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.unidade_trabalho}
-                  </option>
-                ))}
-            </Select>
+              placeholder="Sem pai (raiz)"
+            />
           </div>
           {err && (
             <div

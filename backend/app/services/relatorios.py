@@ -26,8 +26,8 @@ from ..schemas.relatorio import (
 )
 
 
-def _apply_filters(stmt, f: RelatorioFiltro):
-    stmt = stmt.where(Processo.excluido.is_(False))
+def _apply_filters(stmt, f: RelatorioFiltro, tenant_id: int):
+    stmt = stmt.where(Processo.excluido.is_(False), Processo.tenant_id == tenant_id)
     if f.id_unidade:
         stmt = stmt.where(
             (Processo.id_unidade_proprietaria == f.id_unidade)
@@ -53,11 +53,10 @@ def _pct(part: int, total: int) -> float:
 
 
 async def gerar_relatorio(
-    db: AsyncSession, f: RelatorioFiltro, *, max_rows: int = 1000
+    db: AsyncSession, f: RelatorioFiltro, *, tenant_id: int, max_rows: int = 1000
 ) -> RelatorioResposta:
-    # Base join (Assunto sempre, pois usado por filtro tipo_processo)
     base = select(Processo).join(Assunto, Assunto.id == Processo.id_assunto)
-    base = _apply_filters(base, f)
+    base = _apply_filters(base, f, tenant_id)
 
     # Totais — usar colunas da subquery senão SQLAlchemy cross-joina com a tabela original
     sq = base.subquery()
@@ -90,7 +89,7 @@ async def gerar_relatorio(
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
     )
-    tp_stmt = _apply_filters(tp_stmt, f)
+    tp_stmt = _apply_filters(tp_stmt, f, tenant_id)
     tp_stmt = tp_stmt.group_by(TipoProcesso.tipo_processo).order_by(func.count(Processo.id).desc())
     tp_rows = (await db.execute(tp_stmt)).all()
     por_tipo = [
@@ -108,7 +107,7 @@ async def gerar_relatorio(
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(UnidadeTrabalho, UnidadeTrabalho.id == Processo.id_unidade_proprietaria, isouter=True)
     )
-    un_stmt = _apply_filters(un_stmt, f)
+    un_stmt = _apply_filters(un_stmt, f, tenant_id)
     un_stmt = un_stmt.group_by(UnidadeTrabalho.unidade_trabalho).order_by(func.count(Processo.id).desc())
     un_rows = (await db.execute(un_stmt)).all()
     por_unidade = [
@@ -137,7 +136,7 @@ async def gerar_relatorio(
         )
         .join(LocalAtual, LocalAtual.id == Processo.id_local_atual, isouter=True)
     )
-    list_stmt = _apply_filters(list_stmt, f)
+    list_stmt = _apply_filters(list_stmt, f, tenant_id)
     list_stmt = list_stmt.order_by(Processo.data_hora_abertura.desc()).limit(max_rows)
     list_rows = (await db.execute(list_stmt)).all()
     processos = [
@@ -162,7 +161,8 @@ async def gerar_relatorio(
         nome_unidade = (
             await db.execute(
                 select(UnidadeTrabalho.unidade_trabalho).where(
-                    UnidadeTrabalho.id == f.id_unidade
+                    UnidadeTrabalho.id == f.id_unidade,
+                    UnidadeTrabalho.tenant_id == tenant_id,
                 )
             )
         ).scalar_one_or_none()
