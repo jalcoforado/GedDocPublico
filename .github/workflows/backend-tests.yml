@@ -72,6 +72,17 @@ jobs:
           psql -h localhost -U ged_user -d ged_saas_db \
             -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'
 
+      - name: Load legacy PHP schema
+        env:
+          PGPASSWORD: ged_password_secure_local
+        # As migrations 0004+ adicionam tenant_id/RLS em tabelas que vivem
+        # no schema legado do monolito PHP (`protocolos.*`, `utils.*`).
+        # Em dev o banco já tem essas tabelas; no CI rodamos um dump
+        # schema-only pra recriá-las antes de aplicar Alembic.
+        run: |
+          psql -h localhost -U ged_user -d ged_saas_db \
+            -v ON_ERROR_STOP=1 -f ci/legacy-schema.sql
+
       - name: Run migrations
         working-directory: backend
         run: alembic upgrade head
