@@ -538,9 +538,24 @@ export interface CidadaoAssunto {
   tipo_processo: string | null;
 }
 
+export interface CidadaoEspecie {
+  id: number;
+  codigo: string;
+  nome: string;
+}
+
+export interface CidadaoAnexo {
+  id: number;
+  descricao: string | null;
+  e_doc: string | null;
+  qtd_paginas: number | null;
+  publico: boolean;
+}
+
 export interface CidadaoProcessoListItem {
   id: number;
   numero_processo: string;
+  nup: string | null;
   data_hora_abertura: string;
   assunto: string | null;
   tipo_processo: string | null;
@@ -560,13 +575,18 @@ export interface CidadaoMovimentacao {
 export interface CidadaoProcessoDetail extends CidadaoProcessoListItem {
   observacao: string | null;
   corpo: string | null;
+  especie_nome: string | null;
+  ccd_codigo: string | null;
+  ccd_nome: string | null;
   movimentacoes: CidadaoMovimentacao[];
+  anexos: CidadaoAnexo[];
 }
 
 export interface AbrirProcessoCidadaoInput {
   id_assunto: number;
   corpo: string;
   observacao?: string;
+  id_especie_documental?: number;
 }
 
 class ApiError extends Error {
@@ -1012,6 +1032,7 @@ export const api = {
     logout: () => requestCidadao<void>("/cidadao/logout", { method: "POST" }),
     me: (token?: string) => requestCidadao<CidadaoMe>("/cidadao/me", {}, token),
     assuntos: () => requestCidadao<CidadaoAssunto[]>("/cidadao/assuntos"),
+    especies: () => requestCidadao<CidadaoEspecie[]>("/cidadao/especies"),
     listarProcessos: () =>
       requestCidadao<CidadaoProcessoListItem[]>("/cidadao/processos"),
     getProcesso: (id: number) =>
@@ -1021,6 +1042,15 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+    uploadAnexo: (processoId: number, file: File, descricao?: string) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (descricao) fd.append("descricao", descricao);
+      return requestCidadao<CidadaoAnexo>(
+        `/cidadao/processos/${processoId}/anexos`,
+        { method: "POST", body: fd },
+      );
+    },
   },
 };
 

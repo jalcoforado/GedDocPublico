@@ -39,11 +39,19 @@ class AbrirProcessoCidadaoRequest(BaseModel):
     id_assunto: int
     corpo: str = Field(min_length=10)
     observacao: str | None = None
+    id_especie_documental: int | None = None
+
+
+class EspecieCidadaoOut(BaseModel):
+    id: int
+    codigo: str
+    nome: str
 
 
 class ProcessoCidadaoListItem(BaseModel):
     id: int
     numero_processo: str
+    nup: str | None = None
     data_hora_abertura: datetime
     assunto: str | None
     tipo_processo: str | None
@@ -52,10 +60,22 @@ class ProcessoCidadaoListItem(BaseModel):
     publico: bool
 
 
+class AnexoCidadaoOut(BaseModel):
+    id: int
+    descricao: str | None
+    e_doc: str | None
+    qtd_paginas: int | None
+    publico: bool
+
+
 class ProcessoCidadaoDetail(ProcessoCidadaoListItem):
     observacao: str | None
     corpo: str | None
+    especie_nome: str | None = None
+    ccd_codigo: str | None = None
+    ccd_nome: str | None = None
     movimentacoes: list["MovimentacaoCidadaoItem"]
+    anexos: list[AnexoCidadaoOut] = []
 
 
 class MovimentacaoCidadaoItem(BaseModel):

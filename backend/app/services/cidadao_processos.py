@@ -11,18 +11,23 @@ produção isso seria parametrizável (tabela `configuracoes`).
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from ..models import (
     Acao,
+    Anexo,
+    AnexoProcesso,
     Assunto,
+    CcdClasse,
+    EspecieDocumental,
     Manifestante,
     Movimentacao,
     Processo,
+    Tenant,
     TipoManifestante,
     TipoProcesso,
     UnidadeTrabalho,
@@ -30,10 +35,16 @@ from ..models import (
 )
 from ..schemas.cidadao import (
     AbrirProcessoCidadaoRequest,
+    AnexoCidadaoOut,
+    EspecieCidadaoOut,
     MovimentacaoCidadaoItem,
     ProcessoCidadaoDetail,
     ProcessoCidadaoListItem,
 )
+
+# Espécies expostas no portal cidadão (alinhado com seed 0015).
+ESPECIES_PORTAL = ("REQUERIMENTO", "PETICAO", "DECLARACAO")
+RATE_LIMIT_24H = 5
 
 
 class CidadaoProcessoError(Exception):
@@ -79,6 +90,7 @@ def _row_to_list(r) -> ProcessoCidadaoListItem:
     return ProcessoCidadaoListItem(
         id=p.id,
         numero_processo=p.numero_processo,
+        nup=p.nup,
         data_hora_abertura=p.data_hora_abertura,
         assunto=r.assunto_nome,
         tipo_processo=r.tipo_nome,
@@ -86,6 +98,27 @@ def _row_to_list(r) -> ProcessoCidadaoListItem:
         ativo=p.ativo,
         publico=p.publico,
     )
+
+
+async def listar_especies_cidadao(
+    db: AsyncSession, *, tenant_id: int
+) -> list[EspecieCidadaoOut]:
+    """Espécies expostas ao cidadão no portal (subset do seed P1)."""
+    rows = (
+        await db.execute(
+            select(EspecieDocumental)
+            .where(
+                EspecieDocumental.tenant_id == tenant_id,
+                EspecieDocumental.flag.in_(ESPECIES_PORTAL),
+                EspecieDocumental.ativo.is_(True),
+                EspecieDocumental.excluido.is_(False),
+            )
+            .order_by(EspecieDocumental.nome)
+        )
+    ).scalars().all()
+    return [
+        EspecieCidadaoOut(id=e.id, codigo=e.flag, nome=e.nome) for e in rows
+    ]
 
 
 async def get_meu_detail(
@@ -138,11 +171,68 @@ async def get_meu_detail(
         )
         for mov, acao, ut in movs
     ]
+
+    # Anexos públicos do processo — cidadão não vê sigilosos.
+    anexos_rows = (
+        await db.execute(
+            select(Anexo)
+            .join(AnexoProcesso, AnexoProcesso.id_anexo == Anexo.id)
+            .where(
+                AnexoProcesso.id_processo == processo_id,
+                AnexoProcesso.tenant_id == tenant_id,
+                AnexoProcesso.excluido.is_(False),
+                AnexoProcesso.desentranhado_em.is_(None),
+                Anexo.publico.is_(True),
+                Anexo.excluido.is_(False),
+                Anexo.ativo.is_(True),
+            )
+            .order_by(AnexoProcesso.ordem)
+        )
+    ).scalars().all()
+    anexos = [
+        AnexoCidadaoOut(
+            id=a.id,
+            descricao=a.descricao,
+            e_doc=a.e_doc,
+            qtd_paginas=a.qtd_paginas,
+            publico=a.publico,
+        )
+        for a in anexos_rows
+    ]
+
+    especie_nome: str | None = None
+    if p.id_especie_documental:
+        especie_nome = (
+            await db.execute(
+                select(EspecieDocumental.nome).where(
+                    EspecieDocumental.id == p.id_especie_documental
+                )
+            )
+        ).scalar_one_or_none()
+
+    ccd_codigo: str | None = None
+    ccd_nome: str | None = None
+    if p.id_ccd_classe:
+        row = (
+            await db.execute(
+                select(CcdClasse.codigo, CcdClasse.nome).where(
+                    CcdClasse.id == p.id_ccd_classe
+                )
+            )
+        ).first()
+        if row:
+            ccd_codigo = row.codigo
+            ccd_nome = row.nome
+
     return ProcessoCidadaoDetail(
         **base.model_dump(),
         observacao=p.observacao,
         corpo=p.corpo,
+        especie_nome=especie_nome,
+        ccd_codigo=ccd_codigo,
+        ccd_nome=ccd_nome,
         movimentacoes=movimentacoes,
+        anexos=anexos,
     )
 
 
@@ -156,6 +246,28 @@ async def abrir_processo_cidadao(
     if not cidadao.cpf_cnpj or not cidadao.nome:
         raise CidadaoProcessoError("Cadastro do cidadão incompleto (CPF/nome)")
 
+    # Rate-limit anti-spam: máx N aberturas em 24h por CPF no tenant.
+    desde = datetime.now() - timedelta(hours=24)
+    qtd_24h = (
+        await db.execute(
+            select(func.count(Processo.id))
+            .join(Manifestante, Manifestante.id == Processo.id_manifestante)
+            .where(
+                Manifestante.cpf_cnpj == cidadao.cpf_cnpj,
+                Manifestante.tenant_id == tenant_id,
+                Processo.tenant_id == tenant_id,
+                Processo.canal_entrada == "portal",
+                Processo.data_hora_abertura >= desde,
+                Processo.excluido.is_(False),
+            )
+        )
+    ).scalar_one()
+    if qtd_24h >= RATE_LIMIT_24H:
+        raise CidadaoProcessoError(
+            f"Limite de {RATE_LIMIT_24H} aberturas em 24h atingido. "
+            "Aguarde antes de protocolar novamente."
+        )
+
     assunto = (
         await db.execute(
             select(Assunto).where(
@@ -167,6 +279,24 @@ async def abrir_processo_cidadao(
     ).scalar_one_or_none()
     if assunto is None:
         raise CidadaoProcessoError("Assunto inválido")
+
+    # Espécie documental opcional — quando informada, precisa estar entre as
+    # expostas ao portal cidadão (REQUERIMENTO/PETICAO/DECLARACAO).
+    id_especie: int | None = None
+    if payload.id_especie_documental is not None:
+        esp = (
+            await db.execute(
+                select(EspecieDocumental).where(
+                    EspecieDocumental.id == payload.id_especie_documental,
+                    EspecieDocumental.tenant_id == tenant_id,
+                    EspecieDocumental.flag.in_(ESPECIES_PORTAL),
+                    EspecieDocumental.ativo.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if esp is None:
+            raise CidadaoProcessoError("Espécie documental inválida")
+        id_especie = esp.id
 
     unidade = (
         await db.execute(
@@ -240,6 +370,22 @@ async def abrir_processo_cidadao(
         raise CidadaoProcessoError("Ação ABERTURA não cadastrada")
 
     now = datetime.now()
+
+    # Auto-classificação CCD por palavras do assunto + corpo. Aceita só score
+    # acima de 0.3 pra evitar classificar errado por match fraco.
+    from .temporalidade import sugerir_ccd_por_assunto
+
+    id_ccd: int | None = None
+    sugestoes = await sugerir_ccd_por_assunto(
+        db,
+        tenant_id=tenant_id,
+        id_assunto=payload.id_assunto,
+        texto_extra=payload.corpo,
+        limit=1,
+    )
+    if sugestoes and sugestoes[0].score >= 0.3:
+        id_ccd = sugestoes[0].id_ccd_classe
+
     processo = Processo(
         tenant_id=tenant_id,
         id_assunto=payload.id_assunto,
@@ -252,6 +398,10 @@ async def abrir_processo_cidadao(
         externo=True,
         virtual=True,
         data_hora_abertura=now,
+        data_recepcao=now,
+        canal_entrada="portal",
+        id_especie_documental=id_especie,
+        id_ccd_classe=id_ccd,
         id_local_atual=unidade.id,
         id_usuario=None,
         ativo=True,
@@ -274,6 +424,20 @@ async def abrir_processo_cidadao(
     db.add(movimentacao)
     await db.flush()
     processo.id_ultima_movimentacao = movimentacao.id
+
+    # NUP federal — opt-in por tenant. Falha não bloqueia abertura.
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    ).scalar_one_or_none()
+    if tenant and tenant.usar_nup_federal and tenant.codigo_orgao_nup:
+        from .nup import NupError, gerar_nup
+
+        try:
+            nup_str, sequencial = await gerar_nup(db, tenant=tenant, ano=now.year)
+            processo.nup = nup_str
+            processo.numero_sequencial_orgao = sequencial
+        except NupError:
+            pass
 
     await db.commit()
     await db.refresh(processo)

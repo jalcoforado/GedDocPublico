@@ -8,7 +8,7 @@
 |---|---|---|
 | **P1 — Balcão** | ✅ entregue | Migration 0015, endpoints + 2 PDFs (etiqueta Pimaco + comprovante 2 vias), página `/protocolo/balcao` com botões "Etiqueta"/"Comprovante", smoke OK |
 | **P2 — NUP federal** | ✅ entregue | Migration 0017 + service Mod-11, opt-in por tenant, PDFs com NUP, página /configuracoes. Smoke OK |
-| P3 — Portal Cidadão | pendente | depende P1 |
+| **P3 — Portal Cidadão** | ✅ entregue (parcial) | Wizard 3 passos (Dados → Documento → Confirmação), upload de anexo público, rate-limit 5/24h, canal_entrada=portal, auto-classificação CCD via P4, NUP exibido quando configurado. **Pendente:** captcha externo (hCaptcha/Turnstile) e notificação email/WhatsApp |
 | **P4 — CCD + TTD** | ✅ entregue | Migration 0016 (22 classes CONARQ + 14 regras TTD), 11 endpoints, 3 páginas + sugestão no balcão, relatório vencendo-prazo |
 | P5 — Gov.br | pendente | fora do escopo atual |
 | **P6 — Apensamento/Desentranhamento/Volumes** | ✅ entregue | Migration 0018 + 10 endpoints + 3 termos PDF + 3 componentes frontend (árvore apensados, lombadas volumes, modal desentranhar). Smoke OK |

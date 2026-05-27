@@ -79,7 +79,9 @@ export default function CidadaoProcessosPage() {
               )}
               {q.data?.map((p) => (
                 <TR key={p.id}>
-                  <TD className="font-mono text-xs tabular-nums">{p.numero_processo}</TD>
+                  <TD className="font-mono text-xs tabular-nums">
+                    {p.nup ?? p.numero_processo}
+                  </TD>
                   <TD className="text-xs tabular-nums">{fmt(p.data_hora_abertura)}</TD>
                   <TD>
                     <div className="text-sm">{p.assunto ?? "—"}</div>

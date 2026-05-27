@@ -42,7 +42,7 @@ async def upload_anexo(
     descricao: str | None,
     id_tipo_anexo: int | None,
     publico: bool,
-    usuario_id: int,
+    usuario_id: int | None,
 ) -> Anexo:
     settings = get_settings()
 
