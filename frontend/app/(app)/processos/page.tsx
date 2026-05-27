@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, FileText, Lock, Pause, Plus } from "lucide-react";
+import { CheckCircle2, FileText, Lock, Pause, Plus, SearchX } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -9,10 +9,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { api, type ProcessoListFilters } from "@/lib/api";
 
@@ -198,17 +200,17 @@ export default function ProcessosPage() {
           </TR>
         </THead>
         <TBody>
-          {processosQ.isLoading && (
-            <TR>
-              <TD colSpan={7} className="text-center text-muted-foreground">
-                Carregando...
-              </TD>
-            </TR>
-          )}
+          {processosQ.isLoading &&
+            Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} cols={7} />)}
           {!processosQ.isLoading && (processosQ.data?.items.length ?? 0) === 0 && (
             <TR>
-              <TD colSpan={7} className="text-center text-muted-foreground">
-                Nenhum processo encontrado.
+              <TD colSpan={7} className="p-0">
+                <EmptyState
+                  icon={SearchX}
+                  title="Nenhum processo encontrado"
+                  description="Ajuste os filtros ou crie um novo processo."
+                  className="border-0 bg-transparent"
+                />
               </TD>
             </TR>
           )}

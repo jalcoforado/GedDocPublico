@@ -14,6 +14,7 @@ import {
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -158,9 +159,12 @@ export default function CcdPage() {
             </div>
           )}
           {!treeQ.isLoading && treeQ.data && treeQ.data.length === 0 && (
-            <p className="p-6 text-sm text-foreground-muted">
-              Nenhuma classe cadastrada.
-            </p>
+            <EmptyState
+              icon={FolderTree}
+              title="Nenhuma classe cadastrada"
+              description="Clique em Nova classe para criar a primeira da árvore."
+              className="border-0 bg-transparent"
+            />
           )}
           {treeQ.data && treeQ.data.length > 0 && (
             <ul className="divide-y divide-border">

@@ -15,6 +15,7 @@ import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -153,9 +154,12 @@ export default function TtdPage() {
             </div>
           )}
           {!ttdQ.isLoading && (ttdQ.data ?? []).length === 0 && (
-            <p className="p-6 text-sm text-foreground-muted">
-              Nenhuma regra cadastrada para o filtro.
-            </p>
+            <EmptyState
+              icon={CalendarClock}
+              title="Nenhuma regra cadastrada"
+              description="Ajuste o filtro ou clique em Nova regra para criar uma."
+              className="border-0 bg-transparent"
+            />
           )}
           {(ttdQ.data ?? []).length > 0 && (
             <table className="w-full text-sm">

@@ -7,6 +7,7 @@ import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
@@ -96,9 +97,12 @@ export default function VencendoPrazoPage() {
           </div>
         )}
         {!reportQ.isLoading && items.length === 0 && (
-          <p className="p-6 text-sm text-foreground-muted">
-            Nenhum processo vencendo prazo na janela atual.
-          </p>
+          <EmptyState
+            icon={CalendarClock}
+            title="Nada vencendo na janela"
+            description="Aumente o intervalo no seletor acima para ver prazos mais distantes."
+            className="border-0 bg-transparent"
+          />
         )}
         {items.length > 0 && (
           <table className="w-full text-sm">

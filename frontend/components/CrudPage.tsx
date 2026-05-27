@@ -1,14 +1,17 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Inbox } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
@@ -179,17 +182,19 @@ export function CrudPage<T extends { id: number }>({
           </TR>
         </THead>
         <TBody>
-          {listQ.isLoading && (
-            <TR>
-              <TD colSpan={columns.length + 1} className="text-center text-gray-500">
-                Carregando...
-              </TD>
-            </TR>
-          )}
+          {listQ.isLoading &&
+            Array.from({ length: 5 }).map((_, i) => (
+              <SkeletonRow key={i} cols={columns.length + 1} />
+            ))}
           {!listQ.isLoading && rows.length === 0 && (
             <TR>
-              <TD colSpan={columns.length + 1} className="text-center text-gray-500">
-                Nenhum registro.
+              <TD colSpan={columns.length + 1} className="p-0">
+                <EmptyState
+                  icon={Inbox}
+                  title={`Nenhum registro em ${title.toLowerCase()}`}
+                  description="Clique em Novo para criar o primeiro."
+                  className="border-0 bg-transparent"
+                />
               </TD>
             </TR>
           )}

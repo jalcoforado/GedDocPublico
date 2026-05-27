@@ -11,8 +11,17 @@ import {
   Tags,
 } from "lucide-react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
+
+import { cn } from "@/lib/utils";
+
+type TabId = "visao" | "movimentacoes" | "documentos" | "relacionados";
+const VALID_TABS: TabId[] = ["visao", "movimentacoes", "documentos", "relacionados"];
+
+function isTabId(v: string | null): v is TabId {
+  return v !== null && (VALID_TABS as string[]).includes(v);
+}
 
 import { AcoesProcesso } from "@/components/AcoesProcesso";
 import { AnexosProcesso } from "@/components/AnexosProcesso";
@@ -179,9 +188,23 @@ function MovimentacaoCard({
 export default function ProcessoDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const toast = useToast();
   const processoId = Number(params.id);
   const [viewer, setViewer] = useState<ViewerState | null>(null);
+
+  const tabParam = searchParams.get("tab");
+  const activeTab: TabId = isTabId(tabParam) ? tabParam : "visao";
+
+  function setTab(t: TabId) {
+    const url = new URL(window.location.href);
+    if (t === "visao") {
+      url.searchParams.delete("tab");
+    } else {
+      url.searchParams.set("tab", t);
+    }
+    router.replace(url.pathname + url.search, { scroll: false });
+  }
 
   const q = useQuery({
     queryKey: ["processo", processoId],
@@ -341,151 +364,220 @@ export default function ProcessoDetailPage() {
         }
       />
 
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <CardTitle className="font-mono">{p.numero_processo}</CardTitle>
-            <span className="text-sm text-muted-foreground tabular-nums">
-              aberto em {fmtDateTime(p.data_hora_abertura)}
-            </span>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <dl className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted-foreground">Assunto</dt>
-              <dd>{p.assunto ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                Tipo de processo
-              </dt>
-              <dd>{p.tipo_processo ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                Manifestante
-              </dt>
-              <dd>
-                {p.manifestante ?? "—"}{" "}
-                <span className="text-xs text-muted-foreground">
-                  {p.manifestante_cpf_cnpj ?? ""}
-                </span>
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                Unidade proprietária
-              </dt>
-              <dd>{p.unidade_proprietaria ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                Local atual
-              </dt>
-              <dd>{p.local_atual ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                Número origem
-              </dt>
-              <dd>{p.numero_origem ?? "—"}</dd>
-            </div>
-            {p.observacao && (
-              <div className="md:col-span-2">
-                <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Observação
-                </dt>
-                <dd className="whitespace-pre-wrap">{p.observacao}</dd>
-              </div>
-            )}
-            {p.corpo && (
-              <div className="md:col-span-2">
-                <dt className="text-xs uppercase tracking-wide text-muted-foreground">Corpo</dt>
-                <dd>
-                  {/^\s*<[a-zA-Z]/.test(p.corpo) ? (
-                    <RichTextView html={p.corpo} />
-                  ) : (
-                    <p className="whitespace-pre-wrap text-sm">{p.corpo}</p>
+      <div
+        role="tablist"
+        aria-label="Seções do processo"
+        className="flex gap-1 overflow-x-auto border-b border-border"
+      >
+        {(
+          [
+            { id: "visao", label: "Visão geral" },
+            {
+              id: "movimentacoes",
+              label: "Movimentações",
+              count: p.movimentacoes.length,
+            },
+            { id: "documentos", label: "Documentos", count: p.anexos.length },
+            { id: "relacionados", label: "Relacionados" },
+          ] as const
+        ).map((t) => {
+          const active = activeTab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "flex h-11 shrink-0 items-center gap-2 px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                active
+                  ? "border-b-2 border-primary text-primary"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {t.label}
+              {"count" in t && t.count != null && (
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 text-xs tabular-nums",
+                    active
+                      ? "bg-primary/10 text-primary"
+                      : "bg-muted text-muted-foreground",
                   )}
-                </dd>
+                >
+                  {t.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeTab === "visao" && (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <CardTitle className="font-mono">{p.numero_processo}</CardTitle>
+                <span className="text-sm text-muted-foreground tabular-nums">
+                  aberto em {fmtDateTime(p.data_hora_abertura)}
+                </span>
               </div>
-            )}
-          </dl>
-        </CardContent>
-      </Card>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Assunto
+                  </dt>
+                  <dd>{p.assunto ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Tipo de processo
+                  </dt>
+                  <dd>{p.tipo_processo ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Manifestante
+                  </dt>
+                  <dd>
+                    {p.manifestante ?? "—"}{" "}
+                    <span className="text-xs text-muted-foreground">
+                      {p.manifestante_cpf_cnpj ?? ""}
+                    </span>
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Unidade proprietária
+                  </dt>
+                  <dd>{p.unidade_proprietaria ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Local atual
+                  </dt>
+                  <dd>{p.local_atual ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Número origem
+                  </dt>
+                  <dd>{p.numero_origem ?? "—"}</dd>
+                </div>
+                {p.observacao && (
+                  <div className="md:col-span-2">
+                    <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Observação
+                    </dt>
+                    <dd className="whitespace-pre-wrap">{p.observacao}</dd>
+                  </div>
+                )}
+                {p.corpo && (
+                  <div className="md:col-span-2">
+                    <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Corpo
+                    </dt>
+                    <dd>
+                      {/^\s*<[a-zA-Z]/.test(p.corpo) ? (
+                        <RichTextView html={p.corpo} />
+                      ) : (
+                        <p className="whitespace-pre-wrap text-sm">{p.corpo}</p>
+                      )}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Ações de tramitação</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <AcoesProcesso processo={p} />
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Trajeto entre unidades</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ProcessoTrail processoId={p.id} />
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Movimentações ({p.movimentacoes.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {p.movimentacoes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Nenhuma movimentação registrada.
-            </p>
-          ) : (
-            <div className="space-y-5">
-              {p.movimentacoes.map((m) => (
-                <MovimentacaoCard key={m.id} m={m} onOpenViewer={setViewer} />
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Ações de tramitação</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <AcoesProcesso processo={p} />
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Anexos</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <AnexosProcesso processo={p} />
-        </CardContent>
-      </Card>
+      {activeTab === "movimentacoes" && (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Movimentações ({p.movimentacoes.length})</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {p.movimentacoes.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Nenhuma movimentação registrada.
+                </p>
+              ) : (
+                <div className="space-y-5">
+                  {p.movimentacoes.map((m) => (
+                    <MovimentacaoCard key={m.id} m={m} onOpenViewer={setViewer} />
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Assinaturas</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <AssinaturasProcesso processo={p} />
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Workflow</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ProcessoWorkflowPanel processoId={p.id} />
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Trajeto entre unidades</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ProcessoTrail processoId={p.id} />
-        </CardContent>
-      </Card>
+      {activeTab === "documentos" && (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Anexos</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <AnexosProcesso processo={p} />
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Workflow</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ProcessoWorkflowPanel processoId={p.id} />
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Assinaturas</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <AssinaturasProcesso processo={p} />
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
-      <ProcessoApensados
-        processoId={p.id}
-        numeroProcesso={p.numero_processo}
-        idProcessoPai={p.id_processo_pai}
-      />
-
-      <ProcessoVolumes processoId={p.id} />
+      {activeTab === "relacionados" && (
+        <div className="space-y-6">
+          <ProcessoApensados
+            processoId={p.id}
+            numeroProcesso={p.numero_processo}
+            idProcessoPai={p.id_processo_pai}
+          />
+          <ProcessoVolumes processoId={p.id} />
+        </div>
+      )}
 
       {viewer && (
         <PdfViewerDialog

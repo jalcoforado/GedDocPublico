@@ -34,4 +34,4 @@ keys/*.pem
 keys/*.key
 
 # Reports / outputs locais
-jobs/
+/jobs/
