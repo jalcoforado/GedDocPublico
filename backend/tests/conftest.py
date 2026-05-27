@@ -107,6 +107,10 @@ async def two_tenants(admin_engine) -> AsyncIterator[tuple[int, int]]:
         "protocolos.manifestante",
         "protocolos.processo",
         "aprimora_py.nup_sequencia",
+        "protocolos.ttd_regra",
+        "protocolos.ccd_classe",
+        "protocolos.assunto",
+        "protocolos.tipo_processo",
     ]
     Teardown = async_sessionmaker(admin_engine, expire_on_commit=False, class_=AsyncSession)
     async with Teardown() as teardown_session:
