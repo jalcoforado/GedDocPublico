@@ -11,7 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-RUN pip install --upgrade pip && pip install -e .
+# Inclui dev deps (pytest, pytest-asyncio, pytest-cov, PyJWT) para rodar testes
+# dentro do container — sem custo significativo na imagem.
+RUN pip install --upgrade pip && pip install -e ".[dev]"
 
 COPY . .
 

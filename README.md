@@ -87,16 +87,31 @@ curl -I http://localhost:8090/qualquer      # php-legacy
 ## Testes
 
 ```powershell
-# Suite Playwright (22 testes — routing, auth, fluxo completo cidadão)
+# Suite Playwright (e2e: routing Strangler, auth admin, fluxo cidadão)
 docker compose --profile test run --rm e2e
 
 # Relatório HTML
 start tests-e2e\report\index.html
 
-# pytest do backend (instalar primeiro)
-docker exec aprimora-py-backend pip install -e ".[dev]"
+# pytest backend — dev deps já vêm no Dockerfile, sem instalar nada
 docker exec aprimora-py-backend pytest
+
+# Com cobertura
+docker exec aprimora-py-backend pytest --cov=app --cov-report=term-missing
 ```
+
+**Suites:**
+- `tests/test_login_md5_compat.py` — compatibilidade md5 com PHP legacy
+- `tests/test_jwt_compat.py` — formato JWT compatível PHP↔Python
+- `tests/test_rls_isolation.py` — isolamento Row-Level Security entre tenants
+  (4 testes: SELECT/INSERT/sem-setting/UPDATE — todos via role `aprimora_app`
+  NOBYPASSRLS pra validar policies de verdade)
+
+**Cobertura honesta hoje:** baixa. ~9 unit tests + 3 specs e2e cobrem
+compatibilidade legado + isolamento RLS + ciclo cidadão básico. Maioria
+dos services/routers validada por smoke manual via curl durante o
+desenvolvimento. Veja [TESTING.md](TESTING.md) (TODO) para roadmap de
+cobertura.
 
 ## Estrutura
 
