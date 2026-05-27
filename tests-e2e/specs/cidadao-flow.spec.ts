@@ -10,8 +10,11 @@ import { expect, test } from "@playwright/test";
  */
 
 function cpfUnico(): string {
-  // 11 dígitos baseados em timestamp ms. Não é CPF válido — só formato.
-  return String(Date.now()).padStart(11, "0").slice(-11);
+  // 11 dígitos com entropy adicional (timestamp + random) — evita colisão
+  // entre tests consecutivos que rodam no mesmo ms.
+  const ts = Date.now() % 10_000_000_000;
+  const rnd = Math.floor(Math.random() * 10);
+  return String(ts * 10 + rnd).padStart(11, "0").slice(-11);
 }
 
 test.describe("Cidadão E2E", () => {
