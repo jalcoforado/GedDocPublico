@@ -1,5 +1,7 @@
 # Aprimora — Migração Python/React
 
+[![Backend tests](https://github.com/jalcoforado/GedDocPublico/actions/workflows/backend-tests.yml/badge.svg)](https://github.com/jalcoforado/GedDocPublico/actions/workflows/backend-tests.yml)
+
 Substituição gradual do monolito PHP `aprimora/` (porta 8081) por stack moderna (FastAPI + Next.js), via **Strangler Fig**. Roda em paralelo ao PHP — o nginx entry point decide rota a rota qual servidor responde.
 
 **Status:** todas as fases do plano concluídas. Resta o cutover propriamente dito (ver [CUTOVER.md](CUTOVER.md)).
@@ -107,11 +109,11 @@ docker exec aprimora-py-backend pytest --cov=app --cov-report=term-missing
   (4 testes: SELECT/INSERT/sem-setting/UPDATE — todos via role `aprimora_app`
   NOBYPASSRLS pra validar policies de verdade)
 
-**Cobertura honesta hoje:** baixa. ~9 unit tests + 3 specs e2e cobrem
-compatibilidade legado + isolamento RLS + ciclo cidadão básico. Maioria
-dos services/routers validada por smoke manual via curl durante o
-desenvolvimento. Veja [TESTING.md](TESTING.md) (TODO) para roadmap de
-cobertura.
+**Cobertura atual:** 86 testes backend (login compat, JWT, RLS isolation,
+NUP Mod-11 + concorrência, apensamento anti-ciclo, permissões granulares,
+tokenize + hierarquia TTD) + 31 specs e2e Playwright (auth admin, ciclo
+cidadão, routing Strangler, balcão P1, wizard cidadão P3). Rodam a cada
+PR via GitHub Actions (`.github/workflows/backend-tests.yml`).
 
 ## Estrutura
 
