@@ -4,27 +4,31 @@ import {
   BarChart3,
   BookOpen,
   Building2,
+  CalendarClock,
+  ChevronDown,
   ChevronsLeft,
   ChevronsRight,
   Cog,
   FileText,
+  FolderTree,
   GitBranch,
   Home,
+  Inbox,
   Layers,
   Map,
   MapPin,
   Paperclip,
   PenSquare,
+  Settings,
   Shield,
   Tag,
-  User,
   UserCircle,
   Users,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
@@ -42,53 +46,79 @@ interface NavItem {
 interface NavGroup {
   title: string;
   items: NavItem[];
+  /** Estado inicial do grupo (antes da hidratação do localStorage). */
+  defaultOpen?: boolean;
 }
 
 const NAV: NavGroup[] = [
   {
     title: "Geral",
+    defaultOpen: true,
     items: [
       { label: "Início", href: "/home", icon: Home },
       { label: "Dashboard", href: "/dashboard", icon: BarChart3 },
       { label: "Organograma", href: "/organograma", icon: Building2 },
+    ],
+  },
+  {
+    title: "Processos",
+    defaultOpen: true,
+    items: [
       { label: "Processos", href: "/processos", icon: FileText, perm: "processo" },
       { label: "Para assinar", href: "/para-assinar", icon: PenSquare },
-      { label: "Relatórios", href: "/relatorios", icon: BarChart3, perm: "processo" },
       { label: "Workflows", href: "/workflow", icon: GitBranch },
-      { label: "Auditoria", href: "/auditoria", icon: Shield },
-      { label: "Jobs em background", href: "/jobs", icon: Cog },
-      { label: "Meu perfil", href: "/perfil", icon: User },
+      { label: "Relatórios", href: "/relatorios", icon: BarChart3, perm: "processo" },
     ],
   },
   {
-    title: "Acesso",
+    title: "Protocolo",
+    defaultOpen: true,
     items: [
-      { label: "Usuários", href: "/usuarios", icon: Users, perm: "usuario" },
-      { label: "Unidades", href: "/unidades-trabalho", icon: Building2, perm: "unidadeTrabalho" },
-      { label: "Grupos & Permissões", href: "/grupos", icon: Shield },
+      { label: "Balcão", href: "/protocolo/balcao", icon: Inbox, perm: "processo" },
+      {
+        label: "Vencendo prazo",
+        href: "/protocolo/vencendo-prazo",
+        icon: CalendarClock,
+        perm: "processo",
+      },
+      {
+        label: "CCD (Classificação)",
+        href: "/protocolo/ccd",
+        icon: FolderTree,
+        perm: "catalogo",
+      },
+      {
+        label: "TTD (Temporalidade)",
+        href: "/protocolo/ttd",
+        icon: CalendarClock,
+        perm: "catalogo",
+      },
     ],
   },
   {
-    title: "Localização",
+    title: "Cadastros",
+    defaultOpen: false,
     items: [
+      { label: "Manifestantes", href: "/manifestantes", icon: UserCircle, perm: "manifestante" },
+      { label: "Tipos de Manifestante", href: "/tipos-manifestante", icon: Tag, perm: "manifestante" },
+      { label: "Tipos de Processo", href: "/tipos-processo", icon: Layers, perm: "catalogo" },
+      { label: "Assuntos", href: "/assuntos", icon: BookOpen, perm: "assunto" },
+      { label: "Tipos de Anexo", href: "/tipos-anexo", icon: Paperclip, perm: "catalogo" },
       { label: "Cidades", href: "/cidades", icon: MapPin, perm: "cidade" },
       { label: "Bairros", href: "/bairros", icon: Map, perm: "endereco" },
       { label: "Endereços", href: "/enderecos", icon: MapPin, perm: "endereco" },
     ],
   },
   {
-    title: "Catálogos",
+    title: "Administração",
+    defaultOpen: false,
     items: [
-      { label: "Tipos de Processo", href: "/tipos-processo", icon: Layers, perm: "catalogo" },
-      { label: "Assuntos", href: "/assuntos", icon: BookOpen, perm: "assunto" },
-      { label: "Tipos de Anexo", href: "/tipos-anexo", icon: Paperclip, perm: "catalogo" },
-    ],
-  },
-  {
-    title: "Manifestantes",
-    items: [
-      { label: "Manifestantes", href: "/manifestantes", icon: UserCircle, perm: "manifestante" },
-      { label: "Tipos", href: "/tipos-manifestante", icon: Tag, perm: "manifestante" },
+      { label: "Usuários", href: "/usuarios", icon: Users, perm: "usuario" },
+      { label: "Unidades", href: "/unidades-trabalho", icon: Building2, perm: "unidadeTrabalho" },
+      { label: "Grupos & Permissões", href: "/grupos", icon: Shield },
+      { label: "Configurações", href: "/configuracoes", icon: Settings, perm: "usuario" },
+      { label: "Auditoria", href: "/auditoria", icon: Shield },
+      { label: "Jobs em background", href: "/jobs", icon: Cog },
     ],
   },
 ];
@@ -99,14 +129,19 @@ interface SidebarProps {
 }
 
 const COLLAPSED_KEY = "aprimora.sidebar.collapsed";
+const GROUP_STATE_KEY = "aprimora.sidebar.groups.v1";
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { can } = useAuth();
   const branding = useBranding();
   const lastPath = useRef(pathname);
-  // Collapsed state — só faz sentido em desktop. Persistido em localStorage.
+  // Collapsed (icon-only) — só faz sentido em desktop. Persistido em localStorage.
   const [collapsed, setCollapsed] = useState(false);
+  // Grupos abertos/fechados — chave: title do grupo.
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(NAV.map((g) => [g.title, g.defaultOpen ?? true])),
+  );
 
   useEffect(() => {
     try {
@@ -115,7 +150,28 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     } catch {
       /* ignore */
     }
+    try {
+      const raw = localStorage.getItem(GROUP_STATE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, boolean>;
+        // Preserva defaults pra grupos novos que ainda não foram salvos
+        setGroupOpen((prev) => ({ ...prev, ...parsed }));
+      }
+    } catch {
+      /* ignore */
+    }
   }, []);
+
+  // Auto-expand o grupo que contém o item ativo (não fecha grupos abertos).
+  useEffect(() => {
+    const activeGroup = NAV.find((g) =>
+      g.items.some((i) => pathname === i.href || pathname.startsWith(i.href + "/")),
+    );
+    if (activeGroup && !groupOpen[activeGroup.title]) {
+      setGroupOpen((prev) => ({ ...prev, [activeGroup.title]: true }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
@@ -129,12 +185,31 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     });
   };
 
+  const toggleGroup = (title: string) => {
+    setGroupOpen((prev) => {
+      const next = { ...prev, [title]: !prev[title] };
+      try {
+        localStorage.setItem(GROUP_STATE_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
   useEffect(() => {
     if (lastPath.current !== pathname) {
       lastPath.current = pathname;
       onClose();
     }
   }, [pathname, onClose]);
+
+  // Calcula quais grupos têm o item ativo (pra realçar o header).
+  const activeGroupTitle = useMemo(() => {
+    return NAV.find((g) =>
+      g.items.some((i) => pathname === i.href || pathname.startsWith(i.href + "/")),
+    )?.title;
+  }, [pathname]);
 
   return (
     <>
@@ -152,9 +227,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         className={cn(
           "fixed inset-y-0 left-0 z-40 flex w-72 shrink-0 flex-col overflow-hidden",
           "border-r border-sidebar-border bg-sidebar text-sidebar-foreground pt-safe transition-[transform,width] duration-base ease-out-expo",
-          // No desktop: largura depende de collapsed
           collapsed ? "lg:static lg:w-[68px]" : "lg:static lg:w-64 lg:translate-x-0",
-          // Mobile sempre full sidebar (collapsed só vale desktop)
           open ? "translate-x-0 shadow-xl" : "-translate-x-full shadow-none lg:translate-x-0",
         )}
       >
@@ -204,25 +277,65 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         </div>
 
         {/* Items */}
-        <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
+        <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 py-2">
           {NAV.map((group) => {
             const visible = group.items.filter((item) => !item.perm || can(item.perm));
             if (visible.length === 0) return null;
+            const isOpen = groupOpen[group.title] ?? group.defaultOpen ?? true;
+            const groupIsActive = activeGroupTitle === group.title;
+            // Em collapsed mode (icon-only), grupos não colapsam — sempre mostra itens.
+            const showItems = collapsed || isOpen;
+            const slugId = `nav-group-${group.title.toLowerCase().replace(/\s+/g, "-")}`;
+
             return (
-              <div key={group.title}>
-                <div
-                  className={cn(
-                    "mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle",
-                    collapsed && "lg:hidden",
-                  )}
-                >
-                  {group.title}
-                </div>
-                {/* Em collapsed mode, separator sutil entre grupos */}
-                {collapsed && (
-                  <div className="mb-1 hidden h-px w-full bg-sidebar-border lg:block" aria-hidden="true" />
+              <div key={group.title} className="rounded-md">
+                {/* Group header — clicável (exceto em collapsed mode, vira só separador). */}
+                {collapsed ? (
+                  <div
+                    className="my-1 hidden h-px w-full bg-sidebar-border lg:block"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.title)}
+                    aria-expanded={isOpen}
+                    aria-controls={slugId}
+                    className={cn(
+                      "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors duration-fast",
+                      "hover:bg-sidebar-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      groupIsActive && "text-foreground",
+                    )}
+                  >
+                    <ChevronDown
+                      className={cn(
+                        "h-3 w-3 shrink-0 text-foreground-muted transition-transform duration-fast",
+                        !isOpen && "-rotate-90",
+                      )}
+                      aria-hidden="true"
+                    />
+                    <span
+                      className={cn(
+                        "flex-1 text-[10px] font-semibold uppercase tracking-wider",
+                        groupIsActive ? "text-foreground" : "text-foreground-subtle",
+                      )}
+                    >
+                      {group.title}
+                    </span>
+                    {!isOpen && groupIsActive && (
+                      <span
+                        className="h-1.5 w-1.5 rounded-full bg-brand"
+                        aria-label="Página atual neste grupo"
+                      />
+                    )}
+                  </button>
                 )}
-                <div className="flex flex-col gap-0.5">
+
+                {/* Items do grupo */}
+                <div
+                  id={slugId}
+                  className={cn("flex flex-col gap-0.5", !showItems && "hidden")}
+                >
                   {visible.map((item) => {
                     const Icon = item.icon;
                     const active =
@@ -241,7 +354,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                             : "text-foreground-muted hover:bg-sidebar-accent hover:text-foreground",
                         )}
                       >
-                        {/* Indicator bar à esquerda quando ativo */}
                         <span
                           aria-hidden="true"
                           className={cn(
@@ -256,7 +368,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                           )}
                           aria-hidden="true"
                         />
-                        <span className={cn("flex-1", collapsed && "lg:hidden")}>{item.label}</span>
+                        <span className={cn("flex-1", collapsed && "lg:hidden")}>
+                          {item.label}
+                        </span>
                       </Link>
                     );
                   })}
@@ -266,7 +380,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           })}
         </div>
 
-        {/* Footer com toggles (visível em todos os breakpoints) */}
+        {/* Footer com toggles */}
         <div
           className={cn(
             "flex items-center gap-2 border-t border-sidebar-border bg-sidebar-accent/50 px-3 py-3",
@@ -278,7 +392,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           </div>
           <div className="flex items-center gap-1.5">
             <DensityToggle />
-            {/* Botão collapse — só desktop */}
             <button
               type="button"
               onClick={toggleCollapsed}

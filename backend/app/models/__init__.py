@@ -4,8 +4,11 @@ from .assinatura import (
     TipoAssinatura,
     UsuarioAssinatura,
 )
+from .apensamento import ProcessoApensamento, ProcessoVolume
 from .assunto import Assunto, AssuntoTipoProcessoTipoAnexo, TipoAnexo, TipoProcesso
 from .audit import AuditLog
+from .ccd import CcdClasse, TtdRegra
+from .especie_documental import EspecieDocumental
 from .configuracao import Configuracao
 from .processo import (
     Acao,
@@ -55,17 +58,21 @@ __all__ = [
     "AssuntoTipoProcessoTipoAnexo",
     "AuditLog",
     "Bairro",
+    "CcdClasse",
     "Cidade",
     "Despacho",
     "Encaminhamento",
     "Movimentacao",
     "Prioridade",
     "Processo",
+    "ProcessoApensamento",
+    "ProcessoVolume",
     "SolicitacaoAssinatura",
     "TipoAssinatura",
     "Configuracao",
     "ConfiguracoesModulos",
     "Endereco",
+    "EspecieDocumental",
     "Estado",
     "Grupo",
     "GrupoTransacao",
@@ -84,6 +91,7 @@ __all__ = [
     "TipoProcesso",
     "TipoUnidadeTrabalho",
     "Transacao",
+    "TtdRegra",
     "UnidadeTrabalho",
     "Usuario",
     "UsuarioExterno",

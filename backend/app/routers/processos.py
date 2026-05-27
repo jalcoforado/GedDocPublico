@@ -6,6 +6,7 @@ from sqlalchemy import select as _select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Encaminhamento as _Encaminhamento
 from ..models import Prioridade as _Prio
@@ -32,6 +33,49 @@ from ..services.pdf_comprovante import gerar_comprovante_pdf
 from ..services.pdf_etiqueta import gerar_etiqueta_pdf
 from ..services.pdf_montagem import gerar_processo_completo_pdf
 from ..services.processos import get_processo_detail, list_processos
+from ..schemas.ccd import TemporalidadeOut
+from ..services.temporalidade import calcular_temporalidade
+
+# Fase P6 — Apensamento, Desentranhamento, Volumes
+from ..models import (
+    Anexo as _AnexoP6,
+    AnexoProcesso as _AnexoProcessoP6,
+    Manifestante as _ManifestanteP6,
+    Processo as _ProcessoP6,
+    ProcessoApensamento as _ApensP6,
+    ProcessoVolume as _VolP6,
+)
+from ..schemas.apensamento import (
+    ApensamentoOut,
+    ApensarRequest,
+    DesapensarRequest,
+    DesentranhamentoOut,
+    DesentranhamentoRequest,
+    ProcessoApensadoItem,
+    VolumeCreate,
+    VolumeOut,
+    VolumeUpdate,
+)
+from ..services.apensamento import (
+    ApensamentoError,
+    apensar as _apensar_svc,
+    desapensar as _desapensar_svc,
+)
+from ..services.desentranhamento import (
+    DesentranhamentoError,
+    desentranhar_anexo as _desentranhar_svc,
+)
+from ..services.pdf_termos import (
+    gerar_termo_apensamento,
+    gerar_termo_desapensamento,
+    gerar_termo_desentranhamento,
+)
+from ..services.volumes import (
+    VolumeError,
+    atualizar_volume as _vol_update,
+    criar_volume as _vol_create,
+    deletar_volume as _vol_delete,
+)
 
 router = APIRouter(prefix="/processos", tags=["processos"])
 
@@ -83,7 +127,7 @@ async def detail_endpoint(
 @router.post("", response_model=ProcessoDetail, status_code=status.HTTP_201_CREATED)
 async def create_endpoint(
     payload: ProcessoCreate,
-    current: Usuario = Depends(get_current_user),
+    current: Usuario = Depends(require_permission("processo", "inserir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> ProcessoDetail:
@@ -113,16 +157,45 @@ async def get_trail(
     return await build_trail(db, processo_id=processo_id, tenant_id=tenant_id)
 
 
+@router.get("/{processo_id}/temporalidade", response_model=TemporalidadeOut)
+async def temporalidade_endpoint(
+    processo_id: int,
+    _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """P4 — calcula temporalidade documental do processo via regra TTD."""
+    try:
+        return await calcular_temporalidade(db, processo_id, tenant_id=tenant_id)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+
+
+async def _is_super(db: AsyncSession, user: Usuario, tenant_id: int) -> bool:
+    from ..services.permissoes import load_permissions
+
+    perms = await load_permissions(db, user.id, tenant_id=tenant_id)
+    return perms.is_super_usuario
+
+
 @router.post("/{processo_id}/encaminhamentos", response_model=ProcessoDetail)
 async def encaminhar_endpoint(
     processo_id: int,
     payload: EncaminharRequest,
-    current: Usuario = Depends(get_current_user),
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> ProcessoDetail:
+    is_super = await _is_super(db, current, tenant_id)
     try:
-        await encaminhar(db, processo_id, payload, tenant_id=tenant_id, usuario_id=current.id)
+        await encaminhar(
+            db,
+            processo_id,
+            payload,
+            tenant_id=tenant_id,
+            usuario_id=current.id,
+            is_super_usuario=is_super,
+        )
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
@@ -134,12 +207,21 @@ async def encaminhar_endpoint(
 @router.post("/{processo_id}/receber", response_model=ProcessoDetail)
 async def receber_endpoint(
     processo_id: int,
-    current: Usuario = Depends(get_current_user),
+    override_motivo: str | None = None,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> ProcessoDetail:
+    is_super = await _is_super(db, current, tenant_id)
     try:
-        await receber(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+        await receber(
+            db,
+            processo_id,
+            tenant_id=tenant_id,
+            usuario_id=current.id,
+            is_super_usuario=is_super,
+            override_motivo=override_motivo,
+        )
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
@@ -281,7 +363,7 @@ async def comprovante_pdf_endpoint(
 async def cancelar_encaminhamento_endpoint(
     encaminhamento_id: int,
     payload: CancelarEncaminhamentoRequest,
-    current: Usuario = Depends(get_current_user),
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> ProcessoDetail:
@@ -295,3 +377,454 @@ async def cancelar_encaminhamento_endpoint(
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     return detail
+
+
+# =============================================================================
+#  P6 — APENSAMENTO
+# =============================================================================
+
+async def _hydrate_apensamento(
+    db: AsyncSession, apens: _ApensP6
+) -> ApensamentoOut:
+    """Resolve nomes para o ApensamentoOut."""
+    nums = (
+        await db.execute(
+            _select(_ProcessoP6.id, _ProcessoP6.numero_processo).where(
+                _ProcessoP6.id.in_(
+                    [apens.id_processo_apensado, apens.id_processo_principal]
+                )
+            )
+        )
+    ).all()
+    num_por_id = {r.id: r.numero_processo for r in nums}
+
+    user_ids = [uid for uid in [apens.id_usuario, apens.id_usuario_desapensamento] if uid]
+    user_rows = (
+        await db.execute(
+            _select(Usuario.id, Usuario.nome).where(Usuario.id.in_(user_ids))
+        )
+    ).all() if user_ids else []
+    user_por_id = {r.id: r.nome for r in user_rows}
+
+    return ApensamentoOut(
+        id=apens.id,
+        id_processo_apensado=apens.id_processo_apensado,
+        id_processo_principal=apens.id_processo_principal,
+        id_usuario=apens.id_usuario,
+        motivo=apens.motivo,
+        criado_em=apens.criado_em,
+        desapensado_em=apens.desapensado_em,
+        id_usuario_desapensamento=apens.id_usuario_desapensamento,
+        motivo_desapensamento=apens.motivo_desapensamento,
+        numero_processo_apensado=num_por_id.get(apens.id_processo_apensado),
+        numero_processo_principal=num_por_id.get(apens.id_processo_principal),
+        usuario_nome=user_por_id.get(apens.id_usuario),
+        usuario_desapensamento_nome=user_por_id.get(apens.id_usuario_desapensamento)
+        if apens.id_usuario_desapensamento
+        else None,
+        ativo=apens.desapensado_em is None,
+    )
+
+
+@router.post(
+    "/{processo_id}/apensar",
+    response_model=ApensamentoOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def apensar_endpoint(
+    processo_id: int,
+    payload: ApensarRequest,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        apens = await _apensar_svc(
+            db,
+            tenant_id=tenant_id,
+            usuario_id=current.id,
+            id_processo_apensado=processo_id,
+            id_processo_principal=payload.id_processo_principal,
+            motivo=payload.motivo,
+        )
+    except ApensamentoError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+    return await _hydrate_apensamento(db, apens)
+
+
+@router.post(
+    "/{processo_id}/desapensar",
+    response_model=ApensamentoOut,
+)
+async def desapensar_endpoint(
+    processo_id: int,
+    payload: DesapensarRequest,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        apens = await _desapensar_svc(
+            db,
+            tenant_id=tenant_id,
+            usuario_id=current.id,
+            id_processo_apensado=processo_id,
+            motivo=payload.motivo,
+        )
+    except ApensamentoError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+    return await _hydrate_apensamento(db, apens)
+
+
+@router.get(
+    "/{processo_id}/apensamentos",
+    response_model=list[ApensamentoOut],
+)
+async def list_apensamentos_endpoint(
+    processo_id: int,
+    apenas_ativos: bool = False,
+    _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Histórico (ou apenas vínculos ativos) onde o processo é filho OU pai."""
+    stmt = _select(_ApensP6).where(
+        _ApensP6.tenant_id == tenant_id,
+        (_ApensP6.id_processo_apensado == processo_id)
+        | (_ApensP6.id_processo_principal == processo_id),
+    )
+    if apenas_ativos:
+        stmt = stmt.where(_ApensP6.desapensado_em.is_(None))
+    stmt = stmt.order_by(_ApensP6.criado_em.desc())
+    rows = (await db.execute(stmt)).scalars().all()
+    return [await _hydrate_apensamento(db, a) for a in rows]
+
+
+@router.get(
+    "/{processo_id}/apensados",
+    response_model=list[ProcessoApensadoItem],
+)
+async def list_processos_apensados_endpoint(
+    processo_id: int,
+    _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista os processos atualmente apensados a este (este é o pai).
+
+    Retorna filhos ativos (desapensado_em IS NULL) com dados enriquecidos.
+    """
+    stmt = (
+        _select(_ApensP6, _ProcessoP6, _ManifestanteP6.nome)
+        .join(_ProcessoP6, _ProcessoP6.id == _ApensP6.id_processo_apensado)
+        .join(_ManifestanteP6, _ManifestanteP6.id == _ProcessoP6.id_manifestante, isouter=True)
+        .where(
+            _ApensP6.tenant_id == tenant_id,
+            _ApensP6.id_processo_principal == processo_id,
+            _ApensP6.desapensado_em.is_(None),
+        )
+        .order_by(_ApensP6.criado_em.desc())
+    )
+    rows = (await db.execute(stmt)).all()
+    return [
+        ProcessoApensadoItem(
+            id_apensamento=a.id,
+            id_processo=p.id,
+            numero_processo=p.numero_processo,
+            nup=p.nup,
+            manifestante=manif,
+            apensado_em=a.criado_em,
+            motivo=a.motivo,
+        )
+        for a, p, manif in rows
+    ]
+
+
+@router.get("/apensamentos/{apensamento_id}/termo.pdf")
+async def termo_apensamento_pdf(
+    apensamento_id: int,
+    _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Termo de apensamento (ou desapensamento, conforme estado do registro).
+
+    Se ``desapensado_em`` está preenchido → termo de desapensamento.
+    Caso contrário → termo de apensamento ativo.
+    """
+    apens = (
+        await db.execute(
+            _select(_ApensP6).where(
+                _ApensP6.id == apensamento_id, _ApensP6.tenant_id == tenant_id
+            )
+        )
+    ).scalar_one_or_none()
+    if apens is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Apensamento não encontrado")
+
+    # Carrega ambos processos + nome do operador
+    rows = (
+        await db.execute(
+            _select(_ProcessoP6).where(
+                _ProcessoP6.id.in_(
+                    [apens.id_processo_apensado, apens.id_processo_principal]
+                )
+            )
+        )
+    ).scalars().all()
+    p_por_id = {p.id: p for p in rows}
+    pa = p_por_id.get(apens.id_processo_apensado)
+    pp = p_por_id.get(apens.id_processo_principal)
+    if pa is None or pp is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Inconsistência ao carregar processos")
+
+    manif_rows = (
+        await db.execute(
+            _select(_ManifestanteP6.id, _ManifestanteP6.nome).where(
+                _ManifestanteP6.id.in_([pa.id_manifestante, pp.id_manifestante])
+            )
+        )
+    ).all()
+    manif_por_id = {r.id: r.nome for r in manif_rows}
+
+    operador = (
+        await db.execute(_select(Usuario.nome).where(Usuario.id == apens.id_usuario))
+    ).scalar_one_or_none()
+
+    if apens.desapensado_em is not None:
+        op_desap = (
+            await db.execute(
+                _select(Usuario.nome).where(
+                    Usuario.id == apens.id_usuario_desapensamento
+                )
+            )
+        ).scalar_one_or_none() if apens.id_usuario_desapensamento else None
+        pdf = gerar_termo_desapensamento(
+            numero_processo_apensado=pa.numero_processo,
+            numero_processo_principal=pp.numero_processo,
+            nup_apensado=pa.nup,
+            nup_principal=pp.nup,
+            motivo_apensamento=apens.motivo,
+            motivo_desapensamento=apens.motivo_desapensamento or "—",
+            data_apensamento=apens.criado_em,
+            data_desapensamento=apens.desapensado_em,
+            operador_nome=op_desap or operador,
+            processo_id=pa.id,
+        )
+        tipo_arq = "desapensamento"
+    else:
+        pdf = gerar_termo_apensamento(
+            numero_processo_apensado=pa.numero_processo,
+            numero_processo_principal=pp.numero_processo,
+            nup_apensado=pa.nup,
+            nup_principal=pp.nup,
+            manifestante_apensado=manif_por_id.get(pa.id_manifestante),
+            manifestante_principal=manif_por_id.get(pp.id_manifestante),
+            motivo=apens.motivo,
+            data_apensamento=apens.criado_em,
+            operador_nome=operador,
+            processo_id=pa.id,
+        )
+        tipo_arq = "apensamento"
+
+    fname = f"termo-{tipo_arq}-{pa.numero_processo.replace('/', '_')}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{fname}"'},
+    )
+
+
+# =============================================================================
+#  P6 — DESENTRANHAMENTO
+# =============================================================================
+
+
+@router.post(
+    "/{processo_id}/anexos/{anexo_processo_id}/desentranhar",
+    response_model=DesentranhamentoOut,
+)
+async def desentranhar_anexo_endpoint(
+    processo_id: int,
+    anexo_processo_id: int,
+    payload: DesentranhamentoRequest,
+    current: Usuario = Depends(require_permission("processo", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        ap = await _desentranhar_svc(
+            db,
+            tenant_id=tenant_id,
+            usuario_id=current.id,
+            processo_id=processo_id,
+            anexo_processo_id=anexo_processo_id,
+            motivo=payload.motivo,
+            autoridade=payload.autoridade,
+        )
+    except DesentranhamentoError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+
+    anexo = (
+        await db.execute(_select(_AnexoP6).where(_AnexoP6.id == ap.id_anexo))
+    ).scalar_one_or_none()
+    return DesentranhamentoOut(
+        id_anexo_processo=ap.id,
+        id_anexo=ap.id_anexo,
+        descricao_anexo=anexo.descricao if anexo else None,
+        desentranhado_em=ap.desentranhado_em,  # type: ignore[arg-type]
+        motivo=ap.motivo_desentranhamento or "",
+        autoridade=ap.autoridade_desentranhamento or "",
+        usuario_nome=current.nome,
+    )
+
+
+@router.get(
+    "/{processo_id}/anexos/{anexo_processo_id}/termo-desentranhamento.pdf",
+)
+async def termo_desentranhamento_pdf(
+    processo_id: int,
+    anexo_processo_id: int,
+    _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    ap = (
+        await db.execute(
+            _select(_AnexoProcessoP6).where(
+                _AnexoProcessoP6.id == anexo_processo_id,
+                _AnexoProcessoP6.id_processo == processo_id,
+                _AnexoProcessoP6.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if ap is None or ap.desentranhado_em is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Anexo desentranhado não encontrado")
+
+    p = (
+        await db.execute(_select(_ProcessoP6).where(_ProcessoP6.id == processo_id))
+    ).scalar_one()
+    anexo = (
+        await db.execute(_select(_AnexoP6).where(_AnexoP6.id == ap.id_anexo))
+    ).scalar_one_or_none()
+    operador = (
+        await db.execute(
+            _select(Usuario.nome).where(Usuario.id == ap.id_usuario_desentranhamento)
+        )
+    ).scalar_one_or_none() if ap.id_usuario_desentranhamento else None
+
+    pdf = gerar_termo_desentranhamento(
+        numero_processo=p.numero_processo,
+        nup=p.nup,
+        descricao_anexo=anexo.descricao if anexo else None,
+        motivo=ap.motivo_desentranhamento or "—",
+        autoridade=ap.autoridade_desentranhamento or "—",
+        data_desentranhamento=ap.desentranhado_em,
+        operador_nome=operador,
+        processo_id=p.id,
+        anexo_processo_id=ap.id,
+    )
+    fname = f"termo-desentranhamento-{p.numero_processo.replace('/', '_')}-anexo{ap.id}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{fname}"'},
+    )
+
+
+# =============================================================================
+#  P6 — VOLUMES
+# =============================================================================
+
+
+async def _vol_hydrate(db: AsyncSession, vol: _VolP6) -> VolumeOut:
+    nome = (
+        await db.execute(_select(Usuario.nome).where(Usuario.id == vol.id_usuario))
+    ).scalar_one_or_none()
+    return VolumeOut(
+        id=vol.id,
+        id_processo=vol.id_processo,
+        numero=vol.numero,
+        pagina_inicial=vol.pagina_inicial,
+        pagina_final=vol.pagina_final,
+        observacao=vol.observacao,
+        id_usuario=vol.id_usuario,
+        criado_em=vol.criado_em,
+        usuario_nome=nome,
+    )
+
+
+@router.get("/{processo_id}/volumes", response_model=list[VolumeOut])
+async def list_volumes_endpoint(
+    processo_id: int,
+    _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (
+        await db.execute(
+            _select(_VolP6)
+            .where(
+                _VolP6.tenant_id == tenant_id, _VolP6.id_processo == processo_id
+            )
+            .order_by(_VolP6.numero)
+        )
+    ).scalars().all()
+    return [await _vol_hydrate(db, v) for v in rows]
+
+
+@router.post(
+    "/{processo_id}/volumes",
+    response_model=VolumeOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_volume_endpoint(
+    processo_id: int,
+    payload: VolumeCreate,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        vol = await _vol_create(
+            db,
+            tenant_id=tenant_id,
+            usuario_id=current.id,
+            processo_id=processo_id,
+            payload=payload,
+        )
+    except VolumeError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+    return await _vol_hydrate(db, vol)
+
+
+@router.put("/volumes/{volume_id}", response_model=VolumeOut)
+async def update_volume_endpoint(
+    volume_id: int,
+    payload: VolumeUpdate,
+    _: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        vol = await _vol_update(
+            db, tenant_id=tenant_id, volume_id=volume_id, payload=payload
+        )
+    except VolumeError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+    return await _vol_hydrate(db, vol)
+
+
+@router.delete("/volumes/{volume_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_volume_endpoint(
+    volume_id: int,
+    current: Usuario = Depends(require_permission("processo", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await _vol_delete(
+            db, tenant_id=tenant_id, usuario_id=current.id, volume_id=volume_id
+        )
+    except VolumeError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e

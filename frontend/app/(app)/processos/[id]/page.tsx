@@ -16,6 +16,8 @@ import { useState } from "react";
 
 import { AcoesProcesso } from "@/components/AcoesProcesso";
 import { AnexosProcesso } from "@/components/AnexosProcesso";
+import { ProcessoApensados } from "@/components/ProcessoApensados";
+import { ProcessoVolumes } from "@/components/ProcessoVolumes";
 import { AssinaturasProcesso } from "@/components/AssinaturasProcesso";
 import { ProcessoTrail } from "@/components/ProcessoTrail";
 import { ProcessoWorkflowPanel } from "@/components/ProcessoWorkflowPanel";
@@ -227,11 +229,17 @@ export default function ProcessoDetailPage() {
         ]}
         title={
           <span className="font-mono">
-            {p.numero_processo}
+            {p.nup ?? p.numero_processo}
           </span>
         }
         description={
           <span className="text-foreground-muted">
+            {p.nup && (
+              <>
+                <span className="font-mono">Legado: {p.numero_processo}</span>
+                {" · "}
+              </>
+            )}
             Aberto em {fmtDateTime(p.data_hora_abertura)}
             {p.manifestante && ` · ${p.manifestante}`}
           </span>
@@ -470,6 +478,14 @@ export default function ProcessoDetailPage() {
           <ProcessoWorkflowPanel processoId={p.id} />
         </CardContent>
       </Card>
+
+      <ProcessoApensados
+        processoId={p.id}
+        numeroProcesso={p.numero_processo}
+        idProcessoPai={p.id_processo_pai}
+      />
+
+      <ProcessoVolumes processoId={p.id} />
 
       {viewer && (
         <PdfViewerDialog

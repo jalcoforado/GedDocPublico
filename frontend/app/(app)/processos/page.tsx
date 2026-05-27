@@ -214,7 +214,18 @@ export default function ProcessosPage() {
           )}
           {processosQ.data?.items.map((p) => (
             <TR key={p.id}>
-              <TD className="font-mono text-xs tabular-nums">{p.numero_processo}</TD>
+              <TD className="font-mono text-xs tabular-nums">
+                {p.nup ? (
+                  <>
+                    <div>{p.nup}</div>
+                    <div className="text-[10px] text-foreground-muted">
+                      {p.numero_processo}
+                    </div>
+                  </>
+                ) : (
+                  p.numero_processo
+                )}
+              </TD>
               <TD className="text-xs tabular-nums">{fmtDate(p.data_hora_abertura)}</TD>
               <TD>
                 <div className="text-sm text-foreground">{p.manifestante ?? "—"}</div>

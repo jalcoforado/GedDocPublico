@@ -27,6 +27,7 @@ from .routers import (
     organograma,
     permissoes,
     processos,
+    protocolo,
     relatorios,
     tenant,
     unidades,
@@ -77,6 +78,7 @@ app.include_router(localizacao.router, prefix="/api/v2")
 app.include_router(manifestantes.router, prefix="/api/v2")
 app.include_router(assuntos.router, prefix="/api/v2")
 app.include_router(processos.router, prefix="/api/v2")
+app.include_router(protocolo.router, prefix="/api/v2")
 app.include_router(anexos.router, prefix="/api/v2")
 app.include_router(assinaturas.router, prefix="/api/v2")
 app.include_router(relatorios.router, prefix="/api/v2")

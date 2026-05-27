@@ -130,6 +130,7 @@ def _row_to_list(r) -> ProcessoListItem:
     return ProcessoListItem(
         id=p.id,
         numero_processo=p.numero_processo,
+        nup=p.nup,
         numero_origem=p.numero_origem,
         data_hora_abertura=p.data_hora_abertura,
         ativo=p.ativo,
@@ -290,6 +291,8 @@ async def _load_anexos(
             AnexoProcesso.id_processo == processo_id,
             AnexoProcesso.tenant_id == tenant_id,
             AnexoProcesso.excluido.is_(False),
+            # Fase P6 — esconde anexos desentranhados da listagem do processo
+            AnexoProcesso.desentranhado_em.is_(None),
             and_(Anexo.excluido.is_(False), Anexo.ativo.is_(True)),
         )
         .order_by(AnexoProcesso.ordem.nulls_last(), Anexo.id)
@@ -298,6 +301,7 @@ async def _load_anexos(
     return [
         AnexoNoProcesso(
             id=a.id,
+            id_anexo_processo=ap.id,
             descricao=a.descricao,
             publico=a.publico,
             qtd_paginas=a.qtd_paginas,

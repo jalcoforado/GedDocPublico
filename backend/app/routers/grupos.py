@@ -3,6 +3,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.perms import require_permission
 from ..database import get_db, tenant_filter
 from ..models import Grupo, GrupoTransacao, Usuario
 from ..schemas.grupo import (
@@ -56,7 +57,7 @@ async def get_grupo(
 @router.post("", response_model=GrupoOut, status_code=status.HTTP_201_CREATED)
 async def create_grupo(
     payload: GrupoCreate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("usuario", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> GrupoOut:
@@ -71,7 +72,7 @@ async def create_grupo(
 async def update_grupo(
     grupo_id: int,
     payload: GrupoUpdate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("usuario", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> GrupoOut:
@@ -105,7 +106,7 @@ async def list_grupo_transacoes(
 async def set_grupo_transacoes(
     grupo_id: int,
     payload: GrupoTransacoesUpdate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("usuario", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[GrupoTransacaoOut]:

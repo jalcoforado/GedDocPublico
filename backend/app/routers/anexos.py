@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
+from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import AnexoProcesso, Processo, Usuario
 from ..schemas.processo import AnexoNoProcesso
@@ -32,7 +33,7 @@ async def upload_endpoint(
     descricao: str | None = Form(None),
     id_tipo_anexo: int | None = Form(None),
     publico: bool = Form(True),
-    current: Usuario = Depends(get_current_user),
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
@@ -98,7 +99,7 @@ async def download_endpoint(
 async def delete_endpoint(
     processo_id: int,
     anexo_id: int,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("processo", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),

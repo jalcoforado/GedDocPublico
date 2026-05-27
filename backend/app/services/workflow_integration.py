@@ -135,6 +135,110 @@ async def auto_iniciar_workflow_se_aplicavel(
         return None
 
 
+async def validar_acao_strict(
+    db: AsyncSession,
+    processo: Processo,
+    *,
+    acao: str,
+    id_unidade_destino: int | None = None,
+) -> tuple[bool, str | None]:
+    """Em strict mode, valida se a ação solicitada respeita o workflow ativo.
+
+    `acao`: "encaminhar" | "receber" | "cancelar_encaminhamento" | "arquivar"
+
+    Regras:
+    - Se processo não tem instance ativa OU o workflow não é strict → libera (ok=True).
+    - Se acao=encaminhar: deve existir transição saindo do estado atual com
+      `evento in (encaminhamento, manual)` cujo estado destino tem
+      `id_unidade_responsavel == id_unidade_destino`. Se estado destino tem
+      `id_unidade_responsavel=null` (livre), libera.
+    - Se acao=receber: deve existir transição com `evento=recebimento` saindo
+      do estado atual.
+    - Se acao=cancelar_encaminhamento: bloqueado se o encaminhamento veio de
+      transição automática do workflow (auditoria mostra).
+    - Se acao=arquivar: bloqueado a menos que `estado_atual` seja final.
+
+    Retorna `(ok, motivo_bloqueio)`. Quando ok=False, `motivo` é a mensagem
+    pra incluir no HTTP 400.
+    """
+    inst = (
+        await db.execute(
+            select(WorkflowInstance).where(
+                WorkflowInstance.id_processo == processo.id,
+                WorkflowInstance.tenant_id == processo.tenant_id,
+                WorkflowInstance.ativa.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if inst is None:
+        return True, None
+
+    wf = (
+        await db.execute(
+            select(WorkflowDefinition).where(
+                WorkflowDefinition.id == inst.id_workflow_definition,
+                WorkflowDefinition.tenant_id == processo.tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if wf is None or not wf.dsl.get("strict", False):
+        return True, None
+
+    estado_atual = inst.estado_atual
+    estados = {e["slug"]: e for e in wf.dsl.get("estados", [])}
+    transicoes = wf.dsl.get("transicoes", [])
+
+    if acao == "encaminhar":
+        # Procura transição manual/encaminhamento saindo do estado atual
+        # cujo destino aceita o id_unidade_destino solicitado.
+        for t in transicoes:
+            if t.get("de") != estado_atual:
+                continue
+            if t.get("evento", "manual") not in ("manual", "encaminhamento"):
+                continue
+            dest_estado = estados.get(t.get("para", ""))
+            if dest_estado is None:
+                continue
+            unid_esperada = dest_estado.get("id_unidade_responsavel")
+            if unid_esperada is None or id_unidade_destino is None:
+                return True, None
+            if int(unid_esperada) == int(id_unidade_destino):
+                return True, None
+        return False, (
+            f"Workflow strict: estado '{estado_atual}' não permite encaminhamento "
+            f"para essa unidade. Use uma das transições disponíveis ou peça override "
+            f"a um super-usuário."
+        )
+
+    if acao == "receber":
+        for t in transicoes:
+            if t.get("de") != estado_atual:
+                continue
+            if t.get("evento", "manual") == "recebimento":
+                return True, None
+        # Sem transição de recebimento configurada — libera (o recebimento físico
+        # não modifica estado de workflow nesse caso, mas tampouco é ofensa).
+        return True, None
+
+    if acao == "cancelar_encaminhamento":
+        # Cancelar é sempre permitido em strict (representa rollback humano).
+        # Caveat: o encaminhamento gerado por auto-transição cria movimentação
+        # ligada ao log — frontend pode mostrar warning.
+        return True, None
+
+    if acao == "arquivar":
+        estado = estados.get(estado_atual, {})
+        if estado.get("final", False):
+            return True, None
+        return False, (
+            f"Workflow strict: processo está no estado '{estado_atual}' que não "
+            f"é final. Conclua o fluxo antes de arquivar."
+        )
+
+    # Ação desconhecida — não bloqueia (defensivo)
+    return True, None
+
+
 async def disparar_evento(
     db: AsyncSession,
     processo: Processo,

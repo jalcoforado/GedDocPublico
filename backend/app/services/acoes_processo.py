@@ -24,6 +24,12 @@ class AcaoError(Exception):
     pass
 
 
+class WorkflowStrictBlock(AcaoError):
+    """Ação bloqueada pelo workflow strict. 400 com instrução de override."""
+
+    pass
+
+
 async def _get_acao(db: AsyncSession, flag: str) -> Acao:
     """Acao é catálogo global — sem tenant_id."""
     acao = (
@@ -66,8 +72,41 @@ async def encaminhar(
     *,
     tenant_id: int,
     usuario_id: int,
+    is_super_usuario: bool = False,
 ) -> Encaminhamento:
     processo = await _get_processo(db, processo_id, tenant_id)
+
+    # Workflow strict: valida se o encaminhamento respeita o fluxo.
+    from .workflow_integration import validar_acao_strict
+
+    ok, motivo = await validar_acao_strict(
+        db,
+        processo,
+        acao="encaminhar",
+        id_unidade_destino=payload.id_unidade_destino,
+    )
+    if not ok:
+        if not (is_super_usuario and payload.override_motivo):
+            raise WorkflowStrictBlock(
+                motivo
+                or "Workflow strict bloqueou a ação. Super-usuário pode usar 'override_motivo'."
+            )
+        # Override registrado — audit do override
+        from .audit import log as audit_log
+
+        await audit_log(
+            db,
+            tenant_id=tenant_id,
+            id_usuario=usuario_id,
+            acao="processo.encaminhar.override_strict",
+            entidade="processo",
+            id_entidade=processo_id,
+            payload={
+                "id_unidade_destino": payload.id_unidade_destino,
+                "motivo": payload.override_motivo,
+                "bloqueio_original": motivo,
+            },
+        )
 
     # Bloqueia se há encaminhamento pendente (não recebido e não cancelado).
     pendente = (
@@ -154,8 +193,19 @@ async def receber(
     *,
     tenant_id: int,
     usuario_id: int,
+    is_super_usuario: bool = False,
+    override_motivo: str | None = None,
 ) -> Encaminhamento:
     processo = await _get_processo(db, processo_id, tenant_id)
+
+    # Workflow strict (receber é menos restritivo — só audita se há override)
+    from .workflow_integration import validar_acao_strict
+
+    ok, motivo = await validar_acao_strict(db, processo, acao="receber")
+    if not ok and not (is_super_usuario and override_motivo):
+        raise WorkflowStrictBlock(
+            motivo or "Workflow strict bloqueou o recebimento."
+        )
 
     enc = (
         await db.execute(

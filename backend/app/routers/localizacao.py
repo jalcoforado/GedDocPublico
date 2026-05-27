@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Bairro, Cidade, Endereco, Estado, Usuario
 from ..schemas.common import Paginated
@@ -61,7 +62,7 @@ async def list_cidades(
 @router.post("/cidades", response_model=CidadeOut, status_code=status.HTTP_201_CREATED)
 async def create_cidade(
     payload: CidadeCreate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("cidade", "inserir")),
     db: AsyncSession = Depends(get_db),
 ):
     c = Cidade(**payload.model_dump(), excluido=False)
@@ -75,7 +76,7 @@ async def create_cidade(
 async def update_cidade(
     cidade_id: int,
     payload: CidadeUpdate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("cidade", "atualizar")),
     db: AsyncSession = Depends(get_db),
 ):
     c = await get_or_404(db, Cidade, cidade_id, tenant_id=None, label="Cidade")
@@ -89,7 +90,7 @@ async def update_cidade(
 @router.delete("/cidades/{cidade_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_cidade(
     cidade_id: int,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("cidade", "excluir")),
     db: AsyncSession = Depends(get_db),
 ):
     c = await get_or_404(db, Cidade, cidade_id, tenant_id=None, label="Cidade")
@@ -125,7 +126,7 @@ async def list_bairros(
 @router.post("/bairros", response_model=BairroOut, status_code=status.HTTP_201_CREATED)
 async def create_bairro(
     payload: BairroCreate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("endereco", "inserir")),
     db: AsyncSession = Depends(get_db),
 ):
     b = Bairro(**payload.model_dump(), excluido=False)
@@ -139,7 +140,7 @@ async def create_bairro(
 async def update_bairro(
     bairro_id: int,
     payload: BairroUpdate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("endereco", "atualizar")),
     db: AsyncSession = Depends(get_db),
 ):
     b = await get_or_404(db, Bairro, bairro_id, tenant_id=None, label="Bairro")
@@ -153,7 +154,7 @@ async def update_bairro(
 @router.delete("/bairros/{bairro_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_bairro(
     bairro_id: int,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("endereco", "excluir")),
     db: AsyncSession = Depends(get_db),
 ):
     b = await get_or_404(db, Bairro, bairro_id, tenant_id=None, label="Bairro")
@@ -196,7 +197,7 @@ async def list_enderecos(
 @router.post("/enderecos", response_model=EnderecoOut, status_code=status.HTTP_201_CREATED)
 async def create_endereco(
     payload: EnderecoCreate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("endereco", "inserir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -211,7 +212,7 @@ async def create_endereco(
 async def update_endereco(
     endereco_id: int,
     payload: EnderecoUpdate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("endereco", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -226,7 +227,7 @@ async def update_endereco(
 @router.delete("/enderecos/{endereco_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_endereco(
     endereco_id: int,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("endereco", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):

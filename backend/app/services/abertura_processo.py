@@ -13,7 +13,7 @@ from datetime import datetime
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Acao, Movimentacao, Processo
+from ..models import Acao, Movimentacao, Processo, Tenant
 from ..schemas.processo import ProcessoCreate
 
 
@@ -112,6 +112,33 @@ async def abrir_processo(
             "publico": processo.publico,
         },
     )
+
+    # Fase P2 — NUP federal (opt-in por tenant). Gera ANTES do commit pra
+    # que sequencial e nup fiquem na mesma transação do processo.
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    ).scalar_one_or_none()
+    if tenant and tenant.usar_nup_federal and tenant.codigo_orgao_nup:
+        from .nup import NupError, gerar_nup
+
+        try:
+            nup_str, sequencial = await gerar_nup(db, tenant=tenant, ano=now.year)
+            processo.nup = nup_str
+            processo.numero_sequencial_orgao = sequencial
+        except NupError as e:
+            # Falha de geração de NUP NÃO bloqueia abertura — registra audit
+            # como warning. Operador pode reemitir manualmente depois.
+            from .audit import log as audit_log_warn
+
+            await audit_log_warn(
+                db,
+                tenant_id=tenant_id,
+                id_usuario=usuario_id,
+                acao="processo.nup_falhou",
+                entidade="processo",
+                id_entidade=processo.id,
+                payload={"erro": str(e)},
+            )
 
     await db.commit()
     await db.refresh(processo)

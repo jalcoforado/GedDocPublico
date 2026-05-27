@@ -92,6 +92,12 @@ class WorkflowDSL(BaseModel):
     estado_inicial: str
     estados: list[WorkflowEstado] = Field(..., min_length=1)
     transicoes: list[WorkflowTransicao] = Field(default_factory=list)
+    # Modo estrito: quando True, ações genéricas em processos vinculados
+    # (encaminhar/receber/cancelar/arquivar) são bloqueadas se não
+    # corresponderem a uma transição válida do workflow. Super-usuário
+    # pode quebrar com `override_motivo` (auditado). Default False mantém
+    # comportamento "auto-piloto orientativo" anterior à Fase 21+.
+    strict: bool = False
 
     @field_validator("estados")
     @classmethod

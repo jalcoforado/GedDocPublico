@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
 from ..auth.password import hash_md5, hash_password
+from ..auth.perms import require_permission
 from ..config import get_settings
 from ..database import get_db, tenant_filter
 from ..models import Usuario, UsuarioGrupo, UsuarioUnidadeTrabalho
@@ -103,7 +104,7 @@ async def get_usuario(
 @router.post("", response_model=UsuarioDetail, status_code=status.HTTP_201_CREATED)
 async def create_usuario(
     payload: UsuarioCreate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("usuario", "inserir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> UsuarioDetail:
@@ -161,7 +162,7 @@ async def create_usuario(
 async def update_usuario(
     usuario_id: int,
     payload: UsuarioUpdate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("usuario", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> UsuarioDetail:
@@ -190,7 +191,7 @@ async def update_usuario(
 @router.delete("/{usuario_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_usuario(
     usuario_id: int,
-    current: Usuario = Depends(get_current_user),
+    current: Usuario = Depends(require_permission("usuario", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -206,7 +207,7 @@ async def delete_usuario(
 async def set_grupos(
     usuario_id: int,
     grupos: list[int],
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("usuario", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> UsuarioDetail:
@@ -242,7 +243,7 @@ async def set_grupos(
 async def set_unidades(
     usuario_id: int,
     unidades: list[int],
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("usuario", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> UsuarioDetail:

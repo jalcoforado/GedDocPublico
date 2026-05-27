@@ -23,3 +23,6 @@ class Tenant(Base):
     logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Fase P2 — NUP federal (Decreto 8.539/2015). Opt-in por tenant.
+    codigo_orgao_nup: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    usar_nup_federal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

@@ -109,15 +109,34 @@ export function ProcessoWorkflowPanel({ processoId }: Props) {
             )}
           </div>
           {defQ.data && (
-            <Link
-              href={`/workflow/${defQ.data.id}`}
-              className="text-xs text-muted-foreground hover:underline"
-            >
-              {defQ.data.nome} (v{defQ.data.versao})
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/workflow/${defQ.data.id}`}
+                className="text-xs text-muted-foreground hover:underline"
+              >
+                {defQ.data.nome} (v{defQ.data.versao})
+              </Link>
+              {defQ.data.dsl.strict && (
+                <Badge
+                  intent="warning"
+                  className="text-[10px]"
+                  title="Fluxo obrigatório — encaminhamentos fora do trilho são bloqueados pelo backend."
+                >
+                  Fluxo obrigatório
+                </Badge>
+              )}
+            </div>
           )}
         </div>
       </div>
+
+      {defQ.data?.dsl.strict && inst.ativa && (
+        <div className="rounded-md border border-warning/30 bg-warning-soft/30 px-3 py-2 text-xs text-warning-soft-foreground">
+          Este processo segue um <strong>fluxo obrigatório</strong>. Use os
+          botões de transição abaixo — encaminhamentos manuais para unidades
+          fora do trilho são bloqueados.
+        </div>
+      )}
 
       {alertasPendentes.length > 0 && (
         <div className="rounded border border-amber-300 bg-amber-50 p-3">

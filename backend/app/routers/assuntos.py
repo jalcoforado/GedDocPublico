@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.perms import require_permission
 from ..database import get_db, tenant_filter
 from ..models import Assunto, AssuntoTipoProcessoTipoAnexo, TipoAnexo, TipoProcesso, Usuario
 from ..schemas.assunto import (
@@ -40,7 +41,7 @@ async def list_tipos_processo(
 @router.post("/tipos-processo", response_model=TipoProcessoOut, status_code=status.HTTP_201_CREATED)
 async def create_tipo_processo(
     payload: TipoProcessoCreate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("catalogo", "inserir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -55,7 +56,7 @@ async def create_tipo_processo(
 async def update_tipo_processo(
     tipo_id: int,
     payload: TipoProcessoUpdate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("catalogo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -70,7 +71,7 @@ async def update_tipo_processo(
 @router.delete("/tipos-processo/{tipo_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tipo_processo(
     tipo_id: int,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("catalogo", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -108,7 +109,7 @@ async def list_assuntos(
 @router.post("/assuntos", response_model=AssuntoOut, status_code=status.HTTP_201_CREATED)
 async def create_assunto(
     payload: AssuntoCreate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("assunto", "inserir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -123,7 +124,7 @@ async def create_assunto(
 async def update_assunto(
     assunto_id: int,
     payload: AssuntoUpdate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("assunto", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -138,7 +139,7 @@ async def update_assunto(
 @router.delete("/assuntos/{assunto_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_assunto(
     assunto_id: int,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("assunto", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -162,7 +163,7 @@ async def list_tipos_anexo(
 @router.post("/tipos-anexo", response_model=TipoAnexoOut, status_code=status.HTTP_201_CREATED)
 async def create_tipo_anexo(
     payload: TipoAnexoCreate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("catalogo", "inserir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -177,7 +178,7 @@ async def create_tipo_anexo(
 async def update_tipo_anexo(
     tipo_id: int,
     payload: TipoAnexoUpdate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("catalogo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -192,7 +193,7 @@ async def update_tipo_anexo(
 @router.delete("/tipos-anexo/{tipo_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tipo_anexo(
     tipo_id: int,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("catalogo", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -231,7 +232,7 @@ async def list_assunto_tipo_anexo(
 )
 async def create_assunto_tipo_anexo(
     payload: AssuntoTipoAnexoCreate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("assunto", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -246,7 +247,7 @@ async def create_assunto_tipo_anexo(
 async def update_assunto_tipo_anexo(
     rel_id: int,
     payload: AssuntoTipoAnexoUpdate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("assunto", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -261,7 +262,7 @@ async def update_assunto_tipo_anexo(
 @router.delete("/assunto-tipo-anexo/{rel_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_assunto_tipo_anexo(
     rel_id: int,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("assunto", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):

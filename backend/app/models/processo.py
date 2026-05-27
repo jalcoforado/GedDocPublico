@@ -64,6 +64,19 @@ class Processo(Base):
     )
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Protocolo P1
+    id_especie_documental: Mapped[int | None] = mapped_column(
+        ForeignKey("protocolos.especie_documental.id"), nullable=True
+    )
+    canal_entrada: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    data_recepcao: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Protocolo P4
+    id_ccd_classe: Mapped[int | None] = mapped_column(
+        ForeignKey("protocolos.ccd_classe.id"), nullable=True
+    )
+    # Protocolo P2 — NUP federal (opt-in por tenant)
+    nup: Mapped[str | None] = mapped_column(String(25), nullable=True)
+    numero_sequencial_orgao: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Movimentacao(Base):
@@ -211,3 +224,10 @@ class AnexoProcesso(Base):
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ordem: Mapped[int | None] = mapped_column(Integer, nullable=True)
     anexo_herdado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Fase P6 — Desentranhamento (remoção formal de anexo de processo já formado)
+    desentranhado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    id_usuario_desentranhamento: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
+    motivo_desentranhamento: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    autoridade_desentranhamento: Mapped[str | None] = mapped_column(String(300), nullable=True)

@@ -21,10 +21,14 @@ class EncaminharRequest(BaseModel):
     quantidade_folhas: int = Field(default=0, ge=0)
     data_prazo: date | None = None
     despacho: str | None = Field(default=None, max_length=10000)
+    # Strict workflow override: super-usuário pode quebrar o trilho do
+    # workflow informando motivo. Será auditado.
+    override_motivo: str | None = Field(default=None, max_length=500)
 
 
 class CancelarEncaminhamentoRequest(BaseModel):
     despacho: str | None = Field(default=None, max_length=2000)
+    override_motivo: str | None = Field(default=None, max_length=500)
 
 
 class PrioridadeOut(BaseModel):
@@ -39,6 +43,7 @@ class ProcessoListItem(BaseModel):
     """Visão para listagem — campos enriquecidos com nomes via JOIN."""
     id: int
     numero_processo: str
+    nup: str | None = None  # Fase P2 — NUP federal (preenchido só se tenant tem flag)
     numero_origem: str | None
     data_hora_abertura: datetime
     ativo: bool
@@ -55,7 +60,8 @@ class ProcessoListItem(BaseModel):
 
 class AnexoNoProcesso(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    id: int
+    id: int  # id do Anexo (file row)
+    id_anexo_processo: int | None = None  # id do join AnexoProcesso (pra desentranhar)
     descricao: str | None
     publico: bool
     qtd_paginas: int | None

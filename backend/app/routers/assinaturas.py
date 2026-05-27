@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Usuario
 from ..schemas.assinatura import (
@@ -30,7 +31,7 @@ router = APIRouter(tags=["assinaturas"])
 async def solicitar_endpoint(
     processo_id: int,
     payload: SolicitarAssinaturaRequest,
-    current: Usuario = Depends(get_current_user),
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> SolicitacaoOut:
@@ -78,7 +79,7 @@ async def minhas_pendentes_endpoint(
 async def assinar_endpoint(
     assinatura_anexo_id: int,
     payload: AssinarRequest,
-    current: Usuario = Depends(get_current_user),
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> SolicitacaoOut:
@@ -127,7 +128,7 @@ async def assinar_endpoint(
 )
 async def cancelar_endpoint(
     solicitacao_id: int,
-    current: Usuario = Depends(get_current_user),
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> SolicitacaoOut:

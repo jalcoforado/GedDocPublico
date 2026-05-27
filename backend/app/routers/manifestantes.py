@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.perms import require_permission
 from ..database import get_db, tenant_filter
 from ..models import Manifestante, TipoManifestante, Usuario
 from ..schemas.common import Paginated
@@ -41,7 +42,7 @@ async def list_tipos_manifestante(
 )
 async def create_tipo_manifestante(
     payload: TipoManifestanteCreate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("manifestante", "inserir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -56,7 +57,7 @@ async def create_tipo_manifestante(
 async def update_tipo_manifestante(
     tipo_id: int,
     payload: TipoManifestanteUpdate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("manifestante", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -71,7 +72,7 @@ async def update_tipo_manifestante(
 @router.delete("/tipos-manifestante/{tipo_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tipo_manifestante(
     tipo_id: int,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("manifestante", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -115,7 +116,7 @@ async def list_manifestantes(
 )
 async def create_manifestante(
     payload: ManifestanteCreate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("manifestante", "inserir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -130,7 +131,7 @@ async def create_manifestante(
 async def update_manifestante(
     manif_id: int,
     payload: ManifestanteUpdate,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("manifestante", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -145,7 +146,7 @@ async def update_manifestante(
 @router.delete("/manifestantes/{manif_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_manifestante(
     manif_id: int,
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_permission("manifestante", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):

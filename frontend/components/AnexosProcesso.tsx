@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { AnexoDesentranhar } from "@/components/AnexoDesentranhar";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
 import {
   anexoCarimbadoUrl,
@@ -152,6 +153,13 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
                 >
                   Baixar
                 </a>
+                {a.id_anexo_processo != null && (
+                  <AnexoDesentranhar
+                    processoId={processo.id}
+                    anexoProcessoId={a.id_anexo_processo}
+                    descricaoAnexo={a.descricao}
+                  />
+                )}
                 <Button
                   variant="danger"
                   size="sm"

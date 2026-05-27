@@ -211,6 +211,8 @@ export interface AssuntoTipoAnexo {
 export interface ProcessoListItem {
   id: number;
   numero_processo: string;
+  /** Fase P2 — NUP federal, só preenchido quando tenant tem usar_nup_federal=true */
+  nup?: string | null;
   numero_origem: string | null;
   data_hora_abertura: string;
   ativo: boolean;
@@ -226,6 +228,8 @@ export interface ProcessoListItem {
 
 export interface AnexoNoProcesso {
   id: number;
+  /** Fase P6 — id do JOIN (necessário pra desentranhar) */
+  id_anexo_processo?: number | null;
   descricao: string | null;
   publico: boolean;
   qtd_paginas: number | null;
@@ -1056,6 +1060,8 @@ export interface WorkflowDSL {
   estado_inicial: string;
   estados: WorkflowEstado[];
   transicoes: WorkflowTransicao[];
+  /** Strict mode: backend bloqueia encaminhamentos/recebimentos fora do trilho. */
+  strict?: boolean;
 }
 
 export interface WorkflowDefinitionListItem {
@@ -1266,6 +1272,387 @@ export interface BuscaResultado {
 
 export const buscaApi = {
   global: (q: string) => request<BuscaResultado>(`/busca${qs({ q })}`),
+};
+
+// ===== Protocolo (Fase P1) =====
+
+export interface EspecieDocumental {
+  id: number;
+  flag: string;
+  nome: string;
+  descricao: string | null;
+  ativo: boolean;
+}
+
+export interface ProtocoloBalcaoPayload {
+  id_manifestante: number;
+  id_assunto: number;
+  id_especie_documental: number;
+  id_unidade_proprietaria: number;
+  observacao?: string | null;
+  numero_origem?: string | null;
+  publico?: boolean;
+  data_recepcao?: string | null;
+  id_ccd_classe?: number | null;
+}
+
+export interface ProtocoloBalcaoResult {
+  id: number;
+  numero_processo: string;
+  nup?: string | null;
+  data_hora_abertura: string;
+  data_recepcao: string | null;
+  canal_entrada: "balcao" | "portal" | "email" | "api" | "interno";
+  id_especie_documental: number | null;
+  especie_documental: string | null;
+  manifestante: string;
+  assunto: string;
+  unidade_proprietaria: string;
+}
+
+// ===== Tenant / Configurações =================================================
+
+export interface TenantMe {
+  id: number;
+  slug: string;
+  nome: string;
+  plano: string;
+  cor_primaria: string | null;
+  logo_url: string | null;
+  /** Fase P2 — código do órgão (5 dígitos) atribuído pelo SIORG/MP */
+  codigo_orgao_nup: string | null;
+  /** Fase P2 — se true, processos novos recebem NUP federal além do número legado */
+  usar_nup_federal: boolean;
+}
+
+export interface NupConfigUpdate {
+  codigo_orgao_nup?: string | null;
+  usar_nup_federal?: boolean;
+}
+
+// ===== Assinaturas pendentes do usuário ======================================
+
+export interface PendenciaAssinatura {
+  id_assinatura_anexo: number;
+  id_anexo: number;
+  anexo_descricao: string | null;
+  id_solicitacao: number;
+  id_processo: number;
+  numero_processo: string;
+  nome_solicitante: string;
+  dt_inicio: string;
+}
+
+export const assinaturasApi = {
+  minhasPendentes: () =>
+    request<PendenciaAssinatura[]>(`/solicitacoes-assinatura/me/pendentes`),
+};
+
+// ===== P6 — Apensamento + Desentranhamento + Volumes ========================
+
+export interface ApensamentoDetail {
+  id: number;
+  id_processo_apensado: number;
+  id_processo_principal: number;
+  id_usuario: number;
+  motivo: string;
+  criado_em: string;
+  desapensado_em: string | null;
+  id_usuario_desapensamento: number | null;
+  motivo_desapensamento: string | null;
+  numero_processo_apensado: string | null;
+  numero_processo_principal: string | null;
+  usuario_nome: string | null;
+  usuario_desapensamento_nome: string | null;
+  ativo: boolean;
+}
+
+export interface ProcessoApensadoListItem {
+  id_apensamento: number;
+  id_processo: number;
+  numero_processo: string;
+  nup: string | null;
+  manifestante: string | null;
+  apensado_em: string;
+  motivo: string;
+}
+
+export interface DesentranhamentoResult {
+  id_anexo_processo: number;
+  id_anexo: number;
+  descricao_anexo: string | null;
+  desentranhado_em: string;
+  motivo: string;
+  autoridade: string;
+  usuario_nome: string | null;
+}
+
+export interface VolumeDetail {
+  id: number;
+  id_processo: number;
+  numero: number;
+  pagina_inicial: number | null;
+  pagina_final: number | null;
+  observacao: string | null;
+  id_usuario: number;
+  criado_em: string;
+  usuario_nome: string | null;
+}
+
+export const apensamentoApi = {
+  apensar: (processoId: number, payload: { id_processo_principal: number; motivo: string }) =>
+    request<ApensamentoDetail>(`/processos/${processoId}/apensar`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  desapensar: (processoId: number, motivo: string) =>
+    request<ApensamentoDetail>(`/processos/${processoId}/desapensar`, {
+      method: "POST",
+      body: JSON.stringify({ motivo }),
+    }),
+  listarHistorico: (processoId: number, apenasAtivos = false) =>
+    request<ApensamentoDetail[]>(
+      `/processos/${processoId}/apensamentos${qs({ apenas_ativos: apenasAtivos })}`,
+    ),
+  listarApensados: (processoId: number) =>
+    request<ProcessoApensadoListItem[]>(`/processos/${processoId}/apensados`),
+};
+
+export function termoApensamentoPdfUrl(apensamentoId: number): string {
+  return `${BROWSER_API_URL}/processos/apensamentos/${apensamentoId}/termo.pdf`;
+}
+
+export const desentranhamentoApi = {
+  desentranhar: (
+    processoId: number,
+    anexoProcessoId: number,
+    payload: { motivo: string; autoridade: string },
+  ) =>
+    request<DesentranhamentoResult>(
+      `/processos/${processoId}/anexos/${anexoProcessoId}/desentranhar`,
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+};
+
+export function termoDesentranhamentoPdfUrl(
+  processoId: number,
+  anexoProcessoId: number,
+): string {
+  return `${BROWSER_API_URL}/processos/${processoId}/anexos/${anexoProcessoId}/termo-desentranhamento.pdf`;
+}
+
+export const volumesApi = {
+  list: (processoId: number) =>
+    request<VolumeDetail[]>(`/processos/${processoId}/volumes`),
+  create: (
+    processoId: number,
+    payload: {
+      numero: number;
+      pagina_inicial?: number | null;
+      pagina_final?: number | null;
+      observacao?: string | null;
+    },
+  ) =>
+    request<VolumeDetail>(`/processos/${processoId}/volumes`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  update: (
+    volumeId: number,
+    payload: {
+      pagina_inicial?: number | null;
+      pagina_final?: number | null;
+      observacao?: string | null;
+    },
+  ) =>
+    request<VolumeDetail>(`/processos/volumes/${volumeId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  delete: (volumeId: number) =>
+    request<void>(`/processos/volumes/${volumeId}`, { method: "DELETE" }),
+};
+
+export const tenantsApi = {
+  me: () => request<TenantMe>(`/tenants/me`),
+  updateNupConfig: (payload: NupConfigUpdate) =>
+    request<TenantMe>(`/tenants/me/nup-config`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+};
+
+export const protocoloApi = {
+  listEspecies: (incluirInativas = false) =>
+    request<EspecieDocumental[]>(
+      `/protocolo/especies-documentais${qs({ incluir_inativas: incluirInativas })}`,
+    ),
+  createEspecie: (payload: { flag: string; nome: string; descricao?: string }) =>
+    request<EspecieDocumental>(`/protocolo/especies-documentais`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  protocolarBalcao: (payload: ProtocoloBalcaoPayload) =>
+    request<ProtocoloBalcaoResult>(`/protocolo/balcao`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+};
+
+export function protocoloEtiquetaPdfUrl(processoId: number): string {
+  return `${BROWSER_API_URL}/protocolo/${processoId}/etiqueta.pdf`;
+}
+
+export function protocoloComprovantePdfUrl(processoId: number): string {
+  return `${BROWSER_API_URL}/protocolo/${processoId}/comprovante.pdf`;
+}
+
+// ===== P4 — CCD + TTD + Temporalidade ========================================
+
+export interface CcdClasse {
+  id: number;
+  codigo: string;
+  nome: string;
+  descricao: string | null;
+  id_classe_pai: number | null;
+  palavras_chave: string | null;
+  ativo: boolean;
+}
+
+export interface CcdClasseTreeNode {
+  id: number;
+  codigo: string;
+  nome: string;
+  descricao: string | null;
+  palavras_chave: string | null;
+  ativo: boolean;
+  filhos: CcdClasseTreeNode[];
+}
+
+export interface CcdClasseCreatePayload {
+  codigo: string;
+  nome: string;
+  descricao?: string | null;
+  id_classe_pai?: number | null;
+  palavras_chave?: string | null;
+}
+
+export interface CcdClasseUpdatePayload {
+  codigo?: string;
+  nome?: string;
+  descricao?: string | null;
+  id_classe_pai?: number | null;
+  palavras_chave?: string | null;
+  ativo?: boolean;
+}
+
+export type DestinoFinal = "ELIMINACAO" | "GUARDA_PERMANENTE";
+
+export interface TtdRegra {
+  id: number;
+  id_ccd_classe: number;
+  id_especie_documental: number | null;
+  anos_corrente: number;
+  anos_intermediario: number;
+  destino_final: DestinoFinal;
+  observacao: string | null;
+  ativo: boolean;
+}
+
+export interface TtdRegraDetail extends TtdRegra {
+  classe_codigo: string;
+  classe_nome: string;
+  especie_nome: string | null;
+}
+
+export interface TtdRegraCreatePayload {
+  id_ccd_classe: number;
+  id_especie_documental?: number | null;
+  anos_corrente: number;
+  anos_intermediario: number;
+  destino_final: DestinoFinal;
+  observacao?: string | null;
+}
+
+export interface TtdRegraUpdatePayload {
+  id_especie_documental?: number | null;
+  anos_corrente?: number;
+  anos_intermediario?: number;
+  destino_final?: DestinoFinal;
+  observacao?: string | null;
+  ativo?: boolean;
+}
+
+export interface SugestaoCcd {
+  id_ccd_classe: number;
+  codigo: string;
+  nome: string;
+  score: number;
+  matched_keywords: string[];
+}
+
+export interface Temporalidade {
+  id_processo: number;
+  numero_processo: string;
+  id_ccd_classe: number | null;
+  classe_codigo: string | null;
+  classe_nome: string | null;
+  id_especie_documental: number | null;
+  especie_nome: string | null;
+  regra_aplicada: TtdRegra | null;
+  data_referencia: string | null;
+  fim_fase_corrente: string | null;
+  fim_fase_intermediaria: string | null;
+  destino_final: DestinoFinal | null;
+  motivo_sem_regra: string | null;
+}
+
+export const ccdApi = {
+  list: (incluirInativas = false) =>
+    request<CcdClasse[]>(
+      `/protocolo/ccd-classes${qs({ incluir_inativas: incluirInativas })}`,
+    ),
+  tree: () => request<CcdClasseTreeNode[]>(`/protocolo/ccd-classes/tree`),
+  create: (payload: CcdClasseCreatePayload) =>
+    request<CcdClasse>(`/protocolo/ccd-classes`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  update: (id: number, payload: CcdClasseUpdatePayload) =>
+    request<CcdClasse>(`/protocolo/ccd-classes/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  delete: (id: number) =>
+    request<void>(`/protocolo/ccd-classes/${id}`, { method: "DELETE" }),
+  sugerir: (params: { id_assunto?: number; texto?: string; limit?: number }) =>
+    request<SugestaoCcd[]>(`/protocolo/sugerir-ccd${qs(params)}`),
+};
+
+export const ttdApi = {
+  list: (id_ccd_classe?: number) =>
+    request<TtdRegraDetail[]>(
+      `/protocolo/ttd-regras${qs({ id_ccd_classe })}`,
+    ),
+  create: (payload: TtdRegraCreatePayload) =>
+    request<TtdRegra>(`/protocolo/ttd-regras`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  update: (id: number, payload: TtdRegraUpdatePayload) =>
+    request<TtdRegra>(`/protocolo/ttd-regras/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  delete: (id: number) =>
+    request<void>(`/protocolo/ttd-regras/${id}`, { method: "DELETE" }),
+};
+
+export const temporalidadeApi = {
+  doProcesso: (processoId: number) =>
+    request<Temporalidade>(`/processos/${processoId}/temporalidade`),
+  vencendoPrazo: (params?: { dias?: number; incluir_permanentes?: boolean }) =>
+    request<Temporalidade[]>(`/protocolo/vencendo-prazo${qs(params ?? {})}`),
 };
 
 // ===== Trail do processo (caminho percorrido) =====

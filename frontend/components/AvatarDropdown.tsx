@@ -108,7 +108,7 @@ export function AvatarDropdown() {
           role="menu"
           className="
             absolute right-0 top-[calc(100%+6px)] z-50 w-72
-            overflow-hidden rounded-lg border border-border bg-popover shadow-xl
+            overflow-hidden rounded-lg border border-border bg-card shadow-xl
             animate-scale-in origin-top-right
           "
         >
