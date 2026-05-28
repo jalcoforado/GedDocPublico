@@ -12,11 +12,13 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.password import verify_md5
+from ..auth.password import verify_password
 from .audit import log as audit_log
+from . import anexos as anexos_svc
+from . import assinatura_throttle as throttle
 from ..models import (
     Anexo,
     AnexoProcesso,
@@ -29,14 +31,24 @@ from ..models import (
 from ..schemas.assinatura import (
     AssinanteStatus,
     AssinaturaAnexoStatus,
+    EvidenciasOut,
     PendenciaAssinatura,
     SolicitacaoOut,
     SolicitarAssinaturaRequest,
+    ValidacaoOut,
 )
 
 
 class AssinaturaError(Exception):
     pass
+
+
+class AssinaturaThrottleError(AssinaturaError):
+    """Excesso de tentativas malsucedidas — bloqueio temporário (HTTP 429)."""
+
+
+class AssinaturaCredencialLegadaError(AssinaturaError):
+    """Senha só valida por MD5 — não pode originar assinatura nova (HTTP 409)."""
 
 
 async def _carregar_processo(
@@ -176,6 +188,9 @@ async def assinar(
     tenant_id: int,
     usuario_id: int,
     senha: str,
+    tenant_slug: str,
+    ip: str | None = None,
+    user_agent: str | None = None,
 ) -> AssinaturaAnexo:
     aa = (
         await db.execute(
@@ -188,8 +203,10 @@ async def assinar(
     ).scalar_one_or_none()
     if aa is None:
         raise AssinaturaError("Assinatura não encontrada")
-    if aa.assinado:
+    if aa.assinado or aa.status == "assinada":
         raise AssinaturaError("Anexo já foi assinado")
+    if aa.status in ("recusada", "cancelada"):
+        raise AssinaturaError("Solicitação recusada/cancelada — não pode ser assinada")
 
     ua = (
         await db.execute(
@@ -202,6 +219,12 @@ async def assinar(
     if ua.id_assinante != usuario_id:
         raise AssinaturaError("Você não é o destinatário desta solicitação")
 
+    # Throttle (fail-open) — bloqueio temporário após excesso de tentativas.
+    if await throttle.esta_bloqueado(tenant_id, usuario_id, aa.id):
+        raise AssinaturaThrottleError(
+            "Muitas tentativas malsucedidas. Tente novamente em alguns minutos."
+        )
+
     usuario = (
         await db.execute(
             select(Usuario).where(
@@ -209,12 +232,55 @@ async def assinar(
             )
         )
     ).scalar_one()
-    if not verify_md5(senha, usuario.senha):
+    ok, needs_rehash = verify_password(
+        senha, bcrypt_hash=usuario.senha_bcrypt, md5_hash=usuario.senha
+    )
+    if not ok:
+        total = await throttle.registrar_falha(tenant_id, usuario_id, aa.id)
+        # Tentativa falha auditada em commit próprio (só houve SELECTs até aqui).
+        await audit_log(
+            db,
+            tenant_id=tenant_id,
+            id_usuario=usuario_id,
+            acao="assinatura.tentativa_falha",
+            entidade="assinatura_anexo",
+            id_entidade=aa.id,
+            payload={"id_processo": aa.id_processo, "tentativa": total},
+        )
+        await db.commit()
         raise AssinaturaError("Senha incorreta")
+    if needs_rehash:
+        # Decisão: assinatura nova não nasce vinculada a credencial legada MD5.
+        raise AssinaturaCredencialLegadaError(
+            "Sua senha precisa ser atualizada para assinar. Faça login novamente "
+            "ou altere a senha no seu perfil e tente de novo."
+        )
 
+    # Integridade: SHA-256 do conteúdo exato do anexo neste instante.
+    documento_hash, hash_algoritmo = await anexos_svc.hash_anexo(
+        db, aa.id_anexo, tenant_id=tenant_id, tenant_slug=tenant_slug
+    )
+
+    now = datetime.now()
     aa.assinado = True
-    aa.dt_assinatura = datetime.now()
+    aa.dt_assinatura = now
     aa.id_usuario = usuario_id
+    aa.status = "assinada"
+    aa.nivel_assinatura = "simples"
+    aa.metodo_autenticacao = "senha_bcrypt"
+    aa.documento_hash = documento_hash
+    aa.hash_algoritmo = hash_algoritmo
+    aa.documento_versao = aa.documento_versao or 1
+    aa.ip_assinatura = ip
+    aa.user_agent_assinatura = user_agent[:512] if user_agent else None
+    aa.evidencias = {
+        "ip": ip,
+        "user_agent": user_agent,
+        "metodo_autenticacao": "senha_bcrypt",
+        "documento_hash": documento_hash,
+        "hash_algoritmo": hash_algoritmo,
+        "dt_assinatura": now.isoformat(),
+    }
 
     pendentes_user = (
         await db.execute(
@@ -231,6 +297,7 @@ async def assinar(
     ).scalars().all()
     if not pendentes_user:
         ua.realizada = True
+        ua.status = "realizada"
 
         solic = (
             await db.execute(
@@ -255,7 +322,7 @@ async def assinar(
             solic.realizada = True
             solic.dt_fim = datetime.now()
 
-    await audit_log(
+    audit_id = await audit_log(
         db,
         tenant_id=tenant_id,
         id_usuario=usuario_id,
@@ -266,11 +333,16 @@ async def assinar(
             "id_processo": aa.id_processo,
             "id_anexo": aa.id_anexo,
             "id_usuario_assinatura": aa.id_usuario_assinatura,
-            "dt_assinatura": aa.dt_assinatura.isoformat() if aa.dt_assinatura else None,
+            "documento_hash": documento_hash,
+            "hash_algoritmo": hash_algoritmo,
+            "nivel": "simples",
+            "metodo": "senha_bcrypt",
         },
     )
+    aa.id_audit_log = audit_id
 
     await db.commit()
+    await throttle.limpar(tenant_id, usuario_id, aa.id)
     await db.refresh(aa)
     return aa
 
@@ -303,6 +375,22 @@ async def cancelar_solicitacao(
     solic.cancelada = True
     solic.dt_fim = datetime.now()
 
+    # Propaga status para os anexos ainda pendentes — impede assinar depois.
+    await db.execute(
+        update(AssinaturaAnexo)
+        .where(
+            AssinaturaAnexo.tenant_id == tenant_id,
+            AssinaturaAnexo.status == "pendente",
+            AssinaturaAnexo.id_usuario_assinatura.in_(
+                select(UsuarioAssinatura.id).where(
+                    UsuarioAssinatura.id_solicitacao_assinatura == solic.id,
+                    UsuarioAssinatura.tenant_id == tenant_id,
+                )
+            ),
+        )
+        .values(status="cancelada")
+    )
+
     await audit_log(
         db,
         tenant_id=tenant_id,
@@ -316,6 +404,188 @@ async def cancelar_solicitacao(
     await db.commit()
     await db.refresh(solic)
     return solic
+
+
+async def recusar_assinatura(
+    db: AsyncSession,
+    solicitacao_id: int,
+    *,
+    tenant_id: int,
+    usuario_id: int,
+    motivo: str,
+) -> UsuarioAssinatura:
+    """O signatário recusa sua participação na solicitação (com motivo)."""
+    solic = (
+        await db.execute(
+            select(SolicitacaoAssinatura).where(
+                SolicitacaoAssinatura.id == solicitacao_id,
+                SolicitacaoAssinatura.tenant_id == tenant_id,
+                SolicitacaoAssinatura.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if solic is None:
+        raise AssinaturaError("Solicitação não encontrada")
+    if solic.cancelada:
+        raise AssinaturaError("Solicitação cancelada")
+    if solic.realizada:
+        raise AssinaturaError("Solicitação já concluída")
+
+    ua = (
+        await db.execute(
+            select(UsuarioAssinatura).where(
+                UsuarioAssinatura.id_solicitacao_assinatura == solicitacao_id,
+                UsuarioAssinatura.id_assinante == usuario_id,
+                UsuarioAssinatura.tenant_id == tenant_id,
+                UsuarioAssinatura.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if ua is None:
+        raise AssinaturaError("Você não é signatário desta solicitação")
+    if ua.realizada or ua.status == "realizada":
+        raise AssinaturaError("Você já assinou — não é possível recusar")
+    if ua.status == "recusada":
+        raise AssinaturaError("Você já recusou esta solicitação")
+
+    now = datetime.now()
+    ua.status = "recusada"
+    ua.motivo_recusa = motivo
+    ua.dt_recusa = now
+
+    await db.execute(
+        update(AssinaturaAnexo)
+        .where(
+            AssinaturaAnexo.id_usuario_assinatura == ua.id,
+            AssinaturaAnexo.tenant_id == tenant_id,
+            AssinaturaAnexo.status == "pendente",
+        )
+        .values(status="recusada", motivo=motivo)
+    )
+
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="assinatura.recusada",
+        entidade="usuario_assinatura",
+        id_entidade=ua.id,
+        payload={
+            "id_solicitacao": solicitacao_id,
+            "id_processo": solic.id_processo,
+            "motivo": motivo,
+        },
+    )
+
+    await db.commit()
+    await db.refresh(ua)
+    return ua
+
+
+async def validar_assinatura(
+    db: AsyncSession,
+    assinatura_anexo_id: int,
+    *,
+    tenant_id: int,
+    tenant_slug: str,
+    usuario_id: int | None = None,
+) -> ValidacaoOut:
+    """Recalcula o hash do arquivo atual e compara com o registrado. Auditada
+    on-demand (esta chamada É uma validação explícita)."""
+    aa = (
+        await db.execute(
+            select(AssinaturaAnexo).where(
+                AssinaturaAnexo.id == assinatura_anexo_id,
+                AssinaturaAnexo.tenant_id == tenant_id,
+                AssinaturaAnexo.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if aa is None:
+        raise AssinaturaError("Assinatura não encontrada")
+
+    legado = aa.nivel_assinatura == "legado" or not aa.documento_hash
+    integro: bool | None
+    hash_atual: str | None = None
+    if legado:
+        integro = None
+        detalhe = "Assinatura legada — sem hash de integridade registrado."
+    else:
+        try:
+            hash_atual, _algo = await anexos_svc.hash_anexo(
+                db, aa.id_anexo, tenant_id=tenant_id, tenant_slug=tenant_slug
+            )
+        except Exception:  # noqa: BLE001
+            hash_atual = None
+        integro = hash_atual is not None and hash_atual == aa.documento_hash
+        detalhe = (
+            "Conteúdo íntegro — confere com o hash da assinatura."
+            if integro
+            else "Conteúdo divergente do hash assinado (documento alterado ou arquivo ausente)."
+        )
+
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="assinatura.validada",
+        entidade="assinatura_anexo",
+        id_entidade=aa.id,
+        payload={"integro": integro, "legado": legado},
+    )
+    await db.commit()
+
+    return ValidacaoOut(
+        id_assinatura_anexo=aa.id,
+        legado=legado,
+        integro=integro,
+        nivel=aa.nivel_assinatura,
+        status=aa.status,
+        documento_hash=aa.documento_hash,
+        hash_atual=hash_atual,
+        dt_assinatura=aa.dt_assinatura,
+        detalhe=detalhe,
+    )
+
+
+async def consultar_evidencias(
+    db: AsyncSession, assinatura_anexo_id: int, *, tenant_id: int
+) -> EvidenciasOut:
+    row = (
+        await db.execute(
+            select(AssinaturaAnexo, UsuarioAssinatura.id_assinante, Usuario.nome)
+            .join(
+                UsuarioAssinatura,
+                UsuarioAssinatura.id == AssinaturaAnexo.id_usuario_assinatura,
+            )
+            .join(Usuario, Usuario.id == UsuarioAssinatura.id_assinante, isouter=True)
+            .where(
+                AssinaturaAnexo.id == assinatura_anexo_id,
+                AssinaturaAnexo.tenant_id == tenant_id,
+                AssinaturaAnexo.excluido.is_(False),
+            )
+        )
+    ).first()
+    if row is None:
+        raise AssinaturaError("Assinatura não encontrada")
+    aa, _id_assinante, nome = row
+    return EvidenciasOut(
+        id_assinatura_anexo=aa.id,
+        id_anexo=aa.id_anexo,
+        id_processo=aa.id_processo,
+        nome_assinante=nome,
+        nivel=aa.nivel_assinatura,
+        status=aa.status,
+        metodo_autenticacao=aa.metodo_autenticacao,
+        documento_hash=aa.documento_hash,
+        hash_algoritmo=aa.hash_algoritmo,
+        documento_versao=aa.documento_versao,
+        ip_assinatura=aa.ip_assinatura,
+        user_agent_assinatura=aa.user_agent_assinatura,
+        dt_assinatura=aa.dt_assinatura,
+        id_audit_log=aa.id_audit_log,
+        evidencias=aa.evidencias,
+    )
 
 
 # ---------- Queries ----------
@@ -372,6 +642,9 @@ async def _hidratar_solicitacao(
                 anexo_descricao=desc,
                 assinado=bool(aa.assinado),
                 dt_assinatura=aa.dt_assinatura,
+                status=aa.status,
+                nivel=aa.nivel_assinatura,
+                tem_hash=bool(aa.documento_hash),
             )
             for aa, desc in anex_rows
         ]
@@ -382,6 +655,8 @@ async def _hidratar_solicitacao(
                 nome_assinante=nome_assin,
                 realizada=ua.realizada,
                 ordem=ua.ordem,
+                status=ua.status,
+                motivo_recusa=ua.motivo_recusa,
                 anexos=anexos_out,
             )
         )

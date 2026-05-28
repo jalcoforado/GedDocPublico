@@ -2203,7 +2203,20 @@ CREATE TABLE protocolos.assinatura_anexo (
     ativo boolean DEFAULT true NOT NULL,
     excluido boolean DEFAULT false NOT NULL,
     id_processo integer,
-    tenant_id integer NOT NULL
+    tenant_id integer NOT NULL,
+    documento_hash character varying(64),
+    hash_algoritmo character varying(20) DEFAULT 'sha256'::character varying,
+    documento_versao integer DEFAULT 1,
+    ip_assinatura character varying(64),
+    user_agent_assinatura character varying(512),
+    metodo_autenticacao character varying(30),
+    nivel_assinatura character varying(20) DEFAULT 'simples'::character varying NOT NULL,
+    status character varying(20) DEFAULT 'pendente'::character varying NOT NULL,
+    motivo character varying(1000),
+    evidencias jsonb,
+    id_audit_log bigint,
+    CONSTRAINT ck_assinatura_anexo_nivel CHECK (((nivel_assinatura)::text = ANY ((ARRAY['legado'::character varying, 'simples'::character varying, 'avancada'::character varying])::text[]))),
+    CONSTRAINT ck_assinatura_anexo_status CHECK (((status)::text = ANY ((ARRAY['pendente'::character varying, 'assinada'::character varying, 'recusada'::character varying, 'cancelada'::character varying])::text[])))
 );
 
 ALTER TABLE ONLY protocolos.assinatura_anexo FORCE ROW LEVEL SECURITY;
@@ -4936,7 +4949,11 @@ CREATE TABLE protocolos.usuario_assinatura (
     id_usuario_aprovacao integer,
     negada boolean DEFAULT false NOT NULL,
     nota character varying(255),
-    tenant_id integer NOT NULL
+    tenant_id integer NOT NULL,
+    status character varying(20) DEFAULT 'pendente'::character varying NOT NULL,
+    motivo_recusa character varying(1000),
+    dt_recusa timestamp without time zone,
+    CONSTRAINT ck_usuario_assinatura_status CHECK (((status)::text = ANY ((ARRAY['pendente'::character varying, 'realizada'::character varying, 'recusada'::character varying])::text[])))
 );
 
 ALTER TABLE ONLY protocolos.usuario_assinatura FORCE ROW LEVEL SECURITY;
@@ -12168,6 +12185,13 @@ CREATE INDEX ix_apensamento_principal ON protocolos.processo_apensamento USING b
 
 
 --
+-- Name: ix_assinatura_anexo_status; Type: INDEX; Schema: protocolos; Owner: -
+--
+
+CREATE INDEX ix_assinatura_anexo_status ON protocolos.assinatura_anexo USING btree (tenant_id, status);
+
+
+--
 -- Name: ix_ccd_classe_tenant_pai; Type: INDEX; Schema: protocolos; Owner: -
 --
 
@@ -13897,6 +13921,14 @@ ALTER TABLE ONLY protocolos.arquivamento
 
 ALTER TABLE ONLY protocolos.assinatura_anexo
     ADD CONSTRAINT assinatura_anexo_id_anexo_fkey FOREIGN KEY (id_anexo) REFERENCES protocolos.anexo(id) MATCH FULL;
+
+
+--
+-- Name: assinatura_anexo assinatura_anexo_id_audit_log_fkey; Type: FK CONSTRAINT; Schema: protocolos; Owner: -
+--
+
+ALTER TABLE ONLY protocolos.assinatura_anexo
+    ADD CONSTRAINT assinatura_anexo_id_audit_log_fkey FOREIGN KEY (id_audit_log) REFERENCES aprimora_py.audit_log(id);
 
 
 --

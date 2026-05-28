@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.auth.password import hash_md5
 from app.schemas.assinatura import SolicitarAssinaturaRequest
 from app.services.assinaturas import (
-    assinar,
     cancelar_solicitacao,
     solicitar_assinatura,
 )
@@ -177,37 +176,8 @@ async def test_solicitar_gera_audit(admin_engine, assinatura_env):
         assert await _conta_audit(s, tid, "assinatura.solicitada") == 1
 
 
-async def test_assinar_gera_audit(admin_engine, assinatura_env):
-    tid = assinatura_env["tenant_id"]
-    uid = assinatura_env["usuario"]
-    async with _session(admin_engine) as s:
-        await solicitar_assinatura(
-            s,
-            assinatura_env["processo"],
-            SolicitarAssinaturaRequest(
-                id_assinantes=[uid], id_anexos=[assinatura_env["anexo"]]
-            ),
-            tenant_id=tid,
-            usuario_id=uid,
-            unidade_solicitante_id=assinatura_env["unidade"],
-        )
-    # Localiza o AssinaturaAnexo gerado p/ este usuário
-    async with _session(admin_engine) as s:
-        aa_id = int(
-            (await s.execute(
-                text(
-                    "SELECT aa.id FROM protocolos.assinatura_anexo aa "
-                    "JOIN protocolos.usuario_assinatura ua "
-                    "  ON ua.id = aa.id_usuario_assinatura "
-                    "WHERE aa.tenant_id = :t AND ua.id_assinante = :u"
-                ),
-                {"t": tid, "u": uid},
-            )).scalar_one()
-        )
-    async with _session(admin_engine) as s:
-        await assinar(s, aa_id, tenant_id=tid, usuario_id=uid, senha=SENHA)
-    async with _session(admin_engine) as s:
-        assert await _conta_audit(s, tid, "assinatura.assinada") == 1
+# O evento `assinatura.assinada` (com hash + evidências) é coberto em
+# test_assinatura_v2.py, que escreve o arquivo no storage e exercita o fluxo v2.
 
 
 async def test_cancelar_gera_audit(admin_engine, assinatura_env):

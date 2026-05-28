@@ -67,6 +67,14 @@ async def desentranhar_anexo(
     if ap.desentranhado_em is not None:
         raise DesentranhamentoError("Anexo já foi desentranhado deste processo")
 
+    # Imutabilidade (Assinatura v2): anexo assinado não pode ser desentranhado.
+    from .anexos import anexo_esta_assinado
+
+    if await anexo_esta_assinado(db, ap.id_anexo, tenant_id=tenant_id):
+        raise DesentranhamentoError(
+            "Anexo possui assinatura e não pode ser desentranhado."
+        )
+
     # Carrega o anexo pra capturar descrição no audit
     anexo = (
         await db.execute(select(Anexo).where(Anexo.id == ap.id_anexo))

@@ -1,24 +1,39 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
 from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Usuario
 from ..schemas.assinatura import (
     AssinarRequest,
+    EvidenciasOut,
     PendenciaAssinatura,
+    RecusarRequest,
     SolicitacaoOut,
     SolicitarAssinaturaRequest,
+    ValidacaoOut,
 )
 from ..services.assinaturas import (
+    AssinaturaCredencialLegadaError,
     AssinaturaError,
+    AssinaturaThrottleError,
     assinar,
     cancelar_solicitacao,
+    consultar_evidencias,
     listar_do_processo,
     listar_minhas_pendentes,
+    recusar_assinatura,
     solicitar_assinatura,
+    validar_assinatura,
 )
+
+
+def _client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else None
 
 router = APIRouter(tags=["assinaturas"])
 
@@ -79,8 +94,10 @@ async def minhas_pendentes_endpoint(
 async def assinar_endpoint(
     assinatura_anexo_id: int,
     payload: AssinarRequest,
+    request: Request,
     current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ) -> SolicitacaoOut:
     try:
@@ -90,7 +107,14 @@ async def assinar_endpoint(
             tenant_id=tenant_id,
             usuario_id=current.id,
             senha=payload.senha,
+            tenant_slug=tenant_slug,
+            ip=_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
         )
+    except AssinaturaThrottleError as e:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
+    except AssinaturaCredencialLegadaError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except AssinaturaError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -140,3 +164,74 @@ async def cancelar_endpoint(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     lista = await listar_do_processo(db, solic.id_processo, tenant_id=tenant_id)
     return next(s for s in lista if s.id == solic.id)
+
+
+@router.post(
+    "/solicitacoes-assinatura/{solicitacao_id}/recusar",
+    response_model=SolicitacaoOut,
+)
+async def recusar_endpoint(
+    solicitacao_id: int,
+    payload: RecusarRequest,
+    current: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> SolicitacaoOut:
+    try:
+        await recusar_assinatura(
+            db,
+            solicitacao_id,
+            tenant_id=tenant_id,
+            usuario_id=current.id,
+            motivo=payload.motivo,
+        )
+    except AssinaturaError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    from sqlalchemy import select as _select
+    from ..models import SolicitacaoAssinatura as _Solic
+
+    processo_id = (
+        await db.execute(
+            _select(_Solic.id_processo).where(
+                _Solic.id == solicitacao_id, _Solic.tenant_id == tenant_id
+            )
+        )
+    ).scalar_one()
+    lista = await listar_do_processo(db, processo_id, tenant_id=tenant_id)
+    return next(s for s in lista if s.id == solicitacao_id)
+
+
+@router.get("/assinaturas/{assinatura_anexo_id}/validar", response_model=ValidacaoOut)
+async def validar_endpoint(
+    assinatura_anexo_id: int,
+    current: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_db),
+) -> ValidacaoOut:
+    try:
+        return await validar_assinatura(
+            db,
+            assinatura_anexo_id,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            usuario_id=current.id,
+        )
+    except AssinaturaError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get("/assinaturas/{assinatura_anexo_id}/evidencias", response_model=EvidenciasOut)
+async def evidencias_endpoint(
+    assinatura_anexo_id: int,
+    _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> EvidenciasOut:
+    try:
+        return await consultar_evidencias(
+            db, assinatura_anexo_id, tenant_id=tenant_id
+        )
+    except AssinaturaError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

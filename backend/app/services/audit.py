@@ -38,8 +38,9 @@ async def log(
     id_entidade: int | None,
     payload: dict[str, Any] | None = None,
     request: Request | None = None,
-) -> None:
-    """Cria entrada de auditoria. Não comita."""
+) -> int | None:
+    """Cria entrada de auditoria. Não comita. Retorna o id criado (ou None se
+    o flush falhar) — útil para vincular a entrada a outra entidade."""
     request_id = None
     ip = None
     if request is not None:
@@ -65,6 +66,7 @@ async def log(
     # Sem commit — caller controla
     try:
         await db.flush()  # gera id pro caso de o caller querer logar referência
+        return row.id
     except Exception:  # noqa: BLE001
         # Auditoria não deve quebrar o fluxo principal. Se o flush falhar
         # (FK, etc), loga e segue.
@@ -77,3 +79,4 @@ async def log(
                 "id_entidade": id_entidade,
             },
         )
+        return None

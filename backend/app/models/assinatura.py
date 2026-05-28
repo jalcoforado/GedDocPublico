@@ -1,6 +1,7 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
@@ -74,6 +75,10 @@ class UsuarioAssinatura(Base):
     )
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Assinatura v2 — recusa por signatário
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente")
+    motivo_recusa: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    dt_recusa: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class AssinaturaAnexo(Base):
@@ -99,4 +104,18 @@ class AssinaturaAnexo(Base):
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     id_processo: Mapped[int | None] = mapped_column(
         ForeignKey("protocolos.processo.id"), nullable=True
+    )
+    # Assinatura v2 — integridade + evidências
+    documento_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    hash_algoritmo: Mapped[str | None] = mapped_column(String(20), nullable=True, default="sha256")
+    documento_versao: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    ip_assinatura: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent_assinatura: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    metodo_autenticacao: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    nivel_assinatura: Mapped[str] = mapped_column(String(20), nullable=False, default="simples")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente")
+    motivo: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    evidencias: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    id_audit_log: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("aprimora_py.audit_log.id"), nullable=True
     )

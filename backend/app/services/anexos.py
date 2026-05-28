@@ -8,12 +8,14 @@ Nome do arquivo no disco: `{anexo_id}.{ext}` — guardado no campo `e_doc`
 (unique constraint). O vínculo `protocolos.anexo_processo` requer
 `id_movimentacao`; usamos `id_ultima_movimentacao` do processo.
 """
+import hashlib
+
 from fastapi import UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings, resolve_anexo_path, tenant_anexos_dir
-from ..models import Anexo, AnexoProcesso, Processo
+from ..models import Anexo, AnexoProcesso, AssinaturaAnexo, Processo
 
 
 class AnexoError(Exception):
@@ -156,10 +158,48 @@ async def get_anexo_path(
     return anexo, path
 
 
+async def anexo_esta_assinado(
+    db: AsyncSession, anexo_id: int, *, tenant_id: int
+) -> bool:
+    """True se há assinatura concluída (`status='assinada'`) sobre o anexo —
+    inclui o legado, cujo backfill marcou `status='assinada'` quando assinado."""
+    achou = (
+        await db.execute(
+            select(AssinaturaAnexo.id).where(
+                AssinaturaAnexo.id_anexo == anexo_id,
+                AssinaturaAnexo.tenant_id == tenant_id,
+                AssinaturaAnexo.status == "assinada",
+                AssinaturaAnexo.excluido.is_(False),
+            )
+        )
+    ).first()
+    return achou is not None
+
+
+async def hash_anexo(
+    db: AsyncSession, anexo_id: int, *, tenant_id: int, tenant_slug: str
+) -> tuple[str, str]:
+    """SHA-256 do conteúdo exato do anexo no disco. Retorna (hex, 'sha256')."""
+    _anexo, path = await get_anexo_path(
+        db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug
+    )
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest(), "sha256"
+
+
 async def delete_anexo(
     db: AsyncSession, processo_id: int, anexo_id: int, *, tenant_id: int
 ) -> None:
     """Soft delete: marca anexo + vínculo como excluído. Mantém arquivo físico."""
+    # Imutabilidade (Assinatura v2): anexo assinado não pode ser removido.
+    if await anexo_esta_assinado(db, anexo_id, tenant_id=tenant_id):
+        raise AnexoError(
+            "Anexo possui assinatura e não pode ser excluído. "
+            "Gere uma nova versão do documento se precisar alterá-lo."
+        )
     anexo = (
         await db.execute(
             select(Anexo).where(
