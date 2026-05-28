@@ -2,7 +2,6 @@
 -- PostgreSQL database dump
 --
 
-\restrict kjypyDOltFJ2bACYr72xbHmub061O7o7bJ7Ly0QRRMPCc1vsqeRzR7gdEfudg5V
 
 -- Dumped from database version 13.23 (Debian 13.23-1.pgdg13+1)
 -- Dumped by pg_dump version 13.23 (Debian 13.23-1.pgdg13+1)
@@ -14702,5 +14701,4 @@ ALTER TABLE utils.usuario_unidade_trabalho ENABLE ROW LEVEL SECURITY;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict kjypyDOltFJ2bACYr72xbHmub061O7o7bJ7Ly0QRRMPCc1vsqeRzR7gdEfudg5V
 
