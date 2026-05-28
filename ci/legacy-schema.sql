@@ -18,6 +18,13 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
+-- Name: aprimora_py; Type: SCHEMA; Schema: -; Owner: -
+--
+
+CREATE SCHEMA aprimora_py;
+
+
+--
 -- Name: protocolos; Type: SCHEMA; Schema: -; Owner: -
 --
 
@@ -1464,6 +1471,433 @@ $_$;
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: alembic_version; Type: TABLE; Schema: aprimora_py; Owner: -
+--
+
+CREATE TABLE aprimora_py.alembic_version (
+    version_num character varying(32) NOT NULL
+);
+
+
+--
+-- Name: audit_log; Type: TABLE; Schema: aprimora_py; Owner: -
+--
+
+CREATE TABLE aprimora_py.audit_log (
+    id bigint NOT NULL,
+    tenant_id integer NOT NULL,
+    id_usuario integer,
+    acao character varying(80) NOT NULL,
+    entidade character varying(60) NOT NULL,
+    id_entidade bigint,
+    payload jsonb,
+    request_id character varying(64),
+    ip character varying(64),
+    criado_em timestamp without time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY aprimora_py.audit_log FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: audit_log_id_seq; Type: SEQUENCE; Schema: aprimora_py; Owner: -
+--
+
+CREATE SEQUENCE aprimora_py.audit_log_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: audit_log_id_seq; Type: SEQUENCE OWNED BY; Schema: aprimora_py; Owner: -
+--
+
+ALTER SEQUENCE aprimora_py.audit_log_id_seq OWNED BY aprimora_py.audit_log.id;
+
+
+--
+-- Name: job; Type: TABLE; Schema: aprimora_py; Owner: -
+--
+
+CREATE TABLE aprimora_py.job (
+    id integer NOT NULL,
+    tipo character varying(60) NOT NULL,
+    descricao character varying(255),
+    status character varying(20) DEFAULT 'pendente'::character varying NOT NULL,
+    parametros jsonb,
+    resultado_path character varying(500),
+    erro text,
+    id_usuario integer NOT NULL,
+    celery_task_id character varying(64),
+    criado_em timestamp without time zone DEFAULT now() NOT NULL,
+    iniciado_em timestamp without time zone,
+    concluido_em timestamp without time zone,
+    tenant_id integer NOT NULL
+);
+
+ALTER TABLE ONLY aprimora_py.job FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: job_id_seq; Type: SEQUENCE; Schema: aprimora_py; Owner: -
+--
+
+CREATE SEQUENCE aprimora_py.job_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: job_id_seq; Type: SEQUENCE OWNED BY; Schema: aprimora_py; Owner: -
+--
+
+ALTER SEQUENCE aprimora_py.job_id_seq OWNED BY aprimora_py.job.id;
+
+
+--
+-- Name: notificacao; Type: TABLE; Schema: aprimora_py; Owner: -
+--
+
+CREATE TABLE aprimora_py.notificacao (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    id_usuario integer,
+    destinatario_email character varying(200),
+    canal character varying(20) NOT NULL,
+    tipo character varying(50) NOT NULL,
+    titulo character varying(200) NOT NULL,
+    mensagem text NOT NULL,
+    link_url character varying(500),
+    payload jsonb,
+    prioridade character varying(10) DEFAULT 'normal'::character varying NOT NULL,
+    criado_em timestamp without time zone DEFAULT now() NOT NULL,
+    lido_em timestamp without time zone,
+    enviado_em timestamp without time zone,
+    erro text,
+    CONSTRAINT notificacao_destino_chk CHECK (((id_usuario IS NOT NULL) OR (destinatario_email IS NOT NULL)))
+);
+
+ALTER TABLE ONLY aprimora_py.notificacao FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: notificacao_id_seq; Type: SEQUENCE; Schema: aprimora_py; Owner: -
+--
+
+CREATE SEQUENCE aprimora_py.notificacao_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: notificacao_id_seq; Type: SEQUENCE OWNED BY; Schema: aprimora_py; Owner: -
+--
+
+ALTER SEQUENCE aprimora_py.notificacao_id_seq OWNED BY aprimora_py.notificacao.id;
+
+
+--
+-- Name: notificacao_preferencia; Type: TABLE; Schema: aprimora_py; Owner: -
+--
+
+CREATE TABLE aprimora_py.notificacao_preferencia (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    id_usuario integer NOT NULL,
+    canal_in_app boolean DEFAULT true NOT NULL,
+    canal_email boolean DEFAULT true NOT NULL,
+    canal_whatsapp boolean DEFAULT false NOT NULL,
+    criado_em timestamp without time zone DEFAULT now() NOT NULL,
+    atualizado_em timestamp without time zone
+);
+
+ALTER TABLE ONLY aprimora_py.notificacao_preferencia FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: notificacao_preferencia_id_seq; Type: SEQUENCE; Schema: aprimora_py; Owner: -
+--
+
+CREATE SEQUENCE aprimora_py.notificacao_preferencia_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: notificacao_preferencia_id_seq; Type: SEQUENCE OWNED BY; Schema: aprimora_py; Owner: -
+--
+
+ALTER SEQUENCE aprimora_py.notificacao_preferencia_id_seq OWNED BY aprimora_py.notificacao_preferencia.id;
+
+
+--
+-- Name: nup_sequencia; Type: TABLE; Schema: aprimora_py; Owner: -
+--
+
+CREATE TABLE aprimora_py.nup_sequencia (
+    tenant_id integer NOT NULL,
+    codigo_orgao character varying(5) NOT NULL,
+    ano integer NOT NULL,
+    ultimo_sequencial integer DEFAULT 0 NOT NULL,
+    atualizado_em timestamp without time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY aprimora_py.nup_sequencia FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: tenant; Type: TABLE; Schema: aprimora_py; Owner: -
+--
+
+CREATE TABLE aprimora_py.tenant (
+    id integer NOT NULL,
+    slug character varying(50) NOT NULL,
+    nome character varying(150) NOT NULL,
+    cnpj character varying(20),
+    id_cidade integer,
+    ativo boolean DEFAULT true NOT NULL,
+    plano character varying(20) DEFAULT 'basico'::character varying NOT NULL,
+    cor_primaria character varying(7),
+    logo_url character varying(500),
+    criado_em timestamp without time zone DEFAULT now() NOT NULL,
+    atualizado_em timestamp without time zone,
+    codigo_orgao_nup character varying(5),
+    usar_nup_federal boolean DEFAULT false NOT NULL,
+    CONSTRAINT ck_tenant_codigo_orgao_nup_5_digitos CHECK (((codigo_orgao_nup IS NULL) OR ((codigo_orgao_nup)::text ~ '^[0-9]{5}$'::text)))
+);
+
+
+--
+-- Name: tenant_id_seq; Type: SEQUENCE; Schema: aprimora_py; Owner: -
+--
+
+CREATE SEQUENCE aprimora_py.tenant_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: tenant_id_seq; Type: SEQUENCE OWNED BY; Schema: aprimora_py; Owner: -
+--
+
+ALTER SEQUENCE aprimora_py.tenant_id_seq OWNED BY aprimora_py.tenant.id;
+
+
+--
+-- Name: tipo_processo_workflow; Type: TABLE; Schema: aprimora_py; Owner: -
+--
+
+CREATE TABLE aprimora_py.tipo_processo_workflow (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    id_tipo_processo integer NOT NULL,
+    slug_workflow character varying(80) NOT NULL,
+    criado_em timestamp without time zone DEFAULT now() NOT NULL,
+    atualizado_em timestamp without time zone
+);
+
+ALTER TABLE ONLY aprimora_py.tipo_processo_workflow FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: tipo_processo_workflow_id_seq; Type: SEQUENCE; Schema: aprimora_py; Owner: -
+--
+
+CREATE SEQUENCE aprimora_py.tipo_processo_workflow_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: tipo_processo_workflow_id_seq; Type: SEQUENCE OWNED BY; Schema: aprimora_py; Owner: -
+--
+
+ALTER SEQUENCE aprimora_py.tipo_processo_workflow_id_seq OWNED BY aprimora_py.tipo_processo_workflow.id;
+
+
+--
+-- Name: workflow_definition; Type: TABLE; Schema: aprimora_py; Owner: -
+--
+
+CREATE TABLE aprimora_py.workflow_definition (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    slug character varying(80) NOT NULL,
+    nome character varying(200) NOT NULL,
+    descricao text,
+    versao integer DEFAULT 1 NOT NULL,
+    ativo boolean DEFAULT true NOT NULL,
+    dsl jsonb NOT NULL,
+    criado_em timestamp without time zone DEFAULT now() NOT NULL,
+    atualizado_em timestamp without time zone,
+    id_usuario_criador integer
+);
+
+ALTER TABLE ONLY aprimora_py.workflow_definition FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: workflow_definition_id_seq; Type: SEQUENCE; Schema: aprimora_py; Owner: -
+--
+
+CREATE SEQUENCE aprimora_py.workflow_definition_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: workflow_definition_id_seq; Type: SEQUENCE OWNED BY; Schema: aprimora_py; Owner: -
+--
+
+ALTER SEQUENCE aprimora_py.workflow_definition_id_seq OWNED BY aprimora_py.workflow_definition.id;
+
+
+--
+-- Name: workflow_instance; Type: TABLE; Schema: aprimora_py; Owner: -
+--
+
+CREATE TABLE aprimora_py.workflow_instance (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    id_workflow_definition integer NOT NULL,
+    id_processo integer NOT NULL,
+    estado_atual character varying(50) NOT NULL,
+    ativa boolean DEFAULT true NOT NULL,
+    iniciada_em timestamp without time zone DEFAULT now() NOT NULL,
+    finalizada_em timestamp without time zone,
+    id_usuario_inicio integer
+);
+
+ALTER TABLE ONLY aprimora_py.workflow_instance FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: workflow_instance_id_seq; Type: SEQUENCE; Schema: aprimora_py; Owner: -
+--
+
+CREATE SEQUENCE aprimora_py.workflow_instance_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: workflow_instance_id_seq; Type: SEQUENCE OWNED BY; Schema: aprimora_py; Owner: -
+--
+
+ALTER SEQUENCE aprimora_py.workflow_instance_id_seq OWNED BY aprimora_py.workflow_instance.id;
+
+
+--
+-- Name: workflow_sla_alerta; Type: TABLE; Schema: aprimora_py; Owner: -
+--
+
+CREATE TABLE aprimora_py.workflow_sla_alerta (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    id_workflow_instance integer NOT NULL,
+    estado character varying(50) NOT NULL,
+    sla_dias integer NOT NULL,
+    dias_no_estado integer NOT NULL,
+    criado_em timestamp without time zone DEFAULT now() NOT NULL,
+    resolvido_em timestamp without time zone,
+    resolucao character varying(40),
+    notificado_em timestamp without time zone
+);
+
+ALTER TABLE ONLY aprimora_py.workflow_sla_alerta FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: workflow_sla_alerta_id_seq; Type: SEQUENCE; Schema: aprimora_py; Owner: -
+--
+
+CREATE SEQUENCE aprimora_py.workflow_sla_alerta_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: workflow_sla_alerta_id_seq; Type: SEQUENCE OWNED BY; Schema: aprimora_py; Owner: -
+--
+
+ALTER SEQUENCE aprimora_py.workflow_sla_alerta_id_seq OWNED BY aprimora_py.workflow_sla_alerta.id;
+
+
+--
+-- Name: workflow_transicao_log; Type: TABLE; Schema: aprimora_py; Owner: -
+--
+
+CREATE TABLE aprimora_py.workflow_transicao_log (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    id_workflow_instance integer NOT NULL,
+    estado_de character varying(50) NOT NULL,
+    estado_para character varying(50) NOT NULL,
+    transicao_label character varying(120) NOT NULL,
+    id_usuario integer,
+    contexto_snapshot jsonb,
+    executada_em timestamp without time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY aprimora_py.workflow_transicao_log FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: workflow_transicao_log_id_seq; Type: SEQUENCE; Schema: aprimora_py; Owner: -
+--
+
+CREATE SEQUENCE aprimora_py.workflow_transicao_log_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: workflow_transicao_log_id_seq; Type: SEQUENCE OWNED BY; Schema: aprimora_py; Owner: -
+--
+
+ALTER SEQUENCE aprimora_py.workflow_transicao_log_id_seq OWNED BY aprimora_py.workflow_transicao_log.id;
+
 
 --
 -- Name: acao; Type: TABLE; Schema: protocolos; Owner: -
@@ -6714,47 +7148,6 @@ CREATE TABLE utils.sistema (
 
 
 --
--- Name: servicosportais; Type: VIEW; Schema: utils; Owner: -
---
-
-CREATE VIEW utils.servicosportais AS
- SELECT x.id,
-    x.url,
-    x.nome,
-    x.label,
-    x.tipo,
-    x.excluido,
-    so.id_icone,
-    i.icone_url
-   FROM ((( SELECT si.id,
-            si.url,
-            si.label AS nome,
-            si.label,
-            'agendasol'::text AS tipo,
-            false AS excluido
-           FROM (agendamento.servico_informacao si
-             LEFT JOIN agendamento.servico_unidade_trabalho sut ON ((sut.id_servico = si.id_servico)))
-        UNION
-         SELECT se.id,
-            se.url,
-            se.nome,
-            se.label,
-            'extra'::text AS tipo,
-            se.excluido
-           FROM utils.servicos_extras se
-        UNION
-         SELECT sistema.id,
-            sistema.url,
-            sistema.sistema,
-            sistema.descricao AS label,
-            'acl'::text AS tipo,
-            sistema.excluido
-           FROM utils.sistema) x
-     LEFT JOIN utils.servico_origem so ON (((so.id_servico = x.id) AND (x.tipo = (so.origem)::text))))
-     LEFT JOIN utils.icone i ON ((i.id = so.id_icone)));
-
-
---
 -- Name: sistema_constante; Type: TABLE; Schema: utils; Owner: -
 --
 
@@ -7754,6 +8147,76 @@ CREATE SEQUENCE utils.zona_id_seq
 --
 
 ALTER SEQUENCE utils.zona_id_seq OWNED BY utils.zona.id;
+
+
+--
+-- Name: audit_log id; Type: DEFAULT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.audit_log ALTER COLUMN id SET DEFAULT nextval('aprimora_py.audit_log_id_seq'::regclass);
+
+
+--
+-- Name: job id; Type: DEFAULT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.job ALTER COLUMN id SET DEFAULT nextval('aprimora_py.job_id_seq'::regclass);
+
+
+--
+-- Name: notificacao id; Type: DEFAULT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.notificacao ALTER COLUMN id SET DEFAULT nextval('aprimora_py.notificacao_id_seq'::regclass);
+
+
+--
+-- Name: notificacao_preferencia id; Type: DEFAULT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.notificacao_preferencia ALTER COLUMN id SET DEFAULT nextval('aprimora_py.notificacao_preferencia_id_seq'::regclass);
+
+
+--
+-- Name: tenant id; Type: DEFAULT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.tenant ALTER COLUMN id SET DEFAULT nextval('aprimora_py.tenant_id_seq'::regclass);
+
+
+--
+-- Name: tipo_processo_workflow id; Type: DEFAULT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.tipo_processo_workflow ALTER COLUMN id SET DEFAULT nextval('aprimora_py.tipo_processo_workflow_id_seq'::regclass);
+
+
+--
+-- Name: workflow_definition id; Type: DEFAULT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_definition ALTER COLUMN id SET DEFAULT nextval('aprimora_py.workflow_definition_id_seq'::regclass);
+
+
+--
+-- Name: workflow_instance id; Type: DEFAULT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_instance ALTER COLUMN id SET DEFAULT nextval('aprimora_py.workflow_instance_id_seq'::regclass);
+
+
+--
+-- Name: workflow_sla_alerta id; Type: DEFAULT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_sla_alerta ALTER COLUMN id SET DEFAULT nextval('aprimora_py.workflow_sla_alerta_id_seq'::regclass);
+
+
+--
+-- Name: workflow_transicao_log id; Type: DEFAULT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_transicao_log ALTER COLUMN id SET DEFAULT nextval('aprimora_py.workflow_transicao_log_id_seq'::regclass);
 
 
 --
@@ -8867,6 +9330,110 @@ ALTER TABLE ONLY utils.votacao_pergunta ALTER COLUMN id SET DEFAULT nextval('uti
 --
 
 ALTER TABLE ONLY utils.zona ALTER COLUMN id SET DEFAULT nextval('utils.zona_id_seq'::regclass);
+
+
+--
+-- Name: alembic_version alembic_version_pkc; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.alembic_version
+    ADD CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num);
+
+
+--
+-- Name: audit_log audit_log_pkey; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.audit_log
+    ADD CONSTRAINT audit_log_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: job job_pkey; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.job
+    ADD CONSTRAINT job_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: notificacao notificacao_pkey; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.notificacao
+    ADD CONSTRAINT notificacao_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: notificacao_preferencia notificacao_preferencia_pkey; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.notificacao_preferencia
+    ADD CONSTRAINT notificacao_preferencia_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: nup_sequencia pk_nup_sequencia; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.nup_sequencia
+    ADD CONSTRAINT pk_nup_sequencia PRIMARY KEY (tenant_id, codigo_orgao, ano);
+
+
+--
+-- Name: tenant tenant_pkey; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.tenant
+    ADD CONSTRAINT tenant_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: tipo_processo_workflow tipo_processo_workflow_pkey; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.tipo_processo_workflow
+    ADD CONSTRAINT tipo_processo_workflow_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: tenant uq_tenant_slug; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.tenant
+    ADD CONSTRAINT uq_tenant_slug UNIQUE (slug);
+
+
+--
+-- Name: workflow_definition workflow_definition_pkey; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_definition
+    ADD CONSTRAINT workflow_definition_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: workflow_instance workflow_instance_pkey; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_instance
+    ADD CONSTRAINT workflow_instance_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: workflow_sla_alerta workflow_sla_alerta_pkey; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_sla_alerta
+    ADD CONSTRAINT workflow_sla_alerta_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: workflow_transicao_log workflow_transicao_log_pkey; Type: CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_transicao_log
+    ADD CONSTRAINT workflow_transicao_log_pkey PRIMARY KEY (id);
 
 
 --
@@ -10315,6 +10882,118 @@ ALTER TABLE ONLY utils.votacao
 
 ALTER TABLE ONLY utils.zona
     ADD CONSTRAINT zona_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ix_audit_log_entidade; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE INDEX ix_audit_log_entidade ON aprimora_py.audit_log USING btree (tenant_id, entidade, id_entidade, criado_em);
+
+
+--
+-- Name: ix_audit_log_tenant_criado; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE INDEX ix_audit_log_tenant_criado ON aprimora_py.audit_log USING btree (tenant_id, criado_em);
+
+
+--
+-- Name: ix_audit_log_usuario; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE INDEX ix_audit_log_usuario ON aprimora_py.audit_log USING btree (tenant_id, id_usuario, criado_em);
+
+
+--
+-- Name: ix_job_criado_em; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE INDEX ix_job_criado_em ON aprimora_py.job USING btree (criado_em DESC);
+
+
+--
+-- Name: ix_job_usuario_status; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE INDEX ix_job_usuario_status ON aprimora_py.job USING btree (id_usuario, status);
+
+
+--
+-- Name: ix_notificacao_tipo_criado; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE INDEX ix_notificacao_tipo_criado ON aprimora_py.notificacao USING btree (tenant_id, tipo, criado_em);
+
+
+--
+-- Name: ix_notificacao_usuario_canal_lido; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE INDEX ix_notificacao_usuario_canal_lido ON aprimora_py.notificacao USING btree (tenant_id, id_usuario, canal, lido_em);
+
+
+--
+-- Name: ix_tipo_processo_workflow_tenant_tipo; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE UNIQUE INDEX ix_tipo_processo_workflow_tenant_tipo ON aprimora_py.tipo_processo_workflow USING btree (tenant_id, id_tipo_processo);
+
+
+--
+-- Name: ix_wf_log_instance; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE INDEX ix_wf_log_instance ON aprimora_py.workflow_transicao_log USING btree (id_workflow_instance, executada_em);
+
+
+--
+-- Name: ix_workflow_definition_tenant_ativo; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE INDEX ix_workflow_definition_tenant_ativo ON aprimora_py.workflow_definition USING btree (tenant_id, ativo);
+
+
+--
+-- Name: ix_workflow_definition_tenant_slug_versao; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE UNIQUE INDEX ix_workflow_definition_tenant_slug_versao ON aprimora_py.workflow_definition USING btree (tenant_id, slug, versao);
+
+
+--
+-- Name: ix_workflow_instance_processo_ativa; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE UNIQUE INDEX ix_workflow_instance_processo_ativa ON aprimora_py.workflow_instance USING btree (id_processo) WHERE (ativa IS TRUE);
+
+
+--
+-- Name: ix_workflow_instance_tenant_processo; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE INDEX ix_workflow_instance_tenant_processo ON aprimora_py.workflow_instance USING btree (tenant_id, id_processo);
+
+
+--
+-- Name: ix_workflow_sla_alerta_tenant_resolvido; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE INDEX ix_workflow_sla_alerta_tenant_resolvido ON aprimora_py.workflow_sla_alerta USING btree (tenant_id, resolvido_em);
+
+
+--
+-- Name: uq_notificacao_preferencia_tenant_usuario; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_notificacao_preferencia_tenant_usuario ON aprimora_py.notificacao_preferencia USING btree (tenant_id, id_usuario);
+
+
+--
+-- Name: uq_workflow_sla_alerta_instance_estado_ativo; Type: INDEX; Schema: aprimora_py; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_workflow_sla_alerta_instance_estado_ativo ON aprimora_py.workflow_sla_alerta USING btree (id_workflow_instance, estado) WHERE (resolvido_em IS NULL);
 
 
 --
@@ -12922,6 +13601,190 @@ CREATE TRIGGER trigger_delete_pessoa BEFORE UPDATE ON utils.pessoa FOR EACH ROW 
 
 
 --
+-- Name: audit_log audit_log_id_usuario_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.audit_log
+    ADD CONSTRAINT audit_log_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES utils.usuario(id);
+
+
+--
+-- Name: audit_log audit_log_tenant_id_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.audit_log
+    ADD CONSTRAINT audit_log_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id);
+
+
+--
+-- Name: job fk_job_tenant_id; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.job
+    ADD CONSTRAINT fk_job_tenant_id FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id);
+
+
+--
+-- Name: job job_id_usuario_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.job
+    ADD CONSTRAINT job_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES utils.usuario(id);
+
+
+--
+-- Name: notificacao notificacao_id_usuario_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.notificacao
+    ADD CONSTRAINT notificacao_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES utils.usuario(id);
+
+
+--
+-- Name: notificacao_preferencia notificacao_preferencia_id_usuario_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.notificacao_preferencia
+    ADD CONSTRAINT notificacao_preferencia_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES utils.usuario(id);
+
+
+--
+-- Name: notificacao_preferencia notificacao_preferencia_tenant_id_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.notificacao_preferencia
+    ADD CONSTRAINT notificacao_preferencia_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id);
+
+
+--
+-- Name: notificacao notificacao_tenant_id_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.notificacao
+    ADD CONSTRAINT notificacao_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id);
+
+
+--
+-- Name: nup_sequencia nup_sequencia_tenant_id_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.nup_sequencia
+    ADD CONSTRAINT nup_sequencia_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id);
+
+
+--
+-- Name: tenant tenant_id_cidade_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.tenant
+    ADD CONSTRAINT tenant_id_cidade_fkey FOREIGN KEY (id_cidade) REFERENCES utils.cidade(id);
+
+
+--
+-- Name: tipo_processo_workflow tipo_processo_workflow_id_tipo_processo_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.tipo_processo_workflow
+    ADD CONSTRAINT tipo_processo_workflow_id_tipo_processo_fkey FOREIGN KEY (id_tipo_processo) REFERENCES protocolos.tipo_processo(id);
+
+
+--
+-- Name: tipo_processo_workflow tipo_processo_workflow_tenant_id_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.tipo_processo_workflow
+    ADD CONSTRAINT tipo_processo_workflow_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id);
+
+
+--
+-- Name: workflow_definition workflow_definition_id_usuario_criador_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_definition
+    ADD CONSTRAINT workflow_definition_id_usuario_criador_fkey FOREIGN KEY (id_usuario_criador) REFERENCES utils.usuario(id);
+
+
+--
+-- Name: workflow_definition workflow_definition_tenant_id_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_definition
+    ADD CONSTRAINT workflow_definition_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id);
+
+
+--
+-- Name: workflow_instance workflow_instance_id_processo_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_instance
+    ADD CONSTRAINT workflow_instance_id_processo_fkey FOREIGN KEY (id_processo) REFERENCES protocolos.processo(id);
+
+
+--
+-- Name: workflow_instance workflow_instance_id_usuario_inicio_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_instance
+    ADD CONSTRAINT workflow_instance_id_usuario_inicio_fkey FOREIGN KEY (id_usuario_inicio) REFERENCES utils.usuario(id);
+
+
+--
+-- Name: workflow_instance workflow_instance_id_workflow_definition_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_instance
+    ADD CONSTRAINT workflow_instance_id_workflow_definition_fkey FOREIGN KEY (id_workflow_definition) REFERENCES aprimora_py.workflow_definition(id);
+
+
+--
+-- Name: workflow_instance workflow_instance_tenant_id_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_instance
+    ADD CONSTRAINT workflow_instance_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id);
+
+
+--
+-- Name: workflow_sla_alerta workflow_sla_alerta_id_workflow_instance_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_sla_alerta
+    ADD CONSTRAINT workflow_sla_alerta_id_workflow_instance_fkey FOREIGN KEY (id_workflow_instance) REFERENCES aprimora_py.workflow_instance(id);
+
+
+--
+-- Name: workflow_sla_alerta workflow_sla_alerta_tenant_id_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_sla_alerta
+    ADD CONSTRAINT workflow_sla_alerta_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id);
+
+
+--
+-- Name: workflow_transicao_log workflow_transicao_log_id_usuario_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_transicao_log
+    ADD CONSTRAINT workflow_transicao_log_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES utils.usuario(id);
+
+
+--
+-- Name: workflow_transicao_log workflow_transicao_log_id_workflow_instance_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_transicao_log
+    ADD CONSTRAINT workflow_transicao_log_id_workflow_instance_fkey FOREIGN KEY (id_workflow_instance) REFERENCES aprimora_py.workflow_instance(id);
+
+
+--
+-- Name: workflow_transicao_log workflow_transicao_log_tenant_id_fkey; Type: FK CONSTRAINT; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE ONLY aprimora_py.workflow_transicao_log
+    ADD CONSTRAINT workflow_transicao_log_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id);
+
+
+--
 -- Name: acoes_privadas_movimentacao acoes_privadas_movimentacao_id_acao_fkey; Type: FK CONSTRAINT; Schema: protocolos; Owner: -
 --
 
@@ -14096,6 +14959,206 @@ ALTER TABLE ONLY utils.transacao_externa
 ALTER TABLE ONLY utils.unidade_trabalho
     ADD CONSTRAINT unidade_trabalho_id_unidade_pai_fkey FOREIGN KEY (id_unidade_pai) REFERENCES utils.unidade_trabalho(id);
 
+
+--
+-- Name: audit_log; Type: ROW SECURITY; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE aprimora_py.audit_log ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: job; Type: ROW SECURITY; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE aprimora_py.job ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: notificacao; Type: ROW SECURITY; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE aprimora_py.notificacao ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: notificacao_preferencia; Type: ROW SECURITY; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE aprimora_py.notificacao_preferencia ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: nup_sequencia; Type: ROW SECURITY; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE aprimora_py.nup_sequencia ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: audit_log tenant_isolation_insert; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_insert ON aprimora_py.audit_log FOR INSERT WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: job tenant_isolation_modify; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_modify ON aprimora_py.job USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: notificacao tenant_isolation_modify; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_modify ON aprimora_py.notificacao USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: notificacao_preferencia tenant_isolation_modify; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_modify ON aprimora_py.notificacao_preferencia USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: nup_sequencia tenant_isolation_modify; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_modify ON aprimora_py.nup_sequencia USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: tipo_processo_workflow tenant_isolation_modify; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_modify ON aprimora_py.tipo_processo_workflow USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: workflow_definition tenant_isolation_modify; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_modify ON aprimora_py.workflow_definition USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: workflow_instance tenant_isolation_modify; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_modify ON aprimora_py.workflow_instance USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: workflow_sla_alerta tenant_isolation_modify; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_modify ON aprimora_py.workflow_sla_alerta USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: workflow_transicao_log tenant_isolation_modify; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_modify ON aprimora_py.workflow_transicao_log USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: audit_log tenant_isolation_select; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_select ON aprimora_py.audit_log FOR SELECT USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: job tenant_isolation_select; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_select ON aprimora_py.job FOR SELECT USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: notificacao tenant_isolation_select; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_select ON aprimora_py.notificacao FOR SELECT USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: notificacao_preferencia tenant_isolation_select; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_select ON aprimora_py.notificacao_preferencia FOR SELECT USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: nup_sequencia tenant_isolation_select; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_select ON aprimora_py.nup_sequencia FOR SELECT USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: tipo_processo_workflow tenant_isolation_select; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_select ON aprimora_py.tipo_processo_workflow FOR SELECT USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: workflow_definition tenant_isolation_select; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_select ON aprimora_py.workflow_definition FOR SELECT USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: workflow_instance tenant_isolation_select; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_select ON aprimora_py.workflow_instance FOR SELECT USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: workflow_sla_alerta tenant_isolation_select; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_select ON aprimora_py.workflow_sla_alerta FOR SELECT USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: workflow_transicao_log tenant_isolation_select; Type: POLICY; Schema: aprimora_py; Owner: -
+--
+
+CREATE POLICY tenant_isolation_select ON aprimora_py.workflow_transicao_log FOR SELECT USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::integer));
+
+
+--
+-- Name: tipo_processo_workflow; Type: ROW SECURITY; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE aprimora_py.tipo_processo_workflow ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: workflow_definition; Type: ROW SECURITY; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE aprimora_py.workflow_definition ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: workflow_instance; Type: ROW SECURITY; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE aprimora_py.workflow_instance ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: workflow_sla_alerta; Type: ROW SECURITY; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE aprimora_py.workflow_sla_alerta ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: workflow_transicao_log; Type: ROW SECURITY; Schema: aprimora_py; Owner: -
+--
+
+ALTER TABLE aprimora_py.workflow_transicao_log ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: anexo; Type: ROW SECURITY; Schema: protocolos; Owner: -

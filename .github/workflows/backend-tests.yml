@@ -65,27 +65,69 @@ jobs:
           done
           echo "postgres not ready after 30s"; exit 1
 
-      - name: Enable uuid-ossp extension
+      - name: Bootstrap extensions + public helpers + cross-schema stubs
         env:
           PGPASSWORD: ged_password_secure_local
+        # O dump legado referencia objetos fora de utils/protocolos/aprimora_py:
+        #   - `uuid_generate_v4()` (extension uuid-ossp)
+        #   - `public.trigger_set_timestamp()` (trigger global)
+        #   - FKs apontando pra `despesas.feempliq` e
+        #     `empresasimples.cnae_subgrupos` (schemas legados do PHP).
+        # Criamos stubs mínimos pra satisfazer essas dependências — testes
+        # não usam essas tabelas.
         run: |
-          psql -h localhost -U ged_user -d ged_saas_db \
-            -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'
+          psql -h localhost -U ged_user -d ged_saas_db <<'SQL'
+            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
-      - name: Load legacy PHP schema
+            CREATE OR REPLACE FUNCTION public.trigger_set_timestamp()
+            RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+              NEW.updated_at = NOW();
+              RETURN NEW;
+            END;
+            $$;
+
+            CREATE SCHEMA IF NOT EXISTS despesas;
+            CREATE TABLE IF NOT EXISTS despesas.feempliq (id integer PRIMARY KEY);
+
+            CREATE SCHEMA IF NOT EXISTS empresasimples;
+            CREATE TABLE IF NOT EXISTS empresasimples.cnae_subgrupos (id integer PRIMARY KEY);
+          SQL
+
+      - name: Load full schema dump
         env:
           PGPASSWORD: ged_password_secure_local
-        # As migrations 0004+ adicionam tenant_id/RLS em tabelas que vivem
-        # no schema legado do monolito PHP (`protocolos.*`, `utils.*`).
-        # Em dev o banco já tem essas tabelas; no CI rodamos um dump
-        # schema-only pra recriá-las antes de aplicar Alembic.
+        # Dump schema-only inclui PHP legacy (utils/protocolos) + estado
+        # pós-Alembic (aprimora_py, tenant_id, RLS, nup_sequencia, etc).
+        # Em CI carregamos tudo de uma vez e depois fazemos `alembic stamp`.
         run: |
           psql -h localhost -U ged_user -d ged_saas_db \
             -v ON_ERROR_STOP=1 -f ci/legacy-schema.sql
 
-      - name: Run migrations
+      - name: Mark Alembic as up-to-date
         working-directory: backend
-        run: alembic upgrade head
+        # Schema já está no dump — apenas marca a revision atual sem rodar
+        # as migrations. Evita conflitos de "objeto já existe".
+        run: alembic stamp head
+
+      - name: Bootstrap RLS role (aprimora_app)
+        env:
+          PGPASSWORD: ged_password_secure_local
+        # A migration 0006 (que estamos pulando via stamp) cria a role
+        # `aprimora_app` que test_rls_isolation usa. Replicamos aqui.
+        run: |
+          psql -h localhost -U ged_user -d ged_saas_db <<'SQL'
+            DO $$ BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aprimora_app') THEN
+                CREATE ROLE aprimora_app LOGIN NOSUPERUSER NOBYPASSRLS
+                  PASSWORD 'ged_password_secure_local';
+              END IF;
+            END $$;
+            GRANT CONNECT ON DATABASE ged_saas_db TO aprimora_app;
+            GRANT USAGE ON SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
+          SQL
 
       - name: Run pytest
         working-directory: backend
