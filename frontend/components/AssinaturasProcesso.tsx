@@ -14,10 +14,15 @@ import { useToast } from "@/components/ui/toast";
 import {
   api,
   assinaturaComprovanteUrl,
+  type AssinanteStatus,
   type ProcessoDetail,
   type SolicitacaoAssinatura,
-  type ValidacaoAssinatura,
 } from "@/lib/api";
+import {
+  statusAssinante,
+  statusSolicitacao,
+  validacaoMensagem,
+} from "@/lib/assinatura";
 
 function fmtDt(s: string | null | undefined) {
   if (!s) return "—";
@@ -96,21 +101,32 @@ export function AssinaturasProcesso({ processo }: { processo: ProcessoDetail }) 
   );
 }
 
+const INTENT_ICON = {
+  success: CheckCircle2,
+  danger: XCircle,
+  warning: Clock,
+} as const;
+
 function statusBadge(s: SolicitacaoAssinatura) {
-  if (s.cancelada) return <Badge intent="danger" icon={XCircle}>Cancelada</Badge>;
-  if (s.realizada) return <Badge intent="success" icon={CheckCircle2}>Concluída</Badge>;
-  return <Badge intent="warning" icon={Clock}>Em andamento</Badge>;
+  const { label, intent } = statusSolicitacao(s);
+  return <Badge intent={intent} icon={INTENT_ICON[intent]}>{label}</Badge>;
 }
 
-function ValidarAcao({ aaId }: { aaId: number }) {
+function assinanteBadge(a: AssinanteStatus) {
+  const { label, intent } = statusAssinante(a);
+  return <Badge intent={intent} icon={INTENT_ICON[intent]}>{label}</Badge>;
+}
+
+export function ValidarAcao({ aaId }: { aaId: number }) {
   const toast = useToast();
-  const [res, setRes] = useState<ValidacaoAssinatura | null>(null);
+  const [res, setRes] = useState<{ texto: string; ok: boolean | null } | null>(null);
   const m = useMutation({
     mutationFn: () => api.assinaturas.validar(aaId),
     onSuccess: (v) => {
-      setRes(v);
-      if (v.integro === true) toast.success("Assinatura íntegra.");
-      else if (v.integro === false) toast.error("Documento alterado após a assinatura.");
+      const msg = validacaoMensagem(v);
+      setRes(msg);
+      if (msg.ok === true) toast.success(msg.texto);
+      else if (msg.ok === false) toast.error(msg.texto);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -135,12 +151,12 @@ function ValidarAcao({ aaId }: { aaId: number }) {
       {res && (
         <span
           className={
-            res.integro === false
+            res.ok === false
               ? "text-danger-soft-foreground"
               : "text-muted-foreground"
           }
         >
-          {res.detalhe}
+          {res.texto}
         </span>
       )}
     </span>
@@ -178,13 +194,7 @@ function SolicitacaoCard({
           <div key={a.id_usuario_assinatura} className="rounded bg-muted p-2">
             <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
               <b className="text-foreground">{a.nome_assinante ?? `Usuário ${a.id_assinante}`}</b>
-              {a.status === "recusada" ? (
-                <Badge intent="danger" icon={XCircle}>Recusou</Badge>
-              ) : a.realizada ? (
-                <Badge intent="success" icon={CheckCircle2}>Assinou tudo</Badge>
-              ) : (
-                <Badge intent="warning" icon={Clock}>Pendente</Badge>
-              )}
+              {assinanteBadge(a)}
               <span className="text-muted-foreground">· ordem {a.ordem}</span>
               {a.status === "recusada" && a.motivo_recusa && (
                 <span className="text-danger-soft-foreground">· motivo: {a.motivo_recusa}</span>

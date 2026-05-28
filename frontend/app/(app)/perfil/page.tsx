@@ -3,6 +3,7 @@
 import { Bell } from "lucide-react";
 import Link from "next/link";
 
+import { TrocarSenhaCard } from "@/components/TrocarSenhaCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth";
 
@@ -54,6 +55,8 @@ export default function PerfilPage() {
           </Link>
         </CardContent>
       </Card>
+
+      <TrocarSenhaCard />
 
       {perms && (
         <Card>

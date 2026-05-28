@@ -21,3 +21,8 @@ class MeResponse(BaseModel):
     email: str
     cargo: str | None = None
     id_unidade_trabalho: int | None = None
+
+
+class AlterarSenhaRequest(BaseModel):
+    senha_atual: str = Field(min_length=1, max_length=255)
+    nova_senha: str = Field(min_length=6, max_length=255)

@@ -1,0 +1,33 @@
+name: Frontend tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: frontend-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vitest:
+    name: vitest (Node 20)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # React 19 ainda tem ranges de peer-deps em transição nas libs de teste,
+      # por isso --legacy-peer-deps (mesma flag usada no dev local em container).
+      - name: Install deps
+        working-directory: frontend
+        run: npm install --legacy-peer-deps
+
+      - name: Run vitest
+        working-directory: frontend
+        run: npm test

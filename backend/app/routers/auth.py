@@ -8,7 +8,13 @@ from ..auth.password import hash_password, verify_password
 from ..config import get_settings
 from ..database import get_db
 from ..models import Usuario
-from ..schemas.auth import LoginRequest, LoginResponse, MeResponse
+from ..schemas.auth import (
+    AlterarSenhaRequest,
+    LoginRequest,
+    LoginResponse,
+    MeResponse,
+)
+from ..services.conta import ContaError, alterar_senha
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 _settings = get_settings()
@@ -91,3 +97,22 @@ async def me(user: Usuario = Depends(get_current_user)) -> MeResponse:
         cargo=user.cargo,
         id_unidade_trabalho=user.id_unidade_trabalho,
     )
+
+
+@router.post("/alterar-senha", status_code=status.HTTP_204_NO_CONTENT)
+async def alterar_senha_endpoint(
+    payload: AlterarSenhaRequest,
+    user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Troca self-service de senha. Grava só bcrypt — desbloqueia a assinatura."""
+    try:
+        await alterar_senha(
+            db,
+            usuario=user,
+            senha_atual=payload.senha_atual,
+            nova_senha=payload.nova_senha,
+        )
+    except ContaError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -859,6 +859,11 @@ export const api = {
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   me: (token?: string) => request<MeResponse>("/auth/me", {}, token),
+  alterarSenha: (senha_atual: string, nova_senha: string) =>
+    request<void>("/auth/alterar-senha", {
+      method: "POST",
+      body: JSON.stringify({ senha_atual, nova_senha }),
+    }),
   // Fase 15 — branding público (não exige login)
   branding: () => request<BrandingResponse>("/branding/me"),
   permissoes: () => request<PermissaoMeResponse>("/permissoes/me"),
