@@ -16,6 +16,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.password import verify_md5
+from .audit import log as audit_log
 from ..models import (
     Anexo,
     AnexoProcesso,
@@ -149,6 +150,20 @@ async def solicitar_assinatura(
                 )
             )
 
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="assinatura.solicitada",
+        entidade="solicitacao_assinatura",
+        id_entidade=solicitacao.id,
+        payload={
+            "id_processo": processo_id,
+            "id_assinantes": list(payload.id_assinantes),
+            "id_anexos": list(payload.id_anexos),
+        },
+    )
+
     await db.commit()
     await db.refresh(solicitacao)
     return solicitacao
@@ -240,6 +255,21 @@ async def assinar(
             solic.realizada = True
             solic.dt_fim = datetime.now()
 
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="assinatura.assinada",
+        entidade="assinatura_anexo",
+        id_entidade=aa.id,
+        payload={
+            "id_processo": aa.id_processo,
+            "id_anexo": aa.id_anexo,
+            "id_usuario_assinatura": aa.id_usuario_assinatura,
+            "dt_assinatura": aa.dt_assinatura.isoformat() if aa.dt_assinatura else None,
+        },
+    )
+
     await db.commit()
     await db.refresh(aa)
     return aa
@@ -272,6 +302,17 @@ async def cancelar_solicitacao(
 
     solic.cancelada = True
     solic.dt_fim = datetime.now()
+
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="assinatura.cancelada",
+        entidade="solicitacao_assinatura",
+        id_entidade=solic.id,
+        payload={"id_processo": solic.id_processo},
+    )
+
     await db.commit()
     await db.refresh(solic)
     return solic

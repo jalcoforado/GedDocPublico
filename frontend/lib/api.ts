@@ -870,6 +870,30 @@ export const api = {
   tiposUnidade: () => request<TipoUnidade[]>("/catalogo/tipos-unidade"),
   prioridades: () => request<Prioridade[]>("/catalogo/prioridades"),
 
+  assinaturas: {
+    minhasPendentes: () =>
+      request<PendenciaAssinatura[]>("/solicitacoes-assinatura/me/pendentes"),
+    listarDoProcesso: (processoId: number) =>
+      request<SolicitacaoAssinatura[]>(
+        `/processos/${processoId}/solicitacoes-assinatura`,
+      ),
+    solicitar: (processoId: number, body: SolicitarAssinaturaInput) =>
+      request<SolicitacaoAssinatura>(
+        `/processos/${processoId}/solicitacoes-assinatura`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    cancelar: (solicitacaoId: number) =>
+      request<SolicitacaoAssinatura>(
+        `/solicitacoes-assinatura/${solicitacaoId}/cancelar`,
+        { method: "POST" },
+      ),
+    assinar: (assinaturaAnexoId: number, senha: string) =>
+      request<SolicitacaoAssinatura>(
+        `/assinaturas/${assinaturaAnexoId}/assinar`,
+        { method: "POST", body: JSON.stringify({ senha }) },
+      ),
+  },
+
   usuarios: {
     list: (params?: { page?: number; page_size?: number; q?: string }) =>
       request<Paginated<Usuario>>(`/usuarios${qs(params ?? {})}`),
@@ -1427,6 +1451,43 @@ export interface PendenciaAssinatura {
   numero_processo: string;
   nome_solicitante: string;
   dt_inicio: string;
+}
+
+// Solicitação de assinatura (espelha SolicitacaoOut do backend)
+export interface AssinaturaAnexoStatus {
+  id: number;
+  id_anexo: number;
+  anexo_descricao: string | null;
+  assinado: boolean;
+  dt_assinatura: string | null;
+}
+
+export interface AssinanteStatus {
+  id_usuario_assinatura: number;
+  id_assinante: number;
+  nome_assinante: string | null;
+  realizada: boolean;
+  ordem: number;
+  anexos: AssinaturaAnexoStatus[];
+}
+
+export interface SolicitacaoAssinatura {
+  id: number;
+  id_processo: number;
+  numero_processo: string | null;
+  id_solicitante: number;
+  nome_solicitante: string | null;
+  realizada: boolean;
+  cancelada: boolean;
+  dt_inicio: string;
+  dt_fim: string | null;
+  assinantes: AssinanteStatus[];
+}
+
+export interface SolicitarAssinaturaInput {
+  id_assinantes: number[];
+  id_anexos: number[];
+  id_tipo_assinatura?: number | null;
 }
 
 export const assinaturasApi = {

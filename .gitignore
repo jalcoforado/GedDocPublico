@@ -13,6 +13,7 @@ node_modules/
 .next-dev/
 out/
 dist/
+*.tsbuildinfo
 
 # IDE
 .vscode/
@@ -35,3 +36,9 @@ keys/*.key
 
 # Reports / outputs locais
 /jobs/
+
+# Celery beat schedule (runtime, pickled — nunca versionar)
+backend/celerybeat-schedule
+
+# Relatórios e2e gerados (Playwright)
+tests-e2e/report/
