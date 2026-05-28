@@ -78,8 +78,14 @@ async def list_processos(
     apenas_ativos: bool = False,
     desde: datetime | None = None,
     ate: datetime | None = None,
+    niveis_permitidos: list[str] | None = None,
 ) -> tuple[list[ProcessoListItem], int]:
     base = _base_select(tenant_id)
+
+    # Sigilo gradual — None = sem restrição (super-usuário); senão filtra pelos
+    # níveis que a credencial do servidor alcança.
+    if niveis_permitidos is not None:
+        base = base.where(Processo.nivel_sigilo.in_(niveis_permitidos))
 
     if q:
         like = f"%{q.lower()}%"
@@ -135,6 +141,7 @@ def _row_to_list(r) -> ProcessoListItem:
         data_hora_abertura=p.data_hora_abertura,
         ativo=p.ativo,
         publico=p.publico,
+        nivel_sigilo=p.nivel_sigilo,
         externo=p.externo,
         assunto=r.assunto_nome,
         tipo_processo=r.tipo_processo_nome,
@@ -146,11 +153,18 @@ def _row_to_list(r) -> ProcessoListItem:
 
 
 async def get_processo_detail(
-    db: AsyncSession, processo_id: int, *, tenant_id: int
+    db: AsyncSession,
+    processo_id: int,
+    *,
+    tenant_id: int,
+    niveis_permitidos: list[str] | None = None,
 ) -> ProcessoDetail | None:
-    row = (
-        await db.execute(_base_select(tenant_id).where(Processo.id == processo_id))
-    ).first()
+    stmt = _base_select(tenant_id).where(Processo.id == processo_id)
+    # Sigilo gradual — fora dos níveis acessíveis retorna None (404), sem
+    # vazar a existência do processo sigiloso.
+    if niveis_permitidos is not None:
+        stmt = stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
+    row = (await db.execute(stmt)).first()
     if row is None:
         return None
     p: Processo = row[0]
@@ -165,6 +179,11 @@ async def get_processo_detail(
         virtual=p.virtual,
         migrado=p.migrado,
         id_processo_pai=p.id_processo_pai,
+        sigilo_fundamento_legal=p.sigilo_fundamento_legal,
+        sigilo_autoridade=p.sigilo_autoridade,
+        sigilo_prazo_anos=p.sigilo_prazo_anos,
+        sigilo_data_classificacao=p.sigilo_data_classificacao,
+        sigilo_data_desclassificacao=p.sigilo_data_desclassificacao,
         movimentacoes=movimentacoes,
         anexos=anexos,
     )

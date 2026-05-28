@@ -1,6 +1,16 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    Computed,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
@@ -54,7 +64,26 @@ class Processo(Base):
         ForeignKey("protocolos.manifestante.id"), nullable=False
     )
     id_processo_pai: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    publico: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Sigilo gradual (LAI). `nivel_sigilo` é a fonte da verdade; `publico` é
+    # coluna gerada (= nivel == 'ostensivo'), read-only via ORM.
+    nivel_sigilo: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="ostensivo"
+    )
+    publico: Mapped[bool] = mapped_column(
+        Boolean, Computed("nivel_sigilo = 'ostensivo'", persisted=True), nullable=False
+    )
+    sigilo_fundamento_legal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sigilo_autoridade: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    sigilo_prazo_anos: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    sigilo_data_classificacao: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    sigilo_data_desclassificacao: Mapped[date | None] = mapped_column(
+        Date, nullable=True
+    )
+    sigilo_classificado_por: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
     migrado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     externo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     id_local_atual: Mapped[int | None] = mapped_column(Integer, nullable=True)

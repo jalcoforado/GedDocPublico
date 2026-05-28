@@ -16,7 +16,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import { api, type ProcessoListFilters } from "@/lib/api";
+import { api, NIVEL_SIGILO_LABEL, type ProcessoListFilters } from "@/lib/api";
 
 const PAGE_SIZE = 20;
 
@@ -253,7 +253,7 @@ export default function ProcessosPage() {
                   )}
                   {!p.publico && (
                     <Badge intent="warning" icon={Lock}>
-                      Sigiloso
+                      {NIVEL_SIGILO_LABEL[p.nivel_sigilo]}
                     </Badge>
                   )}
                 </div>

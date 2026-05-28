@@ -13,7 +13,21 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { api, type UsuarioDetail, type UsuarioInput } from "@/lib/api";
+import {
+  api,
+  NIVEL_SIGILO_LABEL,
+  type NivelSigilo,
+  type UsuarioDetail,
+  type UsuarioInput,
+} from "@/lib/api";
+
+const NIVEIS_SIGILO: NivelSigilo[] = [
+  "ostensivo",
+  "interno",
+  "reservado",
+  "secreto",
+  "ultrassecreto",
+];
 import { useAuth } from "@/lib/auth";
 
 const EMPTY_FORM: UsuarioInput = {
@@ -28,7 +42,8 @@ const EMPTY_FORM: UsuarioInput = {
 };
 
 export default function UsuariosPage() {
-  const { can } = useAuth();
+  const { can, perms } = useAuth();
+  const isSuper = perms?.is_super_usuario ?? false;
   const qc = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
@@ -95,6 +110,7 @@ export default function UsuariosPage() {
       ativo: detail.ativo,
       senha: "",
       grupos: detail.grupos,
+      nivel_acesso_sigilo: detail.nivel_acesso_sigilo,
     });
     setDialogOpen(true);
   }
@@ -111,6 +127,8 @@ export default function UsuariosPage() {
     if (editing) {
       const payload: Partial<UsuarioInput> = { ...form };
       if (!payload.senha) delete payload.senha;
+      // Só super-usuário altera credencial de sigilo (backend bloqueia com 403).
+      if (!isSuper) delete payload.nivel_acesso_sigilo;
       updateM.mutate({ id: editing.id, data: payload });
     } else {
       createM.mutate(form);
@@ -305,6 +323,30 @@ export default function UsuariosPage() {
               ))}
             </Select>
           </div>
+          {editing && isSuper && (
+            <div>
+              <Label htmlFor="nivel-acesso">Credencial de sigilo</Label>
+              <Select
+                id="nivel-acesso"
+                value={form.nivel_acesso_sigilo ?? "interno"}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    nivel_acesso_sigilo: e.target.value as NivelSigilo,
+                  })
+                }
+              >
+                {NIVEIS_SIGILO.map((n) => (
+                  <option key={n} value={n}>
+                    {NIVEL_SIGILO_LABEL[n]}
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-foreground-muted">
+                Define até qual grau de sigilo este servidor pode ver.
+              </p>
+            </div>
+          )}
           <div>
             <Label htmlFor="senha" required={!editing}>
               {editing ? "Nova senha (vazio = manter)" : "Senha"}

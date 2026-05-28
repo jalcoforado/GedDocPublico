@@ -394,7 +394,7 @@ async def abrir_processo_cidadao(
         observacao=payload.observacao,
         corpo=payload.corpo,
         numero_processo=numero_processo,
-        publico=True,
+        nivel_sigilo="ostensivo",
         externo=True,
         virtual=True,
         data_hora_abertura=now,

@@ -162,7 +162,7 @@ async def create_usuario(
 async def update_usuario(
     usuario_id: int,
     payload: UsuarioUpdate,
-    _: Usuario = Depends(require_permission("usuario", "atualizar")),
+    current: Usuario = Depends(require_permission("usuario", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> UsuarioDetail:
@@ -175,6 +175,23 @@ async def update_usuario(
         data["senha_bcrypt"] = hash_password(plain)
     elif "senha" in data:
         data.pop("senha")
+
+    # Sigilo gradual — só super-usuário concede/altera credencial de acesso.
+    if "nivel_acesso_sigilo" in data:
+        from ..services.permissoes import load_permissions
+        from ..services.sigilo import is_nivel_valido
+
+        perms = await load_permissions(db, current.id, tenant_id=tenant_id)
+        if not perms.is_super_usuario:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Apenas super-usuário pode alterar a credencial de sigilo",
+            )
+        if not is_nivel_valido(data["nivel_acesso_sigilo"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Nível de credencial inválido",
+            )
 
     for k, v in data.items():
         setattr(user, k, v)

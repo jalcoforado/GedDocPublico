@@ -44,8 +44,10 @@ import {
   etiquetaUnicaUrl,
   processoCapaUrl,
   processoCompletoUrl,
+  NIVEL_SIGILO_LABEL,
   type MovimentacaoItem,
 } from "@/lib/api";
+import { ClassificarSigiloDialog } from "@/components/ClassificarSigiloDialog";
 
 function fmtDateTime(s: string | null | undefined) {
   if (!s) return "—";
@@ -281,7 +283,7 @@ export default function ProcessoDetailPage() {
               )}
               {!p.publico && (
                 <Badge intent="warning" icon={Lock}>
-                  Sigiloso
+                  {NIVEL_SIGILO_LABEL[p.nivel_sigilo]}
                 </Badge>
               )}
               {p.externo && (
@@ -359,6 +361,7 @@ export default function ProcessoDetailPage() {
               >
                 {gerarBg.isPending ? "Enfileirando..." : "Em fila"}
               </Button>
+              <ClassificarSigiloDialog processo={p} onClassified={() => q.refetch()} />
             </div>
           </div>
         }

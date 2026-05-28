@@ -37,7 +37,10 @@ class ProtocoloBalcaoRequest(BaseModel):
     id_unidade_proprietaria: int
     observacao: str | None = Field(default=None, max_length=2000)
     numero_origem: str | None = Field(default=None, max_length=255)
+    # Sigilo na abertura: ostensivo (público) ou interno. Sigilo legal exige
+    # classificação posterior com TCI. `publico` mantido por compat.
     publico: bool = True
+    nivel_sigilo: Literal["ostensivo", "interno"] = "ostensivo"
     # Quando o documento chegou (default = agora). Útil quando protocolando
     # algo que foi entregue fora do horário.
     data_recepcao: datetime | None = None

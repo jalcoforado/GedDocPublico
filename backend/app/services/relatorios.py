@@ -151,6 +151,7 @@ async def gerar_relatorio(
             local_atual=row.ut_local,
             ativo=row[0].ativo,
             publico=row[0].publico,
+            nivel_sigilo=row[0].nivel_sigilo,
             externo=row[0].externo,
         )
         for row in list_rows

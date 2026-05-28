@@ -153,7 +153,9 @@ def gerar_relatorio_pdf(r: RelatorioResposta) -> bytes:
         for p in r.processos:
             status = "Ativo" if p.ativo else "Inativo"
             if not p.publico:
-                status += " · Sigiloso"
+                from .sigilo import NIVEL_LABEL
+
+                status += f" · {NIVEL_LABEL.get(p.nivel_sigilo, 'Sigiloso')}"
             if p.externo:
                 status += " · Externo"
             rows_data.append(

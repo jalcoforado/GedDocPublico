@@ -53,6 +53,14 @@ async def abrir_processo(
 
     now = datetime.now()
 
+    # Sigilo gradual — resolve ostensivo/interno (publico é coluna gerada).
+    from .sigilo import SigiloError, resolver_nivel_criacao
+
+    try:
+        nivel_sigilo = resolver_nivel_criacao(payload.nivel_sigilo, payload.publico)
+    except SigiloError as e:
+        raise AberturaError(str(e)) from e
+
     # 3. Cria processo.
     processo = Processo(
         tenant_id=tenant_id,
@@ -63,7 +71,7 @@ async def abrir_processo(
         corpo=payload.corpo,
         numero_origem=payload.numero_origem,
         numero_processo=numero_processo,
-        publico=payload.publico,
+        nivel_sigilo=nivel_sigilo,
         externo=payload.externo,
         virtual=payload.virtual,
         data_hora_abertura=now,
@@ -109,7 +117,7 @@ async def abrir_processo(
             "id_manifestante": processo.id_manifestante,
             "id_unidade_proprietaria": processo.id_unidade_proprietaria,
             "externo": processo.externo,
-            "publico": processo.publico,
+            "nivel_sigilo": nivel_sigilo,
         },
     )
 

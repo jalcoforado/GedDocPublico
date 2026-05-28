@@ -18,6 +18,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
 
 from ..schemas.processo import ProcessoDetail
+from .sigilo import NIVEL_LABEL, exige_tci
 
 
 APRIMORA = HexColor("#1e3a5f")
@@ -92,11 +93,30 @@ def gerar_capa_pdf(processo: ProcessoDetail) -> bytes:
     _draw_label(
         c, col2_x, y, "Estado",
         ("Ativo" if processo.ativo else "Inativo")
-        + (" · Sigiloso" if not processo.publico else "")
+        + (
+            f" · {NIVEL_LABEL.get(processo.nivel_sigilo, 'Sigiloso')}"
+            if not processo.publico
+            else ""
+        )
         + (" · Externo" if processo.externo else ""),
         col_w,
     )
     y -= line_h
+
+    # TCI — só nos graus de sigilo legal (LAI art. 24).
+    if exige_tci(processo.nivel_sigilo):
+        desclass = (
+            processo.sigilo_data_desclassificacao.strftime("%d/%m/%Y")
+            if processo.sigilo_data_desclassificacao
+            else "—"
+        )
+        tci = (
+            f"Fund.: {processo.sigilo_fundamento_legal or '—'}  ·  "
+            f"Autoridade: {processo.sigilo_autoridade or '—'}  ·  "
+            f"Desclassificação: {desclass}"
+        )
+        _draw_label(c, col1_x, y, f"Classificação — {NIVEL_LABEL[processo.nivel_sigilo]}", tci, col_w * 2 + 0.5 * cm)
+        y -= line_h
 
     # Assunto (largo)
     c.setFillColor(GRAY)

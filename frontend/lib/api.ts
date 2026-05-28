@@ -71,6 +71,8 @@ export interface Usuario {
   id_unidade_trabalho: number | null;
   cargo: string | null;
   ativo: boolean;
+  /** Sigilo gradual — credencial de acesso (só super-usuário altera) */
+  nivel_acesso_sigilo: NivelSigilo;
 }
 export interface UsuarioDetail extends Usuario {
   grupos: number[];
@@ -85,6 +87,8 @@ export interface UsuarioInput {
   ativo?: boolean;
   senha?: string;
   grupos?: number[];
+  /** Só aplicado em update e apenas por super-usuário */
+  nivel_acesso_sigilo?: NivelSigilo;
 }
 
 export interface UnidadeTrabalho {
@@ -217,6 +221,8 @@ export interface ProcessoListItem {
   data_hora_abertura: string;
   ativo: boolean;
   publico: boolean;
+  /** Sigilo gradual (LAI): ostensivo|interno|reservado|secreto|ultrassecreto */
+  nivel_sigilo: NivelSigilo;
   externo: boolean;
   assunto: string | null;
   tipo_processo: string | null;
@@ -225,6 +231,35 @@ export interface ProcessoListItem {
   unidade_proprietaria: string | null;
   local_atual: string | null;
 }
+
+export type NivelSigilo =
+  | "ostensivo"
+  | "interno"
+  | "reservado"
+  | "secreto"
+  | "ultrassecreto";
+
+export const NIVEL_SIGILO_LABEL: Record<NivelSigilo, string> = {
+  ostensivo: "Ostensivo",
+  interno: "Interno",
+  reservado: "Reservado",
+  secreto: "Secreto",
+  ultrassecreto: "Ultrassecreto",
+};
+
+/** Graus de sigilo legal (LAI) que exigem TCI: fundamento + autoridade + prazo. */
+export const GRAUS_SIGILO_LEGAL: NivelSigilo[] = [
+  "reservado",
+  "secreto",
+  "ultrassecreto",
+];
+
+/** Prazo máximo de restrição por grau (LAI art. 24 §1º). */
+export const NIVEL_PRAZO_MAX: Partial<Record<NivelSigilo, number>> = {
+  reservado: 5,
+  secreto: 15,
+  ultrassecreto: 25,
+};
 
 export interface AnexoNoProcesso {
   id: number;
@@ -275,8 +310,21 @@ export interface ProcessoDetail extends ProcessoListItem {
   virtual: boolean;
   migrado: boolean;
   id_processo_pai: number | null;
+  /** TCI — preenchido só para graus de sigilo legal */
+  sigilo_fundamento_legal: string | null;
+  sigilo_autoridade: string | null;
+  sigilo_prazo_anos: number | null;
+  sigilo_data_classificacao: string | null;
+  sigilo_data_desclassificacao: string | null;
   movimentacoes: MovimentacaoItem[];
   anexos: AnexoNoProcesso[];
+}
+
+export interface ClassificarSigiloInput {
+  nivel: NivelSigilo;
+  fundamento_legal?: string | null;
+  autoridade?: string | null;
+  prazo_anos?: number | null;
 }
 
 export interface ProcessoListFilters {
@@ -299,6 +347,8 @@ export interface ProcessoCreateInput {
   corpo?: string | null;
   numero_origem?: string | null;
   publico?: boolean;
+  /** ostensivo|interno na abertura; sigilo legal exige classificação posterior */
+  nivel_sigilo?: NivelSigilo;
   externo?: boolean;
   virtual?: boolean;
 }
@@ -358,6 +408,7 @@ export interface RelatorioProcessoRow {
   local_atual: string | null;
   ativo: boolean;
   publico: boolean;
+  nivel_sigilo: NivelSigilo;
   externo: boolean;
 }
 
@@ -945,6 +996,11 @@ export const api = {
       }),
     receber: (id: number) =>
       request<ProcessoDetail>(`/processos/${id}/receber`, { method: "POST" }),
+    classificarSigilo: (id: number, data: ClassificarSigiloInput) =>
+      request<ProcessoDetail>(`/processos/${id}/classificar-sigilo`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
     cancelarEncaminhamento: (encaminhamentoId: number, data: CancelarEncaminhamentoInput) =>
       request<ProcessoDetail>(`/processos/encaminhamentos/${encaminhamentoId}/cancelar`, {
         method: "POST",

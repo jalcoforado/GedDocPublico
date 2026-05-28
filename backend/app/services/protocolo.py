@@ -59,6 +59,7 @@ async def abrir_protocolo_balcao(
         corpo=None,
         numero_origem=payload.numero_origem,
         publico=payload.publico,
+        nivel_sigilo=payload.nivel_sigilo,
         externo=True,  # protocolo de balcão é sempre origem externa
         virtual=False,  # documento físico recebido
     )

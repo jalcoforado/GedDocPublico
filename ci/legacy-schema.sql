@@ -4073,7 +4073,6 @@ CREATE TABLE protocolos.processo (
     id_incorporacao_status integer,
     id_processo_pai integer,
     uid uuid DEFAULT public.uuid_generate_v4() NOT NULL,
-    publico boolean DEFAULT true NOT NULL,
     migrado boolean DEFAULT false NOT NULL,
     externo boolean DEFAULT false NOT NULL,
     id_local_atual integer,
@@ -4089,7 +4088,16 @@ CREATE TABLE protocolos.processo (
     data_recepcao timestamp without time zone,
     id_ccd_classe integer,
     nup character varying(25),
-    numero_sequencial_orgao integer
+    numero_sequencial_orgao integer,
+    nivel_sigilo character varying(20) DEFAULT 'ostensivo'::character varying NOT NULL,
+    sigilo_fundamento_legal text,
+    sigilo_autoridade character varying(300),
+    sigilo_prazo_anos smallint,
+    sigilo_data_classificacao timestamp without time zone,
+    sigilo_data_desclassificacao date,
+    sigilo_classificado_por integer,
+    publico boolean GENERATED ALWAYS AS (((nivel_sigilo)::text = 'ostensivo'::text)) STORED NOT NULL,
+    CONSTRAINT ck_processo_nivel_sigilo CHECK (((nivel_sigilo)::text = ANY ((ARRAY['ostensivo'::character varying, 'interno'::character varying, 'reservado'::character varying, 'secreto'::character varying, 'ultrassecreto'::character varying])::text[])))
 );
 
 ALTER TABLE ONLY protocolos.processo FORCE ROW LEVEL SECURITY;
@@ -7148,6 +7156,47 @@ CREATE TABLE utils.sistema (
 
 
 --
+-- Name: servicosportais; Type: VIEW; Schema: utils; Owner: -
+--
+
+CREATE VIEW utils.servicosportais AS
+ SELECT x.id,
+    x.url,
+    x.nome,
+    x.label,
+    x.tipo,
+    x.excluido,
+    so.id_icone,
+    i.icone_url
+   FROM ((( SELECT si.id,
+            si.url,
+            si.label AS nome,
+            si.label,
+            'agendasol'::text AS tipo,
+            false AS excluido
+           FROM (agendamento.servico_informacao si
+             LEFT JOIN agendamento.servico_unidade_trabalho sut ON ((sut.id_servico = si.id_servico)))
+        UNION
+         SELECT se.id,
+            se.url,
+            se.nome,
+            se.label,
+            'extra'::text AS tipo,
+            se.excluido
+           FROM utils.servicos_extras se
+        UNION
+         SELECT sistema.id,
+            sistema.url,
+            sistema.sistema,
+            sistema.descricao AS label,
+            'acl'::text AS tipo,
+            sistema.excluido
+           FROM utils.sistema) x
+     LEFT JOIN utils.servico_origem so ON (((so.id_servico = x.id) AND (x.tipo = (so.origem)::text))))
+     LEFT JOIN utils.icone i ON ((i.id = so.id_icone)));
+
+
+--
 -- Name: sistema_constante; Type: TABLE; Schema: utils; Owner: -
 --
 
@@ -7784,7 +7833,9 @@ CREATE TABLE utils.usuario (
     flg_whatsapp boolean DEFAULT false,
     bloquear_envio_email boolean DEFAULT false,
     senha_bcrypt character varying(255),
-    tenant_id integer NOT NULL
+    tenant_id integer NOT NULL,
+    nivel_acesso_sigilo character varying(20) DEFAULT 'interno'::character varying NOT NULL,
+    CONSTRAINT ck_usuario_nivel_acesso_sigilo CHECK (((nivel_acesso_sigilo)::text = ANY ((ARRAY['ostensivo'::character varying, 'interno'::character varying, 'reservado'::character varying, 'secreto'::character varying, 'ultrassecreto'::character varying])::text[])))
 );
 
 ALTER TABLE ONLY utils.usuario FORCE ROW LEVEL SECURITY;
@@ -12159,6 +12210,13 @@ CREATE INDEX ix_processo_ccd ON protocolos.processo USING btree (tenant_id, id_c
 
 
 --
+-- Name: ix_processo_nivel_sigilo; Type: INDEX; Schema: protocolos; Owner: -
+--
+
+CREATE INDEX ix_processo_nivel_sigilo ON protocolos.processo USING btree (tenant_id, nivel_sigilo);
+
+
+--
 -- Name: ix_processo_nup; Type: INDEX; Schema: protocolos; Owner: -
 --
 
@@ -12793,13 +12851,6 @@ CREATE INDEX processo_migrado_idx ON protocolos.processo USING btree (migrado);
 --
 
 CREATE INDEX processo_numero_origem_idx ON protocolos.processo USING btree (numero_origem);
-
-
---
--- Name: processo_publico_idx; Type: INDEX; Schema: protocolos; Owner: -
---
-
-CREATE INDEX processo_publico_idx ON protocolos.processo USING btree (publico);
 
 
 --
@@ -14374,6 +14425,14 @@ ALTER TABLE ONLY protocolos.processo
 
 ALTER TABLE ONLY protocolos.processo
     ADD CONSTRAINT processo_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES utils.usuario(id) MATCH FULL;
+
+
+--
+-- Name: processo processo_sigilo_classificado_por_fkey; Type: FK CONSTRAINT; Schema: protocolos; Owner: -
+--
+
+ALTER TABLE ONLY protocolos.processo
+    ADD CONSTRAINT processo_sigilo_classificado_por_fkey FOREIGN KEY (sigilo_classificado_por) REFERENCES utils.usuario(id);
 
 
 --

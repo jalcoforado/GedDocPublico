@@ -23,6 +23,7 @@ import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import {
   api,
+  NIVEL_SIGILO_LABEL,
   relatorioCsvUrl,
   relatorioPdfUrl,
   type RelatorioFiltroInput,
@@ -299,7 +300,9 @@ export default function RelatoriosPage() {
                             <Badge intent="neutral" icon={Pause}>Inativo</Badge>
                           )}
                           {!p.publico && (
-                            <Badge intent="warning" icon={Lock}>Sigiloso</Badge>
+                            <Badge intent="warning" icon={Lock}>
+                              {NIVEL_SIGILO_LABEL[p.nivel_sigilo]}
+                            </Badge>
                           )}
                           {p.externo && <Badge intent="info" icon={Eye}>Externo</Badge>}
                         </div>

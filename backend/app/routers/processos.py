@@ -15,6 +15,7 @@ from ..models import Usuario
 from ..schemas.common import Paginated
 from ..schemas.processo import (
     CancelarEncaminhamentoRequest,
+    ClassificarSigiloRequest,
     EncaminharRequest,
     EncaminhamentoOut as _EncaminhamentoOut,
     ProcessoCreate,
@@ -80,11 +81,64 @@ from ..services.volumes import (
 router = APIRouter(prefix="/processos", tags=["processos"])
 
 
-@router.get("", response_model=Paginated[ProcessoListItem])
-async def list_endpoint(
-    _: Usuario = Depends(get_current_user),
+async def _is_super(db: AsyncSession, user: Usuario, tenant_id: int) -> bool:
+    from ..services.permissoes import load_permissions
+
+    perms = await load_permissions(db, user.id, tenant_id=tenant_id)
+    return perms.is_super_usuario
+
+
+async def _niveis_acesso(
+    db: AsyncSession, user: Usuario, tenant_id: int
+) -> list[str] | None:
+    """Níveis de sigilo que o usuário alcança. None = super-usuário (tudo)."""
+    from ..services.sigilo import niveis_permitidos
+
+    if await _is_super(db, user, tenant_id):
+        return None
+    return niveis_permitidos(user.nivel_acesso_sigilo)
+
+
+async def acesso_niveis_dep(
+    user: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+) -> list[str] | None:
+    return await _niveis_acesso(db, user, tenant_id)
+
+
+async def require_acesso_processo(
+    processo_id: int,
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Bloqueia (404) acesso a processo acima da credencial do servidor.
+
+    404 em vez de 403 pra não vazar a existência de processo sigiloso.
+    """
+    niveis = await _niveis_acesso(db, user, tenant_id)
+    if niveis is None:
+        return
+    nivel = (
+        await db.execute(
+            _select(_ProcessoP6.nivel_sigilo).where(
+                _ProcessoP6.id == processo_id,
+                _ProcessoP6.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if nivel is not None and nivel not in niveis:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
+        )
+
+
+@router.get("", response_model=Paginated[ProcessoListItem])
+async def list_endpoint(
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     q: str | None = Query(None, description="Busca em número, manifestante, assunto"),
@@ -107,6 +161,7 @@ async def list_endpoint(
         apenas_ativos=apenas_ativos,
         desde=desde,
         ate=ate,
+        niveis_permitidos=niveis,
     )
     return Paginated(items=items, total=total, page=page, page_size=page_size)
 
@@ -114,10 +169,48 @@ async def list_endpoint(
 @router.get("/{processo_id}", response_model=ProcessoDetail)
 async def detail_endpoint(
     processo_id: int,
-    _: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
+) -> ProcessoDetail:
+    detail = await get_processo_detail(
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+    )
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    return detail
+
+
+@router.post(
+    "/{processo_id}/classificar-sigilo",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def classificar_sigilo_endpoint(
+    processo_id: int,
+    payload: ClassificarSigiloRequest,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> ProcessoDetail:
+    from ..services.sigilo import SigiloError, classificar_processo
+
+    is_super = await _is_super(db, current, tenant_id)
+    try:
+        await classificar_processo(
+            db,
+            tenant_id=tenant_id,
+            processo_id=processo_id,
+            nivel=payload.nivel,
+            usuario_id=current.id,
+            credencial_usuario=current.nivel_acesso_sigilo,
+            is_super=is_super,
+            fundamento_legal=payload.fundamento_legal,
+            autoridade=payload.autoridade,
+            prazo_anos=payload.prazo_anos,
+        )
+    except SigiloError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -141,7 +234,10 @@ async def create_endpoint(
     return detail
 
 
-@router.get("/{processo_id}/trail")
+@router.get(
+    "/{processo_id}/trail",
+    dependencies=[Depends(require_acesso_processo)],
+)
 async def get_trail(
     processo_id: int,
     _: Usuario = Depends(get_current_user),
@@ -157,7 +253,11 @@ async def get_trail(
     return await build_trail(db, processo_id=processo_id, tenant_id=tenant_id)
 
 
-@router.get("/{processo_id}/temporalidade", response_model=TemporalidadeOut)
+@router.get(
+    "/{processo_id}/temporalidade",
+    response_model=TemporalidadeOut,
+    dependencies=[Depends(require_acesso_processo)],
+)
 async def temporalidade_endpoint(
     processo_id: int,
     _: Usuario = Depends(get_current_user),
@@ -171,14 +271,11 @@ async def temporalidade_endpoint(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
 
 
-async def _is_super(db: AsyncSession, user: Usuario, tenant_id: int) -> bool:
-    from ..services.permissoes import load_permissions
-
-    perms = await load_permissions(db, user.id, tenant_id=tenant_id)
-    return perms.is_super_usuario
-
-
-@router.post("/{processo_id}/encaminhamentos", response_model=ProcessoDetail)
+@router.post(
+    "/{processo_id}/encaminhamentos",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo)],
+)
 async def encaminhar_endpoint(
     processo_id: int,
     payload: EncaminharRequest,
@@ -204,7 +301,11 @@ async def encaminhar_endpoint(
     return detail
 
 
-@router.post("/{processo_id}/receber", response_model=ProcessoDetail)
+@router.post(
+    "/{processo_id}/receber",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo)],
+)
 async def receber_endpoint(
     processo_id: int,
     override_motivo: str | None = None,
@@ -243,11 +344,13 @@ def _pdf_response(pdf_bytes: bytes, *, inline: bool, fname: str) -> Response:
 async def capa_pdf_endpoint(
     processo_id: int,
     inline: bool = Query(True),
-    _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
 ):
-    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    detail = await get_processo_detail(
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+    )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     pdf_bytes = gerar_capa_pdf(detail)
@@ -259,11 +362,13 @@ async def capa_pdf_endpoint(
 async def etiqueta_unica_pdf(
     processo_id: int,
     inline: bool = Query(True),
-    _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
 ):
-    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    detail = await get_processo_detail(
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+    )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     pdf_bytes = gerar_etiqueta_pdf(detail, dupla=False)
@@ -275,11 +380,13 @@ async def etiqueta_unica_pdf(
 async def completo_pdf_endpoint(
     processo_id: int,
     inline: bool = Query(True),
-    _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
 ):
-    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    detail = await get_processo_detail(
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+    )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     pdf_bytes = gerar_processo_completo_pdf(detail)
@@ -291,11 +398,13 @@ async def completo_pdf_endpoint(
 async def etiqueta_dupla_pdf(
     processo_id: int,
     inline: bool = Query(True),
-    _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
 ):
-    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    detail = await get_processo_detail(
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+    )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     pdf_bytes = gerar_etiqueta_pdf(detail, dupla=True)
@@ -311,6 +420,7 @@ async def comprovante_pdf_endpoint(
     current: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
 ):
     # Carrega encaminhamento + nomes via JOIN explícito.
     from sqlalchemy.orm import aliased
@@ -333,7 +443,9 @@ async def comprovante_pdf_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Encaminhamento não encontrado")
 
     enc, uo, ud, prio = row
-    detail = await get_processo_detail(db, enc.id_processo, tenant_id=tenant_id)
+    detail = await get_processo_detail(
+        db, enc.id_processo, tenant_id=tenant_id, niveis_permitidos=niveis
+    )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
 
@@ -430,6 +542,7 @@ async def _hydrate_apensamento(
     "/{processo_id}/apensar",
     response_model=ApensamentoOut,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_acesso_processo)],
 )
 async def apensar_endpoint(
     processo_id: int,
@@ -455,6 +568,7 @@ async def apensar_endpoint(
 @router.post(
     "/{processo_id}/desapensar",
     response_model=ApensamentoOut,
+    dependencies=[Depends(require_acesso_processo)],
 )
 async def desapensar_endpoint(
     processo_id: int,
@@ -479,6 +593,7 @@ async def desapensar_endpoint(
 @router.get(
     "/{processo_id}/apensamentos",
     response_model=list[ApensamentoOut],
+    dependencies=[Depends(require_acesso_processo)],
 )
 async def list_apensamentos_endpoint(
     processo_id: int,
@@ -503,6 +618,7 @@ async def list_apensamentos_endpoint(
 @router.get(
     "/{processo_id}/apensados",
     response_model=list[ProcessoApensadoItem],
+    dependencies=[Depends(require_acesso_processo)],
 )
 async def list_processos_apensados_endpoint(
     processo_id: int,
@@ -643,6 +759,7 @@ async def termo_apensamento_pdf(
 @router.post(
     "/{processo_id}/anexos/{anexo_processo_id}/desentranhar",
     response_model=DesentranhamentoOut,
+    dependencies=[Depends(require_acesso_processo)],
 )
 async def desentranhar_anexo_endpoint(
     processo_id: int,
@@ -681,6 +798,7 @@ async def desentranhar_anexo_endpoint(
 
 @router.get(
     "/{processo_id}/anexos/{anexo_processo_id}/termo-desentranhamento.pdf",
+    dependencies=[Depends(require_acesso_processo)],
 )
 async def termo_desentranhamento_pdf(
     processo_id: int,
@@ -754,7 +872,11 @@ async def _vol_hydrate(db: AsyncSession, vol: _VolP6) -> VolumeOut:
     )
 
 
-@router.get("/{processo_id}/volumes", response_model=list[VolumeOut])
+@router.get(
+    "/{processo_id}/volumes",
+    response_model=list[VolumeOut],
+    dependencies=[Depends(require_acesso_processo)],
+)
 async def list_volumes_endpoint(
     processo_id: int,
     _: Usuario = Depends(get_current_user),
@@ -777,6 +899,7 @@ async def list_volumes_endpoint(
     "/{processo_id}/volumes",
     response_model=VolumeOut,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_acesso_processo)],
 )
 async def create_volume_endpoint(
     processo_id: int,

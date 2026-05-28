@@ -10,9 +10,26 @@ class ProcessoCreate(BaseModel):
     observacao: str | None = Field(default=None, max_length=10000)
     corpo: str | None = Field(default=None, max_length=50000)
     numero_origem: str | None = None
+    # `publico` é entrada legada; `nivel_sigilo` (ostensivo|interno) tem
+    # precedência quando != ostensivo. Sigilo legal (reservado+) só via
+    # endpoint de classificação, que captura o TCI.
     publico: bool = True
+    nivel_sigilo: str = "ostensivo"
     externo: bool = False
     virtual: bool = True
+
+
+class ClassificarSigiloRequest(BaseModel):
+    """Classifica/reclassifica o sigilo de um processo (LAI).
+
+    Graus de sigilo legal (reservado/secreto/ultrassecreto) exigem
+    `fundamento_legal` + `autoridade`; `prazo_anos` default = máximo legal.
+    """
+
+    nivel: str = Field(..., description="ostensivo|interno|reservado|secreto|ultrassecreto")
+    fundamento_legal: str | None = Field(default=None, max_length=2000)
+    autoridade: str | None = Field(default=None, max_length=300)
+    prazo_anos: int | None = Field(default=None, ge=1, le=25)
 
 
 class EncaminharRequest(BaseModel):
@@ -48,6 +65,7 @@ class ProcessoListItem(BaseModel):
     data_hora_abertura: datetime
     ativo: bool
     publico: bool
+    nivel_sigilo: str = "ostensivo"
     externo: bool
 
     assunto: str | None
@@ -108,6 +126,13 @@ class ProcessoDetail(ProcessoListItem):
     virtual: bool
     migrado: bool
     id_processo_pai: int | None
+
+    # Sigilo gradual — TCI (preenchido só para graus de sigilo legal).
+    sigilo_fundamento_legal: str | None = None
+    sigilo_autoridade: str | None = None
+    sigilo_prazo_anos: int | None = None
+    sigilo_data_classificacao: datetime | None = None
+    sigilo_data_desclassificacao: date | None = None
 
     movimentacoes: list[MovimentacaoItem]
     anexos: list[AnexoNoProcesso]

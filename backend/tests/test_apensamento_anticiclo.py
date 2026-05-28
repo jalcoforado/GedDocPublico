@@ -190,10 +190,10 @@ async def processos_apensaveis(admin_engine, two_tenants):
                     """
                     INSERT INTO protocolos.processo
                         (tenant_id, id_assunto, id_manifestante, id_unidade_proprietaria,
-                         virtual, publico, externo, ativo, excluido, migrado)
+                         virtual, externo, ativo, excluido, migrado)
                     VALUES
                         (:tid, :assunto, :manif, :unid,
-                         true, true, false, true, false, false)
+                         true, false, true, false, false)
                     RETURNING id
                     """
                 ),

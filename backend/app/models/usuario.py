@@ -24,3 +24,8 @@ class Usuario(Base):
     app: Mapped[str | None] = mapped_column(String(30), nullable=True)
     # Fase 16 — necessário pra canal whatsapp. Formato livre (sugerido E.164).
     telefone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Sigilo gradual (LAI) — credencial de acesso. Pode ver processos cujo
+    # nível seja <= esta credencial. Default 'interno' = vê ostensivo+interno.
+    nivel_acesso_sigilo: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="interno"
+    )

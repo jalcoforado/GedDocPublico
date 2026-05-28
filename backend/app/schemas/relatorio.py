@@ -37,6 +37,7 @@ class RelatorioProcessoRow(BaseModel):
     local_atual: str | None
     ativo: bool
     publico: bool
+    nivel_sigilo: str = "ostensivo"
     externo: bool
 
 
