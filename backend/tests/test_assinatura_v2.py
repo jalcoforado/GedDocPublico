@@ -10,15 +10,18 @@ escrito no storage do tenant pra o hash poder ser calculado.
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth.password import hash_md5, hash_password
 from app.config import tenant_anexos_dir
-from app.schemas.assinatura import SolicitarAssinaturaRequest
+from app.routers.processos import require_acesso_processo
+from app.schemas.assinatura import EvidenciasOut, SolicitarAssinaturaRequest, ValidacaoOut
 from app.services import assinatura_throttle as throttle
 from app.services.assinaturas import (
     AssinaturaCredencialLegadaError,
@@ -26,11 +29,19 @@ from app.services.assinaturas import (
     AssinaturaThrottleError,
     assinar,
     cancelar_solicitacao,
+    consultar_evidencias,
     recusar_assinatura,
     solicitar_assinatura,
     validar_assinatura,
 )
 from app.services.desentranhamento import DesentranhamentoError, desentranhar_anexo
+from app.services.pdf_comprovante_assinatura import gerar_comprovante_assinatura_pdf
+from app.services.sigilo import SigiloAcessoError, assert_acesso_processo
+
+
+def _uobj(uid: int, credencial: str = "interno"):
+    """Objeto leve de usuário para os serviços (id + credencial de sigilo)."""
+    return SimpleNamespace(id=uid, nivel_acesso_sigilo=credencial)
 
 SENHA = "senha-v2-teste"
 CONTEUDO = b"conteudo do documento assinado v2"
@@ -196,12 +207,12 @@ async def test_validar_detecta_alteracao(admin_engine, v2_env):
         await assinar(s, aa_id, tenant_id=tid, usuario_id=uid, senha=SENHA, tenant_slug=v2_env["slug"])
     # íntegro logo após assinar
     async with _session(admin_engine) as s:
-        v = await validar_assinatura(s, aa_id, tenant_id=tid, tenant_slug=v2_env["slug"])
+        v = await validar_assinatura(s, aa_id, tenant_id=tid, tenant_slug=v2_env["slug"], usuario=_uobj(uid))
         assert v.integro is True and v.legado is False
     # altera o arquivo → deve divergir
     v2_env["path"].write_bytes(CONTEUDO + b" ALTERADO")
     async with _session(admin_engine) as s:
-        v = await validar_assinatura(s, aa_id, tenant_id=tid, tenant_slug=v2_env["slug"])
+        v = await validar_assinatura(s, aa_id, tenant_id=tid, tenant_slug=v2_env["slug"], usuario=_uobj(uid))
         assert v.integro is False
     async with _session(admin_engine) as s:
         assert await _conta_audit(s, tid, "assinatura.validada") >= 1
@@ -339,5 +350,102 @@ async def test_legado_nao_quebra_validacao(admin_engine, v2_env):
         )
         await s.commit()
     async with _session(admin_engine) as s:
-        v = await validar_assinatura(s, aa_id, tenant_id=tid, tenant_slug=v2_env["slug"])
+        v = await validar_assinatura(s, aa_id, tenant_id=tid, tenant_slug=v2_env["slug"], usuario=_uobj(uid))
         assert v.legado is True and v.integro is None
+
+
+# -------- guard de sigilo/permissão (PR2b) --------
+
+
+async def _tornar_secreto(admin_engine, tenant_id, processo_id):
+    async with _session(admin_engine) as s:
+        await s.execute(
+            text("UPDATE protocolos.processo SET nivel_sigilo='secreto' WHERE id=:p"),
+            {"p": processo_id},
+        )
+        await s.commit()
+
+
+async def test_validar_negado_sem_credencial(admin_engine, v2_env):
+    tid = v2_env["tenant_id"]
+    uid = v2_env["usuario_moderno"]
+    _solic, aa_id = await _criar_solic(admin_engine, v2_env, uid)
+    await _tornar_secreto(admin_engine, tid, v2_env["processo"])
+    async with _session(admin_engine) as s:
+        with pytest.raises(SigiloAcessoError):
+            await validar_assinatura(
+                s, aa_id, tenant_id=tid, tenant_slug=v2_env["slug"], usuario=_uobj(uid, "interno")
+            )
+
+
+async def test_evidencias_negado_sem_credencial(admin_engine, v2_env):
+    tid = v2_env["tenant_id"]
+    uid = v2_env["usuario_moderno"]
+    _solic, aa_id = await _criar_solic(admin_engine, v2_env, uid)
+    await _tornar_secreto(admin_engine, tid, v2_env["processo"])
+    async with _session(admin_engine) as s:
+        with pytest.raises(SigiloAcessoError):
+            await consultar_evidencias(s, aa_id, tenant_id=tid, usuario=_uobj(uid, "interno"))
+
+
+async def test_evidencias_autorizado(admin_engine, v2_env):
+    tid = v2_env["tenant_id"]
+    uid = v2_env["usuario_moderno"]
+    _solic, aa_id = await _criar_solic(admin_engine, v2_env, uid)
+    async with _session(admin_engine) as s:
+        ev = await consultar_evidencias(s, aa_id, tenant_id=tid, usuario=_uobj(uid, "interno"))
+        assert ev.id_assinatura_anexo == aa_id
+        assert ev.numero_processo is not None
+
+
+async def test_assert_super_bypass(admin_engine, v2_env, monkeypatch):
+    tid = v2_env["tenant_id"]
+    uid = v2_env["usuario_moderno"]
+    await _tornar_secreto(admin_engine, tid, v2_env["processo"])
+
+    async def _fake_super(*a, **k):
+        return SimpleNamespace(is_super_usuario=True, nivel_valor=0, items=[])
+    monkeypatch.setattr("app.services.permissoes.load_permissions", _fake_super)
+
+    async with _session(admin_engine) as s:
+        # não levanta — super-usuário ignora o nível
+        await assert_acesso_processo(
+            s, tenant_id=tid, processo_id=v2_env["processo"], usuario=_uobj(uid, "interno")
+        )
+
+
+async def test_require_acesso_processo_regressao(admin_engine, v2_env):
+    """Regressão da delegação: 404 para sigiloso sem credencial, ok p/ ostensivo."""
+    tid = v2_env["tenant_id"]
+    uid = v2_env["usuario_moderno"]
+    # ostensivo (default) → não levanta
+    async with _session(admin_engine) as s:
+        await require_acesso_processo(
+            v2_env["processo"], user=_uobj(uid, "interno"), tenant_id=tid, db=s
+        )
+    # secreto → 404
+    await _tornar_secreto(admin_engine, tid, v2_env["processo"])
+    async with _session(admin_engine) as s:
+        with pytest.raises(HTTPException) as ei:
+            await require_acesso_processo(
+                v2_env["processo"], user=_uobj(uid, "interno"), tenant_id=tid, db=s
+            )
+        assert ei.value.status_code == 404
+
+
+def test_comprovante_pdf_gerado():
+    ev = EvidenciasOut(
+        id_assinatura_anexo=1, id_anexo=2, id_processo=3,
+        numero_processo="P1/2026", anexo_descricao="Doc",
+        nome_assinante="Fulano", nivel="simples", status="assinada",
+        metodo_autenticacao="senha_bcrypt", documento_hash="a" * 64,
+        hash_algoritmo="sha256", documento_versao=1, ip_assinatura="203.0.113.7",
+        user_agent_assinatura="UA", dt_assinatura=None, id_audit_log=99, evidencias={},
+    )
+    val = ValidacaoOut(
+        id_assinatura_anexo=1, legado=False, integro=True, nivel="simples",
+        status="assinada", documento_hash="a" * 64, hash_atual="a" * 64,
+        dt_assinatura=None, detalhe="Conteúdo íntegro.",
+    )
+    pdf = gerar_comprovante_assinatura_pdf(ev, val)
+    assert pdf[:4] == b"%PDF"

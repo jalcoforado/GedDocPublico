@@ -69,6 +69,11 @@ class SigiloError(Exception):
     """Erro de validação/autorização na classificação de sigilo."""
 
 
+class SigiloAcessoError(SigiloError):
+    """Acesso negado pelo nível de sigilo. Mapear para 404 — não vaza a
+    existência do processo/anexo sigiloso para quem não tem credencial."""
+
+
 def is_nivel_valido(nivel: str) -> bool:
     return nivel in NIVEL_RANK
 
@@ -93,6 +98,40 @@ def pode_acessar(
     cred_rank = NIVEL_RANK.get(credencial, NIVEL_RANK[CREDENCIAL_DEFAULT])
     proc_rank = NIVEL_RANK.get(nivel_processo, 0)
     return proc_rank <= cred_rank
+
+
+async def assert_acesso_processo(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    processo_id: int | None,
+    usuario,
+) -> None:
+    """Guard reaproveitável de acesso a um processo pelo nível de sigilo.
+
+    Mesma lógica usada para acesso a processo: super-usuário passa; senão a
+    credencial do usuário precisa alcançar o nível do processo. Levanta
+    `SigiloAcessoError` (→ 404) caso contrário. `processo_id=None` = nada a checar.
+    """
+    if processo_id is None:
+        return
+    from .permissoes import load_permissions  # lazy: evita ciclo de import
+
+    perms = await load_permissions(db, usuario.id, tenant_id=tenant_id)
+    if perms.is_super_usuario:
+        return
+    credencial = getattr(usuario, "nivel_acesso_sigilo", CREDENCIAL_DEFAULT)
+    permitidos = niveis_permitidos(credencial)
+    nivel = (
+        await db.execute(
+            select(Processo.nivel_sigilo).where(
+                Processo.id == processo_id,
+                Processo.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if nivel is not None and nivel not in permitidos:
+        raise SigiloAcessoError("Processo não encontrado")
 
 
 def resolver_nivel_criacao(nivel_sigilo: str, publico: bool) -> str:

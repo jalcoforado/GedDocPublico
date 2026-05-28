@@ -32,6 +32,8 @@ export default function ParaAssinarPage() {
   const [assinando, setAssinando] = useState<PendenciaAssinatura | null>(null);
   const [senha, setSenha] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [recusando, setRecusando] = useState<PendenciaAssinatura | null>(null);
+  const [motivo, setMotivo] = useState("");
 
   const q = useQuery({
     queryKey: ["minhas-pendencias-assinatura"],
@@ -50,7 +52,23 @@ export default function ParaAssinarPage() {
       setSenha("");
       setErr(null);
     },
+    // A mensagem (incl. 409 "atualize a senha" e 429 "muitas tentativas") vem
+    // pronta do backend em e.message.
     onError: (e: Error) => setErr(e.message),
+  });
+
+  const recusaM = useMutation({
+    mutationFn: () => {
+      if (!recusando) throw new Error("Nada para recusar");
+      return api.assinaturas.recusar(recusando.id_solicitacao, motivo);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["minhas-pendencias-assinatura"] });
+      toast.success("Assinatura recusada.");
+      setRecusando(null);
+      setMotivo("");
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   return (
@@ -127,6 +145,16 @@ export default function ParaAssinarPage() {
                   >
                     Assinar
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setRecusando(p);
+                      setMotivo("");
+                    }}
+                  >
+                    Recusar
+                  </Button>
                 </div>
               </TD>
             </TR>
@@ -192,6 +220,50 @@ export default function ParaAssinarPage() {
             {err}
           </div>
         )}
+      </Dialog>
+
+      <Dialog
+        open={!!recusando}
+        onClose={() => {
+          setRecusando(null);
+          setMotivo("");
+        }}
+        title={recusando ? `Recusar — ${recusando.anexo_descricao ?? "anexo"}` : ""}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setRecusando(null);
+                setMotivo("");
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => recusaM.mutate()}
+              disabled={recusaM.isPending || motivo.trim().length < 3}
+            >
+              {recusaM.isPending ? "Recusando..." : "Confirmar recusa"}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm">
+          Informe o motivo da recusa. Ele fica registrado na trilha de auditoria.
+        </p>
+        <Label htmlFor="motivo-recusa" required>
+          Motivo
+        </Label>
+        <textarea
+          id="motivo-recusa"
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          rows={3}
+          autoFocus
+          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
       </Dialog>
     </div>
   );

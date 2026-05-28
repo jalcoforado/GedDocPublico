@@ -11,7 +11,13 @@ import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toast";
-import { api, type ProcessoDetail, type SolicitacaoAssinatura } from "@/lib/api";
+import {
+  api,
+  assinaturaComprovanteUrl,
+  type ProcessoDetail,
+  type SolicitacaoAssinatura,
+  type ValidacaoAssinatura,
+} from "@/lib/api";
 
 function fmtDt(s: string | null | undefined) {
   if (!s) return "—";
@@ -96,6 +102,51 @@ function statusBadge(s: SolicitacaoAssinatura) {
   return <Badge intent="warning" icon={Clock}>Em andamento</Badge>;
 }
 
+function ValidarAcao({ aaId }: { aaId: number }) {
+  const toast = useToast();
+  const [res, setRes] = useState<ValidacaoAssinatura | null>(null);
+  const m = useMutation({
+    mutationFn: () => api.assinaturas.validar(aaId),
+    onSuccess: (v) => {
+      setRes(v);
+      if (v.integro === true) toast.success("Assinatura íntegra.");
+      else if (v.integro === false) toast.error("Documento alterado após a assinatura.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <span className="ml-2 inline-flex flex-wrap items-center gap-2 text-xs">
+      <button
+        type="button"
+        onClick={() => m.mutate()}
+        disabled={m.isPending}
+        className="text-primary hover:underline disabled:opacity-50"
+      >
+        {m.isPending ? "Validando..." : "Validar"}
+      </button>
+      <a
+        href={assinaturaComprovanteUrl(aaId)}
+        target="_blank"
+        rel="noreferrer"
+        className="text-primary hover:underline"
+      >
+        Comprovante
+      </a>
+      {res && (
+        <span
+          className={
+            res.integro === false
+              ? "text-danger-soft-foreground"
+              : "text-muted-foreground"
+          }
+        >
+          {res.detalhe}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function SolicitacaoCard({
   solic,
   onCancelar,
@@ -127,12 +178,17 @@ function SolicitacaoCard({
           <div key={a.id_usuario_assinatura} className="rounded bg-muted p-2">
             <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
               <b className="text-foreground">{a.nome_assinante ?? `Usuário ${a.id_assinante}`}</b>
-              {a.realizada ? (
+              {a.status === "recusada" ? (
+                <Badge intent="danger" icon={XCircle}>Recusou</Badge>
+              ) : a.realizada ? (
                 <Badge intent="success" icon={CheckCircle2}>Assinou tudo</Badge>
               ) : (
                 <Badge intent="warning" icon={Clock}>Pendente</Badge>
               )}
               <span className="text-muted-foreground">· ordem {a.ordem}</span>
+              {a.status === "recusada" && a.motivo_recusa && (
+                <span className="text-danger-soft-foreground">· motivo: {a.motivo_recusa}</span>
+              )}
             </div>
             <ul className="ml-3 list-disc text-xs">
               {a.anexos.map((ax) => (
@@ -142,9 +198,12 @@ function SolicitacaoCard({
                 >
                   {ax.anexo_descricao ?? `Anexo #${ax.id_anexo}`}
                   {ax.assinado && (
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      assinado em {fmtDt(ax.dt_assinatura)}
-                    </span>
+                    <>
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        assinado em {fmtDt(ax.dt_assinatura)} · nível {ax.nivel}
+                      </span>
+                      <ValidarAcao aaId={ax.id} />
+                    </>
                   )}
                 </li>
               ))}

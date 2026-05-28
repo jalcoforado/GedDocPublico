@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
 from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Usuario
+from ..services.pdf_comprovante_assinatura import gerar_comprovante_assinatura_pdf
+from ..services.sigilo import SigiloAcessoError
 from ..schemas.assinatura import (
     AssinarRequest,
     EvidenciasOut,
@@ -216,22 +219,49 @@ async def validar_endpoint(
             assinatura_anexo_id,
             tenant_id=tenant_id,
             tenant_slug=tenant_slug,
-            usuario_id=current.id,
+            usuario=current,
         )
-    except AssinaturaError as e:
+    except (AssinaturaError, SigiloAcessoError) as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.get("/assinaturas/{assinatura_anexo_id}/evidencias", response_model=EvidenciasOut)
 async def evidencias_endpoint(
     assinatura_anexo_id: int,
-    _: Usuario = Depends(get_current_user),
+    current: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> EvidenciasOut:
     try:
         return await consultar_evidencias(
-            db, assinatura_anexo_id, tenant_id=tenant_id
+            db, assinatura_anexo_id, tenant_id=tenant_id, usuario=current
         )
-    except AssinaturaError as e:
+    except (AssinaturaError, SigiloAcessoError) as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get("/assinaturas/{assinatura_anexo_id}/comprovante.pdf")
+async def comprovante_endpoint(
+    assinatura_anexo_id: int,
+    current: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        evidencias = await consultar_evidencias(
+            db, assinatura_anexo_id, tenant_id=tenant_id, usuario=current
+        )
+        validacao = await validar_assinatura(
+            db, assinatura_anexo_id, tenant_id=tenant_id,
+            tenant_slug=tenant_slug, usuario=current,
+        )
+    except (AssinaturaError, SigiloAcessoError) as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    pdf = gerar_comprovante_assinatura_pdf(evidencias, validacao)
+    fname = f"comprovante-assinatura-{assinatura_anexo_id}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{fname}"'},
+    )

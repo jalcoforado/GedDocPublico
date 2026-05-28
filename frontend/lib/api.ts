@@ -892,6 +892,15 @@ export const api = {
         `/assinaturas/${assinaturaAnexoId}/assinar`,
         { method: "POST", body: JSON.stringify({ senha }) },
       ),
+    recusar: (solicitacaoId: number, motivo: string) =>
+      request<SolicitacaoAssinatura>(
+        `/solicitacoes-assinatura/${solicitacaoId}/recusar`,
+        { method: "POST", body: JSON.stringify({ motivo }) },
+      ),
+    validar: (assinaturaAnexoId: number) =>
+      request<ValidacaoAssinatura>(`/assinaturas/${assinaturaAnexoId}/validar`),
+    evidencias: (assinaturaAnexoId: number) =>
+      request<EvidenciasAssinatura>(`/assinaturas/${assinaturaAnexoId}/evidencias`),
   },
 
   usuarios: {
@@ -1460,6 +1469,9 @@ export interface AssinaturaAnexoStatus {
   anexo_descricao: string | null;
   assinado: boolean;
   dt_assinatura: string | null;
+  status: string;
+  nivel: string;
+  tem_hash: boolean;
 }
 
 export interface AssinanteStatus {
@@ -1468,6 +1480,8 @@ export interface AssinanteStatus {
   nome_assinante: string | null;
   realizada: boolean;
   ordem: number;
+  status: string;
+  motivo_recusa: string | null;
   anexos: AssinaturaAnexoStatus[];
 }
 
@@ -1488,6 +1502,42 @@ export interface SolicitarAssinaturaInput {
   id_assinantes: number[];
   id_anexos: number[];
   id_tipo_assinatura?: number | null;
+}
+
+export interface ValidacaoAssinatura {
+  id_assinatura_anexo: number;
+  legado: boolean;
+  integro: boolean | null;
+  nivel: string;
+  status: string;
+  documento_hash: string | null;
+  hash_atual: string | null;
+  dt_assinatura: string | null;
+  detalhe: string;
+}
+
+export interface EvidenciasAssinatura {
+  id_assinatura_anexo: number;
+  id_anexo: number;
+  id_processo: number | null;
+  numero_processo: string | null;
+  anexo_descricao: string | null;
+  nome_assinante: string | null;
+  nivel: string;
+  status: string;
+  metodo_autenticacao: string | null;
+  documento_hash: string | null;
+  hash_algoritmo: string | null;
+  documento_versao: number | null;
+  ip_assinatura: string | null;
+  user_agent_assinatura: string | null;
+  dt_assinatura: string | null;
+  id_audit_log: number | null;
+  evidencias: Record<string, unknown> | null;
+}
+
+export function assinaturaComprovanteUrl(assinaturaAnexoId: number): string {
+  return `${BROWSER_API_URL}/assinaturas/${assinaturaAnexoId}/comprovante.pdf`;
 }
 
 export const assinaturasApi = {

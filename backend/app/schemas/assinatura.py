@@ -66,6 +66,8 @@ class EvidenciasOut(BaseModel):
     id_assinatura_anexo: int
     id_anexo: int
     id_processo: int | None
+    numero_processo: str | None = None
+    anexo_descricao: str | None = None
     nome_assinante: str | None
     nivel: str
     status: str

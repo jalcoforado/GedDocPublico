@@ -19,6 +19,7 @@ from ..auth.password import verify_password
 from .audit import log as audit_log
 from . import anexos as anexos_svc
 from . import assinatura_throttle as throttle
+from .sigilo import assert_acesso_processo
 from ..models import (
     Anexo,
     AnexoProcesso,
@@ -252,8 +253,9 @@ async def assinar(
     if needs_rehash:
         # Decisão: assinatura nova não nasce vinculada a credencial legada MD5.
         raise AssinaturaCredencialLegadaError(
-            "Sua senha precisa ser atualizada para assinar. Faça login novamente "
-            "ou altere a senha no seu perfil e tente de novo."
+            "Para assinar documentos, sua senha precisa ser atualizada para o "
+            "padrão atual de segurança. Saia do sistema e faça login novamente. "
+            "Se o bloqueio continuar, altere sua senha no perfil ou solicite suporte."
         )
 
     # Integridade: SHA-256 do conteúdo exato do anexo neste instante.
@@ -488,10 +490,11 @@ async def validar_assinatura(
     *,
     tenant_id: int,
     tenant_slug: str,
-    usuario_id: int | None = None,
+    usuario,
 ) -> ValidacaoOut:
     """Recalcula o hash do arquivo atual e compara com o registrado. Auditada
-    on-demand (esta chamada É uma validação explícita)."""
+    on-demand (esta chamada É uma validação explícita). Respeita o sigilo do
+    processo: levanta SigiloAcessoError (→404) se o usuário não tem acesso."""
     aa = (
         await db.execute(
             select(AssinaturaAnexo).where(
@@ -503,6 +506,9 @@ async def validar_assinatura(
     ).scalar_one_or_none()
     if aa is None:
         raise AssinaturaError("Assinatura não encontrada")
+    await assert_acesso_processo(
+        db, tenant_id=tenant_id, processo_id=aa.id_processo, usuario=usuario
+    )
 
     legado = aa.nivel_assinatura == "legado" or not aa.documento_hash
     integro: bool | None
@@ -527,7 +533,7 @@ async def validar_assinatura(
     await audit_log(
         db,
         tenant_id=tenant_id,
-        id_usuario=usuario_id,
+        id_usuario=usuario.id,
         acao="assinatura.validada",
         entidade="assinatura_anexo",
         id_entidade=aa.id,
@@ -549,16 +555,23 @@ async def validar_assinatura(
 
 
 async def consultar_evidencias(
-    db: AsyncSession, assinatura_anexo_id: int, *, tenant_id: int
+    db: AsyncSession, assinatura_anexo_id: int, *, tenant_id: int, usuario
 ) -> EvidenciasOut:
     row = (
         await db.execute(
-            select(AssinaturaAnexo, UsuarioAssinatura.id_assinante, Usuario.nome)
+            select(
+                AssinaturaAnexo,
+                Usuario.nome,
+                Anexo.descricao,
+                Processo.numero_processo,
+            )
             .join(
                 UsuarioAssinatura,
                 UsuarioAssinatura.id == AssinaturaAnexo.id_usuario_assinatura,
             )
             .join(Usuario, Usuario.id == UsuarioAssinatura.id_assinante, isouter=True)
+            .join(Anexo, Anexo.id == AssinaturaAnexo.id_anexo, isouter=True)
+            .join(Processo, Processo.id == AssinaturaAnexo.id_processo, isouter=True)
             .where(
                 AssinaturaAnexo.id == assinatura_anexo_id,
                 AssinaturaAnexo.tenant_id == tenant_id,
@@ -568,11 +581,16 @@ async def consultar_evidencias(
     ).first()
     if row is None:
         raise AssinaturaError("Assinatura não encontrada")
-    aa, _id_assinante, nome = row
+    aa, nome, anexo_descricao, numero_processo = row
+    await assert_acesso_processo(
+        db, tenant_id=tenant_id, processo_id=aa.id_processo, usuario=usuario
+    )
     return EvidenciasOut(
         id_assinatura_anexo=aa.id,
         id_anexo=aa.id_anexo,
         id_processo=aa.id_processo,
+        numero_processo=numero_processo,
+        anexo_descricao=anexo_descricao,
         nome_assinante=nome,
         nivel=aa.nivel_assinatura,
         status=aa.status,

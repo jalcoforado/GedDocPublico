@@ -42,3 +42,5 @@ backend/celerybeat-schedule
 
 # Relatórios e2e gerados (Playwright)
 tests-e2e/report/
+tests-e2e/test-results/
+tests-e2e/package-lock.json

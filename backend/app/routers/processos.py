@@ -117,18 +117,15 @@ async def require_acesso_processo(
 
     404 em vez de 403 pra não vazar a existência de processo sigiloso.
     """
-    niveis = await _niveis_acesso(db, user, tenant_id)
-    if niveis is None:
-        return
-    nivel = (
-        await db.execute(
-            _select(_ProcessoP6.nivel_sigilo).where(
-                _ProcessoP6.id == processo_id,
-                _ProcessoP6.tenant_id == tenant_id,
-            )
+    # Delega ao helper reaproveitável de sigilo (mesma lógica de acesso a
+    # processo usada também pelos endpoints de assinatura).
+    from ..services.sigilo import SigiloAcessoError, assert_acesso_processo
+
+    try:
+        await assert_acesso_processo(
+            db, tenant_id=tenant_id, processo_id=processo_id, usuario=user
         )
-    ).scalar_one_or_none()
-    if nivel is not None and nivel not in niveis:
+    except SigiloAcessoError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
         )
