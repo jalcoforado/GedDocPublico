@@ -15,5 +15,11 @@
 # O serviço `e2e` (profile "test") roda na rede do compose com PY_BASE=http://nginx.
 set -euo pipefail
 SPEC="${1:-specs/assinatura-v2.spec.ts}"
+
+# Mesmo seed do CI (idempotente). Pule com NO_SEED=1.
+if [ "${NO_SEED:-0}" != "1" ]; then
+  "$(dirname "$0")/seed-e2e.sh"
+fi
+
 echo ">> e2e: ${SPEC} (serviço compose 'e2e', PY_BASE=http://nginx)"
 docker compose --profile test run --rm e2e npx playwright test "${SPEC}"

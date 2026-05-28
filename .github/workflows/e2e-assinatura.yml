@@ -1,0 +1,146 @@
+name: E2E assinatura
+
+# Abordagem leve (PR 2d): Postgres + Redis como services, schema+seed via SQL,
+# backend via uvicorn, Playwright API-level apontando para o backend
+# (PY_BASE=http://localhost:8000). Sem nginx/compose/frontend — a spec é
+# API-level e o throttle 429 é app-level (Redis). Validado localmente replicando
+# estes mesmos passos contra um Postgres limpo.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: e2e-assinatura-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: e2e assinatura (Postgres + Redis + uvicorn)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ged_user
+          POSTGRES_PASSWORD: ged_password_secure_local
+          POSTGRES_DB: ged_saas_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      PGPASSWORD: ged_password_secure_local
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend deps
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            pg_isready -h localhost -U ged_user >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo "postgres not ready"; exit 1
+
+      # Stubs cross-schema (igual backend-tests) + agendamento, exigido pela view
+      # utils.servicosportais presente no dump.
+      - name: Bootstrap extensions + cross-schema stubs
+        run: |
+          psql -h localhost -U ged_user -d ged_saas_db <<'SQL'
+            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+            CREATE OR REPLACE FUNCTION public.trigger_set_timestamp()
+              RETURNS trigger LANGUAGE plpgsql AS $$
+              BEGIN NEW.updated_at = NOW(); RETURN NEW; END; $$;
+            CREATE SCHEMA IF NOT EXISTS despesas;
+            CREATE TABLE IF NOT EXISTS despesas.feempliq (id integer PRIMARY KEY);
+            CREATE SCHEMA IF NOT EXISTS empresasimples;
+            CREATE TABLE IF NOT EXISTS empresasimples.cnae_subgrupos (id integer PRIMARY KEY);
+            CREATE SCHEMA IF NOT EXISTS agendamento;
+            CREATE TABLE IF NOT EXISTS agendamento.servico_informacao
+              (id integer PRIMARY KEY, url varchar, label varchar, id_servico integer);
+            CREATE TABLE IF NOT EXISTS agendamento.servico_unidade_trabalho (id_servico integer);
+          SQL
+
+      - name: Load schema dump
+        run: psql -h localhost -U ged_user -d ged_saas_db -v ON_ERROR_STOP=1 -f ci/legacy-schema.sql
+
+      - name: Load e2e seed
+        run: psql -h localhost -U ged_user -d ged_saas_db -v ON_ERROR_STOP=1 -f ci/seed-e2e.sql
+
+      - name: Start backend (uvicorn)
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://ged_user:ged_password_secure_local@localhost:5432/ged_saas_db
+          APP_NAME: sistemas
+          ENVIRONMENT: desenvolvimento
+          JWT_SECRET_SOURCE: env
+          JWT_SECRET_STATIC: ci-e2e-secret
+          CELERY_BROKER_URL: redis://localhost:6379/0
+          CELERY_RESULT_BACKEND: redis://localhost:6379/1
+          # O runner não tem /app; storage vai para /tmp (gravável).
+          TENANTS_STORAGE_ROOT: /tmp/uploads/tenants
+          UPLOADS_DIR: /tmp/uploads/anexos
+          JOBS_RESULTS_DIR: /tmp/uploads/jobs
+        run: |
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &
+          for i in {1..40}; do
+            curl -sf http://localhost:8000/api/v2/health >/dev/null && { echo "backend up"; exit 0; }
+            sleep 1
+          done
+          echo "backend não subiu"; cat /tmp/uvicorn.log; exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install e2e deps
+        working-directory: tests-e2e
+        run: npm install --no-audit --no-fund
+
+      - name: Run Playwright (API-level)
+        working-directory: tests-e2e
+        env:
+          PY_BASE: http://localhost:8000
+        run: npx playwright test specs/assinatura-v2.spec.ts
+
+      - name: Backend log (on failure)
+        if: failure()
+        run: cat /tmp/uvicorn.log || true
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-assinatura-report
+          path: tests-e2e/report
+          if-no-files-found: ignore
+          retention-days: 7

@@ -26,17 +26,36 @@ Cobrem: helpers puros (`statusSolicitacao`/`statusAssinante`/`validacaoMensagem`
 tratamento de **409** (senha legada) e **429** (throttle) no fluxo de assinar.
 
 ## E2E de assinatura (Playwright)
-Via serviço `e2e` do compose (rede interna, `PY_BASE=http://nginx`):
+
+### Local / containerizado
+Via serviço `e2e` do compose (rede interna, `PY_BASE=http://nginx`). Os scripts
+carregam o **mesmo `ci/seed-e2e.sql`** do CI antes de rodar (idempotente):
 ```bash
-# stack de pé + seed Sobral
-docker compose up -d
-# script padronizado:
-scripts/e2e-assinatura.sh                 # (bash)
-scripts\e2e-assinatura.ps1                # (PowerShell)
-# ou direto:
-docker compose --profile test run --rm e2e npx playwright test specs/assinatura-v2.spec.ts
+docker compose up -d                  # stack de pé
+scripts/e2e-assinatura.sh             # seed + e2e (bash)
+scripts\e2e-assinatura.ps1            # seed + e2e (PowerShell)
+# só o seed:
+scripts/seed-e2e.sh                   # carrega ci/seed-e2e.sql no Postgres local
+# pular o seed:
+NO_SEED=1 scripts/e2e-assinatura.sh
 ```
 Cobre via HTTP: assinar + hash + evidências + comprovante, recusar, throttle 429.
+
+### No CI (`.github/workflows/e2e-assinatura.yml`)
+Abordagem leve (sem nginx/compose): services **Postgres + Redis**, carrega
+`ci/legacy-schema.sql` + `ci/seed-e2e.sql`, sobe o backend via **uvicorn** e roda
+o Playwright com `PY_BASE=http://localhost:8000`. Diferença vs. local: só o
+`PY_BASE` (backend direto no CI; nginx no local) — **seed, spec e
+playwright.config são os mesmos**. O backend no CI usa `JWT_SECRET_SOURCE=env`
+e `TENANTS_STORAGE_ROOT=/tmp/...` (o runner não tem `/app`).
+
+### O seed e2e (`ci/seed-e2e.sql`)
+Idempotente, tenant-aware, ids fixos (tenant=1 sobral, admin@local.test
+super-usuário com bcrypt **fixo de teste**, manifestante=1, assunto=1, unidade=3,
+especie=2, acao ABERTURA). Cria só os pré-requisitos estáticos; a spec cria
+processo/anexo/solicitação dinamicamente. **bcrypt embutido = exclusivo de teste.**
+Roda com `session_replication_role = replica` para suspender triggers legados do
+PHP (ex.: trigger de `utils.sistema` → `sistema_chamados.*`) durante o seed.
 
 ## Limitações conhecidas
 - **TLS no host:** `npm install` no Windows host pode falhar
@@ -45,8 +64,12 @@ Cobre via HTTP: assinar + hash + evidências + comprovante, recusar, throttle 42
   renderização de UI é coberta pelo Vitest, não pelo e2e.
 - **409 MD5 no e2e:** não há como criar usuário só-MD5 via API; coberto no
   pytest (`test_md5_only_bloqueado`) e no Vitest (render do erro).
-- **Stack completa no CI (workflow e2e):** adiada — hoje o CI roda pytest +
-  vitest; o e2e roda local/containerizado pelo script.
+- **Compose completo no CI:** adiado — o e2e no CI usa a abordagem leve
+  (Postgres+Redis+uvicorn). Subir nginx/compose/frontend no CI (para testes
+  browser reais) fica para um PR futuro.
+- **`agendamento` stub:** o dump (`ci/legacy-schema.sql`) tem a view
+  `utils.servicosportais` que referencia `agendamento.*`; os workflows criam um
+  stub mínimo desse schema antes de carregar o dump.
 
 ## Simular usuário com senha legada (para ver o 409)
 O login rehasha MD5→bcrypt automaticamente; então simule **após** obter o token:

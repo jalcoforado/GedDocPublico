@@ -92,6 +92,13 @@ jobs:
 
             CREATE SCHEMA IF NOT EXISTS empresasimples;
             CREATE TABLE IF NOT EXISTS empresasimples.cnae_subgrupos (id integer PRIMARY KEY);
+
+            -- A view utils.servicosportais (presente no dump) referencia
+            -- agendamento.* — stub mínimo para o load não falhar.
+            CREATE SCHEMA IF NOT EXISTS agendamento;
+            CREATE TABLE IF NOT EXISTS agendamento.servico_informacao
+              (id integer PRIMARY KEY, url varchar, label varchar, id_servico integer);
+            CREATE TABLE IF NOT EXISTS agendamento.servico_unidade_trabalho (id_servico integer);
           SQL
 
       - name: Load full schema dump

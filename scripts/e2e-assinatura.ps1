@@ -9,6 +9,7 @@
 # Uso:
 #   scripts\e2e-assinatura.ps1
 #   scripts\e2e-assinatura.ps1 -Spec specs/balcao-flow.spec.ts
-param([string]$Spec = "specs/assinatura-v2.spec.ts")
+param([string]$Spec = "specs/assinatura-v2.spec.ts", [switch]$NoSeed)
+if (-not $NoSeed) { & "$PSScriptRoot/seed-e2e.ps1" }
 Write-Host ">> e2e: $Spec (serviço compose 'e2e', PY_BASE=http://nginx)"
 docker compose --profile test run --rm e2e npx playwright test $Spec
