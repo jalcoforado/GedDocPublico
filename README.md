@@ -265,4 +265,20 @@ Quando estiver pronto para aposentar o PHP, ver [CUTOVER.md](CUTOVER.md) — che
 ## Decisões pendentes
 
 - **5.2+ GovBr / AssineJá:** bloqueado por credenciais de homologação.
-- **CI/CD:** sem pipeline (ruff/mypy/pytest/playwright em PR seriam bem-vindos).
+- **CI/CD:** GitHub Actions roda pytest backend a cada PR ([.github/workflows/backend-tests.yml](.github/workflows/backend-tests.yml)). Falta ruff/mypy + playwright e2e no pipeline.
+
+## Decisões de arquitetura registradas
+
+### Hospedagem de arquivos — manter filesystem local por ora; migrar para object storage antes de produção multi-tenant real
+
+**Estado atual:** anexos, PDFs carimbados e resultados de jobs vivem no filesystem local do container backend (`/app/uploads/tenants/{slug}/...`), montado via bind volume. Servidos pelo Python (`FileResponse` com auth+RLS); nginx não serve `uploads/` direto. Indireção limpa via `e_doc` (DB) + `resolve_anexo_path()` / `tenant_anexos_dir()` — o serviço `services/anexos.py` é o único ponto que toca o disco.
+
+**Decisão:** **manter** filesystem local enquanto é dev + piloto Sobral (single host). Migrar é over-engineering agora.
+
+**Gatilho de migração:** quando entrar **o primeiro documento real que não pode ser perdido** — i.e., antes de onboarding do 2º tenant em produção ou antes de dados com valor probatório. O eixo crítico do domínio **não é escala/throughput**, é **durabilidade + integridade legal** (guarda por décadas via TTD, Lei 11.419/2006) e **isolamento multi-tenant dos bytes** (RLS protege o DB, não o filesystem).
+
+**Alvo:** object storage S3-compatible com **versioning + Object Lock (WORM)** para guarda permanente, **server-side encryption**, **bucket/prefixo por tenant com IAM** (equivalente do RLS para bytes) e **lifecycle policy espelhando a TTD** (corrente→quente, intermediária→frio, permanente→lock, eliminação→delete auditado). Provedor é decisão de compliance/LGPD (MinIO self-hosted vs cloud nacional vs S3), não técnica.
+
+**Caminho de baixo custo:** introduzir interface `StorageBackend` (put/get/delete/exists) com impl `LocalFS` (atual) + seleção por env. Desacopla sem obrigar a subir MinIO já. Refactor localizado em `services/anexos.py` + `config.py`.
+
+**Pendência menor relacionada:** limite de upload divergente — backend `max_upload_size_mb=20`, wizard do cidadão anuncia 25MB. Alinhar.
