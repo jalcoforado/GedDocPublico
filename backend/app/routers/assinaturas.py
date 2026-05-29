@@ -14,6 +14,7 @@ from ..schemas.assinatura import (
     EvidenciasOut,
     PendenciaAssinatura,
     RecusarRequest,
+    RevogarValidacaoPublicaRequest,
     SolicitacaoOut,
     SolicitarAssinaturaRequest,
     ValidacaoOut,
@@ -231,11 +232,13 @@ async def evidencias_endpoint(
     assinatura_anexo_id: int,
     current: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ) -> EvidenciasOut:
     try:
         return await consultar_evidencias(
-            db, assinatura_anexo_id, tenant_id=tenant_id, usuario=current
+            db, assinatura_anexo_id, tenant_id=tenant_id, usuario=current,
+            tenant_slug=tenant_slug,
         )
     except (AssinaturaError, SigiloAcessoError) as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -244,7 +247,7 @@ async def evidencias_endpoint(
 @router.post("/assinaturas/{assinatura_anexo_id}/revogar-validacao-publica")
 async def revogar_validacao_publica_endpoint(
     assinatura_anexo_id: int,
-    payload: RecusarRequest,
+    payload: RevogarValidacaoPublicaRequest,
     current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
@@ -277,7 +280,8 @@ async def comprovante_endpoint(
 ):
     try:
         evidencias = await consultar_evidencias(
-            db, assinatura_anexo_id, tenant_id=tenant_id, usuario=current
+            db, assinatura_anexo_id, tenant_id=tenant_id, usuario=current,
+            tenant_slug=tenant_slug,
         )
         validacao = await validar_assinatura(
             db, assinatura_anexo_id, tenant_id=tenant_id,

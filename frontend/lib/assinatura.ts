@@ -4,9 +4,31 @@ import type {
   AssinanteStatus,
   SolicitacaoAssinatura,
   ValidacaoAssinatura,
+  ValidacaoPublicaStatus,
 } from "./api";
 
 export type BadgeIntent = "success" | "warning" | "danger";
+
+// PR2f — apresentação do status da validação pública (calculado no backend; a
+// UI só reflete). `exibeCodigo` controla se código/URL podem aparecer.
+export function statusValidacaoPublica(status: ValidacaoPublicaStatus | undefined): {
+  label: string;
+  intent: BadgeIntent;
+  exibeCodigo: boolean;
+} {
+  switch (status) {
+    case "ativa":
+      return { label: "Validação pública ativa", intent: "success", exibeCodigo: true };
+    case "revogada":
+      return { label: "Validação pública revogada", intent: "danger", exibeCodigo: true };
+    case "bloqueada_sigilo":
+      return { label: "Bloqueada por sigilo", intent: "warning", exibeCodigo: false };
+    case "indisponivel":
+      return { label: "Validação pública indisponível", intent: "warning", exibeCodigo: false };
+    default:
+      return { label: "Sem validação pública", intent: "warning", exibeCodigo: false };
+  }
+}
 
 export function statusSolicitacao(
   s: Pick<SolicitacaoAssinatura, "cancelada" | "realizada">,

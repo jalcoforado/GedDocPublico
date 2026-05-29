@@ -49,6 +49,11 @@ class RecusarRequest(BaseModel):
     motivo: str = Field(min_length=3, max_length=1000)
 
 
+class RevogarValidacaoPublicaRequest(BaseModel):
+    # PR2f — motivo opcional (sem fluxo de aprovação).
+    motivo: str | None = Field(default=None, max_length=1000)
+
+
 class ValidacaoOut(BaseModel):
     """Resultado da validação on-demand de uma assinatura de anexo."""
     id_assinatura_anexo: int
@@ -82,6 +87,10 @@ class EvidenciasOut(BaseModel):
     evidencias: dict | None
     # PR2e — código público de validação (para o servidor compartilhar/imprimir).
     codigo_validacao: str | None = None
+    # PR2f — URL pública + status calculado (fonte única no backend; a UI só reflete).
+    # status ∈ ativa|revogada|bloqueada_sigilo|indisponivel|nao_aplicavel
+    validacao_publica_url: str | None = None
+    validacao_publica_status: str = "nao_aplicavel"
 
 
 class ValidacaoPublicaOut(BaseModel):

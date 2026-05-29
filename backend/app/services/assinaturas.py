@@ -17,10 +17,12 @@ from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.password import verify_password
+from ..config import validacao_publica_url
 from .audit import log as audit_log
 from . import anexos as anexos_svc
 from . import assinatura_throttle as throttle
 from .sigilo import assert_acesso_processo
+from .validacao_publica import status_validacao_publica
 from ..models import (
     Anexo,
     AnexoProcesso,
@@ -558,7 +560,12 @@ async def validar_assinatura(
 
 
 async def consultar_evidencias(
-    db: AsyncSession, assinatura_anexo_id: int, *, tenant_id: int, usuario
+    db: AsyncSession,
+    assinatura_anexo_id: int,
+    *,
+    tenant_id: int,
+    usuario,
+    tenant_slug: str | None = None,
 ) -> EvidenciasOut:
     row = (
         await db.execute(
@@ -567,6 +574,8 @@ async def consultar_evidencias(
                 Usuario.nome,
                 Anexo.descricao,
                 Processo.numero_processo,
+                Processo.nivel_sigilo,
+                Processo.excluido,
             )
             .join(
                 UsuarioAssinatura,
@@ -584,9 +593,36 @@ async def consultar_evidencias(
     ).first()
     if row is None:
         raise AssinaturaError("Assinatura não encontrada")
-    aa, nome, anexo_descricao, numero_processo = row
+    aa, nome, anexo_descricao, numero_processo, nivel_sigilo, processo_excluido = row
     await assert_acesso_processo(
         db, tenant_id=tenant_id, processo_id=aa.id_processo, usuario=usuario
+    )
+
+    # Validação pública (PR2f): status pela fonte única + URL (se houver código).
+    ap_desentranhado_em = (
+        await db.execute(
+            select(AnexoProcesso.desentranhado_em).where(
+                AnexoProcesso.id_anexo == aa.id_anexo,
+                AnexoProcesso.id_processo == aa.id_processo,
+                AnexoProcesso.tenant_id == tenant_id,
+                AnexoProcesso.excluido.is_(False),
+            )
+        )
+    ).first()
+    vp_status = status_validacao_publica(
+        codigo_validacao=aa.codigo_validacao,
+        documento_hash=aa.documento_hash,
+        assinado=aa.assinado,
+        status_assinatura=aa.status,
+        validacao_publica_revogada=aa.validacao_publica_revogada,
+        nivel_sigilo=(nivel_sigilo if not processo_excluido else None),
+        anexo_desentranhado=(ap_desentranhado_em is None or ap_desentranhado_em[0] is not None),
+        validacao_expira_em=aa.validacao_expira_em,
+    )
+    vp_url = (
+        validacao_publica_url(tenant_slug, aa.codigo_validacao)
+        if tenant_slug and aa.codigo_validacao
+        else None
     )
     return EvidenciasOut(
         id_assinatura_anexo=aa.id,
@@ -607,6 +643,8 @@ async def consultar_evidencias(
         id_audit_log=aa.id_audit_log,
         evidencias=aa.evidencias,
         codigo_validacao=aa.codigo_validacao,
+        validacao_publica_url=vp_url,
+        validacao_publica_status=vp_status,
     )
 
 

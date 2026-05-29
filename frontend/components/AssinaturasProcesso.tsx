@@ -11,6 +11,7 @@ import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toast";
+import { ValidacaoPublicaCard } from "@/components/ValidacaoPublicaCard";
 import {
   api,
   assinaturaComprovanteUrl,
@@ -213,6 +214,7 @@ function SolicitacaoCard({
                         assinado em {fmtDt(ax.dt_assinatura)} · nível {ax.nivel}
                       </span>
                       <ValidarAcao aaId={ax.id} />
+                      <ValidacaoPublicaCard aaId={ax.id} />
                     </>
                   )}
                 </li>

@@ -906,6 +906,11 @@ export const api = {
       request<ValidacaoAssinatura>(`/assinaturas/${assinaturaAnexoId}/validar`),
     evidencias: (assinaturaAnexoId: number) =>
       request<EvidenciasAssinatura>(`/assinaturas/${assinaturaAnexoId}/evidencias`),
+    revogarValidacaoPublica: (assinaturaAnexoId: number, motivo?: string) =>
+      request<{ id_assinatura_anexo: number; validacao_publica_revogada: boolean }>(
+        `/assinaturas/${assinaturaAnexoId}/revogar-validacao-publica`,
+        { method: "POST", body: JSON.stringify({ motivo: motivo || null }) },
+      ),
   },
 
   usuarios: {
@@ -1540,7 +1545,17 @@ export interface EvidenciasAssinatura {
   id_audit_log: number | null;
   evidencias: Record<string, unknown> | null;
   codigo_validacao?: string | null;
+  // PR2f — URL pública + status calculado no backend (a UI só reflete).
+  validacao_publica_url?: string | null;
+  validacao_publica_status?: ValidacaoPublicaStatus;
 }
+
+export type ValidacaoPublicaStatus =
+  | "ativa"
+  | "revogada"
+  | "bloqueada_sigilo"
+  | "indisponivel"
+  | "nao_aplicavel";
 
 export function assinaturaComprovanteUrl(assinaturaAnexoId: number): string {
   return `${BROWSER_API_URL}/assinaturas/${assinaturaAnexoId}/comprovante.pdf`;

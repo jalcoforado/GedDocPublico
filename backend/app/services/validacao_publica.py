@@ -45,9 +45,51 @@ AVISO = (
     "qualificada ICP-Brasil."
 )
 
+# Status da validação pública (fonte única — ver status_validacao_publica).
+STATUS_ATIVA = "ativa"
+STATUS_REVOGADA = "revogada"
+STATUS_BLOQUEADA_SIGILO = "bloqueada_sigilo"
+STATUS_INDISPONIVEL = "indisponivel"
+STATUS_NAO_APLICAVEL = "nao_aplicavel"
+
 
 class ValidacaoPublicaError(Exception):
     pass
+
+
+def status_validacao_publica(
+    *,
+    codigo_validacao: str | None,
+    documento_hash: str | None,
+    assinado: bool | None,
+    status_assinatura: str,
+    validacao_publica_revogada: bool,
+    nivel_sigilo: str | None,
+    anexo_desentranhado: bool,
+    validacao_expira_em: datetime | None = None,
+) -> str:
+    """Status da validação pública de UMA assinatura. **Fonte única de regra**,
+    reusada pelo endpoint público (`validar_publico`) e pelas evidências
+    internas (`consultar_evidencias`). Só `ativa` é validável publicamente; os
+    demais resultam em resposta neutra no endpoint público.
+
+    `nivel_sigilo=None` = processo ausente/excluído → indisponível.
+    """
+    if not codigo_validacao or not documento_hash:
+        return STATUS_NAO_APLICAVEL
+    if validacao_publica_revogada:
+        return STATUS_REVOGADA
+    if validacao_expira_em is not None and validacao_expira_em < datetime.now():
+        return STATUS_INDISPONIVEL
+    if status_assinatura != "assinada" or not assinado:
+        return STATUS_INDISPONIVEL
+    if anexo_desentranhado:
+        return STATUS_INDISPONIVEL
+    if nivel_sigilo is None:
+        return STATUS_INDISPONIVEL
+    if nivel_sigilo != "ostensivo":
+        return STATUS_BLOQUEADA_SIGILO
+    return STATUS_ATIVA
 
 
 async def _auditar_negativa(db: AsyncSession, *, tenant_id: int, ip: str | None) -> None:
@@ -95,20 +137,8 @@ async def validar_publico(
     if aa is None:
         await _auditar_negativa(db, tenant_id=tenant_id, ip=ip)
         return None
-    if aa.validacao_publica_revogada:
-        await _auditar_negativa(db, tenant_id=tenant_id, ip=ip)
-        return None
-    if aa.validacao_expira_em is not None and aa.validacao_expira_em < datetime.now():
-        await _auditar_negativa(db, tenant_id=tenant_id, ip=ip)
-        return None
-    if aa.status != "assinada" or not aa.assinado:
-        await _auditar_negativa(db, tenant_id=tenant_id, ip=ip)
-        return None
-    if not aa.documento_hash:  # legado sem hash não é validável publicamente
-        await _auditar_negativa(db, tenant_id=tenant_id, ip=ip)
-        return None
 
-    # tenant ativo
+    # tenant ativo (propriedade do tenant, não da assinatura)
     tenant = (
         await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     ).scalar_one_or_none()
@@ -116,7 +146,6 @@ async def validar_publico(
         await _auditar_negativa(db, tenant_id=tenant_id, ip=ip)
         return None
 
-    # processo OSTENSIVO no estado atual (re-check lazy do sigilo)
     proc = (
         await db.execute(
             select(Processo).where(
@@ -125,11 +154,6 @@ async def validar_publico(
             )
         )
     ).scalar_one_or_none()
-    if proc is None or proc.excluido or proc.nivel_sigilo != "ostensivo":
-        await _auditar_negativa(db, tenant_id=tenant_id, ip=ip)
-        return None
-
-    # anexo NÃO desentranhado (vínculo ativo no processo)
     ap = (
         await db.execute(
             select(AnexoProcesso).where(
@@ -140,7 +164,19 @@ async def validar_publico(
             )
         )
     ).scalar_one_or_none()
-    if ap is None or ap.desentranhado_em is not None:
+
+    # Status pela fonte única — só 'ativa' é validável publicamente.
+    status = status_validacao_publica(
+        codigo_validacao=aa.codigo_validacao,
+        documento_hash=aa.documento_hash,
+        assinado=aa.assinado,
+        status_assinatura=aa.status,
+        validacao_publica_revogada=aa.validacao_publica_revogada,
+        nivel_sigilo=(proc.nivel_sigilo if proc is not None and not proc.excluido else None),
+        anexo_desentranhado=(ap is None or ap.desentranhado_em is not None),
+        validacao_expira_em=aa.validacao_expira_em,
+    )
+    if status != STATUS_ATIVA:
         await _auditar_negativa(db, tenant_id=tenant_id, ip=ip)
         return None
 
@@ -201,7 +237,7 @@ async def revogar_validacao_publica(
     *,
     tenant_id: int,
     usuario,
-    motivo: str,
+    motivo: str | None = None,
 ) -> AssinaturaAnexo:
     """Revogação MANUAL do código público (ação interna autenticada). A partir
     daqui o token passa a responder neutro na validação pública. Respeita o
