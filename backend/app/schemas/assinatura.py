@@ -80,6 +80,28 @@ class EvidenciasOut(BaseModel):
     dt_assinatura: datetime | None
     id_audit_log: int | None
     evidencias: dict | None
+    # PR2e — código público de validação (para o servidor compartilhar/imprimir).
+    codigo_validacao: str | None = None
+
+
+class ValidacaoPublicaOut(BaseModel):
+    """Resposta pública de validação por código (sem autenticação).
+
+    Minimizada (LGPD): expõe só o probatório. Resposta neutra (token
+    inexistente/revogado/sigiloso/etc.) = apenas `valido=False`, todo o resto
+    None — indistinguível entre os casos negativos.
+    """
+    valido: bool
+    integro: bool | None = None
+    signatario: str | None = None
+    processo_numero: str | None = None
+    assinado_em: datetime | None = None
+    hash: str | None = None
+    algoritmo: str | None = None
+    versao_documento: int | None = None
+    status: str | None = None
+    detalhe: str | None = None
+    aviso: str | None = None
 
 
 class SolicitacaoOut(BaseModel):

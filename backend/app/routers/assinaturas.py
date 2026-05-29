@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
 from ..auth.perms import require_permission
+from ..config import validacao_publica_url
 from ..database import get_db
 from ..models import Usuario
 from ..services.pdf_comprovante_assinatura import gerar_comprovante_assinatura_pdf
@@ -240,6 +241,32 @@ async def evidencias_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
+@router.post("/assinaturas/{assinatura_anexo_id}/revogar-validacao-publica")
+async def revogar_validacao_publica_endpoint(
+    assinatura_anexo_id: int,
+    payload: RecusarRequest,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from ..services.validacao_publica import (
+        ValidacaoPublicaError,
+        revogar_validacao_publica,
+    )
+
+    try:
+        aa = await revogar_validacao_publica(
+            db,
+            assinatura_anexo_id,
+            tenant_id=tenant_id,
+            usuario=current,
+            motivo=payload.motivo,
+        )
+    except (ValidacaoPublicaError, SigiloAcessoError) as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return {"id_assinatura_anexo": aa.id, "validacao_publica_revogada": True}
+
+
 @router.get("/assinaturas/{assinatura_anexo_id}/comprovante.pdf")
 async def comprovante_endpoint(
     assinatura_anexo_id: int,
@@ -258,7 +285,12 @@ async def comprovante_endpoint(
         )
     except (AssinaturaError, SigiloAcessoError) as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    pdf = gerar_comprovante_assinatura_pdf(evidencias, validacao)
+    url_validacao = (
+        validacao_publica_url(tenant_slug, evidencias.codigo_validacao)
+        if evidencias.codigo_validacao
+        else None
+    )
+    pdf = gerar_comprovante_assinatura_pdf(evidencias, validacao, url_validacao=url_validacao)
     fname = f"comprovante-assinatura-{assinatura_anexo_id}.pdf"
     return Response(
         content=pdf,

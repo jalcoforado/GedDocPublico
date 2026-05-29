@@ -1539,10 +1539,61 @@ export interface EvidenciasAssinatura {
   dt_assinatura: string | null;
   id_audit_log: number | null;
   evidencias: Record<string, unknown> | null;
+  codigo_validacao?: string | null;
 }
 
 export function assinaturaComprovanteUrl(assinaturaAnexoId: number): string {
   return `${BROWSER_API_URL}/assinaturas/${assinaturaAnexoId}/comprovante.pdf`;
+}
+
+// PR2e — validação PÚBLICA por código/token. Sem autenticação (anônima):
+// não envia cookies. Resposta neutra (404 {valido:false}) NÃO é erro — é o
+// caso "não encontrado/indisponível", indistinguível de revogado/sigiloso.
+export interface ValidacaoPublica {
+  valido: boolean;
+  integro: boolean | null;
+  signatario: string | null;
+  processo_numero: string | null;
+  assinado_em: string | null;
+  hash: string | null;
+  algoritmo: string | null;
+  versao_documento: number | null;
+  status: string | null;
+  detalhe: string | null;
+  aviso: string | null;
+}
+
+const VALIDACAO_NEUTRA: ValidacaoPublica = {
+  valido: false,
+  integro: null,
+  signatario: null,
+  processo_numero: null,
+  assinado_em: null,
+  hash: null,
+  algoritmo: null,
+  versao_documento: null,
+  status: null,
+  detalhe: null,
+  aviso: null,
+};
+
+export async function validarAssinaturaPublica(
+  codigo: string
+): Promise<ValidacaoPublica> {
+  const res = await fetch(
+    `${baseUrl()}/publico/validacao/${encodeURIComponent(codigo)}`,
+    { cache: "no-store" } // sem credentials: requisição anônima
+  );
+  if (res.status === 429) {
+    throw new ApiError("Muitas consultas. Tente novamente em instantes.", 429);
+  }
+  const data = await res.json().catch(() => ({}));
+  // 200 (positivo) e 404 (neutro {valido:false}) são ambos resultados válidos.
+  return { ...VALIDACAO_NEUTRA, ...(data as Partial<ValidacaoPublica>) };
+}
+
+export function validacaoPublicaComprovanteUrl(codigo: string): string {
+  return `${BROWSER_API_URL}/publico/validacao/${encodeURIComponent(codigo)}/comprovante.pdf`;
 }
 
 export const assinaturasApi = {

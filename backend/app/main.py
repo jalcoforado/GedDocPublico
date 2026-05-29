@@ -32,6 +32,7 @@ from .routers import (
     tenant,
     unidades,
     usuarios,
+    validacao_publica,
     workflow,
 )
 
@@ -81,6 +82,7 @@ app.include_router(processos.router, prefix="/api/v2")
 app.include_router(protocolo.router, prefix="/api/v2")
 app.include_router(anexos.router, prefix="/api/v2")
 app.include_router(assinaturas.router, prefix="/api/v2")
+app.include_router(validacao_publica.router, prefix="/api/v2")
 app.include_router(relatorios.router, prefix="/api/v2")
 app.include_router(jobs.router, prefix="/api/v2")
 app.include_router(notificacoes.router, prefix="/api/v2")

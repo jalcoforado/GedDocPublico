@@ -57,6 +57,55 @@ processo/anexo/solicitação dinamicamente. **bcrypt embutido = exclusivo de tes
 Roda com `session_replication_role = replica` para suspender triggers legados do
 PHP (ex.: trigger de `utils.sistema` → `sistema_chamados.*`) durante o seed.
 
+## Validação pública por código/token (PR2e)
+
+Permite a um terceiro **sem login** validar uma assinatura pelo `codigo_validacao`
+impresso no comprovante (texto + QR). O endpoint é anônimo e tenant-scoped pelo
+subdomínio (TenantMiddleware), então o lookup é `(codigo, tenant_id)` — sem
+bypass de RLS.
+
+```
+GET /api/v2/publico/validacao/{codigo}              → JSON minimizado
+GET /api/v2/publico/validacao/{codigo}/comprovante.pdf → PDF público (com QR)
+```
+
+- **Respostas neutras e indistinguíveis** (404 `{valido:false}`) para token
+  inexistente, revogado, processo sigiloso/não-ostensivo, anexo desentranhado,
+  assinatura não-`assinada` ou tenant inativo — não vazam existência.
+- **Revogação automática é lazy**: o estado atual (sigilo, desentranhamento,
+  status) é re-checado a cada consulta. Revogação **manual**:
+  `POST /api/v2/assinaturas/{id}/revogar-validacao-publica` (autenticado, com
+  guard de sigilo).
+- **Minimização (LGPD)**: a resposta pública só traz signatário, data, hash,
+  algoritmo, versão e nº do processo (se ostensivo). Nunca IP/UA/método/
+  evidências/CPF/matrícula/e-mail/dados do cidadão.
+- **Rate-limit**: borda no nginx (`limit_req zone=validacao_publica` no path
+  `/api/v2/publico/`) + app (Redis, `validacao_publica_throttle`, fail-open). A
+  auditoria das respostas neutras é **deduplicada por IP** (no máx. 1 linha por
+  janela) para não inundar o `audit_log` sob enumeração.
+- **URL/QR**: derivada de `PUBLIC_BASE_URL` (se definido) ou
+  `https://{slug}.{base_domain}/validar/{codigo}`. Defina `PUBLIC_BASE_URL` em
+  produção (HTTPS público).
+- O `codigo_validacao` é exposto ao servidor autenticado via **evidências** e
+  impresso no **comprovante interno** (QR), para ele compartilhar/imprimir.
+
+Para obter o código: assine → `GET /api/v2/assinaturas/{id}/evidencias` →
+`codigo_validacao`. Página pública (frontend): `/validar` e `/validar/{codigo}`.
+
+### Ressalvas operacionais (PR2e)
+
+1. **`codigo_validacao` é um segredo compartilhável.** Trate-o como um **token
+   opaco compartilhável**: quem possui o código/QR consegue consultar a
+   validação pública. Porém a resposta é **minimizada** — não expõe evidências
+   internas, IP, user agent, dados do cidadão, CPF, matrícula, e-mail nem o
+   conteúdo do documento. Distribua o código apenas a quem deve poder validar.
+
+2. **`PUBLIC_BASE_URL` é obrigatório em produção.** Antes de gerar comprovantes
+   em produção, `PUBLIC_BASE_URL` precisa estar configurado com a **URL pública
+   HTTPS correta** do tenant/sistema, para evitar QR Code ou link inválido no
+   comprovante. Em dev, na ausência da variável, a URL é derivada do subdomínio
+   (`https://{slug}.{base_domain}/validar/{codigo}`).
+
 ## Limitações conhecidas
 - **TLS no host:** `npm install` no Windows host pode falhar
   (`UNABLE_TO_VERIFY_LEAF_SIGNATURE`); use o container (acima) ou o CI.

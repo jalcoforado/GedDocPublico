@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     # True = host desconhecido retorna 404. False = cai no default_tenant_slug.
     strict_tenant_resolution: bool = False
 
+    # Validação pública de assinatura (PR2e). Base da URL impressa no comprovante
+    # / QR Code. Vazio = deriva do subdomínio do tenant:
+    #   https://{slug}.{base_domain}/validar/{codigo}
+    # Em prod (HTTPS público) defina explicitamente, ex.: https://sobral.aprimora.app
+    public_base_url: str = ""
+
     # Observabilidade (Fase 33). Vazio = desabilitado.
     sentry_dsn: str = ""
     sentry_traces_sample_rate: float = 0.1
@@ -103,6 +109,16 @@ def tenant_jobs_dir(tenant_slug: str) -> Path:
     p = Path(get_settings().tenants_storage_root) / tenant_slug / "jobs"
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def validacao_publica_url(tenant_slug: str, codigo: str) -> str:
+    """URL pública de validação (impressa no comprovante / QR). Usa
+    `public_base_url` quando definido; senão deriva do subdomínio do tenant."""
+    s = get_settings()
+    base = s.public_base_url.strip().rstrip("/")
+    if not base:
+        base = f"https://{tenant_slug}.{s.base_domain}"
+    return f"{base}/validar/{codigo}"
 
 
 def resolve_anexo_path(tenant_slug: str, e_doc: str) -> Path | None:

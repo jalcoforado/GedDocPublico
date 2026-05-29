@@ -119,3 +119,14 @@ class AssinaturaAnexo(Base):
     id_audit_log: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("aprimora_py.audit_log.id"), nullable=True
     )
+    # Assinatura v2 — validação pública (PR2e). `codigo_validacao` é o token
+    # opaco impresso no comprovante. Revogação automática é lazy (na consulta);
+    # estes campos são só para revogação manual.
+    codigo_validacao: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    validacao_publica_revogada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    validacao_revogada_motivo: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    validacao_revogada_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    validacao_revogada_por: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
+    validacao_expira_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

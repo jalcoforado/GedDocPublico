@@ -10,6 +10,7 @@ Fase 13a: todas as funções recebem `tenant_id` e propagam.
 """
 from __future__ import annotations
 
+import secrets
 from datetime import datetime
 
 from sqlalchemy import and_, select, update
@@ -273,6 +274,8 @@ async def assinar(
     aa.documento_hash = documento_hash
     aa.hash_algoritmo = hash_algoritmo
     aa.documento_versao = aa.documento_versao or 1
+    # Token público de validação (PR2e): opaco, ~128 bits, não-enumerável.
+    aa.codigo_validacao = secrets.token_urlsafe(16)
     aa.ip_assinatura = ip
     aa.user_agent_assinatura = user_agent[:512] if user_agent else None
     aa.evidencias = {
@@ -603,6 +606,7 @@ async def consultar_evidencias(
         dt_assinatura=aa.dt_assinatura,
         id_audit_log=aa.id_audit_log,
         evidencias=aa.evidencias,
+        codigo_validacao=aa.codigo_validacao,
     )
 
 

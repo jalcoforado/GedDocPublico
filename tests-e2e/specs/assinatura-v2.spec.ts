@@ -126,6 +126,51 @@ test.describe("Assinatura v2 (PR2b)", () => {
     expect(assinante.status).toBe("recusada");
   });
 
+  test("validação pública: positiva, neutra (404) e revogação", async ({ request }) => {
+    const { aaId } = await setup(request, auth, usuarioId);
+    const sign = await request.post(`/api/v2/assinaturas/${aaId}/assinar`, {
+      headers: auth,
+      data: { senha: "admin123" },
+    });
+    expect(sign.status(), `assinar: ${await sign.text()}`).toBe(200);
+
+    // O servidor obtém o código via evidências (autenticado).
+    const ev = await request.get(`/api/v2/assinaturas/${aaId}/evidencias`, { headers: auth });
+    const codigo = (await ev.json()).codigo_validacao as string;
+    expect(codigo, "código de validação ausente nas evidências").toBeTruthy();
+
+    // Consulta PÚBLICA (sem auth) → válida e íntegra.
+    const pub = await request.get(`/api/v2/publico/validacao/${codigo}`);
+    expect(pub.status(), `público: ${await pub.text()}`).toBe(200);
+    const p = await pub.json();
+    expect(p.valido).toBe(true);
+    expect(p.integro).toBe(true);
+    expect(p.signatario).toBeTruthy();
+    // Minimização: nenhum dado sensível na resposta pública.
+    for (const k of ["ip", "user_agent", "metodo_autenticacao", "email", "cpf", "matricula", "evidencias"]) {
+      expect(p[k]).toBeUndefined();
+    }
+
+    // Comprovante público (PDF) sem auth.
+    const comp = await request.get(`/api/v2/publico/validacao/${codigo}/comprovante.pdf`);
+    expect(comp.status()).toBe(200);
+    expect((await comp.body()).subarray(0, 5).toString("ascii")).toBe("%PDF-");
+
+    // Token inexistente → neutro 404 {valido:false}, indistinguível.
+    const bogus = await request.get(`/api/v2/publico/validacao/nao-existe-${Date.now()}`);
+    expect(bogus.status()).toBe(404);
+    expect((await bogus.json()).valido).toBe(false);
+
+    // Revogação manual (autenticada) → a validação pública passa a responder neutro.
+    const rev = await request.post(
+      `/api/v2/assinaturas/${aaId}/revogar-validacao-publica`,
+      { headers: auth, data: { motivo: "revogação e2e" } },
+    );
+    expect(rev.status(), `revogar: ${await rev.text()}`).toBe(200);
+    const pos = await request.get(`/api/v2/publico/validacao/${codigo}`);
+    expect(pos.status()).toBe(404);
+  });
+
   test("throttle: 5 senhas erradas e a 6ª retorna 429", async ({ request }) => {
     const { aaId } = await setup(request, auth, usuarioId);
     for (let i = 0; i < 5; i++) {
