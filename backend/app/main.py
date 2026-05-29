@@ -30,6 +30,7 @@ from .routers import (
     processos,
     protocolo,
     relatorios,
+    servico,
     tenant,
     unidades,
     usuarios,
@@ -95,6 +96,8 @@ app.include_router(busca.router, prefix="/api/v2")
 app.include_router(cidadao.router, prefix="/api/v2")
 app.include_router(tenant.router, prefix="/api/v2")
 app.include_router(branding.router, prefix="/api/v2")
+app.include_router(servico.router, prefix="/api/v2")
+app.include_router(servico.portal_router, prefix="/api/v2")
 app.include_router(workflow.router, prefix="/api/v2")
 app.include_router(workflow.instances_router, prefix="/api/v2")
 app.include_router(workflow.mapeamento_router, prefix="/api/v2")

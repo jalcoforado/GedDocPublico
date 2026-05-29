@@ -35,6 +35,7 @@ from .manifestante import Manifestante, TipoManifestante
 from .modulo import ConfiguracoesModulos, Modulo
 from .notificacao import Notificacao, NotificacaoPreferencia
 from .nivel import Nivel
+from .servico import Servico
 from .sistema import Sistema
 from .tenant import Tenant
 from .unidade_trabalho import TipoUnidadeTrabalho, UnidadeTrabalho
@@ -82,6 +83,7 @@ __all__ = [
     "Nivel",
     "Notificacao",
     "NotificacaoPreferencia",
+    "Servico",
     "Sistema",
     "SistemaTransacao",
     "Tenant",

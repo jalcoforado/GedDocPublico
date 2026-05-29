@@ -1881,6 +1881,100 @@ export const tenantsApi = {
   onboarding: () => request<OnboardingResponse>(`/tenants/me/onboarding`),
 };
 
+// ===== PR 4a — Catálogo de Serviços / Carta de Serviços ======================
+
+export interface ServicoDocumento {
+  nome: string;
+  obrigatorio: boolean;
+  descricao?: string | null;
+}
+
+export interface Servico {
+  id: number;
+  nome: string;
+  slug: string;
+  descricao_curta: string | null;
+  descricao_detalhada: string | null;
+  publico_alvo: string | null;
+  instrucoes_cidadao: string | null;
+  documentos_exigidos: ServicoDocumento[] | null;
+  prazo_estimado_dias: number | null;
+  id_unidade_responsavel: number | null;
+  id_tipo_processo_padrao: number | null;
+  id_assunto_padrao: number | null;
+  id_especie_documental_padrao: number | null;
+  nivel_sigilo_padrao: string;
+  canal_entrada_permitido: string;
+  ativo: boolean;
+  destaque: boolean;
+  ordem_exibicao: number;
+  categoria: string | null;
+  texto_confirmacao: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface ServicoInput {
+  nome: string;
+  slug: string;
+  descricao_curta?: string | null;
+  descricao_detalhada?: string | null;
+  publico_alvo?: string | null;
+  instrucoes_cidadao?: string | null;
+  documentos_exigidos?: ServicoDocumento[] | null;
+  prazo_estimado_dias?: number | null;
+  id_unidade_responsavel?: number | null;
+  id_tipo_processo_padrao?: number | null;
+  id_assunto_padrao?: number | null;
+  id_especie_documental_padrao?: number | null;
+  nivel_sigilo_padrao?: string;
+  canal_entrada_permitido?: string;
+  destaque?: boolean;
+  ordem_exibicao?: number;
+  categoria?: string | null;
+  texto_confirmacao?: string | null;
+}
+
+/** Projeção pública segura (sem ids internos, sigilo, canal ou flags admin). */
+export interface ServicoPublico {
+  nome: string;
+  slug: string;
+  descricao_curta: string | null;
+  descricao_detalhada: string | null;
+  publico_alvo: string | null;
+  instrucoes_cidadao: string | null;
+  prazo_estimado_dias: number | null;
+  unidade_responsavel: string | null;
+  documentos_exigidos: ServicoDocumento[] | null;
+  categoria: string | null;
+  destaque: boolean;
+  ordem_exibicao: number;
+  solicitar_habilitado: boolean;
+}
+
+export const servicosApi = {
+  list: (incluirInativos = false) =>
+    request<Servico[]>(
+      `/servicos${qs({ incluir_inativos: incluirInativos ? "true" : undefined })}`,
+    ),
+  get: (id: number) => request<Servico>(`/servicos/${id}`),
+  create: (data: ServicoInput) =>
+    request<Servico>(`/servicos`, { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: Partial<ServicoInput>) =>
+    request<Servico>(`/servicos/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  ativar: (id: number) =>
+    request<Servico>(`/servicos/${id}/ativar`, { method: "POST" }),
+  desativar: (id: number) =>
+    request<Servico>(`/servicos/${id}/desativar`, { method: "POST" }),
+};
+
+// Portal público — sem login, tenant pelo Host.
+export const portalApi = {
+  servicos: () => request<ServicoPublico[]>(`/portal/servicos`),
+  servico: (slug: string) =>
+    request<ServicoPublico>(`/portal/servicos/${encodeURIComponent(slug)}`),
+};
+
 export const protocoloApi = {
   listEspecies: (incluirInativas = false) =>
     request<EspecieDocumental[]>(
