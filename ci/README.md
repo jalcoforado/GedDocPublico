@@ -13,6 +13,20 @@ As migrations do Alembic (0004 em diante) assumem que essas tabelas
 tabelas, etc. Em desenvolvimento o banco vem de um dump base PHP;
 em CI rodamos este SQL antes de `alembic upgrade head`.
 
+### Revision do dump e migrations novas
+
+O dump reflete o schema numa **revision baseline** (hoje `0020`) e tem o
+`alembic_version` vazio. Os workflows fazem:
+
+```bash
+alembic stamp 0020   # carimba o baseline do dump (não roda 0001..0020)
+alembic upgrade head # roda só as migrations NOVAS (ex.: 0021) — em banco limpo
+```
+
+Assim o CI **exercita** cada migration nova num banco limpo. Ao regenerar o
+dump (abaixo), **atualize o baseline `0020`** nos workflows
+(`backend-tests.yml`, `e2e-assinatura.yml`) para a nova revision do dump.
+
 ### Regenerar quando o schema legado mudar
 
 ```bash

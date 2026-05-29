@@ -93,6 +93,17 @@ jobs:
       - name: Load schema dump
         run: psql -h localhost -U ged_user -d ged_saas_db -v ON_ERROR_STOP=1 -f ci/legacy-schema.sql
 
+      - name: Stamp baseline do dump + roda migrations pendentes
+        working-directory: backend
+        # Dump está na revision 0020 (alembic_version vazio). Carimba 0020 e
+        # `upgrade head` roda só as novas (ex.: 0021 — validação pública).
+        # Ao regenerar o dump, atualize o baseline.
+        env:
+          DATABASE_URL: postgresql+asyncpg://ged_user:ged_password_secure_local@localhost:5432/ged_saas_db
+        run: |
+          alembic stamp 0020
+          alembic upgrade head
+
       - name: Load e2e seed
         run: psql -h localhost -U ged_user -d ged_saas_db -v ON_ERROR_STOP=1 -f ci/seed-e2e.sql
 

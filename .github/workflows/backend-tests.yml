@@ -116,11 +116,16 @@ jobs:
           psql -h localhost -U ged_user -d ged_saas_db \
             -v ON_ERROR_STOP=1 -f ci/legacy-schema.sql
 
-      - name: Mark Alembic as up-to-date
+      - name: Stamp baseline do dump + roda migrations pendentes
         working-directory: backend
-        # Schema já está no dump — apenas marca a revision atual sem rodar
-        # as migrations. Evita conflitos de "objeto já existe".
-        run: alembic stamp head
+        # O dump (ci/legacy-schema.sql) reflete o schema na revision 0020 e tem
+        # alembic_version vazio. Carimbamos 0020 (não rodar 0001..0020, que já
+        # existem no dump) e então `upgrade head` roda só as migrations novas
+        # (ex.: 0021) — assim o CI EXERCITA a migration nova em banco limpo.
+        # Ao regenerar o dump, atualize o baseline aqui.
+        run: |
+          alembic stamp 0020
+          alembic upgrade head
 
       - name: Bootstrap RLS role (aprimora_app)
         env:
