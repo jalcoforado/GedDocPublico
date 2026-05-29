@@ -63,6 +63,32 @@ docker exec aprimora-py-backend python -m app.cli.tenant deactivate fortaleza
 docker exec aprimora-py-backend python -m app.cli.tenant activate fortaleza
 ```
 
+## Configuração inicial do tenant (PR3b)
+
+O admin **municipal** edita os dados institucionais (nome, sigla, contato,
+endereço, horário, logo/cor, mensagem do portal, unidade padrão) e o NUP federal
+pela tela **Configurações** (`/configuracoes`), sem mexer no banco.
+
+**Permissão `configuracao:atualizar` é necessária para editar as configurações
+institucionais** (gate de `PUT /tenants/me` e do `PUT /tenants/me/nup-config`):
+
+- **Super-usuário (`nivel.valor == 0`) já opera por bypass** — não precisa de
+  concessão explícita.
+- **Grupos administrativos não-SU precisam receber essa transação** pela tela de
+  **Grupos → Transações** (a transação `configuracao` é semeada pela migration
+  0023). Sem isso, o usuário não-SU vê a tela em modo leitura e recebe `403` ao
+  salvar.
+
+> A transação NÃO é mapeada automaticamente a `sistema_transacao`/`grupo_transacao`
+> na migration (id de sistema é ambiente-dependente). É uma concessão operacional
+> via UI, por design.
+
+**Reset de senha temporária** (`/usuarios` → "Resetar senha"): gera uma senha
+exibida **uma única vez**, persiste só o hash moderno (bcrypt) e zera o MD5
+legado — a senha antiga deixa de valer. Não envia e-mail; não há
+`must_change_password` (troca manual). Exige `usuario:atualizar` e é restrito ao
+próprio tenant (sem cross-tenant); o reset é auditado em `audit_log`.
+
 ---
 
 ## Backup por tenant

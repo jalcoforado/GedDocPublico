@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
@@ -29,3 +29,13 @@ class Tenant(Base):
     # PR 3a — limites básicos (apenas armazenados; sem enforcement neste PR).
     limite_usuarios: Mapped[int | None] = mapped_column(Integer, nullable=True)
     limite_armazenamento_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # PR 3b — dados institucionais editáveis pelo admin municipal (todos nullable).
+    sigla: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    email_institucional: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    telefone_institucional: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    endereco: Mapped[str | None] = mapped_column(Text, nullable=True)
+    site_oficial: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    horario_atendimento: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    texto_boas_vindas_portal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Soft-ref a utils.unidade_trabalho.id (sem FK rígida; validado no serviço).
+    id_unidade_padrao: Mapped[int | None] = mapped_column(Integer, nullable=True)

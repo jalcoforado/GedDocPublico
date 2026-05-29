@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,12 +9,14 @@ from ..config import get_settings
 from ..database import get_db, tenant_filter
 from ..models import Usuario, UsuarioGrupo, UsuarioUnidadeTrabalho
 from ..schemas.common import Paginated
+from ..schemas.tenant import ResetSenhaResponse
 from ..schemas.usuario import (
     UsuarioCreate,
     UsuarioDetail,
     UsuarioOut,
     UsuarioUpdate,
 )
+from ..services.usuario_senha import resetar_senha_usuario
 
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
 
@@ -202,6 +204,30 @@ async def update_usuario(
         **UsuarioOut.model_validate(user).model_dump(),
         grupos=grupos,
         unidades_extras=unidades,
+    )
+
+
+@router.post("/{usuario_id}/resetar-senha", response_model=ResetSenhaResponse)
+async def resetar_senha(
+    usuario_id: int,
+    request: Request,
+    current: Usuario = Depends(require_permission("usuario", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ResetSenhaResponse:
+    """Gera senha temporária para o usuário (do tenant). Retorna a senha **uma
+    única vez**; persiste só o hash moderno; audita. Sem cross-tenant."""
+    user, senha_temp = await resetar_senha_usuario(
+        db,
+        usuario_id=usuario_id,
+        tenant_id=tenant_id,
+        ator_usuario_id=current.id,
+        request=request,
+    )
+    return ResetSenhaResponse(
+        id_usuario=user.id,
+        senha_temporaria=senha_temp,
+        aviso="Copie agora: esta senha temporária só é exibida uma vez.",
     )
 
 

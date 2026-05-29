@@ -1009,6 +1009,11 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(unidades),
       }),
+    // PR 3b — gera senha temporária; retornada uma única vez.
+    resetarSenha: (id: number) =>
+      request<ResetSenhaResponse>(`/usuarios/${id}/resetar-senha`, {
+        method: "POST",
+      }),
   },
 
   unidades: {
@@ -1526,11 +1531,56 @@ export interface TenantMe {
   codigo_orgao_nup: string | null;
   /** Fase P2 — se true, processos novos recebem NUP federal além do número legado */
   usar_nup_federal: boolean;
+  // PR 3b — dados institucionais
+  sigla: string | null;
+  email_institucional: string | null;
+  telefone_institucional: string | null;
+  endereco: string | null;
+  site_oficial: string | null;
+  horario_atendimento: string | null;
+  texto_boas_vindas_portal: string | null;
+  id_unidade_padrao: number | null;
 }
 
 export interface NupConfigUpdate {
   codigo_orgao_nup?: string | null;
   usar_nup_federal?: boolean;
+}
+
+// PR 3b — whitelist institucional do PUT /tenants/me (campos de plataforma ignorados).
+export interface TenantInstitucionalUpdate {
+  nome?: string;
+  sigla?: string | null;
+  email_institucional?: string | null;
+  telefone_institucional?: string | null;
+  endereco?: string | null;
+  site_oficial?: string | null;
+  horario_atendimento?: string | null;
+  texto_boas_vindas_portal?: string | null;
+  logo_url?: string | null;
+  cor_primaria?: string | null;
+  id_unidade_padrao?: number | null;
+}
+
+// PR 3b — checklist de onboarding calculado (read-only).
+export interface OnboardingItem {
+  chave: string;
+  rotulo: string;
+  /** null = não avaliado */
+  concluido: boolean | null;
+}
+export interface OnboardingResponse {
+  itens: OnboardingItem[];
+  total: number;
+  concluidos: number;
+  pendentes: number;
+}
+
+// PR 3b — reset de senha temporária (exibida uma única vez).
+export interface ResetSenhaResponse {
+  id_usuario: number;
+  senha_temporaria: string;
+  aviso: string;
 }
 
 // ===== Assinaturas pendentes do usuário ======================================
@@ -1822,6 +1872,13 @@ export const tenantsApi = {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
+  // PR 3b — atualiza dados institucionais (whitelist; campos de plataforma ignorados).
+  updateInstitucional: (payload: TenantInstitucionalUpdate) =>
+    request<TenantMe>(`/tenants/me`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  onboarding: () => request<OnboardingResponse>(`/tenants/me/onboarding`),
 };
 
 export const protocoloApi = {

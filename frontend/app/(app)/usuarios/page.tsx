@@ -17,6 +17,7 @@ import {
   api,
   NIVEL_SIGILO_LABEL,
   type NivelSigilo,
+  type ResetSenhaResponse,
   type UsuarioDetail,
   type UsuarioInput,
 } from "@/lib/api";
@@ -53,6 +54,8 @@ export default function UsuariosPage() {
   const [editing, setEditing] = useState<UsuarioDetail | null>(null);
   const [form, setForm] = useState<UsuarioInput>(EMPTY_FORM);
   const [err, setErr] = useState<string | null>(null);
+  const [resetResult, setResetResult] = useState<ResetSenhaResponse | null>(null);
+  const [senhaCopiada, setSenhaCopiada] = useState(false);
 
   const usuariosQ = useQuery({
     queryKey: ["usuarios", page, q],
@@ -86,6 +89,14 @@ export default function UsuariosPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["usuarios"] });
       toast.success("Usuário excluído.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const resetM = useMutation({
+    mutationFn: (id: number) => api.usuarios.resetarSenha(id),
+    onSuccess: (res) => {
+      setSenhaCopiada(false);
+      setResetResult(res);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -193,6 +204,23 @@ export default function UsuariosPage() {
                   {can("usuario", "atualizar") && (
                     <Button variant="secondary" size="sm" onClick={() => openEdit(u.id)}>
                       Editar
+                    </Button>
+                  )}
+                  {can("usuario", "atualizar") && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={resetM.isPending}
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: "Resetar senha",
+                          message: `Gerar uma senha temporária para ${u.nome}? A senha atual deixará de funcionar e a nova será exibida uma única vez.`,
+                          confirmLabel: "Gerar senha",
+                        });
+                        if (ok) resetM.mutate(u.id);
+                      }}
+                    >
+                      Resetar senha
                     </Button>
                   )}
                   {can("usuario", "excluir") && (
@@ -392,6 +420,47 @@ export default function UsuariosPage() {
             </div>
           )}
         </form>
+      </Dialog>
+
+      <Dialog
+        open={resetResult !== null}
+        onClose={() => setResetResult(null)}
+        title="Senha temporária gerada"
+        footer={
+          <Button onClick={() => setResetResult(null)}>Fechar</Button>
+        }
+      >
+        {resetResult && (
+          <div className="space-y-3">
+            <p className="text-sm text-foreground-muted">{resetResult.aviso}</p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 break-all rounded-md border border-border bg-surface-1 px-3 py-2 font-mono text-base">
+                {resetResult.senha_temporaria}
+              </code>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(resetResult.senha_temporaria);
+                    setSenhaCopiada(true);
+                    toast.success("Senha copiada.");
+                  } catch {
+                    toast.error("Não foi possível copiar — selecione e copie manualmente.");
+                  }
+                }}
+              >
+                {senhaCopiada ? "Copiada" : "Copiar"}
+              </Button>
+            </div>
+            <p
+              role="alert"
+              className="rounded-md bg-warning-soft px-3 py-2 text-xs text-warning-soft-foreground"
+            >
+              Anote ou copie agora: esta senha não será exibida novamente.
+            </p>
+          </div>
+        )}
       </Dialog>
     </div>
   );
