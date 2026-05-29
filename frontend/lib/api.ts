@@ -851,6 +851,56 @@ function crud<T, C = Partial<T>, U = Partial<T>>(path: string) {
   };
 }
 
+// PR3a — admin SaaS / tenants
+export interface AdminMe {
+  email: string;
+  is_platform_admin: boolean;
+}
+export interface AdminTenant {
+  id: number;
+  slug: string;
+  nome: string;
+  cnpj: string | null;
+  id_cidade: number | null;
+  ativo: boolean;
+  plano: string;
+  cor_primaria: string | null;
+  logo_url: string | null;
+  codigo_orgao_nup: string | null;
+  usar_nup_federal: boolean;
+  limite_usuarios: number | null;
+  limite_armazenamento_mb: number | null;
+  criado_em: string;
+  atualizado_em: string | null;
+  modulos: string[];
+}
+export interface AdminTenantCreateInput {
+  slug: string;
+  nome: string;
+  admin_email: string;
+  admin_nome: string;
+  admin_cpf: string;
+  cnpj?: string | null;
+  plano?: string;
+  cor_primaria?: string | null;
+  limite_usuarios?: number | null;
+  limite_armazenamento_mb?: number | null;
+}
+export interface AdminTenantUpdateInput {
+  nome?: string;
+  cnpj?: string | null;
+  plano?: string;
+  cor_primaria?: string | null;
+  limite_usuarios?: number | null;
+  limite_armazenamento_mb?: number | null;
+}
+export interface AdminTenantCreated {
+  tenant: AdminTenant;
+  admin_email: string;
+  senha_temporaria: string;
+  aviso: string;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -911,6 +961,30 @@ export const api = {
         `/assinaturas/${assinaturaAnexoId}/revogar-validacao-publica`,
         { method: "POST", body: JSON.stringify({ motivo: motivo || null }) },
       ),
+  },
+
+  // PR3a — admin SaaS / gestão de tenants (allowlist de plataforma).
+  admin: {
+    me: () => request<AdminMe>("/admin/me"),
+    tenants: {
+      list: (params?: { q?: string; ativo?: boolean; plano?: string }) =>
+        request<AdminTenant[]>(`/admin/tenants${qs(params ?? {})}`),
+      detalhe: (id: number) => request<AdminTenant>(`/admin/tenants/${id}`),
+      criar: (data: AdminTenantCreateInput) =>
+        request<AdminTenantCreated>("/admin/tenants", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      editar: (id: number, data: AdminTenantUpdateInput) =>
+        request<AdminTenant>(`/admin/tenants/${id}`, {
+          method: "PUT",
+          body: JSON.stringify(data),
+        }),
+      ativar: (id: number) =>
+        request<AdminTenant>(`/admin/tenants/${id}/ativar`, { method: "POST" }),
+      desativar: (id: number) =>
+        request<AdminTenant>(`/admin/tenants/${id}/desativar`, { method: "POST" }),
+    },
   },
 
   usuarios: {

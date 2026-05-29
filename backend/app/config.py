@@ -54,6 +54,19 @@ class Settings(BaseSettings):
     # Em prod (HTTPS público) defina explicitamente, ex.: https://sobral.aprimora.app
     public_base_url: str = ""
 
+    # Admin SaaS (PR3a) — allowlist de e-mails com acesso ao painel de plataforma
+    # (criar/listar/editar/ativar/desativar tenants). Separado por vírgula.
+    # NÃO é permissão de tenant: super-usuário de prefeitura NÃO entra aqui.
+    platform_admin_emails: str = ""
+
+    @property
+    def platform_admin_email_set(self) -> set[str]:
+        return {
+            e.strip().lower()
+            for e in self.platform_admin_emails.split(",")
+            if e.strip()
+        }
+
     # Observabilidade (Fase 33). Vazio = desabilitado.
     sentry_dsn: str = ""
     sentry_traces_sample_rate: float = 0.1
@@ -88,6 +101,32 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def is_platform_admin(email: str | None) -> bool:
+    """True se o e-mail está na allowlist de admin de plataforma (PR3a)."""
+    if not email:
+        return False
+    return email.strip().lower() in get_settings().platform_admin_email_set
+
+
+# PR3a — módulos derivados do plano (apenas exibição; sem enforcement neste PR).
+# Mapa de partida; refinar conforme catálogo real de módulos.
+PLANO_MODULOS: dict[str, list[str]] = {
+    "basico": ["protocolo", "processos", "assinatura"],
+    "profissional": [
+        "protocolo", "processos", "assinatura", "workflow", "relatorios", "organograma",
+    ],
+    "enterprise": [
+        "protocolo", "processos", "assinatura", "workflow", "relatorios",
+        "organograma", "auditoria", "dashboard",
+    ],
+}
+
+
+def modulos_do_plano(plano: str | None) -> list[str]:
+    """Módulos ativos derivados do plano. Plano desconhecido → conjunto básico."""
+    return PLANO_MODULOS.get((plano or "basico").lower(), PLANO_MODULOS["basico"])
 
 
 def tenant_anexos_dir(tenant_slug: str) -> Path:

@@ -29,7 +29,9 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
@@ -135,6 +137,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { can } = useAuth();
   const branding = useBranding();
+  // PR3a — link de plataforma só aparece para admin de plataforma (allowlist).
+  const adminMeQ = useQuery({
+    queryKey: ["admin-me"],
+    queryFn: () => api.admin.me(),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const isPlatformAdmin = adminMeQ.data?.is_platform_admin ?? false;
   const lastPath = useRef(pathname);
   // Collapsed (icon-only) — só faz sentido em desktop. Persistido em localStorage.
   const [collapsed, setCollapsed] = useState(false);
@@ -378,6 +388,24 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               </div>
             );
           })}
+
+          {isPlatformAdmin && (
+            <Link
+              href="/admin/tenants"
+              title={collapsed ? "Plataforma" : undefined}
+              aria-current={pathname.startsWith("/admin") ? "page" : undefined}
+              className={cn(
+                "group relative mt-1 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
+                collapsed && "lg:justify-center lg:gap-0 lg:px-0",
+                pathname.startsWith("/admin")
+                  ? "bg-brand/12 text-brand dark:bg-brand/25 dark:text-brand-light"
+                  : "text-foreground-muted hover:bg-sidebar-accent hover:text-foreground",
+              )}
+            >
+              <Shield className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className={cn("flex-1", collapsed && "lg:hidden")}>Plataforma</span>
+            </Link>
+          )}
         </div>
 
         {/* Footer com toggles */}

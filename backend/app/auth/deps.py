@@ -2,6 +2,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import is_platform_admin
 from ..database import get_db
 from ..models import Tenant, Usuario, UsuarioExterno
 from .jwt import decode_token, get_jwt_secret
@@ -111,6 +112,21 @@ async def get_current_user(
     # Para o logging middleware (Fase 33)
     request.state.usuario_id = user.id
     return user
+
+
+async def require_platform_admin(
+    current: Usuario = Depends(get_current_user),
+) -> Usuario:
+    """Admin SaaS (PR3a) — autentica via JWT (get_current_user) e exige que o
+    e-mail esteja na allowlist `PLATFORM_ADMIN_EMAILS`. NÃO usa require_tenant_id
+    nem require_permission: é permissão de **plataforma**, não de tenant —
+    super-usuário de prefeitura NÃO passa. 403 caso fora da allowlist."""
+    if not is_platform_admin(current.email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito a administradores da plataforma",
+        )
+    return current
 
 
 async def get_current_cidadao(

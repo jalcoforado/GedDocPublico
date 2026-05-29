@@ -4,7 +4,30 @@ Procedimentos para operações de produção. Tudo executável como `docker exec
 
 ---
 
-## Onboarding de um novo tenant
+## Painel admin de plataforma (PR3a)
+
+Onboarding e gestão de tenants pela interface, sem mexer no banco.
+
+**`PLATFORM_ADMIN_EMAILS` é obrigatório** para operar o painel. É a allowlist
+(separada por vírgula) de e-mails de usuários com acesso à administração da
+plataforma. **Vazio = ninguém acessa** (bloqueio seguro por padrão). NÃO é
+permissão de tenant: super-usuário de prefeitura **não** entra.
+
+```bash
+# .env do backend (produção)
+PLATFORM_ADMIN_EMAILS=ops@aprimora.app,gestor@aprimora.app
+```
+
+- Painel: `/admin/tenants` (criar/listar/editar/ativar/desativar).
+- Criar uma prefeitura gera uma **senha temporária exibida UMA ÚNICA VEZ** na
+  resposta; repasse pelo canal acordado (NUNCA email texto-puro) e oriente a
+  troca após o 1º acesso. Só o hash bcrypt é persistido.
+- API: `POST /api/v2/admin/tenants` (e `GET/PUT/.../ativar/desativar`),
+  protegida pela allowlist (`require_platform_admin`).
+
+## Onboarding de um novo tenant (CLI)
+
+A CLI usa o **mesmo serviço** (`services/provisioning_tenant`) do painel:
 
 ```bash
 docker exec aprimora-py-backend python -m app.cli.tenant create \
@@ -15,12 +38,12 @@ docker exec aprimora-py-backend python -m app.cli.tenant create \
   --cor "#0055aa" \
   --admin-email admin@fortaleza.gov.br \
   --admin-cpf 12345678901 \
-  --admin-nome "Maria Silva" \
-  --senha "TROCAR-NO-PRIMEIRO-LOGIN"
+  --admin-nome "Maria Silva"
 ```
 
-Saída inclui credenciais geradas. Em prod, **passar `--senha`** com algo forte
-e enviar pelo canal acordado (NUNCA por email texto-puro).
+Saída inclui a senha temporária gerada (exibida uma vez). Em prod, repasse pelo
+canal acordado (NUNCA por email texto-puro). Só o hash bcrypt é persistido
+(o campo MD5 legado fica vazio).
 
 Pós-criação:
 1. Configurar DNS: `fortaleza.aprimora.app` → mesmo IP do produto
@@ -179,3 +202,25 @@ docker logs aprimora-py-worker --tail 50
 
 Caveat conhecido (resolvido na Fase 7.1): nunca importar `SessionLocal`
 global em tasks. Usar `task_session_scope(tenant_id=...)`.
+
+---
+
+## Dívida técnica (PR3a e correlatos)
+
+Itens conscientemente adiados — revisitar em PRs futuros:
+
+- **Campo `senha` (MD5 legado) em `utils.usuario`:** hoje NOT NULL. O
+  provisionamento grava `""` (só bcrypt é credencial). Remover/torná-lo nullable
+  quando o fluxo legado MD5 puder ser aposentado.
+- **`must_change_password` no 1º acesso:** não implementado (exige flag +
+  enforcement no login + UX). A senha temporária é exibida 1x; troca é manual.
+- **Domínio neutro da plataforma:** hoje o admin de plataforma autentica no
+  subdomínio do seu tenant de origem; avaliar um domínio/admin dedicado para
+  operar a plataforma de forma independente de um tenant.
+- **Status do tenant:** hoje booleano `ativo`. Evoluir para enum
+  (implantação/trial/suspenso/inadimplente/cancelado) só quando houver
+  billing/operação que justifique.
+- **Enforcement de limites:** `limite_usuarios`/`limite_armazenamento_mb` são
+  apenas armazenados; o bloqueio efetivo (quota) fica para PR futuro.
+- **Módulos por tenant:** derivados do `plano` (sem tabela `tenant_modulo`);
+  customização fina por módulo é PR posterior.

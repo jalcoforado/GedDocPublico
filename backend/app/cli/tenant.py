@@ -18,150 +18,51 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import secrets
 import sys
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import datetime
 
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from ..auth.password import hash_md5, hash_password
 from ..database import SessionLocal
-from ..models import (
-    Acao,
-    Grupo,
-    Nivel,
-    Sistema,
-    Tenant,
-    TipoManifestante,
-    TipoUnidadeTrabalho,
-    UnidadeTrabalho,
-    Usuario,
-    UsuarioGrupo,
-)
+from ..models import Tenant
+from ..services.provisioning_tenant import ProvisioningError, provisionar_tenant
 
 
 async def _create(args: argparse.Namespace) -> int:
     async with SessionLocal() as db:
-        # Verifica unicidade do slug
-        existe = (
-            await db.execute(select(Tenant).where(Tenant.slug == args.slug))
-        ).scalar_one_or_none()
-        if existe is not None:
-            print(f"[ERRO] Slug '{args.slug}' já existe (tenant id={existe.id})")
+        try:
+            tenant, senha_plain = await provisionar_tenant(
+                db,
+                slug=args.slug,
+                nome=args.nome,
+                cnpj=args.cnpj,
+                id_cidade=args.id_cidade,
+                plano=args.plano,
+                cor_primaria=args.cor,
+                logo_url=args.logo,
+                admin_email=args.admin_email,
+                admin_nome=args.admin_nome,
+                admin_cpf=args.admin_cpf,
+                senha=args.senha,
+            )
+        except ProvisioningError as e:
+            print(f"[ERRO] {e}")
             return 1
 
-        # Cria tenant
-        tenant = Tenant(
-            slug=args.slug,
-            nome=args.nome,
-            cnpj=args.cnpj,
-            id_cidade=args.id_cidade,
-            plano=args.plano,
-            cor_primaria=args.cor,
-            logo_url=args.logo,
-            ativo=True,
-            criado_em=datetime.utcnow(),
-        )
-        db.add(tenant)
-        await db.flush()
-        print(f"[ok] tenant criado: id={tenant.id} slug={tenant.slug}")
-
-        # Cria tipo unidade default + unidade
-        tu = TipoUnidadeTrabalho(
-            tenant_id=tenant.id, tipo_unidade_trabalho="Secretaria", codigo="SEC"
-        )
-        db.add(tu)
-        await db.flush()
-        unidade = UnidadeTrabalho(
-            tenant_id=tenant.id,
-            unidade_trabalho="Protocolo Geral",
-            sigla="PG",
-            id_tipo_unidade_trabalho=tu.id,
-        )
-        db.add(unidade)
-        await db.flush()
-        print(f"[ok] unidade default: id={unidade.id} 'Protocolo Geral'")
-
-        # Cria tipo manifestante default
-        tm = TipoManifestante(
-            tenant_id=tenant.id,
-            tipo_manifestante="Pessoa Física",
-            id_categoria=1,
-            ativo=True,
-        )
-        db.add(tm)
-        await db.flush()
-        print(f"[ok] tipo manifestante default: id={tm.id}")
-
-        # Cria super-usuário admin
-        senha_plain = args.senha or secrets.token_urlsafe(12)
-        usuario = Usuario(
-            tenant_id=tenant.id,
-            nome=args.admin_nome,
-            email=args.admin_email,
-            cpf=args.admin_cpf,
-            senha=hash_md5(senha_plain),
-            senha_bcrypt=hash_password(senha_plain),
-            id_unidade_trabalho=unidade.id,
-            ativo=True,
-            excluido=False,
-            cargo="Administrador",
-            app="sistemas",
-        )
-        db.add(usuario)
-        await db.flush()
-        print(f"[ok] usuário admin: id={usuario.id} email={usuario.email}")
-
-        # Cria grupo Super Usuário (nivel.valor=0) atrelado ao usuário
-        nivel_su = (
-            await db.execute(select(Nivel).where(Nivel.valor == 0).limit(1))
-        ).scalar_one_or_none()
-        sistema_app = (
-            await db.execute(select(Sistema).where(Sistema.app == "sistemas").limit(1))
-        ).scalar_one_or_none()
-        if nivel_su and sistema_app:
-            grupo_su = Grupo(
-                tenant_id=tenant.id,
-                id_nivel=nivel_su.id,
-                id_sistema=sistema_app.id,
-                grupo="Super Usuário",
-                excluido=False,
-            )
-            db.add(grupo_su)
-            await db.flush()
-            db.add(
-                UsuarioGrupo(
-                    tenant_id=tenant.id,
-                    id_usuario=usuario.id,
-                    id_grupo=grupo_su.id,
-                    ativo=True,
-                    excluido=False,
-                    app="sistemas",
-                )
-            )
-            await db.flush()
-            print(f"[ok] grupo SU + vínculo")
-        else:
-            print(f"[warn] não foi possível atrelar nível SU (nivel ou sistema 'sistemas' não encontrados)")
-
-        await db.commit()
-
-        print()
-        print("=" * 60)
-        print(f"TENANT CRIADO COM SUCESSO")
-        print("=" * 60)
-        print(f"  ID:           {tenant.id}")
-        print(f"  Slug:         {tenant.slug}")
-        print(f"  Subdomain:    {tenant.slug}.aprimora.app (prod) / {tenant.slug}.aprimora.local (dev)")
-        print(f"  Admin email:  {usuario.email}")
-        print(f"  Admin senha:  {senha_plain}")
-        print(f"  CNPJ:         {tenant.cnpj or '(não informado)'}")
-        print(f"  Plano:        {tenant.plano}")
-        print(f"  Cor:          {tenant.cor_primaria or '(default)'}")
-        print("=" * 60)
-        return 0
+    print()
+    print("=" * 60)
+    print("TENANT CRIADO COM SUCESSO")
+    print("=" * 60)
+    print(f"  ID:           {tenant.id}")
+    print(f"  Slug:         {tenant.slug}")
+    print(f"  Subdomain:    {tenant.slug}.aprimora.app (prod) / {tenant.slug}.aprimora.local (dev)")
+    print(f"  Admin email:  {args.admin_email}")
+    print(f"  Admin senha:  {senha_plain}   <-- exibida só agora; troque após o 1º acesso")
+    print(f"  CNPJ:         {tenant.cnpj or '(não informado)'}")
+    print(f"  Plano:        {tenant.plano}")
+    print(f"  Cor:          {tenant.cor_primaria or '(default)'}")
+    print("=" * 60)
+    return 0
 
 
 async def _list(_: argparse.Namespace) -> int:

@@ -26,3 +26,6 @@ class Tenant(Base):
     # Fase P2 — NUP federal (Decreto 8.539/2015). Opt-in por tenant.
     codigo_orgao_nup: Mapped[str | None] = mapped_column(String(5), nullable=True)
     usar_nup_federal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # PR 3a — limites básicos (apenas armazenados; sem enforcement neste PR).
+    limite_usuarios: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    limite_armazenamento_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)

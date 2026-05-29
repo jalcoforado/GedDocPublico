@@ -7,6 +7,7 @@ from .middleware.tenant import TenantMiddleware
 from .observability.logging import configure_logging
 from .observability.sentry import init_sentry
 from .routers import (
+    admin_tenants,
     anexos,
     assinaturas,
     assuntos,
@@ -83,6 +84,7 @@ app.include_router(protocolo.router, prefix="/api/v2")
 app.include_router(anexos.router, prefix="/api/v2")
 app.include_router(assinaturas.router, prefix="/api/v2")
 app.include_router(validacao_publica.router, prefix="/api/v2")
+app.include_router(admin_tenants.router, prefix="/api/v2")
 app.include_router(relatorios.router, prefix="/api/v2")
 app.include_router(jobs.router, prefix="/api/v2")
 app.include_router(notificacoes.router, prefix="/api/v2")

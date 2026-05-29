@@ -177,6 +177,16 @@ Migrations atuais:
 | `0012` | `aprimora_py.notificacao_preferencia` (Fase 17b) — 1 row por (tenant_id, id_usuario) unique. Flags `canal_in_app/email/whatsapp` (defaults: in_app=true, email=true, whatsapp=false). Ausência da row = defaults. RLS + GRANTs. |
 | `0013` | Adiciona `telefone VARCHAR(20)` em `utils.usuario` (Fase 16, WhatsApp). Idempotente — checa `information_schema` antes do ALTER porque o legado PHP pode já ter a coluna. Downgrade no-op pelo mesmo motivo (coluna compartilhada). |
 | `0014` | `aprimora_py.audit_log` (Fase 24) — append-only. `(tenant_id, id_usuario, acao, entidade, id_entidade, payload JSONB, request_id, ip, criado_em)`. Convenção de ação `<entidade>.<verbo>` (ex: `processo.aberto`, `processo.encaminhado`). 3 índices: por tenant+tempo, por entidade+id, por usuário+tempo. RLS com policy SELECT+INSERT (sem UPDATE/DELETE — imutável). |
+| `0015`–`0021` | Protocolo (espécie documental, CCD/TTD, NUP federal, apensamento/desentranhamento) + Assinatura v2 (`0020` integridade/evidências, `0021` validação pública por token). Ver `backend/alembic/versions/`. |
+| `0022` | Admin SaaS (PR3a): `aprimora_py.tenant` ganha `limite_usuarios` + `limite_armazenamento_mb` (apenas armazenados, sem enforcement). Sem RLS (a tabela `tenant` nunca teve). |
+
+### Admin de plataforma (PR3a)
+
+Gestão de tenants pela interface (`/admin/tenants`) e API (`/api/v2/admin/...`),
+além da CLI (`app.cli.tenant`, que reusa o mesmo serviço de provisionamento).
+Acesso controlado pela allowlist **`PLATFORM_ADMIN_EMAILS`** (env, separada por
+vírgula) — **obrigatória**; vazia = ninguém acessa. Não é permissão de tenant.
+Ver detalhes operacionais no [RUNBOOK](RUNBOOK.md).
 
 ```bash
 # Estado atual
