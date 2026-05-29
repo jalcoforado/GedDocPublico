@@ -109,5 +109,7 @@ class ServicoPublicOut(BaseModel):
     categoria: str | None = None
     destaque: bool
     ordem_exibicao: int
-    # PR 4a: abertura por serviço é o PR 4b — botão fica desabilitado.
+    # Mensagem ao cidadão exibida na confirmação/tela final (citizen-facing).
+    texto_confirmacao: str | None = None
+    # PR 4b: true só quando o serviço está solicitável pelo portal (§ _to_public).
     solicitar_habilitado: bool = False

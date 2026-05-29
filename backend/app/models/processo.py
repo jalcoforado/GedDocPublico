@@ -106,6 +106,11 @@ class Processo(Base):
     # Protocolo P2 — NUP federal (opt-in por tenant)
     nup: Mapped[str | None] = mapped_column(String(25), nullable=True)
     numero_sequencial_orgao: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # PR 4b — vínculo com a Carta de Serviços (soft-link; null em processos não
+    # originados de serviço).
+    id_servico: Mapped[int | None] = mapped_column(
+        ForeignKey("protocolos.servico.id"), nullable=True
+    )
 
 
 class Movimentacao(Base):

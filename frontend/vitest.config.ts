@@ -13,5 +13,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
     include: ["**/__tests__/**/*.test.{ts,tsx}"],
+    // Execução sequencial de arquivos: o setup do jsdom é pesado e, em paralelo,
+    // a contenção fazia `waitFor`/`findBy` estourar o timeout em testes não
+    // relacionados (flakiness de ambiente, não de produto). Equivale a
+    // `--no-file-parallelism`. Não altera lógica de produto.
+    fileParallelism: false,
   },
 });

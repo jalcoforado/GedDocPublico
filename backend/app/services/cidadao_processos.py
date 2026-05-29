@@ -11,6 +11,7 @@ produção isso seria parametrizável (tabela `configuracoes`).
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 
 from sqlalchemy import func, select, text
@@ -27,6 +28,7 @@ from ..models import (
     Manifestante,
     Movimentacao,
     Processo,
+    Servico,
     Tenant,
     TipoManifestante,
     TipoProcesso,
@@ -34,6 +36,7 @@ from ..models import (
     UsuarioExterno,
 )
 from ..schemas.cidadao import (
+    AbrirPorServicoRequest,
     AbrirProcessoCidadaoRequest,
     AnexoCidadaoOut,
     EspecieCidadaoOut,
@@ -41,6 +44,9 @@ from ..schemas.cidadao import (
     ProcessoCidadaoDetail,
     ProcessoCidadaoListItem,
 )
+from .audit import log as audit_log
+
+logger = logging.getLogger("cidadao_processos")
 
 # Espécies expostas no portal cidadão (alinhado com seed 0015).
 ESPECIES_PORTAL = ("REQUERIMENTO", "PETICAO", "DECLARACAO")
@@ -236,24 +242,18 @@ async def get_meu_detail(
     )
 
 
-async def abrir_processo_cidadao(
-    db: AsyncSession,
-    cidadao: UsuarioExterno,
-    payload: AbrirProcessoCidadaoRequest,
-    *,
-    tenant_id: int,
-) -> Processo:
-    if not cidadao.cpf_cnpj or not cidadao.nome:
-        raise CidadaoProcessoError("Cadastro do cidadão incompleto (CPF/nome)")
+async def _checar_rate_limit(db: AsyncSession, cpf_cnpj: str, tenant_id: int) -> None:
+    """Anti-spam: máx N aberturas em 24h por CPF no tenant (canal portal).
 
-    # Rate-limit anti-spam: máx N aberturas em 24h por CPF no tenant.
+    Compartilhado entre a abertura genérica e a abertura por serviço — ambas
+    contam no mesmo limite (canal portal)."""
     desde = datetime.now() - timedelta(hours=24)
     qtd_24h = (
         await db.execute(
             select(func.count(Processo.id))
             .join(Manifestante, Manifestante.id == Processo.id_manifestante)
             .where(
-                Manifestante.cpf_cnpj == cidadao.cpf_cnpj,
+                Manifestante.cpf_cnpj == cpf_cnpj,
                 Manifestante.tenant_id == tenant_id,
                 Processo.tenant_id == tenant_id,
                 Processo.canal_entrada == "portal",
@@ -267,6 +267,170 @@ async def abrir_processo_cidadao(
             f"Limite de {RATE_LIMIT_24H} aberturas em 24h atingido. "
             "Aguarde antes de protocolar novamente."
         )
+
+
+async def _resolver_ou_criar_manifestante(
+    db: AsyncSession, cidadao: UsuarioExterno, tenant_id: int
+) -> Manifestante:
+    manifestante = (
+        await db.execute(
+            select(Manifestante).where(
+                Manifestante.cpf_cnpj == cidadao.cpf_cnpj,
+                Manifestante.tenant_id == tenant_id,
+                Manifestante.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if manifestante is not None:
+        return manifestante
+
+    tipo_pf = (
+        await db.execute(
+            select(TipoManifestante)
+            .where(
+                TipoManifestante.tenant_id == tenant_id,
+                TipoManifestante.ativo.is_(True),
+            )
+            .order_by(TipoManifestante.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if tipo_pf is None:
+        raise CidadaoProcessoError("Nenhum tipo de manifestante cadastrado")
+    manifestante = Manifestante(
+        tenant_id=tenant_id,
+        id_tipo_manifestante=tipo_pf.id,
+        cpf_cnpj=cidadao.cpf_cnpj,
+        nome=cidadao.nome,
+        email=cidadao.email,
+        telefone_celular=cidadao.telefone,
+        ativo=True,
+        excluido=False,
+    )
+    db.add(manifestante)
+    await db.flush()
+    return manifestante
+
+
+async def _criar_processo_publico(
+    db: AsyncSession,
+    cidadao: UsuarioExterno,
+    *,
+    tenant_id: int,
+    id_assunto: int,
+    id_unidade: int,
+    id_especie: int | None,
+    nivel_sigilo: str,
+    corpo: str | None,
+    observacao: str | None,
+    id_servico: int | None = None,
+) -> Processo:
+    """Núcleo de abertura pública (canal portal). NÃO comita — o caller controla
+    a transação (permite auditar na mesma transação). Pressupõe rate-limit já
+    checado e assunto/unidade já validados no tenant."""
+    manifestante = await _resolver_ou_criar_manifestante(db, cidadao, tenant_id)
+
+    numero = (
+        await db.execute(text("SELECT protocolos.gerar_numero_processo_string() AS n"))
+    ).first()
+    if numero is None or not numero.n:
+        raise CidadaoProcessoError("Falha ao gerar número de processo")
+    numero_processo = numero.n
+
+    # Acao é catálogo global — sem tenant_id.
+    acao_abertura = (
+        await db.execute(
+            select(Acao).where(
+                Acao.flag == "ABERTURA",
+                Acao.ativo.is_(True),
+                Acao.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if acao_abertura is None:
+        raise CidadaoProcessoError("Ação ABERTURA não cadastrada")
+
+    now = datetime.now()
+
+    # Auto-classificação CCD por palavras do assunto + corpo. Aceita só score
+    # acima de 0.3 pra evitar classificar errado por match fraco.
+    from .temporalidade import sugerir_ccd_por_assunto
+
+    id_ccd: int | None = None
+    sugestoes = await sugerir_ccd_por_assunto(
+        db, tenant_id=tenant_id, id_assunto=id_assunto, texto_extra=corpo, limit=1
+    )
+    if sugestoes and sugestoes[0].score >= 0.3:
+        id_ccd = sugestoes[0].id_ccd_classe
+
+    processo = Processo(
+        tenant_id=tenant_id,
+        id_assunto=id_assunto,
+        id_manifestante=manifestante.id,
+        id_unidade_proprietaria=id_unidade,
+        observacao=observacao,
+        corpo=corpo,
+        numero_processo=numero_processo,
+        nivel_sigilo=nivel_sigilo,
+        externo=True,
+        virtual=True,
+        data_hora_abertura=now,
+        data_recepcao=now,
+        canal_entrada="portal",
+        id_especie_documental=id_especie,
+        id_ccd_classe=id_ccd,
+        id_local_atual=id_unidade,
+        id_usuario=None,
+        id_servico=id_servico,
+        ativo=True,
+        excluido=False,
+        migrado=False,
+    )
+    db.add(processo)
+    await db.flush()
+
+    movimentacao = Movimentacao(
+        tenant_id=tenant_id,
+        id_processo=processo.id,
+        id_unidade_responsavel=id_unidade,
+        id_acao=acao_abertura.id,
+        id_usuario=None,
+        data_hora_movimentacao=now,
+        ativo=True,
+        excluido=False,
+    )
+    db.add(movimentacao)
+    await db.flush()
+    processo.id_ultima_movimentacao = movimentacao.id
+
+    # NUP federal — opt-in por tenant. Falha não bloqueia abertura.
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    ).scalar_one_or_none()
+    if tenant and tenant.usar_nup_federal and tenant.codigo_orgao_nup:
+        from .nup import NupError, gerar_nup
+
+        try:
+            nup_str, sequencial = await gerar_nup(db, tenant=tenant, ano=now.year)
+            processo.nup = nup_str
+            processo.numero_sequencial_orgao = sequencial
+        except NupError:
+            pass
+
+    return processo
+
+
+async def abrir_processo_cidadao(
+    db: AsyncSession,
+    cidadao: UsuarioExterno,
+    payload: AbrirProcessoCidadaoRequest,
+    *,
+    tenant_id: int,
+) -> Processo:
+    if not cidadao.cpf_cnpj or not cidadao.nome:
+        raise CidadaoProcessoError("Cadastro do cidadão incompleto (CPF/nome)")
+
+    await _checar_rate_limit(db, cidadao.cpf_cnpj, tenant_id)
 
     assunto = (
         await db.execute(
@@ -312,132 +476,103 @@ async def abrir_processo_cidadao(
     if unidade is None:
         raise CidadaoProcessoError("Nenhuma unidade configurada")
 
-    manifestante = (
-        await db.execute(
-            select(Manifestante).where(
-                Manifestante.cpf_cnpj == cidadao.cpf_cnpj,
-                Manifestante.tenant_id == tenant_id,
-                Manifestante.excluido.is_(False),
-            )
-        )
-    ).scalar_one_or_none()
+    processo = await _criar_processo_publico(
+        db,
+        cidadao,
+        tenant_id=tenant_id,
+        id_assunto=payload.id_assunto,
+        id_unidade=unidade.id,
+        id_especie=id_especie,
+        nivel_sigilo="ostensivo",
+        corpo=payload.corpo,
+        observacao=payload.observacao,
+        id_servico=None,
+    )
+    await db.commit()
+    await db.refresh(processo)
+    return processo
 
-    if manifestante is None:
-        tipo_pf = (
+
+async def abrir_processo_por_servico(
+    db: AsyncSession,
+    cidadao: UsuarioExterno,
+    servico: "Servico",
+    payload: "AbrirPorServicoRequest",
+    *,
+    tenant_id: int,
+) -> Processo:
+    """Abre protocolo a partir de um serviço já validado como solicitável
+    (ver services.servico.obter_servico_solicitavel). Aplica os defaults do
+    serviço; o cidadão não escolhe classificação. Audita de forma minimizada."""
+    if not cidadao.cpf_cnpj or not cidadao.nome:
+        raise CidadaoProcessoError("Cadastro do cidadão incompleto (CPF/nome)")
+
+    await _checar_rate_limit(db, cidadao.cpf_cnpj, tenant_id)
+
+    # Espécie é opcional (D-E): se setada e válida no tenant, usa; senão abre sem.
+    id_especie: int | None = None
+    if servico.id_especie_documental_padrao is not None:
+        esp = (
             await db.execute(
-                select(TipoManifestante)
-                .where(
-                    TipoManifestante.tenant_id == tenant_id,
-                    TipoManifestante.ativo.is_(True),
+                select(EspecieDocumental.id).where(
+                    EspecieDocumental.id == servico.id_especie_documental_padrao,
+                    EspecieDocumental.tenant_id == tenant_id,
+                    EspecieDocumental.excluido.is_(False),
                 )
-                .order_by(TipoManifestante.id)
-                .limit(1)
             )
         ).scalar_one_or_none()
-        if tipo_pf is None:
-            raise CidadaoProcessoError("Nenhum tipo de manifestante cadastrado")
-        manifestante = Manifestante(
-            tenant_id=tenant_id,
-            id_tipo_manifestante=tipo_pf.id,
-            cpf_cnpj=cidadao.cpf_cnpj,
-            nome=cidadao.nome,
-            email=cidadao.email,
-            telefone_celular=cidadao.telefone,
-            ativo=True,
-            excluido=False,
-        )
-        db.add(manifestante)
-        await db.flush()
-
-    numero = (
-        await db.execute(text("SELECT protocolos.gerar_numero_processo_string() AS n"))
-    ).first()
-    if numero is None or not numero.n:
-        raise CidadaoProcessoError("Falha ao gerar número de processo")
-    numero_processo = numero.n
-
-    # Acao é catálogo global — sem tenant_id.
-    acao_abertura = (
-        await db.execute(
-            select(Acao).where(
-                Acao.flag == "ABERTURA",
-                Acao.ativo.is_(True),
-                Acao.excluido.is_(False),
+        if esp is None:
+            logger.warning(
+                "servico_especie_invalida",
+                extra={"tenant_id": tenant_id, "id_servico": servico.id},
             )
-        )
-    ).scalar_one_or_none()
-    if acao_abertura is None:
-        raise CidadaoProcessoError("Ação ABERTURA não cadastrada")
+        else:
+            id_especie = esp
 
-    now = datetime.now()
+    # Coerência de tipo (telemetria — não bloqueia): o tipo vem do assunto.
+    if servico.id_tipo_processo_padrao is not None:
+        tipo_do_assunto = (
+            await db.execute(
+                select(Assunto.id_tipo_processo).where(
+                    Assunto.id == servico.id_assunto_padrao,
+                    Assunto.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if tipo_do_assunto != servico.id_tipo_processo_padrao:
+            logger.warning(
+                "servico_tipo_incoerente",
+                extra={
+                    "tenant_id": tenant_id,
+                    "id_servico": servico.id,
+                    "tipo_servico": servico.id_tipo_processo_padrao,
+                    "tipo_assunto": tipo_do_assunto,
+                },
+            )
 
-    # Auto-classificação CCD por palavras do assunto + corpo. Aceita só score
-    # acima de 0.3 pra evitar classificar errado por match fraco.
-    from .temporalidade import sugerir_ccd_por_assunto
+    processo = await _criar_processo_publico(
+        db,
+        cidadao,
+        tenant_id=tenant_id,
+        id_assunto=servico.id_assunto_padrao,
+        id_unidade=servico.id_unidade_responsavel,
+        id_especie=id_especie,
+        nivel_sigilo=servico.nivel_sigilo_padrao,
+        corpo=payload.corpo,
+        observacao=payload.observacao,
+        id_servico=servico.id,
+    )
 
-    id_ccd: int | None = None
-    sugestoes = await sugerir_ccd_por_assunto(
+    # Auditoria minimizada (sem CPF/nome/corpo/anexos) — mesma transação.
+    await audit_log(
         db,
         tenant_id=tenant_id,
-        id_assunto=payload.id_assunto,
-        texto_extra=payload.corpo,
-        limit=1,
-    )
-    if sugestoes and sugestoes[0].score >= 0.3:
-        id_ccd = sugestoes[0].id_ccd_classe
-
-    processo = Processo(
-        tenant_id=tenant_id,
-        id_assunto=payload.id_assunto,
-        id_manifestante=manifestante.id,
-        id_unidade_proprietaria=unidade.id,
-        observacao=payload.observacao,
-        corpo=payload.corpo,
-        numero_processo=numero_processo,
-        nivel_sigilo="ostensivo",
-        externo=True,
-        virtual=True,
-        data_hora_abertura=now,
-        data_recepcao=now,
-        canal_entrada="portal",
-        id_especie_documental=id_especie,
-        id_ccd_classe=id_ccd,
-        id_local_atual=unidade.id,
         id_usuario=None,
-        ativo=True,
-        excluido=False,
-        migrado=False,
+        acao="processo.aberto_por_servico",
+        entidade="processo",
+        id_entidade=processo.id,
+        payload={"id_servico": servico.id, "canal": "portal", "origem": "servico"},
     )
-    db.add(processo)
-    await db.flush()
-
-    movimentacao = Movimentacao(
-        tenant_id=tenant_id,
-        id_processo=processo.id,
-        id_unidade_responsavel=unidade.id,
-        id_acao=acao_abertura.id,
-        id_usuario=None,
-        data_hora_movimentacao=now,
-        ativo=True,
-        excluido=False,
-    )
-    db.add(movimentacao)
-    await db.flush()
-    processo.id_ultima_movimentacao = movimentacao.id
-
-    # NUP federal — opt-in por tenant. Falha não bloqueia abertura.
-    tenant = (
-        await db.execute(select(Tenant).where(Tenant.id == tenant_id))
-    ).scalar_one_or_none()
-    if tenant and tenant.usar_nup_federal and tenant.codigo_orgao_nup:
-        from .nup import NupError, gerar_nup
-
-        try:
-            nup_str, sequencial = await gerar_nup(db, tenant=tenant, ano=now.year)
-            processo.nup = nup_str
-            processo.numero_sequencial_orgao = sequencial
-        except NupError:
-            pass
 
     await db.commit()
     await db.refresh(processo)

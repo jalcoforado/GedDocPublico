@@ -10,6 +10,7 @@ Tudo tenant-scoped. Pontos críticos de segurança:
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from fastapi import HTTPException, status
@@ -28,6 +29,8 @@ from ..schemas.servico import (
     ServicoPublicOut,
     ServicoUpdate,
 )
+
+logger = logging.getLogger("servico")
 
 
 async def _validar_slug_unico(
@@ -151,6 +154,16 @@ async def set_ativo(
     return servico
 
 
+def _servico_solicitavel(servico: Servico) -> bool:
+    """Solicitável pelo portal (D-C): canal portal + assunto + unidade
+    configurados. `ativo/não excluído` já são garantidos por quem lista."""
+    return (
+        servico.canal_entrada_permitido == "portal"
+        and servico.id_assunto_padrao is not None
+        and servico.id_unidade_responsavel is not None
+    )
+
+
 def _to_public(servico: Servico, unidade_nome: str | None) -> ServicoPublicOut:
     return ServicoPublicOut(
         nome=servico.nome,
@@ -165,7 +178,8 @@ def _to_public(servico: Servico, unidade_nome: str | None) -> ServicoPublicOut:
         categoria=servico.categoria,
         destaque=servico.destaque,
         ordem_exibicao=servico.ordem_exibicao,
-        solicitar_habilitado=False,
+        texto_confirmacao=servico.texto_confirmacao,
+        solicitar_habilitado=_servico_solicitavel(servico),
     )
 
 
@@ -209,3 +223,47 @@ async def obter_publico(
         )
     servico, unidade_nome = row
     return _to_public(servico, unidade_nome)
+
+
+async def obter_servico_solicitavel(
+    db: AsyncSession, *, tenant_id: int, slug: str
+) -> Servico:
+    """Resolve um serviço solicitável pelo portal (PR 4b).
+
+    - não encontrado / inativo / excluído / outro tenant → 404 neutro;
+    - encontrado mas mal configurado (canal ≠ portal, sem assunto ou sem
+      unidade) → 409 com mensagem amigável + log técnico (não vaza o motivo).
+    """
+    servico = (
+        await db.execute(
+            select(Servico).where(
+                Servico.slug == slug,
+                Servico.tenant_id == tenant_id,
+                Servico.ativo.is_(True),
+                Servico.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if servico is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Serviço não encontrado"
+        )
+
+    if not _servico_solicitavel(servico):
+        logger.warning(
+            "servico_mal_configurado_para_solicitacao",
+            extra={
+                "tenant_id": tenant_id,
+                "id_servico": servico.id,
+                "slug": slug,
+                "canal": servico.canal_entrada_permitido,
+                "tem_assunto": servico.id_assunto_padrao is not None,
+                "tem_unidade": servico.id_unidade_responsavel is not None,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Solicitação online indisponível para este serviço no momento.",
+        )
+
+    return servico

@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Building2, Clock, FileText, Loader2, Star } from "lucide-react";
+import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -102,10 +103,18 @@ function ServicoCard({ servico: s }: { servico: ServicoPublico }) {
       )}
 
       <div className="mt-4 pt-1">
-        {/* PR 4a: abertura por serviço é o PR 4b — botão desabilitado. */}
-        <Button variant="secondary" size="sm" disabled title="Disponível em breve">
-          Solicitação disponível em breve
-        </Button>
+        {s.solicitar_habilitado ? (
+          <Link
+            href={`/cidadao/servicos/${s.slug}`}
+            className="inline-flex h-9 items-center justify-center rounded-md bg-brand px-3 text-xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-brand-light"
+          >
+            Solicitar serviço
+          </Link>
+        ) : (
+          <Button variant="secondary" size="sm" disabled title="Solicitação indisponível">
+            Solicitação indisponível
+          </Button>
+        )}
       </div>
     </article>
   );

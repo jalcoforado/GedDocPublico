@@ -15,6 +15,7 @@ from ..config import get_settings
 from ..database import get_db, tenant_filter
 from ..models import Assunto, Manifestante, Processo, TipoProcesso, UsuarioExterno
 from ..schemas.cidadao import (
+    AbrirPorServicoRequest,
     AbrirProcessoCidadaoRequest,
     AnexoCidadaoOut,
     CadastroCidadaoRequest,
@@ -34,10 +35,12 @@ from ..services.cidadao_auth import (
 from ..services.cidadao_processos import (
     CidadaoProcessoError,
     abrir_processo_cidadao,
+    abrir_processo_por_servico,
     get_meu_detail,
     listar_especies_cidadao,
     listar_meus,
 )
+from ..services.servico import obter_servico_solicitavel
 
 settings = get_settings()
 router = APIRouter(prefix="/cidadao", tags=["cidadao"])
@@ -182,6 +185,39 @@ async def abrir_processo_endpoint(
 ) -> ProcessoCidadaoDetail:
     try:
         processo = await abrir_processo_cidadao(db, cidadao, payload, tenant_id=tenant_id)
+    except CidadaoProcessoError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    detail = await get_meu_detail(db, cidadao, processo.id, tenant_id=tenant_id)
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Processo criado mas não localizado depois",
+        )
+    return detail
+
+
+@router.post(
+    "/servicos/{slug}/abrir",
+    response_model=ProcessoCidadaoDetail,
+    status_code=status.HTTP_201_CREATED,
+)
+async def abrir_por_servico_endpoint(
+    slug: str,
+    payload: AbrirPorServicoRequest,
+    cidadao: UsuarioExterno = Depends(get_current_cidadao),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoCidadaoDetail:
+    """Abre protocolo a partir de um serviço ativo do portal (PR 4b).
+
+    Serviço resolvido por slug + tenant do Host. Defaults do serviço são
+    aplicados server-side; o cidadão não escolhe classificação."""
+    # 404 neutro (não achado/inativo/outro tenant) ou 409 controlado (mal config).
+    servico = await obter_servico_solicitavel(db, tenant_id=tenant_id, slug=slug)
+    try:
+        processo = await abrir_processo_por_servico(
+            db, cidadao, servico, payload, tenant_id=tenant_id
+        )
     except CidadaoProcessoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     detail = await get_meu_detail(db, cidadao, processo.id, tenant_id=tenant_id)

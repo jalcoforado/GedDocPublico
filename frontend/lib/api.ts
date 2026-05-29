@@ -1949,6 +1949,7 @@ export interface ServicoPublico {
   categoria: string | null;
   destaque: boolean;
   ordem_exibicao: number;
+  texto_confirmacao: string | null;
   solicitar_habilitado: boolean;
 }
 
@@ -1968,11 +1969,17 @@ export const servicosApi = {
     request<Servico>(`/servicos/${id}/desativar`, { method: "POST" }),
 };
 
-// Portal público — sem login, tenant pelo Host.
+// Portal público — listagem/detalhe sem login (tenant pelo Host).
 export const portalApi = {
   servicos: () => request<ServicoPublico[]>(`/portal/servicos`),
   servico: (slug: string) =>
     request<ServicoPublico>(`/portal/servicos/${encodeURIComponent(slug)}`),
+  // PR 4b — abertura por serviço: exige cidadão logado (cookie aprimora_cidadao_token).
+  abrirPorServico: (slug: string, body: { corpo: string; observacao?: string }) =>
+    requestCidadao<CidadaoProcessoDetail>(
+      `/cidadao/servicos/${encodeURIComponent(slug)}/abrir`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
 };
 
 export const protocoloApi = {

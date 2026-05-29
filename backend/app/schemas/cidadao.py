@@ -42,6 +42,15 @@ class AbrirProcessoCidadaoRequest(BaseModel):
     id_especie_documental: int | None = None
 
 
+class AbrirPorServicoRequest(BaseModel):
+    """PR 4b — abertura por serviço. A classificação (assunto/unidade/tipo/
+    espécie/sigilo/canal) vem dos defaults do serviço; o cidadão só descreve o
+    pedido. Não há campos de classificação aqui — impossível sobrescrever."""
+
+    corpo: str = Field(min_length=10)
+    observacao: str | None = None
+
+
 class EspecieCidadaoOut(BaseModel):
     id: int
     codigo: str
