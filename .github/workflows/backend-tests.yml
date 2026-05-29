@@ -39,6 +39,11 @@ jobs:
       PYTEST_DB_PORT: "5432"
       PYTEST_DB_NAME: ged_saas_db
       PYTEST_DB_PASS: ged_password_secure_local
+      # O runner não tem /app gravável; o storage de anexos (usado por
+      # test_assinatura_v2 ao gravar o arquivo p/ o hash) vai para /tmp.
+      TENANTS_STORAGE_ROOT: /tmp/uploads/tenants
+      UPLOADS_DIR: /tmp/uploads/anexos
+      JOBS_RESULTS_DIR: /tmp/uploads/jobs
 
     steps:
       - uses: actions/checkout@v4
