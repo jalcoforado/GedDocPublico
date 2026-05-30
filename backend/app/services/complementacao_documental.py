@@ -5,18 +5,29 @@ montar_out. `ComplementacaoError(status_code, detail)` é mapeada para
 HTTPException nos routers.
 
 Decisões fechadas que valem aqui:
+
 - D-CONCORRENCIA: 1 `aberta` viva por processo (verificação + índice único
-  parcial na migration 0027).
+  parcial na migration 0027 + **transição atômica** via
+  `UPDATE ... WHERE status='aberta' RETURNING *` em responder/cancelar —
+  PR 4d-fix).
 - D-RESPOSTA: cidadão responde via ação explícita; **não** exige docs
   completos.
 - D-AUDIT: mensagem/motivo nunca vão pro audit (ficam só na tabela, sob RLS).
+
+LGPD — decisão sobre `documentos_solicitados_keys` no audit (PR 4d-fix):
+mantida no payload do evento `complementacao.solicitada`. Justificativa:
+são *slugs técnicos estáveis* (gerados de `slugify(nome)` em `servico.py`,
+PR 4a/4c), não descrições livres nem dados do cidadão. Não é registrado:
+CPF, nome do cidadão, mensagem do servidor, motivo de cancelamento, nome
+de arquivo, conteúdo. Se no futuro as keys passarem a derivar de algo
+sensível, trocar por contagem ou hash.
 """
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -238,27 +249,47 @@ async def responder(
 
     Não valida quantidade de anexos — D-RESPOSTA: cidadão decide quando
     fechar; servidor avalia suficiência depois.
-    """
-    comp = (
-        await db.execute(
-            select(ComplementacaoDocumental).where(
-                ComplementacaoDocumental.id == complementacao_id,
-                ComplementacaoDocumental.id_processo == processo_id,
-                ComplementacaoDocumental.tenant_id == tenant_id,
-                ComplementacaoDocumental.excluido.is_(False),
-            )
-        )
-    ).scalar_one_or_none()
-    if comp is None:
-        raise ComplementacaoError(404, "Complementação não encontrada")
-    if comp.status != "aberta":
-        raise ComplementacaoError(409, "Complementação não está aberta.")
 
+    Transição **atômica** via `UPDATE ... WHERE status='aberta' RETURNING *`:
+    se duas transações concorrentes tentarem responder/cancelar a mesma
+    complementação, apenas a primeira faz o UPDATE; a segunda recebe 0
+    linhas e levanta 409 — sem emitir audit_log fantasma (PR 4d-fix).
+    """
     now = _now()
-    comp.status = "respondida"
-    comp.respondido_em = now
-    comp.atualizado_em = now
-    await db.flush()
+    stmt = (
+        update(ComplementacaoDocumental)
+        .where(
+            ComplementacaoDocumental.id == complementacao_id,
+            ComplementacaoDocumental.id_processo == processo_id,
+            ComplementacaoDocumental.tenant_id == tenant_id,
+            ComplementacaoDocumental.excluido.is_(False),
+            ComplementacaoDocumental.status == "aberta",
+        )
+        .values(
+            status="respondida",
+            respondido_em=now,
+            atualizado_em=now,
+        )
+        .returning(ComplementacaoDocumental)
+        .execution_options(synchronize_session="fetch")
+    )
+    comp = (await db.execute(stmt)).scalar_one_or_none()
+    if comp is None:
+        # 0 linhas alteradas: ou a linha não existe (404), ou existe mas o
+        # status já não é "aberta" / está excluída (409). Diagnostica.
+        existente = (
+            await db.execute(
+                select(ComplementacaoDocumental.id).where(
+                    ComplementacaoDocumental.id == complementacao_id,
+                    ComplementacaoDocumental.id_processo == processo_id,
+                    ComplementacaoDocumental.tenant_id == tenant_id,
+                    ComplementacaoDocumental.excluido.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if existente is None:
+            raise ComplementacaoError(404, "Complementação não encontrada")
+        raise ComplementacaoError(409, "Complementação não está aberta.")
 
     await audit_log(
         db,
@@ -285,27 +316,48 @@ async def cancelar(
     id_usuario_responsavel: int,
     motivo: str | None,
 ) -> ComplementacaoDocumental:
-    comp = (
-        await db.execute(
-            select(ComplementacaoDocumental).where(
-                ComplementacaoDocumental.id == complementacao_id,
-                ComplementacaoDocumental.id_processo == processo_id,
-                ComplementacaoDocumental.tenant_id == tenant_id,
-                ComplementacaoDocumental.excluido.is_(False),
-            )
-        )
-    ).scalar_one_or_none()
-    if comp is None:
-        raise ComplementacaoError(404, "Complementação não encontrada")
-    if comp.status != "aberta":
-        raise ComplementacaoError(409, "Complementação não está aberta.")
+    """Servidor cancela complementação aberta.
 
+    Transição **atômica** via `UPDATE ... WHERE status='aberta' RETURNING *`
+    (mesma garantia de `responder`): se duas transações concorrentes
+    tentarem responder/cancelar a mesma complementação, apenas a primeira
+    faz o UPDATE; a segunda recebe 0 linhas e levanta 409 — sem audit_log
+    fantasma (PR 4d-fix).
+    """
     now = _now()
-    comp.status = "cancelada"
-    comp.cancelado_em = now
-    comp.atualizado_em = now
-    comp.motivo_cancelamento = motivo
-    await db.flush()
+    stmt = (
+        update(ComplementacaoDocumental)
+        .where(
+            ComplementacaoDocumental.id == complementacao_id,
+            ComplementacaoDocumental.id_processo == processo_id,
+            ComplementacaoDocumental.tenant_id == tenant_id,
+            ComplementacaoDocumental.excluido.is_(False),
+            ComplementacaoDocumental.status == "aberta",
+        )
+        .values(
+            status="cancelada",
+            cancelado_em=now,
+            atualizado_em=now,
+            motivo_cancelamento=motivo,
+        )
+        .returning(ComplementacaoDocumental)
+        .execution_options(synchronize_session="fetch")
+    )
+    comp = (await db.execute(stmt)).scalar_one_or_none()
+    if comp is None:
+        existente = (
+            await db.execute(
+                select(ComplementacaoDocumental.id).where(
+                    ComplementacaoDocumental.id == complementacao_id,
+                    ComplementacaoDocumental.id_processo == processo_id,
+                    ComplementacaoDocumental.tenant_id == tenant_id,
+                    ComplementacaoDocumental.excluido.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if existente is None:
+            raise ComplementacaoError(404, "Complementação não encontrada")
+        raise ComplementacaoError(409, "Complementação não está aberta.")
 
     await audit_log(
         db,

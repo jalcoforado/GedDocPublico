@@ -650,3 +650,185 @@ async def test_listar_ordena_desc(admin_engine):
         assert [r.id for r in rows] == [c2.id, c1.id]  # desc por criado_em
     finally:
         await _cleanup(admin_engine, tenant.id)
+
+
+# ============ PR 4d-fix — transição atômica ============
+
+async def test_responder_ja_cancelada_409_sem_audit_fantasma(admin_engine):
+    """PR 4d-fix: tentar responder uma complementação JÁ cancelada deve
+    retornar 409 e NÃO emitir um evento `complementacao.respondida` no audit.
+    Garante que a transição atômica não gera dois eventos contraditórios."""
+    tenant, sv, pid, admin_id = await _setup_servico_processo(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            comp = await comp_svc.solicitar(
+                s, tenant_id=tenant.id, processo_id=pid,
+                id_usuario_solicitante=admin_id, mensagem="m",
+                documentos_solicitados_keys=["rg"],
+            )
+            await comp_svc.cancelar(
+                s, tenant_id=tenant.id, processo_id=pid,
+                complementacao_id=comp.id,
+                id_usuario_responsavel=admin_id, motivo=None,
+            )
+            await s.commit()
+
+        # Tenta responder a já cancelada → 409
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(ComplementacaoError) as exc:
+                await comp_svc.responder(
+                    s, tenant_id=tenant.id, processo_id=pid,
+                    complementacao_id=comp.id,
+                )
+            assert exc.value.status_code == 409
+
+        # Estado final: cancelada (não foi sobrescrito)
+        async with _sm(admin_engine)() as s:
+            row = (await s.execute(text(
+                "SELECT status FROM protocolos.complementacao_documental "
+                "WHERE id=:i"
+            ), {"i": comp.id})).first()
+            assert row.status == "cancelada"
+
+            # Audit: 1 solicitada + 1 cancelada; ZERO respondida
+            counts = {
+                acao: int(n) for acao, n in (await s.execute(text(
+                    "SELECT acao, COUNT(*) FROM aprimora_py.audit_log "
+                    "WHERE tenant_id=:t AND entidade='complementacao_documental' "
+                    "AND id_entidade=:e GROUP BY acao"
+                ), {"t": tenant.id, "e": comp.id})).all()
+            }
+            assert counts.get("complementacao.solicitada") == 1
+            assert counts.get("complementacao.cancelada") == 1
+            assert counts.get("complementacao.respondida") is None
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+async def test_cancelar_ja_respondida_409_sem_audit_fantasma(admin_engine):
+    """PR 4d-fix: tentar cancelar uma complementação JÁ respondida deve
+    retornar 409 e NÃO emitir um evento `complementacao.cancelada`."""
+    tenant, sv, pid, admin_id = await _setup_servico_processo(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            comp = await comp_svc.solicitar(
+                s, tenant_id=tenant.id, processo_id=pid,
+                id_usuario_solicitante=admin_id, mensagem="m",
+                documentos_solicitados_keys=["rg"],
+            )
+            await comp_svc.responder(
+                s, tenant_id=tenant.id, processo_id=pid,
+                complementacao_id=comp.id,
+            )
+            await s.commit()
+
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(ComplementacaoError) as exc:
+                await comp_svc.cancelar(
+                    s, tenant_id=tenant.id, processo_id=pid,
+                    complementacao_id=comp.id,
+                    id_usuario_responsavel=admin_id, motivo="tentativa",
+                )
+            assert exc.value.status_code == 409
+
+        async with _sm(admin_engine)() as s:
+            row = (await s.execute(text(
+                "SELECT status, motivo_cancelamento FROM "
+                "protocolos.complementacao_documental WHERE id=:i"
+            ), {"i": comp.id})).first()
+            assert row.status == "respondida"
+            assert row.motivo_cancelamento is None  # não vazou o "tentativa"
+
+            counts = {
+                acao: int(n) for acao, n in (await s.execute(text(
+                    "SELECT acao, COUNT(*) FROM aprimora_py.audit_log "
+                    "WHERE tenant_id=:t AND entidade='complementacao_documental' "
+                    "AND id_entidade=:e GROUP BY acao"
+                ), {"t": tenant.id, "e": comp.id})).all()
+            }
+            assert counts.get("complementacao.respondida") == 1
+            assert counts.get("complementacao.cancelada") is None
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+async def test_transicao_concorrente_simulada_apenas_uma_prevalece(admin_engine):
+    """PR 4d-fix: simula o cenário onde responder e cancelar disparam em
+    paralelo. Como ambos usam `UPDATE ... WHERE status='aberta' RETURNING *`,
+    apenas a primeira transição prevalece. A segunda, mesmo que tenha lido
+    `status='aberta'` antes, recebe 0 linhas no UPDATE e levanta 409 — sem
+    audit_log fantasma."""
+    tenant, sv, pid, admin_id = await _setup_servico_processo(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            comp = await comp_svc.solicitar(
+                s, tenant_id=tenant.id, processo_id=pid,
+                id_usuario_solicitante=admin_id, mensagem="m",
+                documentos_solicitados_keys=["rg"],
+            )
+            await s.commit()
+
+        # Sessão A: responder e commita primeiro.
+        async with _sm(admin_engine)() as sa:
+            await comp_svc.responder(
+                sa, tenant_id=tenant.id, processo_id=pid,
+                complementacao_id=comp.id,
+            )
+            await sa.commit()
+
+        # Sessão B: havia visto status='aberta' antes de A commitar, agora
+        # tenta cancelar (em transação nova) — UPDATE atômico não acha
+        # status='aberta' e devolve 0 linhas → 409.
+        async with _sm(admin_engine)() as sb:
+            with pytest.raises(ComplementacaoError) as exc:
+                await comp_svc.cancelar(
+                    sb, tenant_id=tenant.id, processo_id=pid,
+                    complementacao_id=comp.id,
+                    id_usuario_responsavel=admin_id, motivo=None,
+                )
+            assert exc.value.status_code == 409
+
+        # Estado final: respondida prevaleceu; só 1 evento de transição.
+        async with _sm(admin_engine)() as s:
+            row = (await s.execute(text(
+                "SELECT status FROM protocolos.complementacao_documental "
+                "WHERE id=:i"
+            ), {"i": comp.id})).first()
+            assert row.status == "respondida"
+            counts = {
+                acao: int(n) for acao, n in (await s.execute(text(
+                    "SELECT acao, COUNT(*) FROM aprimora_py.audit_log "
+                    "WHERE tenant_id=:t AND entidade='complementacao_documental' "
+                    "AND id_entidade=:e GROUP BY acao"
+                ), {"t": tenant.id, "e": comp.id})).all()
+            }
+            # Exatamente 1 solicitada + 1 respondida; 0 canceladas.
+            assert counts.get("complementacao.solicitada") == 1
+            assert counts.get("complementacao.respondida") == 1
+            assert counts.get("complementacao.cancelada") is None
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+async def test_transicao_404_distinguida_de_409(admin_engine):
+    """PR 4d-fix: UPDATE atômico com fallback distingue 404 (não existe)
+    de 409 (existe mas não está aberta)."""
+    tenant, sv, pid, admin_id = await _setup_servico_processo(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(ComplementacaoError) as exc:
+                await comp_svc.responder(
+                    s, tenant_id=tenant.id, processo_id=pid,
+                    complementacao_id=999999,
+                )
+            assert exc.value.status_code == 404
+
+            with pytest.raises(ComplementacaoError) as exc:
+                await comp_svc.cancelar(
+                    s, tenant_id=tenant.id, processo_id=pid,
+                    complementacao_id=999999,
+                    id_usuario_responsavel=admin_id, motivo=None,
+                )
+            assert exc.value.status_code == 404
+    finally:
+        await _cleanup(admin_engine, tenant.id)

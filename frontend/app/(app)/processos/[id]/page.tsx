@@ -601,34 +601,42 @@ export default function ProcessoDetailPage() {
 
       {activeTab === "documentos" && (
         <div className="space-y-6">
-          {/* PR 4d — Bloco de complementação documental */}
+          {/* PR 4d — Bloco de complementação documental.
+              PR 4d-fix: enquanto o histórico ainda carrega, NÃO oferece
+              "Solicitar complementação" (backend é fonte de verdade,
+              mas evita clique confuso quando já existe uma aberta e a UI
+              ainda não tem o dado). Mostra placeholder no lugar. */}
           {(() => {
             const todas = complementacoesQ.data ?? [];
             const aberta = todas.find((c) => c.status === "aberta") ?? null;
             const anteriores = todas.filter((c) => c.status !== "aberta");
+            const blocoComplementacao = complementacoesQ.isLoading ? (
+              <div
+                data-testid="complementacao-loading"
+                className="h-16 animate-pulse rounded-lg bg-surface-2/40"
+              />
+            ) : aberta ? (
+              <ComplementacaoAbertaCard
+                data={aberta}
+                modo="servidor"
+                onCancelar={
+                  podeAtualizarProcesso ? () => setCancelarOpen(true) : undefined
+                }
+              />
+            ) : podeAtualizarProcesso ? (
+              <div className="flex justify-end">
+                <Button
+                  variant="secondary"
+                  onClick={() => setSolicitarOpen(true)}
+                  disabled={!checklistQ.data}
+                >
+                  Solicitar complementação
+                </Button>
+              </div>
+            ) : null;
             return (
               <>
-                {aberta ? (
-                  <ComplementacaoAbertaCard
-                    data={aberta}
-                    modo="servidor"
-                    onCancelar={
-                      podeAtualizarProcesso
-                        ? () => setCancelarOpen(true)
-                        : undefined
-                    }
-                  />
-                ) : podeAtualizarProcesso ? (
-                  <div className="flex justify-end">
-                    <Button
-                      variant="secondary"
-                      onClick={() => setSolicitarOpen(true)}
-                      disabled={!checklistQ.data}
-                    >
-                      Solicitar complementação
-                    </Button>
-                  </div>
-                ) : null}
+                {blocoComplementacao}
                 <ChecklistDocumentosCard
                   data={checklistQ.data}
                   loading={checklistQ.isLoading}
