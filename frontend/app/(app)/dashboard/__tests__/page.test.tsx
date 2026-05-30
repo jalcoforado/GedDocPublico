@@ -101,7 +101,8 @@ function basePayload(overrides: Partial<Record<string, unknown>> = {}) {
       sem_id_servico_periodo: 7,
       checklist_pendente: 8,
       checklist_parcial: 5,
-      checklist_completo: 22,
+      checklist_completo: 12,
+      sem_documentos_exigidos: 10,
     },
     complementacao: {
       abertas_agora: 4,
@@ -120,7 +121,8 @@ function basePayload(overrides: Partial<Record<string, unknown>> = {}) {
         complementacoes_respondidas_periodo: 5,
         checklist_pendente: 4,
         checklist_parcial: 3,
-        checklist_completo: 23,
+        checklist_completo: 13,
+        sem_documentos_exigidos: 10,
       },
       {
         id_servico: null,
@@ -131,6 +133,7 @@ function basePayload(overrides: Partial<Record<string, unknown>> = {}) {
         checklist_pendente: 0,
         checklist_parcial: 0,
         checklist_completo: 0,
+        sem_documentos_exigidos: 7,
       },
     ],
     ...overrides,
@@ -266,5 +269,72 @@ describe("DashboardPage — PR 5a", () => {
     renderPage();
     const wrapper = await screen.findByTestId("dashboard-pr5a-kpis");
     expect(wrapper).toHaveTextContent("—");
+  });
+
+  // PR 5a-fix: novos casos.
+  it("card 'Sem documentos exigidos' aparece separado de 'Checklist completo'", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    renderPage();
+    const wrapper = await screen.findByTestId("dashboard-pr5a-kpis");
+    // O card existe.
+    expect(wrapper).toHaveTextContent(/Sem documentos exigidos/i);
+    // Os números são distintos (12 completo, 10 sem docs).
+    expect(wrapper).toHaveTextContent("12");
+    expect(wrapper).toHaveTextContent("10");
+  });
+
+  it("checkbox 'Incluir legado' fica disabled quando há id_servico", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    renderPage();
+    await screen.findByText("42");
+    await waitFor(() => expect(servicosMock).toHaveBeenCalled());
+
+    // Re-busca o elemento a cada checagem — mudar `idServico` muda a
+    // queryKey e o componente passa por loading antes de re-renderizar.
+    const initialToggle = (await screen.findByTestId(
+      "dashboard-toggle-legado",
+    )) as HTMLInputElement;
+    expect(initialToggle.disabled).toBe(false);
+
+    const select = await screen.findByTestId("dashboard-filtro-servico");
+    fireEvent.change(select, { target: { value: "100" } });
+
+    await waitFor(() => {
+      const t = screen.getByTestId(
+        "dashboard-toggle-legado",
+      ) as HTMLInputElement;
+      expect(t.disabled).toBe(true);
+    });
+  });
+
+  it("URLs de export preservam id_servico e incluir_legado", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    renderPage();
+    await screen.findByText("42");
+    await waitFor(() => expect(servicosMock).toHaveBeenCalled());
+
+    // Estado inicial: incluir_legado=true (default → não vai na querystring),
+    // sem id_servico.
+    const initialCsv = screen.getByTitle(/Baixar CSV/i) as HTMLAnchorElement;
+    expect(initialCsv.href).toMatch(/periodo=30/);
+    expect(initialCsv.href).not.toMatch(/incluir_legado=false/);
+
+    // Toggle off ANTES de selecionar serviço (enquanto ainda está habilitado).
+    const toggle = (await screen.findByTestId(
+      "dashboard-toggle-legado",
+    )) as HTMLInputElement;
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      const csv = screen.getByTitle(/Baixar CSV/i) as HTMLAnchorElement;
+      expect(csv.href).toMatch(/incluir_legado=false/);
+    });
+
+    // Após escolher serviço, URL passa id_servico=100 (e mantém incluir_legado).
+    const select = await screen.findByTestId("dashboard-filtro-servico");
+    fireEvent.change(select, { target: { value: "100" } });
+    await waitFor(() => {
+      const csv = screen.getByTitle(/Baixar CSV/i) as HTMLAnchorElement;
+      expect(csv.href).toMatch(/id_servico=100/);
+    });
   });
 });

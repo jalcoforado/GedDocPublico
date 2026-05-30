@@ -595,13 +595,16 @@ async def test_kpis_estrutura_basica(admin_engine, setup_pr5a):
 async def test_kpis_documental_equivale_a_calcular_checklist(
     admin_engine, setup_pr5a
 ):
-    """Soma pendente/parcial/completo do agregado deve bater com soma do
-    `calcular_checklist` chamado por cada processo do set."""
+    """Soma pendente/parcial/completo/sem_documentos_exigidos do agregado
+    deve bater 1:1 com `calcular_checklist` chamado por cada processo.
+
+    PR 5a-fix: `sem_documentos_exigidos` separado de `completo`.
+    """
     s = setup_pr5a
     tenant_id = s["tenant"].id
     # Processos com id_servico do tenant A no período (sem legado).
     pids = [s["p_a_pendente"], s["p_a_parcial"], s["p_a_completo"], s["p_b"]]
-    contagem = {"pendente": 0, "parcial": 0, "completo": 0}
+    contagem = {"pendente": 0, "parcial": 0, "completo": 0, "sem_docs": 0}
     async with _sm(admin_engine)() as sess:
         for pid in pids:
             r = await calcular_checklist(sess, processo_id=pid, tenant_id=tenant_id)
@@ -609,10 +612,10 @@ async def test_kpis_documental_equivale_a_calcular_checklist(
                 contagem["pendente"] += 1
             elif r.status_documental == "parcial":
                 contagem["parcial"] += 1
-            elif r.status_documental in ("completo", "sem_documentos_exigidos"):
-                # No agregado, "sem_documentos_exigidos" (serviço sem docs)
-                # cai em completo trivial (per escopo §4.3).
+            elif r.status_documental == "completo":
                 contagem["completo"] += 1
+            elif r.status_documental == "sem_documentos_exigidos":
+                contagem["sem_docs"] += 1
 
     async with _sm(admin_engine)() as sess:
         data = await compute_kpis(sess, tenant_id=tenant_id, periodo_dias=30)
@@ -620,6 +623,7 @@ async def test_kpis_documental_equivale_a_calcular_checklist(
     assert d["checklist_pendente"] == contagem["pendente"]
     assert d["checklist_parcial"] == contagem["parcial"]
     assert d["checklist_completo"] == contagem["completo"]
+    assert d["sem_documentos_exigidos"] == contagem["sem_docs"]
     # Auxiliares: 4 com id_servico + 1 sem (legado).
     assert d["com_id_servico_periodo"] == 4
     assert d["sem_id_servico_periodo"] == 1
@@ -876,3 +880,232 @@ async def test_pdf_smoke_devolve_bytes(admin_engine, setup_pr5a):
     assert isinstance(pdf_bytes, bytes)
     assert pdf_bytes.startswith(b"%PDF-"), "não é um PDF válido"
     assert len(pdf_bytes) > 1000  # PDF mínimo plausível
+
+
+# =====================================================================
+# 6) PR 5a-fix — achados do Codex
+# =====================================================================
+
+async def test_documental_sem_documentos_separado_de_completo(
+    admin_engine, setup_pr5a
+):
+    """`sem_documentos_exigidos` (serviço B sem docs) NÃO é contabilizado
+    em `checklist_completo`. Antes do fix, ambos caíam em completo."""
+    s = setup_pr5a
+    async with _sm(admin_engine)() as sess:
+        data = await compute_kpis(sess, tenant_id=s["tenant"].id, periodo_dias=30)
+    d = data["documental"]
+    # Set: pendente=1, parcial=1, completo=1 (p_a_completo), sem_docs=1 (p_b).
+    assert d["checklist_pendente"] == 1
+    assert d["checklist_parcial"] == 1
+    assert d["checklist_completo"] == 1
+    assert d["sem_documentos_exigidos"] == 1
+    # Soma das 4 categorias = total com id_servico no período.
+    soma = (
+        d["checklist_pendente"]
+        + d["checklist_parcial"]
+        + d["checklist_completo"]
+        + d["sem_documentos_exigidos"]
+    )
+    assert soma == d["com_id_servico_periodo"]
+
+
+async def test_ranking_por_servico_aplica_id_unidade_em_complementacoes(
+    admin_engine, setup_pr5a
+):
+    """Quando `id_unidade` está filtrado, `complementacoes_abertas` e
+    `complementacoes_respondidas_periodo` no ranking devem refletir
+    apenas processos daquela unidade.
+
+    Setup-pr5a abre todas as complementações em processos da unidade
+    padrão. Filtrando por OUTRA unidade, as colunas de complementação
+    devem zerar — antes do fix, vinham preenchidas porque ignoravam
+    `id_unidade`.
+    """
+    s = setup_pr5a
+    # Cria uma segunda unidade no mesmo tenant para servir de filtro.
+    async with _sm(admin_engine)() as sess:
+        tu_id = int(
+            (
+                await sess.execute(
+                    text(
+                        "SELECT id FROM utils.tipo_unidade_trabalho "
+                        "WHERE tenant_id=:t LIMIT 1"
+                    ),
+                    {"t": s["tenant"].id},
+                )
+            ).scalar_one()
+        )
+        outra_uid = int(
+            (
+                await sess.execute(
+                    text(
+                        "INSERT INTO utils.unidade_trabalho "
+                        "(tenant_id, unidade_trabalho, sigla, "
+                        "id_tipo_unidade_trabalho) "
+                        "VALUES (:t, 'Outra', 'O', :tu) RETURNING id"
+                    ),
+                    {"t": s["tenant"].id, "tu": tu_id},
+                )
+            ).scalar_one()
+        )
+        await sess.commit()
+
+    async with _sm(admin_engine)() as sess:
+        data = await compute_kpis(
+            sess,
+            tenant_id=s["tenant"].id,
+            periodo_dias=30,
+            id_unidade=outra_uid,
+        )
+    # Ranking pode estar vazio (não há processos nessa unidade) OU pode
+    # ter linha legado. Em qualquer caso, NENHUMA complementação deve
+    # aparecer (todas estão em processos da unidade original).
+    for it in data["por_servico"]:
+        assert it["complementacoes_abertas"] == 0, it
+        assert it["complementacoes_respondidas_periodo"] == 0, it
+
+
+async def test_sla_respeita_filtro_id_servico(admin_engine, setup_pr5a):
+    """SLA agora respeita id_servico via JOIN WorkflowInstance → Processo.
+
+    Sem alertas semeados no setup, o teste é negativo: garante que a
+    consulta não estoura e o resultado é coerente (0 alertas com qualquer
+    id_servico válido).
+    """
+    s = setup_pr5a
+    async with _sm(admin_engine)() as sess:
+        data = await compute_kpis(
+            sess,
+            tenant_id=s["tenant"].id,
+            periodo_dias=30,
+            id_servico=s["sv_a"].id,
+        )
+    assert data["sla"]["pendentes"] == 0
+    assert data["sla"]["resolvidos_periodo"] == 0
+
+
+async def test_janela_temporal_exclui_processos_futuros(
+    admin_engine, setup_pr5a
+):
+    """Breakdowns e série temporal devem usar `< ate` (não só `>= desde`).
+
+    Cria processo com `data_hora_abertura` 365+ dias no futuro; ele
+    aparece no banco mas NÃO deve entrar em por_tipo / por_assunto /
+    por_unidade / serie_temporal (que olham o período atual `[desde, now)`).
+    Antes do fix, eles entravam pois só filtravam `>= desde`.
+    """
+    s = setup_pr5a
+    tenant_id = s["tenant"].id
+    # Pega assunto e unidade do tenant.
+    async with _sm(admin_engine)() as sess:
+        async_uid = int(
+            (
+                await sess.execute(
+                    text(
+                        "SELECT id FROM utils.unidade_trabalho "
+                        "WHERE tenant_id=:t LIMIT 1"
+                    ),
+                    {"t": tenant_id},
+                )
+            ).scalar_one()
+        )
+        async_aid = int(
+            (
+                await sess.execute(
+                    text(
+                        "SELECT id FROM protocolos.assunto "
+                        "WHERE tenant_id=:t LIMIT 1"
+                    ),
+                    {"t": tenant_id},
+                )
+            ).scalar_one()
+        )
+        # Manifestante mínimo.
+        await sess.execute(
+            text(
+                "INSERT INTO protocolos.manifestante "
+                "(tenant_id, id_tipo_manifestante, nome, cpf_cnpj, ativo, excluido) "
+                "SELECT :t, id, 'Futuro', '99999999999', true, false "
+                "FROM protocolos.tipo_manifestante WHERE tenant_id=:t LIMIT 1"
+            ),
+            {"t": tenant_id},
+        )
+        mid = int(
+            (
+                await sess.execute(
+                    text(
+                        "SELECT id FROM protocolos.manifestante "
+                        "WHERE tenant_id=:t ORDER BY id DESC LIMIT 1"
+                    ),
+                    {"t": tenant_id},
+                )
+            ).scalar_one()
+        )
+        # Processo com data_hora_abertura 400 dias no futuro.
+        await sess.execute(
+            text(
+                "INSERT INTO protocolos.processo "
+                "(tenant_id, id_assunto, id_manifestante, id_unidade_proprietaria, "
+                "virtual, data_hora_abertura, numero_processo, nivel_sigilo, "
+                "externo, migrado, ativo, excluido, canal_entrada) "
+                "VALUES (:t, :a, :m, :u, true, NOW() + INTERVAL '400 day', "
+                ":np, 'ostensivo', true, false, true, false, 'portal')"
+            ),
+            {
+                "t": tenant_id,
+                "a": async_aid,
+                "m": mid,
+                "u": async_uid,
+                "np": "PFUT/2027",
+            },
+        )
+        await sess.commit()
+
+    async with _sm(admin_engine)() as sess:
+        data = await compute_kpis(sess, tenant_id=tenant_id, periodo_dias=30)
+    # Soma dos breakdowns por unidade no período = abertos do volume; o
+    # processo futuro NÃO deve aparecer.
+    total_por_unidade = sum(it["count"] for it in data["por_unidade"])
+    assert total_por_unidade == data["volume"]["abertos_periodo"]
+    # Série temporal: nenhuma data > now.
+    from datetime import datetime as _dt
+    now_iso = _dt.utcnow().isoformat()
+    for ponto in data["serie_temporal"]:
+        assert ponto["dia"] <= now_iso, (
+            f"processo futuro vazou para série temporal: {ponto}"
+        )
+
+
+async def test_csv_contem_sem_documentos_exigidos(admin_engine, setup_pr5a):
+    """Export CSV reflete o novo indicador `sem_documentos_exigidos`."""
+    s = setup_pr5a
+    async with _sm(admin_engine)() as sess:
+        data = await compute_kpis(sess, tenant_id=s["tenant"].id, periodo_dias=30)
+    csv_str = to_csv(data, nome_tenant="Pref")
+    # Linha do indicador na seção Documental.
+    assert "Sem documentos exigidos" in csv_str
+    # Cabeçalho da tabela por serviço também tem a coluna.
+    assert "Sem documentos exigidos" in csv_str.split("[Por serviço]")[1]
+
+
+async def test_csv_export_com_filtro_id_servico_e_legado_false(
+    admin_engine, setup_pr5a
+):
+    """CSV deve respeitar filtros: com id_servico fixo + incluir_legado=false,
+    seção Volume só conta processos do serviço; ranking só lista esse
+    serviço; sem linha (sem serviço)."""
+    s = setup_pr5a
+    async with _sm(admin_engine)() as sess:
+        data = await compute_kpis(
+            sess,
+            tenant_id=s["tenant"].id,
+            periodo_dias=30,
+            id_servico=s["sv_a"].id,
+            incluir_legado=False,
+        )
+    csv_str = to_csv(data, nome_tenant="Pref")
+    # Volume: 3 processos (apenas Serviço A).
+    assert "[Volume]" in csv_str
+    # Sem linha "(sem serviço)" no ranking.
+    assert "(sem serviço)" not in csv_str

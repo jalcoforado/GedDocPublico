@@ -1406,13 +1406,16 @@ export interface DashboardBreakdownItem {
   count: number;
 }
 
-/** PR 5a — agregados de checklist documental no período. */
+/** PR 5a — agregados de checklist documental no período.
+ * PR 5a-fix: `sem_documentos_exigidos` separado de `checklist_completo`.
+ */
 export interface DashboardDocumentalKpis {
   com_id_servico_periodo: number;
   sem_id_servico_periodo: number;
   checklist_pendente: number;
   checklist_parcial: number;
   checklist_completo: number;
+  sem_documentos_exigidos: number;
 }
 
 /** PR 5a — agregados de complementação documental. */
@@ -1425,7 +1428,9 @@ export interface DashboardComplementacaoKpis {
   tempo_medio_resposta_dias: number | null;
 }
 
-/** PR 5a — linha do ranking por serviço. `id_servico=null` = "(sem serviço)". */
+/** PR 5a — linha do ranking por serviço. `id_servico=null` = "(sem serviço)".
+ * PR 5a-fix: `sem_documentos_exigidos` separado de `checklist_completo`.
+ */
 export interface DashboardServicoBreakdownItem {
   id_servico: number | null;
   nome: string;
@@ -1435,6 +1440,7 @@ export interface DashboardServicoBreakdownItem {
   checklist_pendente: number;
   checklist_parcial: number;
   checklist_completo: number;
+  sem_documentos_exigidos: number;
 }
 
 export interface DashboardKpis {

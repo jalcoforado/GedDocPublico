@@ -177,6 +177,8 @@ def to_csv(payload: dict[str, Any], nome_tenant: str = "") -> str:
         w.writerow(["Checklist pendente", doc.get("checklist_pendente", 0)])
         w.writerow(["Checklist parcial", doc.get("checklist_parcial", 0)])
         w.writerow(["Checklist completo", doc.get("checklist_completo", 0)])
+        # PR 5a-fix: separado do completo.
+        w.writerow(["Sem documentos exigidos", doc.get("sem_documentos_exigidos", 0)])
         w.writerow([])
 
     comp = payload.get("complementacao") or {}
@@ -207,6 +209,8 @@ def to_csv(payload: dict[str, Any], nome_tenant: str = "") -> str:
                 "Checklist pendente",
                 "Checklist parcial",
                 "Checklist completo",
+                # PR 5a-fix.
+                "Sem documentos exigidos",
             ]
         )
         for it in por_servico:
@@ -220,6 +224,7 @@ def to_csv(payload: dict[str, Any], nome_tenant: str = "") -> str:
                     it.get("checklist_pendente", 0),
                     it.get("checklist_parcial", 0),
                     it.get("checklist_completo", 0),
+                    it.get("sem_documentos_exigidos", 0),
                 ]
             )
 
@@ -397,6 +402,8 @@ def to_pdf(payload: dict[str, Any], nome_tenant: str = "") -> bytes:
             ["Checklist pendente", _fmt_num(doc_kpis.get("checklist_pendente", 0))],
             ["Checklist parcial", _fmt_num(doc_kpis.get("checklist_parcial", 0))],
             ["Checklist completo", _fmt_num(doc_kpis.get("checklist_completo", 0))],
+            # PR 5a-fix.
+            ["Sem documentos exigidos", _fmt_num(doc_kpis.get("sem_documentos_exigidos", 0))],
         ]
         t = Table(rows, colWidths=[12 * cm, 3 * cm], repeatRows=1)
         t.setStyle(
@@ -459,6 +466,8 @@ def to_pdf(payload: dict[str, Any], nome_tenant: str = "") -> bytes:
                 "Pend.",
                 "Parcial",
                 "Compl.",
+                # PR 5a-fix.
+                "S/Docs",
             ]
         ]
         for it in por_servico:
@@ -471,11 +480,12 @@ def to_pdf(payload: dict[str, Any], nome_tenant: str = "") -> bytes:
                     _fmt_num(it.get("checklist_pendente", 0)),
                     _fmt_num(it.get("checklist_parcial", 0)),
                     _fmt_num(it.get("checklist_completo", 0)),
+                    _fmt_num(it.get("sem_documentos_exigidos", 0)),
                 ]
             )
         t = Table(
             rows,
-            colWidths=[5.5 * cm, 1.5 * cm, 2.2 * cm, 2.2 * cm, 1.3 * cm, 1.3 * cm, 1.3 * cm],
+            colWidths=[5.0 * cm, 1.3 * cm, 2.0 * cm, 2.0 * cm, 1.2 * cm, 1.2 * cm, 1.2 * cm, 1.2 * cm],
             repeatRows=1,
         )
         t.setStyle(

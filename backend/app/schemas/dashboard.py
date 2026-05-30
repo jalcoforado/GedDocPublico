@@ -54,17 +54,29 @@ class SerieTemporalItem(BaseModel):
 
 
 class DocumentalKpis(BaseModel):
-    """Agregados de checklist por processo no período (PR 4c × PR 4a)."""
+    """Agregados de checklist por processo no período (PR 4c × PR 4a).
+
+    PR 5a-fix: `checklist_completo` passa a contar apenas processos com
+    obrigatórios e todos enviados; processos sem obrigatórios aplicáveis
+    (serviço sem `documentos_exigidos`, lista vazia, JSONB null/não-array
+    ou só opcionais) vão para `sem_documentos_exigidos` — alinhado ao
+    status `sem_documentos_exigidos` do checklist por processo (PR 4c).
+    """
 
     com_id_servico_periodo: int
     sem_id_servico_periodo: int
-    # Processo com id_servico cujo serviço **tem** documentos exigidos e
+    # Processo com id_servico cujo serviço **tem** obrigatórios e
     # **nenhum** dos obrigatórios foi enviado.
     checklist_pendente: int
     # Algum obrigatório enviado, nem todos.
     checklist_parcial: int
-    # Sem obrigatórios (trivial) ou todos os obrigatórios enviados.
+    # Tem obrigatórios e todos foram enviados (trivial "obrigatorios=0"
+    # NÃO entra aqui — vai para `sem_documentos_exigidos`).
     checklist_completo: int
+    # Processo com id_servico mas sem obrigatórios aplicáveis (serviço
+    # sem `documentos_exigidos`, lista vazia, JSONB null/não-array ou só
+    # itens opcionais).
+    sem_documentos_exigidos: int
 
 
 class ComplementacaoKpis(BaseModel):
@@ -81,7 +93,12 @@ class ComplementacaoKpis(BaseModel):
 class ServicoBreakdownItem(BaseModel):
     """Linha do ranking por serviço. `id_servico=None` → linha "(sem serviço)"
     (legado), só aparece quando `incluir_legado=True` e sem filtro de
-    `id_servico`."""
+    `id_servico`.
+
+    PR 5a-fix: `sem_documentos_exigidos` separado de `checklist_completo`.
+    Para a linha legado, `sem_documentos_exigidos == count` (todo
+    processo sem `id_servico` é sem documentos exigidos por definição).
+    """
 
     id_servico: int | None
     nome: str
@@ -91,6 +108,7 @@ class ServicoBreakdownItem(BaseModel):
     checklist_pendente: int
     checklist_parcial: int
     checklist_completo: int
+    sem_documentos_exigidos: int
 
 
 class DashboardKpis(BaseModel):

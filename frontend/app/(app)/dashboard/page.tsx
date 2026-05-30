@@ -332,7 +332,8 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* PR 5a — KPIs documental + complementação */}
+      {/* PR 5a — KPIs documental + complementação. PR 5a-fix: card extra
+          para `sem_documentos_exigidos`, separado de `checklist_completo`. */}
       <div
         className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
         data-testid="dashboard-pr5a-kpis"
@@ -340,16 +341,22 @@ export default function DashboardPage() {
         <KpiCard
           label="Checklist pendente"
           value={fmtNum(d.documental.checklist_pendente)}
-          hint="processos sem obrigatório enviado"
+          hint="obrigatórios não enviados"
           icon={Layers}
           intent={d.documental.checklist_pendente > 0 ? "warning" : "default"}
         />
         <KpiCard
           label="Checklist completo"
           value={fmtNum(d.documental.checklist_completo)}
-          hint="processos com obrigatórios em dia"
+          hint="todos os obrigatórios enviados"
           icon={CheckCircle2}
           intent="success"
+        />
+        <KpiCard
+          label="Sem documentos exigidos"
+          value={fmtNum(d.documental.sem_documentos_exigidos)}
+          hint="serviço sem obrigatórios aplicáveis"
+          icon={Layers}
         />
         <KpiCard
           label="Complementações abertas"
@@ -538,8 +545,15 @@ export default function DashboardPage() {
                     <th className="py-2 pr-4 text-right font-medium tabular-nums">
                       Parcial
                     </th>
-                    <th className="py-2 text-right font-medium tabular-nums">
+                    <th className="py-2 pr-4 text-right font-medium tabular-nums">
                       Completo
+                    </th>
+                    {/* PR 5a-fix */}
+                    <th
+                      className="py-2 text-right font-medium tabular-nums"
+                      title="Processos sem obrigatórios aplicáveis"
+                    >
+                      S/Docs
                     </th>
                   </tr>
                 </thead>
@@ -583,8 +597,11 @@ export default function DashboardPage() {
                         <td className="py-2 pr-4 text-right tabular-nums">
                           {fmtNum(it.checklist_parcial)}
                         </td>
-                        <td className="py-2 text-right tabular-nums">
+                        <td className="py-2 pr-4 text-right tabular-nums">
                           {fmtNum(it.checklist_completo)}
+                        </td>
+                        <td className="py-2 text-right tabular-nums">
+                          {fmtNum(it.sem_documentos_exigidos)}
                         </td>
                       </tr>
                     );

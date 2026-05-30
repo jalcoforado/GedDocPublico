@@ -40,6 +40,7 @@ from ..models import (
     Processo,
     TipoProcesso,
     UnidadeTrabalho,
+    WorkflowInstance,
     WorkflowSlaAlerta,
 )
 
@@ -171,18 +172,33 @@ async def _counts_intervalo(
     tempo_medio = (await db.execute(tm_stmt)).scalar_one()
     tempo_medio = float(tempo_medio) if tempo_medio is not None else None
 
-    # SLA não tem filtro de processo (alerta vive na unidade + workflow). Mantemos
-    # como antes — só janela temporal.
-    sla_resolv = (
-        await db.execute(
-            select(func.count(WorkflowSlaAlerta.id)).where(
-                WorkflowSlaAlerta.tenant_id == tenant_id,
-                WorkflowSlaAlerta.resolvido_em.is_not(None),
-                WorkflowSlaAlerta.resolvido_em >= desde,
-                WorkflowSlaAlerta.resolvido_em < ate,
-            )
+    # PR 5a-fix: SLA passa a respeitar filtros id_unidade/id_servico/
+    # incluir_legado via JOIN WorkflowSlaAlerta → WorkflowInstance →
+    # Processo. Sem JOIN, alertas de processos legados ou de outros
+    # serviços apareceriam mesmo com filtro ativo.
+    sla_resolv_stmt = (
+        select(func.count(WorkflowSlaAlerta.id))
+        .join(
+            WorkflowInstance,
+            WorkflowInstance.id == WorkflowSlaAlerta.id_workflow_instance,
         )
-    ).scalar_one()
+        .join(Processo, Processo.id == WorkflowInstance.id_processo)
+        .where(
+            WorkflowSlaAlerta.tenant_id == tenant_id,
+            WorkflowSlaAlerta.resolvido_em.is_not(None),
+            WorkflowSlaAlerta.resolvido_em >= desde,
+            WorkflowSlaAlerta.resolvido_em < ate,
+            Processo.tenant_id == tenant_id,
+            Processo.excluido.is_(False),
+        )
+    )
+    sla_resolv_stmt = _aplicar_filtros_processo(
+        sla_resolv_stmt,
+        id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=incluir_legado,
+    )
+    sla_resolv = (await db.execute(sla_resolv_stmt)).scalar_one()
 
     taxa = None
     if abertos and abertos > 0:
@@ -233,19 +249,23 @@ async def _documental_periodo(
 
     Distribui contagens em `com_id_servico_periodo` / `sem_id_servico_periodo`
     para diagnóstico do gestor (saber quanto da operação ainda é legado), e
-    em `checklist_pendente / parcial / completo` para visão de gargalo
-    documental.
+    em `checklist_pendente / parcial / completo / sem_documentos_exigidos`
+    para visão de gargalo documental.
 
-    A regra de status aqui ESPELHA `services/checklist_documentos._calcular_status`:
-    - obrigatorios = 0 (serviço sem documentos exigidos OU sem nenhum item
-      `obrigatorio=true`) → completo trivial;
-    - obrigatorios > 0 e nenhum enviado → pendente;
-    - obrigatorios > 0 e 0 < enviados < total → parcial;
-    - obrigatorios > 0 e enviados = total → completo.
+    PR 5a-fix: a regra de status agora ESPELHA exatamente
+    `services/checklist_documentos._calcular_status`:
+    - obrigatorios = 0 (serviço sem documentos exigidos OU lista vazia OU
+      JSONB null/não-array OU só itens opcionais) → `sem_documentos_exigidos`;
+    - obrigatorios > 0 e nenhum enviado → `pendente`;
+    - obrigatorios > 0 e 0 < enviados < total → `parcial`;
+    - obrigatorios > 0 e enviados = total → `completo`.
 
-    Processo SEM `id_servico` é contado em `sem_id_servico_periodo`, mas
-    não entra em pendente/parcial/completo (alinhado ao status
-    `sem_documentos_exigidos` do checklist por processo).
+    Antes, processos com obrigatorios=0 entravam em `completo` (trivial),
+    misturando com casos genuinamente concluídos. Agora ficam separados.
+
+    Processo SEM `id_servico` continua em `sem_id_servico_periodo`, fora
+    de pendente/parcial/completo/sem_documentos_exigidos (esses 4 são
+    todos restritos a `id_servico IS NOT NULL` pela CTE).
     """
     # Contadores básicos com/sem id_servico (respeitam id_unidade; `id_servico`
     # filtra para zero quando informado pq há filtro `IS NULL/NOT NULL`).
@@ -348,8 +368,11 @@ async def _documental_periodo(
                   AND obrigatorios_enviados < obrigatorios
             ) AS parcial,
             COUNT(*) FILTER (
-                WHERE obrigatorios = 0 OR obrigatorios_enviados = obrigatorios
-            ) AS completo
+                WHERE obrigatorios > 0 AND obrigatorios_enviados = obrigatorios
+            ) AS completo,
+            COUNT(*) FILTER (
+                WHERE obrigatorios = 0
+            ) AS sem_documentos
         FROM por_processo;
         """
     )
@@ -370,6 +393,7 @@ async def _documental_periodo(
         "checklist_pendente": int(row.pendente or 0),
         "checklist_parcial": int(row.parcial or 0),
         "checklist_completo": int(row.completo or 0),
+        "sem_documentos_exigidos": int(row.sem_documentos or 0),
     }
 
 
@@ -499,6 +523,18 @@ async def _breakdown_servico(
     )
     extra_clause = f" AND {extra_where}" if extra_where else ""
 
+    # PR 5a-fix: as subqueries de complementação usam alias `pp` (não `p`).
+    # `extra_clause` traz `p.*` filters da função `_processo_filtros_sql`;
+    # construímos uma cláusula equivalente com alias `pp` para honrar o
+    # filtro `id_unidade` nos subindicadores de complementação (e na linha
+    # legado). Não introduz parâmetros novos — reutiliza :id_unidade.
+    pp_id_unidade_clause = (
+        " AND (pp.id_unidade_proprietaria = :id_unidade "
+        "OR pp.id_local_atual = :id_unidade)"
+        if id_unidade is not None
+        else ""
+    )
+
     # Query A: contagem por serviço + sub-agregados de complementacao por id_servico
     # (subqueries escalares evitam multi-join sem GROUP BY).
     sql_servicos = text(
@@ -534,6 +570,7 @@ async def _breakdown_servico(
                   AND pp.tenant_id = :tenant_id
                   AND pp.excluido = false
                   AND pp.id_servico = s.id
+                  {pp_id_unidade_clause}
             ) AS compl_abertas,
             (
                 SELECT COUNT(*)
@@ -547,6 +584,7 @@ async def _breakdown_servico(
                   AND pp.tenant_id = :tenant_id
                   AND pp.excluido = false
                   AND pp.id_servico = s.id
+                  {pp_id_unidade_clause}
             ) AS compl_respondidas
         FROM contagens_por_servico c
         JOIN protocolos.servico s ON s.id = c.id_servico
@@ -641,8 +679,11 @@ async def _breakdown_servico(
                       AND obrigatorios_enviados < obrigatorios
                 ) AS parcial,
                 COUNT(*) FILTER (
-                    WHERE obrigatorios = 0 OR obrigatorios_enviados = obrigatorios
-                ) AS completo
+                    WHERE obrigatorios > 0 AND obrigatorios_enviados = obrigatorios
+                ) AS completo,
+                COUNT(*) FILTER (
+                    WHERE obrigatorios = 0
+                ) AS sem_documentos
             FROM por_processo
             GROUP BY id_servico;
             """
@@ -664,15 +705,15 @@ async def _breakdown_servico(
                 "pendente": int(r.pendente or 0),
                 "parcial": int(r.parcial or 0),
                 "completo": int(r.completo or 0),
+                "sem_documentos_exigidos": int(r.sem_documentos or 0),
             }
             for r in check_rows
         }
 
     breakdown: list[dict[str, Any]] = []
+    _CK_ZERO = {"pendente": 0, "parcial": 0, "completo": 0, "sem_documentos_exigidos": 0}
     for r in rows_serv:
-        ck = checklist_por_servico.get(
-            int(r.id_servico), {"pendente": 0, "parcial": 0, "completo": 0}
-        )
+        ck = checklist_por_servico.get(int(r.id_servico), _CK_ZERO)
         breakdown.append(
             {
                 "id_servico": int(r.id_servico),
@@ -683,6 +724,7 @@ async def _breakdown_servico(
                 "checklist_pendente": ck["pendente"],
                 "checklist_parcial": ck["parcial"],
                 "checklist_completo": ck["completo"],
+                "sem_documentos_exigidos": ck["sem_documentos_exigidos"],
             }
         )
 
@@ -705,39 +747,54 @@ async def _breakdown_servico(
             )
         ).scalar_one()
         if legado_qt > 0:
+            # PR 5a-fix: aplicar id_unidade também nas complementações da
+            # linha legado — antes só filtrava tenant + id_servico IS NULL,
+            # podendo mostrar complementações de outras unidades.
+            def _aplicar_unid(stmt):
+                if id_unidade is None:
+                    return stmt
+                return stmt.where(
+                    (Processo.id_unidade_proprietaria == id_unidade)
+                    | (Processo.id_local_atual == id_unidade)
+                )
+
             legado_compl_abertas = (
                 await db.execute(
-                    select(func.count(ComplementacaoDocumental.id))
-                    .join(
-                        Processo,
-                        Processo.id == ComplementacaoDocumental.id_processo,
-                    )
-                    .where(
-                        ComplementacaoDocumental.tenant_id == tenant_id,
-                        ComplementacaoDocumental.excluido.is_(False),
-                        ComplementacaoDocumental.status == "aberta",
-                        Processo.tenant_id == tenant_id,
-                        Processo.excluido.is_(False),
-                        Processo.id_servico.is_(None),
+                    _aplicar_unid(
+                        select(func.count(ComplementacaoDocumental.id))
+                        .join(
+                            Processo,
+                            Processo.id == ComplementacaoDocumental.id_processo,
+                        )
+                        .where(
+                            ComplementacaoDocumental.tenant_id == tenant_id,
+                            ComplementacaoDocumental.excluido.is_(False),
+                            ComplementacaoDocumental.status == "aberta",
+                            Processo.tenant_id == tenant_id,
+                            Processo.excluido.is_(False),
+                            Processo.id_servico.is_(None),
+                        )
                     )
                 )
             ).scalar_one()
             legado_compl_respondidas = (
                 await db.execute(
-                    select(func.count(ComplementacaoDocumental.id))
-                    .join(
-                        Processo,
-                        Processo.id == ComplementacaoDocumental.id_processo,
-                    )
-                    .where(
-                        ComplementacaoDocumental.tenant_id == tenant_id,
-                        ComplementacaoDocumental.excluido.is_(False),
-                        ComplementacaoDocumental.respondido_em.is_not(None),
-                        ComplementacaoDocumental.respondido_em >= desde,
-                        ComplementacaoDocumental.respondido_em < ate,
-                        Processo.tenant_id == tenant_id,
-                        Processo.excluido.is_(False),
-                        Processo.id_servico.is_(None),
+                    _aplicar_unid(
+                        select(func.count(ComplementacaoDocumental.id))
+                        .join(
+                            Processo,
+                            Processo.id == ComplementacaoDocumental.id_processo,
+                        )
+                        .where(
+                            ComplementacaoDocumental.tenant_id == tenant_id,
+                            ComplementacaoDocumental.excluido.is_(False),
+                            ComplementacaoDocumental.respondido_em.is_not(None),
+                            ComplementacaoDocumental.respondido_em >= desde,
+                            ComplementacaoDocumental.respondido_em < ate,
+                            Processo.tenant_id == tenant_id,
+                            Processo.excluido.is_(False),
+                            Processo.id_servico.is_(None),
+                        )
                     )
                 )
             ).scalar_one()
@@ -750,10 +807,12 @@ async def _breakdown_servico(
                     "complementacoes_respondidas_periodo": int(
                         legado_compl_respondidas or 0
                     ),
-                    # Sem checklist (sem id_servico → sem documentos exigidos).
+                    # Sem checklist — legado é sem_documentos_exigidos por
+                    # definição (sem id_servico → sem documentos exigidos).
                     "checklist_pendente": 0,
                     "checklist_parcial": 0,
                     "checklist_completo": 0,
+                    "sem_documentos_exigidos": int(legado_qt),
                 }
             )
 
@@ -817,15 +876,30 @@ async def kpis(
     sq_ah = ativos_hoje_stmt.subquery()
     ativos_hoje = (await db.execute(select(func.count(sq_ah.c.id)))).scalar_one()
 
-    # SLA pendentes agora (snapshot — não janelado, sem filtro de processo).
-    sla_pendentes = (
-        await db.execute(
-            select(func.count(WorkflowSlaAlerta.id)).where(
-                WorkflowSlaAlerta.tenant_id == tenant_id,
-                WorkflowSlaAlerta.resolvido_em.is_(None),
-            )
+    # SLA pendentes agora (snapshot — não janelado). PR 5a-fix: respeita
+    # filtros id_unidade/id_servico/incluir_legado via WorkflowInstance →
+    # Processo.
+    sla_pend_stmt = (
+        select(func.count(WorkflowSlaAlerta.id))
+        .join(
+            WorkflowInstance,
+            WorkflowInstance.id == WorkflowSlaAlerta.id_workflow_instance,
         )
-    ).scalar_one()
+        .join(Processo, Processo.id == WorkflowInstance.id_processo)
+        .where(
+            WorkflowSlaAlerta.tenant_id == tenant_id,
+            WorkflowSlaAlerta.resolvido_em.is_(None),
+            Processo.tenant_id == tenant_id,
+            Processo.excluido.is_(False),
+        )
+    )
+    sla_pend_stmt = _aplicar_filtros_processo(
+        sla_pend_stmt,
+        id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=incluir_legado,
+    )
+    sla_pendentes = (await db.execute(sla_pend_stmt)).scalar_one()
 
     def _aplicar_break(stmt):
         return _aplicar_filtros_processo(
@@ -848,6 +922,7 @@ async def kpis(
             Processo.tenant_id == tenant_id,
             Processo.excluido.is_(False),
             Processo.data_hora_abertura >= desde_atual,
+            Processo.data_hora_abertura < now,
         )
         .group_by(TipoProcesso.tipo_processo)
         .order_by(func.count(Processo.id).desc())
@@ -870,6 +945,7 @@ async def kpis(
             Processo.tenant_id == tenant_id,
             Processo.excluido.is_(False),
             Processo.data_hora_abertura >= desde_atual,
+            Processo.data_hora_abertura < now,
         )
         .group_by(Assunto.assunto)
         .order_by(func.count(Processo.id).desc())
@@ -892,6 +968,7 @@ async def kpis(
             Processo.tenant_id == tenant_id,
             Processo.excluido.is_(False),
             Processo.data_hora_abertura >= desde_atual,
+            Processo.data_hora_abertura < now,
         )
         .group_by(UnidadeTrabalho.unidade_trabalho)
         .order_by(func.count(Processo.id).desc())
@@ -912,6 +989,7 @@ async def kpis(
             Processo.tenant_id == tenant_id,
             Processo.excluido.is_(False),
             Processo.data_hora_abertura >= desde_atual,
+            Processo.data_hora_abertura < now,
         )
         .group_by(literal_column("1"))
         .order_by(literal_column("1"))
