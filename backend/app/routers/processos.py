@@ -14,6 +14,11 @@ from ..models import UnidadeTrabalho as _UT
 from ..models import Usuario
 from ..schemas.common import Paginated
 from ..schemas.checklist_documentos import ChecklistDocumentosResponse
+from ..schemas.complementacao_documental import (
+    CancelarComplementacaoRequest,
+    ComplementacaoOut,
+    SolicitarComplementacaoRequest,
+)
 from ..schemas.processo import (
     CancelarEncaminhamentoRequest,
     ClassificarSigiloRequest,
@@ -35,6 +40,8 @@ from ..services.pdf_comprovante import gerar_comprovante_pdf
 from ..services.pdf_etiqueta import gerar_etiqueta_pdf
 from ..services.pdf_montagem import gerar_processo_completo_pdf
 from ..services.checklist_documentos import calcular_checklist
+from ..services import complementacao_documental as _comp_svc
+from ..services.complementacao_documental import ComplementacaoError
 from ..services.processos import get_processo_detail, list_processos
 from ..schemas.ccd import TemporalidadeOut
 from ..services.temporalidade import calcular_temporalidade
@@ -192,6 +199,87 @@ async def checklist_documentos_servidor(
 ) -> ChecklistDocumentosResponse:
     """PR 4c — checklist documental read-only do processo (servidor)."""
     return await calcular_checklist(db, processo_id=processo_id, tenant_id=tenant_id)
+
+
+# PR 4d — Complementação documental formal ===================================
+
+@router.post(
+    "/{processo_id}/complementacoes",
+    response_model=ComplementacaoOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def solicitar_complementacao(
+    processo_id: int,
+    payload: SolicitarComplementacaoRequest,
+    tenant_id: int = Depends(require_tenant_id),
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    db: AsyncSession = Depends(get_db),
+) -> ComplementacaoOut:
+    """PR 4d — servidor abre solicitação formal de complementação documental."""
+    try:
+        comp = await _comp_svc.solicitar(
+            db,
+            tenant_id=tenant_id,
+            processo_id=processo_id,
+            id_usuario_solicitante=current.id,
+            mensagem=payload.mensagem,
+            documentos_solicitados_keys=payload.documentos_solicitados,
+        )
+    except ComplementacaoError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    out = await _comp_svc.montar_out(db, comp)
+    await db.commit()
+    return out
+
+
+@router.get(
+    "/{processo_id}/complementacoes",
+    response_model=list[ComplementacaoOut],
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def listar_complementacoes_servidor(
+    processo_id: int,
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[ComplementacaoOut]:
+    """PR 4d — histórico de complementações do processo (desc por criado_em)."""
+    try:
+        return await _comp_svc.listar_out(
+            db, tenant_id=tenant_id, processo_id=processo_id
+        )
+    except ComplementacaoError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+
+@router.post(
+    "/{processo_id}/complementacoes/{complementacao_id}/cancelar",
+    response_model=ComplementacaoOut,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def cancelar_complementacao(
+    processo_id: int,
+    complementacao_id: int,
+    payload: CancelarComplementacaoRequest,
+    tenant_id: int = Depends(require_tenant_id),
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    db: AsyncSession = Depends(get_db),
+) -> ComplementacaoOut:
+    """PR 4d — servidor cancela complementação aberta."""
+    try:
+        comp = await _comp_svc.cancelar(
+            db,
+            tenant_id=tenant_id,
+            processo_id=processo_id,
+            complementacao_id=complementacao_id,
+            id_usuario_responsavel=current.id,
+            motivo=payload.motivo,
+        )
+    except ComplementacaoError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    out = await _comp_svc.montar_out(db, comp)
+    await db.commit()
+    return out
 
 
 @router.post(

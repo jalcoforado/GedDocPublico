@@ -8,6 +8,7 @@ from .apensamento import ProcessoApensamento, ProcessoVolume
 from .assunto import Assunto, AssuntoTipoProcessoTipoAnexo, TipoAnexo, TipoProcesso
 from .audit import AuditLog
 from .ccd import CcdClasse, TtdRegra
+from .complementacao_documental import ComplementacaoDocumental
 from .especie_documental import EspecieDocumental
 from .configuracao import Configuracao
 from .processo import (
@@ -61,6 +62,7 @@ __all__ = [
     "Bairro",
     "CcdClasse",
     "Cidade",
+    "ComplementacaoDocumental",
     "Despacho",
     "Encaminhamento",
     "Movimentacao",

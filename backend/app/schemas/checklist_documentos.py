@@ -2,10 +2,15 @@
 
 Status calculados em runtime (sem tabela), a partir de `servico.documentos_exigidos`
 e dos anexos do processo agrupados por `anexo.documento_exigido_key`.
+
+PR 4d acrescenta `complementacao_aberta` como **campo informativo** — o
+`status_documental` continua sendo um dos quatro do PR 4c (D-STATUS).
 """
 from typing import Literal
 
 from pydantic import BaseModel
+
+from .complementacao_documental import ComplementacaoOut
 
 
 StatusDocumental = Literal["sem_documentos_exigidos", "pendente", "parcial", "completo"]
@@ -34,3 +39,5 @@ class ChecklistDocumentosResponse(BaseModel):
     obrigatorios_total: int
     obrigatorios_enviados: int
     itens: list[ChecklistItem]
+    # PR 4d — informativo apenas; NÃO altera `status_documental`.
+    complementacao_aberta: ComplementacaoOut | None = None

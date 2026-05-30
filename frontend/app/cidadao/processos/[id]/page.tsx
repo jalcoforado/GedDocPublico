@@ -7,6 +7,8 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 
 import { ChecklistDocumentosCard } from "@/components/ChecklistDocumentosCard";
+import { ComplementacaoAbertaCard } from "@/components/ComplementacaoAbertaCard";
+import { ComplementacoesHistoricoLista } from "@/components/ComplementacoesHistoricoLista";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,6 +46,22 @@ export default function CidadaoProcessoDetailPage() {
     queryFn: () => api.cidadao.checklistDocumentos(id),
     enabled: !!cidadao && idValido,
   });
+  // PR 4d — histórico de complementações do cidadão.
+  const complementacoesQ = useQuery({
+    queryKey: ["cidadao-complementacoes", id],
+    queryFn: () => api.cidadao.listarComplementacoes(id),
+    enabled: !!cidadao && idValido,
+  });
+  const responderM = useMutation({
+    mutationFn: (complementacaoId: number) =>
+      api.cidadao.responderComplementacao(id, complementacaoId),
+    onSuccess: () => {
+      toast.success("Complementação enviada ao servidor.");
+      qc.invalidateQueries({ queryKey: ["cidadao-checklist", id] });
+      qc.invalidateQueries({ queryKey: ["cidadao-complementacoes", id] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const [uploadKey, setUploadKey] = useState<string | null>(null);
   const [uploadNome, setUploadNome] = useState<string>("");
@@ -58,6 +76,7 @@ export default function CidadaoProcessoDetailPage() {
       toast.success("Documento anexado.");
       qc.invalidateQueries({ queryKey: ["cidadao-processo", id] });
       qc.invalidateQueries({ queryKey: ["cidadao-checklist", id] });
+      qc.invalidateQueries({ queryKey: ["cidadao-complementacoes", id] });
       setUploadKey(null);
       setFile(null);
     },
@@ -206,6 +225,23 @@ export default function CidadaoProcessoDetailPage() {
         </CardContent>
       </Card>
 
+      {checklistQ.data?.complementacao_aberta && (
+        <ComplementacaoAbertaCard
+          data={checklistQ.data.complementacao_aberta}
+          modo="cidadao"
+          onAnexar={(key, nome) => {
+            setUploadKey(key);
+            setUploadNome(nome);
+            setFile(null);
+          }}
+          onResponder={() => {
+            const cid = checklistQ.data?.complementacao_aberta?.id;
+            if (cid) responderM.mutate(cid);
+          }}
+          respondendo={responderM.isPending}
+        />
+      )}
+
       <ChecklistDocumentosCard
         data={checklistQ.data}
         loading={checklistQ.isLoading}
@@ -215,6 +251,12 @@ export default function CidadaoProcessoDetailPage() {
           setFile(null);
         }}
       />
+
+      {complementacoesQ.data && (
+        <ComplementacoesHistoricoLista
+          data={complementacoesQ.data.filter((c) => c.status !== "aberta")}
+        />
+      )}
 
       <Card>
         <CardHeader>

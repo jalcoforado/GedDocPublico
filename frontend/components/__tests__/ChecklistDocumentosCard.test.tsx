@@ -39,6 +39,7 @@ function payload(overrides: Partial<ChecklistDocumentosResponse> = {}): Checklis
     obrigatorios_total: 2,
     obrigatorios_enviados: 1,
     itens: ITENS,
+    complementacao_aberta: null,
     ...overrides,
   };
 }

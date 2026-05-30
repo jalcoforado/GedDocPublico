@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
   Eye,
@@ -25,7 +25,11 @@ function isTabId(v: string | null): v is TabId {
 
 import { AcoesProcesso } from "@/components/AcoesProcesso";
 import { AnexosProcesso } from "@/components/AnexosProcesso";
+import { CancelarComplementacaoDialog } from "@/components/CancelarComplementacaoDialog";
 import { ChecklistDocumentosCard } from "@/components/ChecklistDocumentosCard";
+import { ComplementacaoAbertaCard } from "@/components/ComplementacaoAbertaCard";
+import { ComplementacoesHistoricoLista } from "@/components/ComplementacoesHistoricoLista";
+import { SolicitarComplementacaoDialog } from "@/components/SolicitarComplementacaoDialog";
 import { ProcessoApensados } from "@/components/ProcessoApensados";
 import { ProcessoVolumes } from "@/components/ProcessoVolumes";
 import { AssinaturasProcesso } from "@/components/AssinaturasProcesso";
@@ -38,6 +42,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
+import { useAuth } from "@/lib/auth";
 import {
   api,
   comprovanteUrl,
@@ -193,6 +198,7 @@ export default function ProcessoDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
+  const { can } = useAuth();
   const processoId = Number(params.id);
   const [viewer, setViewer] = useState<ViewerState | null>(null);
 
@@ -219,6 +225,42 @@ export default function ProcessoDetailPage() {
     queryKey: ["processo-checklist", processoId],
     queryFn: () => api.processos.checklistDocumentos(processoId),
     enabled: !!processoId,
+  });
+  // PR 4d — Complementação documental (histórico + ações servidor).
+  const qc = useQueryClient();
+  const complementacoesQ = useQuery({
+    queryKey: ["processo-complementacoes", processoId],
+    queryFn: () => api.processos.listarComplementacoes(processoId),
+    enabled: !!processoId,
+  });
+  const [solicitarOpen, setSolicitarOpen] = useState(false);
+  const [cancelarOpen, setCancelarOpen] = useState(false);
+  const solicitarM = useMutation({
+    mutationFn: (body: { mensagem: string; documentos_solicitados: string[] }) =>
+      api.processos.solicitarComplementacao(processoId, body),
+    onSuccess: () => {
+      toast.success("Complementação solicitada.");
+      setSolicitarOpen(false);
+      qc.invalidateQueries({ queryKey: ["processo-complementacoes", processoId] });
+      qc.invalidateQueries({ queryKey: ["processo-checklist", processoId] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const cancelarM = useMutation({
+    mutationFn: ({
+      id,
+      motivo,
+    }: {
+      id: number;
+      motivo: string | null;
+    }) => api.processos.cancelarComplementacao(processoId, id, { motivo }),
+    onSuccess: () => {
+      toast.success("Complementação cancelada.");
+      setCancelarOpen(false);
+      qc.invalidateQueries({ queryKey: ["processo-complementacoes", processoId] });
+      qc.invalidateQueries({ queryKey: ["processo-checklist", processoId] });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const gerarBg = useMutation({
@@ -250,6 +292,7 @@ export default function ProcessoDetailPage() {
   }
 
   const p = q.data;
+  const podeAtualizarProcesso = can("processo", "atualizar");
 
   return (
     <div className="space-y-6">
@@ -558,10 +601,57 @@ export default function ProcessoDetailPage() {
 
       {activeTab === "documentos" && (
         <div className="space-y-6">
-          <ChecklistDocumentosCard
-            data={checklistQ.data}
-            loading={checklistQ.isLoading}
-          />
+          {/* PR 4d — Bloco de complementação documental */}
+          {(() => {
+            const todas = complementacoesQ.data ?? [];
+            const aberta = todas.find((c) => c.status === "aberta") ?? null;
+            const anteriores = todas.filter((c) => c.status !== "aberta");
+            return (
+              <>
+                {aberta ? (
+                  <ComplementacaoAbertaCard
+                    data={aberta}
+                    modo="servidor"
+                    onCancelar={
+                      podeAtualizarProcesso
+                        ? () => setCancelarOpen(true)
+                        : undefined
+                    }
+                  />
+                ) : podeAtualizarProcesso ? (
+                  <div className="flex justify-end">
+                    <Button
+                      variant="secondary"
+                      onClick={() => setSolicitarOpen(true)}
+                      disabled={!checklistQ.data}
+                    >
+                      Solicitar complementação
+                    </Button>
+                  </div>
+                ) : null}
+                <ChecklistDocumentosCard
+                  data={checklistQ.data}
+                  loading={checklistQ.isLoading}
+                />
+                <ComplementacoesHistoricoLista data={anteriores} />
+                <SolicitarComplementacaoDialog
+                  open={solicitarOpen}
+                  onClose={() => setSolicitarOpen(false)}
+                  checklist={checklistQ.data}
+                  onSubmit={(body) => solicitarM.mutate(body)}
+                  submitting={solicitarM.isPending}
+                />
+                <CancelarComplementacaoDialog
+                  open={cancelarOpen}
+                  onClose={() => setCancelarOpen(false)}
+                  onSubmit={(body) =>
+                    aberta && cancelarM.mutate({ id: aberta.id, motivo: body.motivo })
+                  }
+                  submitting={cancelarM.isPending}
+                />
+              </>
+            );
+          })()}
 
           <Card>
             <CardHeader>

@@ -42,8 +42,11 @@ from ..services.cidadao_processos import (
 )
 from ..services.audit import log as audit_log
 from ..services.checklist_documentos import calcular_checklist
+from ..services import complementacao_documental as _comp_svc
+from ..services.complementacao_documental import ComplementacaoError
 from ..services.servico import obter_servico_solicitavel
 from ..schemas.checklist_documentos import ChecklistDocumentosResponse
+from ..schemas.complementacao_documental import ComplementacaoOut
 
 settings = get_settings()
 router = APIRouter(prefix="/cidadao", tags=["cidadao"])
@@ -333,3 +336,55 @@ async def checklist_documentos_cidadao(
     """PR 4c — checklist documental do próprio processo do cidadão."""
     await _verificar_dono(db, cidadao, processo_id, tenant_id)
     return await calcular_checklist(db, processo_id=processo_id, tenant_id=tenant_id)
+
+
+# PR 4d — Complementação documental (visualização e resposta) =================
+
+@router.get(
+    "/processos/{processo_id}/complementacoes",
+    response_model=list[ComplementacaoOut],
+)
+async def listar_complementacoes_cidadao(
+    processo_id: int,
+    cidadao: UsuarioExterno = Depends(get_current_cidadao),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[ComplementacaoOut]:
+    """PR 4d — histórico de complementações do próprio processo do cidadão."""
+    await _verificar_dono(db, cidadao, processo_id, tenant_id)
+    try:
+        return await _comp_svc.listar_out(
+            db, tenant_id=tenant_id, processo_id=processo_id
+        )
+    except ComplementacaoError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+
+@router.post(
+    "/processos/{processo_id}/complementacoes/{complementacao_id}/responder",
+    response_model=ComplementacaoOut,
+)
+async def responder_complementacao_cidadao(
+    processo_id: int,
+    complementacao_id: int,
+    cidadao: UsuarioExterno = Depends(get_current_cidadao),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ComplementacaoOut:
+    """PR 4d — cidadão marca complementação como respondida (ação explícita).
+
+    D-RESPOSTA: não exige todos os documentos solicitados estarem anexados;
+    cidadão decide quando "fechar" a resposta."""
+    await _verificar_dono(db, cidadao, processo_id, tenant_id)
+    try:
+        comp = await _comp_svc.responder(
+            db,
+            tenant_id=tenant_id,
+            processo_id=processo_id,
+            complementacao_id=complementacao_id,
+        )
+    except ComplementacaoError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    out = await _comp_svc.montar_out(db, comp)
+    await db.commit()
+    return out

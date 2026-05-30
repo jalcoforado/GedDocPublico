@@ -4,6 +4,9 @@ Deriva o checklist em runtime de `servico.documentos_exigidos` + anexos do
 processo agrupados por `anexo.documento_exigido_key`. Sem tabela nova. Processo
 sem `id_servico` ou serviço sem documentos exigidos → status
 `sem_documentos_exigidos` (não quebra).
+
+PR 4d: anexa `complementacao_aberta` ao response (informativo). O
+`status_documental` continua sendo um dos quatro do PR 4c — D-STATUS.
 """
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ from ..schemas.checklist_documentos import (
     ChecklistItem,
     StatusDocumental,
 )
+from . import complementacao_documental as _comp_svc
 
 
 def _calcular_status(itens: list[ChecklistItem]) -> tuple[StatusDocumental, int, int]:
@@ -57,6 +61,12 @@ async def calcular_checklist(
             status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
         )
 
+    # PR 4d — complementação aberta independe de status documental (D-STATUS).
+    # Calculada uma vez aqui e usada em todos os retornos abaixo.
+    aberta = await _comp_svc.obter_aberta(
+        db, tenant_id=tenant_id, processo_id=processo.id
+    )
+
     # Sem serviço vinculado → não há documentos exigidos.
     if processo.id_servico is None:
         return ChecklistDocumentosResponse(
@@ -66,6 +76,9 @@ async def calcular_checklist(
             obrigatorios_total=0,
             obrigatorios_enviados=0,
             itens=[],
+            complementacao_aberta=(
+                await _comp_svc.montar_out(db, aberta) if aberta else None
+            ),
         )
 
     servico = (
@@ -87,6 +100,9 @@ async def calcular_checklist(
             obrigatorios_total=0,
             obrigatorios_enviados=0,
             itens=[],
+            complementacao_aberta=(
+                await _comp_svc.montar_out(db, aberta) if aberta else None
+            ),
         )
 
     # Anexos do processo agrupados por documento_exigido_key.
@@ -129,6 +145,21 @@ async def calcular_checklist(
         )
 
     status_doc, obrig_total, obrig_envs = _calcular_status(itens)
+
+    # PR 4d — anexar complementação aberta (informativo; não muda status_doc).
+    complementacao_out = None
+    if aberta is not None:
+        # Reusa o índice por_key já calculado acima como "anexos enviados".
+        keys_enviadas = {k for k, lista in por_key.items() if lista}
+        docs_idx = {
+            d["key"]: d
+            for d in documentos
+            if isinstance(d, dict) and d.get("key")
+        }
+        complementacao_out = await _comp_svc.montar_out(
+            db, aberta, docs_servico_idx=docs_idx, keys_enviadas=keys_enviadas
+        )
+
     return ChecklistDocumentosResponse(
         id_processo=processo.id,
         id_servico=processo.id_servico,
@@ -136,4 +167,5 @@ async def calcular_checklist(
         obrigatorios_total=obrig_total,
         obrigatorios_enviados=obrig_envs,
         itens=itens,
+        complementacao_aberta=complementacao_out,
     )

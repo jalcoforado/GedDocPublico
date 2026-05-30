@@ -1148,6 +1148,28 @@ export const api = {
       request<ChecklistDocumentosResponse>(
         `/processos/${processoId}/checklist-documentos`,
       ),
+    // PR 4d — Complementação documental formal (servidor)
+    solicitarComplementacao: (
+      processoId: number,
+      body: SolicitarComplementacaoInput,
+    ) =>
+      request<ComplementacaoOut>(
+        `/processos/${processoId}/complementacoes`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    listarComplementacoes: (processoId: number) =>
+      request<ComplementacaoOut[]>(
+        `/processos/${processoId}/complementacoes`,
+      ),
+    cancelarComplementacao: (
+      processoId: number,
+      complementacaoId: number,
+      body: CancelarComplementacaoInput,
+    ) =>
+      request<ComplementacaoOut>(
+        `/processos/${processoId}/complementacoes/${complementacaoId}/cancelar`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   },
 
   // Fase 6 — Relatórios
@@ -1244,6 +1266,16 @@ export const api = {
     checklistDocumentos: (processoId: number) =>
       requestCidadao<ChecklistDocumentosResponse>(
         `/cidadao/processos/${processoId}/checklist-documentos`,
+      ),
+    // PR 4d — Complementação documental (cidadão)
+    listarComplementacoes: (processoId: number) =>
+      requestCidadao<ComplementacaoOut[]>(
+        `/cidadao/processos/${processoId}/complementacoes`,
+      ),
+    responderComplementacao: (processoId: number, complementacaoId: number) =>
+      requestCidadao<ComplementacaoOut>(
+        `/cidadao/processos/${processoId}/complementacoes/${complementacaoId}/responder`,
+        { method: "POST" },
       ),
   },
 };
@@ -1935,6 +1967,41 @@ export interface ChecklistDocumentosResponse {
   obrigatorios_total: number;
   obrigatorios_enviados: number;
   itens: ChecklistItem[];
+  // PR 4d — informativo apenas; não altera status_documental.
+  complementacao_aberta: ComplementacaoOut | null;
+}
+
+// PR 4d — Complementação documental formal
+export type StatusComplementacao = "aberta" | "respondida" | "cancelada";
+
+export interface ComplementacaoDocSolicitado {
+  key: string;
+  nome: string;
+  descricao: string | null;
+  enviado: boolean;
+}
+
+export interface ComplementacaoOut {
+  id: number;
+  status: StatusComplementacao;
+  mensagem: string;
+  documentos_solicitados: ComplementacaoDocSolicitado[];
+  id_usuario_solicitante: number;
+  nome_solicitante: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+  respondido_em: string | null;
+  cancelado_em: string | null;
+  motivo_cancelamento: string | null;
+}
+
+export interface SolicitarComplementacaoInput {
+  mensagem: string;
+  documentos_solicitados: string[];
+}
+
+export interface CancelarComplementacaoInput {
+  motivo: string | null;
 }
 
 export interface Servico {
