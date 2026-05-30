@@ -165,6 +165,63 @@ def to_csv(payload: dict[str, Any], nome_tenant: str = "") -> str:
         # ISO "2026-05-23T00:00:00" → "2026-05-23"
         dia = ponto["dia"][:10] if isinstance(ponto["dia"], str) else ponto["dia"]
         w.writerow([dia, ponto["count"]])
+    w.writerow([])
+
+    # PR 5a — seções novas append-only.
+    doc = payload.get("documental") or {}
+    if doc:
+        w.writerow(["[Documental]"])
+        w.writerow(["Métrica", "Valor"])
+        w.writerow(["Processos com serviço (período)", doc.get("com_id_servico_periodo", 0)])
+        w.writerow(["Processos sem serviço — legado (período)", doc.get("sem_id_servico_periodo", 0)])
+        w.writerow(["Checklist pendente", doc.get("checklist_pendente", 0)])
+        w.writerow(["Checklist parcial", doc.get("checklist_parcial", 0)])
+        w.writerow(["Checklist completo", doc.get("checklist_completo", 0)])
+        w.writerow([])
+
+    comp = payload.get("complementacao") or {}
+    if comp:
+        w.writerow(["[Complementação]"])
+        w.writerow(["Métrica", "Valor"])
+        w.writerow(["Abertas agora", comp.get("abertas_agora", 0)])
+        w.writerow(["Solicitadas no período", comp.get("solicitadas_periodo", 0)])
+        w.writerow(["Respondidas no período", comp.get("respondidas_periodo", 0)])
+        w.writerow(["Canceladas no período", comp.get("canceladas_periodo", 0)])
+        w.writerow(["Processos com complementação aberta", comp.get("processos_com_aberta_agora", 0)])
+        tmr = comp.get("tempo_medio_resposta_dias")
+        w.writerow(
+            ["Tempo médio de resposta (dias)", f"{tmr:.1f}" if tmr is not None else ""]
+        )
+        w.writerow([])
+
+    por_servico = payload.get("por_servico") or []
+    if por_servico:
+        w.writerow(["[Por serviço]"])
+        w.writerow(
+            [
+                "id_servico",
+                "Serviço",
+                "Processos",
+                "Compl. abertas",
+                "Compl. respondidas",
+                "Checklist pendente",
+                "Checklist parcial",
+                "Checklist completo",
+            ]
+        )
+        for it in por_servico:
+            w.writerow(
+                [
+                    it.get("id_servico") if it.get("id_servico") is not None else "",
+                    it.get("nome", ""),
+                    it.get("count", 0),
+                    it.get("complementacoes_abertas", 0),
+                    it.get("complementacoes_respondidas_periodo", 0),
+                    it.get("checklist_pendente", 0),
+                    it.get("checklist_parcial", 0),
+                    it.get("checklist_completo", 0),
+                ]
+            )
 
     return buf.getvalue()
 
@@ -328,6 +385,115 @@ def to_pdf(payload: dict[str, Any], nome_tenant: str = "") -> bytes:
     breakdown_table("Top 5 — por tipo de processo", payload.get("por_tipo", []))
     breakdown_table("Top 10 — por assunto", payload.get("por_assunto", []))
     breakdown_table("Top 10 — por unidade", payload.get("por_unidade", []))
+
+    # PR 5a — seções novas append-only.
+    doc_kpis = payload.get("documental") or {}
+    if doc_kpis:
+        story.append(Paragraph("Documental (PR 5a)", h2))
+        rows = [
+            ["Métrica", "Valor"],
+            ["Processos com serviço (período)", _fmt_num(doc_kpis.get("com_id_servico_periodo", 0))],
+            ["Processos sem serviço — legado (período)", _fmt_num(doc_kpis.get("sem_id_servico_periodo", 0))],
+            ["Checklist pendente", _fmt_num(doc_kpis.get("checklist_pendente", 0))],
+            ["Checklist parcial", _fmt_num(doc_kpis.get("checklist_parcial", 0))],
+            ["Checklist completo", _fmt_num(doc_kpis.get("checklist_completo", 0))],
+        ]
+        t = Table(rows, colWidths=[12 * cm, 3 * cm], repeatRows=1)
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), APRIMORA),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
+                    ("GRID", (0, 0), (-1, -1), 0.25, GRAY),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("PADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        story.append(t)
+        story.append(Spacer(1, 0.3 * cm))
+
+    comp_kpis = payload.get("complementacao") or {}
+    if comp_kpis:
+        story.append(Paragraph("Complementação (PR 5a)", h2))
+        tmr = comp_kpis.get("tempo_medio_resposta_dias")
+        rows = [
+            ["Métrica", "Valor"],
+            ["Abertas agora", _fmt_num(comp_kpis.get("abertas_agora", 0))],
+            ["Solicitadas no período", _fmt_num(comp_kpis.get("solicitadas_periodo", 0))],
+            ["Respondidas no período", _fmt_num(comp_kpis.get("respondidas_periodo", 0))],
+            ["Canceladas no período", _fmt_num(comp_kpis.get("canceladas_periodo", 0))],
+            ["Processos com complementação aberta", _fmt_num(comp_kpis.get("processos_com_aberta_agora", 0))],
+            ["Tempo médio de resposta (dias)", _fmt_num(tmr, 1) if tmr is not None else "—"],
+        ]
+        t = Table(rows, colWidths=[12 * cm, 3 * cm], repeatRows=1)
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), APRIMORA),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
+                    ("GRID", (0, 0), (-1, -1), 0.25, GRAY),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("PADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        story.append(t)
+        story.append(Spacer(1, 0.3 * cm))
+
+    por_servico = payload.get("por_servico") or []
+    if por_servico:
+        story.append(Paragraph("Por serviço — top 10 + legado (PR 5a)", h2))
+        rows = [
+            [
+                "Serviço",
+                "Proc.",
+                "Compl. abertas",
+                "Compl. resp.",
+                "Pend.",
+                "Parcial",
+                "Compl.",
+            ]
+        ]
+        for it in por_servico:
+            rows.append(
+                [
+                    it.get("nome", ""),
+                    _fmt_num(it.get("count", 0)),
+                    _fmt_num(it.get("complementacoes_abertas", 0)),
+                    _fmt_num(it.get("complementacoes_respondidas_periodo", 0)),
+                    _fmt_num(it.get("checklist_pendente", 0)),
+                    _fmt_num(it.get("checklist_parcial", 0)),
+                    _fmt_num(it.get("checklist_completo", 0)),
+                ]
+            )
+        t = Table(
+            rows,
+            colWidths=[5.5 * cm, 1.5 * cm, 2.2 * cm, 2.2 * cm, 1.3 * cm, 1.3 * cm, 1.3 * cm],
+            repeatRows=1,
+        )
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), APRIMORA),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
+                    ("GRID", (0, 0), (-1, -1), 0.25, GRAY),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("PADDING", (0, 0), (-1, -1), 3),
+                ]
+            )
+        )
+        story.append(t)
+        story.append(Spacer(1, 0.3 * cm))
 
     doc.build(story)
     return buf.getvalue()

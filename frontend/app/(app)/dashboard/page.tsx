@@ -7,6 +7,8 @@ import {
   Clock,
   FileSpreadsheet,
   FileText,
+  Layers,
+  ShieldAlert,
   TrendingUp,
 } from "lucide-react";
 import { useState } from "react";
@@ -18,7 +20,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
   Line,
   LineChart,
   Pie,
@@ -36,6 +37,8 @@ import {
   dashboardApi,
   dashboardExportCsvUrl,
   dashboardExportPdfUrl,
+  servicosApi,
+  type ApiError,
   type DashboardKpis,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -71,19 +74,44 @@ function fmtDia(s: string): string {
 export default function DashboardPage() {
   const [periodo, setPeriodo] = useState<number>(30);
   const [idUnidade, setIdUnidade] = useState<number | null>(null);
+  // PR 5a — filtros novos
+  const [idServico, setIdServico] = useState<number | null>(null);
+  const [incluirLegado, setIncluirLegado] = useState<boolean>(true);
+
+  const servicosQ = useQuery({
+    queryKey: ["dashboard-servicos-filter"],
+    queryFn: () => servicosApi.list(false),
+    staleTime: 5 * 60_000,
+  });
+
+  const exportParams = {
+    periodo,
+    id_unidade: idUnidade ?? undefined,
+    id_servico: idServico ?? undefined,
+    incluir_legado: incluirLegado,
+  };
 
   const q = useQuery({
-    queryKey: ["dashboard-kpis", { periodo, idUnidade }],
+    queryKey: [
+      "dashboard-kpis",
+      { periodo, idUnidade, idServico, incluirLegado },
+    ],
     queryFn: () =>
       dashboardApi.kpis({
         periodo,
         id_unidade: idUnidade ?? undefined,
+        id_servico: idServico ?? undefined,
+        incluir_legado: incluirLegado,
       }),
     refetchInterval: 60_000,
+    retry: (failureCount, error) => {
+      // 403 não tem retry — usuário sem permissão precisa ver feedback agora.
+      if ((error as ApiError)?.status === 403) return false;
+      return failureCount < 2;
+    },
   });
 
   if (q.isLoading) {
-    // Skeleton de KPIs em grid 4 cols + skeletons abaixo
     return (
       <div className="space-y-6">
         <div className="h-20 animate-pulse rounded-xl bg-surface-2/40" />
@@ -93,9 +121,37 @@ export default function DashboardPage() {
           ))}
         </div>
         <div className="h-64 animate-pulse rounded-lg bg-surface-2/40" />
+        {/* PR 5a — skeleton do ranking por serviço */}
+        <div
+          className="h-48 animate-pulse rounded-lg bg-surface-2/40"
+          data-testid="dashboard-ranking-skeleton"
+        />
       </div>
     );
   }
+
+  // PR 5a — D-PERMISSAO: 403 explícito.
+  if (q.error && (q.error as ApiError)?.status === 403) {
+    return (
+      <div
+        className="rounded-lg border border-danger/40 bg-danger-soft p-6 text-sm text-danger-soft-foreground"
+        data-testid="dashboard-403"
+      >
+        <div className="flex items-start gap-3">
+          <ShieldAlert className="mt-0.5 h-5 w-5 flex-none" aria-hidden="true" />
+          <div>
+            <p className="font-semibold">Sem permissão para o dashboard</p>
+            <p className="mt-1 text-xs opacity-90">
+              Solicite ao administrador municipal a permissão{" "}
+              <code className="rounded bg-surface-1 px-1 py-0.5">dashboard</code>{" "}
+              no seu grupo de acesso.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (q.error || !q.data) {
     return (
       <div className="rounded-lg border border-danger/40 bg-danger-soft p-4 text-sm text-danger-soft-foreground">
@@ -112,7 +168,7 @@ export default function DashboardPage() {
         variant="hero"
         icon={TrendingUp}
         title="Dashboard executivo"
-        description="Visão consolidada da operação. Compare com o período anterior, filtre por unidade e exporte quando precisar."
+        description="Visão consolidada da operação. Filtre por unidade, serviço e período; compare com o período anterior e exporte quando precisar."
         actions={
           <div className="flex flex-wrap items-end gap-3">
             <div className="w-64">
@@ -124,6 +180,44 @@ export default function DashboardPage() {
                 onChange={setIdUnidade}
                 placeholder="Todas as unidades"
               />
+            </div>
+            <div className="w-64">
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-foreground-subtle">
+                Serviço
+              </div>
+              <select
+                value={idServico ?? ""}
+                onChange={(e) =>
+                  setIdServico(e.target.value ? Number(e.target.value) : null)
+                }
+                className="h-10 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-foreground"
+                aria-label="Filtrar por serviço"
+                data-testid="dashboard-filtro-servico"
+              >
+                <option value="">Todos os serviços</option>
+                {(servicosQ.data ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-foreground-subtle">
+                Legado
+              </div>
+              <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-border bg-surface-1 px-3 text-xs text-foreground">
+                <input
+                  type="checkbox"
+                  checked={incluirLegado}
+                  onChange={(e) => setIncluirLegado(e.target.checked)}
+                  disabled={idServico !== null}
+                  data-testid="dashboard-toggle-legado"
+                  aria-label="Incluir processos legados (sem serviço)"
+                  className="h-4 w-4"
+                />
+                <span>Incluir legado</span>
+              </label>
             </div>
             <div>
               <div className="mb-1 text-[10px] uppercase tracking-wide text-foreground-subtle">
@@ -153,10 +247,7 @@ export default function DashboardPage() {
               </div>
               <div className="flex gap-1">
                 <a
-                  href={dashboardExportPdfUrl(
-                    { periodo, id_unidade: idUnidade ?? undefined },
-                    false,
-                  )}
+                  href={dashboardExportPdfUrl(exportParams, false)}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex h-10 items-center gap-1.5 rounded-md border border-border-strong bg-surface-1 px-3 text-xs font-medium text-foreground transition-colors duration-fast hover:bg-muted"
@@ -166,10 +257,7 @@ export default function DashboardPage() {
                   PDF
                 </a>
                 <a
-                  href={dashboardExportCsvUrl({
-                    periodo,
-                    id_unidade: idUnidade ?? undefined,
-                  })}
+                  href={dashboardExportCsvUrl(exportParams)}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex h-10 items-center gap-1.5 rounded-md border border-border-strong bg-surface-1 px-3 text-xs font-medium text-foreground transition-colors duration-fast hover:bg-muted"
@@ -184,7 +272,7 @@ export default function DashboardPage() {
         }
       />
 
-      {/* KPI cards */}
+      {/* KPI cards (Fase 18) — preservados byte-a-byte */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           label="Abertos no período"
@@ -241,6 +329,44 @@ export default function DashboardPage() {
           intent="success"
           current={d.sla.resolvidos_periodo}
           previous={d.comparativo.sla_resolvidos_anterior}
+        />
+      </div>
+
+      {/* PR 5a — KPIs documental + complementação */}
+      <div
+        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+        data-testid="dashboard-pr5a-kpis"
+      >
+        <KpiCard
+          label="Checklist pendente"
+          value={fmtNum(d.documental.checklist_pendente)}
+          hint="processos sem obrigatório enviado"
+          icon={Layers}
+          intent={d.documental.checklist_pendente > 0 ? "warning" : "default"}
+        />
+        <KpiCard
+          label="Checklist completo"
+          value={fmtNum(d.documental.checklist_completo)}
+          hint="processos com obrigatórios em dia"
+          icon={CheckCircle2}
+          intent="success"
+        />
+        <KpiCard
+          label="Complementações abertas"
+          value={fmtNum(d.complementacao.abertas_agora)}
+          hint={`${d.complementacao.processos_com_aberta_agora} processo(s)`}
+          icon={AlertTriangle}
+          intent={d.complementacao.abertas_agora > 0 ? "warning" : "default"}
+        />
+        <KpiCard
+          label="Tempo médio de resposta"
+          value={
+            d.complementacao.tempo_medio_resposta_dias !== null
+              ? `${fmtNum(d.complementacao.tempo_medio_resposta_dias, 1)}d`
+              : "—"
+          }
+          hint="cidadão → respondida"
+          icon={Clock}
         />
       </div>
 
@@ -376,6 +502,95 @@ export default function DashboardPage() {
                   <Bar dataKey="count" fill="#16a34a" />
                 </BarChart>
               </ResponsiveContainer>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* PR 5a — ranking por serviço */}
+      <Card data-testid="dashboard-ranking-servicos">
+        <CardHeader>
+          <CardTitle>Por serviço (top 10)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {d.por_servico.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Sem dados no período.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-border text-left text-xs uppercase tracking-wide text-foreground-muted">
+                  <tr>
+                    <th className="py-2 pr-4 font-medium">Serviço</th>
+                    <th className="py-2 pr-4 text-right font-medium tabular-nums">
+                      Processos
+                    </th>
+                    <th className="py-2 pr-4 text-right font-medium tabular-nums">
+                      Compl. abertas
+                    </th>
+                    <th className="py-2 pr-4 text-right font-medium tabular-nums">
+                      Compl. respondidas
+                    </th>
+                    <th className="py-2 pr-4 text-right font-medium tabular-nums">
+                      Pendente
+                    </th>
+                    <th className="py-2 pr-4 text-right font-medium tabular-nums">
+                      Parcial
+                    </th>
+                    <th className="py-2 text-right font-medium tabular-nums">
+                      Completo
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.por_servico.map((it) => {
+                    const legado = it.id_servico === null;
+                    return (
+                      <tr
+                        key={`${it.id_servico ?? "legado"}`}
+                        className={cn(
+                          "border-b border-border/60 last:border-0",
+                          legado && "bg-warning-soft/30",
+                        )}
+                        data-testid={
+                          legado
+                            ? "dashboard-ranking-legado"
+                            : "dashboard-ranking-item"
+                        }
+                      >
+                        <td className="py-2 pr-4">
+                          {legado ? (
+                            <span className="italic text-warning-soft-foreground">
+                              {it.nome} — legado
+                            </span>
+                          ) : (
+                            it.nome
+                          )}
+                        </td>
+                        <td className="py-2 pr-4 text-right tabular-nums">
+                          {fmtNum(it.count)}
+                        </td>
+                        <td className="py-2 pr-4 text-right tabular-nums">
+                          {fmtNum(it.complementacoes_abertas)}
+                        </td>
+                        <td className="py-2 pr-4 text-right tabular-nums">
+                          {fmtNum(it.complementacoes_respondidas_periodo)}
+                        </td>
+                        <td className="py-2 pr-4 text-right tabular-nums">
+                          {fmtNum(it.checklist_pendente)}
+                        </td>
+                        <td className="py-2 pr-4 text-right tabular-nums">
+                          {fmtNum(it.checklist_parcial)}
+                        </td>
+                        <td className="py-2 text-right tabular-nums">
+                          {fmtNum(it.checklist_completo)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </CardContent>

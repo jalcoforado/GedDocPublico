@@ -1,44 +1,64 @@
-"""Agregações para o dashboard executivo — Fases 18a + 18b.
+"""Agregações para o dashboard executivo — Fase 18 + PR 5a.
 
-Objetivo: dar a um gestor uma visão rápida do volume e saúde dos processos
-do tenant. Não substitui o relatório operacional (Fase 6) — este é
-sumário visual.
+Fase 18 (a/b/c): visão volume/conclusão/SLA + comparativo período anterior +
+breakdowns por tipo/assunto/unidade + série temporal. Filtros `periodo` e
+`id_unidade`.
 
-Filtros:
-- `periodo` (dias atrás a partir de hoje): 7 | 30 | 90 | 365
-- `id_unidade` (opcional): restringe a processos proprietários OU em local
-  atual nessa unidade
+PR 5a: adiciona dimensão **serviço** (PR 4a) e indicadores agregados de
+**checklist documental** (PR 4c) e **complementação documental** (PR 4d).
 
-Métricas (período atual):
-- volume: abertos no período, ativos hoje, externos no período
-- conclusão: arquivados no período + tempo médio (data abertura → última
-  arquivamento)
-- SLA: alertas pendentes hoje, alertas resolvidos no período
-- breakdown: top 5 por tipo_processo, top 10 por assunto, top 10 por
-  unidade proprietária
-- série temporal: abertos por dia no período (agrupado por dia)
+- `id_servico` (filtro): isola contadores e indicadores ao serviço escolhido;
+  quando informado, **prevalece** e ignora `incluir_legado`.
+- `incluir_legado` (filtro, default True): quando True, inclui processos
+  legados (`id_servico IS NULL`) em todos os contadores onde fizer sentido
+  e renderiza a linha "(sem serviço)" no ranking por serviço. Quando False,
+  remove processos legados de todos os contadores periodais.
+- `documental`: 3 contadores (pendente/parcial/completo) + 2 contadores
+  auxiliares (com/sem id_servico no período). Calculados via CTE única
+  com `jsonb_array_elements(servico.documentos_exigidos)` + LEFT JOIN em
+  `anexo` — sem N+1, sem `calcular_checklist` por processo.
+- `complementacao`: contadores de aberta/respondida/cancelada + tempo médio
+  de resposta. Joins com `processo` para herdar os filtros do gestor.
+- `por_servico`: top 10 serviços por nº de processos no período + linha
+  "(sem serviço)" apenas quando `incluir_legado=True` e sem `id_servico`.
 
-Métricas (período anterior — para comparativo na 18b):
-- mesmos contadores numéricos (sem breakdown nem série temporal), com
-  janela `[now - 2*periodo, now - periodo)`. Frontend calcula delta % e
-  desenha seta de tendência.
+LGPD: nenhum CPF/nome/mensagem/motivo/filename/conteúdo no payload. Apenas
+agregados, IDs e `servico.nome` (que já é público para o cidadão pelo portal).
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, literal_column, select
+from sqlalchemy import func, literal_column, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
     Assunto,
+    ComplementacaoDocumental,
     Movimentacao,
     Processo,
     TipoProcesso,
     UnidadeTrabalho,
     WorkflowSlaAlerta,
 )
+
+
+def _aplicar_filtros_processo(stmt, *, id_unidade, id_servico, incluir_legado):
+    """Aplica filtros de unidade/serviço/legado a uma query sobre `Processo`.
+
+    Regra D-FILTROS: `id_servico` informado prevalece e ignora `incluir_legado`.
+    """
+    if id_unidade is not None:
+        stmt = stmt.where(
+            (Processo.id_unidade_proprietaria == id_unidade)
+            | (Processo.id_local_atual == id_unidade)
+        )
+    if id_servico is not None:
+        stmt = stmt.where(Processo.id_servico == id_servico)
+    elif not incluir_legado:
+        stmt = stmt.where(Processo.id_servico.is_not(None))
+    return stmt
 
 
 async def _counts_intervalo(
@@ -48,6 +68,8 @@ async def _counts_intervalo(
     desde: datetime,
     ate: datetime,
     id_unidade: int | None,
+    id_servico: int | None,
+    incluir_legado: bool,
 ) -> dict[str, Any]:
     """Computa contadores numéricos pro intervalo `[desde, ate)`.
 
@@ -56,56 +78,49 @@ async def _counts_intervalo(
     - `sla.pendentes` (snapshot)
     - breakdowns + série temporal (só atual usa)
     """
-    # Filtro por unidade reusado em vários WHERE
-    unid_filter = []
-    if id_unidade is not None:
-        unid_filter = [
-            (Processo.id_unidade_proprietaria == id_unidade)
-            | (Processo.id_local_atual == id_unidade)
-        ]
+    def _base_count():
+        return select(func.count(Processo.id)).where(
+            Processo.tenant_id == tenant_id,
+            Processo.excluido.is_(False),
+            Processo.data_hora_abertura >= desde,
+            Processo.data_hora_abertura < ate,
+        )
 
-    # Abertos
     abertos = (
         await db.execute(
-            select(func.count(Processo.id)).where(
-                Processo.tenant_id == tenant_id,
-                Processo.excluido.is_(False),
-                Processo.data_hora_abertura >= desde,
-                Processo.data_hora_abertura < ate,
-                *unid_filter,
+            _aplicar_filtros_processo(
+                _base_count(),
+                id_unidade=id_unidade,
+                id_servico=id_servico,
+                incluir_legado=incluir_legado,
             )
         )
     ).scalar_one()
 
-    # Externos
     externos = (
         await db.execute(
-            select(func.count(Processo.id)).where(
-                Processo.tenant_id == tenant_id,
-                Processo.excluido.is_(False),
-                Processo.data_hora_abertura >= desde,
-                Processo.data_hora_abertura < ate,
-                Processo.externo.is_(True),
-                *unid_filter,
+            _aplicar_filtros_processo(
+                _base_count().where(Processo.externo.is_(True)),
+                id_unidade=id_unidade,
+                id_servico=id_servico,
+                incluir_legado=incluir_legado,
             )
         )
     ).scalar_one()
 
-    # Sigilosos
     sigilosos = (
         await db.execute(
-            select(func.count(Processo.id)).where(
-                Processo.tenant_id == tenant_id,
-                Processo.excluido.is_(False),
-                Processo.data_hora_abertura >= desde,
-                Processo.data_hora_abertura < ate,
-                Processo.publico.is_(False),
-                *unid_filter,
+            _aplicar_filtros_processo(
+                _base_count().where(Processo.publico.is_(False)),
+                id_unidade=id_unidade,
+                id_servico=id_servico,
+                incluir_legado=incluir_legado,
             )
         )
     ).scalar_one()
 
-    # Arquivados (via Movimentacao com id_arquivamento NOT NULL)
+    # Arquivados (via Movimentacao com id_arquivamento NOT NULL).
+    # Movimentacao filtra por janela; Processo aplica filtros do gestor.
     arq_stmt = (
         select(func.count(Movimentacao.id))
         .select_from(Movimentacao)
@@ -116,12 +131,17 @@ async def _counts_intervalo(
             Movimentacao.data_hora_movimentacao >= desde,
             Movimentacao.data_hora_movimentacao < ate,
             Processo.excluido.is_(False),
-            *unid_filter,
         )
+    )
+    arq_stmt = _aplicar_filtros_processo(
+        arq_stmt,
+        id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=incluir_legado,
     )
     arquivados = (await db.execute(arq_stmt)).scalar_one()
 
-    # Tempo médio de conclusão
+    # Tempo médio de conclusão (mesmo set de Movimentacao).
     tm_stmt = (
         select(
             func.avg(
@@ -140,13 +160,19 @@ async def _counts_intervalo(
             Movimentacao.data_hora_movimentacao >= desde,
             Movimentacao.data_hora_movimentacao < ate,
             Processo.excluido.is_(False),
-            *unid_filter,
         )
+    )
+    tm_stmt = _aplicar_filtros_processo(
+        tm_stmt,
+        id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=incluir_legado,
     )
     tempo_medio = (await db.execute(tm_stmt)).scalar_one()
     tempo_medio = float(tempo_medio) if tempo_medio is not None else None
 
-    # SLA resolvidos no intervalo
+    # SLA não tem filtro de processo (alerta vive na unidade + workflow). Mantemos
+    # como antes — só janela temporal.
     sla_resolv = (
         await db.execute(
             select(func.count(WorkflowSlaAlerta.id)).where(
@@ -158,7 +184,6 @@ async def _counts_intervalo(
         )
     ).scalar_one()
 
-    # Taxa de conclusão
     taxa = None
     if abertos and abertos > 0:
         taxa = round((arquivados / abertos) * 100, 1)
@@ -174,41 +199,608 @@ async def _counts_intervalo(
     }
 
 
+def _processo_filtros_sql(
+    *,
+    id_unidade: int | None,
+    id_servico: int | None,
+    incluir_legado: bool,
+) -> tuple[str, dict[str, Any]]:
+    """Gera trecho SQL extra para WHERE de `protocolos.processo p` + params."""
+    where: list[str] = []
+    params: dict[str, Any] = {}
+    if id_unidade is not None:
+        where.append("(p.id_unidade_proprietaria = :id_unidade OR p.id_local_atual = :id_unidade)")
+        params["id_unidade"] = id_unidade
+    if id_servico is not None:
+        where.append("p.id_servico = :id_servico")
+        params["id_servico"] = id_servico
+    elif not incluir_legado:
+        where.append("p.id_servico IS NOT NULL")
+    return (" AND ".join(where), params) if where else ("", params)
+
+
+async def _documental_periodo(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    desde: datetime,
+    ate: datetime,
+    id_unidade: int | None,
+    id_servico: int | None,
+    incluir_legado: bool,
+) -> dict[str, Any]:
+    """Agregados de checklist documental para processos abertos no período.
+
+    Distribui contagens em `com_id_servico_periodo` / `sem_id_servico_periodo`
+    para diagnóstico do gestor (saber quanto da operação ainda é legado), e
+    em `checklist_pendente / parcial / completo` para visão de gargalo
+    documental.
+
+    A regra de status aqui ESPELHA `services/checklist_documentos._calcular_status`:
+    - obrigatorios = 0 (serviço sem documentos exigidos OU sem nenhum item
+      `obrigatorio=true`) → completo trivial;
+    - obrigatorios > 0 e nenhum enviado → pendente;
+    - obrigatorios > 0 e 0 < enviados < total → parcial;
+    - obrigatorios > 0 e enviados = total → completo.
+
+    Processo SEM `id_servico` é contado em `sem_id_servico_periodo`, mas
+    não entra em pendente/parcial/completo (alinhado ao status
+    `sem_documentos_exigidos` do checklist por processo).
+    """
+    # Contadores básicos com/sem id_servico (respeitam id_unidade; `id_servico`
+    # filtra para zero quando informado pq há filtro `IS NULL/NOT NULL`).
+    base_periodo = select(func.count(Processo.id)).where(
+        Processo.tenant_id == tenant_id,
+        Processo.excluido.is_(False),
+        Processo.data_hora_abertura >= desde,
+        Processo.data_hora_abertura < ate,
+    )
+    if id_unidade is not None:
+        base_periodo = base_periodo.where(
+            (Processo.id_unidade_proprietaria == id_unidade)
+            | (Processo.id_local_atual == id_unidade)
+        )
+
+    com_q = base_periodo.where(Processo.id_servico.is_not(None))
+    sem_q = base_periodo.where(Processo.id_servico.is_(None))
+    if id_servico is not None:
+        com_q = com_q.where(Processo.id_servico == id_servico)
+        sem_q = sem_q.where(literal_column("false"))  # filtro de serviço zera legado
+    elif not incluir_legado:
+        sem_q = sem_q.where(literal_column("false"))
+
+    com_id_servico = int((await db.execute(com_q)).scalar_one())
+    sem_id_servico = int((await db.execute(sem_q)).scalar_one())
+
+    # CTE de checklist agregado por processo.
+    extra_where, extra_params = _processo_filtros_sql(
+        id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=True,  # CTE já filtra id_servico IS NOT NULL — redundante senão
+    )
+    extra_clause = f" AND {extra_where}" if extra_where else ""
+
+    sql = text(
+        f"""
+        WITH docs_exigidos AS (
+            SELECT s.id AS id_servico,
+                   (item ->> 'key') AS doc_key,
+                   (COALESCE(item ->> 'obrigatorio', 'false'))::bool AS obrigatorio
+            FROM protocolos.servico s,
+                 LATERAL jsonb_array_elements(
+                     CASE
+                         WHEN jsonb_typeof(s.documentos_exigidos) = 'array'
+                         THEN s.documentos_exigidos
+                         ELSE '[]'::jsonb
+                     END
+                 ) AS item
+            WHERE s.tenant_id = :tenant_id
+              AND s.excluido = false
+        ),
+        processos_filtrados AS (
+            SELECT p.id, p.id_servico
+            FROM protocolos.processo p
+            WHERE p.tenant_id = :tenant_id
+              AND p.excluido = false
+              AND p.id_servico IS NOT NULL
+              AND p.data_hora_abertura >= :desde
+              AND p.data_hora_abertura <  :ate
+              {extra_clause}
+        ),
+        processo_doc AS (
+            -- Uma linha por par (processo, doc_exigido). EXISTS evita que
+            -- múltiplos anexos do mesmo processo inflem o COUNT.
+            SELECT pf.id AS processo_id,
+                   d.doc_key,
+                   d.obrigatorio,
+                   EXISTS (
+                       SELECT 1
+                       FROM protocolos.anexo_processo ap
+                       JOIN protocolos.anexo a
+                            ON a.id = ap.id_anexo
+                           AND a.excluido = false
+                           AND a.ativo = true
+                           AND a.documento_exigido_key = d.doc_key
+                           AND a.tenant_id = :tenant_id
+                       WHERE ap.id_processo = pf.id
+                         AND ap.excluido = false
+                         AND ap.tenant_id = :tenant_id
+                   ) AS enviado
+            FROM processos_filtrados pf
+            LEFT JOIN docs_exigidos d ON d.id_servico = pf.id_servico
+        ),
+        por_processo AS (
+            SELECT processo_id,
+                   COUNT(doc_key) FILTER (WHERE obrigatorio) AS obrigatorios,
+                   COUNT(doc_key) FILTER (
+                       WHERE obrigatorio AND enviado
+                   ) AS obrigatorios_enviados
+            FROM processo_doc
+            GROUP BY processo_id
+        )
+        SELECT
+            COUNT(*) FILTER (
+                WHERE obrigatorios > 0 AND obrigatorios_enviados = 0
+            ) AS pendente,
+            COUNT(*) FILTER (
+                WHERE obrigatorios > 0
+                  AND obrigatorios_enviados > 0
+                  AND obrigatorios_enviados < obrigatorios
+            ) AS parcial,
+            COUNT(*) FILTER (
+                WHERE obrigatorios = 0 OR obrigatorios_enviados = obrigatorios
+            ) AS completo
+        FROM por_processo;
+        """
+    )
+    row = (
+        await db.execute(
+            sql,
+            {
+                "tenant_id": tenant_id,
+                "desde": desde,
+                "ate": ate,
+                **extra_params,
+            },
+        )
+    ).one()
+    return {
+        "com_id_servico_periodo": com_id_servico,
+        "sem_id_servico_periodo": sem_id_servico,
+        "checklist_pendente": int(row.pendente or 0),
+        "checklist_parcial": int(row.parcial or 0),
+        "checklist_completo": int(row.completo or 0),
+    }
+
+
+async def _complementacao_periodo(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    desde: datetime,
+    ate: datetime,
+    id_unidade: int | None,
+    id_servico: int | None,
+    incluir_legado: bool,
+) -> dict[str, Any]:
+    """Agregados da `complementacao_documental` no período.
+
+    Honra `id_unidade`/`id_servico`/`incluir_legado` via JOIN em `processo` —
+    permite ao gestor restringir a visão à mesma fatia operacional.
+    """
+    def _base(stmt):
+        stmt = stmt.where(
+            ComplementacaoDocumental.tenant_id == tenant_id,
+            ComplementacaoDocumental.excluido.is_(False),
+        )
+        # JOIN obrigatório com processo p/ honrar filtros do gestor.
+        stmt = stmt.join(
+            Processo, Processo.id == ComplementacaoDocumental.id_processo
+        ).where(
+            Processo.tenant_id == tenant_id,
+            Processo.excluido.is_(False),
+        )
+        return _aplicar_filtros_processo(
+            stmt,
+            id_unidade=id_unidade,
+            id_servico=id_servico,
+            incluir_legado=incluir_legado,
+        )
+
+    # Snapshot (status atual)
+    abertas_now_stmt = _base(
+        select(func.count(ComplementacaoDocumental.id))
+    ).where(ComplementacaoDocumental.status == "aberta")
+    abertas_now = (await db.execute(abertas_now_stmt)).scalar_one()
+
+    proc_abertas_stmt = _base(
+        select(func.count(func.distinct(ComplementacaoDocumental.id_processo)))
+    ).where(ComplementacaoDocumental.status == "aberta")
+    processos_com_aberta = (await db.execute(proc_abertas_stmt)).scalar_one()
+
+    # Períodos (não usam status — filtram pela coluna temporal)
+    solicit_stmt = _base(
+        select(func.count(ComplementacaoDocumental.id))
+    ).where(
+        ComplementacaoDocumental.criado_em >= desde,
+        ComplementacaoDocumental.criado_em < ate,
+    )
+    solicitadas = (await db.execute(solicit_stmt)).scalar_one()
+
+    resp_stmt = _base(
+        select(func.count(ComplementacaoDocumental.id))
+    ).where(
+        ComplementacaoDocumental.respondido_em.is_not(None),
+        ComplementacaoDocumental.respondido_em >= desde,
+        ComplementacaoDocumental.respondido_em < ate,
+    )
+    respondidas = (await db.execute(resp_stmt)).scalar_one()
+
+    canc_stmt = _base(
+        select(func.count(ComplementacaoDocumental.id))
+    ).where(
+        ComplementacaoDocumental.cancelado_em.is_not(None),
+        ComplementacaoDocumental.cancelado_em >= desde,
+        ComplementacaoDocumental.cancelado_em < ate,
+    )
+    canceladas = (await db.execute(canc_stmt)).scalar_one()
+
+    # Tempo médio de resposta (em dias) — só sobre respondidas no período.
+    tmr_stmt = _base(
+        select(
+            func.avg(
+                func.extract(
+                    "epoch",
+                    ComplementacaoDocumental.respondido_em
+                    - ComplementacaoDocumental.criado_em,
+                )
+                / 86400.0
+            )
+        )
+    ).where(
+        ComplementacaoDocumental.respondido_em.is_not(None),
+        ComplementacaoDocumental.respondido_em >= desde,
+        ComplementacaoDocumental.respondido_em < ate,
+    )
+    tmr_val = (await db.execute(tmr_stmt)).scalar_one()
+    tempo_medio_resp = float(tmr_val) if tmr_val is not None else None
+
+    return {
+        "abertas_agora": int(abertas_now),
+        "solicitadas_periodo": int(solicitadas),
+        "respondidas_periodo": int(respondidas),
+        "canceladas_periodo": int(canceladas),
+        "processos_com_aberta_agora": int(processos_com_aberta),
+        "tempo_medio_resposta_dias": tempo_medio_resp,
+    }
+
+
+async def _breakdown_servico(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    desde: datetime,
+    ate: datetime,
+    id_unidade: int | None,
+    id_servico: int | None,
+    incluir_legado: bool,
+) -> list[dict[str, Any]]:
+    """Top 10 serviços (por nº de processos no período) + linha "(sem serviço)"
+    quando `incluir_legado=True` e sem filtro de `id_servico`.
+
+    Estratégia: 2 queries SQL agregadas — uma por id_servico (top 10), outra
+    para o checklist por id_servico (CTE), combinadas no Python.
+    """
+    extra_where, extra_params = _processo_filtros_sql(
+        id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=True,  # CTE filtra IS NOT NULL — incluir_legado tratado
+                              # à parte (linha "(sem serviço)" no fim)
+    )
+    extra_clause = f" AND {extra_where}" if extra_where else ""
+
+    # Query A: contagem por serviço + sub-agregados de complementacao por id_servico
+    # (subqueries escalares evitam multi-join sem GROUP BY).
+    sql_servicos = text(
+        f"""
+        WITH processos_no_periodo AS (
+            SELECT p.id, p.id_servico
+            FROM protocolos.processo p
+            WHERE p.tenant_id = :tenant_id
+              AND p.excluido = false
+              AND p.id_servico IS NOT NULL
+              AND p.data_hora_abertura >= :desde
+              AND p.data_hora_abertura <  :ate
+              {extra_clause}
+        ),
+        contagens_por_servico AS (
+            SELECT id_servico, COUNT(*) AS qt
+            FROM processos_no_periodo
+            GROUP BY id_servico
+            ORDER BY qt DESC
+            LIMIT 10
+        )
+        SELECT
+            s.id AS id_servico,
+            s.nome AS nome,
+            c.qt AS qt,
+            (
+                SELECT COUNT(*)
+                FROM protocolos.complementacao_documental cd
+                JOIN protocolos.processo pp ON pp.id = cd.id_processo
+                WHERE cd.tenant_id = :tenant_id
+                  AND cd.excluido = false
+                  AND cd.status = 'aberta'
+                  AND pp.tenant_id = :tenant_id
+                  AND pp.excluido = false
+                  AND pp.id_servico = s.id
+            ) AS compl_abertas,
+            (
+                SELECT COUNT(*)
+                FROM protocolos.complementacao_documental cd
+                JOIN protocolos.processo pp ON pp.id = cd.id_processo
+                WHERE cd.tenant_id = :tenant_id
+                  AND cd.excluido = false
+                  AND cd.respondido_em IS NOT NULL
+                  AND cd.respondido_em >= :desde
+                  AND cd.respondido_em <  :ate
+                  AND pp.tenant_id = :tenant_id
+                  AND pp.excluido = false
+                  AND pp.id_servico = s.id
+            ) AS compl_respondidas
+        FROM contagens_por_servico c
+        JOIN protocolos.servico s ON s.id = c.id_servico
+        ORDER BY c.qt DESC;
+        """
+    )
+    rows_serv = (
+        await db.execute(
+            sql_servicos,
+            {
+                "tenant_id": tenant_id,
+                "desde": desde,
+                "ate": ate,
+                **extra_params,
+            },
+        )
+    ).all()
+
+    # Query B: checklist agregado por id_servico (top 10) — mesmo padrão do
+    # _documental_periodo, mas com GROUP BY id_servico depois do COUNT por
+    # processo.
+    ids_top = [int(r.id_servico) for r in rows_serv]
+    checklist_por_servico: dict[int, dict[str, int]] = {}
+    if ids_top:
+        sql_check = text(
+            f"""
+            WITH docs_exigidos AS (
+                SELECT s.id AS id_servico,
+                       (item ->> 'key') AS doc_key,
+                       (COALESCE(item ->> 'obrigatorio', 'false'))::bool AS obrigatorio
+                FROM protocolos.servico s,
+                     LATERAL jsonb_array_elements(
+                         CASE
+                             WHEN jsonb_typeof(s.documentos_exigidos) = 'array'
+                             THEN s.documentos_exigidos
+                             ELSE '[]'::jsonb
+                         END
+                     ) AS item
+                WHERE s.tenant_id = :tenant_id
+                  AND s.excluido = false
+                  AND s.id = ANY(:ids)
+            ),
+            processos_filtrados AS (
+                SELECT p.id, p.id_servico
+                FROM protocolos.processo p
+                WHERE p.tenant_id = :tenant_id
+                  AND p.excluido = false
+                  AND p.id_servico = ANY(:ids)
+                  AND p.data_hora_abertura >= :desde
+                  AND p.data_hora_abertura <  :ate
+                  {extra_clause}
+            ),
+            processo_doc AS (
+                SELECT pf.id AS processo_id,
+                       pf.id_servico,
+                       d.doc_key,
+                       d.obrigatorio,
+                       EXISTS (
+                           SELECT 1
+                           FROM protocolos.anexo_processo ap
+                           JOIN protocolos.anexo a
+                                ON a.id = ap.id_anexo
+                               AND a.excluido = false
+                               AND a.ativo = true
+                               AND a.documento_exigido_key = d.doc_key
+                               AND a.tenant_id = :tenant_id
+                           WHERE ap.id_processo = pf.id
+                             AND ap.excluido = false
+                             AND ap.tenant_id = :tenant_id
+                       ) AS enviado
+                FROM processos_filtrados pf
+                LEFT JOIN docs_exigidos d ON d.id_servico = pf.id_servico
+            ),
+            por_processo AS (
+                SELECT processo_id,
+                       id_servico,
+                       COUNT(doc_key) FILTER (WHERE obrigatorio) AS obrigatorios,
+                       COUNT(doc_key) FILTER (
+                           WHERE obrigatorio AND enviado
+                       ) AS obrigatorios_enviados
+                FROM processo_doc
+                GROUP BY processo_id, id_servico
+            )
+            SELECT
+                id_servico,
+                COUNT(*) FILTER (
+                    WHERE obrigatorios > 0 AND obrigatorios_enviados = 0
+                ) AS pendente,
+                COUNT(*) FILTER (
+                    WHERE obrigatorios > 0
+                      AND obrigatorios_enviados > 0
+                      AND obrigatorios_enviados < obrigatorios
+                ) AS parcial,
+                COUNT(*) FILTER (
+                    WHERE obrigatorios = 0 OR obrigatorios_enviados = obrigatorios
+                ) AS completo
+            FROM por_processo
+            GROUP BY id_servico;
+            """
+        )
+        check_rows = (
+            await db.execute(
+                sql_check,
+                {
+                    "tenant_id": tenant_id,
+                    "desde": desde,
+                    "ate": ate,
+                    "ids": ids_top,
+                    **extra_params,
+                },
+            )
+        ).all()
+        checklist_por_servico = {
+            int(r.id_servico): {
+                "pendente": int(r.pendente or 0),
+                "parcial": int(r.parcial or 0),
+                "completo": int(r.completo or 0),
+            }
+            for r in check_rows
+        }
+
+    breakdown: list[dict[str, Any]] = []
+    for r in rows_serv:
+        ck = checklist_por_servico.get(
+            int(r.id_servico), {"pendente": 0, "parcial": 0, "completo": 0}
+        )
+        breakdown.append(
+            {
+                "id_servico": int(r.id_servico),
+                "nome": r.nome,
+                "count": int(r.qt),
+                "complementacoes_abertas": int(r.compl_abertas or 0),
+                "complementacoes_respondidas_periodo": int(r.compl_respondidas or 0),
+                "checklist_pendente": ck["pendente"],
+                "checklist_parcial": ck["parcial"],
+                "checklist_completo": ck["completo"],
+            }
+        )
+
+    # Linha "(sem serviço)" — só quando incluir_legado=True E sem filtro de id_servico.
+    if incluir_legado and id_servico is None:
+        legado_qt = (
+            await db.execute(
+                _aplicar_filtros_processo(
+                    select(func.count(Processo.id)).where(
+                        Processo.tenant_id == tenant_id,
+                        Processo.excluido.is_(False),
+                        Processo.data_hora_abertura >= desde,
+                        Processo.data_hora_abertura < ate,
+                        Processo.id_servico.is_(None),
+                    ),
+                    id_unidade=id_unidade,
+                    id_servico=None,
+                    incluir_legado=True,
+                )
+            )
+        ).scalar_one()
+        if legado_qt > 0:
+            legado_compl_abertas = (
+                await db.execute(
+                    select(func.count(ComplementacaoDocumental.id))
+                    .join(
+                        Processo,
+                        Processo.id == ComplementacaoDocumental.id_processo,
+                    )
+                    .where(
+                        ComplementacaoDocumental.tenant_id == tenant_id,
+                        ComplementacaoDocumental.excluido.is_(False),
+                        ComplementacaoDocumental.status == "aberta",
+                        Processo.tenant_id == tenant_id,
+                        Processo.excluido.is_(False),
+                        Processo.id_servico.is_(None),
+                    )
+                )
+            ).scalar_one()
+            legado_compl_respondidas = (
+                await db.execute(
+                    select(func.count(ComplementacaoDocumental.id))
+                    .join(
+                        Processo,
+                        Processo.id == ComplementacaoDocumental.id_processo,
+                    )
+                    .where(
+                        ComplementacaoDocumental.tenant_id == tenant_id,
+                        ComplementacaoDocumental.excluido.is_(False),
+                        ComplementacaoDocumental.respondido_em.is_not(None),
+                        ComplementacaoDocumental.respondido_em >= desde,
+                        ComplementacaoDocumental.respondido_em < ate,
+                        Processo.tenant_id == tenant_id,
+                        Processo.excluido.is_(False),
+                        Processo.id_servico.is_(None),
+                    )
+                )
+            ).scalar_one()
+            breakdown.append(
+                {
+                    "id_servico": None,
+                    "nome": "(sem serviço)",
+                    "count": int(legado_qt),
+                    "complementacoes_abertas": int(legado_compl_abertas or 0),
+                    "complementacoes_respondidas_periodo": int(
+                        legado_compl_respondidas or 0
+                    ),
+                    # Sem checklist (sem id_servico → sem documentos exigidos).
+                    "checklist_pendente": 0,
+                    "checklist_parcial": 0,
+                    "checklist_completo": 0,
+                }
+            )
+
+    return breakdown
+
+
 async def kpis(
     db: AsyncSession,
     *,
     tenant_id: int,
     periodo_dias: int = 30,
     id_unidade: int | None = None,
+    id_servico: int | None = None,
+    incluir_legado: bool = True,
 ) -> dict[str, Any]:
     """Devolve um payload pronto pra UI render. Forma JSON estável documentada
-    no schema Pydantic correspondente."""
+    no schema Pydantic correspondente.
+
+    PR 5a: `id_servico` e `incluir_legado` propagam-se a TODOS os contadores
+    janelados; quando `id_servico` é dado, prevalece sobre `incluir_legado`.
+    """
     if periodo_dias not in (7, 30, 90, 365):
         periodo_dias = 30
     now = datetime.utcnow()
     desde_atual = now - timedelta(days=periodo_dias)
     desde_anterior = now - timedelta(days=2 * periodo_dias)
 
-    # Filtro de tenant + unidade comum a quase todos os queries
     def _base_processo():
         stmt = select(Processo).where(
             Processo.tenant_id == tenant_id,
             Processo.excluido.is_(False),
         )
-        if id_unidade is not None:
-            stmt = stmt.where(
-                (Processo.id_unidade_proprietaria == id_unidade)
-                | (Processo.id_local_atual == id_unidade)
-            )
-        return stmt
+        return _aplicar_filtros_processo(
+            stmt,
+            id_unidade=id_unidade,
+            id_servico=id_servico,
+            incluir_legado=incluir_legado,
+        )
 
-    # Contadores janelados — atual e anterior
     atual = await _counts_intervalo(
         db,
         tenant_id=tenant_id,
         desde=desde_atual,
         ate=now,
         id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=incluir_legado,
     )
     anterior = await _counts_intervalo(
         db,
@@ -216,6 +808,8 @@ async def kpis(
         desde=desde_anterior,
         ate=desde_atual,
         id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=incluir_legado,
     )
 
     # Ativos hoje (snapshot — não janelado)
@@ -223,7 +817,7 @@ async def kpis(
     sq_ah = ativos_hoje_stmt.subquery()
     ativos_hoje = (await db.execute(select(func.count(sq_ah.c.id)))).scalar_one()
 
-    # SLA pendentes agora (snapshot)
+    # SLA pendentes agora (snapshot — não janelado, sem filtro de processo).
     sla_pendentes = (
         await db.execute(
             select(func.count(WorkflowSlaAlerta.id)).where(
@@ -233,8 +827,16 @@ async def kpis(
         )
     ).scalar_one()
 
+    def _aplicar_break(stmt):
+        return _aplicar_filtros_processo(
+            stmt,
+            id_unidade=id_unidade,
+            id_servico=id_servico,
+            incluir_legado=incluir_legado,
+        )
+
     # ===== Breakdown por tipo_processo (top 5) =====
-    tipo_q = (
+    tipo_q = _aplicar_break(
         select(
             TipoProcesso.tipo_processo.label("label"),
             func.count(Processo.id).label("count"),
@@ -251,18 +853,13 @@ async def kpis(
         .order_by(func.count(Processo.id).desc())
         .limit(5)
     )
-    if id_unidade is not None:
-        tipo_q = tipo_q.where(
-            (Processo.id_unidade_proprietaria == id_unidade)
-            | (Processo.id_local_atual == id_unidade)
-        )
     por_tipo = [
         {"label": lbl, "count": int(cnt)}
         for lbl, cnt in (await db.execute(tipo_q)).all()
     ]
 
     # ===== Breakdown por assunto (top 10) =====
-    assunto_q = (
+    assunto_q = _aplicar_break(
         select(
             Assunto.assunto.label("label"),
             func.count(Processo.id).label("count"),
@@ -278,18 +875,13 @@ async def kpis(
         .order_by(func.count(Processo.id).desc())
         .limit(10)
     )
-    if id_unidade is not None:
-        assunto_q = assunto_q.where(
-            (Processo.id_unidade_proprietaria == id_unidade)
-            | (Processo.id_local_atual == id_unidade)
-        )
     por_assunto = [
         {"label": lbl, "count": int(cnt)}
         for lbl, cnt in (await db.execute(assunto_q)).all()
     ]
 
     # ===== Breakdown por unidade proprietária (top 10) =====
-    unid_q = (
+    unid_q = _aplicar_break(
         select(
             UnidadeTrabalho.unidade_trabalho.label("label"),
             func.count(Processo.id).label("count"),
@@ -311,7 +903,7 @@ async def kpis(
     ]
 
     # ===== Série temporal (abertos por dia) =====
-    serie_q = (
+    serie_q = _aplicar_break(
         select(
             func.date_trunc("day", Processo.data_hora_abertura).label("dia"),
             func.count(Processo.id).label("count"),
@@ -324,15 +916,39 @@ async def kpis(
         .group_by(literal_column("1"))
         .order_by(literal_column("1"))
     )
-    if id_unidade is not None:
-        serie_q = serie_q.where(
-            (Processo.id_unidade_proprietaria == id_unidade)
-            | (Processo.id_local_atual == id_unidade)
-        )
     serie_rows = (await db.execute(serie_q)).all()
     serie_temporal = [
         {"dia": dia.isoformat(), "count": int(cnt)} for dia, cnt in serie_rows
     ]
+
+    # ===== PR 5a — blocos novos =====
+    documental = await _documental_periodo(
+        db,
+        tenant_id=tenant_id,
+        desde=desde_atual,
+        ate=now,
+        id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=incluir_legado,
+    )
+    complementacao = await _complementacao_periodo(
+        db,
+        tenant_id=tenant_id,
+        desde=desde_atual,
+        ate=now,
+        id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=incluir_legado,
+    )
+    por_servico = await _breakdown_servico(
+        db,
+        tenant_id=tenant_id,
+        desde=desde_atual,
+        ate=now,
+        id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=incluir_legado,
+    )
 
     return {
         "periodo_dias": periodo_dias,
@@ -352,7 +968,6 @@ async def kpis(
             "pendentes": int(sla_pendentes),
             "resolvidos_periodo": atual["sla_resolvidos"],
         },
-        # Fase 18b — comparativo com período anterior do mesmo tamanho
         "comparativo": {
             "abertos_anterior": anterior["abertos"],
             "externos_anterior": anterior["externos"],
@@ -366,4 +981,8 @@ async def kpis(
         "por_assunto": por_assunto,
         "por_unidade": por_unidade,
         "serie_temporal": serie_temporal,
+        # PR 5a
+        "documental": documental,
+        "complementacao": complementacao,
+        "por_servico": por_servico,
     }

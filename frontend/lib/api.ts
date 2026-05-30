@@ -640,7 +640,7 @@ export interface AbrirProcessoCidadaoInput {
   id_especie_documental?: number;
 }
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
     super(message);
@@ -1406,6 +1406,37 @@ export interface DashboardBreakdownItem {
   count: number;
 }
 
+/** PR 5a — agregados de checklist documental no período. */
+export interface DashboardDocumentalKpis {
+  com_id_servico_periodo: number;
+  sem_id_servico_periodo: number;
+  checklist_pendente: number;
+  checklist_parcial: number;
+  checklist_completo: number;
+}
+
+/** PR 5a — agregados de complementação documental. */
+export interface DashboardComplementacaoKpis {
+  abertas_agora: number;
+  solicitadas_periodo: number;
+  respondidas_periodo: number;
+  canceladas_periodo: number;
+  processos_com_aberta_agora: number;
+  tempo_medio_resposta_dias: number | null;
+}
+
+/** PR 5a — linha do ranking por serviço. `id_servico=null` = "(sem serviço)". */
+export interface DashboardServicoBreakdownItem {
+  id_servico: number | null;
+  nome: string;
+  count: number;
+  complementacoes_abertas: number;
+  complementacoes_respondidas_periodo: number;
+  checklist_pendente: number;
+  checklist_parcial: number;
+  checklist_completo: number;
+}
+
 export interface DashboardKpis {
   periodo_dias: number;
   id_unidade: number | null;
@@ -1438,25 +1469,45 @@ export interface DashboardKpis {
   por_assunto: DashboardBreakdownItem[];
   por_unidade: DashboardBreakdownItem[];
   serie_temporal: { dia: string; count: number }[];
+  /** PR 5a — blocos novos. */
+  documental: DashboardDocumentalKpis;
+  complementacao: DashboardComplementacaoKpis;
+  por_servico: DashboardServicoBreakdownItem[];
+}
+
+export interface DashboardKpisParams {
+  periodo?: number;
+  id_unidade?: number;
+  id_servico?: number;
+  incluir_legado?: boolean;
+}
+
+function _dashQs(params?: DashboardKpisParams): string {
+  // `incluir_legado=true` é default do backend — só envia quando explicitamente
+  // `false`, evitando ruído na query string.
+  return qs({
+    periodo: params?.periodo,
+    id_unidade: params?.id_unidade,
+    id_servico: params?.id_servico,
+    incluir_legado:
+      params?.incluir_legado === false ? "false" : undefined,
+  });
 }
 
 export const dashboardApi = {
-  kpis: (params?: { periodo?: number; id_unidade?: number }) =>
-    request<DashboardKpis>(`/dashboard/kpis${qs(params ?? {})}`),
+  kpis: (params?: DashboardKpisParams) =>
+    request<DashboardKpis>(`/dashboard/kpis${_dashQs(params)}`),
 };
 
-export function dashboardExportCsvUrl(params?: {
-  periodo?: number;
-  id_unidade?: number;
-}): string {
-  return `${BROWSER_API_URL}/dashboard/export.csv${qs(params ?? {})}`;
+export function dashboardExportCsvUrl(params?: DashboardKpisParams): string {
+  return `${BROWSER_API_URL}/dashboard/export.csv${_dashQs(params)}`;
 }
 
 export function dashboardExportPdfUrl(
-  params?: { periodo?: number; id_unidade?: number },
+  params?: DashboardKpisParams,
   inline = true,
 ): string {
-  const baseQs = qs(params ?? {});
+  const baseQs = _dashQs(params);
   if (inline) return `${BROWSER_API_URL}/dashboard/export.pdf${baseQs}`;
   const sep = baseQs ? "&" : "?";
   return `${BROWSER_API_URL}/dashboard/export.pdf${baseQs}${sep}inline=false`;
