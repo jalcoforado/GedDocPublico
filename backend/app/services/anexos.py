@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings, resolve_anexo_path, tenant_anexos_dir
-from ..models import Anexo, AnexoProcesso, AssinaturaAnexo, Processo
+from ..models import Anexo, AnexoProcesso, AssinaturaAnexo, Processo, Servico
 
 
 class AnexoError(Exception):
@@ -45,6 +45,7 @@ async def upload_anexo(
     id_tipo_anexo: int | None,
     publico: bool,
     usuario_id: int | None,
+    documento_exigido_key: str | None = None,
 ) -> Anexo:
     settings = get_settings()
 
@@ -70,6 +71,32 @@ async def upload_anexo(
     if processo.id_ultima_movimentacao is None:
         raise AnexoError("Processo sem movimentação — abra-o antes de anexar")
 
+    # PR 4c — vínculo a item de documento exigido: a key precisa existir em
+    # `servico.documentos_exigidos` do serviço vinculado ao processo.
+    if documento_exigido_key is not None:
+        if processo.id_servico is None:
+            raise AnexoError(
+                "Este processo não foi aberto por serviço; envio geral apenas."
+            )
+        servico = (
+            await db.execute(
+                select(Servico).where(
+                    Servico.id == processo.id_servico,
+                    Servico.tenant_id == tenant_id,
+                    Servico.excluido.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        docs = (servico.documentos_exigidos if servico else None) or []
+        keys_validas = {
+            d["key"] for d in docs
+            if isinstance(d, dict) and d.get("key")
+        }
+        if not keys_validas:
+            raise AnexoError("Este serviço não exige documentos específicos.")
+        if documento_exigido_key not in keys_validas:
+            raise AnexoError("Documento exigido inválido para este serviço.")
+
     max_bytes = settings.max_upload_size_mb * 1024 * 1024
     content = await file.read(max_bytes + 1)
     if len(content) > max_bytes:
@@ -91,6 +118,7 @@ async def upload_anexo(
         excluido=False,
         descricao=(descricao or file.filename)[:512],
         qtd_paginas=qtd_paginas,
+        documento_exigido_key=documento_exigido_key,
     )
     db.add(anexo)
     await db.flush()

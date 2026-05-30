@@ -25,6 +25,7 @@ function isTabId(v: string | null): v is TabId {
 
 import { AcoesProcesso } from "@/components/AcoesProcesso";
 import { AnexosProcesso } from "@/components/AnexosProcesso";
+import { ChecklistDocumentosCard } from "@/components/ChecklistDocumentosCard";
 import { ProcessoApensados } from "@/components/ProcessoApensados";
 import { ProcessoVolumes } from "@/components/ProcessoVolumes";
 import { AssinaturasProcesso } from "@/components/AssinaturasProcesso";
@@ -211,6 +212,12 @@ export default function ProcessoDetailPage() {
   const q = useQuery({
     queryKey: ["processo", processoId],
     queryFn: () => api.processos.get(processoId),
+    enabled: !!processoId,
+  });
+  // PR 4c — checklist documental read-only do processo (visível na aba Documentos).
+  const checklistQ = useQuery({
+    queryKey: ["processo-checklist", processoId],
+    queryFn: () => api.processos.checklistDocumentos(processoId),
     enabled: !!processoId,
   });
 
@@ -551,6 +558,11 @@ export default function ProcessoDetailPage() {
 
       {activeTab === "documentos" && (
         <div className="space-y-6">
+          <ChecklistDocumentosCard
+            data={checklistQ.data}
+            loading={checklistQ.isLoading}
+          />
+
           <Card>
             <CardHeader>
               <CardTitle>Anexos</CardTitle>

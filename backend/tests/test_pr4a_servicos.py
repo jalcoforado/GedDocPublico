@@ -100,7 +100,10 @@ async def test_criar_e_editar_servico(admin_engine):
             )
             assert criado.id and criado.ativo is True and criado.nivel_sigilo_padrao == "ostensivo"
             assert criado.canal_entrada_permitido == "portal"
-            assert criado.documentos_exigidos == [{"nome": "RG", "obrigatorio": True, "descricao": None}]
+            # PR 4c — `key` é injetado pela normalização (slug do nome).
+            assert criado.documentos_exigidos == [
+                {"key": "rg", "nome": "RG", "obrigatorio": True, "descricao": None}
+            ]
 
         async with _sessionmaker(admin_engine)() as s:
             editado = await servico_svc.atualizar_servico(

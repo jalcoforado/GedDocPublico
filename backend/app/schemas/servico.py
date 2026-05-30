@@ -15,8 +15,14 @@ SLUG_PATTERN = r"^[a-z0-9][a-z0-9-]{1,78}[a-z0-9]$"
 
 
 class ServicoDocumento(BaseModel):
-    """Item de `documentos_exigidos` (JSONB)."""
+    """Item de `documentos_exigidos` (JSONB).
 
+    `key` é identificador **estável** do item — não muda quando o admin renomeia
+    `nome`. No input pode vir vazio; o backend preenche com `slug(nome)` e
+    garante unicidade dentro do serviço (ver `services/servico.py`).
+    """
+
+    key: str | None = Field(default=None, max_length=120)
     nome: str = Field(min_length=1, max_length=150)
     obrigatorio: bool = False
     descricao: str | None = Field(default=None, max_length=500)

@@ -13,6 +13,7 @@ from ..models import Prioridade as _Prio
 from ..models import UnidadeTrabalho as _UT
 from ..models import Usuario
 from ..schemas.common import Paginated
+from ..schemas.checklist_documentos import ChecklistDocumentosResponse
 from ..schemas.processo import (
     CancelarEncaminhamentoRequest,
     ClassificarSigiloRequest,
@@ -33,6 +34,7 @@ from ..services.pdf_capa import gerar_capa_pdf
 from ..services.pdf_comprovante import gerar_comprovante_pdf
 from ..services.pdf_etiqueta import gerar_etiqueta_pdf
 from ..services.pdf_montagem import gerar_processo_completo_pdf
+from ..services.checklist_documentos import calcular_checklist
 from ..services.processos import get_processo_detail, list_processos
 from ..schemas.ccd import TemporalidadeOut
 from ..services.temporalidade import calcular_temporalidade
@@ -176,6 +178,20 @@ async def detail_endpoint(
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     return detail
+
+
+@router.get(
+    "/{processo_id}/checklist-documentos",
+    response_model=ChecklistDocumentosResponse,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def checklist_documentos_servidor(
+    processo_id: int,
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ChecklistDocumentosResponse:
+    """PR 4c — checklist documental read-only do processo (servidor)."""
+    return await calcular_checklist(db, processo_id=processo_id, tenant_id=tenant_id)
 
 
 @router.post(

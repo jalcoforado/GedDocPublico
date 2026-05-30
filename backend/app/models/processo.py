@@ -232,6 +232,9 @@ class Anexo(Base):
     e_doc: Mapped[str | None] = mapped_column(String(25), nullable=True)
     descricao: Mapped[str | None] = mapped_column(String(512), nullable=True)
     qtd_paginas: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # PR 4c — vínculo com item de `servico.documentos_exigidos` (soft-link;
+    # null = anexo geral, não vinculado a documento exigido).
+    documento_exigido_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
 
 class AnexoProcesso(Base):

@@ -29,8 +29,35 @@ from ..schemas.servico import (
     ServicoPublicOut,
     ServicoUpdate,
 )
+from ..utils.slug import slugify_unique
 
 logger = logging.getLogger("servico")
+
+
+def _normalizar_documentos_exigidos(docs: list[dict] | None) -> list[dict] | None:
+    """Garante `key` estável + única em cada item de `documentos_exigidos` (D-KEY).
+
+    Itens **com** `key` informada são preservados (admin pode renomear `nome` sem
+    perder o vínculo dos anexos). Itens **sem** `key` recebem `slug(nome)`, com
+    sufixo `-2`, `-3`… em caso de colisão dentro do mesmo serviço."""
+    if not docs:
+        return docs
+    existentes: set[str] = {
+        d["key"] for d in docs if isinstance(d, dict) and d.get("key")
+    }
+    saida: list[dict] = []
+    for item in docs:
+        if not isinstance(item, dict):
+            saida.append(item)
+            continue
+        if item.get("key"):
+            saida.append(item)
+            continue
+        nome = item.get("nome") or "item"
+        nova = slugify_unique(nome, existentes)
+        existentes.add(nova)
+        saida.append({**item, "key": nova})
+    return saida
 
 
 async def _validar_slug_unico(
@@ -113,6 +140,9 @@ async def criar_servico(
     db: AsyncSession, *, tenant_id: int, payload: ServicoCreate
 ) -> Servico:
     dados = payload.model_dump()  # documentos_exigidos -> list[dict] | None
+    dados["documentos_exigidos"] = _normalizar_documentos_exigidos(
+        dados.get("documentos_exigidos")
+    )
     await _validar_slug_unico(db, tenant_id=tenant_id, slug=dados["slug"])
     await _validar_defaults(db, tenant_id=tenant_id, dados=dados)
 
@@ -128,6 +158,11 @@ async def atualizar_servico(
 ) -> Servico:
     servico = await obter_servico(db, tenant_id=tenant_id, servico_id=servico_id)
     dados = payload.model_dump(exclude_unset=True)
+
+    if "documentos_exigidos" in dados:
+        dados["documentos_exigidos"] = _normalizar_documentos_exigidos(
+            dados["documentos_exigidos"]
+        )
 
     if "slug" in dados:
         await _validar_slug_unico(

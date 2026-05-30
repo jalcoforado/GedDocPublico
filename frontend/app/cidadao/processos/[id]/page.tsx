@@ -1,12 +1,18 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, Clock, FileText, Paperclip } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useState } from "react";
 
+import { ChecklistDocumentosCard } from "@/components/ChecklistDocumentosCard";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { useRequireCidadao } from "@/lib/cidadao-auth";
 
@@ -26,10 +32,36 @@ export default function CidadaoProcessoDetailPage() {
   const idValido = Number.isInteger(id) && id > 0;
   const { cidadao, loading } = useRequireCidadao();
 
+  const qc = useQueryClient();
+  const toast = useToast();
   const q = useQuery({
     queryKey: ["cidadao-processo", id],
     queryFn: () => api.cidadao.getProcesso(id),
     enabled: !!cidadao && idValido,
+  });
+  const checklistQ = useQuery({
+    queryKey: ["cidadao-checklist", id],
+    queryFn: () => api.cidadao.checklistDocumentos(id),
+    enabled: !!cidadao && idValido,
+  });
+
+  const [uploadKey, setUploadKey] = useState<string | null>(null);
+  const [uploadNome, setUploadNome] = useState<string>("");
+  const [file, setFile] = useState<File | null>(null);
+
+  const uploadM = useMutation({
+    mutationFn: () => {
+      if (!file || !uploadKey) throw new Error("Selecione um arquivo");
+      return api.cidadao.uploadAnexo(id, file, file.name, uploadKey);
+    },
+    onSuccess: () => {
+      toast.success("Documento anexado.");
+      qc.invalidateQueries({ queryKey: ["cidadao-processo", id] });
+      qc.invalidateQueries({ queryKey: ["cidadao-checklist", id] });
+      setUploadKey(null);
+      setFile(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   if (loading) return <p className="text-sm text-muted-foreground">Carregando...</p>;
@@ -174,6 +206,16 @@ export default function CidadaoProcessoDetailPage() {
         </CardContent>
       </Card>
 
+      <ChecklistDocumentosCard
+        data={checklistQ.data}
+        loading={checklistQ.isLoading}
+        onAnexar={(key, nome) => {
+          setUploadKey(key);
+          setUploadNome(nome);
+          setFile(null);
+        }}
+      />
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -240,6 +282,53 @@ export default function CidadaoProcessoDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={uploadKey !== null}
+        onClose={() => {
+          if (!uploadM.isPending) {
+            setUploadKey(null);
+            setFile(null);
+          }
+        }}
+        title={`Anexar: ${uploadNome}`}
+        size="sm"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setUploadKey(null);
+                setFile(null);
+              }}
+              disabled={uploadM.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => uploadM.mutate()}
+              disabled={!file || uploadM.isPending}
+            >
+              {uploadM.isPending ? "Enviando..." : "Enviar"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Selecione o arquivo correspondente a <strong>{uploadNome}</strong>.
+          </p>
+          <div>
+            <Label htmlFor="checklist-file">Arquivo</Label>
+            <input
+              id="checklist-file"
+              type="file"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm"
+            />
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }

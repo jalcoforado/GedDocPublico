@@ -1143,6 +1143,11 @@ export const api = {
       request<void>(`/processos/${processoId}/anexos/${anexoId}`, {
         method: "DELETE",
       }),
+    // PR 4c — checklist documental read-only (servidor)
+    checklistDocumentos: (processoId: number) =>
+      request<ChecklistDocumentosResponse>(
+        `/processos/${processoId}/checklist-documentos`,
+      ),
   },
 
   // Fase 6 — Relatórios
@@ -1220,15 +1225,26 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
-    uploadAnexo: (processoId: number, file: File, descricao?: string) => {
+    uploadAnexo: (
+      processoId: number,
+      file: File,
+      descricao?: string,
+      documentoExigidoKey?: string,
+    ) => {
       const fd = new FormData();
       fd.append("file", file);
       if (descricao) fd.append("descricao", descricao);
+      if (documentoExigidoKey) fd.append("documento_exigido_key", documentoExigidoKey);
       return requestCidadao<CidadaoAnexo>(
         `/cidadao/processos/${processoId}/anexos`,
         { method: "POST", body: fd },
       );
     },
+    // PR 4c — checklist documental do próprio processo
+    checklistDocumentos: (processoId: number) =>
+      requestCidadao<ChecklistDocumentosResponse>(
+        `/cidadao/processos/${processoId}/checklist-documentos`,
+      ),
   },
 };
 
@@ -1884,9 +1900,41 @@ export const tenantsApi = {
 // ===== PR 4a — Catálogo de Serviços / Carta de Serviços ======================
 
 export interface ServicoDocumento {
+  /** PR 4c — chave estável do item (normalizada pelo backend a partir do `nome`). */
+  key?: string | null;
   nome: string;
   obrigatorio: boolean;
   descricao?: string | null;
+}
+
+// PR 4c — Checklist documental
+export type StatusDocumental =
+  | "sem_documentos_exigidos"
+  | "pendente"
+  | "parcial"
+  | "completo";
+
+export interface ChecklistAnexo {
+  id_anexo: number;
+  descricao: string | null;
+}
+
+export interface ChecklistItem {
+  key: string;
+  nome: string;
+  obrigatorio: boolean;
+  descricao: string | null;
+  enviado: boolean;
+  anexos: ChecklistAnexo[];
+}
+
+export interface ChecklistDocumentosResponse {
+  id_processo: number;
+  id_servico: number | null;
+  status_documental: StatusDocumental;
+  obrigatorios_total: number;
+  obrigatorios_enviados: number;
+  itens: ChecklistItem[];
 }
 
 export interface Servico {

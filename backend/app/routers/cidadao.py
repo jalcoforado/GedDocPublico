@@ -40,7 +40,10 @@ from ..services.cidadao_processos import (
     listar_especies_cidadao,
     listar_meus,
 )
+from ..services.audit import log as audit_log
+from ..services.checklist_documentos import calcular_checklist
 from ..services.servico import obter_servico_solicitavel
+from ..schemas.checklist_documentos import ChecklistDocumentosResponse
 
 settings = get_settings()
 router = APIRouter(prefix="/cidadao", tags=["cidadao"])
@@ -263,12 +266,16 @@ async def upload_anexo_cidadao_endpoint(
     processo_id: int,
     file: UploadFile = File(...),
     descricao: str | None = Form(None),
+    documento_exigido_key: str | None = Form(None),
     cidadao: UsuarioExterno = Depends(get_current_cidadao),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ) -> AnexoCidadaoOut:
-    """Cidadão anexa documento ao próprio processo. Sempre público."""
+    """Cidadão anexa documento ao próprio processo. Sempre público.
+
+    PR 4c — `documento_exigido_key` opcional vincula o anexo a um item de
+    `servico.documentos_exigidos`. Auditoria minimizada (sem CPF/nome/conteúdo)."""
     await _verificar_dono(db, cidadao, processo_id, tenant_id)
     try:
         anexo = await upload_anexo(
@@ -281,9 +288,29 @@ async def upload_anexo_cidadao_endpoint(
             id_tipo_anexo=None,
             publico=True,
             usuario_id=None,
+            documento_exigido_key=documento_exigido_key,
         )
     except AnexoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    # PR 4c — audit minimizado: id_processo, id_anexo, key, canal. Sem dados
+    # pessoais. Falha de audit não derruba o upload (audit_log faz seu próprio
+    # try/except e a UI já recebeu o anexo criado).
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=None,
+        acao="anexo.enviado_cidadao",
+        entidade="anexo",
+        id_entidade=anexo.id,
+        payload={
+            "id_processo": processo_id,
+            "documento_exigido_key": documento_exigido_key,
+            "canal": "portal",
+        },
+    )
+    await db.commit()
+
     return AnexoCidadaoOut(
         id=anexo.id,
         descricao=anexo.descricao,
@@ -291,3 +318,18 @@ async def upload_anexo_cidadao_endpoint(
         qtd_paginas=anexo.qtd_paginas,
         publico=anexo.publico,
     )
+
+
+@router.get(
+    "/processos/{processo_id}/checklist-documentos",
+    response_model=ChecklistDocumentosResponse,
+)
+async def checklist_documentos_cidadao(
+    processo_id: int,
+    cidadao: UsuarioExterno = Depends(get_current_cidadao),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ChecklistDocumentosResponse:
+    """PR 4c — checklist documental do próprio processo do cidadão."""
+    await _verificar_dono(db, cidadao, processo_id, tenant_id)
+    return await calcular_checklist(db, processo_id=processo_id, tenant_id=tenant_id)
