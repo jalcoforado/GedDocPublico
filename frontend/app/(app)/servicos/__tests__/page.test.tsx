@@ -117,3 +117,155 @@ describe("ServicosPage — PR 4a", () => {
     expect(screen.queryByRole("button", { name: /Desativar/i })).toBeNull();
   });
 });
+
+// =============================================================================
+// Fase F (UX-1) — agrupamento visual, microcopy, estados
+// =============================================================================
+
+describe("ServicosPage — Fase F (UX-1 catálogo)", () => {
+  it("dialog renderiza as 3 seções (Identificação, Configuração operacional, Orientações)", async () => {
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    fireEvent.click(screen.getByRole("button", { name: /^Editar$/i }));
+    expect(
+      await screen.findByRole("heading", { name: /Identificação do serviço/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /Configuração operacional/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /Orientações ao cidadão/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("todos os campos do formulário continuam presentes após o agrupamento", async () => {
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    fireEvent.click(screen.getByRole("button", { name: /^Editar$/i }));
+    await screen.findByRole("heading", { name: /Identificação do serviço/i });
+    // Identificação
+    expect(screen.getByLabelText(/^Nome\*?$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Slug\*?$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Categoria$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Descrição curta$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Descrição detalhada$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Público-alvo$/i)).toBeInTheDocument();
+    // Configuração operacional
+    expect(screen.getByLabelText(/^Unidade responsável$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Tipo de processo padrão$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Assunto padrão$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Espécie documental padrão$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Nível de sigilo padrão$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Prazo estimado/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Ordem de exibição$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Destaque no portal$/i)).toBeInTheDocument();
+    // Orientações
+    expect(screen.getByLabelText(/^Instruções ao cidadão$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Texto de confirmação$/i)).toBeInTheDocument();
+  });
+
+  it("payload de criação preserva todas as chaves esperadas pelo backend", async () => {
+    createMock.mockResolvedValue({ ...SERVICO, id: 99, nome: "Teste F", slug: "teste-f" });
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    fireEvent.click(screen.getByRole("button", { name: /Novo serviço/i }));
+    fireEvent.change(await screen.findByLabelText(/^Nome\*?$/i), { target: { value: "Teste F" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Salvar$/i }));
+    await waitFor(() => expect(createMock).toHaveBeenCalled());
+    const payload = createMock.mock.calls[0][0];
+    // Defaults preservados.
+    expect(payload).toMatchObject({
+      nome: "Teste F",
+      slug: "teste-f",
+      nivel_sigilo_padrao: "ostensivo",
+      canal_entrada_permitido: "portal",
+      destaque: false,
+      ordem_exibicao: 0,
+    });
+    // Chaves obrigatórias do contrato com backend.
+    [
+      "descricao_curta",
+      "descricao_detalhada",
+      "publico_alvo",
+      "instrucoes_cidadao",
+      "documentos_exigidos",
+      "prazo_estimado_dias",
+      "id_unidade_responsavel",
+      "id_tipo_processo_padrao",
+      "id_assunto_padrao",
+      "id_especie_documental_padrao",
+      "categoria",
+      "texto_confirmacao",
+    ].forEach((k) => expect(payload).toHaveProperty(k));
+  });
+
+  it("documentos exigidos preservam formato {nome, obrigatorio, descricao} no payload", async () => {
+    createMock.mockResolvedValue({ ...SERVICO, id: 100 });
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    fireEvent.click(screen.getByRole("button", { name: /Novo serviço/i }));
+    fireEvent.change(await screen.findByLabelText(/^Nome\*?$/i), { target: { value: "Com doc" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Adicionar$/i }));
+    const docNome = await screen.findByLabelText(/Documento 1 — nome/i);
+    fireEvent.change(docNome, { target: { value: "RG" } });
+    const docDesc = screen.getByLabelText(/Documento 1 — descrição/i);
+    fireEvent.change(docDesc, { target: { value: "Frente e verso" } });
+    const obrigCheckbox = screen.getByLabelText(/^Obrigatório$/i) as HTMLInputElement;
+    fireEvent.click(obrigCheckbox);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Salvar$/i }));
+    await waitFor(() => expect(createMock).toHaveBeenCalled());
+    const payload = createMock.mock.calls[0][0];
+    expect(payload.documentos_exigidos).toEqual([
+      { nome: "RG", obrigatorio: true, descricao: "Frente e verso" },
+    ]);
+  });
+
+  it("EmptyState aparece quando a lista de serviços está vazia", async () => {
+    listMock.mockResolvedValue([]);
+    renderPage();
+    expect(
+      await screen.findByText(/Nenhum serviço cadastrado/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Cadastre o primeiro serviço/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Cadastrar serviço/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("loading state aparece enquanto a lista carrega", async () => {
+    listMock.mockReturnValue(new Promise(() => {}));
+    renderPage();
+    expect(await screen.findByText(/Carregando serviços/i)).toBeInTheDocument();
+  });
+
+  it("contexto admin mantém 'Inativo' (não troca por 'Encerrado')", async () => {
+    listMock.mockResolvedValue([{ ...SERVICO, ativo: false }]);
+    renderPage();
+    expect(await screen.findByText(/^Inativo$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Encerrado$/i)).toBeNull();
+  });
+
+  it("prazo estimado tem microcopy de previsão (sem promessa/garantia)", async () => {
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    fireEvent.click(screen.getByRole("button", { name: /^Editar$/i }));
+    await screen.findByLabelText(/Prazo estimado/i);
+    expect(screen.getByText(/previsão/i)).toBeInTheDocument();
+    // Termo vetado no portal cidadão também não pode aparecer aqui.
+    expect(screen.queryByText(/\bgarantia\b/i)).toBeNull();
+    expect(screen.queryByText(/garantid[oa]/i)).toBeNull();
+  });
+
+  it("área de documentos vazia explica como adicionar", async () => {
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    fireEvent.click(screen.getByRole("button", { name: /Novo serviço/i }));
+    await screen.findByLabelText(/^Nome\*?$/i);
+    expect(screen.getByText(/Nenhum documento exigido/i)).toBeInTheDocument();
+    expect(screen.getByText(/Clique em/i)).toBeInTheDocument();
+  });
+});

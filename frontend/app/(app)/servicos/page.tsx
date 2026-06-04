@@ -1,7 +1,15 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, Plus, Trash2 } from "lucide-react";
+import {
+  ClipboardList,
+  FileText,
+  Inbox,
+  MessageSquareText,
+  Plus,
+  Settings2,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,9 +17,11 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
@@ -219,7 +229,12 @@ export default function ServicosPage() {
         description="Carta de Serviços do município. Cadastre os serviços que aparecem no portal do cidadão."
       />
 
-      <div className="flex items-center justify-between gap-2">
+      <div
+        role="region"
+        aria-label="Filtros do catálogo"
+        data-testid="servicos-toolbar"
+        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface-1 p-3"
+      >
         <label className="flex items-center gap-2 text-sm text-foreground-muted">
           <Checkbox
             checked={incluirInativos}
@@ -227,85 +242,99 @@ export default function ServicosPage() {
           />
           Mostrar inativos
         </label>
-        {canCreate && <Button onClick={openNew}>Novo serviço</Button>}
+        {canCreate && (
+          <Button onClick={openNew}>
+            <Plus className="mr-1 h-4 w-4" />
+            Novo serviço
+          </Button>
+        )}
       </div>
 
-      <Table>
-        <THead>
-          <TR>
-            <TH>Nome</TH>
-            <TH>Slug</TH>
-            <TH>Categoria</TH>
-            <TH>Ordem</TH>
-            <TH>Status</TH>
-            <TH className="text-right">Ações</TH>
-          </TR>
-        </THead>
-        <TBody>
-          {servicosQ.isLoading && (
+      {!servicosQ.isLoading && servicosQ.data && servicosQ.data.length === 0 ? (
+        <EmptyState
+          icon={Inbox}
+          title="Nenhum serviço cadastrado"
+          description="Cadastre o primeiro serviço para que ele apareça no portal do cidadão."
+          action={
+            canCreate ? (
+              <Button onClick={openNew}>
+                <Plus className="mr-1 h-4 w-4" />
+                Cadastrar serviço
+              </Button>
+            ) : undefined
+          }
+        />
+      ) : (
+        <Table>
+          <THead>
             <TR>
-              <TD colSpan={6} className="text-center text-muted-foreground">
-                Carregando...
-              </TD>
+              <TH>Nome</TH>
+              <TH>Slug</TH>
+              <TH>Categoria</TH>
+              <TH>Ordem</TH>
+              <TH>Status</TH>
+              <TH className="text-right">Ações</TH>
             </TR>
-          )}
-          {servicosQ.data?.length === 0 && (
-            <TR>
-              <TD colSpan={6} className="text-center text-muted-foreground">
-                Nenhum serviço cadastrado.
-              </TD>
-            </TR>
-          )}
-          {servicosQ.data?.map((s) => (
-            <TR key={s.id}>
-              <TD className="font-medium">
-                {s.nome}
-                {s.destaque && (
-                  <Badge intent="brand" className="ml-2">
-                    Destaque
+          </THead>
+          <TBody>
+            {servicosQ.isLoading && (
+              <TR>
+                <TD colSpan={6} className="text-center text-muted-foreground">
+                  Carregando serviços...
+                </TD>
+              </TR>
+            )}
+            {servicosQ.data?.map((s) => (
+              <TR key={s.id}>
+                <TD className="font-medium">
+                  {s.nome}
+                  {s.destaque && (
+                    <Badge intent="brand" className="ml-2">
+                      Destaque
+                    </Badge>
+                  )}
+                </TD>
+                <TD className="font-mono text-xs">{s.slug}</TD>
+                <TD className="text-muted-foreground">{s.categoria ?? "—"}</TD>
+                <TD className="tabular-nums">{s.ordem_exibicao}</TD>
+                <TD>
+                  <Badge intent={s.ativo ? "success" : "neutral"}>
+                    {s.ativo ? "Ativo" : "Inativo"}
                   </Badge>
-                )}
-              </TD>
-              <TD className="font-mono text-xs">{s.slug}</TD>
-              <TD className="text-muted-foreground">{s.categoria ?? "—"}</TD>
-              <TD className="tabular-nums">{s.ordem_exibicao}</TD>
-              <TD>
-                <Badge intent={s.ativo ? "success" : "neutral"}>
-                  {s.ativo ? "Ativo" : "Inativo"}
-                </Badge>
-              </TD>
-              <TD className="text-right">
-                <div className="inline-flex gap-2">
-                  {canEdit && (
-                    <Button variant="secondary" size="sm" onClick={() => openEdit(s)}>
-                      Editar
-                    </Button>
-                  )}
-                  {canEdit && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      disabled={toggleM.isPending}
-                      onClick={async () => {
-                        const ok = await confirm({
-                          title: s.ativo ? "Desativar serviço" : "Ativar serviço",
-                          message: s.ativo
-                            ? `Desativar "${s.nome}"? Ele deixa de aparecer no portal público.`
-                            : `Ativar "${s.nome}"? Ele volta a aparecer no portal público.`,
-                          confirmLabel: s.ativo ? "Desativar" : "Ativar",
-                        });
-                        if (ok) toggleM.mutate({ id: s.id, ativo: !s.ativo });
-                      }}
-                    >
-                      {s.ativo ? "Desativar" : "Ativar"}
-                    </Button>
-                  )}
-                </div>
-              </TD>
-            </TR>
-          ))}
-        </TBody>
-      </Table>
+                </TD>
+                <TD className="text-right">
+                  <div className="inline-flex gap-2">
+                    {canEdit && (
+                      <Button variant="secondary" size="sm" onClick={() => openEdit(s)}>
+                        Editar
+                      </Button>
+                    )}
+                    {canEdit && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={toggleM.isPending}
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: s.ativo ? "Desativar serviço" : "Ativar serviço",
+                            message: s.ativo
+                              ? `Desativar "${s.nome}"? Ele deixa de aparecer no portal público.`
+                              : `Ativar "${s.nome}"? Ele volta a aparecer no portal público.`,
+                            confirmLabel: s.ativo ? "Desativar" : "Ativar",
+                          });
+                          if (ok) toggleM.mutate({ id: s.id, ativo: !s.ativo });
+                        }}
+                      >
+                        {s.ativo ? "Desativar" : "Ativar"}
+                      </Button>
+                    )}
+                  </div>
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      )}
 
       <Dialog
         open={dialogOpen}
@@ -323,158 +352,227 @@ export default function ServicosPage() {
           </>
         }
       >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2">
-            <Label htmlFor="nome" required>
-              Nome
-            </Label>
-            <Input id="nome" value={form.nome} onChange={(e) => onNomeChange(e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="slug" required>
-              Slug
-            </Label>
-            <Input
-              id="slug"
-              value={form.slug}
-              onChange={(e) => {
-                setSlugTocado(true);
-                set("slug", e.target.value);
-              }}
-              className="font-mono"
-            />
-            <p className="mt-1 text-xs text-foreground-muted">
-              Minúsculas, números e hífens (3–80 caracteres).
-            </p>
-          </div>
-          <div>
-            <Label htmlFor="categoria">Categoria</Label>
-            <Input id="categoria" value={form.categoria ?? ""} onChange={(e) => set("categoria", e.target.value)} />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="desc-curta">Descrição curta</Label>
-            <Input id="desc-curta" maxLength={300} value={form.descricao_curta ?? ""} onChange={(e) => set("descricao_curta", e.target.value)} />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="desc-det">Descrição detalhada</Label>
-            <Textarea id="desc-det" rows={3} value={form.descricao_detalhada ?? ""} onChange={(e) => set("descricao_detalhada", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="publico">Público-alvo</Label>
-            <Input id="publico" value={form.publico_alvo ?? ""} onChange={(e) => set("publico_alvo", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="prazo">Prazo estimado (dias)</Label>
-            <Input
-              id="prazo"
-              type="number"
-              min={0}
-              value={form.prazo_estimado_dias ?? ""}
-              onChange={(e) => set("prazo_estimado_dias", e.target.value ? Number(e.target.value) : null)}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="instrucoes">Instruções ao cidadão</Label>
-            <Textarea id="instrucoes" rows={2} value={form.instrucoes_cidadao ?? ""} onChange={(e) => set("instrucoes_cidadao", e.target.value)} />
-          </div>
-
-          <div>
-            <Label htmlFor="unidade">Unidade responsável</Label>
-            <Select id="unidade" value={form.id_unidade_responsavel ?? ""} onChange={(e) => set("id_unidade_responsavel", e.target.value ? Number(e.target.value) : null)}>
-              <option value="">—</option>
-              {unidadesQ.data?.items.map((u) => (
-                <option key={u.id} value={u.id}>{u.unidade_trabalho}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="tipo">Tipo de processo padrão</Label>
-            <Select id="tipo" value={form.id_tipo_processo_padrao ?? ""} onChange={(e) => set("id_tipo_processo_padrao", e.target.value ? Number(e.target.value) : null)}>
-              <option value="">—</option>
-              {tiposQ.data?.map((t) => (
-                <option key={t.id} value={t.id}>{t.tipo_processo}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="assunto">Assunto padrão</Label>
-            <Select id="assunto" value={form.id_assunto_padrao ?? ""} onChange={(e) => set("id_assunto_padrao", e.target.value ? Number(e.target.value) : null)}>
-              <option value="">—</option>
-              {assuntosQ.data?.map((a) => (
-                <option key={a.id} value={a.id}>{a.assunto}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="especie">Espécie documental padrão</Label>
-            <Select id="especie" value={form.id_especie_documental_padrao ?? ""} onChange={(e) => set("id_especie_documental_padrao", e.target.value ? Number(e.target.value) : null)}>
-              <option value="">—</option>
-              {especiesQ.data?.map((e) => (
-                <option key={e.id} value={e.id}>{e.nome}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="sigilo">Nível de sigilo padrão</Label>
-            <Select id="sigilo" value={form.nivel_sigilo_padrao ?? "ostensivo"} onChange={(e) => set("nivel_sigilo_padrao", e.target.value)}>
-              {NIVEIS_SIGILO.map((n) => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="ordem">Ordem de exibição</Label>
-            <Input id="ordem" type="number" value={form.ordem_exibicao ?? 0} onChange={(e) => set("ordem_exibicao", e.target.value ? Number(e.target.value) : 0)} />
-          </div>
-          <div className="flex items-center gap-2 sm:col-span-2">
-            <Checkbox id="destaque" checked={form.destaque ?? false} onChange={(e) => set("destaque", e.target.checked)} />
-            <Label htmlFor="destaque" className="!mb-0">Destaque no portal</Label>
-          </div>
-
-          <div className="sm:col-span-2">
-            <div className="mb-1 flex items-center justify-between">
-              <Label className="!mb-0">Documentos exigidos</Label>
-              <Button type="button" variant="secondary" size="sm" onClick={addDoc}>
-                <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
-              </Button>
+        <div className="space-y-4" data-testid="servico-form">
+          <SectionCard
+            icon={FileText}
+            title="Identificação do serviço"
+            description="Como o serviço aparece no portal do cidadão (nome, categoria, descrições)."
+          >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <Label htmlFor="nome" required>
+                  Nome
+                </Label>
+                <Input id="nome" value={form.nome} onChange={(e) => onNomeChange(e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="slug" required>
+                  Slug
+                </Label>
+                <Input
+                  id="slug"
+                  value={form.slug}
+                  onChange={(e) => {
+                    setSlugTocado(true);
+                    set("slug", e.target.value);
+                  }}
+                  className="font-mono"
+                />
+                <p className="mt-1 text-xs text-foreground-muted">
+                  Identificador na URL. Minúsculas, números e hífens (3–80 caracteres).
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="categoria">Categoria</Label>
+                <Input id="categoria" value={form.categoria ?? ""} onChange={(e) => set("categoria", e.target.value)} />
+                <p className="mt-1 text-xs text-foreground-muted">
+                  Agrupa serviços relacionados no portal.
+                </p>
+              </div>
+              <div className="sm:col-span-2">
+                <Label htmlFor="desc-curta">Descrição curta</Label>
+                <Input id="desc-curta" maxLength={300} value={form.descricao_curta ?? ""} onChange={(e) => set("descricao_curta", e.target.value)} />
+                <p className="mt-1 text-xs text-foreground-muted">
+                  Resumo exibido nos cards de listagem (até 300 caracteres).
+                </p>
+              </div>
+              <div className="sm:col-span-2">
+                <Label htmlFor="desc-det">Descrição detalhada</Label>
+                <Textarea id="desc-det" rows={3} value={form.descricao_detalhada ?? ""} onChange={(e) => set("descricao_detalhada", e.target.value)} />
+              </div>
+              <div className="sm:col-span-2">
+                <Label htmlFor="publico">Público-alvo</Label>
+                <Input id="publico" value={form.publico_alvo ?? ""} onChange={(e) => set("publico_alvo", e.target.value)} />
+                <p className="mt-1 text-xs text-foreground-muted">
+                  Quem pode solicitar (ex.: pessoa física, microempreendedor).
+                </p>
+              </div>
             </div>
-            <div className="space-y-2 rounded-md border border-border p-2">
-              {(form.documentos_exigidos ?? []).length === 0 && (
-                <p className="text-xs text-foreground-muted">Nenhum documento.</p>
-              )}
-              {(form.documentos_exigidos ?? []).map((d, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <Input
-                    placeholder="Nome do documento"
-                    value={d.nome}
-                    onChange={(e) => updateDoc(i, { nome: e.target.value })}
-                    className="flex-1"
-                  />
-                  <Input
-                    placeholder="Descrição (opcional)"
-                    value={d.descricao ?? ""}
-                    onChange={(e) => updateDoc(i, { descricao: e.target.value })}
-                    className="flex-1"
-                  />
-                  <label className="flex shrink-0 items-center gap-1 text-xs">
-                    <Checkbox checked={d.obrigatorio} onChange={(e) => updateDoc(i, { obrigatorio: e.target.checked })} />
-                    Obrig.
-                  </label>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => removeDoc(i)} aria-label="Remover documento">
-                    <Trash2 className="h-4 w-4" />
+          </SectionCard>
+
+          <SectionCard
+            icon={Settings2}
+            title="Configuração operacional"
+            description="Parâmetros internos: roteamento, prazo, destaque. Não aparecem ao cidadão."
+          >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="unidade">Unidade responsável</Label>
+                <Select id="unidade" value={form.id_unidade_responsavel ?? ""} onChange={(e) => set("id_unidade_responsavel", e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">—</option>
+                  {unidadesQ.data?.items.map((u) => (
+                    <option key={u.id} value={u.id}>{u.unidade_trabalho}</option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="assunto">Assunto padrão</Label>
+                <Select id="assunto" value={form.id_assunto_padrao ?? ""} onChange={(e) => set("id_assunto_padrao", e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">—</option>
+                  {assuntosQ.data?.map((a) => (
+                    <option key={a.id} value={a.id}>{a.assunto}</option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="tipo">Tipo de processo padrão</Label>
+                <Select id="tipo" value={form.id_tipo_processo_padrao ?? ""} onChange={(e) => set("id_tipo_processo_padrao", e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">—</option>
+                  {tiposQ.data?.map((t) => (
+                    <option key={t.id} value={t.id}>{t.tipo_processo}</option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="especie">Espécie documental padrão</Label>
+                <Select id="especie" value={form.id_especie_documental_padrao ?? ""} onChange={(e) => set("id_especie_documental_padrao", e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">—</option>
+                  {especiesQ.data?.map((e) => (
+                    <option key={e.id} value={e.id}>{e.nome}</option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="sigilo">Nível de sigilo padrão</Label>
+                <Select id="sigilo" value={form.nivel_sigilo_padrao ?? "ostensivo"} onChange={(e) => set("nivel_sigilo_padrao", e.target.value)}>
+                  {NIVEIS_SIGILO.map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="prazo">Prazo estimado (dias)</Label>
+                <Input
+                  id="prazo"
+                  type="number"
+                  min={0}
+                  value={form.prazo_estimado_dias ?? ""}
+                  onChange={(e) => set("prazo_estimado_dias", e.target.value ? Number(e.target.value) : null)}
+                />
+                <p className="mt-1 text-xs text-foreground-muted">
+                  Estimativa exibida ao cidadão como previsão (não é uma promessa).
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="ordem">Ordem de exibição</Label>
+                <Input id="ordem" type="number" value={form.ordem_exibicao ?? 0} onChange={(e) => set("ordem_exibicao", e.target.value ? Number(e.target.value) : 0)} />
+                <p className="mt-1 text-xs text-foreground-muted">
+                  Menor número aparece primeiro na listagem.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 sm:col-span-2">
+                <Checkbox id="destaque" checked={form.destaque ?? false} onChange={(e) => set("destaque", e.target.checked)} />
+                <Label htmlFor="destaque" className="!mb-0">Destaque no portal</Label>
+              </div>
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            icon={MessageSquareText}
+            title="Orientações ao cidadão"
+            description="Textos e documentos solicitados que o cidadão verá ao abrir o serviço."
+          >
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="instrucoes">Instruções ao cidadão</Label>
+                <Textarea id="instrucoes" rows={3} value={form.instrucoes_cidadao ?? ""} onChange={(e) => set("instrucoes_cidadao", e.target.value)} />
+                <p className="mt-1 text-xs text-foreground-muted">
+                  Passo a passo ou observações importantes para quem vai solicitar.
+                </p>
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <div>
+                    <Label className="!mb-0">Documentos exigidos</Label>
+                    <p className="mt-0.5 text-xs text-foreground-muted">
+                      Lista mostrada ao cidadão no momento da solicitação. Marque como obrigatório o que bloqueia o envio.
+                    </p>
+                  </div>
+                  <Button type="button" variant="secondary" size="sm" onClick={addDoc}>
+                    <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
                   </Button>
                 </div>
-              ))}
-            </div>
-          </div>
+                <div className="space-y-2 rounded-md border border-border bg-surface-1 p-3" data-testid="servicos-docs-area">
+                  {(form.documentos_exigidos ?? []).length === 0 ? (
+                    <div className="flex flex-col items-center justify-center gap-1 py-4 text-center text-xs text-foreground-muted">
+                      <p>Nenhum documento exigido.</p>
+                      <p>Clique em &quot;Adicionar&quot; para listar um documento que o cidadão deve enviar.</p>
+                    </div>
+                  ) : (
+                    (form.documentos_exigidos ?? []).map((d, i) => (
+                      <div
+                        key={i}
+                        className="rounded-md border border-border bg-surface-2 p-2"
+                        data-testid="servicos-doc-item"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Input
+                            placeholder="Nome do documento"
+                            value={d.nome}
+                            onChange={(e) => updateDoc(i, { nome: e.target.value })}
+                            className="flex-1"
+                            aria-label={`Documento ${i + 1} — nome`}
+                          />
+                          <label className="flex shrink-0 items-center gap-1 text-xs">
+                            <Checkbox checked={d.obrigatorio} onChange={(e) => updateDoc(i, { obrigatorio: e.target.checked })} />
+                            Obrigatório
+                          </label>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeDoc(i)}
+                            aria-label={`Remover documento ${i + 1}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <Input
+                          placeholder="Descrição (opcional)"
+                          value={d.descricao ?? ""}
+                          onChange={(e) => updateDoc(i, { descricao: e.target.value })}
+                          className="mt-2"
+                          aria-label={`Documento ${i + 1} — descrição`}
+                        />
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
 
-          <div className="sm:col-span-2">
-            <Label htmlFor="confirmacao">Texto de confirmação</Label>
-            <Textarea id="confirmacao" rows={2} value={form.texto_confirmacao ?? ""} onChange={(e) => set("texto_confirmacao", e.target.value)} />
-          </div>
+              <div>
+                <Label htmlFor="confirmacao">Texto de confirmação</Label>
+                <Textarea id="confirmacao" rows={2} value={form.texto_confirmacao ?? ""} onChange={(e) => set("texto_confirmacao", e.target.value)} />
+                <p className="mt-1 text-xs text-foreground-muted">
+                  Mensagem exibida ao cidadão após o envio da solicitação.
+                </p>
+              </div>
+            </div>
+          </SectionCard>
 
           {err && (
-            <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground sm:col-span-2">
+            <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
               {err}
             </div>
           )}
