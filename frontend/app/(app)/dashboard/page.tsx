@@ -9,6 +9,7 @@ import {
   Clock,
   FileSpreadsheet,
   FileText,
+  Inbox,
   Layers,
   ShieldAlert,
   TimerOff,
@@ -34,7 +35,11 @@ import {
 } from "recharts";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { KpiCard } from "@/components/ui/kpi-card";
+import { SectionCard } from "@/components/ui/section-card";
 import { SkeletonKpi } from "@/components/ui/skeleton";
 import {
   dashboardApi,
@@ -118,11 +123,20 @@ export default function DashboardPage() {
     return (
       <div className="space-y-6">
         <div className="h-20 animate-pulse rounded-xl bg-surface-2/40" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <SkeletonKpi key={i} />
-          ))}
-        </div>
+        {/* FilterBar skeleton (UX-1 Fase E). */}
+        <div className="h-16 animate-pulse rounded-lg bg-surface-2/40" />
+        {/* 3 grids x 4 KpiSkeletons = 12 placeholders alinhados com as
+            3 SectionCards renderizadas no estado normal. */}
+        {Array.from({ length: 3 }).map((_, g) => (
+          <div
+            key={g}
+            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+          >
+            {Array.from({ length: 4 }).map((_, i) => (
+              <SkeletonKpi key={i} />
+            ))}
+          </div>
+        ))}
         <div className="h-64 animate-pulse rounded-lg bg-surface-2/40" />
         {/* PR 5a — skeleton do ranking por serviço */}
         <div
@@ -172,288 +186,323 @@ export default function DashboardPage() {
         icon={TrendingUp}
         title="Dashboard executivo"
         description="Visão consolidada da operação. Filtre por unidade, serviço e período; compare com o período anterior e exporte quando precisar."
-        actions={
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="w-64">
-              <div className="mb-1 text-[10px] uppercase tracking-wide text-foreground-subtle">
-                Unidade
-              </div>
-              <UnidadePicker
-                value={idUnidade}
-                onChange={setIdUnidade}
-                placeholder="Todas as unidades"
-              />
-            </div>
-            <div className="w-64">
-              <div className="mb-1 text-[10px] uppercase tracking-wide text-foreground-subtle">
-                Serviço
-              </div>
-              <select
-                value={idServico ?? ""}
-                onChange={(e) =>
-                  setIdServico(e.target.value ? Number(e.target.value) : null)
-                }
-                className="h-10 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-foreground"
-                aria-label="Filtrar por serviço"
-                data-testid="dashboard-filtro-servico"
-              >
-                <option value="">Todos os serviços</option>
-                {(servicosQ.data ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.nome}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <div className="mb-1 text-[10px] uppercase tracking-wide text-foreground-subtle">
-                Legado
-              </div>
-              <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-border bg-surface-1 px-3 text-xs text-foreground">
-                <input
-                  type="checkbox"
-                  checked={incluirLegado}
-                  onChange={(e) => setIncluirLegado(e.target.checked)}
-                  disabled={idServico !== null}
-                  data-testid="dashboard-toggle-legado"
-                  aria-label="Incluir processos legados (sem serviço)"
-                  className="h-4 w-4"
-                />
-                <span>Incluir legado</span>
-              </label>
-            </div>
-            <div>
-              <div className="mb-1 text-[10px] uppercase tracking-wide text-foreground-subtle">
-                Período
-              </div>
-              <div className="flex rounded-md border border-border bg-surface-1 p-0.5">
-                {PERIODOS.map((p) => (
-                  <button
-                    key={p.value}
-                    type="button"
-                    onClick={() => setPeriodo(p.value)}
-                    className={cn(
-                      "h-10 rounded px-3 text-xs font-medium transition-colors duration-fast",
-                      periodo === p.value
-                        ? "bg-brand text-primary-foreground shadow-sm"
-                        : "text-foreground-muted hover:bg-muted",
-                    )}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div className="mb-1 text-[10px] uppercase tracking-wide text-foreground-subtle">
-                Exportar
-              </div>
-              <div className="flex gap-1">
-                <a
-                  href={dashboardExportPdfUrl(exportParams, false)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-10 items-center gap-1.5 rounded-md border border-border-strong bg-surface-1 px-3 text-xs font-medium text-foreground transition-colors duration-fast hover:bg-muted"
-                  title="Baixar PDF"
-                >
-                  <FileText className="h-3.5 w-3.5" aria-hidden="true" />
-                  PDF
-                </a>
-                <a
-                  href={dashboardExportCsvUrl(exportParams)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-10 items-center gap-1.5 rounded-md border border-border-strong bg-surface-1 px-3 text-xs font-medium text-foreground transition-colors duration-fast hover:bg-muted"
-                  title="Baixar CSV"
-                >
-                  <FileSpreadsheet className="h-3.5 w-3.5" aria-hidden="true" />
-                  CSV
-                </a>
-              </div>
-            </div>
-          </div>
-        }
       />
 
-      {/* KPI cards (Fase 18) — preservados byte-a-byte */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard
-          label="Abertos no período"
-          value={fmtNum(d.volume.abertos_periodo)}
-          hint={`${d.volume.externos_periodo} externos · ${d.volume.sigilosos_periodo} sigilosos`}
-          icon={FileText}
-          current={d.volume.abertos_periodo}
-          previous={d.comparativo.abertos_anterior}
-        />
-        <KpiCard
-          label="Ativos agora"
-          value={fmtNum(d.volume.ativos_hoje)}
-          hint="snapshot hoje (sem comparativo)"
-          icon={TrendingUp}
-        />
-        <KpiCard
-          label="Concluídos no período"
-          value={fmtNum(d.conclusao.arquivados_periodo)}
-          hint={
-            d.conclusao.taxa_conclusao_pct !== null
-              ? `Taxa: ${fmtPct(d.conclusao.taxa_conclusao_pct)}`
-              : undefined
-          }
-          icon={CheckCircle2}
-          intent="success"
-          current={d.conclusao.arquivados_periodo}
-          previous={d.comparativo.arquivados_anterior}
-        />
-        <KpiCard
-          label="Tempo médio"
-          value={
-            d.conclusao.tempo_medio_dias !== null
-              ? `${fmtNum(d.conclusao.tempo_medio_dias, 1)}d`
-              : "—"
-          }
-          hint="abertura → conclusão"
-          icon={Clock}
-          current={d.conclusao.tempo_medio_dias}
-          previous={d.comparativo.tempo_medio_dias_anterior}
-          lowerIsBetter
-        />
-        <KpiCard
-          label="SLA pendentes"
-          value={fmtNum(d.sla.pendentes)}
-          hint="alertas não resolvidos (snapshot)"
-          icon={AlertTriangle}
-          intent={d.sla.pendentes > 0 ? "warning" : "default"}
-        />
-        <KpiCard
-          label="SLA resolvidos"
-          value={fmtNum(d.sla.resolvidos_periodo)}
-          hint="no período"
-          icon={CheckCircle2}
-          intent="success"
-          current={d.sla.resolvidos_periodo}
-          previous={d.comparativo.sla_resolvidos_anterior}
-        />
-      </div>
+      {/* UX-1 Fase E: FilterBar separada do PageHeader. Lógica, query
+          params e chamadas de API preservados byte-a-byte. */}
+      <FilterBar ariaLabel="Filtros do dashboard">
+        <FilterBar.Group label="Unidade" className="w-full sm:w-64">
+          <UnidadePicker
+            value={idUnidade}
+            onChange={setIdUnidade}
+            placeholder="Todas as unidades"
+          />
+        </FilterBar.Group>
+        <FilterBar.Group label="Serviço" className="w-full sm:w-64">
+          <select
+            value={idServico ?? ""}
+            onChange={(e) =>
+              setIdServico(e.target.value ? Number(e.target.value) : null)
+            }
+            className="h-10 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-foreground"
+            aria-label="Filtrar por serviço"
+            data-testid="dashboard-filtro-servico"
+          >
+            <option value="">Todos os serviços</option>
+            {(servicosQ.data ?? []).map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.nome}
+              </option>
+            ))}
+          </select>
+        </FilterBar.Group>
+        <FilterBar.Group label="Legado">
+          <label
+            className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-border bg-surface-1 px-3 text-xs text-foreground"
+            title="Processos sem serviço vinculado (anteriores ao Catálogo). Quando há filtro de serviço, este toggle não tem efeito."
+          >
+            <Checkbox
+              checked={incluirLegado}
+              onChange={(e) => setIncluirLegado(e.target.checked)}
+              disabled={idServico !== null}
+              data-testid="dashboard-toggle-legado"
+              aria-label="Incluir processos legados (sem serviço)"
+              className="h-4 w-4"
+            />
+            <span>Incluir legado</span>
+          </label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Período">
+          <div className="flex rounded-md border border-border bg-surface-1 p-0.5">
+            {PERIODOS.map((p) => (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => setPeriodo(p.value)}
+                className={cn(
+                  "h-10 rounded px-3 text-xs font-medium transition-colors duration-fast",
+                  periodo === p.value
+                    ? "bg-brand text-primary-foreground shadow-sm"
+                    : "text-foreground-muted hover:bg-muted",
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </FilterBar.Group>
+        <FilterBar.Actions>
+          <div>
+            <div className="mb-1 text-[10px] uppercase tracking-wide text-foreground-subtle">
+              Exportar
+            </div>
+            <div className="flex gap-1">
+              <a
+                href={dashboardExportPdfUrl(exportParams, false)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-10 items-center gap-1.5 rounded-md border border-border-strong bg-surface-1 px-3 text-xs font-medium text-foreground transition-colors duration-fast hover:bg-muted"
+                title="Baixar PDF"
+              >
+                <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+                PDF
+              </a>
+              <a
+                href={dashboardExportCsvUrl(exportParams)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-10 items-center gap-1.5 rounded-md border border-border-strong bg-surface-1 px-3 text-xs font-medium text-foreground transition-colors duration-fast hover:bg-muted"
+                title="Baixar CSV"
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5" aria-hidden="true" />
+                CSV
+              </a>
+            </div>
+          </div>
+        </FilterBar.Actions>
+      </FilterBar>
+
+      {/* UX-1 Fase E: SectionCard agrupando KPIs por tema. Tooltips
+          (via `title`) explicam termos potencialmente confusos sem
+          sobrecarregar o card visualmente. Dados e cálculos
+          preservados byte-a-byte. */}
+
+      <SectionCard
+        icon={TrendingUp}
+        title="Visão geral"
+        description="Volume, conclusão e SLA do workflow no período."
+      >
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard
+            label="Abertos no período"
+            value={fmtNum(d.volume.abertos_periodo)}
+            hint={`${d.volume.externos_periodo} externos · ${d.volume.sigilosos_periodo} sigilosos`}
+            icon={FileText}
+            current={d.volume.abertos_periodo}
+            previous={d.comparativo.abertos_anterior}
+          />
+          <KpiCard
+            label="Ativos agora"
+            value={fmtNum(d.volume.ativos_hoje)}
+            hint="snapshot hoje (sem comparativo)"
+            icon={TrendingUp}
+          />
+          <KpiCard
+            label="Concluídos no período"
+            value={fmtNum(d.conclusao.arquivados_periodo)}
+            hint={
+              d.conclusao.taxa_conclusao_pct !== null
+                ? `Taxa: ${fmtPct(d.conclusao.taxa_conclusao_pct)}`
+                : undefined
+            }
+            icon={CheckCircle2}
+            intent="success"
+            current={d.conclusao.arquivados_periodo}
+            previous={d.comparativo.arquivados_anterior}
+          />
+          <KpiCard
+            label="Tempo médio"
+            value={
+              d.conclusao.tempo_medio_dias !== null
+                ? `${fmtNum(d.conclusao.tempo_medio_dias, 1)}d`
+                : "—"
+            }
+            hint="abertura → conclusão"
+            icon={Clock}
+            current={d.conclusao.tempo_medio_dias}
+            previous={d.comparativo.tempo_medio_dias_anterior}
+            lowerIsBetter
+          />
+          <div
+            title="Alertas de SLA por etapa do workflow (PR pré-5b). Difere do prazo end-to-end por serviço, exibido na seção 'Prazos por serviço' abaixo."
+          >
+            <KpiCard
+              label="SLA pendentes"
+              value={fmtNum(d.sla.pendentes)}
+              hint="alertas de etapa não resolvidos"
+              icon={AlertTriangle}
+              intent={d.sla.pendentes > 0 ? "warning" : "default"}
+            />
+          </div>
+          <KpiCard
+            label="SLA resolvidos"
+            value={fmtNum(d.sla.resolvidos_periodo)}
+            hint="no período"
+            icon={CheckCircle2}
+            intent="success"
+            current={d.sla.resolvidos_periodo}
+            previous={d.comparativo.sla_resolvidos_anterior}
+          />
+        </div>
+      </SectionCard>
 
       {/* PR 5a — KPIs documental + complementação. PR 5a-fix: card extra
           para `sem_documentos_exigidos`, separado de `checklist_completo`. */}
-      <div
-        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
-        data-testid="dashboard-pr5a-kpis"
+      <SectionCard
+        icon={Layers}
+        title="Documentação e complementações"
+        description="Estado dos checklists obrigatórios e pedidos de complementação documental."
       >
-        <KpiCard
-          label="Checklist pendente"
-          value={fmtNum(d.documental.checklist_pendente)}
-          hint="obrigatórios não enviados"
-          icon={Layers}
-          intent={d.documental.checklist_pendente > 0 ? "warning" : "default"}
-        />
-        <KpiCard
-          label="Checklist completo"
-          value={fmtNum(d.documental.checklist_completo)}
-          hint="todos os obrigatórios enviados"
-          icon={CheckCircle2}
-          intent="success"
-        />
-        <KpiCard
-          label="Sem documentos exigidos"
-          value={fmtNum(d.documental.sem_documentos_exigidos)}
-          hint="serviço sem obrigatórios aplicáveis"
-          icon={Layers}
-        />
-        <KpiCard
-          label="Complementações abertas"
-          value={fmtNum(d.complementacao.abertas_agora)}
-          hint={`${d.complementacao.processos_com_aberta_agora} processo(s)`}
-          icon={AlertTriangle}
-          intent={d.complementacao.abertas_agora > 0 ? "warning" : "default"}
-        />
-        <KpiCard
-          label="Tempo médio de resposta"
-          value={
-            d.complementacao.tempo_medio_resposta_dias !== null
-              ? `${fmtNum(d.complementacao.tempo_medio_resposta_dias, 1)}d`
-              : "—"
-          }
-          hint="cidadão → respondida"
-          icon={Clock}
-        />
-      </div>
+        <div
+          className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+          data-testid="dashboard-pr5a-kpis"
+        >
+          <KpiCard
+            label="Checklist pendente"
+            value={fmtNum(d.documental.checklist_pendente)}
+            hint="nenhum obrigatório enviado"
+            icon={Layers}
+            intent={d.documental.checklist_pendente > 0 ? "warning" : "default"}
+          />
+          <KpiCard
+            label="Checklist completo"
+            value={fmtNum(d.documental.checklist_completo)}
+            hint="todos os obrigatórios enviados"
+            icon={CheckCircle2}
+            intent="success"
+          />
+          <div
+            title="Processos cujo serviço não exige documentos obrigatórios. Não entra no cálculo de checklist pendente/completo."
+          >
+            <KpiCard
+              label="Sem documentos exigidos"
+              value={fmtNum(d.documental.sem_documentos_exigidos)}
+              hint="serviço sem obrigatórios aplicáveis"
+              icon={Layers}
+            />
+          </div>
+          <KpiCard
+            label="Complementações abertas"
+            value={fmtNum(d.complementacao.abertas_agora)}
+            hint={`${d.complementacao.processos_com_aberta_agora} processo(s)`}
+            icon={AlertTriangle}
+            intent={d.complementacao.abertas_agora > 0 ? "warning" : "default"}
+          />
+          <div
+            title="Tempo médio entre o pedido do servidor e a resposta do cidadão, no período."
+          >
+            <KpiCard
+              label="Tempo médio de resposta"
+              value={
+                d.complementacao.tempo_medio_resposta_dias !== null
+                  ? `${fmtNum(d.complementacao.tempo_medio_resposta_dias, 1)}d`
+                  : "—"
+              }
+              hint="cidadão → respondida"
+              icon={Clock}
+            />
+          </div>
+        </div>
+      </SectionCard>
 
       {/* PR 5b — Bloco prazos end-to-end. D-NOME: NÃO é "sla" (workflow). */}
-      <div
-        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
-        data-testid="dashboard-pr5b-prazos"
+      <SectionCard
+        icon={Clock}
+        title="Prazos por serviço"
+        description="Prazo end-to-end por serviço (PR 5b). Difere do SLA de etapa do workflow."
       >
-        <KpiCard
-          label="Dentro do prazo"
-          value={fmtNum(d.prazos.dentro_do_prazo)}
-          hint="snapshot — em andamento"
-          icon={Clock}
-          intent={d.prazos.dentro_do_prazo > 0 ? "success" : "default"}
-        />
-        <KpiCard
-          label="Vencendo"
-          value={fmtNum(d.prazos.vencendo)}
-          hint="restam ≤ 20% do prazo"
-          icon={AlertTriangle}
-          intent={d.prazos.vencendo > 0 ? "warning" : "default"}
-        />
-        <KpiCard
-          label="Atrasado"
-          value={fmtNum(d.prazos.atrasado)}
-          hint="snapshot — em andamento"
-          icon={AlertCircle}
-          intent={d.prazos.atrasado > 0 ? "danger" : "default"}
-        />
-        <KpiCard
-          label="Sem prazo"
-          value={fmtNum(d.prazos.sem_prazo)}
-          hint="legado ou serviço sem prazo"
-          icon={TimerOff}
-        />
-        <KpiCard
-          label="% no prazo"
-          value={fmtPct(d.prazos.percentual_no_prazo)}
-          hint="snapshot — exclui sem prazo"
-          icon={TrendingUp}
-          intent={
-            d.prazos.percentual_no_prazo !== null &&
-            d.prazos.percentual_no_prazo >= 80
-              ? "success"
-              : d.prazos.percentual_no_prazo !== null &&
-                  d.prazos.percentual_no_prazo < 50
-                ? "danger"
-                : "default"
-          }
-        />
-        <KpiCard
-          label="Concluídos no prazo"
-          value={fmtNum(d.prazos.concluido_no_prazo_periodo)}
-          hint="arquivados no período"
-          icon={CheckCircle2}
-          intent="success"
-        />
-        <KpiCard
-          label="Concluídos com atraso"
-          value={fmtNum(d.prazos.concluido_atrasado_periodo)}
-          hint="arquivados no período"
-          icon={CheckCircle2}
-          intent={
-            d.prazos.concluido_atrasado_periodo > 0 ? "warning" : "default"
-          }
-        />
-        <KpiCard
-          label="Tempo médio de atraso"
-          value={
-            d.prazos.tempo_medio_atraso_dias !== null
-              ? `${fmtNum(d.prazos.tempo_medio_atraso_dias, 1)}d`
-              : "—"
-          }
-          hint="andamento + concluídos atrasados"
-          icon={CalendarClock}
-        />
-      </div>
+        <div
+          className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+          data-testid="dashboard-pr5b-prazos"
+        >
+          <KpiCard
+            label="Dentro do prazo"
+            value={fmtNum(d.prazos.dentro_do_prazo)}
+            hint="snapshot — em andamento"
+            icon={Clock}
+            intent={d.prazos.dentro_do_prazo > 0 ? "success" : "default"}
+          />
+          <div title="Em andamento, com folga restante ≤ 20% do prazo do serviço.">
+            <KpiCard
+              label="Vencendo"
+              value={fmtNum(d.prazos.vencendo)}
+              hint="restam ≤ 20% do prazo"
+              icon={AlertTriangle}
+              intent={d.prazos.vencendo > 0 ? "warning" : "default"}
+            />
+          </div>
+          <KpiCard
+            label="Atrasado"
+            value={fmtNum(d.prazos.atrasado)}
+            hint="snapshot — em andamento"
+            icon={AlertCircle}
+            intent={d.prazos.atrasado > 0 ? "danger" : "default"}
+          />
+          <div
+            title="Processos sem prazo cadastrado (legado ou serviço sem prazo definido). NÃO entra no cálculo de % no prazo."
+          >
+            <KpiCard
+              label="Sem prazo"
+              value={fmtNum(d.prazos.sem_prazo)}
+              hint="legado ou serviço sem prazo"
+              icon={TimerOff}
+            />
+          </div>
+          <KpiCard
+            label="% no prazo"
+            value={fmtPct(d.prazos.percentual_no_prazo)}
+            hint="snapshot — exclui sem prazo"
+            icon={TrendingUp}
+            intent={
+              d.prazos.percentual_no_prazo !== null &&
+              d.prazos.percentual_no_prazo >= 80
+                ? "success"
+                : d.prazos.percentual_no_prazo !== null &&
+                    d.prazos.percentual_no_prazo < 50
+                  ? "danger"
+                  : "default"
+            }
+          />
+          <KpiCard
+            label="Concluídos no prazo"
+            value={fmtNum(d.prazos.concluido_no_prazo_periodo)}
+            hint="arquivados no período"
+            icon={CheckCircle2}
+            intent="success"
+          />
+          <div title="Processos arquivados no período cujo arquivamento ocorreu após a data prevista do serviço.">
+            <KpiCard
+              label="Concluídos com atraso"
+              value={fmtNum(d.prazos.concluido_atrasado_periodo)}
+              hint="arquivados no período"
+              icon={CheckCircle2}
+              intent={
+                d.prazos.concluido_atrasado_periodo > 0 ? "warning" : "default"
+              }
+            />
+          </div>
+          <KpiCard
+            label="Tempo médio de atraso"
+            value={
+              d.prazos.tempo_medio_atraso_dias !== null
+                ? `${fmtNum(d.prazos.tempo_medio_atraso_dias, 1)}d`
+                : "—"
+            }
+            hint="andamento + concluídos atrasados"
+            icon={CalendarClock}
+          />
+        </div>
+      </SectionCard>
 
       {/* Série temporal */}
       <Card>
@@ -462,9 +511,11 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent>
           {d.serie_temporal.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Nenhum processo no período.
-            </p>
+            <EmptyState
+              icon={Inbox}
+              title="Sem processos no período"
+              description="Tente um período maior ou remova filtros."
+            />
           ) : (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -501,7 +552,11 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             {d.por_tipo.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Sem dados.</p>
+              <EmptyState
+                icon={Inbox}
+                title="Sem dados no período"
+                description="Tente um período maior ou remova filtros."
+              />
             ) : (
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
@@ -533,7 +588,11 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             {d.por_unidade.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Sem dados.</p>
+              <EmptyState
+                icon={Inbox}
+                title="Sem dados no período"
+                description="Tente um período maior ou remova filtros."
+              />
             ) : (
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
@@ -566,7 +625,11 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent>
           {d.por_assunto.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Sem dados.</p>
+            <EmptyState
+              icon={Inbox}
+              title="Sem dados no período"
+              description="Tente um período maior ou remova filtros."
+            />
           ) : (
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
@@ -599,9 +662,11 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent>
           {d.por_servico.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Sem dados no período.
-            </p>
+            <EmptyState
+              icon={Inbox}
+              title="Sem dados no período"
+              description="Tente um período maior ou remova filtros."
+            />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

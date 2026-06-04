@@ -371,4 +371,137 @@ describe("DashboardPage — PR 5a", () => {
       expect(csv.href).toMatch(/id_servico=100/);
     });
   });
+
+  // ===== UX-1 Fase E =====
+
+  it("UX-1: FilterBar (role=region) renderiza com todos os 5 controles", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    renderPage();
+    const bar = await screen.findByRole("region", {
+      name: /Filtros do dashboard/i,
+    });
+    expect(bar).toBeInTheDocument();
+    // Os 5 grupos seguem dentro da bar.
+    expect(bar).toContainElement(
+      screen.getByTestId("unidade-picker") as HTMLElement,
+    );
+    expect(bar).toContainElement(
+      screen.getByTestId("dashboard-filtro-servico") as HTMLElement,
+    );
+    expect(bar).toContainElement(
+      screen.getByTestId("dashboard-toggle-legado") as HTMLElement,
+    );
+    expect(bar).toHaveTextContent(/Período/i);
+    expect(bar).toHaveTextContent(/Exportar/i);
+  });
+
+  it("UX-1: SectionCard 'Visão geral' agrupa os KPIs antigos", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    renderPage();
+    expect(
+      await screen.findByRole("heading", { name: /^Visão geral$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("UX-1: SectionCard 'Documentação e complementações' agrupa o bloco PR 5a", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    renderPage();
+    expect(
+      await screen.findByRole("heading", {
+        name: /Documentação e complementações/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("UX-1: SectionCard 'Prazos por serviço' agrupa o bloco PR 5b", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    renderPage();
+    expect(
+      await screen.findByRole("heading", { name: /Prazos por serviço/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("UX-1: gráficos vazios usam EmptyState com 'Sem dados no período'", async () => {
+    kpisMock.mockResolvedValue(
+      basePayload({
+        serie_temporal: [],
+        por_tipo: [],
+        por_unidade: [],
+        por_assunto: [],
+      }),
+    );
+    renderPage();
+    // 'Sem dados no período' aparece em vários EmptyStates + ranking.
+    await screen.findByText(/Abertos no período/i);
+    const matches = screen.queryAllByText(/Sem dados no período/i);
+    // 3 gráficos (por_tipo/por_unidade/por_assunto) + ranking por_servico
+    // (vazio também, default basePayload tem itens) — usar >= 3.
+    expect(matches.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("UX-1: série temporal vazia mostra microcopy 'Sem processos no período'", async () => {
+    kpisMock.mockResolvedValue(basePayload({ serie_temporal: [] }));
+    renderPage();
+    expect(
+      await screen.findByText(/Sem processos no período/i),
+    ).toBeInTheDocument();
+  });
+
+  it("UX-1: tooltips explicativos (title) presentes em Vencendo / Sem prazo / Sem documentos exigidos", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    renderPage();
+    const prazos = await screen.findByTestId("dashboard-pr5b-prazos");
+    // Buscar via querySelector porque title fica num <div> wrapper.
+    expect(
+      prazos.querySelector('[title*="folga restante" i]'),
+    ).not.toBeNull();
+    expect(
+      prazos.querySelector('[title*="não entra no cálculo" i]'),
+    ).not.toBeNull();
+
+    const docs = await screen.findByTestId("dashboard-pr5a-kpis");
+    expect(
+      docs.querySelector('[title*="serviço não exige documentos" i]'),
+    ).not.toBeNull();
+  });
+
+  it("UX-1: 'Tempo médio de resposta' tem tooltip explicativo", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    renderPage();
+    const docs = await screen.findByTestId("dashboard-pr5a-kpis");
+    expect(
+      docs.querySelector('[title*="entre o pedido do servidor" i]'),
+    ).not.toBeNull();
+  });
+
+  it("UX-1: 'Concluídos com atraso' tem tooltip explicativo", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    renderPage();
+    const prazos = await screen.findByTestId("dashboard-pr5b-prazos");
+    expect(
+      prazos.querySelector('[title*="ocorreu após a data prevista" i]'),
+    ).not.toBeNull();
+  });
+
+  it("UX-1: tooltip 'Legado' explica o filtro de incluir_legado", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    renderPage();
+    await screen.findByText("42");
+    // Wrapper do toggle tem title com explicação cidadão-amigável.
+    const toggleLabel = screen.getByText(/Incluir legado/i).closest("label");
+    expect(toggleLabel?.getAttribute("title")).toMatch(/sem serviço vinculado/i);
+  });
+
+  it("UX-1: linguagem cidadã indevida (garantia/SLA garantido) não aparece", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    const { container } = renderPage();
+    await screen.findByText("42");
+    const text = container.textContent ?? "";
+    expect(text).not.toMatch(/garantia/i);
+    expect(text).not.toMatch(/garantido/i);
+    expect(text).not.toMatch(/prazo legal/i);
+    expect(text).not.toMatch(/deferid[oa]|indeferid[oa]/i);
+    // "SLA" segue presente legitimamente como termo técnico (workflow
+    // pré-5b). Não vetar.
+  });
 });
