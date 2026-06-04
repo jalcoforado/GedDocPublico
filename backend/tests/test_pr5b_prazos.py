@@ -190,7 +190,19 @@ async def _arquivar(engine, tenant_id: int, processo_id: int, dias_atras: int) -
                 )
             ).scalar_one()
         )
-        # Status de arquivamento (qualquer ativo).
+        # Status de arquivamento (qualquer ativo). Em dev local o seed pode
+        # estar vazio — garantimos pelo menos 1 row (tabela é global, sem tenant).
+        await s.execute(
+            text(
+                "INSERT INTO protocolos.status_arquivamento "
+                "(status_arquivamento, ativo, excluido) "
+                "SELECT 'Arquivado (PR5b test)', true, false "
+                "WHERE NOT EXISTS ("
+                "  SELECT 1 FROM protocolos.status_arquivamento "
+                "  WHERE ativo=true AND excluido=false"
+                ")"
+            )
+        )
         arq_status = int(
             (
                 await s.execute(
