@@ -7,6 +7,16 @@ type Size = "sm" | "md" | "lg" | "icon";
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
   size?: Size;
+  /**
+   * Quando `true`, NÃO renderiza um `<button>` — clona o único filho
+   * mesclando as classes e props neste. Útil pra envolver `<Link>` do
+   * Next sem reescrever as classes manualmente.
+   *
+   * Restrições: o filho deve ser um único React element que aceite
+   * `className`. `type="button"` não é propagado em modo `asChild`
+   * (não faz sentido em `<a>`).
+   */
+  asChild?: boolean;
 }
 
 const VARIANTS: Record<Variant, string> = {
@@ -29,23 +39,44 @@ const SIZES: Record<Size, string> = {
   icon: "h-11 w-11 p-0",
 };
 
+const BASE_CLASSES =
+  "inline-flex items-center justify-center rounded-md font-medium whitespace-nowrap " +
+  "transition-[background-color,box-shadow,transform,border-color] duration-fast ease-out " +
+  "active:scale-[0.98] " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background " +
+  "disabled:pointer-events-none disabled:opacity-50";
+
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = "primary", size = "md", type = "button", ...props }, ref) => (
-    <button
-      ref={ref}
-      type={type}
-      className={cn(
-        "inline-flex items-center justify-center rounded-md font-medium whitespace-nowrap",
-        "transition-[background-color,box-shadow,transform,border-color] duration-fast ease-out",
-        "active:scale-[0.98]",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-        "disabled:pointer-events-none disabled:opacity-50",
-        SIZES[size],
-        VARIANTS[variant],
-        className,
-      )}
-      {...props}
-    />
-  ),
+  (
+    {
+      className,
+      variant = "primary",
+      size = "md",
+      type = "button",
+      asChild = false,
+      children,
+      ...props
+    },
+    ref,
+  ) => {
+    const merged = cn(BASE_CLASSES, SIZES[size], VARIANTS[variant], className);
+
+    if (asChild) {
+      const child = React.Children.only(children) as React.ReactElement<{
+        className?: string;
+      }>;
+      return React.cloneElement(child, {
+        ...props,
+        // Mescla classes preservando overrides do filho.
+        className: cn(merged, child.props.className),
+      });
+    }
+
+    return (
+      <button ref={ref} type={type} className={merged} {...props}>
+        {children}
+      </button>
+    );
+  },
 );
 Button.displayName = "Button";

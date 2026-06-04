@@ -23,6 +23,7 @@ import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { SectionCard } from "@/components/ui/section-card";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { UnidadePicker } from "@/components/UnidadePicker";
@@ -43,45 +44,6 @@ type FormState = {
 };
 
 const DRAFT_KEY = "aprimora.novo-processo.draft.v1";
-
-function SectionCard({
-  step,
-  title,
-  description,
-  icon: Icon,
-  children,
-}: {
-  step: number;
-  title: string;
-  description: string;
-  icon: React.ComponentType<{ className?: string }>;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-xl border border-border bg-card shadow-xs">
-      <header className="flex items-start gap-3 border-b border-border px-5 py-4">
-        <span
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand/8 text-brand"
-          aria-hidden="true"
-        >
-          <Icon className="h-4 w-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="rounded-full bg-surface-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-foreground-muted">
-              passo {step}
-            </span>
-            <h2 className="text-sm font-semibold tracking-tight text-foreground">
-              {title}
-            </h2>
-          </div>
-          <p className="mt-0.5 text-xs text-foreground-muted">{description}</p>
-        </div>
-      </header>
-      <div className="space-y-4 p-5">{children}</div>
-    </section>
-  );
-}
 
 function ToggleCard({
   checked,
