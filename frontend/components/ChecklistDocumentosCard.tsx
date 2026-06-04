@@ -10,8 +10,15 @@ import type {
   StatusDocumental,
 } from "@/lib/api";
 
-const STATUS_LABEL: Record<StatusDocumental, string> = {
+const STATUS_LABEL_SERVIDOR: Record<StatusDocumental, string> = {
   sem_documentos_exigidos: "Sem documentos exigidos",
+  pendente: "Pendente",
+  parcial: "Parcial",
+  completo: "Completo",
+};
+
+const STATUS_LABEL_CIDADAO: Record<StatusDocumental, string> = {
+  sem_documentos_exigidos: "Sem documentos necessários",
   pendente: "Pendente",
   parcial: "Parcial",
   completo: "Completo",
@@ -32,17 +39,36 @@ interface Props {
   loading?: boolean;
   /** Citizen mode: clique em "Anexar" por item exigido. Read-only se omitido. */
   onAnexar?: (key: string, nome: string) => void;
+  /**
+   * Modo de apresentação. "servidor" (default) mantém microcopy técnica
+   * histórica. "cidadao" usa "Documentos necessários" e mensagens
+   * cuidadosas. UX-1 Fase C.
+   */
+  modo?: "servidor" | "cidadao";
 }
 
-export function ChecklistDocumentosCard({ data, loading, onAnexar }: Props) {
+export function ChecklistDocumentosCard({
+  data,
+  loading,
+  onAnexar,
+  modo = "servidor",
+}: Props) {
+  const titulo = modo === "cidadao" ? "Documentos necessários" : "Documentos exigidos";
+  const statusLabels =
+    modo === "cidadao" ? STATUS_LABEL_CIDADAO : STATUS_LABEL_SERVIDOR;
+  const mensagemVazia =
+    modo === "cidadao"
+      ? "Você não precisa anexar documentos para este serviço."
+      : "Este processo não tem documentos exigidos.";
+
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
-          <CardTitle>Documentos exigidos</CardTitle>
+          <CardTitle>{titulo}</CardTitle>
           {data && (
             <Badge intent={STATUS_INTENT[data.status_documental]}>
-              {STATUS_LABEL[data.status_documental]}
+              {statusLabels[data.status_documental]}
             </Badge>
           )}
         </div>
@@ -56,9 +82,7 @@ export function ChecklistDocumentosCard({ data, loading, onAnexar }: Props) {
         )}
 
         {data && data.status_documental === "sem_documentos_exigidos" && (
-          <p className="text-sm text-muted-foreground">
-            Este processo não tem documentos exigidos.
-          </p>
+          <p className="text-sm text-muted-foreground">{mensagemVazia}</p>
         )}
 
         {data && data.itens.length > 0 && (
@@ -87,10 +111,13 @@ export function ChecklistDocumentosCard({ data, loading, onAnexar }: Props) {
                       <span className="font-medium">
                         {item.nome}
                         {item.obrigatorio && (
-                          <span className="text-danger" aria-label="obrigatório">
-                            {" "}
+                          <abbr
+                            title="Documento obrigatório"
+                            className="ml-0.5 text-danger no-underline"
+                            aria-label="obrigatório"
+                          >
                             *
-                          </span>
+                          </abbr>
                         )}
                       </span>
                       {item.enviado ? (

@@ -2,13 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertCircle,
-  AlertTriangle,
   ArrowLeft,
   CalendarClock,
-  CheckCircle2,
   Clock,
   FileText,
+  History,
+  Info,
   Paperclip,
 } from "lucide-react";
 import Link from "next/link";
@@ -18,13 +17,17 @@ import { useState } from "react";
 import { ChecklistDocumentosCard } from "@/components/ChecklistDocumentosCard";
 import { ComplementacaoAbertaCard } from "@/components/ComplementacaoAbertaCard";
 import { ComplementacoesHistoricoLista } from "@/components/ComplementacoesHistoricoLista";
+import { ProximosPassosCard } from "@/components/ProximosPassosCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Label } from "@/components/ui/label";
+import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
+import { prazoBadge, statusProcessoBadge } from "@/lib/badges";
 import { useRequireCidadao } from "@/lib/cidadao-auth";
 
 function fmt(s: string | null | undefined) {
@@ -42,39 +45,15 @@ function fmtDate(s: string | null | undefined) {
   return new Date(s).toLocaleDateString("pt-BR");
 }
 
-/** PR 5b — badge cidadão: omite `sem_previsao` e `concluido` (redundantes
- * com o badge de "Em andamento"/"Encerrado" do `ativo`).
- *
- * Linguagem deliberadamente cuidadosa — sem "garantia"/"SLA"/"vencido".
- */
-function PrazoCidadaoBadge({
-  prazo,
-}: {
-  prazo: import("@/lib/api").PrazoCidadao;
-}) {
-  switch (prazo.status) {
-    case "sem_previsao":
-    case "concluido":
-      return null;
-    case "dentro_da_previsao":
-      return (
-        <Badge intent="info" icon={Clock}>
-          Dentro da previsão
-        </Badge>
-      );
-    case "proximo_do_prazo":
-      return (
-        <Badge intent="warning" icon={AlertTriangle}>
-          Próximo do prazo
-        </Badge>
-      );
-    case "fora_da_previsao":
-      return (
-        <Badge intent="danger" icon={AlertCircle}>
-          Fora da previsão
-        </Badge>
-      );
-  }
+function DetailSkeleton() {
+  return (
+    <div className="space-y-4">
+      <Skeleton className="h-28 rounded-xl" />
+      <Skeleton className="h-20 rounded-xl" />
+      <Skeleton className="h-48 rounded-xl" />
+      <Skeleton className="h-32 rounded-xl" />
+    </div>
+  );
 }
 
 export default function CidadaoProcessoDetailPage() {
@@ -132,19 +111,20 @@ export default function CidadaoProcessoDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (loading) return <p className="text-sm text-muted-foreground">Carregando...</p>;
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <SkeletonLine width="20%" className="h-4" />
+        <DetailSkeleton />
+      </div>
+    );
+  }
   if (!cidadao) return null;
 
   if (!idValido) {
     return (
       <div className="space-y-3">
-        <Link
-          href="/cidadao/processos"
-          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Voltar
-        </Link>
+        <BackLink />
         <div
           role="alert"
           className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
@@ -155,77 +135,87 @@ export default function CidadaoProcessoDetailPage() {
     );
   }
 
-  if (q.isLoading)
-    return <p className="text-sm text-muted-foreground">Carregando processo...</p>;
+  if (q.isLoading) {
+    return (
+      <div className="space-y-3">
+        <BackLink />
+        <DetailSkeleton />
+      </div>
+    );
+  }
   if (q.error || !q.data) {
     return (
       <div className="space-y-3">
-        <Link
-          href="/cidadao/processos"
-          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Voltar
-        </Link>
-        <div
-          role="alert"
-          className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
-        >
-          {q.error instanceof Error ? q.error.message : "Erro ao carregar"}
-        </div>
+        <BackLink />
+        <EmptyState
+          icon={Info}
+          title="Não foi possível abrir esta solicitação"
+          description={
+            q.error instanceof Error
+              ? q.error.message
+              : "Tente novamente em instantes ou volte para suas solicitações."
+          }
+          action={
+            <Button asChild size="sm">
+              <Link href="/cidadao/processos">Voltar para Meus processos</Link>
+            </Button>
+          }
+        />
       </div>
     );
   }
 
   const p = q.data;
   const identifier = p.nup ?? p.numero_processo;
+  const statusBadge = statusProcessoBadge(p, "cidadao");
+  const StatusIcon = statusBadge.icon;
+  const prazoBadgeSpec = prazoBadge(p.prazo, "cidadao");
+  const PrazoIcon = prazoBadgeSpec?.icon;
+  const localAtual = p.local_atual ?? "Aguardando triagem";
 
   return (
     <div className="space-y-4">
-      <Link
-        href="/cidadao/processos"
-        className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Voltar
-      </Link>
+      <BackLink />
 
+      {/* Card de identidade da solicitação */}
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <CardTitle className="font-mono">{identifier}</CardTitle>
+            <CardTitle className="font-mono">
+              {identifier}
+              {p.nup && p.numero_processo && p.nup !== p.numero_processo && (
+                <span
+                  className="ml-1 align-middle text-xs text-foreground-subtle"
+                  title={`Número interno: ${p.numero_processo}`}
+                  aria-label={`Número interno ${p.numero_processo}`}
+                >
+                  ⓘ
+                </span>
+              )}
+            </CardTitle>
             <span className="text-sm text-muted-foreground tabular-nums">
-              aberto em {fmt(p.data_hora_abertura)}
+              aberta em {fmt(p.data_hora_abertura)}
             </span>
           </div>
-          {p.nup && p.numero_processo && p.nup !== p.numero_processo && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Número interno:{" "}
-              <span className="font-mono">{p.numero_processo}</span>
-            </p>
-          )}
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            {p.ativo ? (
-              <Badge intent="success" icon={Clock}>
-                Em andamento
-              </Badge>
-            ) : (
-              <Badge intent="neutral" icon={CheckCircle2}>
-                Encerrado
-              </Badge>
-            )}
+            <Badge intent={statusBadge.intent} icon={StatusIcon}>
+              {statusBadge.label}
+            </Badge>
             {p.especie_nome && (
               <Badge intent="neutral">{p.especie_nome}</Badge>
             )}
-            {/* PR 5b — situação do prazo (Portal do Cidadão). */}
-            <PrazoCidadaoBadge prazo={p.prazo} />
+            {prazoBadgeSpec && PrazoIcon && (
+              <Badge intent={prazoBadgeSpec.intent} icon={PrazoIcon}>
+                {prazoBadgeSpec.label}
+              </Badge>
+            )}
           </div>
         </CardHeader>
         <CardContent>
           <dl className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
             <div>
               <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                Assunto
+                Sobre o quê
               </dt>
               <dd>{p.assunto ?? "—"}</dd>
             </div>
@@ -237,17 +227,16 @@ export default function CidadaoProcessoDetailPage() {
             </div>
             <div>
               <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                Local atual
+                Onde está agora
               </dt>
-              <dd>{p.local_atual ?? "—"}</dd>
+              <dd>{localAtual}</dd>
             </div>
-            {/* PR 5b — prazo estimado, linguagem cuidadosa. */}
             {p.prazo.prazo_estimado_em && (
               <div>
                 <dt className="text-xs uppercase tracking-wide text-muted-foreground">
                   <span className="inline-flex items-center gap-1">
                     <CalendarClock className="h-3 w-3" aria-hidden="true" />
-                    Prazo estimado de atendimento
+                    Previsão de atendimento
                   </span>
                 </dt>
                 <dd className="tabular-nums">
@@ -273,7 +262,7 @@ export default function CidadaoProcessoDetailPage() {
             {p.corpo && (
               <div className="md:col-span-2">
                 <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Descrição
+                  Sua solicitação
                 </dt>
                 <dd className="whitespace-pre-wrap">{p.corpo}</dd>
               </div>
@@ -290,6 +279,16 @@ export default function CidadaoProcessoDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Próximos passos — sempre logo após a visão geral, para o cidadão
+          ver o que fazer agora sem precisar rolar. Calculado no frontend
+          a partir dos dados já presentes na tela. */}
+      <ProximosPassosCard
+        processo={p}
+        checklist={checklistQ.data}
+        complementacaoAberta={checklistQ.data?.complementacao_aberta}
+      />
+
+      {/* Complementação aberta (se houver) */}
       {checklistQ.data?.complementacao_aberta && (
         <ComplementacaoAbertaCard
           data={checklistQ.data.complementacao_aberta}
@@ -307,9 +306,11 @@ export default function CidadaoProcessoDetailPage() {
         />
       )}
 
+      {/* Checklist documental — modo cidadão (microcopy "Documentos necessários") */}
       <ChecklistDocumentosCard
         data={checklistQ.data}
         loading={checklistQ.isLoading}
+        modo="cidadao"
         onAnexar={(key, nome) => {
           setUploadKey(key);
           setUploadNome(nome);
@@ -317,22 +318,30 @@ export default function CidadaoProcessoDetailPage() {
         }}
       />
 
+      {/* Histórico de complementações anteriores (se houver) */}
       {complementacoesQ.data && (
         <ComplementacoesHistoricoLista
           data={complementacoesQ.data.filter((c) => c.status !== "aberta")}
+          title="Complementações anteriores"
         />
       )}
 
+      {/* Anexos do processo */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Paperclip className="h-4 w-4" />
-            Anexos ({p.anexos.length})
+            <Paperclip className="h-4 w-4" aria-hidden="true" />
+            Anexos{" "}
+            <span className="text-foreground-muted">({p.anexos.length})</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
           {p.anexos.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum anexo público.</p>
+            <EmptyState
+              icon={Paperclip}
+              title="Sem anexos públicos"
+              description="Quando o servidor anexar documentos a esta solicitação, eles aparecerão aqui."
+            />
           ) : (
             <ul className="space-y-2">
               {p.anexos.map((a) => (
@@ -340,7 +349,10 @@ export default function CidadaoProcessoDetailPage() {
                   key={a.id}
                   className="flex items-center gap-3 rounded-md border border-border bg-muted/20 px-3 py-2"
                 >
-                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <FileText
+                    className="h-4 w-4 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm">
                       {a.descricao ?? a.e_doc ?? `Anexo ${a.id}`}
@@ -358,15 +370,24 @@ export default function CidadaoProcessoDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Andamento da solicitação (renomeado de "Histórico") */}
       <Card>
         <CardHeader>
-          <CardTitle>Histórico ({p.movimentacoes.length})</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <History className="h-4 w-4" aria-hidden="true" />
+            Andamento da solicitação{" "}
+            <span className="text-foreground-muted">
+              ({p.movimentacoes.length})
+            </span>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {p.movimentacoes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Nenhuma movimentação ainda.
-            </p>
+            <EmptyState
+              icon={Clock}
+              title="Sem movimentações ainda"
+              description="Assim que o servidor agir nesta solicitação, o andamento aparecerá aqui."
+            />
           ) : (
             <ol className="space-y-3">
               {p.movimentacoes.map((m) => (
@@ -390,6 +411,7 @@ export default function CidadaoProcessoDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Dialog de upload — body/endpoint preservados */}
       <Dialog
         open={uploadKey !== null}
         onClose={() => {
@@ -416,14 +438,14 @@ export default function CidadaoProcessoDetailPage() {
               onClick={() => uploadM.mutate()}
               disabled={!file || uploadM.isPending}
             >
-              {uploadM.isPending ? "Enviando..." : "Enviar"}
+              {uploadM.isPending ? "Enviando…" : "Enviar"}
             </Button>
           </>
         }
       >
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Selecione o arquivo correspondente a <strong>{uploadNome}</strong>.
+            Escolha o arquivo correspondente a <strong>{uploadNome}</strong>.
           </p>
           <div>
             <Label htmlFor="checklist-file">Arquivo</Label>
@@ -433,9 +455,30 @@ export default function CidadaoProcessoDetailPage() {
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               className="block w-full text-sm"
             />
+            {file && (
+              <p className="mt-1 text-xs text-foreground-muted">
+                Selecionado: <strong>{file.name}</strong>
+              </p>
+            )}
           </div>
         </div>
       </Dialog>
     </div>
+  );
+}
+
+function BackLink() {
+  return (
+    <Link
+      href="/cidadao/processos"
+      className="
+        inline-flex items-center gap-1 rounded text-sm text-primary
+        hover:underline focus-visible:outline-none focus-visible:ring-2
+        focus-visible:ring-ring
+      "
+    >
+      <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+      Voltar para Meus processos
+    </Link>
   );
 }
