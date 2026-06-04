@@ -1,12 +1,22 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Building2, Clock, FileText, Loader2, Star } from "lucide-react";
+import { Building2, Clock, FileText, Search, Star } from "lucide-react";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
 import { portalApi, type ServicoPublico } from "@/lib/api";
+
+function fmtPrazo(dias: number): string {
+  return dias === 1 ? "até 1 dia" : `até ${dias} dias`;
+}
+
+function temAlgumObrigatorio(s: ServicoPublico): boolean {
+  return (s.documentos_exigidos ?? []).some((d) => d.obrigatorio);
+}
 
 export default function ServicosPublicosPage() {
   const servicosQ = useQuery({
@@ -19,35 +29,62 @@ export default function ServicosPublicosPage() {
       <div>
         <h1 className="text-2xl font-bold text-primary">Carta de Serviços</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Serviços públicos oferecidos pela prefeitura.
+          Conheça os serviços públicos disponíveis e solicite o que precisar.
         </p>
       </div>
 
       {servicosQ.isLoading && (
-        <p className="text-sm text-muted-foreground">
-          <Loader2 className="mr-1 inline h-4 w-4 animate-spin" />
-          Carregando serviços…
-        </p>
+        <div
+          className="grid grid-cols-1 gap-4 sm:grid-cols-2"
+          data-testid="servicos-loading"
+        >
+          {Array.from({ length: 4 }).map((_, i) => (
+            <ServicoCardSkeleton key={i} />
+          ))}
+        </div>
       )}
 
       {servicosQ.data?.length === 0 && (
-        <p className="rounded-lg border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
-          Nenhum serviço disponível no momento.
-        </p>
+        <EmptyState
+          icon={Search}
+          title="Nenhum serviço disponível no momento"
+          description="A prefeitura ainda não publicou serviços para solicitação online. Tente novamente em breve."
+        />
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {servicosQ.data?.map((s) => (
-          <ServicoCard key={s.slug} servico={s} />
-        ))}
-      </div>
+      {servicosQ.data && servicosQ.data.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {servicosQ.data.map((s) => (
+            <ServicoCard key={s.slug} servico={s} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ServicoCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 shadow-xs">
+      <SkeletonLine width="60%" className="h-5" />
+      <SkeletonLine width="35%" className="mt-2 h-3" />
+      <SkeletonLine width="80%" className="mt-3 h-3" />
+      <SkeletonLine width="50%" className="mt-1.5 h-3" />
+      <Skeleton className="mt-4 h-9 w-32" />
     </div>
   );
 }
 
 function ServicoCard({ servico: s }: { servico: ServicoPublico }) {
+  const algumObrigatorio = temAlgumObrigatorio(s);
   return (
-    <article className="flex flex-col rounded-xl border border-border bg-card p-4 shadow-xs">
+    <article
+      className="
+        flex flex-col rounded-xl border border-border bg-card p-4 shadow-xs
+        transition-all duration-fast
+        hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md
+      "
+    >
       <div className="flex items-start justify-between gap-2">
         <h2 className="text-base font-semibold text-foreground">{s.nome}</h2>
         {s.destaque && (
@@ -71,7 +108,7 @@ function ServicoCard({ servico: s }: { servico: ServicoPublico }) {
         {s.prazo_estimado_dias != null && (
           <div className="flex items-center gap-2 text-foreground-muted">
             <Clock className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <span>Prazo estimado: {s.prazo_estimado_dias} dia(s)</span>
+            <span>Prazo estimado: {fmtPrazo(s.prazo_estimado_dias)}</span>
           </div>
         )}
         {s.unidade_responsavel && (
@@ -86,32 +123,46 @@ function ServicoCard({ servico: s }: { servico: ServicoPublico }) {
         <div className="mt-3">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
             <FileText className="h-3.5 w-3.5" aria-hidden="true" />
-            Documentos exigidos
+            Documentos necessários
           </div>
           <ul className="mt-1 list-inside list-disc text-sm text-foreground-muted">
             {s.documentos_exigidos.map((d, i) => (
               <li key={i}>
                 {d.nome}
-                {d.obrigatorio && <span className="text-danger"> *</span>}
+                {d.obrigatorio && (
+                  <abbr
+                    title="Documento obrigatório"
+                    className="ml-0.5 text-danger no-underline"
+                  >
+                    *
+                  </abbr>
+                )}
                 {d.descricao && (
                   <span className="text-foreground-subtle"> — {d.descricao}</span>
                 )}
               </li>
             ))}
           </ul>
+          {algumObrigatorio && (
+            <p className="mt-1 text-[10px] text-foreground-subtle">
+              <span className="text-danger">*</span> obrigatório
+            </p>
+          )}
         </div>
       )}
 
       <div className="mt-4 pt-1">
         {s.solicitar_habilitado ? (
-          <Link
-            href={`/cidadao/servicos/${s.slug}`}
-            className="inline-flex h-9 items-center justify-center rounded-md bg-brand px-3 text-xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-brand-light"
-          >
-            Solicitar serviço
-          </Link>
+          <Button asChild size="sm" className="w-full sm:w-auto">
+            <Link href={`/cidadao/servicos/${s.slug}`}>Solicitar serviço</Link>
+          </Button>
         ) : (
-          <Button variant="secondary" size="sm" disabled title="Solicitação indisponível">
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled
+            title="O atendimento online deste serviço está pausado pela prefeitura."
+          >
             Solicitação indisponível
           </Button>
         )}

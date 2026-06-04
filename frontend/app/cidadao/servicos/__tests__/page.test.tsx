@@ -65,6 +65,102 @@ describe("Portal público — Carta de Serviços", () => {
   it("mostra vazio quando não há serviços", async () => {
     servicosMock.mockResolvedValue([]);
     renderPage();
-    expect(await screen.findByText(/Nenhum serviço disponível/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Nenhum serviço disponível no momento/i),
+    ).toBeInTheDocument();
+    // EmptyState — confirma microcopy explicativa.
+    expect(
+      screen.getByText(/A prefeitura ainda não publicou serviços/i),
+    ).toBeInTheDocument();
+  });
+
+  // ===== UX-1 Fase B =====
+
+  it("UX-1: enquanto carrega, mostra skeletons (não <p>Carregando…</p>)", () => {
+    // Promise pendurada — nunca resolve.
+    servicosMock.mockReturnValue(new Promise(() => {}));
+    renderPage();
+    expect(screen.queryByText(/Carregando/i)).toBeNull();
+    expect(screen.getByTestId("servicos-loading")).toBeInTheDocument();
+  });
+
+  it("UX-1: card exibe prazo em formato 'até N dias' (plural)", async () => {
+    servicosMock.mockResolvedValue([servico({ prazo_estimado_dias: 30 })]);
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    expect(screen.getByText(/Prazo estimado: até 30 dias/i)).toBeInTheDocument();
+  });
+
+  it("UX-1: card exibe prazo singular 'até 1 dia'", async () => {
+    servicosMock.mockResolvedValue([servico({ prazo_estimado_dias: 1 })]);
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    expect(screen.getByText(/Prazo estimado: até 1 dia(?!s)/i)).toBeInTheDocument();
+  });
+
+  it("UX-1: card exibe legenda '* obrigatório' quando há doc obrigatório", async () => {
+    servicosMock.mockResolvedValue([
+      servico({
+        documentos_exigidos: [{ nome: "RG", obrigatorio: true, descricao: null }],
+      }),
+    ]);
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    expect(screen.getByText(/obrigatório$/i)).toBeInTheDocument();
+    // <abbr title="Documento obrigatório">
+    expect(
+      screen.getByTitle(/Documento obrigatório/i),
+    ).toBeInTheDocument();
+  });
+
+  it("UX-1: card NÃO mostra legenda quando todos docs são opcionais", async () => {
+    servicosMock.mockResolvedValue([
+      servico({
+        documentos_exigidos: [{ nome: "RG", obrigatorio: false, descricao: null }],
+      }),
+    ]);
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    expect(screen.queryByText(/^\* obrigatório$/i)).toBeNull();
+  });
+
+  it("UX-1: usa 'Documentos necessários' (não 'Documentos exigidos')", async () => {
+    servicosMock.mockResolvedValue([servico()]);
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    expect(screen.getByText("Documentos necessários")).toBeInTheDocument();
+    expect(screen.queryByText("Documentos exigidos")).toBeNull();
+  });
+
+  it("UX-1: botão Solicitar é renderizado como link (Button asChild)", async () => {
+    servicosMock.mockResolvedValue([servico({ solicitar_habilitado: true })]);
+    renderPage();
+    const link = await screen.findByRole("link", { name: /Solicitar serviço/i });
+    expect(link.tagName).toBe("A");
+    expect(link).toHaveAttribute("href", "/cidadao/servicos/certidao-iptu");
+    // Classes do <Button> migraram pro <a>.
+    expect(link.className).toContain("inline-flex");
+  });
+
+  it("UX-1: botão indisponível tem título explicativo (não jurídico)", async () => {
+    servicosMock.mockResolvedValue([servico({ solicitar_habilitado: false })]);
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    const btn = screen.getByRole("button", { name: /Solicitação indisponível/i });
+    expect(btn).toHaveAttribute(
+      "title",
+      expect.stringMatching(/pausado pela prefeitura/i),
+    );
+  });
+
+  it("UX-1: nenhum render contém termos vetados (SLA, garantia, deferido)", async () => {
+    servicosMock.mockResolvedValue([servico()]);
+    const { container } = renderPage();
+    await screen.findByText("Certidão de IPTU");
+    const text = container.textContent ?? "";
+    expect(text).not.toMatch(/\bSLA\b/i);
+    expect(text).not.toMatch(/garantia|garantido/i);
+    expect(text).not.toMatch(/prazo legal/i);
+    expect(text).not.toMatch(/deferid[oa]|indeferid[oa]/i);
   });
 });
