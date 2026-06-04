@@ -2,15 +2,14 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertCircle,
-  AlertTriangle,
-  CheckCircle2,
   Clock,
   Eye,
   FileDown,
   FileText,
+  Hourglass,
+  Inbox,
   Lock,
-  Pause,
+  Printer,
   Tags,
 } from "lucide-react";
 import Link from "next/link";
@@ -30,6 +29,7 @@ import { AcoesProcesso } from "@/components/AcoesProcesso";
 import { AnexosProcesso } from "@/components/AnexosProcesso";
 import { CancelarComplementacaoDialog } from "@/components/CancelarComplementacaoDialog";
 import { ChecklistDocumentosCard } from "@/components/ChecklistDocumentosCard";
+import { ClassificarSigiloDialog } from "@/components/ClassificarSigiloDialog";
 import { ComplementacaoAbertaCard } from "@/components/ComplementacaoAbertaCard";
 import { ComplementacoesHistoricoLista } from "@/components/ComplementacoesHistoricoLista";
 import { SolicitarComplementacaoDialog } from "@/components/SolicitarComplementacaoDialog";
@@ -39,13 +39,15 @@ import { AssinaturasProcesso } from "@/components/AssinaturasProcesso";
 import { ProcessoTrail } from "@/components/ProcessoTrail";
 import { ProcessoWorkflowPanel } from "@/components/ProcessoWorkflowPanel";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
-import { PageHeader } from "@/components/ui/page-header";
-import { RichTextView } from "@/components/ui/rich-text-editor";
+import { ActionsMenu } from "@/components/ui/actions-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { RichTextView } from "@/components/ui/rich-text-editor";
+import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
-import { useAuth } from "@/lib/auth";
 import {
   api,
   comprovanteUrl,
@@ -56,7 +58,8 @@ import {
   NIVEL_SIGILO_LABEL,
   type MovimentacaoItem,
 } from "@/lib/api";
-import { ClassificarSigiloDialog } from "@/components/ClassificarSigiloDialog";
+import { prazoBadge, statusProcessoBadge } from "@/lib/badges";
+import { useAuth } from "@/lib/auth";
 
 function fmtDateTime(s: string | null | undefined) {
   if (!s) return "—";
@@ -81,44 +84,17 @@ const ACAO_INTENT: Record<string, "info" | "warning" | "success" | "neutral" | "
   CANCELAMENTO: "danger",
 };
 
-// PR 5b — render do badge de prazo. Retorna null em sem_prazo.
+// PR 5b + UX-1 Fase D — render do badge de prazo via helper de lib/badges.
+// Mantém exatamente as labels antigas (incl. contagem "N d." no servidor).
 function PrazoBadge({ prazo }: { prazo: import("@/lib/api").PrazoInfo }) {
-  switch (prazo.status) {
-    case "sem_prazo":
-      return null;
-    case "dentro_do_prazo":
-      return (
-        <Badge intent="success" icon={Clock}>
-          Dentro do prazo
-          {prazo.dias_restantes !== null && ` (${prazo.dias_restantes} d.)`}
-        </Badge>
-      );
-    case "vencendo":
-      return (
-        <Badge intent="warning" icon={AlertTriangle}>
-          Vencendo
-          {prazo.dias_restantes !== null && ` (${prazo.dias_restantes} d.)`}
-        </Badge>
-      );
-    case "atrasado":
-      return (
-        <Badge intent="danger" icon={AlertCircle}>
-          Atrasado em {prazo.dias_atraso} d.
-        </Badge>
-      );
-    case "concluido_no_prazo":
-      return (
-        <Badge intent="success" icon={CheckCircle2}>
-          Concluído no prazo
-        </Badge>
-      );
-    case "concluido_atrasado":
-      return (
-        <Badge intent="warning" icon={CheckCircle2}>
-          Concluído com atraso
-        </Badge>
-      );
-  }
+  const spec = prazoBadge(prazo, "servidor");
+  if (!spec) return null;
+  const Icon = spec.icon;
+  return (
+    <Badge intent={spec.intent} icon={Icon}>
+      {spec.label}
+    </Badge>
+  );
 }
 
 interface ViewerState {
@@ -316,20 +292,42 @@ export default function ProcessoDetailPage() {
   });
 
   if (q.isLoading) {
-    return <div className="text-muted-foreground">Carregando processo...</div>;
+    return (
+      <div className="space-y-6">
+        <SkeletonLine width="40%" className="h-7" />
+        <SkeletonLine width="25%" className="h-3" />
+        <Skeleton className="h-11 w-full rounded-md" />
+        <Skeleton className="h-64 rounded-xl" />
+        <Skeleton className="h-32 rounded-xl" />
+      </div>
+    );
   }
   if (q.error || !q.data) {
     return (
       <div className="space-y-4">
-        <Link href="/processos" className="text-sm text-primary hover:underline">
+        <Link
+          href="/processos"
+          className="
+            inline-flex items-center gap-1 text-sm text-primary hover:underline
+            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded
+          "
+        >
           ← Voltar para lista
         </Link>
-        <div
-          role="alert"
-          className="rounded-md bg-danger-soft px-4 py-3 text-sm text-danger-soft-foreground"
-        >
-          {q.error instanceof Error ? q.error.message : "Erro ao carregar processo"}
-        </div>
+        <EmptyState
+          icon={Inbox}
+          title="Não foi possível carregar este processo"
+          description={
+            q.error instanceof Error
+              ? q.error.message
+              : "Tente novamente em instantes ou volte para a lista."
+          }
+          action={
+            <Button asChild size="sm">
+              <Link href="/processos">Voltar para lista</Link>
+            </Button>
+          }
+        />
       </div>
     );
   }
@@ -364,16 +362,20 @@ export default function ProcessoDetailPage() {
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {/* Bloco de badges (status macro + sigilo + externo + prazo).
+                D-LINGUAGEM-ENCERRADO: helper retorna "Em tramitacao" /
+                "Encerrado" no modo servidor — alinha com contexto cidadao
+                e evita ambiguidade do antigo "Inativo". */}
             <div className="flex flex-wrap gap-1">
-              {p.ativo ? (
-                <Badge intent="success" icon={CheckCircle2}>
-                  Ativo
-                </Badge>
-              ) : (
-                <Badge intent="neutral" icon={Pause}>
-                  Inativo
-                </Badge>
-              )}
+              {(() => {
+                const s = statusProcessoBadge(p, "servidor");
+                const StatusIcon = s.icon;
+                return (
+                  <Badge intent={s.intent} icon={StatusIcon}>
+                    {s.label}
+                  </Badge>
+                );
+              })()}
               {!p.publico && (
                 <Badge intent="warning" icon={Lock}>
                   {NIVEL_SIGILO_LABEL[p.nivel_sigilo]}
@@ -387,52 +389,11 @@ export default function ProcessoDetailPage() {
               {/* PR 5b — badge de prazo (null em sem_prazo). */}
               <PrazoBadge prazo={p.prazo} />
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  setViewer({
-                    title: `Capa — ${p.numero_processo}`,
-                    src: processoCapaUrl(p.id),
-                    downloadUrl: processoCapaUrl(p.id, false),
-                  })
-                }
-                title="Ver capa"
-              >
-                <FileText className="h-4 w-4" aria-hidden="true" />
-                Capa
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  setViewer({
-                    title: `Etiqueta — ${p.numero_processo}`,
-                    src: etiquetaUnicaUrl(p.id),
-                    downloadUrl: etiquetaUnicaUrl(p.id, false),
-                  })
-                }
-                title="Ver etiqueta"
-              >
-                <Tags className="h-4 w-4" aria-hidden="true" />
-                Etiqueta
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  setViewer({
-                    title: `Etiquetas (dupla) — ${p.numero_processo}`,
-                    src: etiquetaDuplaUrl(p.id),
-                    downloadUrl: etiquetaDuplaUrl(p.id, false),
-                  })
-                }
-                title="Etiqueta dupla"
-              >
-                <Tags className="h-4 w-4" aria-hidden="true" />
-                Dupla
-              </Button>
+            {/* Acoes — D-PRINT-MENU: impressoes/relatorios agrupadas
+                num ActionsMenu "Imprimir". URLs/handlers e permissoes
+                preservados byte-a-byte. PDF completo segue visivel como
+                primario; ClassificarSigilo segue como dialog separado. */}
+            <div className="flex flex-wrap items-center gap-1.5">
               <Button
                 size="sm"
                 onClick={() =>
@@ -445,18 +406,56 @@ export default function ProcessoDetailPage() {
                 title="PDF do processo completo"
               >
                 <FileText className="h-4 w-4" aria-hidden="true" />
-                Completo
+                PDF completo
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => gerarBg.mutate()}
-                disabled={gerarBg.isPending}
-                title="Gera o PDF em background e abre a fila de jobs"
-              >
-                {gerarBg.isPending ? "Enfileirando..." : "Em fila"}
-              </Button>
-              <ClassificarSigiloDialog processo={p} onClassified={() => q.refetch()} />
+              <ActionsMenu
+                label="Imprimir"
+                icon={Printer}
+                items={[
+                  {
+                    label: "Capa",
+                    icon: FileText,
+                    onClick: () =>
+                      setViewer({
+                        title: `Capa — ${p.numero_processo}`,
+                        src: processoCapaUrl(p.id),
+                        downloadUrl: processoCapaUrl(p.id, false),
+                      }),
+                  },
+                  {
+                    label: "Etiqueta",
+                    icon: Tags,
+                    onClick: () =>
+                      setViewer({
+                        title: `Etiqueta — ${p.numero_processo}`,
+                        src: etiquetaUnicaUrl(p.id),
+                        downloadUrl: etiquetaUnicaUrl(p.id, false),
+                      }),
+                  },
+                  {
+                    label: "Etiqueta dupla",
+                    icon: Tags,
+                    onClick: () =>
+                      setViewer({
+                        title: `Etiquetas (dupla) — ${p.numero_processo}`,
+                        src: etiquetaDuplaUrl(p.id),
+                        downloadUrl: etiquetaDuplaUrl(p.id, false),
+                      }),
+                  },
+                  {
+                    label: gerarBg.isPending
+                      ? "Enfileirando…"
+                      : "Gerar PDF em background",
+                    icon: Hourglass,
+                    onClick: () => gerarBg.mutate(),
+                    disabled: gerarBg.isPending,
+                  },
+                ]}
+              />
+              <ClassificarSigiloDialog
+                processo={p}
+                onClassified={() => q.refetch()}
+              />
             </div>
           </div>
         }
@@ -516,12 +515,7 @@ export default function ProcessoDetailPage() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <CardTitle className="font-mono">{p.numero_processo}</CardTitle>
-                <span className="text-sm text-muted-foreground tabular-nums">
-                  aberto em {fmtDateTime(p.data_hora_abertura)}
-                </span>
-              </div>
+              <CardTitle>Visão geral</CardTitle>
             </CardHeader>
             <CardContent>
               <dl className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
@@ -566,23 +560,6 @@ export default function ProcessoDetailPage() {
                   </dt>
                   <dd>{p.numero_origem ?? "—"}</dd>
                 </div>
-                {/* PR 5b — prazo previsto + origem do snapshot. */}
-                {p.prazo.status !== "sem_prazo" && p.prazo.prazo_previsto_em && (
-                  <div>
-                    <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                      Prazo previsto
-                    </dt>
-                    <dd className="tabular-nums">
-                      {fmtDate(p.prazo.prazo_previsto_em)}
-                      {p.prazo.prazo_servico_dias_snapshot && (
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          (baseado no prazo do serviço:{" "}
-                          {p.prazo.prazo_servico_dias_snapshot} dias)
-                        </span>
-                      )}
-                    </dd>
-                  </div>
-                )}
                 {p.observacao && (
                   <div className="md:col-span-2">
                     <dt className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -633,13 +610,20 @@ export default function ProcessoDetailPage() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Movimentações ({p.movimentacoes.length})</CardTitle>
+              <CardTitle>
+                Movimentações{" "}
+                <span className="text-foreground-muted">
+                  ({p.movimentacoes.length})
+                </span>
+              </CardTitle>
             </CardHeader>
             <CardContent>
               {p.movimentacoes.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Nenhuma movimentação registrada.
-                </p>
+                <EmptyState
+                  icon={Clock}
+                  title="Sem movimentações registradas"
+                  description="Use 'Ações de tramitação' na aba Visão geral para registrar a primeira movimentação."
+                />
               ) : (
                 <div className="space-y-5">
                   {p.movimentacoes.map((m) => (
@@ -702,6 +686,7 @@ export default function ProcessoDetailPage() {
                 <ChecklistDocumentosCard
                   data={checklistQ.data}
                   loading={checklistQ.isLoading}
+                  modo="servidor"
                 />
                 <ComplementacoesHistoricoLista data={anteriores} />
                 <SolicitarComplementacaoDialog
