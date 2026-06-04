@@ -34,9 +34,11 @@ from ..schemas.processo import (
     DespachoOut,
     EncaminhamentoOut,
     MovimentacaoItem,
+    PrazoInfo,
     ProcessoDetail,
     ProcessoListItem,
 )
+from .prazos import calcular_prazo
 
 
 def _base_select(tenant_id: int):
@@ -172,6 +174,38 @@ async def get_processo_detail(
     movimentacoes = await _load_movimentacoes(db, processo_id, tenant_id)
     anexos = await _load_anexos(db, processo_id, tenant_id)
 
+    # PR 5b — bloco prazo end-to-end. `data_conclusao` = data da última
+    # Movimentacao ativa com id_arquivamento NOT NULL.
+    data_conclusao = (
+        await db.execute(
+            select(Movimentacao.data_hora_movimentacao)
+            .where(
+                Movimentacao.id_processo == processo_id,
+                Movimentacao.tenant_id == tenant_id,
+                Movimentacao.excluido.is_(False),
+                Movimentacao.ativo.is_(True),
+                Movimentacao.id_arquivamento.is_not(None),
+            )
+            .order_by(Movimentacao.data_hora_movimentacao.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    calc = calcular_prazo(
+        data_abertura=p.data_hora_abertura,
+        prazo_snapshot_dias=p.prazo_servico_dias_snapshot,
+        data_conclusao=data_conclusao,
+        now=datetime.now(),
+    )
+    prazo = PrazoInfo(
+        status=calc.status,
+        prazo_servico_dias_snapshot=calc.prazo_servico_dias_snapshot,
+        prazo_previsto_em=calc.prazo_previsto_em,
+        dias_restantes=calc.dias_restantes,
+        dias_atraso=calc.dias_atraso,
+        concluido_em=calc.concluido_em,
+        origem="servico" if calc.prazo_servico_dias_snapshot is not None else None,
+    )
+
     return ProcessoDetail(
         **base_item.model_dump(),
         observacao=p.observacao,
@@ -186,6 +220,7 @@ async def get_processo_detail(
         sigilo_data_desclassificacao=p.sigilo_data_desclassificacao,
         movimentacoes=movimentacoes,
         anexos=anexos,
+        prazo=prazo,
     )
 
 

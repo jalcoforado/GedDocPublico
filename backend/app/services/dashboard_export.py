@@ -211,6 +211,8 @@ def to_csv(payload: dict[str, Any], nome_tenant: str = "") -> str:
                 "Checklist completo",
                 # PR 5a-fix.
                 "Sem documentos exigidos",
+                # PR 5b.
+                "Atrasados",
             ]
         )
         for it in por_servico:
@@ -225,8 +227,35 @@ def to_csv(payload: dict[str, Any], nome_tenant: str = "") -> str:
                     it.get("checklist_parcial", 0),
                     it.get("checklist_completo", 0),
                     it.get("sem_documentos_exigidos", 0),
+                    it.get("atrasados", 0),
                 ]
             )
+        w.writerow([])
+
+    # PR 5b — seção [Prazos] (snapshot atual + concluídos no período).
+    prazos = payload.get("prazos") or {}
+    if prazos:
+        w.writerow(["[Prazos]"])
+        w.writerow(["Métrica", "Valor"])
+        w.writerow(["Sem prazo (snapshot)", prazos.get("sem_prazo", 0)])
+        w.writerow(["Dentro do prazo (snapshot)", prazos.get("dentro_do_prazo", 0)])
+        w.writerow(["Vencendo (snapshot)", prazos.get("vencendo", 0)])
+        w.writerow(["Atrasado (snapshot)", prazos.get("atrasado", 0)])
+        w.writerow(
+            ["Concluídos no prazo (período)", prazos.get("concluido_no_prazo_periodo", 0)]
+        )
+        w.writerow(
+            ["Concluídos com atraso (período)", prazos.get("concluido_atrasado_periodo", 0)]
+        )
+        pct = prazos.get("percentual_no_prazo")
+        w.writerow(
+            ["% no prazo (snapshot)", f"{pct:.1f}%" if pct is not None else ""]
+        )
+        tma = prazos.get("tempo_medio_atraso_dias")
+        w.writerow(
+            ["Tempo médio de atraso (dias)", f"{tma:.1f}" if tma is not None else ""]
+        )
+        w.writerow([])
 
     return buf.getvalue()
 
@@ -456,7 +485,7 @@ def to_pdf(payload: dict[str, Any], nome_tenant: str = "") -> bytes:
 
     por_servico = payload.get("por_servico") or []
     if por_servico:
-        story.append(Paragraph("Por serviço — top 10 + legado (PR 5a)", h2))
+        story.append(Paragraph("Por serviço — top 10 + legado (PR 5a / 5b)", h2))
         rows = [
             [
                 "Serviço",
@@ -468,6 +497,8 @@ def to_pdf(payload: dict[str, Any], nome_tenant: str = "") -> bytes:
                 "Compl.",
                 # PR 5a-fix.
                 "S/Docs",
+                # PR 5b.
+                "Atrs.",
             ]
         ]
         for it in por_servico:
@@ -481,11 +512,15 @@ def to_pdf(payload: dict[str, Any], nome_tenant: str = "") -> bytes:
                     _fmt_num(it.get("checklist_parcial", 0)),
                     _fmt_num(it.get("checklist_completo", 0)),
                     _fmt_num(it.get("sem_documentos_exigidos", 0)),
+                    _fmt_num(it.get("atrasados", 0)),
                 ]
             )
         t = Table(
             rows,
-            colWidths=[5.0 * cm, 1.3 * cm, 2.0 * cm, 2.0 * cm, 1.2 * cm, 1.2 * cm, 1.2 * cm, 1.2 * cm],
+            colWidths=[
+                4.4 * cm, 1.2 * cm, 1.8 * cm, 1.8 * cm,
+                1.1 * cm, 1.1 * cm, 1.1 * cm, 1.1 * cm, 1.1 * cm,
+            ],
             repeatRows=1,
         )
         t.setStyle(
@@ -499,6 +534,53 @@ def to_pdf(payload: dict[str, Any], nome_tenant: str = "") -> bytes:
                     ("GRID", (0, 0), (-1, -1), 0.25, GRAY),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                     ("PADDING", (0, 0), (-1, -1), 3),
+                ]
+            )
+        )
+        story.append(t)
+        story.append(Spacer(1, 0.3 * cm))
+
+    # PR 5b — bloco Prazos.
+    prazos = payload.get("prazos") or {}
+    if prazos:
+        story.append(Paragraph("Prazos — end-to-end por serviço (PR 5b)", h2))
+        pct = prazos.get("percentual_no_prazo")
+        tma = prazos.get("tempo_medio_atraso_dias")
+        rows = [
+            ["Métrica", "Valor"],
+            ["Sem prazo (snapshot)", _fmt_num(prazos.get("sem_prazo", 0))],
+            ["Dentro do prazo (snapshot)", _fmt_num(prazos.get("dentro_do_prazo", 0))],
+            ["Vencendo (snapshot)", _fmt_num(prazos.get("vencendo", 0))],
+            ["Atrasado (snapshot)", _fmt_num(prazos.get("atrasado", 0))],
+            [
+                "Concluídos no prazo (período)",
+                _fmt_num(prazos.get("concluido_no_prazo_periodo", 0)),
+            ],
+            [
+                "Concluídos com atraso (período)",
+                _fmt_num(prazos.get("concluido_atrasado_periodo", 0)),
+            ],
+            [
+                "% no prazo (snapshot)",
+                f"{pct:.1f}%" if pct is not None else "—",
+            ],
+            [
+                "Tempo médio de atraso (dias)",
+                _fmt_num(tma, 1) if tma is not None else "—",
+            ],
+        ]
+        t = Table(rows, colWidths=[12 * cm, 3 * cm], repeatRows=1)
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), APRIMORA),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
+                    ("GRID", (0, 0), (-1, -1), 0.25, GRAY),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("PADDING", (0, 0), (-1, -1), 4),
                 ]
             )
         )

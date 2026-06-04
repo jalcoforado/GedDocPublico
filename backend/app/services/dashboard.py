@@ -499,6 +499,179 @@ async def _complementacao_periodo(
     }
 
 
+async def _prazos_kpis(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    desde: datetime,
+    ate: datetime,
+    id_unidade: int | None,
+    id_servico: int | None,
+    incluir_legado: bool,
+) -> dict[str, Any]:
+    """Bloco `prazos` (PR 5b). 2 queries SQL agregadas — snapshot + período.
+
+    Snapshot: processos NÃO concluídos (sem Movimentacao ativa de
+    arquivamento). Período: concluídos por arquivamento em [desde, ate).
+    Honra filtros do gestor via `_processo_filtros_sql` (mesmo padrão PR 5a).
+
+    Regra D-VENCENDO replicada em SQL: `GREATEST(1, CEIL(snap * 0.2))`.
+    """
+    extra_where, extra_params = _processo_filtros_sql(
+        id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=incluir_legado,
+    )
+    extra_clause = f" AND {extra_where}" if extra_where else ""
+
+    # ===== Snapshot — processos NÃO concluídos =====
+    sql_snapshot = text(
+        f"""
+        WITH em_andamento AS (
+            SELECT p.id,
+                   p.data_hora_abertura,
+                   p.prazo_servico_dias_snapshot AS snap
+            FROM protocolos.processo p
+            WHERE p.tenant_id = :tenant_id
+              AND p.excluido = false
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM protocolos.movimentacao mv
+                  WHERE mv.id_processo = p.id
+                    AND mv.tenant_id = :tenant_id
+                    AND mv.excluido = false
+                    AND mv.ativo = true
+                    AND mv.id_arquivamento IS NOT NULL
+              )
+              {extra_clause}
+        ),
+        com_prazo AS (
+            SELECT id,
+                   data_hora_abertura + (snap * INTERVAL '1 day') AS prazo_previsto,
+                   GREATEST(1, CEIL(snap * 0.2)) AS limiar
+            FROM em_andamento
+            WHERE snap IS NOT NULL
+        )
+        SELECT
+            (SELECT COUNT(*) FROM em_andamento WHERE snap IS NULL) AS sem_prazo,
+            COUNT(*) FILTER (
+                WHERE (prazo_previsto - NOW()) > (limiar * INTERVAL '1 day')
+            ) AS dentro_do_prazo,
+            COUNT(*) FILTER (
+                WHERE NOW() <= prazo_previsto
+                  AND (prazo_previsto - NOW()) <= (limiar * INTERVAL '1 day')
+            ) AS vencendo,
+            COUNT(*) FILTER (WHERE NOW() > prazo_previsto) AS atrasado,
+            AVG(EXTRACT(EPOCH FROM (NOW() - prazo_previsto)) / 86400.0)
+                FILTER (WHERE NOW() > prazo_previsto) AS atraso_medio_andamento,
+            COUNT(*) FILTER (WHERE NOW() > prazo_previsto) AS qtd_atrasado_for_avg
+        FROM com_prazo;
+        """
+    )
+    snap_row = (
+        await db.execute(
+            sql_snapshot,
+            {"tenant_id": tenant_id, **extra_params},
+        )
+    ).one()
+
+    # ===== Período — concluídos por arquivamento em [desde, ate) =====
+    sql_periodo = text(
+        f"""
+        WITH ultimo_arquiv AS (
+            SELECT DISTINCT ON (mv.id_processo)
+                   mv.id_processo,
+                   mv.data_hora_movimentacao AS data_conclusao
+            FROM protocolos.movimentacao mv
+            WHERE mv.tenant_id = :tenant_id
+              AND mv.excluido = false
+              AND mv.ativo = true
+              AND mv.id_arquivamento IS NOT NULL
+              AND mv.data_hora_movimentacao >= :desde
+              AND mv.data_hora_movimentacao <  :ate
+            ORDER BY mv.id_processo, mv.data_hora_movimentacao DESC
+        ),
+        concluidos AS (
+            SELECT p.id,
+                   p.data_hora_abertura,
+                   p.prazo_servico_dias_snapshot AS snap,
+                   ua.data_conclusao
+            FROM ultimo_arquiv ua
+            JOIN protocolos.processo p ON p.id = ua.id_processo
+            WHERE p.tenant_id = :tenant_id
+              AND p.excluido = false
+              {extra_clause}
+        )
+        SELECT
+            COUNT(*) FILTER (
+                WHERE snap IS NOT NULL
+                  AND data_conclusao <= data_hora_abertura + (snap * INTERVAL '1 day')
+            ) AS concluido_no_prazo,
+            COUNT(*) FILTER (
+                WHERE snap IS NOT NULL
+                  AND data_conclusao >  data_hora_abertura + (snap * INTERVAL '1 day')
+            ) AS concluido_atrasado,
+            AVG(
+                EXTRACT(
+                    EPOCH FROM (data_conclusao
+                                - (data_hora_abertura + (snap * INTERVAL '1 day')))
+                ) / 86400.0
+            ) FILTER (
+                WHERE snap IS NOT NULL
+                  AND data_conclusao >  data_hora_abertura + (snap * INTERVAL '1 day')
+            ) AS atraso_medio_concluidos,
+            COUNT(*) FILTER (
+                WHERE snap IS NOT NULL
+                  AND data_conclusao >  data_hora_abertura + (snap * INTERVAL '1 day')
+            ) AS qtd_concluido_atrasado_for_avg
+        FROM concluidos;
+        """
+    )
+    per_row = (
+        await db.execute(
+            sql_periodo,
+            {"tenant_id": tenant_id, "desde": desde, "ate": ate, **extra_params},
+        )
+    ).one()
+
+    sem_prazo = int(snap_row.sem_prazo or 0)
+    dentro = int(snap_row.dentro_do_prazo or 0)
+    vencendo = int(snap_row.vencendo or 0)
+    atrasado = int(snap_row.atrasado or 0)
+    conc_no_prazo = int(per_row.concluido_no_prazo or 0)
+    conc_atrasado = int(per_row.concluido_atrasado or 0)
+
+    com_prazo_andamento = dentro + vencendo + atrasado
+    pct = (
+        round(((dentro + vencendo) / com_prazo_andamento) * 100, 1)
+        if com_prazo_andamento > 0
+        else None
+    )
+
+    # Média ponderada do atraso (em-andamento + concluídos atrasado no período).
+    qtd_at_a = int(snap_row.qtd_atrasado_for_avg or 0)
+    qtd_at_c = int(per_row.qtd_concluido_atrasado_for_avg or 0)
+    soma_at = (
+        float(snap_row.atraso_medio_andamento or 0.0) * qtd_at_a
+        + float(per_row.atraso_medio_concluidos or 0.0) * qtd_at_c
+    )
+    qtd_total_at = qtd_at_a + qtd_at_c
+    tempo_medio_atraso = (
+        round(soma_at / qtd_total_at, 1) if qtd_total_at > 0 else None
+    )
+
+    return {
+        "sem_prazo": sem_prazo,
+        "dentro_do_prazo": dentro,
+        "vencendo": vencendo,
+        "atrasado": atrasado,
+        "concluido_no_prazo_periodo": conc_no_prazo,
+        "concluido_atrasado_periodo": conc_atrasado,
+        "percentual_no_prazo": pct,
+        "tempo_medio_atraso_dias": tempo_medio_atraso,
+    }
+
+
 async def _breakdown_servico(
     db: AsyncSession,
     *,
@@ -585,7 +758,29 @@ async def _breakdown_servico(
                   AND pp.excluido = false
                   AND pp.id_servico = s.id
                   {pp_id_unidade_clause}
-            ) AS compl_respondidas
+            ) AS compl_respondidas,
+            -- PR 5b — atrasados: processos NÃO concluídos com prazo já vencido.
+            -- Snapshot atual (independente do recorte de período), honra id_unidade.
+            (
+                SELECT COUNT(*)
+                FROM protocolos.processo pp
+                WHERE pp.tenant_id = :tenant_id
+                  AND pp.excluido = false
+                  AND pp.id_servico = s.id
+                  AND pp.prazo_servico_dias_snapshot IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM protocolos.movimentacao mv
+                      WHERE mv.id_processo = pp.id
+                        AND mv.tenant_id = :tenant_id
+                        AND mv.excluido = false
+                        AND mv.ativo = true
+                        AND mv.id_arquivamento IS NOT NULL
+                  )
+                  AND NOW() > pp.data_hora_abertura
+                              + (pp.prazo_servico_dias_snapshot * INTERVAL '1 day')
+                  {pp_id_unidade_clause}
+            ) AS atrasados
         FROM contagens_por_servico c
         JOIN protocolos.servico s ON s.id = c.id_servico
         ORDER BY c.qt DESC;
@@ -725,6 +920,7 @@ async def _breakdown_servico(
                 "checklist_parcial": ck["parcial"],
                 "checklist_completo": ck["completo"],
                 "sem_documentos_exigidos": ck["sem_documentos_exigidos"],
+                "atrasados": int(r.atrasados or 0),  # PR 5b
             }
         )
 
@@ -813,6 +1009,8 @@ async def _breakdown_servico(
                     "checklist_parcial": 0,
                     "checklist_completo": 0,
                     "sem_documentos_exigidos": int(legado_qt),
+                    # PR 5b — legado é sem_prazo por definição (sem snapshot).
+                    "atrasados": 0,
                 }
             )
 
@@ -1027,6 +1225,15 @@ async def kpis(
         id_servico=id_servico,
         incluir_legado=incluir_legado,
     )
+    prazos = await _prazos_kpis(
+        db,
+        tenant_id=tenant_id,
+        desde=desde_atual,
+        ate=now,
+        id_unidade=id_unidade,
+        id_servico=id_servico,
+        incluir_legado=incluir_legado,
+    )
 
     return {
         "periodo_dias": periodo_dias,
@@ -1063,4 +1270,6 @@ async def kpis(
         "documental": documental,
         "complementacao": complementacao,
         "por_servico": por_servico,
+        # PR 5b
+        "prazos": prazos,
     }

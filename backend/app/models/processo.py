@@ -111,6 +111,12 @@ class Processo(Base):
     id_servico: Mapped[int | None] = mapped_column(
         ForeignKey("protocolos.servico.id"), nullable=True
     )
+    # PR 5b — snapshot imutável do prazo do serviço no momento da abertura.
+    # None quando o processo não tem serviço (legado) ou quando o serviço não
+    # tem prazo definido. Mudanças posteriores no serviço NÃO afetam o snapshot.
+    prazo_servico_dias_snapshot: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
 
 
 class Movimentacao(Base):

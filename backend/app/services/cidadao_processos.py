@@ -41,10 +41,12 @@ from ..schemas.cidadao import (
     AnexoCidadaoOut,
     EspecieCidadaoOut,
     MovimentacaoCidadaoItem,
+    PrazoCidadao,
     ProcessoCidadaoDetail,
     ProcessoCidadaoListItem,
 )
 from .audit import log as audit_log
+from .prazos import calcular_prazo, status_cidadao
 
 logger = logging.getLogger("cidadao_processos")
 
@@ -230,6 +232,33 @@ async def get_meu_detail(
             ccd_codigo = row.codigo
             ccd_nome = row.nome
 
+    # PR 5b — bloco prazo reduzido. `data_conclusao` = última Movimentacao
+    # ativa com id_arquivamento NOT NULL (mesmo critério do detalhe admin).
+    data_conclusao = (
+        await db.execute(
+            select(Movimentacao.data_hora_movimentacao)
+            .where(
+                Movimentacao.id_processo == processo_id,
+                Movimentacao.tenant_id == tenant_id,
+                Movimentacao.excluido.is_(False),
+                Movimentacao.ativo.is_(True),
+                Movimentacao.id_arquivamento.is_not(None),
+            )
+            .order_by(Movimentacao.data_hora_movimentacao.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    calc = calcular_prazo(
+        data_abertura=p.data_hora_abertura,
+        prazo_snapshot_dias=p.prazo_servico_dias_snapshot,
+        data_conclusao=data_conclusao,
+        now=datetime.now(),
+    )
+    prazo = PrazoCidadao(
+        prazo_estimado_em=calc.prazo_previsto_em,
+        status=status_cidadao(calc.status),
+    )
+
     return ProcessoCidadaoDetail(
         **base.model_dump(),
         observacao=p.observacao,
@@ -239,6 +268,7 @@ async def get_meu_detail(
         ccd_nome=ccd_nome,
         movimentacoes=movimentacoes,
         anexos=anexos,
+        prazo=prazo,
     )
 
 
@@ -324,10 +354,16 @@ async def _criar_processo_publico(
     corpo: str | None,
     observacao: str | None,
     id_servico: int | None = None,
+    prazo_servico_dias_snapshot: int | None = None,
 ) -> Processo:
     """Núcleo de abertura pública (canal portal). NÃO comita — o caller controla
     a transação (permite auditar na mesma transação). Pressupõe rate-limit já
-    checado e assunto/unidade já validados no tenant."""
+    checado e assunto/unidade já validados no tenant.
+
+    `prazo_servico_dias_snapshot` (PR 5b): snapshot imutável do prazo do
+    serviço no momento da abertura. None quando não há serviço ou quando o
+    serviço não tem prazo definido. NUNCA recalculado depois.
+    """
     manifestante = await _resolver_ou_criar_manifestante(db, cidadao, tenant_id)
 
     numero = (
@@ -382,6 +418,7 @@ async def _criar_processo_publico(
         id_local_atual=id_unidade,
         id_usuario=None,
         id_servico=id_servico,
+        prazo_servico_dias_snapshot=prazo_servico_dias_snapshot,
         ativo=True,
         excluido=False,
         migrado=False,
@@ -561,6 +598,9 @@ async def abrir_processo_por_servico(
         corpo=payload.corpo,
         observacao=payload.observacao,
         id_servico=servico.id,
+        # PR 5b — D-SNAPSHOT: congela o prazo do serviço no momento da abertura.
+        # `servico.prazo_estimado_dias` pode mudar depois sem afetar este processo.
+        prazo_servico_dias_snapshot=servico.prazo_estimado_dias,
     )
 
     # Auditoria minimizada (sem CPF/nome/corpo/anexos) — mesma transação.

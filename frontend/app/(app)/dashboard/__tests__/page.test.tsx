@@ -123,6 +123,7 @@ function basePayload(overrides: Partial<Record<string, unknown>> = {}) {
         checklist_parcial: 3,
         checklist_completo: 13,
         sem_documentos_exigidos: 10,
+        atrasados: 2, // PR 5b
       },
       {
         id_servico: null,
@@ -134,8 +135,20 @@ function basePayload(overrides: Partial<Record<string, unknown>> = {}) {
         checklist_parcial: 0,
         checklist_completo: 0,
         sem_documentos_exigidos: 7,
+        atrasados: 0, // PR 5b — legado é sem_prazo por definição
       },
     ],
+    // PR 5b — bloco prazos.
+    prazos: {
+      sem_prazo: 7,
+      dentro_do_prazo: 25,
+      vencendo: 3,
+      atrasado: 2,
+      concluido_no_prazo_periodo: 8,
+      concluido_atrasado_periodo: 1,
+      percentual_no_prazo: 93.3,
+      tempo_medio_atraso_dias: 4.2,
+    },
     ...overrides,
   };
 }
@@ -281,6 +294,27 @@ describe("DashboardPage — PR 5a", () => {
     // Os números são distintos (12 completo, 10 sem docs).
     expect(wrapper).toHaveTextContent("12");
     expect(wrapper).toHaveTextContent("10");
+  });
+
+  it("PR 5b: renderiza bloco prazos com 4 KPIs principais + atrasados no ranking", async () => {
+    kpisMock.mockResolvedValue(basePayload());
+    renderPage();
+    const wrapper = await screen.findByTestId("dashboard-pr5b-prazos");
+    expect(wrapper).toHaveTextContent(/Dentro do prazo/i);
+    expect(wrapper).toHaveTextContent(/Vencendo/i);
+    expect(wrapper).toHaveTextContent(/Atrasado/i);
+    expect(wrapper).toHaveTextContent(/Sem prazo/i);
+    expect(wrapper).toHaveTextContent(/% no prazo/i);
+    // valores do fixture
+    expect(wrapper).toHaveTextContent("25"); // dentro_do_prazo
+    expect(wrapper).toHaveTextContent("3"); // vencendo
+    expect(wrapper).toHaveTextContent("2"); // atrasado
+    // % no prazo = 93.3 (formato pt-BR usa vírgula)
+    expect(wrapper).toHaveTextContent(/93,3/);
+
+    // Ranking ganhou coluna Atrasados.
+    const ranking = await screen.findByTestId("dashboard-ranking-servicos");
+    expect(ranking).toHaveTextContent(/Atrasados/i);
   });
 
   it("checkbox 'Incluir legado' fica disabled quando há id_servico", async () => {

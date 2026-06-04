@@ -98,6 +98,9 @@ class ServicoBreakdownItem(BaseModel):
     PR 5a-fix: `sem_documentos_exigidos` separado de `checklist_completo`.
     Para a linha legado, `sem_documentos_exigidos == count` (todo
     processo sem `id_servico` é sem documentos exigidos por definição).
+
+    PR 5b: campo `atrasados` (processos NÃO concluídos com status='atrasado'
+    pelo cálculo de prazo). Linha legado = 0 por definição (sem snapshot).
     """
 
     id_servico: int | None
@@ -109,6 +112,30 @@ class ServicoBreakdownItem(BaseModel):
     checklist_parcial: int
     checklist_completo: int
     sem_documentos_exigidos: int
+    atrasados: int = 0  # PR 5b
+
+
+class PrazosKpis(BaseModel):
+    """Indicadores de prazo end-to-end. PR 5b.
+
+    Snapshot (processos NÃO concluídos): `sem_prazo` + `dentro_do_prazo` +
+    `vencendo` + `atrasado`. Período (processos concluídos por arquivamento
+    no recorte): `concluido_no_prazo_periodo` + `concluido_atrasado_periodo`.
+
+    `percentual_no_prazo` é snapshot sobre não-concluídos com prazo
+    (`dentro_do_prazo + vencendo` / `dentro + vencendo + atrasado`); None
+    quando denominador zero. `tempo_medio_atraso_dias` é média ponderada
+    entre em-andamento atrasado e concluído atrasado no período.
+    """
+
+    sem_prazo: int
+    dentro_do_prazo: int
+    vencendo: int
+    atrasado: int
+    concluido_no_prazo_periodo: int
+    concluido_atrasado_periodo: int
+    percentual_no_prazo: float | None
+    tempo_medio_atraso_dias: float | None
 
 
 class DashboardKpis(BaseModel):
@@ -126,3 +153,5 @@ class DashboardKpis(BaseModel):
     documental: DocumentalKpis
     complementacao: ComplementacaoKpis
     por_servico: list[ServicoBreakdownItem]
+    # PR 5b — bloco prazos end-to-end (D-NOME: NÃO é "sla", reservado p/ workflow).
+    prazos: PrazosKpis

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -77,6 +78,25 @@ class AnexoCidadaoOut(BaseModel):
     publico: bool
 
 
+class PrazoCidadao(BaseModel):
+    """Visão reduzida do prazo no portal do cidadão (PR 5b — D-CIDADAO).
+
+    Sem contagem de dias. Status num enum cuidadoso para evitar promessa
+    jurídica. Linguagem na UI: "prazo estimado de atendimento",
+    "previsão", "situação do prazo". Vetado: "garantia", "SLA",
+    "prazo legal garantido", "vencimento contratual".
+    """
+
+    prazo_estimado_em: datetime | None
+    status: Literal[
+        "sem_previsao",
+        "dentro_da_previsao",
+        "proximo_do_prazo",
+        "fora_da_previsao",
+        "concluido",
+    ]
+
+
 class ProcessoCidadaoDetail(ProcessoCidadaoListItem):
     observacao: str | None
     corpo: str | None
@@ -85,6 +105,8 @@ class ProcessoCidadaoDetail(ProcessoCidadaoListItem):
     ccd_nome: str | None = None
     movimentacoes: list["MovimentacaoCidadaoItem"]
     anexos: list[AnexoCidadaoOut] = []
+    # PR 5b — bloco de prazo reduzido. Sempre presente.
+    prazo: PrazoCidadao
 
 
 class MovimentacaoCidadaoItem(BaseModel):

@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -120,6 +121,30 @@ class MovimentacaoItem(BaseModel):
     encaminhamento: EncaminhamentoOut | None = None
 
 
+class PrazoInfo(BaseModel):
+    """Bloco de prazo no detalhe do processo (admin). PR 5b.
+
+    `status` reflete o cálculo end-to-end do processo a partir de
+    `prazo_servico_dias_snapshot` (congelado na abertura). Cidadão recebe
+    versão reduzida em `PrazoCidadao` (schemas/cidadao.py).
+    """
+
+    status: Literal[
+        "sem_prazo",
+        "dentro_do_prazo",
+        "vencendo",
+        "atrasado",
+        "concluido_no_prazo",
+        "concluido_atrasado",
+    ]
+    prazo_servico_dias_snapshot: int | None
+    prazo_previsto_em: datetime | None
+    dias_restantes: int | None  # >0 quando há folga; None se sem_prazo/atrasado
+    dias_atraso: int | None  # >0 quando em atraso; None se não atrasado
+    concluido_em: datetime | None
+    origem: Literal["servico"] | None  # None quando status='sem_prazo'
+
+
 class ProcessoDetail(ProcessoListItem):
     observacao: str | None
     corpo: str | None
@@ -136,3 +161,7 @@ class ProcessoDetail(ProcessoListItem):
 
     movimentacoes: list[MovimentacaoItem]
     anexos: list[AnexoNoProcesso]
+
+    # PR 5b — bloco de prazo end-to-end (sempre presente; status='sem_prazo'
+    # em processos legados ou sem prazo definido no serviço).
+    prazo: PrazoInfo

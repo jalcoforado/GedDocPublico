@@ -304,6 +304,28 @@ export interface MovimentacaoItem {
   encaminhamento: EncaminhamentoOut | null;
 }
 
+/** PR 5b — status admin do prazo end-to-end do processo. */
+export type StatusPrazo =
+  | "sem_prazo"
+  | "dentro_do_prazo"
+  | "vencendo"
+  | "atrasado"
+  | "concluido_no_prazo"
+  | "concluido_atrasado";
+
+/** PR 5b — bloco de prazo no detalhe admin. `origem='servico'` quando há snapshot. */
+export interface PrazoInfo {
+  status: StatusPrazo;
+  prazo_servico_dias_snapshot: number | null;
+  prazo_previsto_em: string | null;
+  /** >0 quando há folga; null se sem_prazo/atrasado/concluido_atrasado. */
+  dias_restantes: number | null;
+  /** >0 quando em atraso; null se não atrasado. */
+  dias_atraso: number | null;
+  concluido_em: string | null;
+  origem: "servico" | null;
+}
+
 export interface ProcessoDetail extends ProcessoListItem {
   observacao: string | null;
   corpo: string | null;
@@ -318,6 +340,8 @@ export interface ProcessoDetail extends ProcessoListItem {
   sigilo_data_desclassificacao: string | null;
   movimentacoes: MovimentacaoItem[];
   anexos: AnexoNoProcesso[];
+  /** PR 5b — sempre presente. status='sem_prazo' em legado ou sem snapshot. */
+  prazo: PrazoInfo;
 }
 
 export interface ClassificarSigiloInput {
@@ -623,6 +647,21 @@ export interface CidadaoMovimentacao {
   despacho_publico: string | null;
 }
 
+/** PR 5b — status reduzido do prazo no Portal do Cidadão. Linguagem
+ * deliberadamente cuidadosa — sem "garantia", "SLA" ou "prazo legal". */
+export type StatusPrazoCidadao =
+  | "sem_previsao"
+  | "dentro_da_previsao"
+  | "proximo_do_prazo"
+  | "fora_da_previsao"
+  | "concluido";
+
+/** PR 5b — bloco de prazo reduzido para o cidadão. SEM contagem de dias. */
+export interface PrazoCidadao {
+  prazo_estimado_em: string | null;
+  status: StatusPrazoCidadao;
+}
+
 export interface CidadaoProcessoDetail extends CidadaoProcessoListItem {
   observacao: string | null;
   corpo: string | null;
@@ -631,6 +670,8 @@ export interface CidadaoProcessoDetail extends CidadaoProcessoListItem {
   ccd_nome: string | null;
   movimentacoes: CidadaoMovimentacao[];
   anexos: CidadaoAnexo[];
+  /** PR 5b — sempre presente. status='sem_previsao' em legado. */
+  prazo: PrazoCidadao;
 }
 
 export interface AbrirProcessoCidadaoInput {
@@ -1441,6 +1482,22 @@ export interface DashboardServicoBreakdownItem {
   checklist_parcial: number;
   checklist_completo: number;
   sem_documentos_exigidos: number;
+  /** PR 5b — processos NÃO concluídos com status='atrasado'. */
+  atrasados: number;
+}
+
+/** PR 5b — bloco prazos do dashboard. NÃO confundir com `sla` (workflow). */
+export interface DashboardPrazosKpis {
+  sem_prazo: number;
+  dentro_do_prazo: number;
+  vencendo: number;
+  atrasado: number;
+  concluido_no_prazo_periodo: number;
+  concluido_atrasado_periodo: number;
+  /** snapshot — null quando denominador zero. */
+  percentual_no_prazo: number | null;
+  /** média ponderada — null quando não há atrasos. */
+  tempo_medio_atraso_dias: number | null;
 }
 
 export interface DashboardKpis {
@@ -1479,6 +1536,8 @@ export interface DashboardKpis {
   documental: DashboardDocumentalKpis;
   complementacao: DashboardComplementacaoKpis;
   por_servico: DashboardServicoBreakdownItem[];
+  /** PR 5b — bloco prazos end-to-end (D-NOME: NÃO é "sla", reservado p/ workflow). */
+  prazos: DashboardPrazosKpis;
 }
 
 export interface DashboardKpisParams {

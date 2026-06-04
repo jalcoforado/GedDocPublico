@@ -2,13 +2,16 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
+  AlertCircle,
   AlertTriangle,
+  CalendarClock,
   CheckCircle2,
   Clock,
   FileSpreadsheet,
   FileText,
   Layers,
   ShieldAlert,
+  TimerOff,
   TrendingUp,
 } from "lucide-react";
 import { useState } from "react";
@@ -377,6 +380,81 @@ export default function DashboardPage() {
         />
       </div>
 
+      {/* PR 5b — Bloco prazos end-to-end. D-NOME: NÃO é "sla" (workflow). */}
+      <div
+        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+        data-testid="dashboard-pr5b-prazos"
+      >
+        <KpiCard
+          label="Dentro do prazo"
+          value={fmtNum(d.prazos.dentro_do_prazo)}
+          hint="snapshot — em andamento"
+          icon={Clock}
+          intent={d.prazos.dentro_do_prazo > 0 ? "success" : "default"}
+        />
+        <KpiCard
+          label="Vencendo"
+          value={fmtNum(d.prazos.vencendo)}
+          hint="restam ≤ 20% do prazo"
+          icon={AlertTriangle}
+          intent={d.prazos.vencendo > 0 ? "warning" : "default"}
+        />
+        <KpiCard
+          label="Atrasado"
+          value={fmtNum(d.prazos.atrasado)}
+          hint="snapshot — em andamento"
+          icon={AlertCircle}
+          intent={d.prazos.atrasado > 0 ? "danger" : "default"}
+        />
+        <KpiCard
+          label="Sem prazo"
+          value={fmtNum(d.prazos.sem_prazo)}
+          hint="legado ou serviço sem prazo"
+          icon={TimerOff}
+        />
+        <KpiCard
+          label="% no prazo"
+          value={fmtPct(d.prazos.percentual_no_prazo)}
+          hint="snapshot — exclui sem prazo"
+          icon={TrendingUp}
+          intent={
+            d.prazos.percentual_no_prazo !== null &&
+            d.prazos.percentual_no_prazo >= 80
+              ? "success"
+              : d.prazos.percentual_no_prazo !== null &&
+                  d.prazos.percentual_no_prazo < 50
+                ? "danger"
+                : "default"
+          }
+        />
+        <KpiCard
+          label="Concluídos no prazo"
+          value={fmtNum(d.prazos.concluido_no_prazo_periodo)}
+          hint="arquivados no período"
+          icon={CheckCircle2}
+          intent="success"
+        />
+        <KpiCard
+          label="Concluídos com atraso"
+          value={fmtNum(d.prazos.concluido_atrasado_periodo)}
+          hint="arquivados no período"
+          icon={CheckCircle2}
+          intent={
+            d.prazos.concluido_atrasado_periodo > 0 ? "warning" : "default"
+          }
+        />
+        <KpiCard
+          label="Tempo médio de atraso"
+          value={
+            d.prazos.tempo_medio_atraso_dias !== null
+              ? `${fmtNum(d.prazos.tempo_medio_atraso_dias, 1)}d`
+              : "—"
+          }
+          hint="andamento + concluídos atrasados"
+          icon={CalendarClock}
+        />
+      </div>
+
       {/* Série temporal */}
       <Card>
         <CardHeader>
@@ -550,10 +628,17 @@ export default function DashboardPage() {
                     </th>
                     {/* PR 5a-fix */}
                     <th
-                      className="py-2 text-right font-medium tabular-nums"
+                      className="py-2 pr-4 text-right font-medium tabular-nums"
                       title="Processos sem obrigatórios aplicáveis"
                     >
                       S/Docs
+                    </th>
+                    {/* PR 5b */}
+                    <th
+                      className="py-2 text-right font-medium tabular-nums"
+                      title="Processos NÃO concluídos com prazo vencido"
+                    >
+                      Atrasados
                     </th>
                   </tr>
                 </thead>
@@ -600,8 +685,17 @@ export default function DashboardPage() {
                         <td className="py-2 pr-4 text-right tabular-nums">
                           {fmtNum(it.checklist_completo)}
                         </td>
-                        <td className="py-2 text-right tabular-nums">
+                        <td className="py-2 pr-4 text-right tabular-nums">
                           {fmtNum(it.sem_documentos_exigidos)}
+                        </td>
+                        {/* PR 5b */}
+                        <td
+                          className={cn(
+                            "py-2 text-right tabular-nums",
+                            it.atrasados > 0 && "font-semibold text-danger",
+                          )}
+                        >
+                          {fmtNum(it.atrasados)}
                         </td>
                       </tr>
                     );

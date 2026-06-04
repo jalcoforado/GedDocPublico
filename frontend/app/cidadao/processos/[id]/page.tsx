@@ -1,7 +1,16 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Clock, FileText, Paperclip } from "lucide-react";
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowLeft,
+  CalendarClock,
+  CheckCircle2,
+  Clock,
+  FileText,
+  Paperclip,
+} from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -26,6 +35,46 @@ function fmt(s: string | null | undefined) {
     " " +
     d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
   );
+}
+
+function fmtDate(s: string | null | undefined) {
+  if (!s) return "—";
+  return new Date(s).toLocaleDateString("pt-BR");
+}
+
+/** PR 5b — badge cidadão: omite `sem_previsao` e `concluido` (redundantes
+ * com o badge de "Em andamento"/"Encerrado" do `ativo`).
+ *
+ * Linguagem deliberadamente cuidadosa — sem "garantia"/"SLA"/"vencido".
+ */
+function PrazoCidadaoBadge({
+  prazo,
+}: {
+  prazo: import("@/lib/api").PrazoCidadao;
+}) {
+  switch (prazo.status) {
+    case "sem_previsao":
+    case "concluido":
+      return null;
+    case "dentro_da_previsao":
+      return (
+        <Badge intent="info" icon={Clock}>
+          Dentro da previsão
+        </Badge>
+      );
+    case "proximo_do_prazo":
+      return (
+        <Badge intent="warning" icon={AlertTriangle}>
+          Próximo do prazo
+        </Badge>
+      );
+    case "fora_da_previsao":
+      return (
+        <Badge intent="danger" icon={AlertCircle}>
+          Fora da previsão
+        </Badge>
+      );
+  }
 }
 
 export default function CidadaoProcessoDetailPage() {
@@ -168,6 +217,8 @@ export default function CidadaoProcessoDetailPage() {
             {p.especie_nome && (
               <Badge intent="neutral">{p.especie_nome}</Badge>
             )}
+            {/* PR 5b — situação do prazo (Portal do Cidadão). */}
+            <PrazoCidadaoBadge prazo={p.prazo} />
           </div>
         </CardHeader>
         <CardContent>
@@ -190,6 +241,20 @@ export default function CidadaoProcessoDetailPage() {
               </dt>
               <dd>{p.local_atual ?? "—"}</dd>
             </div>
+            {/* PR 5b — prazo estimado, linguagem cuidadosa. */}
+            {p.prazo.prazo_estimado_em && (
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                  <span className="inline-flex items-center gap-1">
+                    <CalendarClock className="h-3 w-3" aria-hidden="true" />
+                    Prazo estimado de atendimento
+                  </span>
+                </dt>
+                <dd className="tabular-nums">
+                  {fmtDate(p.prazo.prazo_estimado_em)}
+                </dd>
+              </div>
+            )}
             {p.ccd_nome && (
               <div>
                 <dt className="text-xs uppercase tracking-wide text-muted-foreground">

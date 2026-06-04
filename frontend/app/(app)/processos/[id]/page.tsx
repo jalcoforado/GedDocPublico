@@ -2,7 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertCircle,
+  AlertTriangle,
   CheckCircle2,
+  Clock,
   Eye,
   FileDown,
   FileText,
@@ -77,6 +80,46 @@ const ACAO_INTENT: Record<string, "info" | "warning" | "success" | "neutral" | "
   ARQUIVAMENTO: "neutral",
   CANCELAMENTO: "danger",
 };
+
+// PR 5b — render do badge de prazo. Retorna null em sem_prazo.
+function PrazoBadge({ prazo }: { prazo: import("@/lib/api").PrazoInfo }) {
+  switch (prazo.status) {
+    case "sem_prazo":
+      return null;
+    case "dentro_do_prazo":
+      return (
+        <Badge intent="success" icon={Clock}>
+          Dentro do prazo
+          {prazo.dias_restantes !== null && ` (${prazo.dias_restantes} d.)`}
+        </Badge>
+      );
+    case "vencendo":
+      return (
+        <Badge intent="warning" icon={AlertTriangle}>
+          Vencendo
+          {prazo.dias_restantes !== null && ` (${prazo.dias_restantes} d.)`}
+        </Badge>
+      );
+    case "atrasado":
+      return (
+        <Badge intent="danger" icon={AlertCircle}>
+          Atrasado em {prazo.dias_atraso} d.
+        </Badge>
+      );
+    case "concluido_no_prazo":
+      return (
+        <Badge intent="success" icon={CheckCircle2}>
+          Concluído no prazo
+        </Badge>
+      );
+    case "concluido_atrasado":
+      return (
+        <Badge intent="warning" icon={CheckCircle2}>
+          Concluído com atraso
+        </Badge>
+      );
+  }
+}
 
 interface ViewerState {
   title: string;
@@ -341,6 +384,8 @@ export default function ProcessoDetailPage() {
                   Externo
                 </Badge>
               )}
+              {/* PR 5b — badge de prazo (null em sem_prazo). */}
+              <PrazoBadge prazo={p.prazo} />
             </div>
             <div className="flex flex-wrap gap-1.5">
               <Button
@@ -521,6 +566,23 @@ export default function ProcessoDetailPage() {
                   </dt>
                   <dd>{p.numero_origem ?? "—"}</dd>
                 </div>
+                {/* PR 5b — prazo previsto + origem do snapshot. */}
+                {p.prazo.status !== "sem_prazo" && p.prazo.prazo_previsto_em && (
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Prazo previsto
+                    </dt>
+                    <dd className="tabular-nums">
+                      {fmtDate(p.prazo.prazo_previsto_em)}
+                      {p.prazo.prazo_servico_dias_snapshot && (
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          (baseado no prazo do serviço:{" "}
+                          {p.prazo.prazo_servico_dias_snapshot} dias)
+                        </span>
+                      )}
+                    </dd>
+                  </div>
+                )}
                 {p.observacao && (
                   <div className="md:col-span-2">
                     <dt className="text-xs uppercase tracking-wide text-muted-foreground">
