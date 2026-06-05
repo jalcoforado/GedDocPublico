@@ -17,7 +17,7 @@ vi.mock("@/lib/api", () => ({
   api: {
     unidades: { list: vi.fn() },
     tiposProcesso: { list: vi.fn() },
-    assuntos: { listAll: vi.fn() },
+    assuntos: { list: vi.fn() },
   },
   protocoloApi: { listEspecies: vi.fn() },
 }));
@@ -63,7 +63,12 @@ beforeEach(() => {
   listMock.mockResolvedValue([SERVICO]);
   (api.unidades.list as ReturnType<typeof vi.fn>).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 200 });
   (api.tiposProcesso.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-  (api.assuntos.listAll as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+  (api.assuntos.list as ReturnType<typeof vi.fn>).mockResolvedValue({
+    items: [],
+    total: 0,
+    page: 1,
+    page_size: 500,
+  });
   (protocoloApi.listEspecies as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 });
 
