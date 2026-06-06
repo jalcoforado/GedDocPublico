@@ -77,6 +77,7 @@ async def login(
         usuario_id=user.id,
         usuario_email=user.email,
         nome=user.nome,
+        must_change_password=user.must_change_password,
     )
 
 
@@ -101,6 +102,7 @@ async def me(
         email=user.email,
         cargo=user.cargo,
         id_unidade_trabalho=user.id_unidade_trabalho,
+        must_change_password=user.must_change_password,
     )
 
 
