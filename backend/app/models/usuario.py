@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, ForeignKey, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
@@ -28,4 +28,11 @@ class Usuario(Base):
     # nível seja <= esta credencial. Default 'interno' = vê ostensivo+interno.
     nivel_acesso_sigilo: Mapped[str] = mapped_column(
         String(20), nullable=False, default="interno"
+    )
+    # SEC-1 — força troca de senha no primeiro acesso. Default false:
+    # usuários existentes e novos cadastros nascem sem obrigação; só vira
+    # true quando provisionamento/reset definirem explicitamente (próximos
+    # commits do SEC-1).
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
