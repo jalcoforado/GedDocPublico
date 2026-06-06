@@ -10,7 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user, require_platform_admin
+from ..auth.deps import (
+    get_current_user_no_password_gate,
+    require_platform_admin,
+)
 from ..config import is_platform_admin, modulos_do_plano
 from ..database import get_db
 from ..models import Tenant, Usuario
@@ -62,9 +65,17 @@ async def _get_tenant(db: AsyncSession, tenant_id: int) -> Tenant:
 
 
 @router.get("/admin/me", response_model=AdminMeOut)
-async def admin_me(current: Usuario = Depends(get_current_user)) -> AdminMeOut:
+async def admin_me(
+    current: Usuario = Depends(get_current_user_no_password_gate),
+) -> AdminMeOut:
     """Para o frontend decidir se mostra o painel de plataforma. Qualquer usuário
-    autenticado pode chamar; só reporta se ele é admin de plataforma."""
+    autenticado pode chamar; só reporta se ele é admin de plataforma.
+
+    SEC-1 whitelist: o frontend chama /admin/me na inicialização para decidir
+    se mostra o link do painel de plataforma — não pode ser bloqueado pelo gate
+    de must_change_password. As rotas de mutação do painel
+    (`/admin/tenants/...`) continuam protegidas via `require_platform_admin`,
+    que por sua vez passa por `get_current_user` e portanto herda o gate."""
     return AdminMeOut(email=current.email, is_platform_admin=is_platform_admin(current.email))
 
 

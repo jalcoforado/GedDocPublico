@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user
+from ..auth.deps import get_current_user_no_password_gate
 from ..auth.jwt import build_payload, encode_token, get_jwt_secret
 from ..auth.password import hash_password, verify_password
 from ..config import get_settings
@@ -89,7 +89,12 @@ async def logout() -> Response:
 
 
 @router.get("/me", response_model=MeResponse)
-async def me(user: Usuario = Depends(get_current_user)) -> MeResponse:
+async def me(
+    user: Usuario = Depends(get_current_user_no_password_gate),
+) -> MeResponse:
+    # SEC-1 whitelist: o frontend lê /auth/me logo após o login para decidir
+    # se redireciona para a tela de troca obrigatória — não pode ser bloqueado
+    # pelo gate de must_change_password.
     return MeResponse(
         id=user.id,
         nome=user.nome,
@@ -102,9 +107,13 @@ async def me(user: Usuario = Depends(get_current_user)) -> MeResponse:
 @router.post("/alterar-senha", status_code=status.HTTP_204_NO_CONTENT)
 async def alterar_senha_endpoint(
     payload: AlterarSenhaRequest,
-    user: Usuario = Depends(get_current_user),
+    user: Usuario = Depends(get_current_user_no_password_gate),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
+    # SEC-1 whitelist: esta é justamente a rota que o usuário precisa chamar
+    # para sair da condição must_change_password=true. Bloqueá-la pelo gate
+    # seria um deadlock. A própria troca de senha vai zerar a flag no
+    # Commit 5 (D-ZERAR-MD5-ALTERAR).
     """Troca self-service de senha. Grava só bcrypt — desbloqueia a assinatura."""
     try:
         await alterar_senha(

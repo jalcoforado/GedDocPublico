@@ -57,10 +57,21 @@ async def get_current_tenant(
     return tenant
 
 
-async def get_current_user(
+async def _resolve_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> Usuario:
+    """Resolve a identidade autenticada a partir do JWT (header ou cookie).
+
+    SEC-1 — esta função carrega a lógica original de `get_current_user` SEM
+    aplicar o gate de `must_change_password`. Existe para ser composta por
+    `get_current_user` (com gate, padrão) e por `get_current_user_no_password_gate`
+    (sem gate, whitelist de 4 rotas: /auth/me, /auth/alterar-senha,
+    /permissoes/me, /admin/me).
+
+    NÃO usar diretamente em rotas de negócio: depende do gate aplicado por
+    cima para barrar usuários com senha temporária.
+    """
     token: str | None = None
     auth_header = request.headers.get("Authorization", "")
     if auth_header.lower().startswith("bearer "):
@@ -111,6 +122,49 @@ async def get_current_user(
         )
     # Para o logging middleware (Fase 33)
     request.state.usuario_id = user.id
+    return user
+
+
+async def get_current_user(
+    user: Usuario = Depends(_resolve_current_user),
+) -> Usuario:
+    """Dependência padrão para rotas autenticadas.
+
+    SEC-1 — Aplica o gate de `must_change_password`: se a flag estiver true,
+    responde 403 com header `X-Must-Change-Password: true` para que o frontend
+    redirecione para a tela de troca obrigatória. Não vaza o motivo no body
+    (mensagem genérica), só no header dedicado.
+
+    Toda rota de negócio usa esta dep (direta ou indiretamente via
+    `require_permission` / `require_acesso_processo` / `require_platform_admin`),
+    então o gate cobre 100% da superfície automaticamente. Apenas as 4 rotas
+    da whitelist autenticada (necessárias para o próprio fluxo de troca) usam
+    `get_current_user_no_password_gate`.
+    """
+    if user.must_change_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Troca de senha obrigatória",
+            headers={"X-Must-Change-Password": "true"},
+        )
+    return user
+
+
+async def get_current_user_no_password_gate(
+    user: Usuario = Depends(_resolve_current_user),
+) -> Usuario:
+    """Variante de `get_current_user` SEM o gate de must_change_password.
+
+    SEC-1 — Uso restrito à whitelist mínima necessária para o usuário concluir
+    a troca obrigatória:
+      - GET  /api/v2/auth/me
+      - POST /api/v2/auth/alterar-senha
+      - GET  /api/v2/permissoes/me
+      - GET  /api/v2/admin/me
+
+    NÃO usar em rotas de negócio. Qualquer rota fora da whitelist deve usar
+    `get_current_user` para herdar o gate.
+    """
     return user
 
 
