@@ -107,20 +107,24 @@ async def me(
 @router.post("/alterar-senha", status_code=status.HTTP_204_NO_CONTENT)
 async def alterar_senha_endpoint(
     payload: AlterarSenhaRequest,
+    request: Request,
     user: Usuario = Depends(get_current_user_no_password_gate),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    # SEC-1 whitelist: esta é justamente a rota que o usuário precisa chamar
-    # para sair da condição must_change_password=true. Bloqueá-la pelo gate
-    # seria um deadlock. A própria troca de senha vai zerar a flag no
-    # Commit 5 (D-ZERAR-MD5-ALTERAR).
-    """Troca self-service de senha. Grava só bcrypt — desbloqueia a assinatura."""
+    """Troca self-service de senha. Grava só bcrypt — desbloqueia a assinatura.
+
+    SEC-1 whitelist: esta é justamente a rota que o usuário precisa chamar
+    para sair da condição must_change_password=true. Bloqueá-la pelo gate
+    seria um deadlock. A própria troca de senha zera a flag (Commit 3,
+    D-ZERAR-MD5-ALTERAR) e a partir daí o usuário volta a passar pelo gate.
+    """
     try:
         await alterar_senha(
             db,
             usuario=user,
             senha_atual=payload.senha_atual,
             nova_senha=payload.nova_senha,
+            request=request,
         )
     except ContaError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

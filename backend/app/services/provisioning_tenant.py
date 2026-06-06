@@ -14,6 +14,8 @@ Pontos críticos:
 - Atomicidade: tudo numa transação; falha → rollback (sem tenant parcial).
 - Senha do admin: **gerada**, retornada **uma vez**; persistimos só bcrypt
   (`senha` MD5 fica vazio — caminho legado desabilitado).
+- SEC-1 (Commit 3): admin inicial nasce com `must_change_password=true`;
+  primeiro login do humano vai exigir troca obrigatória via fluxo /alterar-senha.
 """
 from __future__ import annotations
 
@@ -159,6 +161,9 @@ async def provisionar_tenant(
         excluido=False,
         cargo="Administrador",
         app="sistemas",
+        # SEC-1: admin inicial recebe senha temporária — força troca no
+        # primeiro acesso. O guard em get_current_user (Commit 2) já cobre.
+        must_change_password=True,
     )
     db.add(usuario)
     await db.flush()

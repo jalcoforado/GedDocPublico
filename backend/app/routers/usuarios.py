@@ -122,12 +122,16 @@ async def create_usuario(
     if dup:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="E-mail já cadastrado")
 
-    # Grava MD5 (compat PHP) E bcrypt (Python prefere). Ver Fase 9.2.
+    # SEC-1 (Commit 3): novo usuário nasce com must_change_password=true
+    # (senha do payload é tratada como temporária — definida pelo admin) e
+    # apenas bcrypt; MD5 legado fica vazio para alinhar com provisionamento e
+    # reset administrativo. O usuário será obrigado a trocar a senha no
+    # primeiro acesso (guard em get_current_user, Commit 2).
     user = Usuario(
         nome=payload.nome,
         email=payload.email,
         cpf=payload.cpf,
-        senha=hash_md5(payload.senha),
+        senha="",  # MD5 legado limpo — só bcrypt
         senha_bcrypt=hash_password(payload.senha),
         id_unidade_trabalho=payload.id_unidade_trabalho,
         cargo=payload.cargo,
@@ -135,6 +139,7 @@ async def create_usuario(
         excluido=False,
         app=get_settings().app_name,
         tenant_id=tenant_id,
+        must_change_password=True,
     )
     db.add(user)
     await db.flush()

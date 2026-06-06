@@ -1,4 +1,4 @@
-"""Reset de senha temporária de usuário (PR 3b).
+"""Reset de senha temporária de usuário (PR 3b + SEC-1 Commit 3).
 
 Regras (decisão 5):
 - Usuário **escopado ao tenant** (404 se não for do tenant — sem cross-tenant).
@@ -8,7 +8,10 @@ Regras (decisão 5):
 - Retorna a senha em claro **uma única vez** (o caller a devolve na resposta).
 - Audita o reset (ator + afetado; marca claramente se o afetado é SU). A senha
   **não** entra no payload de auditoria.
-- Não envia e-mail; não implementa `must_change_password` (fora de escopo).
+- SEC-1 (Commit 3): marca `must_change_password=true` no afetado. Próximo
+  acesso é bloqueado pelo guard (Commit 2) e o usuário só sai via troca
+  self-service (`/auth/alterar-senha`, whitelist do Commit 2).
+- Não envia e-mail.
 """
 from __future__ import annotations
 
@@ -51,6 +54,10 @@ async def resetar_senha_usuario(
     senha_temp = secrets.token_urlsafe(12)
     user.senha_bcrypt = hash_password(senha_temp)
     user.senha = ""  # zera MD5 legado: a senha antiga deixa de funcionar
+    # SEC-1 (Commit 3): força troca no próximo acesso. O guard em
+    # get_current_user devolverá 403 + X-Must-Change-Password=true até que o
+    # usuário conclua /auth/alterar-senha (que zera a flag em conta.py).
+    user.must_change_password = True
 
     # Marca claramente se o afetado é super-usuário (decisão 5).
     perms_afetado = await load_permissions(db, user.id, tenant_id=tenant_id)
@@ -64,6 +71,7 @@ async def resetar_senha_usuario(
         payload={
             "id_usuario_afetado": user.id,
             "afetado_super_usuario": perms_afetado.is_super_usuario,
+            "must_change_password_set": True,
         },
         request=request,
     )
