@@ -27,6 +27,7 @@ from ..schemas.frota import (
     MotoristaCreate,
     MotoristaUpdate,
     SolicitacaoVeiculoCreate,
+    SolicitacaoVeiculoDesignar,
     SolicitacaoVeiculoUpdate,
     VeiculoCreate,
     VeiculoUpdate,
@@ -432,3 +433,117 @@ async def excluir_solicitacao(
     sol.excluido = True
     sol.atualizado_em = datetime.utcnow()
     await db.commit()
+
+
+# --------------------------- Designação (PR Frota-4) -------------------------
+async def _validar_veiculo_designavel(
+    db: AsyncSession, *, tenant_id: int, id_veiculo: int
+) -> None:
+    veiculo = (
+        await db.execute(
+            select(Veiculo).where(
+                Veiculo.id == id_veiculo,
+                Veiculo.tenant_id == tenant_id,
+                Veiculo.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if veiculo is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Veículo não encontrado",
+        )
+    if veiculo.situacao != "disponivel":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Veículo não disponível para designação (situação atual: "
+                f"'{veiculo.situacao}'). Só veículos com situação 'disponivel' podem ser designados."
+            ),
+        )
+
+
+async def _validar_motorista_designavel(
+    db: AsyncSession, *, tenant_id: int, id_motorista: int
+) -> None:
+    motorista = (
+        await db.execute(
+            select(Motorista).where(
+                Motorista.id == id_motorista,
+                Motorista.tenant_id == tenant_id,
+                Motorista.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if motorista is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Motorista não encontrado",
+        )
+    if motorista.situacao != "ativo":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Motorista não disponível para designação (situação atual: "
+                f"'{motorista.situacao}'). Só motoristas com situação 'ativo' podem ser designados."
+            ),
+        )
+
+
+async def designar_solicitacao(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    solicitacao_id: int,
+    id_usuario_designador: int,
+    payload: SolicitacaoVeiculoDesignar,
+) -> SolicitacaoVeiculo:
+    sol = await obter_solicitacao(db, tenant_id=tenant_id, solicitacao_id=solicitacao_id)
+    if sol.status != "aprovada":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível designar veículo/motorista para solicitações 'aprovada'.",
+        )
+
+    if sol.necessita_motorista and payload.id_motorista is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Esta solicitação exige motorista: id_motorista é obrigatório.",
+        )
+
+    await _validar_veiculo_designavel(db, tenant_id=tenant_id, id_veiculo=payload.id_veiculo)
+    if payload.id_motorista is not None:
+        await _validar_motorista_designavel(
+            db, tenant_id=tenant_id, id_motorista=payload.id_motorista
+        )
+
+    # Redesignação enquanto 'aprovada' = sobrescreve (sem histórico, por escopo).
+    sol.id_veiculo_designado = payload.id_veiculo
+    sol.id_motorista_designado = payload.id_motorista
+    sol.id_usuario_designador = id_usuario_designador
+    sol.data_designacao = datetime.utcnow()
+    sol.observacoes_designacao = payload.observacoes_designacao
+    sol.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(sol)
+    return sol
+
+
+async def limpar_designacao(
+    db: AsyncSession, *, tenant_id: int, solicitacao_id: int
+) -> SolicitacaoVeiculo:
+    sol = await obter_solicitacao(db, tenant_id=tenant_id, solicitacao_id=solicitacao_id)
+    if sol.status != "aprovada":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível limpar a designação de solicitações 'aprovada'.",
+        )
+    sol.id_veiculo_designado = None
+    sol.id_motorista_designado = None
+    sol.id_usuario_designador = None
+    sol.data_designacao = None
+    sol.observacoes_designacao = None
+    sol.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(sol)
+    return sol

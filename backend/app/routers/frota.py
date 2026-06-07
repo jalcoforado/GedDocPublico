@@ -15,6 +15,7 @@ from ..schemas.frota import (
     MotoristaOut,
     MotoristaUpdate,
     SolicitacaoVeiculoCreate,
+    SolicitacaoVeiculoDesignar,
     SolicitacaoVeiculoOut,
     SolicitacaoVeiculoRejeitar,
     SolicitacaoVeiculoUpdate,
@@ -266,6 +267,40 @@ async def cancelar_solicitacao(
     db: AsyncSession = Depends(get_db),
 ) -> SolicitacaoVeiculoOut:
     sol = await frota_svc.cancelar_solicitacao(
+        db, tenant_id=tenant_id, solicitacao_id=solicitacao_id
+    )
+    return SolicitacaoVeiculoOut.model_validate(sol)
+
+
+@solicitacoes_router.post("/{solicitacao_id}/designar", response_model=SolicitacaoVeiculoOut)
+async def designar_solicitacao(
+    solicitacao_id: int,
+    payload: SolicitacaoVeiculoDesignar,
+    usuario: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> SolicitacaoVeiculoOut:
+    # id_usuario_designador vem SEMPRE do usuário autenticado (server-side).
+    sol = await frota_svc.designar_solicitacao(
+        db,
+        tenant_id=tenant_id,
+        solicitacao_id=solicitacao_id,
+        id_usuario_designador=usuario.id,
+        payload=payload,
+    )
+    return SolicitacaoVeiculoOut.model_validate(sol)
+
+
+@solicitacoes_router.post(
+    "/{solicitacao_id}/limpar-designacao", response_model=SolicitacaoVeiculoOut
+)
+async def limpar_designacao(
+    solicitacao_id: int,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> SolicitacaoVeiculoOut:
+    sol = await frota_svc.limpar_designacao(
         db, tenant_id=tenant_id, solicitacao_id=solicitacao_id
     )
     return SolicitacaoVeiculoOut.model_validate(sol)

@@ -1045,8 +1045,19 @@ export interface SolicitacaoVeiculo {
   observacoes: string | null;
   status: SolicitacaoStatus;
   justificativa_rejeicao: string | null;
+  id_veiculo_designado: number | null;
+  id_motorista_designado: number | null;
+  id_usuario_designador: number | null;
+  data_designacao: string | null;
+  observacoes_designacao: string | null;
   criado_em: string;
   atualizado_em: string | null;
+}
+
+export interface DesignacaoInput {
+  id_veiculo: number;
+  id_motorista?: number | null;
+  observacoes_designacao?: string | null;
 }
 
 export const api = {
@@ -1253,6 +1264,15 @@ export const api = {
       }),
     cancelar: (id: number) =>
       request<SolicitacaoVeiculo>(`/frota/solicitacoes/${id}/cancelar`, { method: "POST" }),
+    designar: (id: number, data: DesignacaoInput) =>
+      request<SolicitacaoVeiculo>(`/frota/solicitacoes/${id}/designar`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    limparDesignacao: (id: number) =>
+      request<SolicitacaoVeiculo>(`/frota/solicitacoes/${id}/limpar-designacao`, {
+        method: "POST",
+      }),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),

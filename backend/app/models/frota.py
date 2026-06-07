@@ -129,6 +129,19 @@ class SolicitacaoVeiculo(Base):
         String(20), nullable=False, default="solicitada"
     )
     justificativa_rejeicao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Designação (PR Frota-4) — preenchida só quando status='aprovada'. 1:1, sem
+    # histórico (redesignação sobrescreve). designador/data são server-side.
+    id_veiculo_designado: Mapped[int | None] = mapped_column(
+        ForeignKey("frota.veiculo.id"), nullable=True
+    )
+    id_motorista_designado: Mapped[int | None] = mapped_column(
+        ForeignKey("frota.motorista.id"), nullable=True
+    )
+    id_usuario_designador: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
+    data_designacao: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    observacoes_designacao: Mapped[str | None] = mapped_column(Text, nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

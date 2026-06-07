@@ -290,6 +290,17 @@ class SolicitacaoVeiculoRejeitar(BaseModel):
     justificativa_rejeicao: str = Field(min_length=1, max_length=2000)
 
 
+class SolicitacaoVeiculoDesignar(BaseModel):
+    """Designação de veículo/motorista (PR Frota-4). `id_usuario_designador` e
+    `data_designacao` são server-side. A obrigatoriedade do motorista quando
+    `necessita_motorista` e os status de veículo/motorista são validados no
+    serviço (dependem do registro armazenado)."""
+
+    id_veiculo: int
+    id_motorista: int | None = None
+    observacoes_designacao: str | None = Field(default=None, max_length=2000)
+
+
 class SolicitacaoVeiculoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -305,5 +316,10 @@ class SolicitacaoVeiculoOut(BaseModel):
     observacoes: str | None = None
     status: str
     justificativa_rejeicao: str | None = None
+    id_veiculo_designado: int | None = None
+    id_motorista_designado: int | None = None
+    id_usuario_designador: int | None = None
+    data_designacao: datetime | None = None
+    observacoes_designacao: str | None = None
     criado_em: datetime
     atualizado_em: datetime | None = None
