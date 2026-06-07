@@ -115,6 +115,15 @@ de continuar.
   via UI `/usuarios` → "Resetar senha"): marca a flag e zera o MD5 legado.
 - **Criação de usuário** (`POST /api/v2/usuarios` via UI `/usuarios` → "Novo
   usuário"): nasce com a flag, MD5 legado vazio.
+- **Alteração administrativa de senha pelo cadastro do usuário**
+  (`PUT /api/v2/usuarios/{id}` com `senha` preenchida — campo "Nova senha
+  temporária" no dialog de edição): segue a mesma regra do reset. Zera o MD5
+  legado, grava só bcrypt, marca a flag e registra audit
+  `usuario.senha_alterada_por_admin`. Vale **também** quando o admin altera
+  a própria senha por essa rota — o auto-serviço seguro continua sendo
+  `POST /auth/alterar-senha` (que exige a senha atual). Para suporte ao
+  usuário, prefira **resetar senha** (rota dedicada, senha aleatória, audit
+  específico).
 
 Em todos os casos, a senha temporária é exibida **uma única vez**;
 persistimos só o hash bcrypt. **Nunca envie a senha temporária por canal

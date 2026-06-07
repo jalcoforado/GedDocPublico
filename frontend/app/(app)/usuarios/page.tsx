@@ -377,7 +377,9 @@ export default function UsuariosPage() {
           )}
           <div>
             <Label htmlFor="senha" required={!editing}>
-              {editing ? "Nova senha (vazio = manter)" : "Senha"}
+              {editing
+                ? "Nova senha temporária (vazio = manter senha atual)"
+                : "Senha"}
             </Label>
             <PasswordInput
               id="senha"
@@ -385,7 +387,14 @@ export default function UsuariosPage() {
               onChange={(e) => setForm({ ...form, senha: e.target.value })}
               autoComplete={editing ? "new-password" : "new-password"}
               required={!editing}
+              aria-describedby={editing ? "senha-help" : undefined}
             />
+            {editing && (
+              <p id="senha-help" className="mt-1 text-xs text-foreground-muted">
+                Se preenchida, o usuário será obrigado a alterá-la no próximo
+                acesso. Não envie por canal inseguro.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Checkbox

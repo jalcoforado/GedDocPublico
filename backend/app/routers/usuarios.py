@@ -3,7 +3,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
-from ..auth.password import hash_md5, hash_password
+from ..auth.password import hash_password
 from ..auth.perms import require_permission
 from ..config import get_settings
 from ..database import get_db, tenant_filter
@@ -16,6 +16,8 @@ from ..schemas.usuario import (
     UsuarioOut,
     UsuarioUpdate,
 )
+from ..services.audit import log as audit_log
+from ..services.permissoes import load_permissions
 from ..services.usuario_senha import resetar_senha_usuario
 
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
@@ -169,6 +171,7 @@ async def create_usuario(
 async def update_usuario(
     usuario_id: int,
     payload: UsuarioUpdate,
+    request: Request,
     current: Usuario = Depends(require_permission("usuario", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
@@ -176,16 +179,23 @@ async def update_usuario(
     user = await _get_usuario_or_404(db, usuario_id, tenant_id)
 
     data = payload.model_dump(exclude_unset=True)
+    # SEC-1 follow-up (PR1): alteração administrativa de senha via PUT segue a
+    # mesma regra do reset (Commit 3) — zera MD5 legado, grava só bcrypt e
+    # marca must_change_password=true. Vale inclusive quando o admin altera a
+    # própria senha por esta rota (auto-serviço seguro continua sendo
+    # /auth/alterar-senha, que exige senha atual).
+    senha_alterada = False
     if "senha" in data and data["senha"]:
         plain = data["senha"]
-        data["senha"] = hash_md5(plain)
+        data["senha"] = ""  # zera MD5 legado — antiga deixa de valer
         data["senha_bcrypt"] = hash_password(plain)
+        data["must_change_password"] = True
+        senha_alterada = True
     elif "senha" in data:
         data.pop("senha")
 
     # Sigilo gradual — só super-usuário concede/altera credencial de acesso.
     if "nivel_acesso_sigilo" in data:
-        from ..services.permissoes import load_permissions
         from ..services.sigilo import is_nivel_valido
 
         perms = await load_permissions(db, current.id, tenant_id=tenant_id)
@@ -202,6 +212,25 @@ async def update_usuario(
 
     for k, v in data.items():
         setattr(user, k, v)
+
+    if senha_alterada:
+        # Mesma transação do UPDATE — se o commit falhar, audit volta junto.
+        perms_afetado = await load_permissions(db, user.id, tenant_id=tenant_id)
+        await audit_log(
+            db,
+            tenant_id=tenant_id,
+            id_usuario=current.id,
+            acao="usuario.senha_alterada_por_admin",
+            entidade="usuario",
+            id_entidade=user.id,
+            payload={
+                "id_usuario_afetado": user.id,
+                "afetado_super_usuario": perms_afetado.is_super_usuario,
+                "via": "put_usuario",
+            },
+            request=request,
+        )
+
     await db.commit()
     await db.refresh(user)
     grupos, unidades = await _load_links(db, user.id, tenant_id)
