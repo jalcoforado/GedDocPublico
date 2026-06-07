@@ -63,4 +63,58 @@ describe("TrocarSenhaCard", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/confere/i);
     expect(api.alterarSenha).not.toHaveBeenCalled();
   });
+
+  // SEC-1 Commit 5 — props opcionais.
+
+  it("SEC-1: onSuccess é chamado após sucesso quando passado", async () => {
+    (api.alterarSenha as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const onSuccess = vi.fn();
+    const qc = new QueryClient({
+      defaultOptions: { mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <TrocarSenhaCard onSuccess={onSuccess} />
+      </QueryClientProvider>,
+    );
+    const u = userEvent.setup();
+    await u.type(screen.getByLabelText(/^Senha atual/i), "velha123");
+    await u.type(screen.getByLabelText(/^Nova senha/i), "nova-senha-1");
+    await u.type(screen.getByLabelText(/^Confirmar/i), "nova-senha-1");
+    await u.click(screen.getByRole("button", { name: /alterar senha/i }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+  });
+
+  it("SEC-1: successMessage customiza o toast quando passado", async () => {
+    (api.alterarSenha as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const qc = new QueryClient({
+      defaultOptions: { mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <TrocarSenhaCard successMessage="Tudo certo." />
+      </QueryClientProvider>,
+    );
+    const u = userEvent.setup();
+    await u.type(screen.getByLabelText(/^Senha atual/i), "velha123");
+    await u.type(screen.getByLabelText(/^Nova senha/i), "nova-senha-1");
+    await u.type(screen.getByLabelText(/^Confirmar/i), "nova-senha-1");
+    await u.click(screen.getByRole("button", { name: /alterar senha/i }));
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Tudo certo."));
+  });
+
+  it("SEC-1 regressão: sem props funciona como antes (toast padrão, sem onSuccess)", async () => {
+    (api.alterarSenha as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const u = userEvent.setup();
+    renderCard();
+    await u.type(screen.getByLabelText(/^Senha atual/i), "velha123");
+    await u.type(screen.getByLabelText(/^Nova senha/i), "nova-senha-1");
+    await u.type(screen.getByLabelText(/^Confirmar/i), "nova-senha-1");
+    await u.click(screen.getByRole("button", { name: /alterar senha/i }));
+    await waitFor(() =>
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "Senha alterada. Você já pode assinar normalmente.",
+      ),
+    );
+  });
 });

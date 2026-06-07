@@ -10,7 +10,19 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 
-export function TrocarSenhaCard() {
+interface TrocarSenhaCardProps {
+  /** SEC-1 Commit 5 — callback executado após a troca bem-sucedida.
+   * Útil em fluxos onde a troca de senha é pré-requisito (ex:
+   * /alterar-senha-obrigatoria, que redireciona para /home depois). */
+  onSuccess?: () => void;
+  /** Mensagem customizada do toast de sucesso. Padrão: foco em assinatura. */
+  successMessage?: string;
+}
+
+export function TrocarSenhaCard({
+  onSuccess,
+  successMessage,
+}: TrocarSenhaCardProps = {}) {
   const toast = useToast();
   const [atual, setAtual] = useState("");
   const [nova, setNova] = useState("");
@@ -20,11 +32,14 @@ export function TrocarSenhaCard() {
   const m = useMutation({
     mutationFn: () => api.alterarSenha(atual, nova),
     onSuccess: () => {
-      toast.success("Senha alterada. Você já pode assinar normalmente.");
+      toast.success(
+        successMessage ?? "Senha alterada. Você já pode assinar normalmente.",
+      );
       setAtual("");
       setNova("");
       setConfirma("");
       setErr(null);
+      onSuccess?.();
     },
     onError: (e: Error) => setErr(e.message),
   });

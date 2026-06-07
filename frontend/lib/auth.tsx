@@ -28,6 +28,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .then(([u, p]) => {
         setUser(u);
         setPerms(p);
+        // SEC-1 Commit 5 — se o servidor diz que a senha é temporária,
+        // empurra para a tela obrigatória. Não redireciona se já estiver
+        // lá (evita loop). Sem `pathname` no array de deps: evita re-run
+        // a cada navegação interna; o redirect roda uma vez por mount.
+        if (
+          u.must_change_password &&
+          typeof window !== "undefined" &&
+          window.location.pathname !== "/alterar-senha-obrigatoria"
+        ) {
+          router.replace("/alterar-senha-obrigatoria");
+        }
       })
       .catch(() => {
         router.replace("/login");

@@ -13,6 +13,10 @@ export interface LoginResponse {
   usuario_id: number;
   usuario_email: string;
   nome: string;
+  /** SEC-1 Commit 4 — true quando o usuário acabou de receber senha temporária
+   * (provisionamento, reset administrativo, POST /usuarios). O frontend
+   * deve redirecionar para /alterar-senha-obrigatoria. */
+  must_change_password: boolean;
 }
 
 // Fase 15 — branding/white-label do tenant atual (resolvido pelo Host header).
@@ -29,6 +33,8 @@ export interface MeResponse {
   email: string;
   cargo: string | null;
   id_unidade_trabalho: number | null;
+  /** SEC-1 Commit 4 — espelho da flag, consultável a qualquer momento. */
+  must_change_password: boolean;
 }
 
 export interface PermissaoItem {
@@ -695,6 +701,29 @@ function readCookie(name: string): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+/** SEC-1 Commit 5 — Rotas que NÃO devem disparar redirect ao receber
+ * 403 + X-Must-Change-Password=true. Evita loop (já está na tela / no
+ * login) e protege o portal do cidadão (cookie/fluxo separado). */
+function _suprimeRedirectMustChange(pathname: string): boolean {
+  if (pathname === "/login") return true;
+  if (pathname === "/alterar-senha-obrigatoria") return true;
+  if (pathname.startsWith("/cidadao/")) return true;
+  return false;
+}
+
+/** SEC-1 Commit 5 — Interceptor de 403 com header X-Must-Change-Password.
+ * Roda **apenas no browser** (escopo admin/servidor — request() não é usada
+ * pelo portal do cidadão). Faz hard navigation via window.location.assign
+ * para garantir que toda a árvore React remonte sem o layout principal. */
+function _interceptaMustChangePassword(res: Response): void {
+  if (typeof window === "undefined") return;
+  if (res.status !== 403) return;
+  if (res.headers.get("x-must-change-password") !== "true") return;
+  const pathname = window.location.pathname;
+  if (_suprimeRedirectMustChange(pathname)) return;
+  window.location.assign("/alterar-senha-obrigatoria");
+}
+
 async function request<T>(
   path: string,
   init: RequestInit = {},
@@ -716,6 +745,11 @@ async function request<T>(
     cache: "no-store",
     credentials: "include",  // garante envio de cookies cross-origin (dev: 8090 → 3000)
   });
+  // SEC-1: interceptor antes do parsing — não importa o corpo da resposta,
+  // o redirect já está em curso. O throw abaixo segue normal para o caller
+  // que pode estar em meio a uma mutation (vai cair em catch sem efeito,
+  // pois o navegador já está navegando).
+  _interceptaMustChangePassword(res);
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
