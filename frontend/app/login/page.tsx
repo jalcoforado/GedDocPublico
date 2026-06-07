@@ -26,8 +26,14 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await api.login(email, senha);
-      router.push("/home");
+      // SEC-1 Commit 6 — otimização: redireciona direto para a tela de
+      // troca quando o backend já sinaliza must_change_password no login.
+      // Evita o salto extra por /home (onde o AuthProvider faria o redirect
+      // como defesa em profundidade — que permanece intacto).
+      const r = await api.login(email, senha);
+      router.push(
+        r.must_change_password ? "/alterar-senha-obrigatoria" : "/home",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao autenticar");
     } finally {

@@ -85,9 +85,145 @@ institucionais** (gate de `PUT /tenants/me` e do `PUT /tenants/me/nup-config`):
 
 **Reset de senha temporária** (`/usuarios` → "Resetar senha"): gera uma senha
 exibida **uma única vez**, persiste só o hash moderno (bcrypt) e zera o MD5
-legado — a senha antiga deixa de valer. Não envia e-mail; não há
-`must_change_password` (troca manual). Exige `usuario:atualizar` e é restrito ao
-próprio tenant (sem cross-tenant); o reset é auditado em `audit_log`.
+legado — a senha antiga deixa de valer. **Marca `must_change_password=true`
+no afetado** (SEC-1 Commit 3) — o usuário será forçado a trocar no próximo
+acesso, ver seção *Fluxo obrigatório de troca de senha* abaixo. Não envia
+e-mail. Exige `usuario:atualizar` e é restrito ao próprio tenant (sem
+cross-tenant); o reset é auditado em `audit_log`.
+
+---
+
+## Fluxo obrigatório de troca de senha (SEC-1)
+
+PR SEC-1 introduziu uma flag `utils.usuario.must_change_password` que força o
+servidor/admin a trocar a senha temporária no primeiro acesso, antes de
+acessar qualquer rota de negócio. **Não se aplica ao portal do cidadão**
+(D-CIDADAO — `usuario_externo` não tem a flag).
+
+### O que é `must_change_password`
+
+Coluna boolean em `utils.usuario`, default `false`. Sinaliza que a senha em
+vigor é **temporária** e foi gerada por algum dos fluxos administrativos
+(provisionamento, reset, criação) — o usuário precisa concluir a troca antes
+de continuar.
+
+### Quando a flag é marcada (`true`)
+
+- **Provisionamento de tenant** (CLI `python -m app.cli.tenant create` ou
+  API `POST /admin/tenants`): admin/SU inicial nasce com a flag.
+- **Reset administrativo de senha** (`POST /api/v2/usuarios/{id}/resetar-senha`
+  via UI `/usuarios` → "Resetar senha"): marca a flag e zera o MD5 legado.
+- **Criação de usuário** (`POST /api/v2/usuarios` via UI `/usuarios` → "Novo
+  usuário"): nasce com a flag, MD5 legado vazio.
+
+Em todos os casos, a senha temporária é exibida **uma única vez**;
+persistimos só o hash bcrypt. **Nunca envie a senha temporária por canal
+inseguro** (e-mail texto-puro, chat sem criptografia ponta-a-ponta, etc.) —
+use o canal acordado com o cliente.
+
+### Quando a flag é removida (`false`)
+
+- **Troca self-service de senha** (`POST /api/v2/auth/alterar-senha` via tela
+  `/perfil` ou `/alterar-senha-obrigatoria`): zera a flag, grava bcrypt,
+  limpa MD5 legado. Audit `usuario.senha_alterada` registra
+  `must_change_password_cleared: true`.
+
+Não há outra forma de zerar a flag — não há "ignorar" nem "lembrar depois".
+Por design.
+
+### Comportamento no login
+
+- Login (`POST /api/v2/auth/login`) **funciona normalmente** mesmo com flag
+  ativa — retorna `HTTP 200`, emite JWT e cookie HttpOnly. O endpoint não
+  passa pelo guard `get_current_user`.
+- O `LoginResponse` inclui `must_change_password: boolean` (SEC-1 Commit 4).
+- O frontend (`/login`) usa esse campo para decidir o destino: se `true`,
+  envia direto para `/alterar-senha-obrigatoria`; senão `/home`.
+
+### Comportamento em rotas protegidas
+
+- `get_current_user` em `backend/app/auth/deps.py` aplica o gate: se
+  `user.must_change_password`, responde **403 + header
+  `X-Must-Change-Password: true`**.
+- Toda rota de negócio herda o gate automaticamente (via `require_permission`,
+  `require_platform_admin`, `require_acesso_processo`, ou `Depends(get_current_user)`
+  direto).
+- Whitelist autenticada (rotas que **não** são bloqueadas pelo gate):
+  - `GET  /api/v2/auth/me`
+  - `POST /api/v2/auth/alterar-senha`
+  - `GET  /api/v2/permissoes/me`
+  - `GET  /api/v2/admin/me`
+
+  Usam a dep `get_current_user_no_password_gate`. Essenciais para o usuário
+  flagged conseguir concluir o fluxo.
+
+### Tela `/alterar-senha-obrigatoria`
+
+- Standalone — **não** usa o layout `(app)` com `Sidebar`/`Header`.
+- Mensagem: *"Por segurança, altere sua senha temporária antes de continuar."*
+- Mount valida `me()`:
+  - 401/erro → `/login`.
+  - `must_change_password=false` → `/home` (não precisa estar aqui).
+  - `true` → render form de troca.
+- Após troca bem-sucedida (`onSuccess` do `TrocarSenhaCard`) → `/home`.
+- **Botão "Sair"**: chama `POST /auth/logout` e envia para `/login`. Útil
+  quando o usuário não tem a senha atual em mãos.
+
+A senha temporária **nunca** é exibida nem persistida (`localStorage` /
+`sessionStorage`). O form mantém os campos só em memória React durante a
+sessão da tela.
+
+### Portal cidadão fora do fluxo
+
+O cidadão (`UsuarioExterno`) **não** tem a flag e não passa por esse fluxo.
+O frontend usa `requestCidadao()` separado do `request()` admin — o
+interceptor 403 que detecta `X-Must-Change-Password` opera apenas no path
+admin. Cookies separados (`aprimora_token` vs. `aprimora_cidadao_token`)
+garantem que o mesmo navegador pode estar logado nos dois sem conflito.
+
+### Header `X-Must-Change-Password=true`
+
+- Emitido pelo backend em qualquer 403 originado no gate de
+  `get_current_user`.
+- O frontend (`lib/api.ts`) intercepta no wrapper `request()` e, se presente,
+  faz `window.location.assign("/alterar-senha-obrigatoria")` (hard nav).
+- Whitelist do interceptor (não redireciona se o pathname atual for):
+  - `/login`
+  - `/alterar-senha-obrigatoria`
+  - qualquer rota começando com `/cidadao/`
+
+### Troubleshooting
+
+- **Usuário preso em loop redirecionando para `/alterar-senha-obrigatoria`**:
+  verificar que o backend ainda retorna 200 + `must_change_password=true` em
+  `/auth/me`. Se sim, a tela deveria carregar. Causas comuns:
+  - JS bloqueado / extensões interferindo no `window.location.assign`.
+  - Versão de frontend desatualizada (cache antigo do `lib/api.ts`). Forçar
+    refresh hard (Ctrl+Shift+R).
+  - nginx sem a rota `/alterar-senha-obrigatoria` no regex (502 Bad Gateway).
+    Verificar `nginx/default.conf` — o nome deve estar no `location ~ ^/(...)`
+    do bloco Python.
+- **403 sem header**: o gate não emitiu. Investigar se a rota usa o
+  `get_current_user` correto (não a variante sem gate). Não é o caso para
+  nenhuma rota fora da whitelist documentada acima.
+- **Tela `/alterar-senha-obrigatoria` não carrega**: verificar console do
+  browser. Erro típico de 502 = nginx sem a rota (acima). Erro de 401
+  significa que a sessão expirou — usuário será redirecionado para `/login`.
+- **Reset de senha não força troca**: confirmar que a migration `0030` foi
+  aplicada (`alembic current` no backend). Sem a coluna, o serviço
+  `resetar_senha_usuario` não pode marcar e o gate nunca dispara.
+
+### Observação de segurança
+
+- **NÃO** envie senha temporária por e-mail texto puro, SMS sem criptografia,
+  ou chat público.
+- Use o canal acordado institucionalmente (entrega presencial, sistema de
+  mensagens criptografado, gerenciador de senhas compartilhado).
+- O reset administrativo audita o ator + afetado no `audit_log` (não grava a
+  senha em claro nem o hash) — útil para investigar incidentes.
+- O admin de plataforma recém-provisionado também nasce flagged. Comunique
+  a senha temporária pelo canal seguro e oriente troca imediata no primeiro
+  acesso.
 
 ---
 
