@@ -11,6 +11,7 @@ from .ccd import CcdClasse, TtdRegra
 from .complementacao_documental import ComplementacaoDocumental
 from .especie_documental import EspecieDocumental
 from .configuracao import Configuracao
+from .frota import Motorista, Veiculo
 from .processo import (
     Acao,
     Anexo,
@@ -82,6 +83,7 @@ __all__ = [
     "Job",
     "Manifestante",
     "Modulo",
+    "Motorista",
     "Nivel",
     "Notificacao",
     "NotificacaoPreferencia",
@@ -97,6 +99,7 @@ __all__ = [
     "Transacao",
     "TtdRegra",
     "UnidadeTrabalho",
+    "Veiculo",
     "Usuario",
     "UsuarioExterno",
     "UsuarioGrupo",
