@@ -89,31 +89,42 @@ async def test_must_change_password_column_exists_and_shape(admin_engine):
 
 
 async def test_backfill_existing_users_are_false(admin_engine):
-    """Todos os usuários existentes ficaram com must_change_password=false
-    após o backfill (D-BACKFILL — usuários legados não são forçados)."""
-    async with _sm(admin_engine)() as s:
-        total = (
-            await s.execute(
-                text(
-                    "SELECT COUNT(*) FROM utils.usuario "
-                    "WHERE ativo = true AND excluido = false"
-                )
-            )
-        ).scalar_one()
-        flagged = (
-            await s.execute(
-                text(
-                    "SELECT COUNT(*) FROM utils.usuario "
-                    "WHERE ativo = true AND excluido = false "
-                    "  AND must_change_password = true"
-                )
-            )
-        ).scalar_one()
+    """Migration 0030 fez backfill: o usuário-âncora `admin@local.test`,
+    presente no provisionamento inicial do tenant default (tenant_id=1) e
+    portanto pré-migração, tem `must_change_password=false`. Sanity check
+    direto de D-BACKFILL.
 
-    assert total > 0, "esperado ao menos um usuário ativo no banco para validar backfill"
-    assert flagged == 0, (
-        f"D-BACKFILL violado: {flagged} usuário(s) existente(s) com "
-        "must_change_password=true. Migration 0030 deveria deixar todos false."
+    Reescrita (TECH-2): a versão anterior contava globalmente todos os
+    usuários ativos com flag=true, o que ficava sensível a leftovers
+    legítimos criados por E2E, reset administrativo ou provisionamento.
+    A semântica correta da migration é: *usuários existentes no momento
+    da migration receberam false*. Verificamos isso por âncora — não por
+    contagem global.
+    """
+    async with _sm(admin_engine)() as s:
+        row = (
+            await s.execute(
+                text(
+                    "SELECT must_change_password FROM utils.usuario "
+                    "WHERE email = 'admin@local.test' "
+                    "  AND tenant_id = 1 "
+                    "  AND ativo = true "
+                    "  AND excluido = false"
+                )
+            )
+        ).scalar_one_or_none()
+
+    assert row is not None, (
+        "Usuário-âncora `admin@local.test` ausente no tenant default — "
+        "esperado pelo provisionamento inicial. Sem âncora, não dá pra "
+        "validar D-BACKFILL deterministicamente."
+    )
+    assert row is False, (
+        "D-BACKFILL violado: usuário-âncora `admin@local.test` (pré-migration) "
+        "deveria ter `must_change_password=false`. Se algum reset/edição "
+        "administrativa foi feita nesse usuário em DEV, restaurar com "
+        "`UPDATE utils.usuario SET must_change_password=false WHERE "
+        "email='admin@local.test' AND tenant_id=1`."
     )
 
 

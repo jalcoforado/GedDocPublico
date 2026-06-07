@@ -395,3 +395,43 @@ Itens conscientemente adiados — revisitar em PRs futuros:
   apenas armazenados; o bloqueio efetivo (quota) fica para PR futuro.
 - **Módulos por tenant:** derivados do `plano` (sem tabela `tenant_modulo`);
   customização fina por módulo é PR posterior.
+
+---
+
+## Convenção de dados de teste (E2E / smoke)
+
+Para evitar leftovers poluindo testes de integração:
+
+- **E-mails de teste** devem usar domínio reservado `.test` (RFC 6761) —
+  preferencialmente `@e2e.test` (Playwright) ou `@ux1smoke.test` (smoke UX).
+  Nunca usar domínios reais (`*.gov.br`, `*.com`, etc.) em dados de teste.
+- **Slugs/prefixos** devem ser fáceis de identificar: `e2e-`, `sec1-`,
+  `ux1-smoke-`, `dbg-` (debug manual). Sufixo aleatório (`uuid4().hex[:8]`)
+  evita colisão.
+- **Cleanup obrigatório** no `test.afterAll` (Playwright) ou fixture
+  teardown (pytest) quando o teste criar usuários, processos ou serviços.
+- **Smoke manual** (terminal interativo, debug) deve fazer cleanup
+  explícito ao fim — se abortar, anotar o ID/email para purgar depois.
+- **Testes de integração** **não devem assumir** que o banco está vazio ou
+  livre de usuários flagged. Evitar contagens globais sensíveis a
+  leftovers; quando precisar verificar comportamento de migration ou de
+  fluxo administrativo, usar **usuário-âncora** (ex.: `admin@local.test`
+  no tenant default) ou **tenant isolado** criado e destruído na fixture.
+- **Limpeza pontual em DEV** (uma vez, quando leftovers vivos forem
+  detectados):
+  ```sql
+  -- Subselect dos ids alvos
+  WITH alvos AS (
+    SELECT id FROM utils.usuario WHERE email ~ '@(e2e|ux1smoke)\.test$'
+  )
+  DELETE FROM aprimora_py.audit_log WHERE id_usuario IN (SELECT id FROM alvos);
+  DELETE FROM utils.usuario_unidade_trabalho WHERE id_usuario IN (SELECT id FROM utils.usuario WHERE email ~ '@(e2e|ux1smoke)\.test$');
+  DELETE FROM utils.usuario_grupo            WHERE id_usuario IN (SELECT id FROM utils.usuario WHERE email ~ '@(e2e|ux1smoke)\.test$');
+  UPDATE utils.pessoa SET id_usuario_auditoria = NULL
+    WHERE id_usuario_auditoria IN (SELECT id FROM utils.usuario WHERE email ~ '@(e2e|ux1smoke)\.test$');
+  DELETE FROM utils.usuario WHERE email ~ '@(e2e|ux1smoke)\.test$';
+  ```
+  Ordem importa: `aprimora_py.audit_log` tem FK em `utils.usuario(id)`; sem
+  apagar lá primeiro, o DELETE final falha com `ForeignKeyViolationError`.
+  **Nunca rodar em produção** — domínios `.test` são reservados RFC 6761,
+  nenhum usuário real os usa.
