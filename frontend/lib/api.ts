@@ -978,6 +978,58 @@ export interface AdminTenantCreated {
   aviso: string;
 }
 
+// --- Frota Pública -----------------------------------------------------------
+export type VeiculoSituacao =
+  | "disponivel"
+  | "em_uso"
+  | "manutencao"
+  | "inativo"
+  | "baixado";
+export type VeiculoFormaPosse = "proprio" | "locado" | "cedido" | "convenio";
+
+export interface Veiculo {
+  id: number;
+  placa: string;
+  renavam: string | null;
+  chassi: string | null;
+  marca: string | null;
+  modelo: string | null;
+  ano_fabricacao: number | null;
+  ano_modelo: number | null;
+  cor: string | null;
+  tipo_veiculo: string | null;
+  tipo_combustivel: string | null;
+  situacao: VeiculoSituacao;
+  id_unidade_responsavel: number | null;
+  quilometragem_atual: number;
+  data_aquisicao: string | null;
+  forma_posse: VeiculoFormaPosse;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export type MotoristaSituacao = "ativo" | "afastado" | "inativo";
+export type CnhCategoria = "A" | "B" | "AB" | "C" | "D" | "E" | "AC" | "AD" | "AE";
+
+export interface Motorista {
+  id: number;
+  nome: string;
+  cpf: string;
+  matricula: string | null;
+  cnh_numero: string;
+  cnh_categoria: CnhCategoria;
+  cnh_validade: string;
+  telefone: string | null;
+  email: string | null;
+  id_unidade: number | null;
+  id_usuario: number | null;
+  situacao: MotoristaSituacao;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -1163,6 +1215,14 @@ export const api = {
       request<void>(`/tipos-processo/${id}`, { method: "DELETE" }),
   },
   assuntos: crud<Assunto>("/assuntos"),
+  frota: crud<Veiculo>("/frota/veiculos"),
+  motoristas: {
+    ...crud<Motorista>("/frota/motoristas"),
+    inativar: (id: number) =>
+      request<Motorista>(`/frota/motoristas/${id}/inativar`, { method: "POST" }),
+    reativar: (id: number) =>
+      request<Motorista>(`/frota/motoristas/${id}/reativar`, { method: "POST" }),
+  },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),
     create: (data: Omit<TipoAnexo, "id">) =>
