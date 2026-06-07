@@ -92,3 +92,43 @@ class Motorista(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class SolicitacaoVeiculo(Base):
+    """Solicitação de uso de veículo da frota (PR Frota-3).
+
+    Máquina de estados em `status` (solicitada → aprovada/rejeitada/cancelada),
+    com transições guardadas no serviço de domínio. `id_usuario_solicitante` é
+    sempre o usuário autenticado (definido server-side). `excluido` é soft-delete.
+    Não cobre designação de veículo/motorista nem saída/retorno reais.
+    """
+
+    __tablename__ = "solicitacao_veiculo"
+    __table_args__ = {"schema": "frota"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_usuario_solicitante: Mapped[int] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=False
+    )
+    id_unidade_solicitante: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.unidade_trabalho.id"), nullable=True
+    )
+    finalidade: Mapped[str] = mapped_column(String(255), nullable=False)
+    destino: Mapped[str] = mapped_column(String(255), nullable=False)
+    data_saida_prevista: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    data_retorno_prevista: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    quantidade_passageiros: Mapped[int] = mapped_column(Integer, nullable=False)
+    necessita_motorista: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="solicitada"
+    )
+    justificativa_rejeicao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

@@ -1,6 +1,6 @@
 "use client";
 
-import { Car, IdCard, Truck } from "lucide-react";
+import { Car, ClipboardList, IdCard, Truck } from "lucide-react";
 import Link from "next/link";
 
 import { PageHeader } from "@/components/ui/page-header";
@@ -17,6 +17,12 @@ const CARDS = [
     icon: IdCard,
     title: "Motoristas",
     desc: "Cadastro de condutores: CPF, CNH (categoria e validade), lotação e situação.",
+  },
+  {
+    href: "/frotas/solicitacoes",
+    icon: ClipboardList,
+    title: "Solicitações de Veículo",
+    desc: "Pedidos de uso de veículo: finalidade, destino, datas previstas e fluxo de aprovação.",
   },
 ];
 

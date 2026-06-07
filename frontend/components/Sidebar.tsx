@@ -123,6 +123,7 @@ const NAV: NavGroup[] = [
       { label: "Frota Pública", href: "/frotas", icon: Truck, perm: "frota" },
       { label: "Veículos", href: "/frotas/veiculos", icon: Car, perm: "frota" },
       { label: "Motoristas", href: "/frotas/motoristas", icon: IdCard, perm: "frota" },
+      { label: "Solicitações", href: "/frotas/solicitacoes", icon: ClipboardList, perm: "frota" },
     ],
   },
   {

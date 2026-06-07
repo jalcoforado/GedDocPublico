@@ -7,7 +7,7 @@ brasileiro antigo (ABC1234) e Mercosul (ABC1D23). `VeiculoUpdate` é whitelist:
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Situacao = Literal["disponivel", "em_uso", "manutencao", "inativo", "baixado"]
 FormaPosse = Literal["proprio", "locado", "cedido", "convenio"]
@@ -241,5 +241,69 @@ class MotoristaOut(BaseModel):
     id_usuario: int | None = None
     situacao: str
     observacoes: str | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+
+
+# --- Solicitação de Veículo (PR Frota-3) ------------------------------------
+SolicitacaoStatus = Literal["solicitada", "aprovada", "rejeitada", "cancelada"]
+
+
+class SolicitacaoVeiculoCreate(BaseModel):
+    """`id_usuario_solicitante` e `status` NÃO entram no payload — são definidos
+    server-side (usuário autenticado / 'solicitada')."""
+
+    id_unidade_solicitante: int | None = None
+    finalidade: str = Field(min_length=1, max_length=255)
+    destino: str = Field(min_length=1, max_length=255)
+    data_saida_prevista: datetime
+    data_retorno_prevista: datetime
+    quantidade_passageiros: int = Field(ge=1)
+    necessita_motorista: bool = False
+    observacoes: str | None = None
+
+    @model_validator(mode="after")
+    def _datas_coerentes(self) -> "SolicitacaoVeiculoCreate":
+        if self.data_retorno_prevista < self.data_saida_prevista:
+            raise ValueError(
+                "data_retorno_prevista deve ser posterior ou igual à data_saida_prevista."
+            )
+        return self
+
+
+class SolicitacaoVeiculoUpdate(BaseModel):
+    """Whitelist de edição — `status`/`justificativa_rejeicao`/
+    `id_usuario_solicitante`/`tenant_id`/`id`/`excluido` nunca aceitos. A coerência
+    de datas é revalidada no serviço sobre os valores efetivos (parciais)."""
+
+    id_unidade_solicitante: int | None = None
+    finalidade: str | None = Field(default=None, min_length=1, max_length=255)
+    destino: str | None = Field(default=None, min_length=1, max_length=255)
+    data_saida_prevista: datetime | None = None
+    data_retorno_prevista: datetime | None = None
+    quantidade_passageiros: int | None = Field(default=None, ge=1)
+    necessita_motorista: bool | None = None
+    observacoes: str | None = None
+
+
+class SolicitacaoVeiculoRejeitar(BaseModel):
+    justificativa_rejeicao: str = Field(min_length=1, max_length=2000)
+
+
+class SolicitacaoVeiculoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    id_usuario_solicitante: int
+    id_unidade_solicitante: int | None = None
+    finalidade: str
+    destino: str
+    data_saida_prevista: datetime
+    data_retorno_prevista: datetime
+    quantidade_passageiros: int
+    necessita_motorista: bool
+    observacoes: str | None = None
+    status: str
+    justificativa_rejeicao: str | None = None
     criado_em: datetime
     atualizado_em: datetime | None = None
