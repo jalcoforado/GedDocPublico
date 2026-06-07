@@ -5,6 +5,7 @@ import {
   Background,
   Controls,
   MarkerType,
+  Position,
   ReactFlow,
   type Edge,
   type Node,
@@ -127,8 +128,8 @@ export function UnidadePicker({
           width: NODE_WIDTH,
           cursor: "pointer",
         },
-        sourcePosition: "bottom" as const,
-        targetPosition: "top" as const,
+        sourcePosition: Position.Bottom,
+        targetPosition: Position.Top,
       };
     });
     const edges: Edge[] = data

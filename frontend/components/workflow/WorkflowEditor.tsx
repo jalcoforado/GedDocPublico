@@ -4,6 +4,7 @@ import {
   Background,
   Controls,
   MarkerType,
+  Position,
   ReactFlow,
   addEdge,
   applyEdgeChanges,
@@ -140,8 +141,8 @@ function estadosToNodes(
         width: 170,
         fontSize: 12,
       },
-      sourcePosition: "right" as const,
-      targetPosition: "left" as const,
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
     };
   });
 }

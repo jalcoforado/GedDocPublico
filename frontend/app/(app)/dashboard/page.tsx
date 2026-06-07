@@ -568,7 +568,9 @@ export default function DashboardPage() {
                       cx="50%"
                       cy="50%"
                       outerRadius={80}
-                      label={(entry: { label: string }) => entry.label}
+                      label={(props: { name?: string | number }) =>
+                        String(props.name ?? "")
+                      }
                     >
                       {d.por_tipo.map((_, i) => (
                         <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />

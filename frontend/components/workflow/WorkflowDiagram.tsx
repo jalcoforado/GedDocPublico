@@ -4,6 +4,7 @@ import {
   Background,
   Controls,
   MarkerType,
+  Position,
   ReactFlow,
   type Edge,
   type Node,
@@ -153,8 +154,8 @@ export function WorkflowDiagram({
           width: 170,
           fontSize: 12,
         },
-        sourcePosition: "right" as const,
-        targetPosition: "left" as const,
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
       };
     });
 

@@ -6,6 +6,7 @@ import {
   Controls,
   MarkerType,
   MiniMap,
+  Position,
   ReactFlow,
   type Edge,
   type Node,
@@ -388,8 +389,8 @@ export function OrganogramaDiagramView({
               : undefined,
           transition: "background 120ms ease-out, border-color 120ms ease-out",
         },
-        sourcePosition: "bottom" as const,
-        targetPosition: "top" as const,
+        sourcePosition: Position.Bottom,
+        targetPosition: Position.Top,
       };
     });
 

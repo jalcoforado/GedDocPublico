@@ -233,8 +233,10 @@ export function CommandPalette({ open, onOpenChange }: Props) {
 
   if (!open) return null;
 
-  // Agrupa pra render
-  const groups: { key: CommandAction["group"]; label: string; items: CommandAction[] }[] = [];
+  // Agrupa pra render. CommandActionView é o que circula no UI: ganha
+  // `_idx` (índice global pós-agrupamento, usado pelo teclado e foco).
+  type CommandActionView = CommandAction & { _idx: number };
+  const groups: { key: CommandAction["group"]; label: string; items: CommandActionView[] }[] = [];
   const groupLabels: Record<CommandAction["group"], string> = {
     resultados: "Resultados",
     navegar: "Navegar",
@@ -243,7 +245,7 @@ export function CommandPalette({ open, onOpenChange }: Props) {
     conta: "Conta",
   };
   let runningIdx = 0;
-  const indexed = items.map((it) => ({ ...it, _idx: runningIdx++ }));
+  const indexed: CommandActionView[] = items.map((it) => ({ ...it, _idx: runningIdx++ }));
   for (const g of ["resultados", "navegar", "criar", "preferencias", "conta"] as const) {
     const inGroup = indexed.filter((i) => i.group === g);
     if (inGroup.length > 0) {

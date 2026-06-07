@@ -40,10 +40,6 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
   const confirm = useConfirm();
   const [openUpload, setOpenUpload] = useState(false);
   const [viewer, setViewer] = useState<ViewerState | null>(null);
-  const tiposQ = useQuery({
-    queryKey: ["tipos-anexo"],
-    queryFn: () => api.tiposAnexo.list(),
-  });
 
   const deleteM = useMutation({
     mutationFn: (anexoId: number) =>
@@ -67,9 +63,7 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
   const temPdf = processo.anexos.some(isPdf);
 
   function tipoNome(a: AnexoNoProcesso) {
-    if (a.tipo_anexo) return a.tipo_anexo;
-    const tipo = tiposQ.data?.find((t) => t.id === a.id_tipo_anexo);
-    return tipo?.tipo_anexo ?? "—";
+    return a.tipo_anexo ?? "—";
   }
 
   const podeAnexar = processo.ativo && processo.movimentacoes.length > 0;

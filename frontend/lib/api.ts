@@ -903,7 +903,9 @@ export interface AnexoUploadInput {
   publico?: boolean;
 }
 
-function qs(params: Record<string, string | number | undefined | null>): string {
+type QsValue = string | number | boolean | undefined | null;
+
+function qs(params: Record<string, QsValue>): string {
   const s = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== "") s.set(k, String(v));
@@ -1179,7 +1181,11 @@ export const api = {
   // Fase 3
   processos: {
     list: (params?: ProcessoListFilters) =>
-      request<Paginated<ProcessoListItem>>(`/processos${qs(params ?? {})}`),
+      request<Paginated<ProcessoListItem>>(
+        // ProcessoListFilters é uma interface fechada (sem index signature);
+        // o cast widening é seguro — todos os campos cabem em QsValue.
+        `/processos${qs((params ?? {}) as Record<string, QsValue>)}`,
+      ),
     get: (id: number) => request<ProcessoDetail>(`/processos/${id}`),
     create: (data: ProcessoCreateInput) =>
       request<ProcessoDetail>("/processos", {
@@ -1664,7 +1670,9 @@ export interface AuditFilters {
 
 export const auditApi = {
   list: (filters?: AuditFilters) =>
-    request<AuditLogPage>(`/audit${qs(filters ?? {})}`),
+    // AuditFilters é uma interface fechada (sem index signature); cast
+    // widening seguro — todos os campos cabem em QsValue.
+    request<AuditLogPage>(`/audit${qs((filters ?? {}) as Record<string, QsValue>)}`),
 };
 
 // ===== Busca global (Fase 24) =====
