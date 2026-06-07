@@ -16,10 +16,18 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Motorista, UnidadeTrabalho, Usuario, Veiculo
+from ..models import (
+    Motorista,
+    SolicitacaoVeiculo,
+    UnidadeTrabalho,
+    Usuario,
+    Veiculo,
+)
 from ..schemas.frota import (
     MotoristaCreate,
     MotoristaUpdate,
+    SolicitacaoVeiculoCreate,
+    SolicitacaoVeiculoUpdate,
     VeiculoCreate,
     VeiculoUpdate,
 )
@@ -255,4 +263,172 @@ async def excluir_motorista(
     motorista = await obter_motorista(db, tenant_id=tenant_id, motorista_id=motorista_id)
     motorista.excluido = True
     motorista.atualizado_em = datetime.utcnow()
+    await db.commit()
+
+
+# ========================= Solicitação de Veículo ============================
+async def obter_solicitacao(
+    db: AsyncSession, *, tenant_id: int, solicitacao_id: int
+) -> SolicitacaoVeiculo:
+    sol = (
+        await db.execute(
+            select(SolicitacaoVeiculo).where(
+                SolicitacaoVeiculo.id == solicitacao_id,
+                SolicitacaoVeiculo.tenant_id == tenant_id,
+                SolicitacaoVeiculo.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if sol is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Solicitação não encontrada"
+        )
+    return sol
+
+
+async def listar_solicitacoes(
+    db: AsyncSession, *, tenant_id: int
+) -> list[SolicitacaoVeiculo]:
+    stmt = (
+        select(SolicitacaoVeiculo)
+        .where(
+            SolicitacaoVeiculo.tenant_id == tenant_id,
+            SolicitacaoVeiculo.excluido.is_(False),
+        )
+        .order_by(SolicitacaoVeiculo.data_saida_prevista.desc())
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def criar_solicitacao(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    id_usuario_solicitante: int,
+    payload: SolicitacaoVeiculoCreate,
+) -> SolicitacaoVeiculo:
+    dados = payload.model_dump()
+    await _validar_unidade(
+        db, tenant_id=tenant_id, id_unidade=dados.get("id_unidade_solicitante")
+    )
+    sol = SolicitacaoVeiculo(
+        tenant_id=tenant_id,
+        id_usuario_solicitante=id_usuario_solicitante,
+        status="solicitada",
+        criado_em=datetime.utcnow(),
+        **dados,
+    )
+    db.add(sol)
+    await db.commit()
+    await db.refresh(sol)
+    return sol
+
+
+async def atualizar_solicitacao(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    solicitacao_id: int,
+    payload: SolicitacaoVeiculoUpdate,
+) -> SolicitacaoVeiculo:
+    sol = await obter_solicitacao(db, tenant_id=tenant_id, solicitacao_id=solicitacao_id)
+    if sol.status != "solicitada":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível editar solicitações com status 'solicitada'.",
+        )
+    dados = payload.model_dump(exclude_unset=True)
+
+    if "id_unidade_solicitante" in dados:
+        await _validar_unidade(
+            db, tenant_id=tenant_id, id_unidade=dados["id_unidade_solicitante"]
+        )
+
+    # Coerência de datas sobre os valores efetivos (merge do parcial).
+    saida = dados.get("data_saida_prevista", sol.data_saida_prevista)
+    retorno = dados.get("data_retorno_prevista", sol.data_retorno_prevista)
+    if retorno < saida:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="data_retorno_prevista deve ser posterior ou igual à data_saida_prevista.",
+        )
+
+    for campo, valor in dados.items():
+        setattr(sol, campo, valor)
+    sol.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(sol)
+    return sol
+
+
+async def _set_status_solicitacao(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    solicitacao_id: int,
+    novo_status: str,
+    permitido_de: set[str],
+    justificativa: str | None = None,
+) -> SolicitacaoVeiculo:
+    sol = await obter_solicitacao(db, tenant_id=tenant_id, solicitacao_id=solicitacao_id)
+    if sol.status not in permitido_de:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Transição inválida: não é possível mudar de '{sol.status}' "
+                f"para '{novo_status}'."
+            ),
+        )
+    sol.status = novo_status
+    if justificativa is not None:
+        sol.justificativa_rejeicao = justificativa
+    sol.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(sol)
+    return sol
+
+
+async def aprovar_solicitacao(
+    db: AsyncSession, *, tenant_id: int, solicitacao_id: int
+) -> SolicitacaoVeiculo:
+    return await _set_status_solicitacao(
+        db,
+        tenant_id=tenant_id,
+        solicitacao_id=solicitacao_id,
+        novo_status="aprovada",
+        permitido_de={"solicitada"},
+    )
+
+
+async def rejeitar_solicitacao(
+    db: AsyncSession, *, tenant_id: int, solicitacao_id: int, justificativa: str
+) -> SolicitacaoVeiculo:
+    return await _set_status_solicitacao(
+        db,
+        tenant_id=tenant_id,
+        solicitacao_id=solicitacao_id,
+        novo_status="rejeitada",
+        permitido_de={"solicitada"},
+        justificativa=justificativa,
+    )
+
+
+async def cancelar_solicitacao(
+    db: AsyncSession, *, tenant_id: int, solicitacao_id: int
+) -> SolicitacaoVeiculo:
+    return await _set_status_solicitacao(
+        db,
+        tenant_id=tenant_id,
+        solicitacao_id=solicitacao_id,
+        novo_status="cancelada",
+        permitido_de={"solicitada", "aprovada"},
+    )
+
+
+async def excluir_solicitacao(
+    db: AsyncSession, *, tenant_id: int, solicitacao_id: int
+) -> None:
+    sol = await obter_solicitacao(db, tenant_id=tenant_id, solicitacao_id=solicitacao_id)
+    sol.excluido = True
+    sol.atualizado_em = datetime.utcnow()
     await db.commit()

@@ -1030,6 +1030,25 @@ export interface Motorista {
   atualizado_em: string | null;
 }
 
+export type SolicitacaoStatus = "solicitada" | "aprovada" | "rejeitada" | "cancelada";
+
+export interface SolicitacaoVeiculo {
+  id: number;
+  id_usuario_solicitante: number;
+  id_unidade_solicitante: number | null;
+  finalidade: string;
+  destino: string;
+  data_saida_prevista: string;
+  data_retorno_prevista: string;
+  quantidade_passageiros: number;
+  necessita_motorista: boolean;
+  observacoes: string | null;
+  status: SolicitacaoStatus;
+  justificativa_rejeicao: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -1222,6 +1241,18 @@ export const api = {
       request<Motorista>(`/frota/motoristas/${id}/inativar`, { method: "POST" }),
     reativar: (id: number) =>
       request<Motorista>(`/frota/motoristas/${id}/reativar`, { method: "POST" }),
+  },
+  solicitacoes: {
+    ...crud<SolicitacaoVeiculo>("/frota/solicitacoes"),
+    aprovar: (id: number) =>
+      request<SolicitacaoVeiculo>(`/frota/solicitacoes/${id}/aprovar`, { method: "POST" }),
+    rejeitar: (id: number, justificativa_rejeicao: string) =>
+      request<SolicitacaoVeiculo>(`/frota/solicitacoes/${id}/rejeitar`, {
+        method: "POST",
+        body: JSON.stringify({ justificativa_rejeicao }),
+      }),
+    cancelar: (id: number) =>
+      request<SolicitacaoVeiculo>(`/frota/solicitacoes/${id}/cancelar`, { method: "POST" }),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),

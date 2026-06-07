@@ -14,6 +14,10 @@ from ..schemas.frota import (
     MotoristaCreate,
     MotoristaOut,
     MotoristaUpdate,
+    SolicitacaoVeiculoCreate,
+    SolicitacaoVeiculoOut,
+    SolicitacaoVeiculoRejeitar,
+    SolicitacaoVeiculoUpdate,
     VeiculoCreate,
     VeiculoOut,
     VeiculoUpdate,
@@ -165,3 +169,115 @@ async def delete_motorista(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await frota_svc.excluir_motorista(db, tenant_id=tenant_id, motorista_id=motorista_id)
+
+
+# --- Solicitações de Veículo (permissão `frota`) ----------------------------
+solicitacoes_router = APIRouter(prefix="/frota/solicitacoes", tags=["frota"])
+
+
+@solicitacoes_router.get("", response_model=list[SolicitacaoVeiculoOut])
+async def list_solicitacoes(
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[SolicitacaoVeiculoOut]:
+    rows = await frota_svc.listar_solicitacoes(db, tenant_id=tenant_id)
+    return [SolicitacaoVeiculoOut.model_validate(r) for r in rows]
+
+
+@solicitacoes_router.get("/{solicitacao_id}", response_model=SolicitacaoVeiculoOut)
+async def get_solicitacao(
+    solicitacao_id: int,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> SolicitacaoVeiculoOut:
+    sol = await frota_svc.obter_solicitacao(
+        db, tenant_id=tenant_id, solicitacao_id=solicitacao_id
+    )
+    return SolicitacaoVeiculoOut.model_validate(sol)
+
+
+@solicitacoes_router.post(
+    "", response_model=SolicitacaoVeiculoOut, status_code=status.HTTP_201_CREATED
+)
+async def create_solicitacao(
+    payload: SolicitacaoVeiculoCreate,
+    usuario: Usuario = Depends(require_permission("frota", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> SolicitacaoVeiculoOut:
+    # id_usuario_solicitante vem SEMPRE do usuário autenticado (server-side).
+    sol = await frota_svc.criar_solicitacao(
+        db, tenant_id=tenant_id, id_usuario_solicitante=usuario.id, payload=payload
+    )
+    return SolicitacaoVeiculoOut.model_validate(sol)
+
+
+@solicitacoes_router.put("/{solicitacao_id}", response_model=SolicitacaoVeiculoOut)
+async def update_solicitacao(
+    solicitacao_id: int,
+    payload: SolicitacaoVeiculoUpdate,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> SolicitacaoVeiculoOut:
+    sol = await frota_svc.atualizar_solicitacao(
+        db, tenant_id=tenant_id, solicitacao_id=solicitacao_id, payload=payload
+    )
+    return SolicitacaoVeiculoOut.model_validate(sol)
+
+
+@solicitacoes_router.post("/{solicitacao_id}/aprovar", response_model=SolicitacaoVeiculoOut)
+async def aprovar_solicitacao(
+    solicitacao_id: int,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> SolicitacaoVeiculoOut:
+    sol = await frota_svc.aprovar_solicitacao(
+        db, tenant_id=tenant_id, solicitacao_id=solicitacao_id
+    )
+    return SolicitacaoVeiculoOut.model_validate(sol)
+
+
+@solicitacoes_router.post("/{solicitacao_id}/rejeitar", response_model=SolicitacaoVeiculoOut)
+async def rejeitar_solicitacao(
+    solicitacao_id: int,
+    payload: SolicitacaoVeiculoRejeitar,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> SolicitacaoVeiculoOut:
+    sol = await frota_svc.rejeitar_solicitacao(
+        db,
+        tenant_id=tenant_id,
+        solicitacao_id=solicitacao_id,
+        justificativa=payload.justificativa_rejeicao,
+    )
+    return SolicitacaoVeiculoOut.model_validate(sol)
+
+
+@solicitacoes_router.post("/{solicitacao_id}/cancelar", response_model=SolicitacaoVeiculoOut)
+async def cancelar_solicitacao(
+    solicitacao_id: int,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> SolicitacaoVeiculoOut:
+    sol = await frota_svc.cancelar_solicitacao(
+        db, tenant_id=tenant_id, solicitacao_id=solicitacao_id
+    )
+    return SolicitacaoVeiculoOut.model_validate(sol)
+
+
+@solicitacoes_router.delete("/{solicitacao_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_solicitacao(
+    solicitacao_id: int,
+    _: Usuario = Depends(require_permission("frota", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await frota_svc.excluir_solicitacao(
+        db, tenant_id=tenant_id, solicitacao_id=solicitacao_id
+    )
