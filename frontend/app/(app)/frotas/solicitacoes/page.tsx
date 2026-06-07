@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, FileText, Inbox, MapPin, Plus } from "lucide-react";
+import { Car, ClipboardList, FileText, Inbox, MapPin, Plus } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +17,12 @@ import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
-import { api, type SolicitacaoStatus, type SolicitacaoVeiculo } from "@/lib/api";
+import {
+  api,
+  type DesignacaoInput,
+  type SolicitacaoStatus,
+  type SolicitacaoVeiculo,
+} from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 const STATUS_LABEL: Record<SolicitacaoStatus, string> = {
@@ -55,6 +60,18 @@ const EMPTY: SolicitacaoForm = {
   observacoes: "",
 };
 
+interface DesignarForm {
+  id_veiculo: number | null;
+  id_motorista: number | null;
+  observacoes_designacao: string;
+}
+
+const DESIGNAR_EMPTY: DesignarForm = {
+  id_veiculo: null,
+  id_motorista: null,
+  observacoes_designacao: "",
+};
+
 function nullify(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
@@ -80,6 +97,11 @@ export default function SolicitacoesPage() {
   const [form, setForm] = useState<SolicitacaoForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
 
+  const [designarOpen, setDesignarOpen] = useState(false);
+  const [designarSol, setDesignarSol] = useState<SolicitacaoVeiculo | null>(null);
+  const [designarForm, setDesignarForm] = useState<DesignarForm>(DESIGNAR_EMPTY);
+  const [designarErr, setDesignarErr] = useState<string | null>(null);
+
   const listQ = useQuery({
     queryKey: ["frota-solicitacoes"],
     queryFn: () => api.solicitacoes.listAll(),
@@ -88,9 +110,22 @@ export default function SolicitacoesPage() {
     queryKey: ["unidades-all"],
     queryFn: () => api.unidades.list({ page_size: 200 }),
   });
+  const veiculosQ = useQuery({ queryKey: ["frota-veiculos"], queryFn: () => api.frota.listAll() });
+  const motoristasQ = useQuery({
+    queryKey: ["frota-motoristas"],
+    queryFn: () => api.motoristas.listAll(),
+  });
   const unidades = unidadesQ.data?.items ?? [];
+  const veiculos = veiculosQ.data ?? [];
+  const motoristas = motoristasQ.data ?? [];
   const unidadeNome = (id: number | null) =>
     unidades.find((u) => u.id === id)?.unidade_trabalho ?? "—";
+  const veiculoLabel = (id: number | null) => {
+    const v = veiculos.find((x) => x.id === id);
+    return v ? [v.placa, v.marca, v.modelo].filter(Boolean).join(" ") : null;
+  };
+  const motoristaNome = (id: number | null) =>
+    motoristas.find((x) => x.id === id)?.nome ?? null;
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["frota-solicitacoes"] });
 
@@ -135,6 +170,24 @@ export default function SolicitacoesPage() {
     onSuccess: () => {
       invalidate();
       toast.success("Solicitação excluída.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const designarM = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: DesignacaoInput }) =>
+      api.solicitacoes.designar(id, data),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Designação registrada.");
+      closeDesignar();
+    },
+    onError: (e: Error) => setDesignarErr(e.message),
+  });
+  const limparDesignacaoM = useMutation({
+    mutationFn: (id: number) => api.solicitacoes.limparDesignacao(id),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Designação removida.");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -197,6 +250,46 @@ export default function SolicitacoesPage() {
     rejeitarM.mutate({ id: s.id, justificativa: justificativa.trim() });
   }
 
+  function openDesignar(s: SolicitacaoVeiculo) {
+    setDesignarSol(s);
+    setDesignarForm({
+      id_veiculo: s.id_veiculo_designado,
+      id_motorista: s.id_motorista_designado,
+      observacoes_designacao: s.observacoes_designacao ?? "",
+    });
+    setDesignarErr(null);
+    setDesignarOpen(true);
+  }
+
+  function closeDesignar() {
+    setDesignarOpen(false);
+    setDesignarSol(null);
+    setDesignarForm(DESIGNAR_EMPTY);
+    setDesignarErr(null);
+  }
+
+  function salvarDesignar() {
+    setDesignarErr(null);
+    if (!designarSol) return;
+    if (!designarForm.id_veiculo) {
+      setDesignarErr("Selecione um veículo.");
+      return;
+    }
+    if (designarSol.necessita_motorista && !designarForm.id_motorista) {
+      setDesignarErr("Esta solicitação exige motorista.");
+      return;
+    }
+    const data: DesignacaoInput = {
+      id_veiculo: designarForm.id_veiculo,
+      id_motorista: designarForm.id_motorista ?? null,
+      observacoes_designacao: nullify(designarForm.observacoes_designacao),
+    };
+    designarM.mutate({ id: designarSol.id, data });
+  }
+
+  const veiculosDisponiveis = veiculos.filter((v) => v.situacao === "disponivel");
+  const motoristasAtivos = motoristas.filter((m) => m.situacao === "ativo");
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -238,6 +331,7 @@ export default function SolicitacoesPage() {
               <TH>Retorno previsto</TH>
               <TH className="text-right">Passag.</TH>
               <TH>Unidade</TH>
+              <TH>Designado</TH>
               <TH>Status</TH>
               <TH className="text-right">Ações</TH>
             </TR>
@@ -245,7 +339,7 @@ export default function SolicitacoesPage() {
           <TBody>
             {listQ.isLoading && (
               <TR>
-                <TD colSpan={8} className="text-center text-muted-foreground">
+                <TD colSpan={9} className="text-center text-muted-foreground">
                   Carregando solicitações...
                 </TD>
               </TR>
@@ -261,6 +355,22 @@ export default function SolicitacoesPage() {
                   <TD className="tabular-nums">{fmt(s.data_retorno_prevista)}</TD>
                   <TD className="text-right tabular-nums">{s.quantidade_passageiros}</TD>
                   <TD className="text-muted-foreground">{unidadeNome(s.id_unidade_solicitante)}</TD>
+                  <TD>
+                    {s.id_veiculo_designado ? (
+                      <div className="text-xs">
+                        <div className="font-medium">
+                          {veiculoLabel(s.id_veiculo_designado) ?? `#${s.id_veiculo_designado}`}
+                        </div>
+                        {s.id_motorista_designado && (
+                          <div className="text-muted-foreground">
+                            {motoristaNome(s.id_motorista_designado) ?? `#${s.id_motorista_designado}`}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TD>
                   <TD>
                     <Badge intent={STATUS_INTENT[s.status]}>{STATUS_LABEL[s.status]}</Badge>
                   </TD>
@@ -289,6 +399,28 @@ export default function SolicitacoesPage() {
                           onClick={() => onRejeitar(s)}
                         >
                           Rejeitar
+                        </Button>
+                      )}
+                      {canEdit && isAprovada && (
+                        <Button variant="secondary" size="sm" onClick={() => openDesignar(s)}>
+                          Designar
+                        </Button>
+                      )}
+                      {canEdit && isAprovada && s.id_veiculo_designado && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={limparDesignacaoM.isPending}
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: "Limpar designação",
+                              message: "Remover o veículo/motorista designados desta solicitação?",
+                              confirmLabel: "Limpar",
+                            });
+                            if (ok) limparDesignacaoM.mutate(s.id);
+                          }}
+                        >
+                          Limpar designação
                         </Button>
                       )}
                       {canEdit && (isSolicitada || isAprovada) && (
@@ -466,6 +598,93 @@ export default function SolicitacoesPage() {
             </div>
           )}
         </div>
+      </Dialog>
+
+      <Dialog
+        open={designarOpen}
+        onClose={closeDesignar}
+        title={designarSol ? `Designar — ${designarSol.finalidade}` : "Designar"}
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeDesignar}>
+              Cancelar
+            </Button>
+            <Button onClick={salvarDesignar} disabled={designarM.isPending}>
+              {designarM.isPending ? "Salvando..." : "Designar"}
+            </Button>
+          </>
+        }
+      >
+        <SectionCard
+          icon={Car}
+          title="Veículo e motorista"
+          description="Apenas veículos disponíveis e motoristas ativos podem ser designados."
+        >
+          <div className="grid grid-cols-1 gap-4">
+            <div>
+              <Label htmlFor="d_veiculo" required>
+                Veículo
+              </Label>
+              <Select
+                id="d_veiculo"
+                value={designarForm.id_veiculo ?? ""}
+                onChange={(e) =>
+                  setDesignarForm((f) => ({
+                    ...f,
+                    id_veiculo: e.target.value ? Number(e.target.value) : null,
+                  }))
+                }
+              >
+                <option value="">—</option>
+                {veiculosDisponiveis.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {[v.placa, v.marca, v.modelo].filter(Boolean).join(" ")}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="d_motorista" required={designarSol?.necessita_motorista}>
+                Motorista
+                {designarSol?.necessita_motorista ? " (obrigatório)" : " (opcional)"}
+              </Label>
+              <Select
+                id="d_motorista"
+                value={designarForm.id_motorista ?? ""}
+                onChange={(e) =>
+                  setDesignarForm((f) => ({
+                    ...f,
+                    id_motorista: e.target.value ? Number(e.target.value) : null,
+                  }))
+                }
+              >
+                <option value="">—</option>
+                {motoristasAtivos.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.nome}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="d_obs">Observações da designação</Label>
+              <Textarea
+                id="d_obs"
+                rows={2}
+                value={designarForm.observacoes_designacao}
+                onChange={(e) =>
+                  setDesignarForm((f) => ({ ...f, observacoes_designacao: e.target.value }))
+                }
+              />
+            </div>
+            {designarErr && (
+              <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+                {designarErr}
+              </div>
+            )}
+          </div>
+        </SectionCard>
       </Dialog>
     </div>
   );
