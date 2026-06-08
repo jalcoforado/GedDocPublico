@@ -4,6 +4,7 @@ import {
   BarChart3,
   BookOpen,
   Building2,
+  Bus,
   CalendarClock,
   ChevronDown,
   ClipboardList,
@@ -124,6 +125,19 @@ const NAV: NavGroup[] = [
       { label: "Veículos", href: "/frotas/veiculos", icon: Car, perm: "frota" },
       { label: "Motoristas", href: "/frotas/motoristas", icon: IdCard, perm: "frota" },
       { label: "Solicitações", href: "/frotas/solicitacoes", icon: ClipboardList, perm: "frota" },
+    ],
+  },
+  {
+    title: "Transporte Regulado",
+    defaultOpen: false,
+    items: [
+      { label: "Transporte Regulado", href: "/transporte-regulado", icon: Bus, perm: "transporte_regulado" },
+      {
+        label: "Permissionários",
+        href: "/transporte-regulado/permissionarios",
+        icon: IdCard,
+        perm: "transporte_regulado",
+      },
     ],
   },
   {

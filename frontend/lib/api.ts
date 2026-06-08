@@ -1277,6 +1277,43 @@ export interface OcorrenciaResolverInput {
   providencias?: string | null;
 }
 
+// --- Transporte Regulado: Permissionário ------------------------------------
+export type TipoServico =
+  | "taxi"
+  | "mototaxi"
+  | "transporte_escolar"
+  | "motofrete"
+  | "transporte_distrital"
+  | "aplicativo"
+  | "outro";
+export type PermissionarioSituacao =
+  | "ativo"
+  | "pendente"
+  | "suspenso"
+  | "cassado"
+  | "inativo";
+
+export interface Permissionario {
+  id: number;
+  nome: string;
+  cpf: string;
+  rg: string | null;
+  data_nascimento: string | null;
+  telefone: string | null;
+  email: string | null;
+  cnh_numero: string | null;
+  cnh_categoria: string | null;
+  cnh_validade: string | null;
+  tipo_servico: TipoServico;
+  numero_permissao: string | null;
+  data_inicio_permissao: string | null;
+  data_validade_permissao: string | null;
+  situacao: PermissionarioSituacao;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -1612,6 +1649,38 @@ export const api = {
       request<VeiculoOcorrencia>(`/frota/ocorrencias/${id}/cancelar`, { method: "POST" }),
     remove: (id: number) =>
       request<void>(`/frota/ocorrencias/${id}`, { method: "DELETE" }),
+  },
+  permissionarios: {
+    list: (params?: { situacao?: string; tipo_servico?: string }) =>
+      request<Permissionario[]>(`/transporte-regulado/permissionarios${qs(params ?? {})}`),
+    get: (id: number) =>
+      request<Permissionario>(`/transporte-regulado/permissionarios/${id}`),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    create: (data: any) =>
+      request<Permissionario>("/transporte-regulado/permissionarios", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    update: (id: number, data: any) =>
+      request<Permissionario>(`/transporte-regulado/permissionarios/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    inativar: (id: number) =>
+      request<Permissionario>(`/transporte-regulado/permissionarios/${id}/inativar`, {
+        method: "POST",
+      }),
+    reativar: (id: number) =>
+      request<Permissionario>(`/transporte-regulado/permissionarios/${id}/reativar`, {
+        method: "POST",
+      }),
+    suspender: (id: number) =>
+      request<Permissionario>(`/transporte-regulado/permissionarios/${id}/suspender`, {
+        method: "POST",
+      }),
+    remove: (id: number) =>
+      request<void>(`/transporte-regulado/permissionarios/${id}`, { method: "DELETE" }),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),

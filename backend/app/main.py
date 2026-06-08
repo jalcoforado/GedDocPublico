@@ -33,6 +33,7 @@ from .routers import (
     relatorios,
     servico,
     tenant,
+    transporte_regulado,
     unidades,
     usuarios,
     validacao_publica,
@@ -107,6 +108,7 @@ app.include_router(frota.manutencoes_router, prefix="/api/v2")
 app.include_router(frota.abastecimentos_router, prefix="/api/v2")
 app.include_router(frota.vistorias_router, prefix="/api/v2")
 app.include_router(frota.ocorrencias_router, prefix="/api/v2")
+app.include_router(transporte_regulado.permissionarios_router, prefix="/api/v2")
 app.include_router(workflow.router, prefix="/api/v2")
 app.include_router(workflow.instances_router, prefix="/api/v2")
 app.include_router(workflow.mapeamento_router, prefix="/api/v2")
