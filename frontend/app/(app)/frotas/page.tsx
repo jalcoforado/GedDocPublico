@@ -1,9 +1,11 @@
 "use client";
 
-import { Car, ClipboardList, IdCard, Truck } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, Car, ClipboardList, IdCard, Truck } from "lucide-react";
 import Link from "next/link";
 
 import { PageHeader } from "@/components/ui/page-header";
+import { api } from "@/lib/api";
 
 const CARDS = [
   {
@@ -27,6 +29,14 @@ const CARDS = [
 ];
 
 export default function FrotaHubPage() {
+  const alertasQ = useQuery({
+    queryKey: ["frota-documentos-alertas"],
+    queryFn: () => api.documentosVeiculo.alertas(30),
+  });
+  const vencidos = alertasQ.data?.vencidos.length ?? 0;
+  const aVencer = alertasQ.data?.a_vencer.length ?? 0;
+  const temAlerta = vencidos + aVencer > 0;
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -34,6 +44,21 @@ export default function FrotaHubPage() {
         title="Frota Pública"
         description="Gestão da frota própria do município."
       />
+
+      {temAlerta && (
+        <Link
+          href="/frotas/veiculos"
+          className="flex items-center gap-3 rounded-lg border border-warning-soft bg-warning-soft px-4 py-3 text-sm text-warning-soft-foreground transition-opacity hover:opacity-90"
+        >
+          <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden="true" />
+          <span>
+            <strong>{vencidos}</strong> documento(s) vencido(s) e{" "}
+            <strong>{aVencer}</strong> a vencer nos próximos 30 dias. Acesse os veículos
+            para regularizar.
+          </span>
+        </Link>
+      )}
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {CARDS.map((c) => {
           const Icon = c.icon;

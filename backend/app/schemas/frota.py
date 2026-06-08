@@ -354,3 +354,73 @@ class SolicitacaoVeiculoOut(BaseModel):
     id_usuario_registro_retorno: int | None = None
     criado_em: datetime
     atualizado_em: datetime | None = None
+
+
+# --- Documento do Veículo (PR Frota-6) --------------------------------------
+# Apenas metadados + alertas de vencimento — SEM upload/anexos.
+TipoDocumento = Literal[
+    "crlv", "seguro", "licenciamento", "autorizacao", "vistoria", "outro"
+]
+DocumentoStatus = Literal["ativo", "vencido", "substituido", "cancelado"]
+
+
+class VeiculoDocumentoBase(BaseModel):
+    numero: str | None = Field(default=None, max_length=60)
+    orgao_emissor: str | None = Field(default=None, max_length=120)
+    data_emissao: date | None = None
+    data_vencimento: date
+    status: DocumentoStatus = "ativo"
+    observacoes: str | None = None
+
+    @model_validator(mode="after")
+    def _datas_coerentes(self) -> "VeiculoDocumentoBase":
+        if self.data_emissao is not None and self.data_emissao > self.data_vencimento:
+            raise ValueError(
+                "data_emissao não pode ser posterior à data_vencimento."
+            )
+        return self
+
+
+class VeiculoDocumentoCreate(VeiculoDocumentoBase):
+    """`id_veiculo` vem da rota (não do payload); `tenant_id`/`id`/`excluido`
+    nunca aceitos."""
+
+    tipo_documento: TipoDocumento
+
+
+class VeiculoDocumentoUpdate(BaseModel):
+    """Whitelist de edição — `tenant_id`/`id`/`id_veiculo`/`excluido`/`criado_em`/
+    `atualizado_em` nunca aceitos. A coerência de datas é revalidada no serviço
+    sobre os valores efetivos (parciais)."""
+
+    tipo_documento: TipoDocumento | None = None
+    numero: str | None = Field(default=None, max_length=60)
+    orgao_emissor: str | None = Field(default=None, max_length=120)
+    data_emissao: date | None = None
+    data_vencimento: date | None = None
+    status: DocumentoStatus | None = None
+    observacoes: str | None = None
+
+
+class VeiculoDocumentoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    id_veiculo: int
+    tipo_documento: str
+    numero: str | None = None
+    orgao_emissor: str | None = None
+    data_emissao: date | None = None
+    data_vencimento: date
+    status: str
+    observacoes: str | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+
+
+class VeiculoDocumentoAlertas(BaseModel):
+    """Documentos vencidos / a vencer dentro de `dias` (tenant-scoped)."""
+
+    dias: int
+    vencidos: list[VeiculoDocumentoOut]
+    a_vencer: list[VeiculoDocumentoOut]

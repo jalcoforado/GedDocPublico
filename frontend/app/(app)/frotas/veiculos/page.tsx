@@ -25,6 +25,8 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
+import { DocumentosDialog } from "./documentos-dialog";
+
 const SITUACOES: { value: VeiculoSituacao; label: string }[] = [
   { value: "disponivel", label: "Disponível" },
   { value: "em_uso", label: "Em uso" },
@@ -100,6 +102,7 @@ export default function VeiculosPage() {
   const [editing, setEditing] = useState<Veiculo | null>(null);
   const [form, setForm] = useState<VeiculoForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
+  const [docsVeiculo, setDocsVeiculo] = useState<Veiculo | null>(null);
 
   const veiculosQ = useQuery({ queryKey: ["frota-veiculos"], queryFn: () => api.frota.listAll() });
   const unidadesQ = useQuery({
@@ -262,6 +265,10 @@ export default function VeiculosPage() {
                 </TD>
                 <TD className="text-right">
                   <div className="inline-flex gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => setDocsVeiculo(v)}>
+                      <FileText className="mr-1 h-4 w-4" />
+                      Documentos
+                    </Button>
                     {canEdit && (
                       <Button variant="secondary" size="sm" onClick={() => openEdit(v)}>
                         Editar
@@ -482,6 +489,12 @@ export default function VeiculosPage() {
           )}
         </div>
       </Dialog>
+
+      <DocumentosDialog
+        veiculo={docsVeiculo}
+        open={docsVeiculo != null}
+        onClose={() => setDocsVeiculo(null)}
+      />
     </div>
   );
 }

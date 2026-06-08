@@ -162,3 +162,35 @@ class SolicitacaoVeiculo(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoDocumento(Base):
+    """Documento administrativo do veículo (PR Frota-6).
+
+    Controle simples de metadados — SEM upload/anexos. Cada veículo pode ter N
+    documentos (CRLV, seguro, licenciamento, autorização, vistoria, outro) com
+    `data_vencimento`; alertas de vencido/a vencer são calculados na aplicação.
+    `status` (ativo/vencido/substituido/cancelado) é estado de domínio; `excluido`
+    é soft-delete. `id_veiculo` é validado same-tenant no serviço (a FK garante
+    integridade mas NÃO filtra por tenant)."""
+
+    __tablename__ = "veiculo_documento"
+    __table_args__ = {"schema": "frota"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("frota.veiculo.id"), nullable=False
+    )
+    tipo_documento: Mapped[str] = mapped_column(String(30), nullable=False)
+    numero: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    orgao_emissor: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    data_emissao: Mapped[date | None] = mapped_column(Date, nullable=True)
+    data_vencimento: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ativo")
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

@@ -10,7 +10,7 @@ Tudo tenant-scoped, mesmo padrão de `services/servico.py`:
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -22,6 +22,7 @@ from ..models import (
     UnidadeTrabalho,
     Usuario,
     Veiculo,
+    VeiculoDocumento,
 )
 from ..schemas.frota import (
     MotoristaCreate,
@@ -32,6 +33,8 @@ from ..schemas.frota import (
     SolicitacaoVeiculoRegistrarSaida,
     SolicitacaoVeiculoUpdate,
     VeiculoCreate,
+    VeiculoDocumentoCreate,
+    VeiculoDocumentoUpdate,
     VeiculoUpdate,
 )
 
@@ -675,3 +678,137 @@ async def registrar_retorno(
     await db.commit()
     await db.refresh(sol)
     return sol
+
+
+# --------------------- Documentos do Veículo (PR Frota-6) --------------------
+# Documentos retirados (substituido/cancelado) não disparam alerta de vencimento.
+_DOC_STATUS_ALERTAVEL = ("ativo", "vencido")
+
+
+async def obter_documento(
+    db: AsyncSession, *, tenant_id: int, documento_id: int
+) -> VeiculoDocumento:
+    doc = (
+        await db.execute(
+            select(VeiculoDocumento).where(
+                VeiculoDocumento.id == documento_id,
+                VeiculoDocumento.tenant_id == tenant_id,
+                VeiculoDocumento.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Documento não encontrado"
+        )
+    return doc
+
+
+async def listar_documentos_veiculo(
+    db: AsyncSession, *, tenant_id: int, id_veiculo: int
+) -> list[VeiculoDocumento]:
+    # Garante que o veículo existe e é deste tenant (404 cross-tenant/excluído).
+    await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=id_veiculo)
+    stmt = (
+        select(VeiculoDocumento)
+        .where(
+            VeiculoDocumento.tenant_id == tenant_id,
+            VeiculoDocumento.id_veiculo == id_veiculo,
+            VeiculoDocumento.excluido.is_(False),
+        )
+        .order_by(VeiculoDocumento.data_vencimento)
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def criar_documento(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    id_veiculo: int,
+    payload: VeiculoDocumentoCreate,
+) -> VeiculoDocumento:
+    # Veículo deve existir, ser deste tenant e não estar excluído (404).
+    await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=id_veiculo)
+    dados = payload.model_dump()
+    doc = VeiculoDocumento(
+        tenant_id=tenant_id,
+        id_veiculo=id_veiculo,
+        criado_em=datetime.utcnow(),
+        **dados,
+    )
+    db.add(doc)
+    await db.commit()
+    await db.refresh(doc)
+    return doc
+
+
+async def atualizar_documento(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    documento_id: int,
+    payload: VeiculoDocumentoUpdate,
+) -> VeiculoDocumento:
+    doc = await obter_documento(db, tenant_id=tenant_id, documento_id=documento_id)
+    dados = payload.model_dump(exclude_unset=True)
+
+    # Coerência de datas sobre os valores efetivos (merge do parcial).
+    emissao = dados.get("data_emissao", doc.data_emissao)
+    vencimento = dados.get("data_vencimento", doc.data_vencimento)
+    if emissao is not None and emissao > vencimento:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="data_emissao não pode ser posterior à data_vencimento.",
+        )
+
+    for campo, valor in dados.items():
+        setattr(doc, campo, valor)
+    doc.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(doc)
+    return doc
+
+
+async def excluir_documento(
+    db: AsyncSession, *, tenant_id: int, documento_id: int
+) -> None:
+    doc = await obter_documento(db, tenant_id=tenant_id, documento_id=documento_id)
+    doc.excluido = True
+    doc.atualizado_em = datetime.utcnow()
+    await db.commit()
+
+
+async def listar_alertas_documentos(
+    db: AsyncSession, *, tenant_id: int, dias: int
+) -> dict[str, list[VeiculoDocumento]]:
+    """Documentos vencidos (data_vencimento < hoje) e a vencer (entre hoje e
+    hoje + `dias`). Tenant-scoped; ignora excluídos e os retirados
+    (substituido/cancelado)."""
+    hoje = date.today()
+    limite = hoje + timedelta(days=dias)
+    base = (
+        select(VeiculoDocumento)
+        .where(
+            VeiculoDocumento.tenant_id == tenant_id,
+            VeiculoDocumento.excluido.is_(False),
+            VeiculoDocumento.status.in_(_DOC_STATUS_ALERTAVEL),
+        )
+        .order_by(VeiculoDocumento.data_vencimento)
+    )
+    vencidos = list(
+        (
+            await db.execute(base.where(VeiculoDocumento.data_vencimento < hoje))
+        ).scalars().all()
+    )
+    a_vencer = list(
+        (
+            await db.execute(
+                base.where(
+                    VeiculoDocumento.data_vencimento >= hoje,
+                    VeiculoDocumento.data_vencimento <= limite,
+                )
+            )
+        ).scalars().all()
+    )
+    return {"vencidos": vencidos, "a_vencer": a_vencer}
