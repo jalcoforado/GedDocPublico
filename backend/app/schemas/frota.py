@@ -424,3 +424,243 @@ class VeiculoDocumentoAlertas(BaseModel):
     dias: int
     vencidos: list[VeiculoDocumentoOut]
     a_vencer: list[VeiculoDocumentoOut]
+
+
+# --- Manutenção do Veículo (Frota — operacional) ----------------------------
+ManutencaoTipo = Literal["preventiva", "corretiva"]
+ManutencaoStatus = Literal["aberta", "em_andamento", "concluida", "cancelada"]
+
+
+class VeiculoManutencaoCreate(BaseModel):
+    """`id_veiculo` no corpo (página standalone, validado same-tenant no serviço);
+    `status`/`data_conclusao`/`custo_final` são server-side (status inicial
+    'aberta'). `data_abertura` opcional (default hoje no serviço).
+    `tenant_id`/`id`/`excluido` nunca aceitos."""
+
+    id_veiculo: int
+    tipo: ManutencaoTipo
+    descricao: str = Field(min_length=1)
+    data_abertura: date | None = None
+    data_prevista: date | None = None
+    km_atual: int | None = Field(default=None, ge=0)
+    fornecedor: str | None = Field(default=None, max_length=150)
+    custo_estimado: float | None = Field(default=None, ge=0)
+    observacoes: str | None = None
+
+
+class VeiculoManutencaoUpdate(BaseModel):
+    """Whitelist de edição de metadados — `status`/`data_abertura`/
+    `data_conclusao`/`custo_final` (mudam por ações dedicadas) e
+    `tenant_id`/`id`/`id_veiculo`/`excluido` nunca aceitos."""
+
+    tipo: ManutencaoTipo | None = None
+    descricao: str | None = Field(default=None, min_length=1)
+    data_prevista: date | None = None
+    km_atual: int | None = Field(default=None, ge=0)
+    fornecedor: str | None = Field(default=None, max_length=150)
+    custo_estimado: float | None = Field(default=None, ge=0)
+    observacoes: str | None = None
+
+
+class VeiculoManutencaoConcluir(BaseModel):
+    """Conclusão da manutenção — `data_conclusao` (default hoje no serviço),
+    `custo_final` e `km_atual` opcionais."""
+
+    data_conclusao: date | None = None
+    custo_final: float | None = Field(default=None, ge=0)
+    km_atual: int | None = Field(default=None, ge=0)
+    observacoes: str | None = None
+
+
+class VeiculoManutencaoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    id_veiculo: int
+    tipo: str
+    descricao: str
+    data_abertura: date
+    data_prevista: date | None = None
+    data_conclusao: date | None = None
+    km_atual: int | None = None
+    fornecedor: str | None = None
+    custo_estimado: float | None = None
+    custo_final: float | None = None
+    status: str
+    observacoes: str | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+
+
+# --- Abastecimento do Veículo (Frota — operacional) -------------------------
+class VeiculoAbastecimentoCreate(BaseModel):
+    """`id_veiculo` no corpo (validado same-tenant no serviço). `data_abastecimento`
+    opcional (default hoje). `tenant_id`/`id`/`excluido` nunca aceitos."""
+
+    id_veiculo: int
+    id_motorista: int | None = None
+    data_abastecimento: date | None = None
+    km_atual: int = Field(ge=0)
+    tipo_combustivel: str | None = Field(default=None, max_length=20)
+    litros: float = Field(gt=0)
+    valor_total: float = Field(ge=0)
+    posto: str | None = Field(default=None, max_length=150)
+    observacoes: str | None = None
+
+
+class VeiculoAbastecimentoUpdate(BaseModel):
+    """Whitelist de edição — `id_veiculo`/`tenant_id`/`id`/`excluido` nunca
+    aceitos. (Edição não reprocessa a quilometragem do veículo.)"""
+
+    id_motorista: int | None = None
+    data_abastecimento: date | None = None
+    km_atual: int | None = Field(default=None, ge=0)
+    tipo_combustivel: str | None = Field(default=None, max_length=20)
+    litros: float | None = Field(default=None, gt=0)
+    valor_total: float | None = Field(default=None, ge=0)
+    posto: str | None = Field(default=None, max_length=150)
+    observacoes: str | None = None
+
+
+class VeiculoAbastecimentoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    id_veiculo: int
+    id_motorista: int | None = None
+    data_abastecimento: date
+    km_atual: int
+    tipo_combustivel: str | None = None
+    litros: float
+    valor_total: float
+    posto: str | None = None
+    observacoes: str | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+
+
+class AbastecimentoResumo(BaseModel):
+    """Indicadores agregados (tenant-scoped, opcionalmente por veículo)."""
+
+    total_abastecimentos: int
+    total_litros: float
+    total_valor: float
+    media_valor_litro: float | None = None
+    ultimo_abastecimento: date | None = None
+
+
+# --- Vistoria / Checklist interno (Frota — operacional) ---------------------
+VistoriaTipo = Literal["saida", "retorno", "periodica"]
+VistoriaResultado = Literal["aprovada", "reprovada", "com_ressalvas"]
+
+
+class VeiculoVistoriaBase(BaseModel):
+    data_vistoria: date | None = None
+    pneus_ok: bool = False
+    luzes_ok: bool = False
+    freios_ok: bool = False
+    documentacao_ok: bool = False
+    limpeza_ok: bool = False
+    equipamentos_ok: bool = False
+    observacoes: str | None = None
+
+
+class VeiculoVistoriaCreate(VeiculoVistoriaBase):
+    """`id_veiculo` no corpo (validado same-tenant). `tipo` e `resultado`
+    obrigatórios. `tenant_id`/`id`/`excluido` nunca aceitos."""
+
+    id_veiculo: int
+    tipo: VistoriaTipo
+    resultado: VistoriaResultado
+
+
+class VeiculoVistoriaUpdate(BaseModel):
+    """Whitelist de edição — `id_veiculo`/`tenant_id`/`id`/`excluido` nunca aceitos."""
+
+    data_vistoria: date | None = None
+    tipo: VistoriaTipo | None = None
+    resultado: VistoriaResultado | None = None
+    pneus_ok: bool | None = None
+    luzes_ok: bool | None = None
+    freios_ok: bool | None = None
+    documentacao_ok: bool | None = None
+    limpeza_ok: bool | None = None
+    equipamentos_ok: bool | None = None
+    observacoes: str | None = None
+
+
+class VeiculoVistoriaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    id_veiculo: int
+    data_vistoria: date
+    tipo: str
+    resultado: str
+    pneus_ok: bool
+    luzes_ok: bool
+    freios_ok: bool
+    documentacao_ok: bool
+    limpeza_ok: bool
+    equipamentos_ok: bool
+    observacoes: str | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+
+
+# --- Ocorrência interna do Veículo (Frota — operacional) --------------------
+OcorrenciaTipo = Literal[
+    "avaria", "multa", "sinistro", "documentacao", "uso_indevido", "outro"
+]
+OcorrenciaGravidade = Literal["baixa", "media", "alta", "critica"]
+OcorrenciaStatus = Literal["aberta", "em_tratamento", "resolvida", "cancelada"]
+
+
+class VeiculoOcorrenciaCreate(BaseModel):
+    """`id_veiculo` no corpo (validado same-tenant). `status` server-side
+    ('aberta'); `data_resolucao` nunca no payload. `tenant_id`/`id`/`excluido`
+    nunca aceitos."""
+
+    id_veiculo: int
+    id_motorista: int | None = None
+    tipo: OcorrenciaTipo
+    data_ocorrencia: date | None = None
+    descricao: str = Field(min_length=1)
+    gravidade: OcorrenciaGravidade = "media"
+    providencias: str | None = None
+
+
+class VeiculoOcorrenciaUpdate(BaseModel):
+    """Whitelist de edição — `status`/`data_resolucao` (mudam por ações
+    dedicadas) e `id_veiculo`/`tenant_id`/`id`/`excluido` nunca aceitos."""
+
+    id_motorista: int | None = None
+    tipo: OcorrenciaTipo | None = None
+    data_ocorrencia: date | None = None
+    descricao: str | None = Field(default=None, min_length=1)
+    gravidade: OcorrenciaGravidade | None = None
+    providencias: str | None = None
+
+
+class VeiculoOcorrenciaResolver(BaseModel):
+    """Resolução — `data_resolucao` (default hoje no serviço) e `providencias`."""
+
+    data_resolucao: date | None = None
+    providencias: str | None = None
+
+
+class VeiculoOcorrenciaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    id_veiculo: int
+    id_motorista: int | None = None
+    tipo: str
+    data_ocorrencia: date
+    descricao: str
+    gravidade: str
+    status: str
+    providencias: str | None = None
+    data_resolucao: date | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None

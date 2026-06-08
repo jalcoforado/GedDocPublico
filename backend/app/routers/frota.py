@@ -21,13 +21,28 @@ from ..schemas.frota import (
     SolicitacaoVeiculoRegistrarSaida,
     SolicitacaoVeiculoRejeitar,
     SolicitacaoVeiculoUpdate,
+    AbastecimentoResumo,
+    VeiculoAbastecimentoCreate,
+    VeiculoAbastecimentoOut,
+    VeiculoAbastecimentoUpdate,
     VeiculoCreate,
     VeiculoDocumentoAlertas,
     VeiculoDocumentoCreate,
     VeiculoDocumentoOut,
     VeiculoDocumentoUpdate,
+    VeiculoManutencaoConcluir,
+    VeiculoManutencaoCreate,
+    VeiculoManutencaoOut,
+    VeiculoManutencaoUpdate,
+    VeiculoOcorrenciaCreate,
+    VeiculoOcorrenciaOut,
+    VeiculoOcorrenciaResolver,
+    VeiculoOcorrenciaUpdate,
     VeiculoOut,
     VeiculoUpdate,
+    VeiculoVistoriaCreate,
+    VeiculoVistoriaOut,
+    VeiculoVistoriaUpdate,
 )
 from ..services import frota as frota_svc
 
@@ -459,4 +474,385 @@ async def delete_documento(
 ) -> None:
     await frota_svc.excluir_documento(
         db, tenant_id=tenant_id, documento_id=documento_id
+    )
+
+
+# --- Manutenção de Veículos (permissão `frota`) -----------------------------
+manutencoes_router = APIRouter(prefix="/frota/manutencoes", tags=["frota"])
+
+
+@manutencoes_router.get("", response_model=list[VeiculoManutencaoOut])
+async def list_manutencoes(
+    id_veiculo: int | None = None,
+    status_filtro: str | None = None,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[VeiculoManutencaoOut]:
+    rows = await frota_svc.listar_manutencoes(
+        db, tenant_id=tenant_id, id_veiculo=id_veiculo, status_filtro=status_filtro
+    )
+    return [VeiculoManutencaoOut.model_validate(r) for r in rows]
+
+
+@manutencoes_router.get("/{manutencao_id}", response_model=VeiculoManutencaoOut)
+async def get_manutencao(
+    manutencao_id: int,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoManutencaoOut:
+    m = await frota_svc.obter_manutencao(
+        db, tenant_id=tenant_id, manutencao_id=manutencao_id
+    )
+    return VeiculoManutencaoOut.model_validate(m)
+
+
+@manutencoes_router.post(
+    "", response_model=VeiculoManutencaoOut, status_code=status.HTTP_201_CREATED
+)
+async def create_manutencao(
+    payload: VeiculoManutencaoCreate,
+    _: Usuario = Depends(require_permission("frota", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoManutencaoOut:
+    m = await frota_svc.criar_manutencao(
+        db, tenant_id=tenant_id, id_veiculo=payload.id_veiculo, payload=payload
+    )
+    return VeiculoManutencaoOut.model_validate(m)
+
+
+@manutencoes_router.put("/{manutencao_id}", response_model=VeiculoManutencaoOut)
+async def update_manutencao(
+    manutencao_id: int,
+    payload: VeiculoManutencaoUpdate,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoManutencaoOut:
+    m = await frota_svc.atualizar_manutencao(
+        db, tenant_id=tenant_id, manutencao_id=manutencao_id, payload=payload
+    )
+    return VeiculoManutencaoOut.model_validate(m)
+
+
+@manutencoes_router.post("/{manutencao_id}/iniciar", response_model=VeiculoManutencaoOut)
+async def iniciar_manutencao(
+    manutencao_id: int,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoManutencaoOut:
+    m = await frota_svc.iniciar_manutencao(
+        db, tenant_id=tenant_id, manutencao_id=manutencao_id
+    )
+    return VeiculoManutencaoOut.model_validate(m)
+
+
+@manutencoes_router.post("/{manutencao_id}/concluir", response_model=VeiculoManutencaoOut)
+async def concluir_manutencao(
+    manutencao_id: int,
+    payload: VeiculoManutencaoConcluir,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoManutencaoOut:
+    m = await frota_svc.concluir_manutencao(
+        db, tenant_id=tenant_id, manutencao_id=manutencao_id, payload=payload
+    )
+    return VeiculoManutencaoOut.model_validate(m)
+
+
+@manutencoes_router.post("/{manutencao_id}/cancelar", response_model=VeiculoManutencaoOut)
+async def cancelar_manutencao(
+    manutencao_id: int,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoManutencaoOut:
+    m = await frota_svc.cancelar_manutencao(
+        db, tenant_id=tenant_id, manutencao_id=manutencao_id
+    )
+    return VeiculoManutencaoOut.model_validate(m)
+
+
+@manutencoes_router.delete("/{manutencao_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_manutencao(
+    manutencao_id: int,
+    _: Usuario = Depends(require_permission("frota", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await frota_svc.excluir_manutencao(
+        db, tenant_id=tenant_id, manutencao_id=manutencao_id
+    )
+
+
+# --- Abastecimentos de Veículos (permissão `frota`) -------------------------
+abastecimentos_router = APIRouter(prefix="/frota/abastecimentos", tags=["frota"])
+
+
+@abastecimentos_router.get("", response_model=list[VeiculoAbastecimentoOut])
+async def list_abastecimentos(
+    id_veiculo: int | None = None,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[VeiculoAbastecimentoOut]:
+    rows = await frota_svc.listar_abastecimentos(
+        db, tenant_id=tenant_id, id_veiculo=id_veiculo
+    )
+    return [VeiculoAbastecimentoOut.model_validate(r) for r in rows]
+
+
+# `resumo` declarado ANTES de `/{abastecimento_id}` (evita conflito de rota).
+@abastecimentos_router.get("/resumo", response_model=AbastecimentoResumo)
+async def resumo_abastecimentos(
+    id_veiculo: int | None = None,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AbastecimentoResumo:
+    dados = await frota_svc.resumo_abastecimentos(
+        db, tenant_id=tenant_id, id_veiculo=id_veiculo
+    )
+    return AbastecimentoResumo(**dados)
+
+
+@abastecimentos_router.get("/{abastecimento_id}", response_model=VeiculoAbastecimentoOut)
+async def get_abastecimento(
+    abastecimento_id: int,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoAbastecimentoOut:
+    a = await frota_svc.obter_abastecimento(
+        db, tenant_id=tenant_id, abastecimento_id=abastecimento_id
+    )
+    return VeiculoAbastecimentoOut.model_validate(a)
+
+
+@abastecimentos_router.post(
+    "", response_model=VeiculoAbastecimentoOut, status_code=status.HTTP_201_CREATED
+)
+async def create_abastecimento(
+    payload: VeiculoAbastecimentoCreate,
+    _: Usuario = Depends(require_permission("frota", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoAbastecimentoOut:
+    a = await frota_svc.criar_abastecimento(
+        db, tenant_id=tenant_id, id_veiculo=payload.id_veiculo, payload=payload
+    )
+    return VeiculoAbastecimentoOut.model_validate(a)
+
+
+@abastecimentos_router.put("/{abastecimento_id}", response_model=VeiculoAbastecimentoOut)
+async def update_abastecimento(
+    abastecimento_id: int,
+    payload: VeiculoAbastecimentoUpdate,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoAbastecimentoOut:
+    a = await frota_svc.atualizar_abastecimento(
+        db, tenant_id=tenant_id, abastecimento_id=abastecimento_id, payload=payload
+    )
+    return VeiculoAbastecimentoOut.model_validate(a)
+
+
+@abastecimentos_router.delete(
+    "/{abastecimento_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_abastecimento(
+    abastecimento_id: int,
+    _: Usuario = Depends(require_permission("frota", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await frota_svc.excluir_abastecimento(
+        db, tenant_id=tenant_id, abastecimento_id=abastecimento_id
+    )
+
+
+# --- Vistorias / Checklist (permissão `frota`) ------------------------------
+vistorias_router = APIRouter(prefix="/frota/vistorias", tags=["frota"])
+
+
+@vistorias_router.get("", response_model=list[VeiculoVistoriaOut])
+async def list_vistorias(
+    id_veiculo: int | None = None,
+    resultado: str | None = None,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[VeiculoVistoriaOut]:
+    rows = await frota_svc.listar_vistorias(
+        db, tenant_id=tenant_id, id_veiculo=id_veiculo, resultado=resultado
+    )
+    return [VeiculoVistoriaOut.model_validate(r) for r in rows]
+
+
+@vistorias_router.get("/{vistoria_id}", response_model=VeiculoVistoriaOut)
+async def get_vistoria(
+    vistoria_id: int,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoVistoriaOut:
+    v = await frota_svc.obter_vistoria(db, tenant_id=tenant_id, vistoria_id=vistoria_id)
+    return VeiculoVistoriaOut.model_validate(v)
+
+
+@vistorias_router.post(
+    "", response_model=VeiculoVistoriaOut, status_code=status.HTTP_201_CREATED
+)
+async def create_vistoria(
+    payload: VeiculoVistoriaCreate,
+    _: Usuario = Depends(require_permission("frota", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoVistoriaOut:
+    v = await frota_svc.criar_vistoria(
+        db, tenant_id=tenant_id, id_veiculo=payload.id_veiculo, payload=payload
+    )
+    return VeiculoVistoriaOut.model_validate(v)
+
+
+@vistorias_router.put("/{vistoria_id}", response_model=VeiculoVistoriaOut)
+async def update_vistoria(
+    vistoria_id: int,
+    payload: VeiculoVistoriaUpdate,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoVistoriaOut:
+    v = await frota_svc.atualizar_vistoria(
+        db, tenant_id=tenant_id, vistoria_id=vistoria_id, payload=payload
+    )
+    return VeiculoVistoriaOut.model_validate(v)
+
+
+@vistorias_router.delete("/{vistoria_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_vistoria(
+    vistoria_id: int,
+    _: Usuario = Depends(require_permission("frota", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await frota_svc.excluir_vistoria(db, tenant_id=tenant_id, vistoria_id=vistoria_id)
+
+
+# --- Ocorrências internas (permissão `frota`) -------------------------------
+ocorrencias_router = APIRouter(prefix="/frota/ocorrencias", tags=["frota"])
+
+
+@ocorrencias_router.get("", response_model=list[VeiculoOcorrenciaOut])
+async def list_ocorrencias(
+    id_veiculo: int | None = None,
+    status_filtro: str | None = None,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[VeiculoOcorrenciaOut]:
+    rows = await frota_svc.listar_ocorrencias(
+        db, tenant_id=tenant_id, id_veiculo=id_veiculo, status_filtro=status_filtro
+    )
+    return [VeiculoOcorrenciaOut.model_validate(r) for r in rows]
+
+
+@ocorrencias_router.get("/{ocorrencia_id}", response_model=VeiculoOcorrenciaOut)
+async def get_ocorrencia(
+    ocorrencia_id: int,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoOcorrenciaOut:
+    o = await frota_svc.obter_ocorrencia(
+        db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id
+    )
+    return VeiculoOcorrenciaOut.model_validate(o)
+
+
+@ocorrencias_router.post(
+    "", response_model=VeiculoOcorrenciaOut, status_code=status.HTTP_201_CREATED
+)
+async def create_ocorrencia(
+    payload: VeiculoOcorrenciaCreate,
+    _: Usuario = Depends(require_permission("frota", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoOcorrenciaOut:
+    o = await frota_svc.criar_ocorrencia(
+        db, tenant_id=tenant_id, id_veiculo=payload.id_veiculo, payload=payload
+    )
+    return VeiculoOcorrenciaOut.model_validate(o)
+
+
+@ocorrencias_router.put("/{ocorrencia_id}", response_model=VeiculoOcorrenciaOut)
+async def update_ocorrencia(
+    ocorrencia_id: int,
+    payload: VeiculoOcorrenciaUpdate,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoOcorrenciaOut:
+    o = await frota_svc.atualizar_ocorrencia(
+        db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id, payload=payload
+    )
+    return VeiculoOcorrenciaOut.model_validate(o)
+
+
+@ocorrencias_router.post(
+    "/{ocorrencia_id}/iniciar-tratamento", response_model=VeiculoOcorrenciaOut
+)
+async def iniciar_tratamento_ocorrencia(
+    ocorrencia_id: int,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoOcorrenciaOut:
+    o = await frota_svc.iniciar_tratamento_ocorrencia(
+        db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id
+    )
+    return VeiculoOcorrenciaOut.model_validate(o)
+
+
+@ocorrencias_router.post("/{ocorrencia_id}/resolver", response_model=VeiculoOcorrenciaOut)
+async def resolver_ocorrencia(
+    ocorrencia_id: int,
+    payload: VeiculoOcorrenciaResolver,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoOcorrenciaOut:
+    o = await frota_svc.resolver_ocorrencia(
+        db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id, payload=payload
+    )
+    return VeiculoOcorrenciaOut.model_validate(o)
+
+
+@ocorrencias_router.post("/{ocorrencia_id}/cancelar", response_model=VeiculoOcorrenciaOut)
+async def cancelar_ocorrencia(
+    ocorrencia_id: int,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoOcorrenciaOut:
+    o = await frota_svc.cancelar_ocorrencia(
+        db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id
+    )
+    return VeiculoOcorrenciaOut.model_validate(o)
+
+
+@ocorrencias_router.delete("/{ocorrencia_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_ocorrencia(
+    ocorrencia_id: int,
+    _: Usuario = Depends(require_permission("frota", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await frota_svc.excluir_ocorrencia(
+        db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id
     )

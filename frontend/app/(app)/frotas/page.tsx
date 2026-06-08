@@ -1,7 +1,18 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Car, ClipboardList, IdCard, Truck } from "lucide-react";
+import {
+  AlertOctagon,
+  AlertTriangle,
+  BarChart3,
+  Car,
+  ClipboardCheck,
+  ClipboardList,
+  Fuel,
+  IdCard,
+  Truck,
+  Wrench,
+} from "lucide-react";
 import Link from "next/link";
 
 import { PageHeader } from "@/components/ui/page-header";
@@ -25,6 +36,36 @@ const CARDS = [
     icon: ClipboardList,
     title: "Solicitações de Veículo",
     desc: "Pedidos de uso de veículo: finalidade, destino, datas previstas e fluxo de aprovação.",
+  },
+  {
+    href: "/frotas/manutencoes",
+    icon: Wrench,
+    title: "Manutenções",
+    desc: "Manutenções preventivas e corretivas: abertura, andamento, conclusão e custos.",
+  },
+  {
+    href: "/frotas/abastecimentos",
+    icon: Fuel,
+    title: "Abastecimentos",
+    desc: "Registro de abastecimentos: litros, valor, quilometragem, posto e indicadores.",
+  },
+  {
+    href: "/frotas/vistorias",
+    icon: ClipboardCheck,
+    title: "Vistorias",
+    desc: "Checklist interno de vistoria: saída, retorno e periódica, com resultado e itens.",
+  },
+  {
+    href: "/frotas/ocorrencias",
+    icon: AlertOctagon,
+    title: "Ocorrências",
+    desc: "Avarias, multas, sinistros e uso indevido: gravidade, tratamento e resolução.",
+  },
+  {
+    href: "/frotas/relatorios",
+    icon: BarChart3,
+    title: "Visão gerencial",
+    desc: "Indicadores consolidados: veículos, solicitações, pendências e abastecimentos.",
   },
 ];
 

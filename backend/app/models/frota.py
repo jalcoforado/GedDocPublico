@@ -8,8 +8,18 @@ manutenção / inativo / baixado); `excluido` é soft-delete. Não há flag `ati
 separada — `situacao` já cobre disponibilidade (evita redundância).
 """
 from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
@@ -191,6 +201,143 @@ class VeiculoDocumento(Base):
     data_vencimento: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ativo")
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoManutencao(Base):
+    """Manutenção preventiva/corretiva do veículo (Frota — operacional).
+
+    Controle simples (SEM ordem de serviço complexa). `tipo`
+    (preventiva/corretiva) e `status` (aberta/em_andamento/concluida/cancelada)
+    são estado de domínio; `excluido` é soft-delete. `id_veiculo` validado
+    same-tenant no serviço. Efeitos na `situacao` do veículo são guardados no
+    serviço (abrir → 'manutencao' se 'disponivel'; concluir/cancelar →
+    'disponivel' só se estava em 'manutencao')."""
+
+    __tablename__ = "veiculo_manutencao"
+    __table_args__ = {"schema": "frota"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("frota.veiculo.id"), nullable=False
+    )
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    descricao: Mapped[str] = mapped_column(Text, nullable=False)
+    data_abertura: Mapped[date] = mapped_column(Date, nullable=False)
+    data_prevista: Mapped[date | None] = mapped_column(Date, nullable=True)
+    data_conclusao: Mapped[date | None] = mapped_column(Date, nullable=True)
+    km_atual: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fornecedor: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    custo_estimado: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    custo_final: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="aberta")
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoAbastecimento(Base):
+    """Abastecimento do veículo (Frota — operacional).
+
+    Registro simples (litros, valor, km, posto). NÃO altera a `situacao` do
+    veículo; o serviço atualiza `quilometragem_atual` se o `km_atual` informado
+    for maior. `id_veiculo`/`id_motorista` validados same-tenant no serviço.
+    `excluido` é soft-delete."""
+
+    __tablename__ = "veiculo_abastecimento"
+    __table_args__ = {"schema": "frota"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("frota.veiculo.id"), nullable=False
+    )
+    id_motorista: Mapped[int | None] = mapped_column(
+        ForeignKey("frota.motorista.id"), nullable=True
+    )
+    data_abastecimento: Mapped[date] = mapped_column(Date, nullable=False)
+    km_atual: Mapped[int] = mapped_column(Integer, nullable=False)
+    tipo_combustivel: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    litros: Mapped[Decimal] = mapped_column(Numeric(10, 3), nullable=False)
+    valor_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    posto: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoVistoria(Base):
+    """Vistoria/checklist interno do veículo (Frota — operacional).
+
+    Checklist simples de campos fixos (Opção A): `tipo` (saida/retorno/periodica),
+    `resultado` (aprovada/reprovada/com_ressalvas) e itens booleanos de
+    conferência. NÃO altera a `situacao` do veículo (mesmo se 'reprovada' —
+    decisão deste módulo). `id_veiculo` validado same-tenant no serviço;
+    `excluido` é soft-delete."""
+
+    __tablename__ = "veiculo_vistoria"
+    __table_args__ = {"schema": "frota"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("frota.veiculo.id"), nullable=False
+    )
+    data_vistoria: Mapped[date] = mapped_column(Date, nullable=False)
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    resultado: Mapped[str] = mapped_column(String(20), nullable=False)
+    pneus_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    luzes_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    freios_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    documentacao_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    limpeza_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    equipamentos_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoOcorrencia(Base):
+    """Ocorrência interna do veículo (Frota — operacional).
+
+    Tipos: avaria/multa/sinistro/documentacao/uso_indevido/outro. `gravidade`
+    (baixa/media/alta/critica) e `status` (aberta/em_tratamento/resolvida/
+    cancelada) são estado de domínio. NÃO altera a `situacao` do veículo.
+    `data_resolucao` é gravada server-side ao resolver. `id_veiculo`/
+    `id_motorista` validados same-tenant no serviço; `excluido` é soft-delete."""
+
+    __tablename__ = "veiculo_ocorrencia"
+    __table_args__ = {"schema": "frota"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("frota.veiculo.id"), nullable=False
+    )
+    id_motorista: Mapped[int | None] = mapped_column(
+        ForeignKey("frota.motorista.id"), nullable=True
+    )
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    data_ocorrencia: Mapped[date] = mapped_column(Date, nullable=False)
+    descricao: Mapped[str] = mapped_column(Text, nullable=False)
+    gravidade: Mapped[str] = mapped_column(String(20), nullable=False, default="media")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="aberta")
+    providencias: Mapped[str | None] = mapped_column(Text, nullable=True)
+    data_resolucao: Mapped[date | None] = mapped_column(Date, nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

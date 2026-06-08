@@ -1124,6 +1124,159 @@ export interface VeiculoDocumentoAlertas {
   a_vencer: VeiculoDocumento[];
 }
 
+// Manutenção de veículos (Frota operacional)
+export type ManutencaoTipo = "preventiva" | "corretiva";
+export type ManutencaoStatus = "aberta" | "em_andamento" | "concluida" | "cancelada";
+
+export interface VeiculoManutencao {
+  id: number;
+  id_veiculo: number;
+  tipo: ManutencaoTipo;
+  descricao: string;
+  data_abertura: string;
+  data_prevista: string | null;
+  data_conclusao: string | null;
+  km_atual: number | null;
+  fornecedor: string | null;
+  custo_estimado: number | null;
+  custo_final: number | null;
+  status: ManutencaoStatus;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface VeiculoManutencaoInput {
+  id_veiculo: number;
+  tipo: ManutencaoTipo;
+  descricao: string;
+  data_abertura?: string | null;
+  data_prevista?: string | null;
+  km_atual?: number | null;
+  fornecedor?: string | null;
+  custo_estimado?: number | null;
+  observacoes?: string | null;
+}
+
+export interface ManutencaoConcluirInput {
+  data_conclusao?: string | null;
+  custo_final?: number | null;
+  km_atual?: number | null;
+  observacoes?: string | null;
+}
+
+// Abastecimentos (Frota operacional)
+export interface VeiculoAbastecimento {
+  id: number;
+  id_veiculo: number;
+  id_motorista: number | null;
+  data_abastecimento: string;
+  km_atual: number;
+  tipo_combustivel: string | null;
+  litros: number;
+  valor_total: number;
+  posto: string | null;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface VeiculoAbastecimentoInput {
+  id_veiculo: number;
+  id_motorista?: number | null;
+  data_abastecimento?: string | null;
+  km_atual: number;
+  tipo_combustivel?: string | null;
+  litros: number;
+  valor_total: number;
+  posto?: string | null;
+  observacoes?: string | null;
+}
+
+export interface AbastecimentoResumo {
+  total_abastecimentos: number;
+  total_litros: number;
+  total_valor: number;
+  media_valor_litro: number | null;
+  ultimo_abastecimento: string | null;
+}
+
+// Vistoria / checklist interno (Frota operacional)
+export type VistoriaTipo = "saida" | "retorno" | "periodica";
+export type VistoriaResultado = "aprovada" | "reprovada" | "com_ressalvas";
+
+export interface VeiculoVistoria {
+  id: number;
+  id_veiculo: number;
+  data_vistoria: string;
+  tipo: VistoriaTipo;
+  resultado: VistoriaResultado;
+  pneus_ok: boolean;
+  luzes_ok: boolean;
+  freios_ok: boolean;
+  documentacao_ok: boolean;
+  limpeza_ok: boolean;
+  equipamentos_ok: boolean;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface VeiculoVistoriaInput {
+  id_veiculo: number;
+  data_vistoria?: string | null;
+  tipo: VistoriaTipo;
+  resultado: VistoriaResultado;
+  pneus_ok?: boolean;
+  luzes_ok?: boolean;
+  freios_ok?: boolean;
+  documentacao_ok?: boolean;
+  limpeza_ok?: boolean;
+  equipamentos_ok?: boolean;
+  observacoes?: string | null;
+}
+
+// Ocorrências internas (Frota operacional)
+export type OcorrenciaTipo =
+  | "avaria"
+  | "multa"
+  | "sinistro"
+  | "documentacao"
+  | "uso_indevido"
+  | "outro";
+export type OcorrenciaGravidade = "baixa" | "media" | "alta" | "critica";
+export type OcorrenciaStatus = "aberta" | "em_tratamento" | "resolvida" | "cancelada";
+
+export interface VeiculoOcorrencia {
+  id: number;
+  id_veiculo: number;
+  id_motorista: number | null;
+  tipo: OcorrenciaTipo;
+  data_ocorrencia: string;
+  descricao: string;
+  gravidade: OcorrenciaGravidade;
+  status: OcorrenciaStatus;
+  providencias: string | null;
+  data_resolucao: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface VeiculoOcorrenciaInput {
+  id_veiculo: number;
+  id_motorista?: number | null;
+  tipo: OcorrenciaTipo;
+  data_ocorrencia?: string | null;
+  descricao: string;
+  gravidade?: OcorrenciaGravidade;
+  providencias?: string | null;
+}
+
+export interface OcorrenciaResolverInput {
+  data_resolucao?: string | null;
+  providencias?: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -1369,6 +1522,96 @@ export const api = {
       request<VeiculoDocumentoAlertas>(
         `/frota/documentos-veiculo/alertas${qs({ dias })}`,
       ),
+  },
+  manutencoes: {
+    list: (params?: { id_veiculo?: number; status_filtro?: string }) =>
+      request<VeiculoManutencao[]>(`/frota/manutencoes${qs(params ?? {})}`),
+    get: (id: number) => request<VeiculoManutencao>(`/frota/manutencoes/${id}`),
+    create: (data: VeiculoManutencaoInput) =>
+      request<VeiculoManutencao>("/frota/manutencoes", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<Omit<VeiculoManutencaoInput, "id_veiculo">>) =>
+      request<VeiculoManutencao>(`/frota/manutencoes/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    iniciar: (id: number) =>
+      request<VeiculoManutencao>(`/frota/manutencoes/${id}/iniciar`, { method: "POST" }),
+    concluir: (id: number, data: ManutencaoConcluirInput) =>
+      request<VeiculoManutencao>(`/frota/manutencoes/${id}/concluir`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    cancelar: (id: number) =>
+      request<VeiculoManutencao>(`/frota/manutencoes/${id}/cancelar`, { method: "POST" }),
+    remove: (id: number) =>
+      request<void>(`/frota/manutencoes/${id}`, { method: "DELETE" }),
+  },
+  abastecimentos: {
+    list: (params?: { id_veiculo?: number }) =>
+      request<VeiculoAbastecimento[]>(`/frota/abastecimentos${qs(params ?? {})}`),
+    resumo: (params?: { id_veiculo?: number }) =>
+      request<AbastecimentoResumo>(`/frota/abastecimentos/resumo${qs(params ?? {})}`),
+    get: (id: number) => request<VeiculoAbastecimento>(`/frota/abastecimentos/${id}`),
+    create: (data: VeiculoAbastecimentoInput) =>
+      request<VeiculoAbastecimento>("/frota/abastecimentos", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<Omit<VeiculoAbastecimentoInput, "id_veiculo">>) =>
+      request<VeiculoAbastecimento>(`/frota/abastecimentos/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) =>
+      request<void>(`/frota/abastecimentos/${id}`, { method: "DELETE" }),
+  },
+  vistorias: {
+    list: (params?: { id_veiculo?: number; resultado?: string }) =>
+      request<VeiculoVistoria[]>(`/frota/vistorias${qs(params ?? {})}`),
+    get: (id: number) => request<VeiculoVistoria>(`/frota/vistorias/${id}`),
+    create: (data: VeiculoVistoriaInput) =>
+      request<VeiculoVistoria>("/frota/vistorias", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<Omit<VeiculoVistoriaInput, "id_veiculo">>) =>
+      request<VeiculoVistoria>(`/frota/vistorias/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) =>
+      request<void>(`/frota/vistorias/${id}`, { method: "DELETE" }),
+  },
+  ocorrencias: {
+    list: (params?: { id_veiculo?: number; status_filtro?: string }) =>
+      request<VeiculoOcorrencia[]>(`/frota/ocorrencias${qs(params ?? {})}`),
+    get: (id: number) => request<VeiculoOcorrencia>(`/frota/ocorrencias/${id}`),
+    create: (data: VeiculoOcorrenciaInput) =>
+      request<VeiculoOcorrencia>("/frota/ocorrencias", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<Omit<VeiculoOcorrenciaInput, "id_veiculo">>) =>
+      request<VeiculoOcorrencia>(`/frota/ocorrencias/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    iniciarTratamento: (id: number) =>
+      request<VeiculoOcorrencia>(`/frota/ocorrencias/${id}/iniciar-tratamento`, {
+        method: "POST",
+      }),
+    resolver: (id: number, data: OcorrenciaResolverInput) =>
+      request<VeiculoOcorrencia>(`/frota/ocorrencias/${id}/resolver`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    cancelar: (id: number) =>
+      request<VeiculoOcorrencia>(`/frota/ocorrencias/${id}/cancelar`, { method: "POST" }),
+    remove: (id: number) =>
+      request<void>(`/frota/ocorrencias/${id}`, { method: "DELETE" }),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),
