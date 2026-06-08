@@ -22,6 +22,7 @@ from ..models import (
     UnidadeTrabalho,
     Usuario,
     Veiculo,
+    VeiculoAbastecimento,
     VeiculoDocumento,
     VeiculoManutencao,
 )
@@ -33,6 +34,8 @@ from ..schemas.frota import (
     SolicitacaoVeiculoRegistrarRetorno,
     SolicitacaoVeiculoRegistrarSaida,
     SolicitacaoVeiculoUpdate,
+    VeiculoAbastecimentoCreate,
+    VeiculoAbastecimentoUpdate,
     VeiculoCreate,
     VeiculoDocumentoCreate,
     VeiculoDocumentoUpdate,
@@ -1001,3 +1004,116 @@ async def excluir_manutencao(
     m.excluido = True
     m.atualizado_em = datetime.utcnow()
     await db.commit()
+
+
+# ----------------------- Abastecimento do Veículo (operacional) -------------
+async def obter_abastecimento(
+    db: AsyncSession, *, tenant_id: int, abastecimento_id: int
+) -> VeiculoAbastecimento:
+    a = (
+        await db.execute(
+            select(VeiculoAbastecimento).where(
+                VeiculoAbastecimento.id == abastecimento_id,
+                VeiculoAbastecimento.tenant_id == tenant_id,
+                VeiculoAbastecimento.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Abastecimento não encontrado"
+        )
+    return a
+
+
+async def listar_abastecimentos(
+    db: AsyncSession, *, tenant_id: int, id_veiculo: int | None = None
+) -> list[VeiculoAbastecimento]:
+    stmt = select(VeiculoAbastecimento).where(
+        VeiculoAbastecimento.tenant_id == tenant_id,
+        VeiculoAbastecimento.excluido.is_(False),
+    )
+    if id_veiculo is not None:
+        stmt = stmt.where(VeiculoAbastecimento.id_veiculo == id_veiculo)
+    stmt = stmt.order_by(
+        VeiculoAbastecimento.data_abastecimento.desc(), VeiculoAbastecimento.id.desc()
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def criar_abastecimento(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    id_veiculo: int,
+    payload: VeiculoAbastecimentoCreate,
+) -> VeiculoAbastecimento:
+    veiculo = await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=id_veiculo)
+    if payload.id_motorista is not None:
+        # 404 same-tenant (não exige situação específica para abastecer).
+        await obter_motorista(db, tenant_id=tenant_id, motorista_id=payload.id_motorista)
+    dados = payload.model_dump(exclude={"id_veiculo"})
+    if dados.get("data_abastecimento") is None:
+        dados["data_abastecimento"] = date.today()
+    a = VeiculoAbastecimento(
+        tenant_id=tenant_id,
+        id_veiculo=id_veiculo,
+        criado_em=datetime.utcnow(),
+        **dados,
+    )
+    db.add(a)
+    # Atualiza a quilometragem do veículo se o hodômetro avançou (não mexe na
+    # situação). km menor é aceito (pode ser correção/registro retroativo).
+    if payload.km_atual > veiculo.quilometragem_atual:
+        veiculo.quilometragem_atual = payload.km_atual
+        veiculo.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(a)
+    return a
+
+
+async def atualizar_abastecimento(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    abastecimento_id: int,
+    payload: VeiculoAbastecimentoUpdate,
+) -> VeiculoAbastecimento:
+    a = await obter_abastecimento(db, tenant_id=tenant_id, abastecimento_id=abastecimento_id)
+    dados = payload.model_dump(exclude_unset=True)
+    if "id_motorista" in dados and dados["id_motorista"] is not None:
+        await obter_motorista(db, tenant_id=tenant_id, motorista_id=dados["id_motorista"])
+    for campo, valor in dados.items():
+        setattr(a, campo, valor)
+    a.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(a)
+    return a
+
+
+async def excluir_abastecimento(
+    db: AsyncSession, *, tenant_id: int, abastecimento_id: int
+) -> None:
+    a = await obter_abastecimento(db, tenant_id=tenant_id, abastecimento_id=abastecimento_id)
+    a.excluido = True
+    a.atualizado_em = datetime.utcnow()
+    await db.commit()
+
+
+async def resumo_abastecimentos(
+    db: AsyncSession, *, tenant_id: int, id_veiculo: int | None = None
+) -> dict:
+    """Agregados simples: nº, litros, valor, média R$/litro e último (tenant-scoped)."""
+    registros = await listar_abastecimentos(db, tenant_id=tenant_id, id_veiculo=id_veiculo)
+    total = len(registros)
+    total_litros = sum(float(r.litros) for r in registros)
+    total_valor = sum(float(r.valor_total) for r in registros)
+    media = round(total_valor / total_litros, 4) if total_litros > 0 else None
+    ultimo = max((r.data_abastecimento for r in registros), default=None)
+    return {
+        "total_abastecimentos": total,
+        "total_litros": round(total_litros, 3),
+        "total_valor": round(total_valor, 2),
+        "media_valor_litro": media,
+        "ultimo_abastecimento": ultimo,
+    }

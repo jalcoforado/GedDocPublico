@@ -490,3 +490,60 @@ class VeiculoManutencaoOut(BaseModel):
     observacoes: str | None = None
     criado_em: datetime
     atualizado_em: datetime | None = None
+
+
+# --- Abastecimento do Veículo (Frota — operacional) -------------------------
+class VeiculoAbastecimentoCreate(BaseModel):
+    """`id_veiculo` no corpo (validado same-tenant no serviço). `data_abastecimento`
+    opcional (default hoje). `tenant_id`/`id`/`excluido` nunca aceitos."""
+
+    id_veiculo: int
+    id_motorista: int | None = None
+    data_abastecimento: date | None = None
+    km_atual: int = Field(ge=0)
+    tipo_combustivel: str | None = Field(default=None, max_length=20)
+    litros: float = Field(gt=0)
+    valor_total: float = Field(ge=0)
+    posto: str | None = Field(default=None, max_length=150)
+    observacoes: str | None = None
+
+
+class VeiculoAbastecimentoUpdate(BaseModel):
+    """Whitelist de edição — `id_veiculo`/`tenant_id`/`id`/`excluido` nunca
+    aceitos. (Edição não reprocessa a quilometragem do veículo.)"""
+
+    id_motorista: int | None = None
+    data_abastecimento: date | None = None
+    km_atual: int | None = Field(default=None, ge=0)
+    tipo_combustivel: str | None = Field(default=None, max_length=20)
+    litros: float | None = Field(default=None, gt=0)
+    valor_total: float | None = Field(default=None, ge=0)
+    posto: str | None = Field(default=None, max_length=150)
+    observacoes: str | None = None
+
+
+class VeiculoAbastecimentoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    id_veiculo: int
+    id_motorista: int | None = None
+    data_abastecimento: date
+    km_atual: int
+    tipo_combustivel: str | None = None
+    litros: float
+    valor_total: float
+    posto: str | None = None
+    observacoes: str | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+
+
+class AbastecimentoResumo(BaseModel):
+    """Indicadores agregados (tenant-scoped, opcionalmente por veículo)."""
+
+    total_abastecimentos: int
+    total_litros: float
+    total_valor: float
+    media_valor_litro: float | None = None
+    ultimo_abastecimento: date | None = None

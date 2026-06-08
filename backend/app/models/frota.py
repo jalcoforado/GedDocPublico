@@ -240,3 +240,36 @@ class VeiculoManutencao(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoAbastecimento(Base):
+    """Abastecimento do veículo (Frota — operacional).
+
+    Registro simples (litros, valor, km, posto). NÃO altera a `situacao` do
+    veículo; o serviço atualiza `quilometragem_atual` se o `km_atual` informado
+    for maior. `id_veiculo`/`id_motorista` validados same-tenant no serviço.
+    `excluido` é soft-delete."""
+
+    __tablename__ = "veiculo_abastecimento"
+    __table_args__ = {"schema": "frota"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("frota.veiculo.id"), nullable=False
+    )
+    id_motorista: Mapped[int | None] = mapped_column(
+        ForeignKey("frota.motorista.id"), nullable=True
+    )
+    data_abastecimento: Mapped[date] = mapped_column(Date, nullable=False)
+    km_atual: Mapped[int] = mapped_column(Integer, nullable=False)
+    tipo_combustivel: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    litros: Mapped[Decimal] = mapped_column(Numeric(10, 3), nullable=False)
+    valor_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    posto: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

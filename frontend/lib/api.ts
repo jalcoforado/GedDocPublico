@@ -1165,6 +1165,42 @@ export interface ManutencaoConcluirInput {
   observacoes?: string | null;
 }
 
+// Abastecimentos (Frota operacional)
+export interface VeiculoAbastecimento {
+  id: number;
+  id_veiculo: number;
+  id_motorista: number | null;
+  data_abastecimento: string;
+  km_atual: number;
+  tipo_combustivel: string | null;
+  litros: number;
+  valor_total: number;
+  posto: string | null;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface VeiculoAbastecimentoInput {
+  id_veiculo: number;
+  id_motorista?: number | null;
+  data_abastecimento?: string | null;
+  km_atual: number;
+  tipo_combustivel?: string | null;
+  litros: number;
+  valor_total: number;
+  posto?: string | null;
+  observacoes?: string | null;
+}
+
+export interface AbastecimentoResumo {
+  total_abastecimentos: number;
+  total_litros: number;
+  total_valor: number;
+  media_valor_litro: number | null;
+  ultimo_abastecimento: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -1436,6 +1472,25 @@ export const api = {
       request<VeiculoManutencao>(`/frota/manutencoes/${id}/cancelar`, { method: "POST" }),
     remove: (id: number) =>
       request<void>(`/frota/manutencoes/${id}`, { method: "DELETE" }),
+  },
+  abastecimentos: {
+    list: (params?: { id_veiculo?: number }) =>
+      request<VeiculoAbastecimento[]>(`/frota/abastecimentos${qs(params ?? {})}`),
+    resumo: (params?: { id_veiculo?: number }) =>
+      request<AbastecimentoResumo>(`/frota/abastecimentos/resumo${qs(params ?? {})}`),
+    get: (id: number) => request<VeiculoAbastecimento>(`/frota/abastecimentos/${id}`),
+    create: (data: VeiculoAbastecimentoInput) =>
+      request<VeiculoAbastecimento>("/frota/abastecimentos", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<Omit<VeiculoAbastecimentoInput, "id_veiculo">>) =>
+      request<VeiculoAbastecimento>(`/frota/abastecimentos/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) =>
+      request<void>(`/frota/abastecimentos/${id}`, { method: "DELETE" }),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),

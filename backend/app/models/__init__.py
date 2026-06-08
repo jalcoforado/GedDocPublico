@@ -15,6 +15,7 @@ from .frota import (
     Motorista,
     SolicitacaoVeiculo,
     Veiculo,
+    VeiculoAbastecimento,
     VeiculoDocumento,
     VeiculoManutencao,
 )
@@ -107,6 +108,7 @@ __all__ = [
     "TtdRegra",
     "UnidadeTrabalho",
     "Veiculo",
+    "VeiculoAbastecimento",
     "VeiculoDocumento",
     "VeiculoManutencao",
     "Usuario",
