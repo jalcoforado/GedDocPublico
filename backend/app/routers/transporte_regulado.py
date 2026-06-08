@@ -1,9 +1,9 @@
-"""Transporte Regulado — routers de Permissionários e Empresas.
+"""Transporte Regulado — routers de Permissionários, Empresas e Veículos regulados.
 
-`permissionarios_router` / `empresas_router` (prefixos
-`/transporte-regulado/permissionarios` e `/transporte-regulado/empresas`): CRUD
-interno, autenticado + permissão `transporte_regulado`. Mesmo padrão dos routers
-de `frota`. Sem portal público nesta etapa.
+`permissionarios_router` / `empresas_router` / `veiculos_router` (prefixos
+`/transporte-regulado/permissionarios`, `/empresas` e `/veiculos`): CRUD interno,
+autenticado + permissão `transporte_regulado`. Mesmo padrão dos routers de `frota`.
+Sem portal público nesta etapa.
 """
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,9 @@ from ..schemas.transporte_regulado import (
     PermissionarioCreate,
     PermissionarioOut,
     PermissionarioUpdate,
+    VeiculoReguladoCreate,
+    VeiculoReguladoOut,
+    VeiculoReguladoUpdate,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -246,3 +249,114 @@ async def delete_empresa(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await tr_svc.excluir_empresa(db, tenant_id=tenant_id, empresa_id=empresa_id)
+
+
+# ============================ Veículos regulados ============================
+veiculos_router = APIRouter(
+    prefix="/transporte-regulado/veiculos", tags=["transporte-regulado"]
+)
+
+
+@veiculos_router.get("", response_model=list[VeiculoReguladoOut])
+async def list_veiculos(
+    situacao: str | None = None,
+    tipo_servico: str | None = None,
+    id_permissionario: int | None = None,
+    id_empresa: int | None = None,
+    q: str | None = None,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[VeiculoReguladoOut]:
+    rows = await tr_svc.listar_veiculos(
+        db, tenant_id=tenant_id, situacao=situacao, tipo_servico=tipo_servico,
+        id_permissionario=id_permissionario, id_empresa=id_empresa, q=q,
+    )
+    return [VeiculoReguladoOut.model_validate(r) for r in rows]
+
+
+@veiculos_router.get("/{veiculo_id}", response_model=VeiculoReguladoOut)
+async def get_veiculo(
+    veiculo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoReguladoOut:
+    v = await tr_svc.obter_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
+    return VeiculoReguladoOut.model_validate(v)
+
+
+@veiculos_router.post(
+    "", response_model=VeiculoReguladoOut, status_code=status.HTTP_201_CREATED
+)
+async def create_veiculo(
+    payload: VeiculoReguladoCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoReguladoOut:
+    v = await tr_svc.criar_veiculo(db, tenant_id=tenant_id, payload=payload)
+    return VeiculoReguladoOut.model_validate(v)
+
+
+@veiculos_router.put("/{veiculo_id}", response_model=VeiculoReguladoOut)
+async def update_veiculo(
+    veiculo_id: int,
+    payload: VeiculoReguladoUpdate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoReguladoOut:
+    v = await tr_svc.atualizar_veiculo(
+        db, tenant_id=tenant_id, veiculo_id=veiculo_id, payload=payload
+    )
+    return VeiculoReguladoOut.model_validate(v)
+
+
+@veiculos_router.post("/{veiculo_id}/inativar", response_model=VeiculoReguladoOut)
+async def inativar_veiculo(
+    veiculo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoReguladoOut:
+    v = await tr_svc.set_situacao_veiculo(
+        db, tenant_id=tenant_id, veiculo_id=veiculo_id, situacao="inativo"
+    )
+    return VeiculoReguladoOut.model_validate(v)
+
+
+@veiculos_router.post("/{veiculo_id}/reativar", response_model=VeiculoReguladoOut)
+async def reativar_veiculo(
+    veiculo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoReguladoOut:
+    v = await tr_svc.set_situacao_veiculo(
+        db, tenant_id=tenant_id, veiculo_id=veiculo_id, situacao="ativo"
+    )
+    return VeiculoReguladoOut.model_validate(v)
+
+
+@veiculos_router.post("/{veiculo_id}/suspender", response_model=VeiculoReguladoOut)
+async def suspender_veiculo(
+    veiculo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoReguladoOut:
+    v = await tr_svc.set_situacao_veiculo(
+        db, tenant_id=tenant_id, veiculo_id=veiculo_id, situacao="suspenso"
+    )
+    return VeiculoReguladoOut.model_validate(v)
+
+
+@veiculos_router.delete("/{veiculo_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_veiculo(
+    veiculo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await tr_svc.excluir_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)

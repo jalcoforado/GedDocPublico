@@ -1349,6 +1349,57 @@ export interface Empresa {
   atualizado_em: string | null;
 }
 
+// --- Transporte Regulado: Veículo regulado ----------------------------------
+export type VeiculoReguladoSituacao =
+  | "ativo"
+  | "pendente"
+  | "suspenso"
+  | "cassado"
+  | "inativo";
+export type VeiculoCategoria =
+  | "automovel"
+  | "motocicleta"
+  | "van"
+  | "micro_onibus"
+  | "onibus"
+  | "utilitario"
+  | "outro";
+export type TipoCombustivel =
+  | "gasolina"
+  | "etanol"
+  | "diesel"
+  | "flex"
+  | "gnv"
+  | "eletrico"
+  | "hibrido"
+  | "outro";
+
+export interface VeiculoRegulado {
+  id: number;
+  id_permissionario: number | null;
+  id_empresa: number | null;
+  placa: string;
+  renavam: string | null;
+  chassi: string | null;
+  marca: string;
+  modelo: string;
+  ano_fabricacao: number | null;
+  ano_modelo: number | null;
+  cor: string | null;
+  categoria: VeiculoCategoria | null;
+  tipo_servico: TipoServico;
+  capacidade_passageiros: number | null;
+  tipo_combustivel: TipoCombustivel | null;
+  adaptado: boolean;
+  numero_autorizacao: string | null;
+  data_inicio_autorizacao: string | null;
+  data_validade_autorizacao: string | null;
+  situacao: VeiculoReguladoSituacao;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -1747,6 +1798,42 @@ export const api = {
       }),
     remove: (id: number) =>
       request<void>(`/transporte-regulado/empresas/${id}`, { method: "DELETE" }),
+  },
+  veiculosRegulados: {
+    list: (params?: {
+      situacao?: string;
+      tipo_servico?: string;
+      id_permissionario?: number;
+      id_empresa?: number;
+      q?: string;
+    }) => request<VeiculoRegulado[]>(`/transporte-regulado/veiculos${qs(params ?? {})}`),
+    get: (id: number) => request<VeiculoRegulado>(`/transporte-regulado/veiculos/${id}`),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    create: (data: any) =>
+      request<VeiculoRegulado>("/transporte-regulado/veiculos", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    update: (id: number, data: any) =>
+      request<VeiculoRegulado>(`/transporte-regulado/veiculos/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    inativar: (id: number) =>
+      request<VeiculoRegulado>(`/transporte-regulado/veiculos/${id}/inativar`, {
+        method: "POST",
+      }),
+    reativar: (id: number) =>
+      request<VeiculoRegulado>(`/transporte-regulado/veiculos/${id}/reativar`, {
+        method: "POST",
+      }),
+    suspender: (id: number) =>
+      request<VeiculoRegulado>(`/transporte-regulado/veiculos/${id}/suspender`, {
+        method: "POST",
+      }),
+    remove: (id: number) =>
+      request<void>(`/transporte-regulado/veiculos/${id}`, { method: "DELETE" }),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),

@@ -49,7 +49,7 @@ from .nivel import Nivel
 from .servico import Servico
 from .sistema import Sistema
 from .tenant import Tenant
-from .transporte_regulado import Empresa, Permissionario
+from .transporte_regulado import Empresa, Permissionario, VeiculoRegulado
 from .unidade_trabalho import TipoUnidadeTrabalho, UnidadeTrabalho
 from .usuario import Usuario
 from .usuario_externo import UsuarioExterno
@@ -117,6 +117,7 @@ __all__ = [
     "VeiculoDocumento",
     "VeiculoManutencao",
     "VeiculoOcorrencia",
+    "VeiculoRegulado",
     "VeiculoVistoria",
     "Usuario",
     "UsuarioExterno",

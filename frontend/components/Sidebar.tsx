@@ -144,6 +144,12 @@ const NAV: NavGroup[] = [
         icon: Building2,
         perm: "transporte_regulado",
       },
+      {
+        label: "Veículos",
+        href: "/transporte-regulado/veiculos",
+        icon: Car,
+        perm: "transporte_regulado",
+      },
     ],
   },
   {

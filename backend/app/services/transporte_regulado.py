@@ -14,12 +14,14 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Empresa, Permissionario
+from ..models import Empresa, Permissionario, VeiculoRegulado
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
     EmpresaUpdate,
     PermissionarioCreate,
     PermissionarioUpdate,
+    VeiculoReguladoCreate,
+    VeiculoReguladoUpdate,
 )
 
 
@@ -308,4 +310,231 @@ async def excluir_empresa(
     e = await obter_empresa(db, tenant_id=tenant_id, empresa_id=empresa_id)
     e.excluido = True
     e.atualizado_em = datetime.utcnow()
+    await db.commit()
+
+
+# ============================ Veículo regulado ==============================
+async def _validar_campo_unico_veiculo(
+    db: AsyncSession, *, tenant_id: int, campo, valor: str, excluir_id: int | None = None
+) -> bool:
+    """Retorna True se já existe outro veículo não-excluído do tenant com `campo == valor`."""
+    stmt = select(VeiculoRegulado.id).where(
+        VeiculoRegulado.tenant_id == tenant_id,
+        campo == valor,
+        VeiculoRegulado.excluido.is_(False),
+    )
+    if excluir_id is not None:
+        stmt = stmt.where(VeiculoRegulado.id != excluir_id)
+    return (await db.execute(stmt)).scalar_one_or_none() is not None
+
+
+async def _validar_unicidade_veiculo(
+    db: AsyncSession, *, tenant_id: int, dados: dict, excluir_id: int | None = None
+) -> None:
+    if "placa" in dados and dados["placa"] is not None:
+        if await _validar_campo_unico_veiculo(
+            db, tenant_id=tenant_id, campo=VeiculoRegulado.placa,
+            valor=dados["placa"], excluir_id=excluir_id,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Já existe um veículo com a placa '{dados['placa']}' neste tenant.",
+            )
+    if dados.get("renavam") is not None:
+        if await _validar_campo_unico_veiculo(
+            db, tenant_id=tenant_id, campo=VeiculoRegulado.renavam,
+            valor=dados["renavam"], excluir_id=excluir_id,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Já existe um veículo com o RENAVAM '{dados['renavam']}' neste tenant.",
+            )
+    if dados.get("chassi") is not None:
+        if await _validar_campo_unico_veiculo(
+            db, tenant_id=tenant_id, campo=VeiculoRegulado.chassi,
+            valor=dados["chassi"], excluir_id=excluir_id,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Já existe um veículo com o chassi '{dados['chassi']}' neste tenant.",
+            )
+
+
+async def _validar_vinculos_veiculo(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    id_permissionario: int | None,
+    id_empresa: int | None,
+) -> None:
+    """Se informados, permissionário/empresa devem ser do MESMO tenant e não-excluídos."""
+    if id_permissionario is not None:
+        existe = (
+            await db.execute(
+                select(Permissionario.id).where(
+                    Permissionario.id == id_permissionario,
+                    Permissionario.tenant_id == tenant_id,
+                    Permissionario.excluido.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if existe is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Permissionário do vínculo não encontrado neste tenant.",
+            )
+    if id_empresa is not None:
+        existe = (
+            await db.execute(
+                select(Empresa.id).where(
+                    Empresa.id == id_empresa,
+                    Empresa.tenant_id == tenant_id,
+                    Empresa.excluido.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if existe is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Empresa do vínculo não encontrada neste tenant.",
+            )
+
+
+async def obter_veiculo(
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int
+) -> VeiculoRegulado:
+    v = (
+        await db.execute(
+            select(VeiculoRegulado).where(
+                VeiculoRegulado.id == veiculo_id,
+                VeiculoRegulado.tenant_id == tenant_id,
+                VeiculoRegulado.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if v is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
+        )
+    return v
+
+
+async def listar_veiculos(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    situacao: str | None = None,
+    tipo_servico: str | None = None,
+    id_permissionario: int | None = None,
+    id_empresa: int | None = None,
+    q: str | None = None,
+) -> list[VeiculoRegulado]:
+    stmt = select(VeiculoRegulado).where(
+        VeiculoRegulado.tenant_id == tenant_id,
+        VeiculoRegulado.excluido.is_(False),
+    )
+    if situacao is not None:
+        stmt = stmt.where(VeiculoRegulado.situacao == situacao)
+    if tipo_servico is not None:
+        stmt = stmt.where(VeiculoRegulado.tipo_servico == tipo_servico)
+    if id_permissionario is not None:
+        stmt = stmt.where(VeiculoRegulado.id_permissionario == id_permissionario)
+    if id_empresa is not None:
+        stmt = stmt.where(VeiculoRegulado.id_empresa == id_empresa)
+    if q:
+        termo = f"%{q.strip()}%"
+        stmt = stmt.where(
+            VeiculoRegulado.placa.ilike(termo)
+            | VeiculoRegulado.marca.ilike(termo)
+            | VeiculoRegulado.modelo.ilike(termo)
+            | VeiculoRegulado.renavam.ilike(termo)
+            | VeiculoRegulado.chassi.ilike(termo)
+        )
+    stmt = stmt.order_by(VeiculoRegulado.placa)
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def criar_veiculo(
+    db: AsyncSession, *, tenant_id: int, payload: VeiculoReguladoCreate
+) -> VeiculoRegulado:
+    dados = payload.model_dump()
+    await _validar_unicidade_veiculo(db, tenant_id=tenant_id, dados=dados)
+    await _validar_vinculos_veiculo(
+        db, tenant_id=tenant_id,
+        id_permissionario=dados.get("id_permissionario"),
+        id_empresa=dados.get("id_empresa"),
+    )
+    v = VeiculoRegulado(tenant_id=tenant_id, criado_em=datetime.utcnow(), **dados)
+    db.add(v)
+    await db.commit()
+    await db.refresh(v)
+    return v
+
+
+async def atualizar_veiculo(
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int, payload: VeiculoReguladoUpdate
+) -> VeiculoRegulado:
+    v = await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
+    dados = payload.model_dump(exclude_unset=True)
+
+    await _validar_unicidade_veiculo(
+        db, tenant_id=tenant_id, dados=dados, excluir_id=veiculo_id
+    )
+    if "id_permissionario" in dados or "id_empresa" in dados:
+        await _validar_vinculos_veiculo(
+            db, tenant_id=tenant_id,
+            id_permissionario=dados.get("id_permissionario"),
+            id_empresa=dados.get("id_empresa"),
+        )
+
+    # Vínculo efetivo (merge do parcial): ao menos um deve permanecer.
+    novo_perm = dados.get("id_permissionario", v.id_permissionario)
+    nova_emp = dados.get("id_empresa", v.id_empresa)
+    if novo_perm is None and nova_emp is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Informe ao menos um vínculo: id_permissionario ou id_empresa.",
+        )
+
+    # Coerência de anos e datas sobre os valores efetivos.
+    ano_fab = dados.get("ano_fabricacao", v.ano_fabricacao)
+    ano_mod = dados.get("ano_modelo", v.ano_modelo)
+    if ano_fab is not None and ano_mod is not None and ano_mod < ano_fab:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ano_modelo deve ser maior ou igual a ano_fabricacao.",
+        )
+    inicio = dados.get("data_inicio_autorizacao", v.data_inicio_autorizacao)
+    validade = dados.get("data_validade_autorizacao", v.data_validade_autorizacao)
+    if inicio is not None and validade is not None and validade < inicio:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="data_validade_autorizacao deve ser posterior ou igual à data_inicio_autorizacao.",
+        )
+
+    for campo, valor in dados.items():
+        setattr(v, campo, valor)
+    v.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(v)
+    return v
+
+
+async def set_situacao_veiculo(
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int, situacao: str
+) -> VeiculoRegulado:
+    v = await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
+    v.situacao = situacao
+    v.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(v)
+    return v
+
+
+async def excluir_veiculo(
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int
+) -> None:
+    v = await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
+    v.excluido = True
+    v.atualizado_em = datetime.utcnow()
     await db.commit()

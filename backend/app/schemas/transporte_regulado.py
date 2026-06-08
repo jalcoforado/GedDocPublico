@@ -48,6 +48,66 @@ def _validar_uf(v: str | None) -> str | None:
     return v
 
 
+# Veículo regulado — situação masculina (mesmo conjunto do permissionário).
+VeiculoReguladoSituacao = Literal["ativo", "pendente", "suspenso", "cassado", "inativo"]
+VeiculoCategoria = Literal[
+    "automovel",
+    "motocicleta",
+    "van",
+    "micro_onibus",
+    "onibus",
+    "utilitario",
+    "outro",
+]
+TipoCombustivel = Literal[
+    "gasolina",
+    "etanol",
+    "diesel",
+    "flex",
+    "gnv",
+    "eletrico",
+    "hibrido",
+    "outro",
+]
+
+
+def _validar_placa(v: str) -> str:
+    """Normaliza a placa: uppercase, sem hífen/espaço. Aceita Mercosul e padrão
+    antigo de forma simples: 7 caracteres alfanuméricos após normalização."""
+    import re
+
+    v = re.sub(r"[\s\-]", "", v).upper()
+    if not re.fullmatch(r"[A-Z0-9]{7}", v):
+        raise ValueError(
+            "Placa inválida. Deve conter 7 caracteres alfanuméricos (Mercosul ou padrão antigo)."
+        )
+    return v
+
+
+def _validar_renavam(v: str | None) -> str | None:
+    if v is None:
+        return v
+    v = _so_digitos(v)
+    if v == "":
+        return None
+    if not (9 <= len(v) <= 11):
+        raise ValueError("RENAVAM inválido. Deve conter de 9 a 11 dígitos.")
+    return v
+
+
+def _validar_chassi(v: str | None) -> str | None:
+    if v is None:
+        return v
+    import re
+
+    v = re.sub(r"\s", "", v).upper()
+    if v == "":
+        return None
+    if len(v) > 17:
+        raise ValueError("Chassi inválido. Deve conter no máximo 17 caracteres.")
+    return v
+
+
 def _validar_email(v: str | None) -> str | None:
     if v is None:
         return v
@@ -314,6 +374,142 @@ class EmpresaOut(BaseModel):
     data_inicio_autorizacao: date | None = None
     data_validade_autorizacao: date | None = None
     id_representante_permissionario: int | None = None
+    situacao: str
+    observacoes: str | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+
+
+# ============================ Veículo regulado ==============================
+class VeiculoReguladoCreate(BaseModel):
+    """Veículo regulado. Pelo menos um de `id_permissionario`/`id_empresa` deve ser
+    informado (validado aqui e no serviço; coerência de tenant no serviço).
+    `tenant_id`/`id`/`excluido` nunca aceitos."""
+
+    id_permissionario: int | None = None
+    id_empresa: int | None = None
+    placa: str = Field(min_length=1, max_length=10)
+    renavam: str | None = Field(default=None, max_length=14)
+    chassi: str | None = Field(default=None, max_length=20)
+    marca: str = Field(min_length=1, max_length=60)
+    modelo: str = Field(min_length=1, max_length=60)
+    ano_fabricacao: int | None = None
+    ano_modelo: int | None = None
+    cor: str | None = Field(default=None, max_length=30)
+    categoria: VeiculoCategoria | None = None
+    tipo_servico: TipoServico
+    capacidade_passageiros: int | None = Field(default=None, ge=1)
+    tipo_combustivel: TipoCombustivel | None = None
+    adaptado: bool = False
+    numero_autorizacao: str | None = Field(default=None, max_length=40)
+    data_inicio_autorizacao: date | None = None
+    data_validade_autorizacao: date | None = None
+    situacao: VeiculoReguladoSituacao = "pendente"
+    observacoes: str | None = None
+
+    @field_validator("placa")
+    @classmethod
+    def _placa(cls, v: str) -> str:
+        return _validar_placa(v)
+
+    @field_validator("renavam")
+    @classmethod
+    def _renavam(cls, v: str | None) -> str | None:
+        return _validar_renavam(v)
+
+    @field_validator("chassi")
+    @classmethod
+    def _chassi(cls, v: str | None) -> str | None:
+        return _validar_chassi(v)
+
+    @model_validator(mode="after")
+    def _coerencia(self) -> "VeiculoReguladoCreate":
+        if self.id_permissionario is None and self.id_empresa is None:
+            raise ValueError(
+                "Informe ao menos um vínculo: id_permissionario ou id_empresa."
+            )
+        if (
+            self.ano_fabricacao is not None
+            and self.ano_modelo is not None
+            and self.ano_modelo < self.ano_fabricacao
+        ):
+            raise ValueError("ano_modelo deve ser maior ou igual a ano_fabricacao.")
+        if (
+            self.data_inicio_autorizacao is not None
+            and self.data_validade_autorizacao is not None
+            and self.data_validade_autorizacao < self.data_inicio_autorizacao
+        ):
+            raise ValueError(
+                "data_validade_autorizacao deve ser posterior ou igual à data_inicio_autorizacao."
+            )
+        return self
+
+
+class VeiculoReguladoUpdate(BaseModel):
+    """Whitelist de edição — `tenant_id`/`id`/`excluido`/`criado_em`/
+    `atualizado_em` nunca aceitos. Coerências revalidadas no serviço."""
+
+    id_permissionario: int | None = None
+    id_empresa: int | None = None
+    placa: str | None = Field(default=None, min_length=1, max_length=10)
+    renavam: str | None = Field(default=None, max_length=14)
+    chassi: str | None = Field(default=None, max_length=20)
+    marca: str | None = Field(default=None, min_length=1, max_length=60)
+    modelo: str | None = Field(default=None, min_length=1, max_length=60)
+    ano_fabricacao: int | None = None
+    ano_modelo: int | None = None
+    cor: str | None = Field(default=None, max_length=30)
+    categoria: VeiculoCategoria | None = None
+    tipo_servico: TipoServico | None = None
+    capacidade_passageiros: int | None = Field(default=None, ge=1)
+    tipo_combustivel: TipoCombustivel | None = None
+    adaptado: bool | None = None
+    numero_autorizacao: str | None = Field(default=None, max_length=40)
+    data_inicio_autorizacao: date | None = None
+    data_validade_autorizacao: date | None = None
+    situacao: VeiculoReguladoSituacao | None = None
+    observacoes: str | None = None
+
+    @field_validator("placa")
+    @classmethod
+    def _placa(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return _validar_placa(v)
+
+    @field_validator("renavam")
+    @classmethod
+    def _renavam(cls, v: str | None) -> str | None:
+        return _validar_renavam(v)
+
+    @field_validator("chassi")
+    @classmethod
+    def _chassi(cls, v: str | None) -> str | None:
+        return _validar_chassi(v)
+
+
+class VeiculoReguladoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    id_permissionario: int | None = None
+    id_empresa: int | None = None
+    placa: str
+    renavam: str | None = None
+    chassi: str | None = None
+    marca: str
+    modelo: str
+    ano_fabricacao: int | None = None
+    ano_modelo: int | None = None
+    cor: str | None = None
+    categoria: str | None = None
+    tipo_servico: str
+    capacidade_passageiros: int | None = None
+    tipo_combustivel: str | None = None
+    adaptado: bool
+    numero_autorizacao: str | None = None
+    data_inicio_autorizacao: date | None = None
+    data_validade_autorizacao: date | None = None
     situacao: str
     observacoes: str | None = None
     criado_em: datetime
