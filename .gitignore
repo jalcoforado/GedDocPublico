@@ -18,7 +18,11 @@ dist/
 # IDE
 .vscode/
 .idea/
-.claude/
+# Ignora .claude/ em geral (caches, worktrees, configs locais, logs),
+# mas versiona os subagentes de projeto em .claude/agents/.
+.claude/*
+!.claude/agents/
+!.claude/agents/*.md
 
 # OS
 .DS_Store
