@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Car, ClipboardList, IdCard, Truck } from "lucide-react";
+import { AlertTriangle, Car, ClipboardList, IdCard, Truck, Wrench } from "lucide-react";
 import Link from "next/link";
 
 import { PageHeader } from "@/components/ui/page-header";
@@ -25,6 +25,12 @@ const CARDS = [
     icon: ClipboardList,
     title: "Solicitações de Veículo",
     desc: "Pedidos de uso de veículo: finalidade, destino, datas previstas e fluxo de aprovação.",
+  },
+  {
+    href: "/frotas/manutencoes",
+    icon: Wrench,
+    title: "Manutenções",
+    desc: "Manutenções preventivas e corretivas: abertura, andamento, conclusão e custos.",
   },
 ];
 

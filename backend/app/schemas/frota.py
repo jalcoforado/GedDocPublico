@@ -424,3 +424,69 @@ class VeiculoDocumentoAlertas(BaseModel):
     dias: int
     vencidos: list[VeiculoDocumentoOut]
     a_vencer: list[VeiculoDocumentoOut]
+
+
+# --- Manutenção do Veículo (Frota — operacional) ----------------------------
+ManutencaoTipo = Literal["preventiva", "corretiva"]
+ManutencaoStatus = Literal["aberta", "em_andamento", "concluida", "cancelada"]
+
+
+class VeiculoManutencaoCreate(BaseModel):
+    """`id_veiculo` no corpo (página standalone, validado same-tenant no serviço);
+    `status`/`data_conclusao`/`custo_final` são server-side (status inicial
+    'aberta'). `data_abertura` opcional (default hoje no serviço).
+    `tenant_id`/`id`/`excluido` nunca aceitos."""
+
+    id_veiculo: int
+    tipo: ManutencaoTipo
+    descricao: str = Field(min_length=1)
+    data_abertura: date | None = None
+    data_prevista: date | None = None
+    km_atual: int | None = Field(default=None, ge=0)
+    fornecedor: str | None = Field(default=None, max_length=150)
+    custo_estimado: float | None = Field(default=None, ge=0)
+    observacoes: str | None = None
+
+
+class VeiculoManutencaoUpdate(BaseModel):
+    """Whitelist de edição de metadados — `status`/`data_abertura`/
+    `data_conclusao`/`custo_final` (mudam por ações dedicadas) e
+    `tenant_id`/`id`/`id_veiculo`/`excluido` nunca aceitos."""
+
+    tipo: ManutencaoTipo | None = None
+    descricao: str | None = Field(default=None, min_length=1)
+    data_prevista: date | None = None
+    km_atual: int | None = Field(default=None, ge=0)
+    fornecedor: str | None = Field(default=None, max_length=150)
+    custo_estimado: float | None = Field(default=None, ge=0)
+    observacoes: str | None = None
+
+
+class VeiculoManutencaoConcluir(BaseModel):
+    """Conclusão da manutenção — `data_conclusao` (default hoje no serviço),
+    `custo_final` e `km_atual` opcionais."""
+
+    data_conclusao: date | None = None
+    custo_final: float | None = Field(default=None, ge=0)
+    km_atual: int | None = Field(default=None, ge=0)
+    observacoes: str | None = None
+
+
+class VeiculoManutencaoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    id_veiculo: int
+    tipo: str
+    descricao: str
+    data_abertura: date
+    data_prevista: date | None = None
+    data_conclusao: date | None = None
+    km_atual: int | None = None
+    fornecedor: str | None = None
+    custo_estimado: float | None = None
+    custo_final: float | None = None
+    status: str
+    observacoes: str | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None

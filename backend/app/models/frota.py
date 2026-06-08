@@ -8,8 +8,18 @@ manutenção / inativo / baixado); `excluido` é soft-delete. Não há flag `ati
 separada — `situacao` já cobre disponibilidade (evita redundância).
 """
 from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
@@ -190,6 +200,42 @@ class VeiculoDocumento(Base):
     data_emissao: Mapped[date | None] = mapped_column(Date, nullable=True)
     data_vencimento: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ativo")
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoManutencao(Base):
+    """Manutenção preventiva/corretiva do veículo (Frota — operacional).
+
+    Controle simples (SEM ordem de serviço complexa). `tipo`
+    (preventiva/corretiva) e `status` (aberta/em_andamento/concluida/cancelada)
+    são estado de domínio; `excluido` é soft-delete. `id_veiculo` validado
+    same-tenant no serviço. Efeitos na `situacao` do veículo são guardados no
+    serviço (abrir → 'manutencao' se 'disponivel'; concluir/cancelar →
+    'disponivel' só se estava em 'manutencao')."""
+
+    __tablename__ = "veiculo_manutencao"
+    __table_args__ = {"schema": "frota"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("frota.veiculo.id"), nullable=False
+    )
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    descricao: Mapped[str] = mapped_column(Text, nullable=False)
+    data_abertura: Mapped[date] = mapped_column(Date, nullable=False)
+    data_prevista: Mapped[date | None] = mapped_column(Date, nullable=True)
+    data_conclusao: Mapped[date | None] = mapped_column(Date, nullable=True)
+    km_atual: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fornecedor: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    custo_estimado: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    custo_final: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="aberta")
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

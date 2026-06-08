@@ -26,6 +26,10 @@ from ..schemas.frota import (
     VeiculoDocumentoCreate,
     VeiculoDocumentoOut,
     VeiculoDocumentoUpdate,
+    VeiculoManutencaoConcluir,
+    VeiculoManutencaoCreate,
+    VeiculoManutencaoOut,
+    VeiculoManutencaoUpdate,
     VeiculoOut,
     VeiculoUpdate,
 )
@@ -459,4 +463,116 @@ async def delete_documento(
 ) -> None:
     await frota_svc.excluir_documento(
         db, tenant_id=tenant_id, documento_id=documento_id
+    )
+
+
+# --- Manutenção de Veículos (permissão `frota`) -----------------------------
+manutencoes_router = APIRouter(prefix="/frota/manutencoes", tags=["frota"])
+
+
+@manutencoes_router.get("", response_model=list[VeiculoManutencaoOut])
+async def list_manutencoes(
+    id_veiculo: int | None = None,
+    status_filtro: str | None = None,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[VeiculoManutencaoOut]:
+    rows = await frota_svc.listar_manutencoes(
+        db, tenant_id=tenant_id, id_veiculo=id_veiculo, status_filtro=status_filtro
+    )
+    return [VeiculoManutencaoOut.model_validate(r) for r in rows]
+
+
+@manutencoes_router.get("/{manutencao_id}", response_model=VeiculoManutencaoOut)
+async def get_manutencao(
+    manutencao_id: int,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoManutencaoOut:
+    m = await frota_svc.obter_manutencao(
+        db, tenant_id=tenant_id, manutencao_id=manutencao_id
+    )
+    return VeiculoManutencaoOut.model_validate(m)
+
+
+@manutencoes_router.post(
+    "", response_model=VeiculoManutencaoOut, status_code=status.HTTP_201_CREATED
+)
+async def create_manutencao(
+    payload: VeiculoManutencaoCreate,
+    _: Usuario = Depends(require_permission("frota", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoManutencaoOut:
+    m = await frota_svc.criar_manutencao(
+        db, tenant_id=tenant_id, id_veiculo=payload.id_veiculo, payload=payload
+    )
+    return VeiculoManutencaoOut.model_validate(m)
+
+
+@manutencoes_router.put("/{manutencao_id}", response_model=VeiculoManutencaoOut)
+async def update_manutencao(
+    manutencao_id: int,
+    payload: VeiculoManutencaoUpdate,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoManutencaoOut:
+    m = await frota_svc.atualizar_manutencao(
+        db, tenant_id=tenant_id, manutencao_id=manutencao_id, payload=payload
+    )
+    return VeiculoManutencaoOut.model_validate(m)
+
+
+@manutencoes_router.post("/{manutencao_id}/iniciar", response_model=VeiculoManutencaoOut)
+async def iniciar_manutencao(
+    manutencao_id: int,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoManutencaoOut:
+    m = await frota_svc.iniciar_manutencao(
+        db, tenant_id=tenant_id, manutencao_id=manutencao_id
+    )
+    return VeiculoManutencaoOut.model_validate(m)
+
+
+@manutencoes_router.post("/{manutencao_id}/concluir", response_model=VeiculoManutencaoOut)
+async def concluir_manutencao(
+    manutencao_id: int,
+    payload: VeiculoManutencaoConcluir,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoManutencaoOut:
+    m = await frota_svc.concluir_manutencao(
+        db, tenant_id=tenant_id, manutencao_id=manutencao_id, payload=payload
+    )
+    return VeiculoManutencaoOut.model_validate(m)
+
+
+@manutencoes_router.post("/{manutencao_id}/cancelar", response_model=VeiculoManutencaoOut)
+async def cancelar_manutencao(
+    manutencao_id: int,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoManutencaoOut:
+    m = await frota_svc.cancelar_manutencao(
+        db, tenant_id=tenant_id, manutencao_id=manutencao_id
+    )
+    return VeiculoManutencaoOut.model_validate(m)
+
+
+@manutencoes_router.delete("/{manutencao_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_manutencao(
+    manutencao_id: int,
+    _: Usuario = Depends(require_permission("frota", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await frota_svc.excluir_manutencao(
+        db, tenant_id=tenant_id, manutencao_id=manutencao_id
     )

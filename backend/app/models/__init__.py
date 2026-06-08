@@ -11,7 +11,13 @@ from .ccd import CcdClasse, TtdRegra
 from .complementacao_documental import ComplementacaoDocumental
 from .especie_documental import EspecieDocumental
 from .configuracao import Configuracao
-from .frota import Motorista, SolicitacaoVeiculo, Veiculo, VeiculoDocumento
+from .frota import (
+    Motorista,
+    SolicitacaoVeiculo,
+    Veiculo,
+    VeiculoDocumento,
+    VeiculoManutencao,
+)
 from .processo import (
     Acao,
     Anexo,
@@ -102,6 +108,7 @@ __all__ = [
     "UnidadeTrabalho",
     "Veiculo",
     "VeiculoDocumento",
+    "VeiculoManutencao",
     "Usuario",
     "UsuarioExterno",
     "UsuarioGrupo",

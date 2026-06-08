@@ -1124,6 +1124,47 @@ export interface VeiculoDocumentoAlertas {
   a_vencer: VeiculoDocumento[];
 }
 
+// Manutenção de veículos (Frota operacional)
+export type ManutencaoTipo = "preventiva" | "corretiva";
+export type ManutencaoStatus = "aberta" | "em_andamento" | "concluida" | "cancelada";
+
+export interface VeiculoManutencao {
+  id: number;
+  id_veiculo: number;
+  tipo: ManutencaoTipo;
+  descricao: string;
+  data_abertura: string;
+  data_prevista: string | null;
+  data_conclusao: string | null;
+  km_atual: number | null;
+  fornecedor: string | null;
+  custo_estimado: number | null;
+  custo_final: number | null;
+  status: ManutencaoStatus;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface VeiculoManutencaoInput {
+  id_veiculo: number;
+  tipo: ManutencaoTipo;
+  descricao: string;
+  data_abertura?: string | null;
+  data_prevista?: string | null;
+  km_atual?: number | null;
+  fornecedor?: string | null;
+  custo_estimado?: number | null;
+  observacoes?: string | null;
+}
+
+export interface ManutencaoConcluirInput {
+  data_conclusao?: string | null;
+  custo_final?: number | null;
+  km_atual?: number | null;
+  observacoes?: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -1369,6 +1410,32 @@ export const api = {
       request<VeiculoDocumentoAlertas>(
         `/frota/documentos-veiculo/alertas${qs({ dias })}`,
       ),
+  },
+  manutencoes: {
+    list: (params?: { id_veiculo?: number; status_filtro?: string }) =>
+      request<VeiculoManutencao[]>(`/frota/manutencoes${qs(params ?? {})}`),
+    get: (id: number) => request<VeiculoManutencao>(`/frota/manutencoes/${id}`),
+    create: (data: VeiculoManutencaoInput) =>
+      request<VeiculoManutencao>("/frota/manutencoes", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<Omit<VeiculoManutencaoInput, "id_veiculo">>) =>
+      request<VeiculoManutencao>(`/frota/manutencoes/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    iniciar: (id: number) =>
+      request<VeiculoManutencao>(`/frota/manutencoes/${id}/iniciar`, { method: "POST" }),
+    concluir: (id: number, data: ManutencaoConcluirInput) =>
+      request<VeiculoManutencao>(`/frota/manutencoes/${id}/concluir`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    cancelar: (id: number) =>
+      request<VeiculoManutencao>(`/frota/manutencoes/${id}/cancelar`, { method: "POST" }),
+    remove: (id: number) =>
+      request<void>(`/frota/manutencoes/${id}`, { method: "DELETE" }),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),

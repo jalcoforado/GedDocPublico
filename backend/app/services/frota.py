@@ -23,6 +23,7 @@ from ..models import (
     Usuario,
     Veiculo,
     VeiculoDocumento,
+    VeiculoManutencao,
 )
 from ..schemas.frota import (
     MotoristaCreate,
@@ -35,6 +36,9 @@ from ..schemas.frota import (
     VeiculoCreate,
     VeiculoDocumentoCreate,
     VeiculoDocumentoUpdate,
+    VeiculoManutencaoConcluir,
+    VeiculoManutencaoCreate,
+    VeiculoManutencaoUpdate,
     VeiculoUpdate,
 )
 
@@ -812,3 +816,188 @@ async def listar_alertas_documentos(
         ).scalars().all()
     )
     return {"vencidos": vencidos, "a_vencer": a_vencer}
+
+
+# ----------------------- Manutenção do Veículo (operacional) -----------------
+# Decisões de efeito na situação do veículo (documentadas):
+#  - Abrir manutenção: se o veículo está 'disponivel', passa para 'manutencao'.
+#    NÃO mexe se está 'em_uso'/'baixado'/'inativo' (não atrapalha viagem em curso).
+#  - Concluir/Cancelar: devolve o veículo a 'disponivel' SOMENTE se ele está em
+#    'manutencao' (não sobrescreve 'em_uso' nem outros estados).
+_MANUT_ENCERRAVEL = {"aberta", "em_andamento"}
+
+
+async def obter_manutencao(
+    db: AsyncSession, *, tenant_id: int, manutencao_id: int
+) -> VeiculoManutencao:
+    m = (
+        await db.execute(
+            select(VeiculoManutencao).where(
+                VeiculoManutencao.id == manutencao_id,
+                VeiculoManutencao.tenant_id == tenant_id,
+                VeiculoManutencao.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if m is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Manutenção não encontrada"
+        )
+    return m
+
+
+async def listar_manutencoes(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    id_veiculo: int | None = None,
+    status_filtro: str | None = None,
+) -> list[VeiculoManutencao]:
+    stmt = select(VeiculoManutencao).where(
+        VeiculoManutencao.tenant_id == tenant_id,
+        VeiculoManutencao.excluido.is_(False),
+    )
+    if id_veiculo is not None:
+        stmt = stmt.where(VeiculoManutencao.id_veiculo == id_veiculo)
+    if status_filtro is not None:
+        stmt = stmt.where(VeiculoManutencao.status == status_filtro)
+    stmt = stmt.order_by(VeiculoManutencao.data_abertura.desc(), VeiculoManutencao.id.desc())
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def criar_manutencao(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    id_veiculo: int,
+    payload: VeiculoManutencaoCreate,
+) -> VeiculoManutencao:
+    veiculo = await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=id_veiculo)
+    dados = payload.model_dump(exclude={"id_veiculo"})
+    if dados.get("data_abertura") is None:
+        dados["data_abertura"] = date.today()
+    m = VeiculoManutencao(
+        tenant_id=tenant_id,
+        id_veiculo=id_veiculo,
+        status="aberta",
+        criado_em=datetime.utcnow(),
+        **dados,
+    )
+    db.add(m)
+    # Abrir manutenção tira o veículo de 'disponivel' (não mexe em 'em_uso' etc.).
+    if veiculo.situacao == "disponivel":
+        veiculo.situacao = "manutencao"
+        veiculo.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(m)
+    return m
+
+
+async def atualizar_manutencao(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    manutencao_id: int,
+    payload: VeiculoManutencaoUpdate,
+) -> VeiculoManutencao:
+    m = await obter_manutencao(db, tenant_id=tenant_id, manutencao_id=manutencao_id)
+    if m.status in ("concluida", "cancelada"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Não é possível editar manutenção concluída ou cancelada.",
+        )
+    dados = payload.model_dump(exclude_unset=True)
+    for campo, valor in dados.items():
+        setattr(m, campo, valor)
+    m.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(m)
+    return m
+
+
+async def iniciar_manutencao(
+    db: AsyncSession, *, tenant_id: int, manutencao_id: int
+) -> VeiculoManutencao:
+    m = await obter_manutencao(db, tenant_id=tenant_id, manutencao_id=manutencao_id)
+    if m.status != "aberta":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível iniciar manutenções 'aberta'.",
+        )
+    m.status = "em_andamento"
+    m.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(m)
+    return m
+
+
+async def _liberar_veiculo_se_em_manutencao(
+    db: AsyncSession, *, tenant_id: int, id_veiculo: int
+) -> None:
+    veiculo = (
+        await db.execute(
+            select(Veiculo).where(
+                Veiculo.id == id_veiculo,
+                Veiculo.tenant_id == tenant_id,
+                Veiculo.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if veiculo is not None and veiculo.situacao == "manutencao":
+        veiculo.situacao = "disponivel"
+        veiculo.atualizado_em = datetime.utcnow()
+
+
+async def concluir_manutencao(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    manutencao_id: int,
+    payload: VeiculoManutencaoConcluir,
+) -> VeiculoManutencao:
+    m = await obter_manutencao(db, tenant_id=tenant_id, manutencao_id=manutencao_id)
+    if m.status not in _MANUT_ENCERRAVEL:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível concluir manutenções 'aberta' ou 'em_andamento'.",
+        )
+    dados = payload.model_dump(exclude_unset=True)
+    m.status = "concluida"
+    m.data_conclusao = dados.get("data_conclusao") or m.data_conclusao or date.today()
+    if "custo_final" in dados:
+        m.custo_final = dados["custo_final"]
+    if "km_atual" in dados and dados["km_atual"] is not None:
+        m.km_atual = dados["km_atual"]
+    if "observacoes" in dados:
+        m.observacoes = dados["observacoes"]
+    m.atualizado_em = datetime.utcnow()
+    await _liberar_veiculo_se_em_manutencao(db, tenant_id=tenant_id, id_veiculo=m.id_veiculo)
+    await db.commit()
+    await db.refresh(m)
+    return m
+
+
+async def cancelar_manutencao(
+    db: AsyncSession, *, tenant_id: int, manutencao_id: int
+) -> VeiculoManutencao:
+    m = await obter_manutencao(db, tenant_id=tenant_id, manutencao_id=manutencao_id)
+    if m.status not in _MANUT_ENCERRAVEL:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível cancelar manutenções 'aberta' ou 'em_andamento'.",
+        )
+    m.status = "cancelada"
+    m.atualizado_em = datetime.utcnow()
+    await _liberar_veiculo_se_em_manutencao(db, tenant_id=tenant_id, id_veiculo=m.id_veiculo)
+    await db.commit()
+    await db.refresh(m)
+    return m
+
+
+async def excluir_manutencao(
+    db: AsyncSession, *, tenant_id: int, manutencao_id: int
+) -> None:
+    m = await obter_manutencao(db, tenant_id=tenant_id, manutencao_id=manutencao_id)
+    m.excluido = True
+    m.atualizado_em = datetime.utcnow()
+    await db.commit()
