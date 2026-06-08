@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   AlertOctagon,
   AlertTriangle,
+  BarChart3,
   Car,
   ClipboardCheck,
   ClipboardList,
@@ -59,6 +60,12 @@ const CARDS = [
     icon: AlertOctagon,
     title: "Ocorrências",
     desc: "Avarias, multas, sinistros e uso indevido: gravidade, tratamento e resolução.",
+  },
+  {
+    href: "/frotas/relatorios",
+    icon: BarChart3,
+    title: "Visão gerencial",
+    desc: "Indicadores consolidados: veículos, solicitações, pendências e abastecimentos.",
   },
 ];
 
