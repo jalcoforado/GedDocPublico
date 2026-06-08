@@ -97,10 +97,11 @@ class Motorista(Base):
 class SolicitacaoVeiculo(Base):
     """Solicitação de uso de veículo da frota (PR Frota-3).
 
-    Máquina de estados em `status` (solicitada → aprovada/rejeitada/cancelada),
-    com transições guardadas no serviço de domínio. `id_usuario_solicitante` é
-    sempre o usuário autenticado (definido server-side). `excluido` é soft-delete.
-    Não cobre designação de veículo/motorista nem saída/retorno reais.
+    Máquina de estados em `status` (solicitada → aprovada/rejeitada/cancelada →
+    em_uso → concluida), com transições guardadas no serviço de domínio.
+    `id_usuario_solicitante` é sempre o usuário autenticado (definido
+    server-side). `excluido` é soft-delete. Saída/retorno reais (PR Frota-5)
+    movem o ciclo operacional aprovada → em_uso → concluida.
     """
 
     __tablename__ = "solicitacao_veiculo"
@@ -142,6 +143,22 @@ class SolicitacaoVeiculo(Base):
     )
     data_designacao: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     observacoes_designacao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Saída/retorno real (PR Frota-5) — preenchidos no registro operacional.
+    # datas/usuários são server-side; km validados no serviço. Saída move o
+    # status para 'em_uso' e o veículo para 'em_uso'; retorno move para
+    # 'concluida' e devolve o veículo a 'disponivel' atualizando a quilometragem.
+    data_saida_real: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    data_retorno_real: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    km_saida: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    km_retorno: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    observacoes_saida: Mapped[str | None] = mapped_column(Text, nullable=True)
+    observacoes_retorno: Mapped[str | None] = mapped_column(Text, nullable=True)
+    id_usuario_registro_saida: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
+    id_usuario_registro_retorno: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

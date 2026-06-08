@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Car, ClipboardList, FileText, Inbox, MapPin, Plus } from "lucide-react";
+import { Car, ClipboardList, FileText, Gauge, Inbox, MapPin, Plus } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,8 @@ import { useToast } from "@/components/ui/toast";
 import {
   api,
   type DesignacaoInput,
+  type RegistrarRetornoInput,
+  type RegistrarSaidaInput,
   type SolicitacaoStatus,
   type SolicitacaoVeiculo,
 } from "@/lib/api";
@@ -30,12 +32,16 @@ const STATUS_LABEL: Record<SolicitacaoStatus, string> = {
   aprovada: "Aprovada",
   rejeitada: "Rejeitada",
   cancelada: "Cancelada",
+  em_uso: "Em uso",
+  concluida: "Concluída",
 };
 const STATUS_INTENT: Record<SolicitacaoStatus, "neutral" | "success" | "danger" | "warning"> = {
   solicitada: "warning",
   aprovada: "success",
   rejeitada: "danger",
   cancelada: "neutral",
+  em_uso: "warning",
+  concluida: "success",
 };
 
 interface SolicitacaoForm {
@@ -72,6 +78,18 @@ const DESIGNAR_EMPTY: DesignarForm = {
   observacoes_designacao: "",
 };
 
+interface SaidaForm {
+  km_saida: string;
+  observacoes_saida: string;
+}
+const SAIDA_EMPTY: SaidaForm = { km_saida: "", observacoes_saida: "" };
+
+interface RetornoForm {
+  km_retorno: string;
+  observacoes_retorno: string;
+}
+const RETORNO_EMPTY: RetornoForm = { km_retorno: "", observacoes_retorno: "" };
+
 function nullify(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
@@ -101,6 +119,16 @@ export default function SolicitacoesPage() {
   const [designarSol, setDesignarSol] = useState<SolicitacaoVeiculo | null>(null);
   const [designarForm, setDesignarForm] = useState<DesignarForm>(DESIGNAR_EMPTY);
   const [designarErr, setDesignarErr] = useState<string | null>(null);
+
+  const [saidaOpen, setSaidaOpen] = useState(false);
+  const [saidaSol, setSaidaSol] = useState<SolicitacaoVeiculo | null>(null);
+  const [saidaForm, setSaidaForm] = useState<SaidaForm>(SAIDA_EMPTY);
+  const [saidaErr, setSaidaErr] = useState<string | null>(null);
+
+  const [retornoOpen, setRetornoOpen] = useState(false);
+  const [retornoSol, setRetornoSol] = useState<SolicitacaoVeiculo | null>(null);
+  const [retornoForm, setRetornoForm] = useState<RetornoForm>(RETORNO_EMPTY);
+  const [retornoErr, setRetornoErr] = useState<string | null>(null);
 
   const listQ = useQuery({
     queryKey: ["frota-solicitacoes"],
@@ -190,6 +218,28 @@ export default function SolicitacoesPage() {
       toast.success("Designação removida.");
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+  const registrarSaidaM = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: RegistrarSaidaInput }) =>
+      api.solicitacoes.registrarSaida(id, data),
+    onSuccess: () => {
+      invalidate();
+      qc.invalidateQueries({ queryKey: ["frota-veiculos"] });
+      toast.success("Saída registrada.");
+      closeSaida();
+    },
+    onError: (e: Error) => setSaidaErr(e.message),
+  });
+  const registrarRetornoM = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: RegistrarRetornoInput }) =>
+      api.solicitacoes.registrarRetorno(id, data),
+    onSuccess: () => {
+      invalidate();
+      qc.invalidateQueries({ queryKey: ["frota-veiculos"] });
+      toast.success("Retorno registrado.");
+      closeRetorno();
+    },
+    onError: (e: Error) => setRetornoErr(e.message),
   });
 
   function set<K extends keyof SolicitacaoForm>(key: K, value: SolicitacaoForm[K]) {
@@ -287,6 +337,74 @@ export default function SolicitacoesPage() {
     designarM.mutate({ id: designarSol.id, data });
   }
 
+  function openSaida(s: SolicitacaoVeiculo) {
+    setSaidaSol(s);
+    setSaidaForm(SAIDA_EMPTY);
+    setSaidaErr(null);
+    setSaidaOpen(true);
+  }
+
+  function closeSaida() {
+    setSaidaOpen(false);
+    setSaidaSol(null);
+    setSaidaForm(SAIDA_EMPTY);
+    setSaidaErr(null);
+  }
+
+  function salvarSaida() {
+    setSaidaErr(null);
+    if (!saidaSol) return;
+    if (saidaForm.km_saida.trim() === "") {
+      setSaidaErr("Informe a quilometragem de saída.");
+      return;
+    }
+    const km = Number(saidaForm.km_saida);
+    if (!Number.isFinite(km) || km < 0) {
+      setSaidaErr("Quilometragem de saída inválida.");
+      return;
+    }
+    registrarSaidaM.mutate({
+      id: saidaSol.id,
+      data: { km_saida: km, observacoes_saida: nullify(saidaForm.observacoes_saida) },
+    });
+  }
+
+  function openRetorno(s: SolicitacaoVeiculo) {
+    setRetornoSol(s);
+    setRetornoForm(RETORNO_EMPTY);
+    setRetornoErr(null);
+    setRetornoOpen(true);
+  }
+
+  function closeRetorno() {
+    setRetornoOpen(false);
+    setRetornoSol(null);
+    setRetornoForm(RETORNO_EMPTY);
+    setRetornoErr(null);
+  }
+
+  function salvarRetorno() {
+    setRetornoErr(null);
+    if (!retornoSol) return;
+    if (retornoForm.km_retorno.trim() === "") {
+      setRetornoErr("Informe a quilometragem de retorno.");
+      return;
+    }
+    const km = Number(retornoForm.km_retorno);
+    if (!Number.isFinite(km) || km < 0) {
+      setRetornoErr("Quilometragem de retorno inválida.");
+      return;
+    }
+    if (retornoSol.km_saida != null && km < retornoSol.km_saida) {
+      setRetornoErr(`Quilometragem de retorno não pode ser menor que a de saída (${retornoSol.km_saida}).`);
+      return;
+    }
+    registrarRetornoM.mutate({
+      id: retornoSol.id,
+      data: { km_retorno: km, observacoes_retorno: nullify(retornoForm.observacoes_retorno) },
+    });
+  }
+
   const veiculosDisponiveis = veiculos.filter((v) => v.situacao === "disponivel");
   const motoristasAtivos = motoristas.filter((m) => m.situacao === "ativo");
 
@@ -332,6 +450,7 @@ export default function SolicitacoesPage() {
               <TH className="text-right">Passag.</TH>
               <TH>Unidade</TH>
               <TH>Designado</TH>
+              <TH>Saída / Retorno</TH>
               <TH>Status</TH>
               <TH className="text-right">Ações</TH>
             </TR>
@@ -339,7 +458,7 @@ export default function SolicitacoesPage() {
           <TBody>
             {listQ.isLoading && (
               <TR>
-                <TD colSpan={9} className="text-center text-muted-foreground">
+                <TD colSpan={10} className="text-center text-muted-foreground">
                   Carregando solicitações...
                 </TD>
               </TR>
@@ -347,6 +466,7 @@ export default function SolicitacoesPage() {
             {listQ.data?.map((s) => {
               const isSolicitada = s.status === "solicitada";
               const isAprovada = s.status === "aprovada";
+              const isEmUso = s.status === "em_uso";
               return (
                 <TR key={s.id}>
                   <TD className="font-medium">{s.finalidade}</TD>
@@ -364,6 +484,32 @@ export default function SolicitacoesPage() {
                         {s.id_motorista_designado && (
                           <div className="text-muted-foreground">
                             {motoristaNome(s.id_motorista_designado) ?? `#${s.id_motorista_designado}`}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TD>
+                  <TD>
+                    {s.data_saida_real || s.data_retorno_real ? (
+                      <div className="text-xs">
+                        {s.data_saida_real && (
+                          <div>
+                            <span className="text-muted-foreground">Saída: </span>
+                            {fmt(s.data_saida_real)}
+                            {s.km_saida != null && (
+                              <span className="text-muted-foreground"> · {s.km_saida} km</span>
+                            )}
+                          </div>
+                        )}
+                        {s.data_retorno_real && (
+                          <div>
+                            <span className="text-muted-foreground">Retorno: </span>
+                            {fmt(s.data_retorno_real)}
+                            {s.km_retorno != null && (
+                              <span className="text-muted-foreground"> · {s.km_retorno} km</span>
+                            )}
                           </div>
                         )}
                       </div>
@@ -421,6 +567,16 @@ export default function SolicitacoesPage() {
                           }}
                         >
                           Limpar designação
+                        </Button>
+                      )}
+                      {canEdit && isAprovada && s.id_veiculo_designado && (
+                        <Button variant="secondary" size="sm" onClick={() => openSaida(s)}>
+                          Registrar saída
+                        </Button>
+                      )}
+                      {canEdit && isEmUso && (
+                        <Button variant="secondary" size="sm" onClick={() => openRetorno(s)}>
+                          Registrar retorno
                         </Button>
                       )}
                       {canEdit && (isSolicitada || isAprovada) && (
@@ -681,6 +837,119 @@ export default function SolicitacoesPage() {
             {designarErr && (
               <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
                 {designarErr}
+              </div>
+            )}
+          </div>
+        </SectionCard>
+      </Dialog>
+
+      <Dialog
+        open={saidaOpen}
+        onClose={closeSaida}
+        title={saidaSol ? `Registrar saída — ${saidaSol.finalidade}` : "Registrar saída"}
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeSaida}>
+              Cancelar
+            </Button>
+            <Button onClick={salvarSaida} disabled={registrarSaidaM.isPending}>
+              {registrarSaidaM.isPending ? "Salvando..." : "Registrar saída"}
+            </Button>
+          </>
+        }
+      >
+        <SectionCard
+          icon={Gauge}
+          title="Saída do veículo"
+          description="A data/hora da saída é registrada automaticamente. A quilometragem deve ser maior ou igual à atual do veículo."
+        >
+          <div className="grid grid-cols-1 gap-4">
+            <div>
+              <Label htmlFor="km_saida" required>
+                Quilometragem de saída
+              </Label>
+              <Input
+                id="km_saida"
+                type="number"
+                min={0}
+                value={saidaForm.km_saida}
+                onChange={(e) => setSaidaForm((f) => ({ ...f, km_saida: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label htmlFor="obs_saida">Observações da saída</Label>
+              <Textarea
+                id="obs_saida"
+                rows={2}
+                value={saidaForm.observacoes_saida}
+                onChange={(e) =>
+                  setSaidaForm((f) => ({ ...f, observacoes_saida: e.target.value }))
+                }
+              />
+            </div>
+            {saidaErr && (
+              <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+                {saidaErr}
+              </div>
+            )}
+          </div>
+        </SectionCard>
+      </Dialog>
+
+      <Dialog
+        open={retornoOpen}
+        onClose={closeRetorno}
+        title={retornoSol ? `Registrar retorno — ${retornoSol.finalidade}` : "Registrar retorno"}
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeRetorno}>
+              Cancelar
+            </Button>
+            <Button onClick={salvarRetorno} disabled={registrarRetornoM.isPending}>
+              {registrarRetornoM.isPending ? "Salvando..." : "Registrar retorno"}
+            </Button>
+          </>
+        }
+      >
+        <SectionCard
+          icon={Gauge}
+          title="Retorno do veículo"
+          description="A data/hora do retorno é registrada automaticamente. A quilometragem de retorno atualiza a do veículo e deve ser maior ou igual à de saída."
+        >
+          <div className="grid grid-cols-1 gap-4">
+            {retornoSol?.km_saida != null && (
+              <p className="text-sm text-muted-foreground">
+                Quilometragem de saída registrada: <strong>{retornoSol.km_saida} km</strong>.
+              </p>
+            )}
+            <div>
+              <Label htmlFor="km_retorno" required>
+                Quilometragem de retorno
+              </Label>
+              <Input
+                id="km_retorno"
+                type="number"
+                min={retornoSol?.km_saida ?? 0}
+                value={retornoForm.km_retorno}
+                onChange={(e) => setRetornoForm((f) => ({ ...f, km_retorno: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label htmlFor="obs_retorno">Observações do retorno</Label>
+              <Textarea
+                id="obs_retorno"
+                rows={2}
+                value={retornoForm.observacoes_retorno}
+                onChange={(e) =>
+                  setRetornoForm((f) => ({ ...f, observacoes_retorno: e.target.value }))
+                }
+              />
+            </div>
+            {retornoErr && (
+              <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+                {retornoErr}
               </div>
             )}
           </div>
