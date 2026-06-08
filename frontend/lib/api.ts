@@ -1030,7 +1030,13 @@ export interface Motorista {
   atualizado_em: string | null;
 }
 
-export type SolicitacaoStatus = "solicitada" | "aprovada" | "rejeitada" | "cancelada";
+export type SolicitacaoStatus =
+  | "solicitada"
+  | "aprovada"
+  | "rejeitada"
+  | "cancelada"
+  | "em_uso"
+  | "concluida";
 
 export interface SolicitacaoVeiculo {
   id: number;
@@ -1050,6 +1056,14 @@ export interface SolicitacaoVeiculo {
   id_usuario_designador: number | null;
   data_designacao: string | null;
   observacoes_designacao: string | null;
+  data_saida_real: string | null;
+  data_retorno_real: string | null;
+  km_saida: number | null;
+  km_retorno: number | null;
+  observacoes_saida: string | null;
+  observacoes_retorno: string | null;
+  id_usuario_registro_saida: number | null;
+  id_usuario_registro_retorno: number | null;
   criado_em: string;
   atualizado_em: string | null;
 }
@@ -1058,6 +1072,16 @@ export interface DesignacaoInput {
   id_veiculo: number;
   id_motorista?: number | null;
   observacoes_designacao?: string | null;
+}
+
+export interface RegistrarSaidaInput {
+  km_saida: number;
+  observacoes_saida?: string | null;
+}
+
+export interface RegistrarRetornoInput {
+  km_retorno: number;
+  observacoes_retorno?: string | null;
 }
 
 export const api = {
@@ -1272,6 +1296,16 @@ export const api = {
     limparDesignacao: (id: number) =>
       request<SolicitacaoVeiculo>(`/frota/solicitacoes/${id}/limpar-designacao`, {
         method: "POST",
+      }),
+    registrarSaida: (id: number, data: RegistrarSaidaInput) =>
+      request<SolicitacaoVeiculo>(`/frota/solicitacoes/${id}/registrar-saida`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    registrarRetorno: (id: number, data: RegistrarRetornoInput) =>
+      request<SolicitacaoVeiculo>(`/frota/solicitacoes/${id}/registrar-retorno`, {
+        method: "POST",
+        body: JSON.stringify(data),
       }),
   },
   tiposAnexo: {

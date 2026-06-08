@@ -28,6 +28,8 @@ from ..schemas.frota import (
     MotoristaUpdate,
     SolicitacaoVeiculoCreate,
     SolicitacaoVeiculoDesignar,
+    SolicitacaoVeiculoRegistrarRetorno,
+    SolicitacaoVeiculoRegistrarSaida,
     SolicitacaoVeiculoUpdate,
     VeiculoCreate,
     VeiculoUpdate,
@@ -544,6 +546,132 @@ async def limpar_designacao(
     sol.data_designacao = None
     sol.observacoes_designacao = None
     sol.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(sol)
+    return sol
+
+
+# ----------------------- Saída / Retorno real (PR Frota-5) -------------------
+async def _carregar_veiculo_tenant(
+    db: AsyncSession, *, tenant_id: int, id_veiculo: int
+) -> Veiculo:
+    """Carrega o veículo same-tenant para mutação (situação/quilometragem).
+
+    A FK do Postgres garante integridade mas NÃO filtra por tenant — daí o
+    filtro explícito. Retorna 404 se não existe, não é deste tenant ou foi
+    excluído (mesmo critério de `obter_veiculo`)."""
+    veiculo = (
+        await db.execute(
+            select(Veiculo).where(
+                Veiculo.id == id_veiculo,
+                Veiculo.tenant_id == tenant_id,
+                Veiculo.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if veiculo is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
+        )
+    return veiculo
+
+
+async def registrar_saida(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    solicitacao_id: int,
+    id_usuario_registro: int,
+    payload: SolicitacaoVeiculoRegistrarSaida,
+) -> SolicitacaoVeiculo:
+    sol = await obter_solicitacao(db, tenant_id=tenant_id, solicitacao_id=solicitacao_id)
+    if sol.status != "aprovada":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível registrar saída de solicitações 'aprovada'.",
+        )
+    if sol.id_veiculo_designado is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Não há veículo designado: designe um veículo antes de registrar a saída.",
+        )
+    if sol.necessita_motorista and sol.id_motorista_designado is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Esta solicitação exige motorista: designe um motorista antes da saída.",
+        )
+
+    veiculo = await _carregar_veiculo_tenant(
+        db, tenant_id=tenant_id, id_veiculo=sol.id_veiculo_designado
+    )
+    if veiculo.situacao != "disponivel":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Veículo não disponível para saída (situação atual: "
+                f"'{veiculo.situacao}'). Só veículos 'disponivel' podem sair."
+            ),
+        )
+    if payload.km_saida < veiculo.quilometragem_atual:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"km_saida ({payload.km_saida}) não pode ser menor que a "
+                f"quilometragem atual do veículo ({veiculo.quilometragem_atual})."
+            ),
+        )
+
+    agora = datetime.utcnow()
+    sol.status = "em_uso"
+    sol.km_saida = payload.km_saida
+    sol.observacoes_saida = payload.observacoes_saida
+    sol.data_saida_real = agora
+    sol.id_usuario_registro_saida = id_usuario_registro
+    sol.atualizado_em = agora
+    veiculo.situacao = "em_uso"
+    veiculo.atualizado_em = agora
+    await db.commit()
+    await db.refresh(sol)
+    return sol
+
+
+async def registrar_retorno(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    solicitacao_id: int,
+    id_usuario_registro: int,
+    payload: SolicitacaoVeiculoRegistrarRetorno,
+) -> SolicitacaoVeiculo:
+    sol = await obter_solicitacao(db, tenant_id=tenant_id, solicitacao_id=solicitacao_id)
+    if sol.status != "em_uso":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível registrar retorno de solicitações 'em_uso'.",
+        )
+    if sol.km_saida is not None and payload.km_retorno < sol.km_saida:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"km_retorno ({payload.km_retorno}) não pode ser menor que a "
+                f"quilometragem de saída ({sol.km_saida})."
+            ),
+        )
+
+    veiculo = await _carregar_veiculo_tenant(
+        db, tenant_id=tenant_id, id_veiculo=sol.id_veiculo_designado
+    )
+
+    agora = datetime.utcnow()
+    sol.status = "concluida"
+    sol.km_retorno = payload.km_retorno
+    sol.observacoes_retorno = payload.observacoes_retorno
+    sol.data_retorno_real = agora
+    sol.id_usuario_registro_retorno = id_usuario_registro
+    sol.atualizado_em = agora
+    veiculo.situacao = "disponivel"
+    veiculo.quilometragem_atual = payload.km_retorno
+    veiculo.atualizado_em = agora
     await db.commit()
     await db.refresh(sol)
     return sol

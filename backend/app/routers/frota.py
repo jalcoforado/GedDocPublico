@@ -17,6 +17,8 @@ from ..schemas.frota import (
     SolicitacaoVeiculoCreate,
     SolicitacaoVeiculoDesignar,
     SolicitacaoVeiculoOut,
+    SolicitacaoVeiculoRegistrarRetorno,
+    SolicitacaoVeiculoRegistrarSaida,
     SolicitacaoVeiculoRejeitar,
     SolicitacaoVeiculoUpdate,
     VeiculoCreate,
@@ -302,6 +304,48 @@ async def limpar_designacao(
 ) -> SolicitacaoVeiculoOut:
     sol = await frota_svc.limpar_designacao(
         db, tenant_id=tenant_id, solicitacao_id=solicitacao_id
+    )
+    return SolicitacaoVeiculoOut.model_validate(sol)
+
+
+@solicitacoes_router.post(
+    "/{solicitacao_id}/registrar-saida", response_model=SolicitacaoVeiculoOut
+)
+async def registrar_saida(
+    solicitacao_id: int,
+    payload: SolicitacaoVeiculoRegistrarSaida,
+    usuario: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> SolicitacaoVeiculoOut:
+    # id_usuario_registro_saida vem SEMPRE do usuário autenticado (server-side).
+    sol = await frota_svc.registrar_saida(
+        db,
+        tenant_id=tenant_id,
+        solicitacao_id=solicitacao_id,
+        id_usuario_registro=usuario.id,
+        payload=payload,
+    )
+    return SolicitacaoVeiculoOut.model_validate(sol)
+
+
+@solicitacoes_router.post(
+    "/{solicitacao_id}/registrar-retorno", response_model=SolicitacaoVeiculoOut
+)
+async def registrar_retorno(
+    solicitacao_id: int,
+    payload: SolicitacaoVeiculoRegistrarRetorno,
+    usuario: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> SolicitacaoVeiculoOut:
+    # id_usuario_registro_retorno vem SEMPRE do usuário autenticado (server-side).
+    sol = await frota_svc.registrar_retorno(
+        db,
+        tenant_id=tenant_id,
+        solicitacao_id=solicitacao_id,
+        id_usuario_registro=usuario.id,
+        payload=payload,
     )
     return SolicitacaoVeiculoOut.model_validate(sol)
 

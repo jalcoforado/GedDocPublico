@@ -246,7 +246,11 @@ class MotoristaOut(BaseModel):
 
 
 # --- Solicitação de Veículo (PR Frota-3) ------------------------------------
-SolicitacaoStatus = Literal["solicitada", "aprovada", "rejeitada", "cancelada"]
+# em_uso/concluida (PR Frota-5) são estados operacionais: aprovada → em_uso
+# (saída real) → concluida (retorno real).
+SolicitacaoStatus = Literal[
+    "solicitada", "aprovada", "rejeitada", "cancelada", "em_uso", "concluida"
+]
 
 
 class SolicitacaoVeiculoCreate(BaseModel):
@@ -301,6 +305,25 @@ class SolicitacaoVeiculoDesignar(BaseModel):
     observacoes_designacao: str | None = Field(default=None, max_length=2000)
 
 
+class SolicitacaoVeiculoRegistrarSaida(BaseModel):
+    """Registro de saída real (PR Frota-5). `data_saida_real`/
+    `id_usuario_registro_saida` são server-side — nunca no payload. `km_saida`
+    é obrigatório (>= 0); a regra `km_saida >= quilometragem_atual` do veículo
+    é validada no serviço (depende do registro armazenado)."""
+
+    km_saida: int = Field(ge=0)
+    observacoes_saida: str | None = Field(default=None, max_length=2000)
+
+
+class SolicitacaoVeiculoRegistrarRetorno(BaseModel):
+    """Registro de retorno real (PR Frota-5). `data_retorno_real`/
+    `id_usuario_registro_retorno` são server-side. `km_retorno` é obrigatório
+    (>= 0); a regra `km_retorno >= km_saida` é validada no serviço."""
+
+    km_retorno: int = Field(ge=0)
+    observacoes_retorno: str | None = Field(default=None, max_length=2000)
+
+
 class SolicitacaoVeiculoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -321,5 +344,13 @@ class SolicitacaoVeiculoOut(BaseModel):
     id_usuario_designador: int | None = None
     data_designacao: datetime | None = None
     observacoes_designacao: str | None = None
+    data_saida_real: datetime | None = None
+    data_retorno_real: datetime | None = None
+    km_saida: int | None = None
+    km_retorno: int | None = None
+    observacoes_saida: str | None = None
+    observacoes_retorno: str | None = None
+    id_usuario_registro_saida: int | None = None
+    id_usuario_registro_retorno: int | None = None
     criado_em: datetime
     atualizado_em: datetime | None = None
