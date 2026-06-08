@@ -138,6 +138,12 @@ const NAV: NavGroup[] = [
         icon: IdCard,
         perm: "transporte_regulado",
       },
+      {
+        label: "Empresas",
+        href: "/transporte-regulado/empresas",
+        icon: Building2,
+        perm: "transporte_regulado",
+      },
     ],
   },
   {

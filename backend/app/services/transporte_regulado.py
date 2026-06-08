@@ -14,8 +14,10 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Permissionario
+from ..models import Empresa, Permissionario
 from ..schemas.transporte_regulado import (
+    EmpresaCreate,
+    EmpresaUpdate,
     PermissionarioCreate,
     PermissionarioUpdate,
 )
@@ -150,4 +152,160 @@ async def excluir_permissionario(
     )
     p.excluido = True
     p.atualizado_em = datetime.utcnow()
+    await db.commit()
+
+
+# ============================ Empresa =======================================
+async def _validar_cnpj_unico(
+    db: AsyncSession, *, tenant_id: int, cnpj: str, excluir_id: int | None = None
+) -> None:
+    stmt = select(Empresa.id).where(
+        Empresa.tenant_id == tenant_id,
+        Empresa.cnpj == cnpj,
+        Empresa.excluido.is_(False),
+    )
+    if excluir_id is not None:
+        stmt = stmt.where(Empresa.id != excluir_id)
+    if (await db.execute(stmt)).scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Já existe uma empresa com o CNPJ '{cnpj}' neste tenant.",
+        )
+
+
+async def _validar_representante(
+    db: AsyncSession, *, tenant_id: int, representante_id: int | None
+) -> None:
+    """Se informado, o representante deve ser um permissionário do mesmo tenant,
+    não excluído (404 caso contrário)."""
+    if representante_id is None:
+        return
+    existe = (
+        await db.execute(
+            select(Permissionario.id).where(
+                Permissionario.id == representante_id,
+                Permissionario.tenant_id == tenant_id,
+                Permissionario.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if existe is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Permissionário representante não encontrado neste tenant.",
+        )
+
+
+async def obter_empresa(
+    db: AsyncSession, *, tenant_id: int, empresa_id: int
+) -> Empresa:
+    e = (
+        await db.execute(
+            select(Empresa).where(
+                Empresa.id == empresa_id,
+                Empresa.tenant_id == tenant_id,
+                Empresa.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if e is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada"
+        )
+    return e
+
+
+async def listar_empresas(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    situacao: str | None = None,
+    tipo_servico: str | None = None,
+    q: str | None = None,
+) -> list[Empresa]:
+    stmt = select(Empresa).where(
+        Empresa.tenant_id == tenant_id,
+        Empresa.excluido.is_(False),
+    )
+    if situacao is not None:
+        stmt = stmt.where(Empresa.situacao == situacao)
+    if tipo_servico is not None:
+        stmt = stmt.where(Empresa.tipo_servico == tipo_servico)
+    if q:
+        termo = f"%{q.strip()}%"
+        stmt = stmt.where(
+            Empresa.razao_social.ilike(termo)
+            | Empresa.nome_fantasia.ilike(termo)
+            | Empresa.cnpj.ilike(termo)
+        )
+    stmt = stmt.order_by(Empresa.razao_social)
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def criar_empresa(
+    db: AsyncSession, *, tenant_id: int, payload: EmpresaCreate
+) -> Empresa:
+    dados = payload.model_dump()
+    await _validar_cnpj_unico(db, tenant_id=tenant_id, cnpj=dados["cnpj"])
+    await _validar_representante(
+        db, tenant_id=tenant_id,
+        representante_id=dados.get("id_representante_permissionario"),
+    )
+    e = Empresa(tenant_id=tenant_id, criado_em=datetime.utcnow(), **dados)
+    db.add(e)
+    await db.commit()
+    await db.refresh(e)
+    return e
+
+
+async def atualizar_empresa(
+    db: AsyncSession, *, tenant_id: int, empresa_id: int, payload: EmpresaUpdate
+) -> Empresa:
+    e = await obter_empresa(db, tenant_id=tenant_id, empresa_id=empresa_id)
+    dados = payload.model_dump(exclude_unset=True)
+
+    if "cnpj" in dados:
+        await _validar_cnpj_unico(
+            db, tenant_id=tenant_id, cnpj=dados["cnpj"], excluir_id=empresa_id
+        )
+    if "id_representante_permissionario" in dados:
+        await _validar_representante(
+            db, tenant_id=tenant_id,
+            representante_id=dados["id_representante_permissionario"],
+        )
+
+    # Coerência das datas da autorização sobre os valores efetivos (merge do parcial).
+    inicio = dados.get("data_inicio_autorizacao", e.data_inicio_autorizacao)
+    validade = dados.get("data_validade_autorizacao", e.data_validade_autorizacao)
+    if inicio is not None and validade is not None and validade < inicio:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="data_validade_autorizacao deve ser posterior ou igual à data_inicio_autorizacao.",
+        )
+
+    for campo, valor in dados.items():
+        setattr(e, campo, valor)
+    e.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(e)
+    return e
+
+
+async def set_situacao_empresa(
+    db: AsyncSession, *, tenant_id: int, empresa_id: int, situacao: str
+) -> Empresa:
+    e = await obter_empresa(db, tenant_id=tenant_id, empresa_id=empresa_id)
+    e.situacao = situacao
+    e.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(e)
+    return e
+
+
+async def excluir_empresa(
+    db: AsyncSession, *, tenant_id: int, empresa_id: int
+) -> None:
+    e = await obter_empresa(db, tenant_id=tenant_id, empresa_id=empresa_id)
+    e.excluido = True
+    e.atualizado_em = datetime.utcnow()
     await db.commit()
