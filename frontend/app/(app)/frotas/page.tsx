@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
+  AlertOctagon,
   AlertTriangle,
   Car,
   ClipboardCheck,
@@ -52,6 +53,12 @@ const CARDS = [
     icon: ClipboardCheck,
     title: "Vistorias",
     desc: "Checklist interno de vistoria: saída, retorno e periódica, com resultado e itens.",
+  },
+  {
+    href: "/frotas/ocorrencias",
+    icon: AlertOctagon,
+    title: "Ocorrências",
+    desc: "Avarias, multas, sinistros e uso indevido: gravidade, tratamento e resolução.",
   },
 ];
 

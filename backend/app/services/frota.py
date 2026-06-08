@@ -25,6 +25,7 @@ from ..models import (
     VeiculoAbastecimento,
     VeiculoDocumento,
     VeiculoManutencao,
+    VeiculoOcorrencia,
     VeiculoVistoria,
 )
 from ..schemas.frota import (
@@ -43,6 +44,9 @@ from ..schemas.frota import (
     VeiculoManutencaoConcluir,
     VeiculoManutencaoCreate,
     VeiculoManutencaoUpdate,
+    VeiculoOcorrenciaCreate,
+    VeiculoOcorrenciaResolver,
+    VeiculoOcorrenciaUpdate,
     VeiculoUpdate,
     VeiculoVistoriaCreate,
     VeiculoVistoriaUpdate,
@@ -1211,4 +1215,164 @@ async def excluir_vistoria(
     v = await obter_vistoria(db, tenant_id=tenant_id, vistoria_id=vistoria_id)
     v.excluido = True
     v.atualizado_em = datetime.utcnow()
+    await db.commit()
+
+
+# ----------------------- Ocorrências internas (operacional) -----------------
+# NÃO altera a situação do veículo. data_resolucao é gravada server-side.
+_OCORRENCIA_TRATAVEL = {"aberta", "em_tratamento"}
+
+
+async def obter_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, ocorrencia_id: int
+) -> VeiculoOcorrencia:
+    o = (
+        await db.execute(
+            select(VeiculoOcorrencia).where(
+                VeiculoOcorrencia.id == ocorrencia_id,
+                VeiculoOcorrencia.tenant_id == tenant_id,
+                VeiculoOcorrencia.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if o is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ocorrência não encontrada"
+        )
+    return o
+
+
+async def listar_ocorrencias(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    id_veiculo: int | None = None,
+    status_filtro: str | None = None,
+) -> list[VeiculoOcorrencia]:
+    stmt = select(VeiculoOcorrencia).where(
+        VeiculoOcorrencia.tenant_id == tenant_id,
+        VeiculoOcorrencia.excluido.is_(False),
+    )
+    if id_veiculo is not None:
+        stmt = stmt.where(VeiculoOcorrencia.id_veiculo == id_veiculo)
+    if status_filtro is not None:
+        stmt = stmt.where(VeiculoOcorrencia.status == status_filtro)
+    stmt = stmt.order_by(
+        VeiculoOcorrencia.data_ocorrencia.desc(), VeiculoOcorrencia.id.desc()
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def criar_ocorrencia(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    id_veiculo: int,
+    payload: VeiculoOcorrenciaCreate,
+) -> VeiculoOcorrencia:
+    await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=id_veiculo)
+    if payload.id_motorista is not None:
+        await obter_motorista(db, tenant_id=tenant_id, motorista_id=payload.id_motorista)
+    dados = payload.model_dump(exclude={"id_veiculo"})
+    if dados.get("data_ocorrencia") is None:
+        dados["data_ocorrencia"] = date.today()
+    o = VeiculoOcorrencia(
+        tenant_id=tenant_id,
+        id_veiculo=id_veiculo,
+        status="aberta",
+        criado_em=datetime.utcnow(),
+        **dados,
+    )
+    db.add(o)
+    await db.commit()
+    await db.refresh(o)
+    return o
+
+
+async def atualizar_ocorrencia(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    ocorrencia_id: int,
+    payload: VeiculoOcorrenciaUpdate,
+) -> VeiculoOcorrencia:
+    o = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
+    if o.status in ("resolvida", "cancelada"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Não é possível editar ocorrência resolvida ou cancelada.",
+        )
+    dados = payload.model_dump(exclude_unset=True)
+    if "id_motorista" in dados and dados["id_motorista"] is not None:
+        await obter_motorista(db, tenant_id=tenant_id, motorista_id=dados["id_motorista"])
+    for campo, valor in dados.items():
+        setattr(o, campo, valor)
+    o.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(o)
+    return o
+
+
+async def iniciar_tratamento_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, ocorrencia_id: int
+) -> VeiculoOcorrencia:
+    o = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
+    if o.status != "aberta":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível iniciar tratamento de ocorrências 'aberta'.",
+        )
+    o.status = "em_tratamento"
+    o.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(o)
+    return o
+
+
+async def resolver_ocorrencia(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    ocorrencia_id: int,
+    payload: VeiculoOcorrenciaResolver,
+) -> VeiculoOcorrencia:
+    o = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
+    if o.status not in _OCORRENCIA_TRATAVEL:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível resolver ocorrências 'aberta' ou 'em_tratamento'.",
+        )
+    dados = payload.model_dump(exclude_unset=True)
+    o.status = "resolvida"
+    o.data_resolucao = dados.get("data_resolucao") or date.today()
+    if "providencias" in dados:
+        o.providencias = dados["providencias"]
+    o.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(o)
+    return o
+
+
+async def cancelar_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, ocorrencia_id: int
+) -> VeiculoOcorrencia:
+    o = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
+    if o.status not in _OCORRENCIA_TRATAVEL:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível cancelar ocorrências 'aberta' ou 'em_tratamento'.",
+        )
+    o.status = "cancelada"
+    o.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(o)
+    return o
+
+
+async def excluir_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, ocorrencia_id: int
+) -> None:
+    o = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
+    o.excluido = True
+    o.atualizado_em = datetime.utcnow()
     await db.commit()

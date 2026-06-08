@@ -307,3 +307,37 @@ class VeiculoVistoria(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoOcorrencia(Base):
+    """Ocorrência interna do veículo (Frota — operacional).
+
+    Tipos: avaria/multa/sinistro/documentacao/uso_indevido/outro. `gravidade`
+    (baixa/media/alta/critica) e `status` (aberta/em_tratamento/resolvida/
+    cancelada) são estado de domínio. NÃO altera a `situacao` do veículo.
+    `data_resolucao` é gravada server-side ao resolver. `id_veiculo`/
+    `id_motorista` validados same-tenant no serviço; `excluido` é soft-delete."""
+
+    __tablename__ = "veiculo_ocorrencia"
+    __table_args__ = {"schema": "frota"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("frota.veiculo.id"), nullable=False
+    )
+    id_motorista: Mapped[int | None] = mapped_column(
+        ForeignKey("frota.motorista.id"), nullable=True
+    )
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    data_ocorrencia: Mapped[date] = mapped_column(Date, nullable=False)
+    descricao: Mapped[str] = mapped_column(Text, nullable=False)
+    gravidade: Mapped[str] = mapped_column(String(20), nullable=False, default="media")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="aberta")
+    providencias: Mapped[str | None] = mapped_column(Text, nullable=True)
+    data_resolucao: Mapped[date | None] = mapped_column(Date, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

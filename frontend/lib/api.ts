@@ -1236,6 +1236,47 @@ export interface VeiculoVistoriaInput {
   observacoes?: string | null;
 }
 
+// Ocorrências internas (Frota operacional)
+export type OcorrenciaTipo =
+  | "avaria"
+  | "multa"
+  | "sinistro"
+  | "documentacao"
+  | "uso_indevido"
+  | "outro";
+export type OcorrenciaGravidade = "baixa" | "media" | "alta" | "critica";
+export type OcorrenciaStatus = "aberta" | "em_tratamento" | "resolvida" | "cancelada";
+
+export interface VeiculoOcorrencia {
+  id: number;
+  id_veiculo: number;
+  id_motorista: number | null;
+  tipo: OcorrenciaTipo;
+  data_ocorrencia: string;
+  descricao: string;
+  gravidade: OcorrenciaGravidade;
+  status: OcorrenciaStatus;
+  providencias: string | null;
+  data_resolucao: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface VeiculoOcorrenciaInput {
+  id_veiculo: number;
+  id_motorista?: number | null;
+  tipo: OcorrenciaTipo;
+  data_ocorrencia?: string | null;
+  descricao: string;
+  gravidade?: OcorrenciaGravidade;
+  providencias?: string | null;
+}
+
+export interface OcorrenciaResolverInput {
+  data_resolucao?: string | null;
+  providencias?: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -1543,6 +1584,34 @@ export const api = {
       }),
     remove: (id: number) =>
       request<void>(`/frota/vistorias/${id}`, { method: "DELETE" }),
+  },
+  ocorrencias: {
+    list: (params?: { id_veiculo?: number; status_filtro?: string }) =>
+      request<VeiculoOcorrencia[]>(`/frota/ocorrencias${qs(params ?? {})}`),
+    get: (id: number) => request<VeiculoOcorrencia>(`/frota/ocorrencias/${id}`),
+    create: (data: VeiculoOcorrenciaInput) =>
+      request<VeiculoOcorrencia>("/frota/ocorrencias", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<Omit<VeiculoOcorrenciaInput, "id_veiculo">>) =>
+      request<VeiculoOcorrencia>(`/frota/ocorrencias/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    iniciarTratamento: (id: number) =>
+      request<VeiculoOcorrencia>(`/frota/ocorrencias/${id}/iniciar-tratamento`, {
+        method: "POST",
+      }),
+    resolver: (id: number, data: OcorrenciaResolverInput) =>
+      request<VeiculoOcorrencia>(`/frota/ocorrencias/${id}/resolver`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    cancelar: (id: number) =>
+      request<VeiculoOcorrencia>(`/frota/ocorrencias/${id}/cancelar`, { method: "POST" }),
+    remove: (id: number) =>
+      request<void>(`/frota/ocorrencias/${id}`, { method: "DELETE" }),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),

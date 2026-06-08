@@ -606,3 +606,61 @@ class VeiculoVistoriaOut(BaseModel):
     observacoes: str | None = None
     criado_em: datetime
     atualizado_em: datetime | None = None
+
+
+# --- Ocorrência interna do Veículo (Frota — operacional) --------------------
+OcorrenciaTipo = Literal[
+    "avaria", "multa", "sinistro", "documentacao", "uso_indevido", "outro"
+]
+OcorrenciaGravidade = Literal["baixa", "media", "alta", "critica"]
+OcorrenciaStatus = Literal["aberta", "em_tratamento", "resolvida", "cancelada"]
+
+
+class VeiculoOcorrenciaCreate(BaseModel):
+    """`id_veiculo` no corpo (validado same-tenant). `status` server-side
+    ('aberta'); `data_resolucao` nunca no payload. `tenant_id`/`id`/`excluido`
+    nunca aceitos."""
+
+    id_veiculo: int
+    id_motorista: int | None = None
+    tipo: OcorrenciaTipo
+    data_ocorrencia: date | None = None
+    descricao: str = Field(min_length=1)
+    gravidade: OcorrenciaGravidade = "media"
+    providencias: str | None = None
+
+
+class VeiculoOcorrenciaUpdate(BaseModel):
+    """Whitelist de edição — `status`/`data_resolucao` (mudam por ações
+    dedicadas) e `id_veiculo`/`tenant_id`/`id`/`excluido` nunca aceitos."""
+
+    id_motorista: int | None = None
+    tipo: OcorrenciaTipo | None = None
+    data_ocorrencia: date | None = None
+    descricao: str | None = Field(default=None, min_length=1)
+    gravidade: OcorrenciaGravidade | None = None
+    providencias: str | None = None
+
+
+class VeiculoOcorrenciaResolver(BaseModel):
+    """Resolução — `data_resolucao` (default hoje no serviço) e `providencias`."""
+
+    data_resolucao: date | None = None
+    providencias: str | None = None
+
+
+class VeiculoOcorrenciaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    id_veiculo: int
+    id_motorista: int | None = None
+    tipo: str
+    data_ocorrencia: date
+    descricao: str
+    gravidade: str
+    status: str
+    providencias: str | None = None
+    data_resolucao: date | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None
