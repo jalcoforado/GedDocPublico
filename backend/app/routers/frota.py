@@ -22,6 +22,10 @@ from ..schemas.frota import (
     SolicitacaoVeiculoRejeitar,
     SolicitacaoVeiculoUpdate,
     VeiculoCreate,
+    VeiculoDocumentoAlertas,
+    VeiculoDocumentoCreate,
+    VeiculoDocumentoOut,
+    VeiculoDocumentoUpdate,
     VeiculoOut,
     VeiculoUpdate,
 )
@@ -84,6 +88,40 @@ async def delete_veiculo(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await frota_svc.excluir_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
+
+
+# --- Documentos do Veículo (PR Frota-6, permissão `frota`) -------------------
+# Listagem/criação aninhadas ao veículo; detalhe/edição/remoção/alertas em
+# `documentos_router` (/frota/documentos-veiculo).
+@router.get("/{veiculo_id}/documentos", response_model=list[VeiculoDocumentoOut])
+async def list_documentos_veiculo(
+    veiculo_id: int,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[VeiculoDocumentoOut]:
+    rows = await frota_svc.listar_documentos_veiculo(
+        db, tenant_id=tenant_id, id_veiculo=veiculo_id
+    )
+    return [VeiculoDocumentoOut.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/{veiculo_id}/documentos",
+    response_model=VeiculoDocumentoOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_documento_veiculo(
+    veiculo_id: int,
+    payload: VeiculoDocumentoCreate,
+    _: Usuario = Depends(require_permission("frota", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoDocumentoOut:
+    doc = await frota_svc.criar_documento(
+        db, tenant_id=tenant_id, id_veiculo=veiculo_id, payload=payload
+    )
+    return VeiculoDocumentoOut.model_validate(doc)
 
 
 # --- Motoristas / Condutores (permissão `frota`) ----------------------------
@@ -359,4 +397,66 @@ async def delete_solicitacao(
 ) -> None:
     await frota_svc.excluir_solicitacao(
         db, tenant_id=tenant_id, solicitacao_id=solicitacao_id
+    )
+
+
+# --- Documentos do Veículo: detalhe / edição / remoção / alertas -------------
+documentos_router = APIRouter(prefix="/frota/documentos-veiculo", tags=["frota"])
+
+
+# `alertas` é declarada ANTES de `/{documento_id}` (evita conflito de rota).
+@documentos_router.get("/alertas", response_model=VeiculoDocumentoAlertas)
+async def alertas_documentos(
+    dias: int = 30,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoDocumentoAlertas:
+    dias = max(0, min(dias, 365))  # clamp defensivo
+    grupos = await frota_svc.listar_alertas_documentos(
+        db, tenant_id=tenant_id, dias=dias
+    )
+    return VeiculoDocumentoAlertas(
+        dias=dias,
+        vencidos=[VeiculoDocumentoOut.model_validate(d) for d in grupos["vencidos"]],
+        a_vencer=[VeiculoDocumentoOut.model_validate(d) for d in grupos["a_vencer"]],
+    )
+
+
+@documentos_router.get("/{documento_id}", response_model=VeiculoDocumentoOut)
+async def get_documento(
+    documento_id: int,
+    _: Usuario = Depends(require_permission("frota")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoDocumentoOut:
+    doc = await frota_svc.obter_documento(
+        db, tenant_id=tenant_id, documento_id=documento_id
+    )
+    return VeiculoDocumentoOut.model_validate(doc)
+
+
+@documentos_router.put("/{documento_id}", response_model=VeiculoDocumentoOut)
+async def update_documento(
+    documento_id: int,
+    payload: VeiculoDocumentoUpdate,
+    _: Usuario = Depends(require_permission("frota", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoDocumentoOut:
+    doc = await frota_svc.atualizar_documento(
+        db, tenant_id=tenant_id, documento_id=documento_id, payload=payload
+    )
+    return VeiculoDocumentoOut.model_validate(doc)
+
+
+@documentos_router.delete("/{documento_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_documento(
+    documento_id: int,
+    _: Usuario = Depends(require_permission("frota", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await frota_svc.excluir_documento(
+        db, tenant_id=tenant_id, documento_id=documento_id
     )

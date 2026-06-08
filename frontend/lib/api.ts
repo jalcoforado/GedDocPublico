@@ -1084,6 +1084,46 @@ export interface RegistrarRetornoInput {
   observacoes_retorno?: string | null;
 }
 
+// Documentos do Veículo (PR Frota-6) — apenas metadados + alertas.
+export type TipoDocumento =
+  | "crlv"
+  | "seguro"
+  | "licenciamento"
+  | "autorizacao"
+  | "vistoria"
+  | "outro";
+export type DocumentoStatus = "ativo" | "vencido" | "substituido" | "cancelado";
+
+export interface VeiculoDocumento {
+  id: number;
+  id_veiculo: number;
+  tipo_documento: TipoDocumento;
+  numero: string | null;
+  orgao_emissor: string | null;
+  data_emissao: string | null;
+  data_vencimento: string;
+  status: DocumentoStatus;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface VeiculoDocumentoInput {
+  tipo_documento: TipoDocumento;
+  numero?: string | null;
+  orgao_emissor?: string | null;
+  data_emissao?: string | null;
+  data_vencimento: string;
+  status?: DocumentoStatus;
+  observacoes?: string | null;
+}
+
+export interface VeiculoDocumentoAlertas {
+  dias: number;
+  vencidos: VeiculoDocumento[];
+  a_vencer: VeiculoDocumento[];
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -1307,6 +1347,28 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+  },
+  documentosVeiculo: {
+    listByVeiculo: (idVeiculo: number) =>
+      request<VeiculoDocumento[]>(`/frota/veiculos/${idVeiculo}/documentos`),
+    create: (idVeiculo: number, data: VeiculoDocumentoInput) =>
+      request<VeiculoDocumento>(`/frota/veiculos/${idVeiculo}/documentos`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    get: (id: number) =>
+      request<VeiculoDocumento>(`/frota/documentos-veiculo/${id}`),
+    update: (id: number, data: Partial<VeiculoDocumentoInput>) =>
+      request<VeiculoDocumento>(`/frota/documentos-veiculo/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) =>
+      request<void>(`/frota/documentos-veiculo/${id}`, { method: "DELETE" }),
+    alertas: (dias = 30) =>
+      request<VeiculoDocumentoAlertas>(
+        `/frota/documentos-veiculo/alertas${qs({ dias })}`,
+      ),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),
