@@ -1314,6 +1314,41 @@ export interface Permissionario {
   atualizado_em: string | null;
 }
 
+// --- Transporte Regulado: Empresa -------------------------------------------
+export type EmpresaSituacao =
+  | "ativa"
+  | "pendente"
+  | "suspensa"
+  | "cassada"
+  | "inativa";
+
+export interface Empresa {
+  id: number;
+  razao_social: string;
+  nome_fantasia: string | null;
+  cnpj: string;
+  inscricao_municipal: string | null;
+  inscricao_estadual: string | null;
+  telefone: string | null;
+  email: string | null;
+  cep: string | null;
+  logradouro: string | null;
+  numero: string | null;
+  complemento: string | null;
+  bairro: string | null;
+  municipio: string | null;
+  uf: string | null;
+  tipo_servico: TipoServico;
+  numero_autorizacao: string | null;
+  data_inicio_autorizacao: string | null;
+  data_validade_autorizacao: string | null;
+  id_representante_permissionario: number | null;
+  situacao: EmpresaSituacao;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -1681,6 +1716,37 @@ export const api = {
       }),
     remove: (id: number) =>
       request<void>(`/transporte-regulado/permissionarios/${id}`, { method: "DELETE" }),
+  },
+  empresas: {
+    list: (params?: { situacao?: string; tipo_servico?: string; q?: string }) =>
+      request<Empresa[]>(`/transporte-regulado/empresas${qs(params ?? {})}`),
+    get: (id: number) => request<Empresa>(`/transporte-regulado/empresas/${id}`),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    create: (data: any) =>
+      request<Empresa>("/transporte-regulado/empresas", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    update: (id: number, data: any) =>
+      request<Empresa>(`/transporte-regulado/empresas/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    inativar: (id: number) =>
+      request<Empresa>(`/transporte-regulado/empresas/${id}/inativar`, {
+        method: "POST",
+      }),
+    reativar: (id: number) =>
+      request<Empresa>(`/transporte-regulado/empresas/${id}/reativar`, {
+        method: "POST",
+      }),
+    suspender: (id: number) =>
+      request<Empresa>(`/transporte-regulado/empresas/${id}/suspender`, {
+        method: "POST",
+      }),
+    remove: (id: number) =>
+      request<void>(`/transporte-regulado/empresas/${id}`, { method: "DELETE" }),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),
