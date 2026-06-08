@@ -25,6 +25,7 @@ from ..models import (
     VeiculoAbastecimento,
     VeiculoDocumento,
     VeiculoManutencao,
+    VeiculoVistoria,
 )
 from ..schemas.frota import (
     MotoristaCreate,
@@ -43,6 +44,8 @@ from ..schemas.frota import (
     VeiculoManutencaoCreate,
     VeiculoManutencaoUpdate,
     VeiculoUpdate,
+    VeiculoVistoriaCreate,
+    VeiculoVistoriaUpdate,
 )
 
 
@@ -1117,3 +1120,95 @@ async def resumo_abastecimentos(
         "media_valor_litro": media,
         "ultimo_abastecimento": ultimo,
     }
+
+
+# ----------------------- Vistoria / Checklist (operacional) -----------------
+# NÃO altera a situação do veículo, mesmo em resultado 'reprovada' (decisão
+# deste módulo — registrar a vistoria não muda o estado operacional).
+async def obter_vistoria(
+    db: AsyncSession, *, tenant_id: int, vistoria_id: int
+) -> VeiculoVistoria:
+    v = (
+        await db.execute(
+            select(VeiculoVistoria).where(
+                VeiculoVistoria.id == vistoria_id,
+                VeiculoVistoria.tenant_id == tenant_id,
+                VeiculoVistoria.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if v is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Vistoria não encontrada"
+        )
+    return v
+
+
+async def listar_vistorias(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    id_veiculo: int | None = None,
+    resultado: str | None = None,
+) -> list[VeiculoVistoria]:
+    stmt = select(VeiculoVistoria).where(
+        VeiculoVistoria.tenant_id == tenant_id,
+        VeiculoVistoria.excluido.is_(False),
+    )
+    if id_veiculo is not None:
+        stmt = stmt.where(VeiculoVistoria.id_veiculo == id_veiculo)
+    if resultado is not None:
+        stmt = stmt.where(VeiculoVistoria.resultado == resultado)
+    stmt = stmt.order_by(
+        VeiculoVistoria.data_vistoria.desc(), VeiculoVistoria.id.desc()
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def criar_vistoria(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    id_veiculo: int,
+    payload: VeiculoVistoriaCreate,
+) -> VeiculoVistoria:
+    await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=id_veiculo)
+    dados = payload.model_dump(exclude={"id_veiculo"})
+    if dados.get("data_vistoria") is None:
+        dados["data_vistoria"] = date.today()
+    v = VeiculoVistoria(
+        tenant_id=tenant_id,
+        id_veiculo=id_veiculo,
+        criado_em=datetime.utcnow(),
+        **dados,
+    )
+    db.add(v)
+    await db.commit()
+    await db.refresh(v)
+    return v
+
+
+async def atualizar_vistoria(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    vistoria_id: int,
+    payload: VeiculoVistoriaUpdate,
+) -> VeiculoVistoria:
+    v = await obter_vistoria(db, tenant_id=tenant_id, vistoria_id=vistoria_id)
+    dados = payload.model_dump(exclude_unset=True)
+    for campo, valor in dados.items():
+        setattr(v, campo, valor)
+    v.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(v)
+    return v
+
+
+async def excluir_vistoria(
+    db: AsyncSession, *, tenant_id: int, vistoria_id: int
+) -> None:
+    v = await obter_vistoria(db, tenant_id=tenant_id, vistoria_id=vistoria_id)
+    v.excluido = True
+    v.atualizado_em = datetime.utcnow()
+    await db.commit()

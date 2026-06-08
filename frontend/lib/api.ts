@@ -1201,6 +1201,41 @@ export interface AbastecimentoResumo {
   ultimo_abastecimento: string | null;
 }
 
+// Vistoria / checklist interno (Frota operacional)
+export type VistoriaTipo = "saida" | "retorno" | "periodica";
+export type VistoriaResultado = "aprovada" | "reprovada" | "com_ressalvas";
+
+export interface VeiculoVistoria {
+  id: number;
+  id_veiculo: number;
+  data_vistoria: string;
+  tipo: VistoriaTipo;
+  resultado: VistoriaResultado;
+  pneus_ok: boolean;
+  luzes_ok: boolean;
+  freios_ok: boolean;
+  documentacao_ok: boolean;
+  limpeza_ok: boolean;
+  equipamentos_ok: boolean;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface VeiculoVistoriaInput {
+  id_veiculo: number;
+  data_vistoria?: string | null;
+  tipo: VistoriaTipo;
+  resultado: VistoriaResultado;
+  pneus_ok?: boolean;
+  luzes_ok?: boolean;
+  freios_ok?: boolean;
+  documentacao_ok?: boolean;
+  limpeza_ok?: boolean;
+  equipamentos_ok?: boolean;
+  observacoes?: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -1491,6 +1526,23 @@ export const api = {
       }),
     remove: (id: number) =>
       request<void>(`/frota/abastecimentos/${id}`, { method: "DELETE" }),
+  },
+  vistorias: {
+    list: (params?: { id_veiculo?: number; resultado?: string }) =>
+      request<VeiculoVistoria[]>(`/frota/vistorias${qs(params ?? {})}`),
+    get: (id: number) => request<VeiculoVistoria>(`/frota/vistorias/${id}`),
+    create: (data: VeiculoVistoriaInput) =>
+      request<VeiculoVistoria>("/frota/vistorias", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<Omit<VeiculoVistoriaInput, "id_veiculo">>) =>
+      request<VeiculoVistoria>(`/frota/vistorias/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) =>
+      request<void>(`/frota/vistorias/${id}`, { method: "DELETE" }),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),

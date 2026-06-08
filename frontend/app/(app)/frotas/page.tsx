@@ -1,7 +1,16 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Car, ClipboardList, Fuel, IdCard, Truck, Wrench } from "lucide-react";
+import {
+  AlertTriangle,
+  Car,
+  ClipboardCheck,
+  ClipboardList,
+  Fuel,
+  IdCard,
+  Truck,
+  Wrench,
+} from "lucide-react";
 import Link from "next/link";
 
 import { PageHeader } from "@/components/ui/page-header";
@@ -37,6 +46,12 @@ const CARDS = [
     icon: Fuel,
     title: "Abastecimentos",
     desc: "Registro de abastecimentos: litros, valor, quilometragem, posto e indicadores.",
+  },
+  {
+    href: "/frotas/vistorias",
+    icon: ClipboardCheck,
+    title: "Vistorias",
+    desc: "Checklist interno de vistoria: saída, retorno e periódica, com resultado e itens.",
   },
 ];
 

@@ -18,6 +18,7 @@ from .frota import (
     VeiculoAbastecimento,
     VeiculoDocumento,
     VeiculoManutencao,
+    VeiculoVistoria,
 )
 from .processo import (
     Acao,
@@ -111,6 +112,7 @@ __all__ = [
     "VeiculoAbastecimento",
     "VeiculoDocumento",
     "VeiculoManutencao",
+    "VeiculoVistoria",
     "Usuario",
     "UsuarioExterno",
     "UsuarioGrupo",

@@ -547,3 +547,62 @@ class AbastecimentoResumo(BaseModel):
     total_valor: float
     media_valor_litro: float | None = None
     ultimo_abastecimento: date | None = None
+
+
+# --- Vistoria / Checklist interno (Frota — operacional) ---------------------
+VistoriaTipo = Literal["saida", "retorno", "periodica"]
+VistoriaResultado = Literal["aprovada", "reprovada", "com_ressalvas"]
+
+
+class VeiculoVistoriaBase(BaseModel):
+    data_vistoria: date | None = None
+    pneus_ok: bool = False
+    luzes_ok: bool = False
+    freios_ok: bool = False
+    documentacao_ok: bool = False
+    limpeza_ok: bool = False
+    equipamentos_ok: bool = False
+    observacoes: str | None = None
+
+
+class VeiculoVistoriaCreate(VeiculoVistoriaBase):
+    """`id_veiculo` no corpo (validado same-tenant). `tipo` e `resultado`
+    obrigatórios. `tenant_id`/`id`/`excluido` nunca aceitos."""
+
+    id_veiculo: int
+    tipo: VistoriaTipo
+    resultado: VistoriaResultado
+
+
+class VeiculoVistoriaUpdate(BaseModel):
+    """Whitelist de edição — `id_veiculo`/`tenant_id`/`id`/`excluido` nunca aceitos."""
+
+    data_vistoria: date | None = None
+    tipo: VistoriaTipo | None = None
+    resultado: VistoriaResultado | None = None
+    pneus_ok: bool | None = None
+    luzes_ok: bool | None = None
+    freios_ok: bool | None = None
+    documentacao_ok: bool | None = None
+    limpeza_ok: bool | None = None
+    equipamentos_ok: bool | None = None
+    observacoes: str | None = None
+
+
+class VeiculoVistoriaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    id_veiculo: int
+    data_vistoria: date
+    tipo: str
+    resultado: str
+    pneus_ok: bool
+    luzes_ok: bool
+    freios_ok: bool
+    documentacao_ok: bool
+    limpeza_ok: bool
+    equipamentos_ok: bool
+    observacoes: str | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None
