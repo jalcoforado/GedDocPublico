@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     zenvia_api_url: str = "https://api.zenvia.com/v2/channels/whatsapp/messages"
     zenvia_from: str = ""  # número remetente cadastrado no console Zenvia
 
+    # Cifragem de dados sensíveis (dados bancários de credor, tokens Google).
+    # Fernet key (base64 urlsafe de 32 bytes). Vazio em dev → operações de cifra falham
+    # explicitamente. Gerar com: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    dados_sensiveis_encryption_key: str = ""
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
