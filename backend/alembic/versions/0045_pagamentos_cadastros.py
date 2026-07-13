@@ -58,6 +58,7 @@ def _cols_comuns() -> list:
 
 def upgrade() -> None:
     op.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
+    op.execute(f"GRANT USAGE ON SCHEMA {SCHEMA} TO aprimora_app")
 
     # ---- credor ----
     op.create_table(
