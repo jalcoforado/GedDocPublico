@@ -47,6 +47,16 @@ from .manifestante import Manifestante, TipoManifestante
 from .minuta import Minuta, MinutaHistorico, TemplateDocumento
 from .modulo import ConfiguracoesModulos, Modulo
 from .notificacao import Notificacao, NotificacaoPreferencia
+from .pagamentos import (
+    Alcada,
+    ContaBancaria,
+    Contrato,
+    Credor,
+    Criticidade,
+    FonteRecursos,
+    GrupoDespesa,
+    NaturezaDespesa,
+)
 from .nivel import Nivel
 from .servico import Servico
 from .sistema import Sistema
@@ -72,8 +82,10 @@ __all__ = [
     "Assunto",
     "AssuntoTipoProcessoTipoAnexo",
     "AuditLog",
+    "Alcada",
     "Bairro",
     "CcdClasse",
+    "ContaBancaria",
     "Cidade",
     "ComplementacaoDocumental",
     "Despacho",
@@ -87,12 +99,17 @@ __all__ = [
     "TipoAssinatura",
     "Configuracao",
     "ConfiguracoesModulos",
+    "Contrato",
+    "Credor",
+    "Criticidade",
     "Empresa",
     "Endereco",
     "EspecieDocumental",
     "Estado",
+    "FonteRecursos",
     "GoogleCredencial",
     "Grupo",
+    "GrupoDespesa",
     "GrupoTransacao",
     "Job",
     "Manifestante",
@@ -100,6 +117,7 @@ __all__ = [
     "MinutaHistorico",
     "Modulo",
     "Motorista",
+    "NaturezaDespesa",
     "Nivel",
     "Notificacao",
     "Permissionario",

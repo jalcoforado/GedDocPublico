@@ -1,0 +1,119 @@
+"""Models do módulo de Pagamentos — cadastros (PAG-1). Schema `pagamentos`,
+tenant-scoped com RLS (migration 0045). Dados bancários do credor guardados
+cifrados (colunas *_cif); a cifra/decifra é responsabilidade do serviço."""
+from __future__ import annotations
+
+import enum
+from datetime import date, datetime
+from decimal import Decimal
+
+from sqlalchemy import (
+    Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric, String, Text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from ..database import Base
+
+
+class Criticidade(str, enum.Enum):
+    URGENTE = "URGENTE"; ALTA = "ALTA"; MEDIA = "MEDIA"; BAIXA = "BAIXA"
+
+
+class GrupoDespesa(str, enum.Enum):
+    PESSOAL = "PESSOAL"; CUSTEIO = "CUSTEIO"; INVESTIMENTO = "INVESTIMENTO"
+    DIVIDA = "DIVIDA"; OUTRAS = "OUTRAS"
+
+
+class Credor(Base):
+    __tablename__ = "credor"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    tipo_pessoa: Mapped[str] = mapped_column(String(10), nullable=False)
+    cnpj_cpf: Mapped[str] = mapped_column(String(18), nullable=False)
+    nome: Mapped[str] = mapped_column(String(200), nullable=False)
+    situacao_cadastral: Mapped[str] = mapped_column(String(10), nullable=False, default="REGULAR")
+    motivo_pendencia: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    banco_cif: Mapped[str | None] = mapped_column(Text, nullable=True)
+    agencia_cif: Mapped[str | None] = mapped_column(Text, nullable=True)
+    conta_cif: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chave_pix_cif: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class NaturezaDespesa(Base):
+    __tablename__ = "natureza_despesa"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    codigo: Mapped[str] = mapped_column(String(20), nullable=False)
+    descricao: Mapped[str] = mapped_column(String(150), nullable=False)
+    criticidade_padrao: Mapped[str] = mapped_column(String(10), nullable=False, default="MEDIA")
+    ativa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class FonteRecursos(Base):
+    __tablename__ = "fonte_recursos"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    codigo: Mapped[str] = mapped_column(String(20), nullable=False)
+    descricao: Mapped[str] = mapped_column(String(200), nullable=False)
+    grupos_despesa_permitidos: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class ContaBancaria(Base):
+    __tablename__ = "conta_bancaria"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    nome: Mapped[str] = mapped_column(String(150), nullable=False)
+    banco: Mapped[str] = mapped_column(String(100), nullable=False)
+    agencia: Mapped[str] = mapped_column(String(20), nullable=False)
+    conta: Mapped[str] = mapped_column(String(30), nullable=False)
+    id_fonte_recursos: Mapped[int] = mapped_column(ForeignKey("pagamentos.fonte_recursos.id"), nullable=False)
+    grupo_despesa: Mapped[str] = mapped_column(String(20), nullable=False)
+    saldo_minimo_alerta: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    ativa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class Contrato(Base):
+    __tablename__ = "contrato"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    numero: Mapped[str] = mapped_column(String(50), nullable=False)
+    id_credor: Mapped[int] = mapped_column(ForeignKey("pagamentos.credor.id"), nullable=False)
+    id_unidade: Mapped[int] = mapped_column(ForeignKey("utils.unidade_trabalho.id"), nullable=False)
+    objeto: Mapped[str] = mapped_column(String(255), nullable=False)
+    vigencia_inicio: Mapped[date] = mapped_column(Date, nullable=False)
+    vigencia_fim: Mapped[date] = mapped_column(Date, nullable=False)
+    valor_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class Alcada(Base):
+    __tablename__ = "alcada"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_usuario: Mapped[int] = mapped_column(ForeignKey("utils.usuario.id"), nullable=False)
+    id_natureza: Mapped[int | None] = mapped_column(ForeignKey("pagamentos.natureza_despesa.id"), nullable=True)
+    valor_maximo: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
