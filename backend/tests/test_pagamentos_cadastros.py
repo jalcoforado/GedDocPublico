@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.schemas.pagamentos import CredorCreate, DadosBancarios
+from app.schemas.pagamentos import CredorCreate, CredorUpdate, DadosBancarios
 from app.services import pagamentos_cadastros as svc
 from app.services.provisioning_tenant import provisionar_tenant
 
@@ -123,6 +123,37 @@ async def test_cnpj_cpf_duplicado_mesmo_tenant_409(admin_engine):
         with pytest.raises(HTTPException) as exc:
             await _criar(admin_engine, t.id, cnpj_cpf=doc)
         assert exc.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+# ============================ Re-cifragem no update ===========================
+async def test_atualizar_credor_recifra(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        c = await _criar(admin_engine, t.id, dados_bancarios=DadosBancarios(conta="ANTIGO111"))
+        async with _sm(admin_engine)() as s:
+            atualizado = await svc.atualizar_credor(
+                s, tenant_id=t.id, credor_id=c.id,
+                payload=CredorUpdate(
+                    dados_bancarios=DadosBancarios(conta="NOVOSEGREDO999", chave_pix="novo@pix")
+                ),
+            )
+        assert svc.credor_out(atualizado)["tem_dados_bancarios"] is True
+        # cifrado em repouso: sessão nova, SELECT bruto não expõe o texto puro
+        async with _sm(admin_engine)() as s:
+            row = (
+                await s.execute(
+                    text("SELECT conta_cif FROM pagamentos.credor WHERE id=:i"), {"i": c.id}
+                )
+            ).fetchone()
+        assert row[0] is not None
+        assert "NOVOSEGREDO999" not in row[0]
+        # reveal decifra os novos valores
+        async with _sm(admin_engine)() as s:
+            revelado = await svc.dados_bancarios_credor(s, tenant_id=t.id, credor_id=c.id)
+        assert revelado.conta == "NOVOSEGREDO999"
+        assert revelado.chave_pix == "novo@pix"
     finally:
         await _cleanup(admin_engine, t.id)
 
