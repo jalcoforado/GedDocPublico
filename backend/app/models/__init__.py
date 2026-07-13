@@ -41,8 +41,10 @@ from .grupo import (
     UsuarioGrupo,
     UsuarioUnidadeTrabalho,
 )
+from .google_credencial import GoogleCredencial
 from .localizacao import Bairro, Cidade, Endereco, Estado
 from .manifestante import Manifestante, TipoManifestante
+from .minuta import Minuta, MinutaHistorico, TemplateDocumento
 from .modulo import ConfiguracoesModulos, Modulo
 from .notificacao import Notificacao, NotificacaoPreferencia
 from .nivel import Nivel
@@ -89,10 +91,13 @@ __all__ = [
     "Endereco",
     "EspecieDocumental",
     "Estado",
+    "GoogleCredencial",
     "Grupo",
     "GrupoTransacao",
     "Job",
     "Manifestante",
+    "Minuta",
+    "MinutaHistorico",
     "Modulo",
     "Motorista",
     "Nivel",
@@ -103,6 +108,7 @@ __all__ = [
     "Sistema",
     "SistemaTransacao",
     "SolicitacaoVeiculo",
+    "TemplateDocumento",
     "Tenant",
     "TipoAnexo",
     "TipoProcessoWorkflow",

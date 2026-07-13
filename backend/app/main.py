@@ -24,6 +24,7 @@ from .routers import (
     jobs,
     localizacao,
     manifestantes,
+    minutas,
     modulos,
     notificacoes,
     organograma,
@@ -111,6 +112,8 @@ app.include_router(frota.ocorrencias_router, prefix="/api/v2")
 app.include_router(transporte_regulado.permissionarios_router, prefix="/api/v2")
 app.include_router(transporte_regulado.empresas_router, prefix="/api/v2")
 app.include_router(transporte_regulado.veiculos_router, prefix="/api/v2")
+app.include_router(minutas.templates_router, prefix="/api/v2")
+app.include_router(minutas.minutas_router, prefix="/api/v2")
 app.include_router(workflow.router, prefix="/api/v2")
 app.include_router(workflow.instances_router, prefix="/api/v2")
 app.include_router(workflow.mapeamento_router, prefix="/api/v2")

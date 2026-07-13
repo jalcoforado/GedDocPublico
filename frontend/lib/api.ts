@@ -903,6 +903,81 @@ export interface AnexoUploadInput {
   publico?: boolean;
 }
 
+// Minutas de documento + templates (editor interno / Google Docs)
+export type MinutaOrigem = "interno" | "google";
+export type MinutaStatus = "rascunho" | "finalizada" | "cancelada";
+
+export interface PlaceholderInfo {
+  chave: string;
+  descricao: string;
+}
+
+export interface TemplateDocumento {
+  id: number;
+  nome: string;
+  descricao: string | null;
+  categoria: string | null;
+  corpo_html: string;
+  placeholders_utilizados: string[] | null;
+  ativo: boolean;
+  id_usuario_criacao: number | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface TemplateDocumentoInput {
+  nome: string;
+  descricao?: string | null;
+  categoria?: string | null;
+  corpo_html: string;
+  ativo?: boolean;
+}
+
+export interface Minuta {
+  id: number;
+  id_processo: number;
+  id_template_origem: number | null;
+  titulo: string;
+  origem: MinutaOrigem;
+  status: MinutaStatus;
+  versao: number;
+  corpo_html: string | null;
+  google_doc_id: string | null;
+  google_doc_url: string | null;
+  id_anexo_final: number | null;
+  id_usuario_criacao: number;
+  id_usuario_finalizacao: number | null;
+  finalizada_em: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface MinutaListItem {
+  id: number;
+  id_processo: number;
+  titulo: string;
+  origem: MinutaOrigem;
+  status: MinutaStatus;
+  versao: number;
+  id_anexo_final: number | null;
+  id_usuario_criacao: number;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface MinutaCreateInput {
+  titulo: string;
+  origem?: MinutaOrigem;
+  id_template_origem?: number | null;
+  corpo_html?: string | null;
+}
+
+export interface MinutaUpdateInput {
+  titulo?: string;
+  corpo_html?: string | null;
+  versao?: number;
+}
+
 type QsValue = string | number | boolean | undefined | null;
 
 function qs(params: Record<string, QsValue>): string {
@@ -1848,6 +1923,49 @@ export const api = {
         body: JSON.stringify(data),
       }),
     remove: (id: number) => request<void>(`/tipos-anexo/${id}`, { method: "DELETE" }),
+  },
+
+  // Templates de documento (admin) + placeholders disponíveis
+  templatesDocumento: {
+    list: (params?: { categoria?: string; apenas_ativos?: boolean }) =>
+      request<TemplateDocumento[]>(
+        `/templates-documento${qs((params ?? {}) as Record<string, QsValue>)}`,
+      ),
+    get: (id: number) => request<TemplateDocumento>(`/templates-documento/${id}`),
+    create: (data: TemplateDocumentoInput) =>
+      request<TemplateDocumento>("/templates-documento", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<TemplateDocumentoInput>) =>
+      request<TemplateDocumento>(`/templates-documento/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) =>
+      request<void>(`/templates-documento/${id}`, { method: "DELETE" }),
+    placeholders: () =>
+      request<PlaceholderInfo[]>("/templates-documento/placeholders-disponiveis"),
+  },
+
+  // Minutas de documento (por processo)
+  minutas: {
+    list: (processoId: number) =>
+      request<MinutaListItem[]>(`/processos/${processoId}/minutas`),
+    get: (id: number) => request<Minuta>(`/minutas/${id}`),
+    create: (processoId: number, data: MinutaCreateInput) =>
+      request<Minuta>(`/processos/${processoId}/minutas`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: MinutaUpdateInput) =>
+      request<Minuta>(`/minutas/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) => request<void>(`/minutas/${id}`, { method: "DELETE" }),
+    finalizar: (id: number) =>
+      request<Minuta>(`/minutas/${id}/finalizar`, { method: "POST" }),
   },
 
   // Fase 3

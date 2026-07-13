@@ -16,6 +16,7 @@ dependencies = [
   "httpx==0.28.1",
   "reportlab==4.2.5",
   "pypdf==5.1.0",
+  "weasyprint==63.1",
   "celery==5.4.0",
   "redis==5.2.1",
   "bcrypt==4.2.1",

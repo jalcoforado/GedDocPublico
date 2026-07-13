@@ -39,3 +39,8 @@ class Tenant(Base):
     texto_boas_vindas_portal: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Soft-ref a utils.unidade_trabalho.id (sem FK rígida; validado no serviço).
     id_unidade_padrao: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Minuta/Google Docs — opt-in por tenant (soberania de dados). Vazio = integração
+    # Google desabilitada; o editor interno segue disponível independentemente.
+    google_docs_habilitado: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )

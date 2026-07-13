@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings, resolve_anexo_path, tenant_anexos_dir
-from ..models import Anexo, AnexoProcesso, AssinaturaAnexo, Processo, Servico
+from ..models import Anexo, AnexoProcesso, AssinaturaAnexo, Minuta, Processo, Servico
 
 
 class AnexoError(Exception):
@@ -47,11 +47,60 @@ async def upload_anexo(
     usuario_id: int | None,
     documento_exigido_key: str | None = None,
 ) -> Anexo:
+    """Recebe um `UploadFile` (upload manual): valida nome/extensão/tamanho e
+    delega a criação do anexo ao núcleo `_criar_anexo_from_bytes`."""
     settings = get_settings()
 
     if not file.filename:
         raise AnexoError("Arquivo sem nome")
     ext = _ext_of(file.filename)
+    if ext not in ALLOWED_EXTS:
+        raise AnexoError(f"Extensão '.{ext}' não permitida")
+
+    max_bytes = settings.max_upload_size_mb * 1024 * 1024
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise AnexoError(f"Arquivo excede {settings.max_upload_size_mb} MB")
+
+    return await _criar_anexo_from_bytes(
+        db,
+        processo_id,
+        content=content,
+        filename=file.filename,
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        descricao=descricao,
+        id_tipo_anexo=id_tipo_anexo,
+        publico=publico,
+        usuario_id=usuario_id,
+        documento_exigido_key=documento_exigido_key,
+    )
+
+
+async def _criar_anexo_from_bytes(
+    db: AsyncSession,
+    processo_id: int,
+    *,
+    content: bytes,
+    filename: str,
+    tenant_id: int,
+    tenant_slug: str,
+    descricao: str | None,
+    id_tipo_anexo: int | None,
+    publico: bool,
+    usuario_id: int | None,
+    documento_exigido_key: str | None = None,
+    commit: bool = True,
+) -> Anexo:
+    """Núcleo compartilhado da criação de anexo a partir de bytes em memória.
+
+    Usado tanto pelo upload manual (`upload_anexo`) quanto pela finalização de
+    minutas (`services/minutas.finalizar_minuta`, PR-C). Aplica as MESMAS regras
+    de negócio (processo ativo, movimentação, documento exigido), grava no storage
+    por tenant e cria o vínculo `AnexoProcesso`. Com `commit=False` o caller
+    controla a transação (finalização atômica anexo + minuta).
+    """
+    ext = _ext_of(filename)
     if ext not in ALLOWED_EXTS:
         raise AnexoError(f"Extensão '.{ext}' não permitida")
 
@@ -97,11 +146,6 @@ async def upload_anexo(
         if documento_exigido_key not in keys_validas:
             raise AnexoError("Documento exigido inválido para este serviço.")
 
-    max_bytes = settings.max_upload_size_mb * 1024 * 1024
-    content = await file.read(max_bytes + 1)
-    if len(content) > max_bytes:
-        raise AnexoError(f"Arquivo excede {settings.max_upload_size_mb} MB")
-
     qtd_paginas = None
     if ext == "pdf":
         try:
@@ -116,7 +160,7 @@ async def upload_anexo(
         id_usuario=usuario_id,
         ativo=True,
         excluido=False,
-        descricao=(descricao or file.filename)[:512],
+        descricao=(descricao or filename)[:512],
         qtd_paginas=qtd_paginas,
         documento_exigido_key=documento_exigido_key,
     )
@@ -154,8 +198,9 @@ async def upload_anexo(
         )
     )
 
-    await db.commit()
-    await db.refresh(anexo)
+    if commit:
+        await db.commit()
+        await db.refresh(anexo)
     return anexo
 
 
@@ -256,4 +301,23 @@ async def delete_anexo(
     anexo.excluido = True
     anexo.ativo = False
     vinculo.excluido = True
+
+    # Se este anexo foi gerado pela finalização de uma minuta, reverte a minuta
+    # para rascunho (limpa o vínculo) para que possa ser reeditada/refinalizada —
+    # em vez de deixá-la 'finalizada' apontando para um anexo excluído.
+    minuta = (
+        await db.execute(
+            select(Minuta).where(
+                Minuta.id_anexo_final == anexo_id,
+                Minuta.tenant_id == tenant_id,
+                Minuta.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if minuta is not None:
+        minuta.status = "rascunho"
+        minuta.id_anexo_final = None
+        minuta.id_usuario_finalizacao = None
+        minuta.finalizada_em = None
+
     await db.commit()

@@ -112,6 +112,7 @@ const NAV: NavGroup[] = [
       { label: "Assuntos", href: "/assuntos", icon: BookOpen, perm: "assunto" },
       { label: "Catálogo de Serviços", href: "/servicos", icon: ClipboardList, perm: "servico" },
       { label: "Tipos de Anexo", href: "/tipos-anexo", icon: Paperclip, perm: "catalogo" },
+      { label: "Templates de documento", href: "/templates-documento", icon: FileText, perm: "minuta_template" },
       { label: "Cidades", href: "/cidades", icon: MapPin, perm: "cidade" },
       { label: "Bairros", href: "/bairros", icon: Map, perm: "endereco" },
       { label: "Endereços", href: "/enderecos", icon: MapPin, perm: "endereco" },
