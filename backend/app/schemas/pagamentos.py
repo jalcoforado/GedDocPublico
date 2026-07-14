@@ -201,3 +201,9 @@ class MovimentacaoOut(BaseModel):
 class SaldoConta(BaseModel):
     id_conta: int; saldo_inicial: Decimal; total_entradas: Decimal
     total_saidas: Decimal; saldo_atual: Decimal
+
+
+class ContaSaldoPainel(BaseModel):
+    id_conta: int; nome: str; banco: str; grupo_despesa: str
+    saldo_inicial: Decimal; total_entradas: Decimal; total_saidas: Decimal
+    saldo_atual: Decimal; saldo_minimo_alerta: Decimal; abaixo_minimo: bool

@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import ContaBancaria, MovimentacaoConta
-from ..schemas.pagamentos import MovimentacaoCreate, SaldoConta
+from ..schemas.pagamentos import ContaSaldoPainel, MovimentacaoCreate, SaldoConta
 
 _ORIGENS_MANUAIS = {"APORTE", "RECEITA", "AJUSTE"}
 
@@ -54,3 +54,20 @@ async def saldo_conta(db, *, tenant_id, conta_id) -> SaldoConta:
     inicial = conta.saldo_inicial or Decimal("0")
     return SaldoConta(id_conta=conta_id, saldo_inicial=inicial, total_entradas=entradas,
                       total_saidas=saidas, saldo_atual=inicial + entradas - saidas)
+
+
+async def painel_caixa(db, *, tenant_id) -> list[ContaSaldoPainel]:
+    contas = (await db.execute(select(ContaBancaria).where(
+        ContaBancaria.tenant_id == tenant_id, ContaBancaria.excluido.is_(False))
+        .order_by(ContaBancaria.nome))).scalars().all()
+    painel: list[ContaSaldoPainel] = []
+    for conta in contas:
+        saldo = await saldo_conta(db, tenant_id=tenant_id, conta_id=conta.id)
+        minimo = conta.saldo_minimo_alerta or Decimal("0")
+        painel.append(ContaSaldoPainel(
+            id_conta=conta.id, nome=conta.nome, banco=conta.banco, grupo_despesa=conta.grupo_despesa,
+            saldo_inicial=saldo.saldo_inicial, total_entradas=saldo.total_entradas,
+            total_saidas=saldo.total_saidas, saldo_atual=saldo.saldo_atual,
+            saldo_minimo_alerta=minimo, abaixo_minimo=saldo.saldo_atual < minimo,
+        ))
+    return painel

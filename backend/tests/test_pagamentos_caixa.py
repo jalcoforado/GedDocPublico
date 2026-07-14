@@ -40,18 +40,20 @@ async def _provisionar(engine):
     return tenant
 
 
-async def _criar_conta(engine, tenant_id, *, saldo_inicial=Decimal("0")):
+async def _criar_conta(engine, tenant_id, *, saldo_inicial=Decimal("0"), nome="C1", codigo="700",
+                       saldo_minimo_alerta=Decimal("0")):
     async with _sm(engine)() as s:
         fonte = await cad.criar_fonte(
             s, tenant_id=tenant_id,
-            payload=FonteCreate(codigo="700", descricao="F", grupos_despesa_permitidos=["CUSTEIO"]),
+            payload=FonteCreate(codigo=codigo, descricao="F", grupos_despesa_permitidos=["CUSTEIO"]),
         )
     async with _sm(engine)() as s:
         conta = await cad.criar_conta(
             s, tenant_id=tenant_id,
             payload=ContaCreate(
-                nome="C1", banco="001", agencia="1", conta="1", id_fonte_recursos=fonte.id,
+                nome=nome, banco="001", agencia="1", conta="1", id_fonte_recursos=fonte.id,
                 grupo_despesa="CUSTEIO", saldo_inicial=saldo_inicial,
+                saldo_minimo_alerta=saldo_minimo_alerta,
             ),
         )
     return conta
@@ -157,3 +159,46 @@ async def test_extrato_e_saldo_cross_tenant_404(admin_engine):
     finally:
         await _cleanup(admin_engine, a.id)
         await _cleanup(admin_engine, b.id)
+
+
+# ============================ painel de caixa ===================================
+async def test_painel_caixa_lista_saldos_e_alerta_minimo(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        conta_ok = await _criar_conta(
+            admin_engine, t.id, nome="Conta Saudavel", codigo="701",
+            saldo_inicial=Decimal("1000"), saldo_minimo_alerta=Decimal("100"),
+        )
+        conta_baixa = await _criar_conta(
+            admin_engine, t.id, nome="Conta Critica", codigo="702",
+            saldo_inicial=Decimal("50"), saldo_minimo_alerta=Decimal("500"),
+        )
+        usuario_id = await _usuario_id(admin_engine, t.id)
+
+        async with _sm(admin_engine)() as s:
+            await caixa.lancar_movimentacao(
+                s, tenant_id=t.id, usuario_id=usuario_id,
+                payload=MovimentacaoCreate(id_conta=conta_ok.id, tipo="ENTRADA", valor=Decimal("200"),
+                                            origem="APORTE", data=date(2026, 7, 14)),
+            )
+        async with _sm(admin_engine)() as s:
+            await caixa.lancar_movimentacao(
+                s, tenant_id=t.id, usuario_id=usuario_id,
+                payload=MovimentacaoCreate(id_conta=conta_baixa.id, tipo="SAIDA", valor=Decimal("10"),
+                                            origem="AJUSTE", data=date(2026, 7, 14)),
+            )
+
+        async with _sm(admin_engine)() as s:
+            painel = await caixa.painel_caixa(s, tenant_id=t.id)
+
+        assert [p.nome for p in painel] == ["Conta Critica", "Conta Saudavel"]
+
+        p_ok = next(p for p in painel if p.id_conta == conta_ok.id)
+        assert p_ok.saldo_atual == Decimal("1200")
+        assert p_ok.abaixo_minimo is False
+
+        p_baixa = next(p for p in painel if p.id_conta == conta_baixa.id)
+        assert p_baixa.saldo_atual == Decimal("40")
+        assert p_baixa.abaixo_minimo is True
+    finally:
+        await _cleanup(admin_engine, t.id)
