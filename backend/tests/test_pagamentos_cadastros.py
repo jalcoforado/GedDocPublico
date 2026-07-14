@@ -14,7 +14,10 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.schemas.pagamentos import CredorCreate, CredorUpdate, DadosBancarios
+from app.schemas.pagamentos import (
+    CredorCreate, CredorUpdate, DadosBancarios,
+    FonteCreate, NaturezaCreate,
+)
 from app.services import pagamentos_cadastros as svc
 from app.services.provisioning_tenant import provisionar_tenant
 
@@ -55,6 +58,8 @@ async def _criar(engine, tenant_id, *, cnpj_cpf=None, dados_bancarios=None):
 async def _cleanup(engine, tenant_id: int) -> None:
     async with _sm(engine)() as s:
         for stmt in (
+            "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
             "DELETE FROM pagamentos.credor WHERE tenant_id=:t",
             "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
             "DELETE FROM utils.grupo WHERE tenant_id=:t",
@@ -171,3 +176,35 @@ async def test_obter_credor_cross_tenant_404(admin_engine):
     finally:
         await _cleanup(admin_engine, a.id)
         await _cleanup(admin_engine, b.id)
+
+
+# ============================ natureza_despesa / fonte_recursos ==============
+async def test_natureza_e_fonte_crud(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            natureza = await svc.criar_natureza(
+                s, tenant_id=t.id,
+                payload=NaturezaCreate(codigo="3.3.90.30", descricao="Material de consumo"),
+            )
+        assert natureza.codigo == "3.3.90.30"
+
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.criar_natureza(
+                    s, tenant_id=t.id,
+                    payload=NaturezaCreate(codigo="3.3.90.30", descricao="dup"),
+                )
+            assert exc.value.status_code == 409
+
+        async with _sm(admin_engine)() as s:
+            fonte = await svc.criar_fonte(
+                s, tenant_id=t.id,
+                payload=FonteCreate(
+                    codigo="500", descricao="Recursos próprios",
+                    grupos_despesa_permitidos=["CUSTEIO", "INVESTIMENTO"],
+                ),
+            )
+        assert fonte.grupos_despesa_permitidos == ["CUSTEIO", "INVESTIMENTO"]
+    finally:
+        await _cleanup(admin_engine, t.id)

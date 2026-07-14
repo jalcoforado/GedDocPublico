@@ -9,8 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core import crypto
-from ..models import Credor
-from ..schemas.pagamentos import CredorCreate, CredorUpdate, DadosBancarios
+from ..models import Credor, FonteRecursos, NaturezaDespesa
+from ..schemas.pagamentos import (
+    CredorCreate, CredorUpdate, DadosBancarios,
+    FonteCreate, FonteUpdate, NaturezaCreate, NaturezaUpdate,
+)
 
 
 def _utcnow() -> datetime:
@@ -97,3 +100,97 @@ async def dados_bancarios_credor(db: AsyncSession, *, tenant_id: int, credor_id:
     c = await obter_credor(db, tenant_id=tenant_id, credor_id=credor_id)
     return DadosBancarios(banco=crypto.decrypt(c.banco_cif), agencia=crypto.decrypt(c.agencia_cif),
                           conta=crypto.decrypt(c.conta_cif), chave_pix=crypto.decrypt(c.chave_pix_cif))
+
+
+# ============================ natureza_despesa / fonte_recursos ==============
+
+async def _codigo_unico(db: AsyncSession, model, *, tenant_id: int, codigo: str,
+                         excluir_id: int | None = None) -> None:
+    stmt = select(model.id).where(model.tenant_id == tenant_id, model.codigo == codigo,
+                                   model.excluido.is_(False))
+    if excluir_id is not None:
+        stmt = stmt.where(model.id != excluir_id)
+    if (await db.execute(stmt)).scalar_one_or_none() is not None:
+        raise PagamentoCadastroError(f"Já existe cadastro com o código '{codigo}'.", status.HTTP_409_CONFLICT)
+
+
+async def obter_natureza(db: AsyncSession, *, tenant_id: int, natureza_id: int) -> NaturezaDespesa:
+    n = (await db.execute(select(NaturezaDespesa).where(
+        NaturezaDespesa.id == natureza_id, NaturezaDespesa.tenant_id == tenant_id,
+        NaturezaDespesa.excluido.is_(False)))).scalar_one_or_none()
+    if n is None:
+        raise PagamentoCadastroError("Natureza não encontrada", status.HTTP_404_NOT_FOUND)
+    return n
+
+
+async def listar_naturezas(db: AsyncSession, *, tenant_id: int) -> list[NaturezaDespesa]:
+    stmt = select(NaturezaDespesa).where(NaturezaDespesa.tenant_id == tenant_id,
+                                          NaturezaDespesa.excluido.is_(False))
+    return list((await db.execute(stmt.order_by(NaturezaDespesa.codigo))).scalars().all())
+
+
+async def criar_natureza(db: AsyncSession, *, tenant_id: int, payload: NaturezaCreate) -> NaturezaDespesa:
+    await _codigo_unico(db, NaturezaDespesa, tenant_id=tenant_id, codigo=payload.codigo)
+    n = NaturezaDespesa(tenant_id=tenant_id, criado_em=_utcnow(), **payload.model_dump())
+    db.add(n); await db.commit(); await db.refresh(n)
+    return n
+
+
+async def atualizar_natureza(db: AsyncSession, *, tenant_id: int, natureza_id: int,
+                              payload: NaturezaUpdate) -> NaturezaDespesa:
+    n = await obter_natureza(db, tenant_id=tenant_id, natureza_id=natureza_id)
+    dados = payload.model_dump(exclude_unset=True)
+    if "codigo" in dados:
+        await _codigo_unico(db, NaturezaDespesa, tenant_id=tenant_id, codigo=dados["codigo"],
+                             excluir_id=natureza_id)
+    for k, v in dados.items():
+        setattr(n, k, v)
+    n.atualizado_em = _utcnow(); await db.commit(); await db.refresh(n)
+    return n
+
+
+async def excluir_natureza(db: AsyncSession, *, tenant_id: int, natureza_id: int) -> None:
+    n = await obter_natureza(db, tenant_id=tenant_id, natureza_id=natureza_id)
+    n.excluido = True; n.atualizado_em = _utcnow(); await db.commit()
+
+
+async def obter_fonte(db: AsyncSession, *, tenant_id: int, fonte_id: int) -> FonteRecursos:
+    f = (await db.execute(select(FonteRecursos).where(
+        FonteRecursos.id == fonte_id, FonteRecursos.tenant_id == tenant_id,
+        FonteRecursos.excluido.is_(False)))).scalar_one_or_none()
+    if f is None:
+        raise PagamentoCadastroError("Fonte não encontrada", status.HTTP_404_NOT_FOUND)
+    return f
+
+
+async def listar_fontes(db: AsyncSession, *, tenant_id: int) -> list[FonteRecursos]:
+    stmt = select(FonteRecursos).where(FonteRecursos.tenant_id == tenant_id,
+                                        FonteRecursos.excluido.is_(False))
+    return list((await db.execute(stmt.order_by(FonteRecursos.codigo))).scalars().all())
+
+
+async def criar_fonte(db: AsyncSession, *, tenant_id: int, payload: FonteCreate) -> FonteRecursos:
+    await _codigo_unico(db, FonteRecursos, tenant_id=tenant_id, codigo=payload.codigo)
+    f = FonteRecursos(tenant_id=tenant_id, criado_em=_utcnow(),
+                       codigo=payload.codigo, descricao=payload.descricao,
+                       grupos_despesa_permitidos=[g for g in payload.grupos_despesa_permitidos])
+    db.add(f); await db.commit(); await db.refresh(f)
+    return f
+
+
+async def atualizar_fonte(db: AsyncSession, *, tenant_id: int, fonte_id: int,
+                           payload: FonteUpdate) -> FonteRecursos:
+    f = await obter_fonte(db, tenant_id=tenant_id, fonte_id=fonte_id)
+    dados = payload.model_dump(exclude_unset=True)
+    if "codigo" in dados:
+        await _codigo_unico(db, FonteRecursos, tenant_id=tenant_id, codigo=dados["codigo"],
+                             excluir_id=fonte_id)
+    for k, v in dados.items():
+        setattr(f, k, v)
+    f.atualizado_em = _utcnow(); await db.commit(); await db.refresh(f)
+    return f
+
+
+async def excluir_fonte(db: AsyncSession, *, tenant_id: int, fonte_id: int) -> None:
+    f = await obter_fonte(db, tenant_id=tenant_id, fonte_id=fonte_id)
+    f.excluido = True; f.atualizado_em = _utcnow(); await db.commit()
