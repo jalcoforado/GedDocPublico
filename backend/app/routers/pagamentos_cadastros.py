@@ -9,7 +9,9 @@ from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Usuario
 from ..schemas.pagamentos import (
+    AlcadaCreate, AlcadaOut, AlcadaUpdate,
     ContaCreate, ContaOut, ContaUpdate,
+    ContratoCreate, ContratoOut, ContratoUpdate,
     CredorCreate, CredorDadosBancariosOut, CredorOut, CredorUpdate,
     FonteCreate, FonteOut, FonteUpdate, NaturezaCreate, NaturezaOut, NaturezaUpdate,
 )
@@ -199,3 +201,90 @@ async def delete_conta(conta_id: int,
                        tenant_id: int = Depends(require_tenant_id),
                        db: AsyncSession = Depends(get_db)):
     await svc.excluir_conta(db, tenant_id=tenant_id, conta_id=conta_id)
+
+
+contratos_router = APIRouter(prefix="/pagamentos/contratos", tags=["pagamentos-cadastros"])
+
+
+@contratos_router.get("", response_model=list[ContratoOut])
+async def list_contratos(_: Usuario = Depends(require_permission("pagamento_cadastro")),
+                         tenant_id: int = Depends(require_tenant_id),
+                         db: AsyncSession = Depends(get_db)):
+    return [ContratoOut.model_validate(r) for r in await svc.listar_contratos(db, tenant_id=tenant_id)]
+
+
+@contratos_router.get("/{contrato_id}", response_model=ContratoOut)
+async def get_contrato(contrato_id: int,
+                       _: Usuario = Depends(require_permission("pagamento_cadastro")),
+                       tenant_id: int = Depends(require_tenant_id),
+                       db: AsyncSession = Depends(get_db)):
+    return ContratoOut.model_validate(
+        await svc.obter_contrato(db, tenant_id=tenant_id, contrato_id=contrato_id))
+
+
+@contratos_router.post("", response_model=ContratoOut, status_code=status.HTTP_201_CREATED)
+async def create_contrato(payload: ContratoCreate,
+                          _: Usuario = Depends(require_permission("pagamento_cadastro", "inserir")),
+                          tenant_id: int = Depends(require_tenant_id),
+                          db: AsyncSession = Depends(get_db)):
+    return ContratoOut.model_validate(await svc.criar_contrato(db, tenant_id=tenant_id, payload=payload))
+
+
+@contratos_router.put("/{contrato_id}", response_model=ContratoOut)
+async def update_contrato(contrato_id: int, payload: ContratoUpdate,
+                          _: Usuario = Depends(require_permission("pagamento_cadastro", "atualizar")),
+                          tenant_id: int = Depends(require_tenant_id),
+                          db: AsyncSession = Depends(get_db)):
+    return ContratoOut.model_validate(
+        await svc.atualizar_contrato(db, tenant_id=tenant_id, contrato_id=contrato_id, payload=payload))
+
+
+@contratos_router.delete("/{contrato_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_contrato(contrato_id: int,
+                          _: Usuario = Depends(require_permission("pagamento_cadastro", "excluir")),
+                          tenant_id: int = Depends(require_tenant_id),
+                          db: AsyncSession = Depends(get_db)):
+    await svc.excluir_contrato(db, tenant_id=tenant_id, contrato_id=contrato_id)
+
+
+alcadas_router = APIRouter(prefix="/pagamentos/alcadas", tags=["pagamentos-cadastros"])
+
+
+@alcadas_router.get("", response_model=list[AlcadaOut])
+async def list_alcadas(_: Usuario = Depends(require_permission("pagamento_cadastro")),
+                       tenant_id: int = Depends(require_tenant_id),
+                       db: AsyncSession = Depends(get_db)):
+    return [AlcadaOut.model_validate(r) for r in await svc.listar_alcadas(db, tenant_id=tenant_id)]
+
+
+@alcadas_router.get("/{alcada_id}", response_model=AlcadaOut)
+async def get_alcada(alcada_id: int,
+                     _: Usuario = Depends(require_permission("pagamento_cadastro")),
+                     tenant_id: int = Depends(require_tenant_id),
+                     db: AsyncSession = Depends(get_db)):
+    return AlcadaOut.model_validate(await svc.obter_alcada(db, tenant_id=tenant_id, alcada_id=alcada_id))
+
+
+@alcadas_router.post("", response_model=AlcadaOut, status_code=status.HTTP_201_CREATED)
+async def create_alcada(payload: AlcadaCreate,
+                        _: Usuario = Depends(require_permission("pagamento_cadastro", "inserir")),
+                        tenant_id: int = Depends(require_tenant_id),
+                        db: AsyncSession = Depends(get_db)):
+    return AlcadaOut.model_validate(await svc.criar_alcada(db, tenant_id=tenant_id, payload=payload))
+
+
+@alcadas_router.put("/{alcada_id}", response_model=AlcadaOut)
+async def update_alcada(alcada_id: int, payload: AlcadaUpdate,
+                        _: Usuario = Depends(require_permission("pagamento_cadastro", "atualizar")),
+                        tenant_id: int = Depends(require_tenant_id),
+                        db: AsyncSession = Depends(get_db)):
+    return AlcadaOut.model_validate(
+        await svc.atualizar_alcada(db, tenant_id=tenant_id, alcada_id=alcada_id, payload=payload))
+
+
+@alcadas_router.delete("/{alcada_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_alcada(alcada_id: int,
+                        _: Usuario = Depends(require_permission("pagamento_cadastro", "excluir")),
+                        tenant_id: int = Depends(require_tenant_id),
+                        db: AsyncSession = Depends(get_db)):
+    await svc.excluir_alcada(db, tenant_id=tenant_id, alcada_id=alcada_id)

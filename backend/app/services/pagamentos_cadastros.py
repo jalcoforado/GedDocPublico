@@ -9,9 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core import crypto
-from ..models import ContaBancaria, Credor, FonteRecursos, NaturezaDespesa
+from ..models import Alcada, ContaBancaria, Contrato, Credor, FonteRecursos, NaturezaDespesa, UnidadeTrabalho
 from ..schemas.pagamentos import (
+    AlcadaCreate, AlcadaUpdate,
     ContaCreate, ContaUpdate,
+    ContratoCreate, ContratoUpdate,
     CredorCreate, CredorUpdate, DadosBancarios,
     FonteCreate, FonteUpdate, NaturezaCreate, NaturezaUpdate,
 )
@@ -249,3 +251,125 @@ async def atualizar_conta(db: AsyncSession, *, tenant_id: int, conta_id: int,
 async def excluir_conta(db: AsyncSession, *, tenant_id: int, conta_id: int) -> None:
     c = await obter_conta(db, tenant_id=tenant_id, conta_id=conta_id)
     c.excluido = True; c.atualizado_em = _utcnow(); await db.commit()
+
+
+# ============================ contrato =========================================
+
+async def _numero_unico(db: AsyncSession, *, tenant_id: int, numero: str,
+                         excluir_id: int | None = None) -> None:
+    stmt = select(Contrato.id).where(Contrato.tenant_id == tenant_id, Contrato.numero == numero,
+                                      Contrato.excluido.is_(False))
+    if excluir_id is not None:
+        stmt = stmt.where(Contrato.id != excluir_id)
+    if (await db.execute(stmt)).scalar_one_or_none() is not None:
+        raise PagamentoCadastroError(f"Já existe contrato número '{numero}'.", status.HTTP_409_CONFLICT)
+
+
+async def _validar_unidade(db: AsyncSession, *, tenant_id: int, id_unidade: int) -> None:
+    u = (await db.execute(select(UnidadeTrabalho.id).where(
+        UnidadeTrabalho.id == id_unidade, UnidadeTrabalho.tenant_id == tenant_id,
+        UnidadeTrabalho.excluido.is_(False)))).scalar_one_or_none()
+    if u is None:
+        raise PagamentoCadastroError("Unidade (órgão) inválida.", status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+
+async def obter_contrato(db: AsyncSession, *, tenant_id: int, contrato_id: int) -> Contrato:
+    c = (await db.execute(select(Contrato).where(
+        Contrato.id == contrato_id, Contrato.tenant_id == tenant_id,
+        Contrato.excluido.is_(False)))).scalar_one_or_none()
+    if c is None:
+        raise PagamentoCadastroError("Contrato não encontrado", status.HTTP_404_NOT_FOUND)
+    return c
+
+
+async def listar_contratos(db: AsyncSession, *, tenant_id: int) -> list[Contrato]:
+    stmt = select(Contrato).where(Contrato.tenant_id == tenant_id, Contrato.excluido.is_(False))
+    return list((await db.execute(stmt.order_by(Contrato.numero))).scalars().all())
+
+
+async def criar_contrato(db: AsyncSession, *, tenant_id: int, payload: ContratoCreate) -> Contrato:
+    await _numero_unico(db, tenant_id=tenant_id, numero=payload.numero)
+    await obter_credor(db, tenant_id=tenant_id, credor_id=payload.id_credor)
+    await _validar_unidade(db, tenant_id=tenant_id, id_unidade=payload.id_unidade)
+    c = Contrato(tenant_id=tenant_id, criado_em=_utcnow(), **payload.model_dump())
+    db.add(c); await db.commit(); await db.refresh(c)
+    return c
+
+
+async def atualizar_contrato(db: AsyncSession, *, tenant_id: int, contrato_id: int,
+                              payload: ContratoUpdate) -> Contrato:
+    c = await obter_contrato(db, tenant_id=tenant_id, contrato_id=contrato_id)
+    dados = payload.model_dump(exclude_unset=True)
+    if "numero" in dados:
+        await _numero_unico(db, tenant_id=tenant_id, numero=dados["numero"], excluir_id=contrato_id)
+    if "id_credor" in dados:
+        await obter_credor(db, tenant_id=tenant_id, credor_id=dados["id_credor"])
+    if "id_unidade" in dados:
+        await _validar_unidade(db, tenant_id=tenant_id, id_unidade=dados["id_unidade"])
+    for k, v in dados.items():
+        setattr(c, k, v)
+    c.atualizado_em = _utcnow(); await db.commit(); await db.refresh(c)
+    return c
+
+
+async def excluir_contrato(db: AsyncSession, *, tenant_id: int, contrato_id: int) -> None:
+    c = await obter_contrato(db, tenant_id=tenant_id, contrato_id=contrato_id)
+    c.excluido = True; c.atualizado_em = _utcnow(); await db.commit()
+
+
+# ============================ alcada ============================================
+
+async def _alcada_unica(db: AsyncSession, *, tenant_id: int, id_usuario: int, id_natureza: int | None,
+                         excluir_id: int | None = None) -> None:
+    stmt = select(Alcada.id).where(Alcada.tenant_id == tenant_id, Alcada.id_usuario == id_usuario,
+                                    Alcada.excluido.is_(False))
+    if id_natureza is None:
+        stmt = stmt.where(Alcada.id_natureza.is_(None))
+    else:
+        stmt = stmt.where(Alcada.id_natureza == id_natureza)
+    if excluir_id is not None:
+        stmt = stmt.where(Alcada.id != excluir_id)
+    if (await db.execute(stmt)).scalar_one_or_none() is not None:
+        raise PagamentoCadastroError("Já existe alçada para este usuário/natureza.", status.HTTP_409_CONFLICT)
+
+
+async def obter_alcada(db: AsyncSession, *, tenant_id: int, alcada_id: int) -> Alcada:
+    a = (await db.execute(select(Alcada).where(
+        Alcada.id == alcada_id, Alcada.tenant_id == tenant_id,
+        Alcada.excluido.is_(False)))).scalar_one_or_none()
+    if a is None:
+        raise PagamentoCadastroError("Alçada não encontrada", status.HTTP_404_NOT_FOUND)
+    return a
+
+
+async def listar_alcadas(db: AsyncSession, *, tenant_id: int) -> list[Alcada]:
+    stmt = select(Alcada).where(Alcada.tenant_id == tenant_id, Alcada.excluido.is_(False))
+    return list((await db.execute(stmt.order_by(Alcada.id))).scalars().all())
+
+
+async def criar_alcada(db: AsyncSession, *, tenant_id: int, payload: AlcadaCreate) -> Alcada:
+    await _alcada_unica(db, tenant_id=tenant_id, id_usuario=payload.id_usuario,
+                         id_natureza=payload.id_natureza)
+    a = Alcada(tenant_id=tenant_id, criado_em=_utcnow(), **payload.model_dump())
+    db.add(a); await db.commit(); await db.refresh(a)
+    return a
+
+
+async def atualizar_alcada(db: AsyncSession, *, tenant_id: int, alcada_id: int,
+                            payload: AlcadaUpdate) -> Alcada:
+    a = await obter_alcada(db, tenant_id=tenant_id, alcada_id=alcada_id)
+    dados = payload.model_dump(exclude_unset=True)
+    if "id_usuario" in dados or "id_natureza" in dados:
+        id_usuario = dados.get("id_usuario", a.id_usuario)
+        id_natureza = dados.get("id_natureza", a.id_natureza)
+        await _alcada_unica(db, tenant_id=tenant_id, id_usuario=id_usuario, id_natureza=id_natureza,
+                             excluir_id=alcada_id)
+    for k, v in dados.items():
+        setattr(a, k, v)
+    a.atualizado_em = _utcnow(); await db.commit(); await db.refresh(a)
+    return a
+
+
+async def excluir_alcada(db: AsyncSession, *, tenant_id: int, alcada_id: int) -> None:
+    a = await obter_alcada(db, tenant_id=tenant_id, alcada_id=alcada_id)
+    a.excluido = True; a.atualizado_em = _utcnow(); await db.commit()

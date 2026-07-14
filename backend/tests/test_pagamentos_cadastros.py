@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.pagamentos import (
-    ContaCreate, CredorCreate, CredorUpdate, DadosBancarios,
+    AlcadaCreate, ContaCreate, ContratoCreate, CredorCreate, CredorUpdate, DadosBancarios,
     FonteCreate, NaturezaCreate,
 )
 from app.services import pagamentos_cadastros as svc
@@ -58,6 +58,8 @@ async def _criar(engine, tenant_id, *, cnpj_cpf=None, dados_bancarios=None):
 async def _cleanup(engine, tenant_id: int) -> None:
     async with _sm(engine)() as s:
         for stmt in (
+            "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
             "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
             "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
             "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
@@ -246,5 +248,75 @@ async def test_conta_valida_fonte_grupo(admin_engine):
                     ),
                 )
             assert exc.value.status_code == 422
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+# ============================ contrato / alcada ================================
+async def test_contrato_e_alcada_crud(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        credor = await _criar(admin_engine, t.id)
+
+        async with _sm(admin_engine)() as s:
+            id_unidade = (await s.execute(
+                text("SELECT id FROM utils.unidade_trabalho WHERE tenant_id=:t AND excluido=false LIMIT 1"),
+                {"t": t.id},
+            )).scalar_one()
+            id_usuario = (await s.execute(
+                text("SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id},
+            )).scalar_one()
+
+        async with _sm(admin_engine)() as s:
+            contrato = await svc.criar_contrato(
+                s, tenant_id=t.id,
+                payload=ContratoCreate(
+                    numero="CT-001/2026", id_credor=credor.id, id_unidade=id_unidade,
+                    objeto="Fornecimento", vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
+                    valor_total="100000.00",
+                ),
+            )
+        assert contrato.numero == "CT-001/2026"
+        assert contrato.tenant_id == t.id
+
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.criar_contrato(
+                    s, tenant_id=t.id,
+                    payload=ContratoCreate(
+                        numero="CT-001/2026", id_credor=credor.id, id_unidade=id_unidade,
+                        objeto="x", vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
+                        valor_total="1.00",
+                    ),
+                )
+            assert exc.value.status_code == 409
+
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.criar_contrato(
+                    s, tenant_id=t.id,
+                    payload=ContratoCreate(
+                        numero="CT-002/2026", id_credor=credor.id, id_unidade=999999,
+                        objeto="x", vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
+                        valor_total="1.00",
+                    ),
+                )
+            assert exc.value.status_code == 422
+
+        async with _sm(admin_engine)() as s:
+            alcada = await svc.criar_alcada(
+                s, tenant_id=t.id,
+                payload=AlcadaCreate(id_usuario=id_usuario, valor_maximo="500000.00"),
+            )
+        assert alcada.id_usuario == id_usuario
+        assert alcada.tenant_id == t.id
+
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.criar_alcada(
+                    s, tenant_id=t.id,
+                    payload=AlcadaCreate(id_usuario=id_usuario, valor_maximo="1.00"),
+                )
+            assert exc.value.status_code == 409
     finally:
         await _cleanup(admin_engine, t.id)
