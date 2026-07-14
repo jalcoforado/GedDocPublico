@@ -9,6 +9,7 @@ from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Usuario
 from ..schemas.pagamentos import (
+    ContaCreate, ContaOut, ContaUpdate,
     CredorCreate, CredorDadosBancariosOut, CredorOut, CredorUpdate,
     FonteCreate, FonteOut, FonteUpdate, NaturezaCreate, NaturezaOut, NaturezaUpdate,
 )
@@ -155,3 +156,46 @@ async def delete_fonte(fonte_id: int,
                        tenant_id: int = Depends(require_tenant_id),
                        db: AsyncSession = Depends(get_db)):
     await svc.excluir_fonte(db, tenant_id=tenant_id, fonte_id=fonte_id)
+
+
+contas_router = APIRouter(prefix="/pagamentos/contas", tags=["pagamentos-cadastros"])
+
+
+@contas_router.get("", response_model=list[ContaOut])
+async def list_contas(_: Usuario = Depends(require_permission("pagamento_cadastro")),
+                      tenant_id: int = Depends(require_tenant_id),
+                      db: AsyncSession = Depends(get_db)):
+    return [ContaOut.model_validate(r) for r in await svc.listar_contas(db, tenant_id=tenant_id)]
+
+
+@contas_router.get("/{conta_id}", response_model=ContaOut)
+async def get_conta(conta_id: int,
+                    _: Usuario = Depends(require_permission("pagamento_cadastro")),
+                    tenant_id: int = Depends(require_tenant_id),
+                    db: AsyncSession = Depends(get_db)):
+    return ContaOut.model_validate(await svc.obter_conta(db, tenant_id=tenant_id, conta_id=conta_id))
+
+
+@contas_router.post("", response_model=ContaOut, status_code=status.HTTP_201_CREATED)
+async def create_conta(payload: ContaCreate,
+                       _: Usuario = Depends(require_permission("pagamento_cadastro", "inserir")),
+                       tenant_id: int = Depends(require_tenant_id),
+                       db: AsyncSession = Depends(get_db)):
+    return ContaOut.model_validate(await svc.criar_conta(db, tenant_id=tenant_id, payload=payload))
+
+
+@contas_router.put("/{conta_id}", response_model=ContaOut)
+async def update_conta(conta_id: int, payload: ContaUpdate,
+                       _: Usuario = Depends(require_permission("pagamento_cadastro", "atualizar")),
+                       tenant_id: int = Depends(require_tenant_id),
+                       db: AsyncSession = Depends(get_db)):
+    return ContaOut.model_validate(
+        await svc.atualizar_conta(db, tenant_id=tenant_id, conta_id=conta_id, payload=payload))
+
+
+@contas_router.delete("/{conta_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conta(conta_id: int,
+                       _: Usuario = Depends(require_permission("pagamento_cadastro", "excluir")),
+                       tenant_id: int = Depends(require_tenant_id),
+                       db: AsyncSession = Depends(get_db)):
+    await svc.excluir_conta(db, tenant_id=tenant_id, conta_id=conta_id)

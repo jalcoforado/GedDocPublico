@@ -9,8 +9,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core import crypto
-from ..models import Credor, FonteRecursos, NaturezaDespesa
+from ..models import ContaBancaria, Credor, FonteRecursos, NaturezaDespesa
 from ..schemas.pagamentos import (
+    ContaCreate, ContaUpdate,
     CredorCreate, CredorUpdate, DadosBancarios,
     FonteCreate, FonteUpdate, NaturezaCreate, NaturezaUpdate,
 )
@@ -194,3 +195,57 @@ async def atualizar_fonte(db: AsyncSession, *, tenant_id: int, fonte_id: int,
 async def excluir_fonte(db: AsyncSession, *, tenant_id: int, fonte_id: int) -> None:
     f = await obter_fonte(db, tenant_id=tenant_id, fonte_id=fonte_id)
     f.excluido = True; f.atualizado_em = _utcnow(); await db.commit()
+
+
+# ============================ conta_bancaria (fonte x grupo) ==================
+
+async def _validar_fonte_grupo(db: AsyncSession, *, tenant_id: int, id_fonte_recursos: int,
+                                grupo_despesa: str) -> None:
+    fonte = await obter_fonte(db, tenant_id=tenant_id, fonte_id=id_fonte_recursos)
+    permitidos = fonte.grupos_despesa_permitidos or []
+    if permitidos and grupo_despesa not in permitidos:
+        raise PagamentoCadastroError(
+            f"Grupo '{grupo_despesa}' incompatível com a fonte '{fonte.codigo}'.",
+            status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+
+async def obter_conta(db: AsyncSession, *, tenant_id: int, conta_id: int) -> ContaBancaria:
+    c = (await db.execute(select(ContaBancaria).where(
+        ContaBancaria.id == conta_id, ContaBancaria.tenant_id == tenant_id,
+        ContaBancaria.excluido.is_(False)))).scalar_one_or_none()
+    if c is None:
+        raise PagamentoCadastroError("Conta não encontrada", status.HTTP_404_NOT_FOUND)
+    return c
+
+
+async def listar_contas(db: AsyncSession, *, tenant_id: int) -> list[ContaBancaria]:
+    stmt = select(ContaBancaria).where(ContaBancaria.tenant_id == tenant_id,
+                                        ContaBancaria.excluido.is_(False))
+    return list((await db.execute(stmt.order_by(ContaBancaria.nome))).scalars().all())
+
+
+async def criar_conta(db: AsyncSession, *, tenant_id: int, payload: ContaCreate) -> ContaBancaria:
+    await _validar_fonte_grupo(db, tenant_id=tenant_id, id_fonte_recursos=payload.id_fonte_recursos,
+                                grupo_despesa=payload.grupo_despesa)
+    c = ContaBancaria(tenant_id=tenant_id, criado_em=_utcnow(), **payload.model_dump())
+    db.add(c); await db.commit(); await db.refresh(c)
+    return c
+
+
+async def atualizar_conta(db: AsyncSession, *, tenant_id: int, conta_id: int,
+                           payload: ContaUpdate) -> ContaBancaria:
+    c = await obter_conta(db, tenant_id=tenant_id, conta_id=conta_id)
+    dados = payload.model_dump(exclude_unset=True)
+    if "id_fonte_recursos" in dados or "grupo_despesa" in dados:
+        fonte_id = dados.get("id_fonte_recursos", c.id_fonte_recursos)
+        grupo = dados.get("grupo_despesa", c.grupo_despesa)
+        await _validar_fonte_grupo(db, tenant_id=tenant_id, id_fonte_recursos=fonte_id, grupo_despesa=grupo)
+    for k, v in dados.items():
+        setattr(c, k, v)
+    c.atualizado_em = _utcnow(); await db.commit(); await db.refresh(c)
+    return c
+
+
+async def excluir_conta(db: AsyncSession, *, tenant_id: int, conta_id: int) -> None:
+    c = await obter_conta(db, tenant_id=tenant_id, conta_id=conta_id)
+    c.excluido = True; c.atualizado_em = _utcnow(); await db.commit()

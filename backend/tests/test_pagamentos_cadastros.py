@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.pagamentos import (
-    CredorCreate, CredorUpdate, DadosBancarios,
+    ContaCreate, CredorCreate, CredorUpdate, DadosBancarios,
     FonteCreate, NaturezaCreate,
 )
 from app.services import pagamentos_cadastros as svc
@@ -59,6 +59,7 @@ async def _cleanup(engine, tenant_id: int) -> None:
     async with _sm(engine)() as s:
         for stmt in (
             "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
             "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
             "DELETE FROM pagamentos.credor WHERE tenant_id=:t",
             "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
@@ -206,5 +207,44 @@ async def test_natureza_e_fonte_crud(admin_engine):
                 ),
             )
         assert fonte.grupos_despesa_permitidos == ["CUSTEIO", "INVESTIMENTO"]
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+# ============================ conta_bancaria (fonte x grupo) ==================
+async def test_conta_valida_fonte_grupo(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            fonte = await svc.criar_fonte(
+                s, tenant_id=t.id,
+                payload=FonteCreate(
+                    codigo="600", descricao="F", grupos_despesa_permitidos=["CUSTEIO"],
+                ),
+            )
+
+        # grupo compatível → cria com sucesso
+        async with _sm(admin_engine)() as s:
+            ok = await svc.criar_conta(
+                s, tenant_id=t.id,
+                payload=ContaCreate(
+                    nome="Conta A", banco="001", agencia="1", conta="2",
+                    id_fonte_recursos=fonte.id, grupo_despesa="CUSTEIO",
+                ),
+            )
+        assert ok.id is not None
+        assert ok.grupo_despesa == "CUSTEIO"
+
+        # grupo incompatível → 422
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.criar_conta(
+                    s, tenant_id=t.id,
+                    payload=ContaCreate(
+                        nome="Conta B", banco="001", agencia="1", conta="3",
+                        id_fonte_recursos=fonte.id, grupo_despesa="INVESTIMENTO",
+                    ),
+                )
+            assert exc.value.status_code == 422
     finally:
         await _cleanup(admin_engine, t.id)
