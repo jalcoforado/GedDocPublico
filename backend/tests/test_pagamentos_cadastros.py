@@ -1,4 +1,4 @@
-"""Pagamentos PAG-1 — cadastro de Credor.
+"""Pagamentos PAG-1 — cadastro de Fornecedor.
 
 Cobre o serviço de domínio (`services/pagamentos_cadastros.py`): CRUD
 tenant-scoped, cifragem Fernet dos dados bancários em repouso, unicidade de
@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.pagamentos import (
-    AlcadaCreate, ContaCreate, ContratoCreate, CredorCreate, CredorUpdate, DadosBancarios,
+    AlcadaCreate, ContaCreate, ContratoCreate, FornecedorCreate, FornecedorUpdate, DadosBancarios,
     FonteCreate, NaturezaCreate,
 )
 from app.services import pagamentos_cadastros as svc
@@ -46,9 +46,9 @@ def _doc() -> str:
 
 async def _criar(engine, tenant_id, *, cnpj_cpf=None, dados_bancarios=None):
     async with _sm(engine)() as s:
-        return await svc.criar_credor(
+        return await svc.criar_fornecedor(
             s, tenant_id=tenant_id,
-            payload=CredorCreate(
+            payload=FornecedorCreate(
                 tipo_pessoa="JURIDICA", cnpj_cpf=cnpj_cpf or _doc(), nome="Medlar LTDA",
                 dados_bancarios=dados_bancarios,
             ),
@@ -63,7 +63,7 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
             "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
             "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.credor WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
             "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
             "DELETE FROM utils.grupo WHERE tenant_id=:t",
             "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
@@ -78,25 +78,25 @@ async def _cleanup(engine, tenant_id: int) -> None:
 
 
 # ============================ Criação + cifragem =============================
-async def test_criar_credor_com_dados_bancarios(admin_engine):
+async def test_criar_fornecedor_com_dados_bancarios(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         dados = DadosBancarios(banco="001", agencia="1234", conta="5678-9", chave_pix="pix@medlar")
         c = await _criar(admin_engine, t.id, dados_bancarios=dados)
-        saida = svc.credor_out(c)
+        saida = svc.fornecedor_out(c)
         assert saida["tem_dados_bancarios"] is True
         assert c.tenant_id == t.id
     finally:
         await _cleanup(admin_engine, t.id)
 
 
-async def test_dados_bancarios_credor_decifra_corretamente(admin_engine):
+async def test_dados_bancarios_fornecedor_decifra_corretamente(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         dados = DadosBancarios(banco="001", agencia="1234", conta="5678-9", chave_pix="pix@medlar")
         c = await _criar(admin_engine, t.id, dados_bancarios=dados)
         async with _sm(admin_engine)() as s:
-            revelado = await svc.dados_bancarios_credor(s, tenant_id=t.id, credor_id=c.id)
+            revelado = await svc.dados_bancarios_fornecedor(s, tenant_id=t.id, fornecedor_id=c.id)
         assert revelado.chave_pix == "pix@medlar"
         assert revelado.banco == "001"
         assert revelado.agencia == "1234"
@@ -113,7 +113,7 @@ async def test_dados_bancarios_cifrados_em_repouso(admin_engine):
         async with _sm(admin_engine)() as s:
             row = (
                 await s.execute(
-                    text("SELECT conta_cif FROM pagamentos.credor WHERE id=:i"), {"i": c.id}
+                    text("SELECT conta_cif FROM pagamentos.fornecedor WHERE id=:i"), {"i": c.id}
                 )
             ).fetchone()
         assert row[0] is not None
@@ -136,30 +136,30 @@ async def test_cnpj_cpf_duplicado_mesmo_tenant_409(admin_engine):
 
 
 # ============================ Re-cifragem no update ===========================
-async def test_atualizar_credor_recifra(admin_engine):
+async def test_atualizar_fornecedor_recifra(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         c = await _criar(admin_engine, t.id, dados_bancarios=DadosBancarios(conta="ANTIGO111"))
         async with _sm(admin_engine)() as s:
-            atualizado = await svc.atualizar_credor(
-                s, tenant_id=t.id, credor_id=c.id,
-                payload=CredorUpdate(
+            atualizado = await svc.atualizar_fornecedor(
+                s, tenant_id=t.id, fornecedor_id=c.id,
+                payload=FornecedorUpdate(
                     dados_bancarios=DadosBancarios(conta="NOVOSEGREDO999", chave_pix="novo@pix")
                 ),
             )
-        assert svc.credor_out(atualizado)["tem_dados_bancarios"] is True
+        assert svc.fornecedor_out(atualizado)["tem_dados_bancarios"] is True
         # cifrado em repouso: sessão nova, SELECT bruto não expõe o texto puro
         async with _sm(admin_engine)() as s:
             row = (
                 await s.execute(
-                    text("SELECT conta_cif FROM pagamentos.credor WHERE id=:i"), {"i": c.id}
+                    text("SELECT conta_cif FROM pagamentos.fornecedor WHERE id=:i"), {"i": c.id}
                 )
             ).fetchone()
         assert row[0] is not None
         assert "NOVOSEGREDO999" not in row[0]
         # reveal decifra os novos valores
         async with _sm(admin_engine)() as s:
-            revelado = await svc.dados_bancarios_credor(s, tenant_id=t.id, credor_id=c.id)
+            revelado = await svc.dados_bancarios_fornecedor(s, tenant_id=t.id, fornecedor_id=c.id)
         assert revelado.conta == "NOVOSEGREDO999"
         assert revelado.chave_pix == "novo@pix"
     finally:
@@ -167,14 +167,14 @@ async def test_atualizar_credor_recifra(admin_engine):
 
 
 # ============================ Cross-tenant 404 =================================
-async def test_obter_credor_cross_tenant_404(admin_engine):
+async def test_obter_fornecedor_cross_tenant_404(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
     try:
         ca = await _criar(admin_engine, a.id)
         async with _sm(admin_engine)() as s:
             with pytest.raises(HTTPException) as exc:
-                await svc.obter_credor(s, tenant_id=b.id, credor_id=ca.id)
+                await svc.obter_fornecedor(s, tenant_id=b.id, fornecedor_id=ca.id)
             assert exc.value.status_code == 404
     finally:
         await _cleanup(admin_engine, a.id)
@@ -256,7 +256,7 @@ async def test_conta_valida_fonte_grupo(admin_engine):
 async def test_contrato_e_alcada_crud(admin_engine):
     t = await _provisionar(admin_engine)
     try:
-        credor = await _criar(admin_engine, t.id)
+        fornecedor = await _criar(admin_engine, t.id)
 
         async with _sm(admin_engine)() as s:
             id_unidade = (await s.execute(
@@ -271,7 +271,7 @@ async def test_contrato_e_alcada_crud(admin_engine):
             contrato = await svc.criar_contrato(
                 s, tenant_id=t.id,
                 payload=ContratoCreate(
-                    numero="CT-001/2026", id_credor=credor.id, id_unidade=id_unidade,
+                    numero="CT-001/2026", id_fornecedor=fornecedor.id, id_unidade=id_unidade,
                     objeto="Fornecimento", vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
                     valor_total="100000.00",
                 ),
@@ -284,7 +284,7 @@ async def test_contrato_e_alcada_crud(admin_engine):
                 await svc.criar_contrato(
                     s, tenant_id=t.id,
                     payload=ContratoCreate(
-                        numero="CT-001/2026", id_credor=credor.id, id_unidade=id_unidade,
+                        numero="CT-001/2026", id_fornecedor=fornecedor.id, id_unidade=id_unidade,
                         objeto="x", vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
                         valor_total="1.00",
                     ),
@@ -296,7 +296,7 @@ async def test_contrato_e_alcada_crud(admin_engine):
                 await svc.criar_contrato(
                     s, tenant_id=t.id,
                     payload=ContratoCreate(
-                        numero="CT-002/2026", id_credor=credor.id, id_unidade=999999,
+                        numero="CT-002/2026", id_fornecedor=fornecedor.id, id_unidade=999999,
                         objeto="x", vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
                         valor_total="1.00",
                     ),

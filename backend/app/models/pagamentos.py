@@ -1,5 +1,5 @@
 """Models do módulo de Pagamentos — cadastros (PAG-1). Schema `pagamentos`,
-tenant-scoped com RLS (migration 0045). Dados bancários do credor guardados
+tenant-scoped com RLS (migration 0045). Dados bancários do fornecedor guardados
 cifrados (colunas *_cif); a cifra/decifra é responsabilidade do serviço."""
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ class GrupoDespesa(str, enum.Enum):
     DIVIDA = "DIVIDA"; OUTRAS = "OUTRAS"
 
 
-class Credor(Base):
-    __tablename__ = "credor"
+class Fornecedor(Base):
+    __tablename__ = "fornecedor"
     __table_args__ = {"schema": "pagamentos"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
@@ -83,6 +83,7 @@ class ContaBancaria(Base):
     id_fonte_recursos: Mapped[int] = mapped_column(ForeignKey("pagamentos.fonte_recursos.id"), nullable=False)
     grupo_despesa: Mapped[str] = mapped_column(String(20), nullable=False)
     saldo_minimo_alerta: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    saldo_inicial: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     ativa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -95,7 +96,7 @@ class Contrato(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
     numero: Mapped[str] = mapped_column(String(50), nullable=False)
-    id_credor: Mapped[int] = mapped_column(ForeignKey("pagamentos.credor.id"), nullable=False)
+    id_fornecedor: Mapped[int] = mapped_column(ForeignKey("pagamentos.fornecedor.id"), nullable=False)
     id_unidade: Mapped[int] = mapped_column(ForeignKey("utils.unidade_trabalho.id"), nullable=False)
     objeto: Mapped[str] = mapped_column(String(255), nullable=False)
     vigencia_inicio: Mapped[date] = mapped_column(Date, nullable=False)

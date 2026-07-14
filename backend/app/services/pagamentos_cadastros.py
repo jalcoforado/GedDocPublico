@@ -1,5 +1,5 @@
 """Cadastros de Pagamentos — serviço de domínio (PAG-1). tenant-scoped, soft-delete,
-unicidade por tenant. Dados bancários do credor cifrados via app.core.crypto."""
+unicidade por tenant. Dados bancários do fornecedor cifrados via app.core.crypto."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -9,12 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core import crypto
-from ..models import Alcada, ContaBancaria, Contrato, Credor, FonteRecursos, NaturezaDespesa, UnidadeTrabalho
+from ..models import Alcada, ContaBancaria, Contrato, Fornecedor, FonteRecursos, NaturezaDespesa, UnidadeTrabalho
 from ..schemas.pagamentos import (
     AlcadaCreate, AlcadaUpdate,
     ContaCreate, ContaUpdate,
     ContratoCreate, ContratoUpdate,
-    CredorCreate, CredorUpdate, DadosBancarios,
+    FornecedorCreate, FornecedorUpdate, DadosBancarios,
     FonteCreate, FonteUpdate, NaturezaCreate, NaturezaUpdate,
 )
 
@@ -28,7 +28,7 @@ class PagamentoCadastroError(HTTPException):
         super().__init__(status_code=code, detail=detail)
 
 
-def credor_out(c: Credor) -> dict:
+def fornecedor_out(c: Fornecedor) -> dict:
     return {
         "id": c.id, "tipo_pessoa": c.tipo_pessoa, "cnpj_cpf": c.cnpj_cpf, "nome": c.nome,
         "situacao_cadastral": c.situacao_cadastral, "motivo_pendencia": c.motivo_pendencia,
@@ -38,15 +38,15 @@ def credor_out(c: Credor) -> dict:
 
 
 async def _validar_doc_unico(db, *, tenant_id: int, cnpj_cpf: str, excluir_id: int | None = None) -> None:
-    stmt = select(Credor.id).where(Credor.tenant_id == tenant_id, Credor.cnpj_cpf == cnpj_cpf,
-                                   Credor.excluido.is_(False))
+    stmt = select(Fornecedor.id).where(Fornecedor.tenant_id == tenant_id, Fornecedor.cnpj_cpf == cnpj_cpf,
+                                        Fornecedor.excluido.is_(False))
     if excluir_id is not None:
-        stmt = stmt.where(Credor.id != excluir_id)
+        stmt = stmt.where(Fornecedor.id != excluir_id)
     if (await db.execute(stmt)).scalar_one_or_none() is not None:
-        raise PagamentoCadastroError(f"Já existe credor com o documento '{cnpj_cpf}'.", status.HTTP_409_CONFLICT)
+        raise PagamentoCadastroError(f"Já existe fornecedor com o documento '{cnpj_cpf}'.", status.HTTP_409_CONFLICT)
 
 
-def _aplicar_dados_bancarios(c: Credor, db_dados: DadosBancarios | None) -> None:
+def _aplicar_dados_bancarios(c: Fornecedor, db_dados: DadosBancarios | None) -> None:
     if db_dados is None:
         return
     c.banco_cif = crypto.encrypt(db_dados.banco)
@@ -55,36 +55,37 @@ def _aplicar_dados_bancarios(c: Credor, db_dados: DadosBancarios | None) -> None
     c.chave_pix_cif = crypto.encrypt(db_dados.chave_pix)
 
 
-async def obter_credor(db: AsyncSession, *, tenant_id: int, credor_id: int) -> Credor:
-    c = (await db.execute(select(Credor).where(Credor.id == credor_id, Credor.tenant_id == tenant_id,
-                                               Credor.excluido.is_(False)))).scalar_one_or_none()
+async def obter_fornecedor(db: AsyncSession, *, tenant_id: int, fornecedor_id: int) -> Fornecedor:
+    c = (await db.execute(select(Fornecedor).where(Fornecedor.id == fornecedor_id, Fornecedor.tenant_id == tenant_id,
+                                                     Fornecedor.excluido.is_(False)))).scalar_one_or_none()
     if c is None:
-        raise PagamentoCadastroError("Credor não encontrado", status.HTTP_404_NOT_FOUND)
+        raise PagamentoCadastroError("Fornecedor não encontrado", status.HTTP_404_NOT_FOUND)
     return c
 
 
-async def listar_credores(db: AsyncSession, *, tenant_id: int, q: str | None = None) -> list[Credor]:
-    stmt = select(Credor).where(Credor.tenant_id == tenant_id, Credor.excluido.is_(False))
+async def listar_fornecedores(db: AsyncSession, *, tenant_id: int, q: str | None = None) -> list[Fornecedor]:
+    stmt = select(Fornecedor).where(Fornecedor.tenant_id == tenant_id, Fornecedor.excluido.is_(False))
     if q:
-        stmt = stmt.where(Credor.nome.ilike(f"%{q}%"))
-    return list((await db.execute(stmt.order_by(Credor.nome))).scalars().all())
+        stmt = stmt.where(Fornecedor.nome.ilike(f"%{q}%"))
+    return list((await db.execute(stmt.order_by(Fornecedor.nome))).scalars().all())
 
 
-async def criar_credor(db: AsyncSession, *, tenant_id: int, payload: CredorCreate) -> Credor:
+async def criar_fornecedor(db: AsyncSession, *, tenant_id: int, payload: FornecedorCreate) -> Fornecedor:
     await _validar_doc_unico(db, tenant_id=tenant_id, cnpj_cpf=payload.cnpj_cpf)
-    c = Credor(tenant_id=tenant_id, tipo_pessoa=payload.tipo_pessoa, cnpj_cpf=payload.cnpj_cpf,
-               nome=payload.nome, situacao_cadastral=payload.situacao_cadastral,
-               motivo_pendencia=payload.motivo_pendencia, criado_em=_utcnow())
+    c = Fornecedor(tenant_id=tenant_id, tipo_pessoa=payload.tipo_pessoa, cnpj_cpf=payload.cnpj_cpf,
+                    nome=payload.nome, situacao_cadastral=payload.situacao_cadastral,
+                    motivo_pendencia=payload.motivo_pendencia, criado_em=_utcnow())
     _aplicar_dados_bancarios(c, payload.dados_bancarios)
     db.add(c); await db.commit(); await db.refresh(c)
     return c
 
 
-async def atualizar_credor(db: AsyncSession, *, tenant_id: int, credor_id: int, payload: CredorUpdate) -> Credor:
-    c = await obter_credor(db, tenant_id=tenant_id, credor_id=credor_id)
+async def atualizar_fornecedor(db: AsyncSession, *, tenant_id: int, fornecedor_id: int,
+                                payload: FornecedorUpdate) -> Fornecedor:
+    c = await obter_fornecedor(db, tenant_id=tenant_id, fornecedor_id=fornecedor_id)
     dados = payload.model_dump(exclude_unset=True)
     if "cnpj_cpf" in dados:
-        await _validar_doc_unico(db, tenant_id=tenant_id, cnpj_cpf=dados["cnpj_cpf"], excluir_id=credor_id)
+        await _validar_doc_unico(db, tenant_id=tenant_id, cnpj_cpf=dados["cnpj_cpf"], excluir_id=fornecedor_id)
     for campo in ("tipo_pessoa", "cnpj_cpf", "nome", "situacao_cadastral", "motivo_pendencia"):
         if campo in dados:
             setattr(c, campo, dados[campo])
@@ -94,13 +95,13 @@ async def atualizar_credor(db: AsyncSession, *, tenant_id: int, credor_id: int, 
     return c
 
 
-async def excluir_credor(db: AsyncSession, *, tenant_id: int, credor_id: int) -> None:
-    c = await obter_credor(db, tenant_id=tenant_id, credor_id=credor_id)
+async def excluir_fornecedor(db: AsyncSession, *, tenant_id: int, fornecedor_id: int) -> None:
+    c = await obter_fornecedor(db, tenant_id=tenant_id, fornecedor_id=fornecedor_id)
     c.excluido = True; c.atualizado_em = _utcnow(); await db.commit()
 
 
-async def dados_bancarios_credor(db: AsyncSession, *, tenant_id: int, credor_id: int) -> DadosBancarios:
-    c = await obter_credor(db, tenant_id=tenant_id, credor_id=credor_id)
+async def dados_bancarios_fornecedor(db: AsyncSession, *, tenant_id: int, fornecedor_id: int) -> DadosBancarios:
+    c = await obter_fornecedor(db, tenant_id=tenant_id, fornecedor_id=fornecedor_id)
     return DadosBancarios(banco=crypto.decrypt(c.banco_cif), agencia=crypto.decrypt(c.agencia_cif),
                           conta=crypto.decrypt(c.conta_cif), chave_pix=crypto.decrypt(c.chave_pix_cif))
 
@@ -289,7 +290,7 @@ async def listar_contratos(db: AsyncSession, *, tenant_id: int) -> list[Contrato
 
 async def criar_contrato(db: AsyncSession, *, tenant_id: int, payload: ContratoCreate) -> Contrato:
     await _numero_unico(db, tenant_id=tenant_id, numero=payload.numero)
-    await obter_credor(db, tenant_id=tenant_id, credor_id=payload.id_credor)
+    await obter_fornecedor(db, tenant_id=tenant_id, fornecedor_id=payload.id_fornecedor)
     await _validar_unidade(db, tenant_id=tenant_id, id_unidade=payload.id_unidade)
     c = Contrato(tenant_id=tenant_id, criado_em=_utcnow(), **payload.model_dump())
     db.add(c); await db.commit(); await db.refresh(c)
@@ -302,8 +303,8 @@ async def atualizar_contrato(db: AsyncSession, *, tenant_id: int, contrato_id: i
     dados = payload.model_dump(exclude_unset=True)
     if "numero" in dados:
         await _numero_unico(db, tenant_id=tenant_id, numero=dados["numero"], excluir_id=contrato_id)
-    if "id_credor" in dados:
-        await obter_credor(db, tenant_id=tenant_id, credor_id=dados["id_credor"])
+    if "id_fornecedor" in dados:
+        await obter_fornecedor(db, tenant_id=tenant_id, fornecedor_id=dados["id_fornecedor"])
     if "id_unidade" in dados:
         await _validar_unidade(db, tenant_id=tenant_id, id_unidade=dados["id_unidade"])
     for k, v in dados.items():

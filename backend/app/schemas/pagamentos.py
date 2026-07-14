@@ -1,5 +1,5 @@
 """Schemas dos cadastros de Pagamentos. `*Update` são whitelist (nunca aceitam
-tenant_id/id/excluido/timestamps). CredorOut mascara dados bancários; a revelação
+tenant_id/id/excluido/timestamps). FornecedorOut mascara dados bancários; a revelação
 decifrada é um schema/endpoint separado e auditado."""
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ CriticidadeLit = Literal["URGENTE", "ALTA", "MEDIA", "BAIXA"]
 GrupoDespesaLit = Literal["PESSOAL", "CUSTEIO", "INVESTIMENTO", "DIVIDA", "OUTRAS"]
 
 
-# ---------- credor ----------
+# ---------- fornecedor ----------
 class DadosBancarios(BaseModel):
     banco: str | None = Field(default=None, max_length=200)
     agencia: str | None = Field(default=None, max_length=200)
@@ -23,7 +23,7 @@ class DadosBancarios(BaseModel):
     chave_pix: str | None = Field(default=None, max_length=200)
 
 
-class CredorCreate(BaseModel):
+class FornecedorCreate(BaseModel):
     tipo_pessoa: TipoPessoa
     cnpj_cpf: str = Field(min_length=1, max_length=18)
     nome: str = Field(min_length=1, max_length=200)
@@ -32,7 +32,7 @@ class CredorCreate(BaseModel):
     dados_bancarios: DadosBancarios | None = None
 
 
-class CredorUpdate(BaseModel):
+class FornecedorUpdate(BaseModel):
     tipo_pessoa: TipoPessoa | None = None
     cnpj_cpf: str | None = Field(default=None, max_length=18)
     nome: str | None = Field(default=None, max_length=200)
@@ -41,7 +41,7 @@ class CredorUpdate(BaseModel):
     dados_bancarios: DadosBancarios | None = None
 
 
-class CredorOut(BaseModel):
+class FornecedorOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     tipo_pessoa: TipoPessoa
@@ -54,7 +54,7 @@ class CredorOut(BaseModel):
     atualizado_em: datetime | None
 
 
-class CredorDadosBancariosOut(DadosBancarios):
+class FornecedorDadosBancariosOut(DadosBancarios):
     pass
 
 
@@ -107,6 +107,7 @@ class ContaCreate(BaseModel):
     id_fonte_recursos: int
     grupo_despesa: GrupoDespesaLit
     saldo_minimo_alerta: Decimal = Decimal("0")
+    saldo_inicial: Decimal = Decimal("0")
     ativa: bool = True
 
 
@@ -118,6 +119,7 @@ class ContaUpdate(BaseModel):
     id_fonte_recursos: int | None = None
     grupo_despesa: GrupoDespesaLit | None = None
     saldo_minimo_alerta: Decimal | None = None
+    saldo_inicial: Decimal | None = None
     ativa: bool | None = None
 
 
@@ -125,14 +127,14 @@ class ContaOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int; nome: str; banco: str; agencia: str; conta: str
     id_fonte_recursos: int; grupo_despesa: GrupoDespesaLit
-    saldo_minimo_alerta: Decimal; ativa: bool
+    saldo_minimo_alerta: Decimal; saldo_inicial: Decimal; ativa: bool
     criado_em: datetime; atualizado_em: datetime | None
 
 
 # ---------- contrato ----------
 class ContratoCreate(BaseModel):
     numero: str = Field(min_length=1, max_length=50)
-    id_credor: int
+    id_fornecedor: int
     id_unidade: int
     objeto: str = Field(min_length=1, max_length=255)
     vigencia_inicio: date
@@ -142,7 +144,7 @@ class ContratoCreate(BaseModel):
 
 class ContratoUpdate(BaseModel):
     numero: str | None = Field(default=None, max_length=50)
-    id_credor: int | None = None
+    id_fornecedor: int | None = None
     id_unidade: int | None = None
     objeto: str | None = Field(default=None, max_length=255)
     vigencia_inicio: date | None = None
@@ -152,7 +154,7 @@ class ContratoUpdate(BaseModel):
 
 class ContratoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    id: int; numero: str; id_credor: int; id_unidade: int; objeto: str
+    id: int; numero: str; id_fornecedor: int; id_unidade: int; objeto: str
     vigencia_inicio: date; vigencia_fim: date; valor_total: Decimal
     criado_em: datetime; atualizado_em: datetime | None
 

@@ -1,6 +1,6 @@
 """Cifragem simétrica (Fernet) de dados sensíveis em repouso.
 
-Reutilizável por qualquer campo bancário/sigiloso (credor de pagamentos) e por
+Reutilizável por qualquer campo bancário/sigiloso (fornecedor de pagamentos) e por
 tokens OAuth (PR-D da minuta). Chave em `settings.dados_sensiveis_encryption_key`
 (Fernet key base64). Valores None/"" passam sem cifrar.
 """
