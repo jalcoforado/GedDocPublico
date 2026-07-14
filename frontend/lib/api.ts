@@ -965,6 +965,81 @@ export interface MinutaListItem {
   atualizado_em: string | null;
 }
 
+// ---------- Pagamentos (PAG-1) — cadastros ----------
+export interface Credor {
+  id: number;
+  tipo_pessoa: "FISICA" | "JURIDICA";
+  cnpj_cpf: string;
+  nome: string;
+  situacao_cadastral: "REGULAR" | "PENDENTE" | "IRREGULAR";
+  motivo_pendencia: string | null;
+  tem_dados_bancarios: boolean;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface DadosBancarios {
+  banco: string | null;
+  agencia: string | null;
+  conta: string | null;
+  chave_pix: string | null;
+}
+
+export interface NaturezaDespesa {
+  id: number;
+  codigo: string;
+  descricao: string;
+  criticidade_padrao: "URGENTE" | "ALTA" | "MEDIA" | "BAIXA";
+  ativa: boolean;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface FonteRecursos {
+  id: number;
+  codigo: string;
+  descricao: string;
+  grupos_despesa_permitidos: string[];
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface ContaBancaria {
+  id: number;
+  nome: string;
+  banco: string;
+  agencia: string;
+  conta: string;
+  id_fonte_recursos: number;
+  grupo_despesa: "PESSOAL" | "CUSTEIO" | "INVESTIMENTO" | "DIVIDA" | "OUTRAS";
+  saldo_minimo_alerta: string;
+  ativa: boolean;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface Contrato {
+  id: number;
+  numero: string;
+  id_credor: number;
+  id_unidade: number;
+  objeto: string;
+  vigencia_inicio: string;
+  vigencia_fim: string;
+  valor_total: string;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface Alcada {
+  id: number;
+  id_usuario: number;
+  id_natureza: number | null;
+  valor_maximo: string;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
 export interface MinutaCreateInput {
   titulo: string;
   origem?: MinutaOrigem;
@@ -1966,6 +2041,112 @@ export const api = {
     remove: (id: number) => request<void>(`/minutas/${id}`, { method: "DELETE" }),
     finalizar: (id: number) =>
       request<Minuta>(`/minutas/${id}/finalizar`, { method: "POST" }),
+  },
+
+  // PAG-1 — cadastros de Pagamentos
+  pagamentos: {
+    cadastros: {
+      credores: {
+        list: (q?: string) => request<Credor[]>(`/pagamentos/credores${qs({ q })}`),
+        get: (id: number) => request<Credor>(`/pagamentos/credores/${id}`),
+        dadosBancarios: (id: number) =>
+          request<DadosBancarios>(`/pagamentos/credores/${id}/dados-bancarios`),
+        create: (data: unknown) =>
+          request<Credor>("/pagamentos/credores", {
+            method: "POST",
+            body: JSON.stringify(data),
+          }),
+        update: (id: number, data: unknown) =>
+          request<Credor>(`/pagamentos/credores/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+          }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/credores/${id}`, { method: "DELETE" }),
+      },
+      naturezas: {
+        list: () => request<NaturezaDespesa[]>("/pagamentos/naturezas"),
+        get: (id: number) => request<NaturezaDespesa>(`/pagamentos/naturezas/${id}`),
+        create: (data: unknown) =>
+          request<NaturezaDespesa>("/pagamentos/naturezas", {
+            method: "POST",
+            body: JSON.stringify(data),
+          }),
+        update: (id: number, data: unknown) =>
+          request<NaturezaDespesa>(`/pagamentos/naturezas/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+          }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/naturezas/${id}`, { method: "DELETE" }),
+      },
+      fontes: {
+        list: () => request<FonteRecursos[]>("/pagamentos/fontes"),
+        get: (id: number) => request<FonteRecursos>(`/pagamentos/fontes/${id}`),
+        create: (data: unknown) =>
+          request<FonteRecursos>("/pagamentos/fontes", {
+            method: "POST",
+            body: JSON.stringify(data),
+          }),
+        update: (id: number, data: unknown) =>
+          request<FonteRecursos>(`/pagamentos/fontes/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+          }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/fontes/${id}`, { method: "DELETE" }),
+      },
+      contas: {
+        list: () => request<ContaBancaria[]>("/pagamentos/contas"),
+        get: (id: number) => request<ContaBancaria>(`/pagamentos/contas/${id}`),
+        create: (data: unknown) =>
+          request<ContaBancaria>("/pagamentos/contas", {
+            method: "POST",
+            body: JSON.stringify(data),
+          }),
+        update: (id: number, data: unknown) =>
+          request<ContaBancaria>(`/pagamentos/contas/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+          }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/contas/${id}`, { method: "DELETE" }),
+      },
+      contratos: {
+        list: () => request<Contrato[]>("/pagamentos/contratos"),
+        get: (id: number) => request<Contrato>(`/pagamentos/contratos/${id}`),
+        create: (data: unknown) =>
+          request<Contrato>("/pagamentos/contratos", {
+            method: "POST",
+            body: JSON.stringify(data),
+          }),
+        update: (id: number, data: unknown) =>
+          request<Contrato>(`/pagamentos/contratos/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+          }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/contratos/${id}`, { method: "DELETE" }),
+      },
+      alcadas: {
+        list: () => request<Alcada[]>("/pagamentos/alcadas"),
+        get: (id: number) => request<Alcada>(`/pagamentos/alcadas/${id}`),
+        create: (data: unknown) =>
+          request<Alcada>("/pagamentos/alcadas", {
+            method: "POST",
+            body: JSON.stringify(data),
+          }),
+        update: (id: number, data: unknown) =>
+          request<Alcada>(`/pagamentos/alcadas/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+          }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/alcadas/${id}`, { method: "DELETE" }),
+      },
+      enums: () =>
+        request<{ criticidade: string[]; grupo_despesa: string[] }>("/pagamentos/enums"),
+    },
   },
 
   // Fase 3
