@@ -29,7 +29,7 @@ interface FormState {
   conta: string;
   id_fonte_recursos: number | null;
   grupo_despesa: string;
-  saldo_minimo_alerta: number | null;
+  saldo_minimo_alerta: number;
   ativa: boolean;
 }
 
@@ -40,7 +40,7 @@ const EMPTY: FormState = {
   conta: "",
   id_fonte_recursos: null,
   grupo_despesa: "CUSTEIO",
-  saldo_minimo_alerta: null,
+  saldo_minimo_alerta: 0,
   ativa: true,
 };
 
@@ -96,7 +96,7 @@ export default function ContasPage() {
         conta: form.conta.trim(),
         id_fonte_recursos: form.id_fonte_recursos,
         grupo_despesa: form.grupo_despesa,
-        saldo_minimo_alerta: form.saldo_minimo_alerta,
+        saldo_minimo_alerta: form.saldo_minimo_alerta ?? 0,
         ativa: form.ativa,
       };
       return editId === null
@@ -259,11 +259,11 @@ export default function ContasPage() {
             <Input
               id="conta-saldo"
               type="number"
-              value={form.saldo_minimo_alerta ?? ""}
+              value={form.saldo_minimo_alerta}
               onChange={(e) =>
                 setForm({
                   ...form,
-                  saldo_minimo_alerta: e.target.value === "" ? null : Number(e.target.value),
+                  saldo_minimo_alerta: e.target.value === "" ? 0 : Number(e.target.value),
                 })
               }
             />
