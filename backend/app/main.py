@@ -29,6 +29,7 @@ from .routers import (
     notificacoes,
     organograma,
     pagamentos_cadastros,
+    pagamentos_caixa,
     permissoes,
     processos,
     protocolo,
@@ -120,6 +121,7 @@ app.include_router(pagamentos_cadastros.contas_router, prefix="/api/v2")
 app.include_router(pagamentos_cadastros.contratos_router, prefix="/api/v2")
 app.include_router(pagamentos_cadastros.alcadas_router, prefix="/api/v2")
 app.include_router(pagamentos_cadastros.enums_router, prefix="/api/v2")
+app.include_router(pagamentos_caixa.caixa_router, prefix="/api/v2")
 app.include_router(minutas.templates_router, prefix="/api/v2")
 app.include_router(minutas.minutas_router, prefix="/api/v2")
 app.include_router(workflow.router, prefix="/api/v2")

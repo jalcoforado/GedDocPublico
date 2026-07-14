@@ -107,6 +107,25 @@ class Contrato(Base):
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
+class MovimentacaoConta(Base):
+    __tablename__ = "movimentacao_conta"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_conta: Mapped[int] = mapped_column(ForeignKey("pagamentos.conta_bancaria.id"), nullable=False)
+    tipo: Mapped[str] = mapped_column(String(10), nullable=False)
+    valor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    origem: Mapped[str] = mapped_column(String(20), nullable=False)
+    id_debito: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    id_parcela: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    data: Mapped[date] = mapped_column(Date, nullable=False)
+    id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    descricao: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
 class Alcada(Base):
     __tablename__ = "alcada"
     __table_args__ = {"schema": "pagamentos"}

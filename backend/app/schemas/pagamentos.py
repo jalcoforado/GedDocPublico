@@ -176,3 +176,28 @@ class AlcadaOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int; id_usuario: int; id_natureza: int | None; valor_maximo: Decimal
     criado_em: datetime; atualizado_em: datetime | None
+
+
+# ---------- movimentacao_conta (caixa) ----------
+TipoMov = Literal["ENTRADA", "SAIDA"]
+OrigemMov = Literal["APORTE", "RECEITA", "AJUSTE", "PAGAMENTO", "ESTORNO"]
+
+
+class MovimentacaoCreate(BaseModel):
+    id_conta: int
+    tipo: TipoMov
+    valor: Decimal = Field(gt=0)
+    origem: OrigemMov
+    data: date
+    descricao: str | None = Field(default=None, max_length=255)
+
+
+class MovimentacaoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; id_conta: int; tipo: TipoMov; valor: Decimal; origem: OrigemMov
+    data: date; descricao: str | None; id_usuario: int | None; criado_em: datetime
+
+
+class SaldoConta(BaseModel):
+    id_conta: int; saldo_inicial: Decimal; total_entradas: Decimal
+    total_saidas: Decimal; saldo_atual: Decimal

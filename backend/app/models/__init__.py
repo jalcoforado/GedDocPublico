@@ -55,6 +55,7 @@ from .pagamentos import (
     Criticidade,
     FonteRecursos,
     GrupoDespesa,
+    MovimentacaoConta,
     NaturezaDespesa,
 )
 from .nivel import Nivel
@@ -117,6 +118,7 @@ __all__ = [
     "MinutaHistorico",
     "Modulo",
     "Motorista",
+    "MovimentacaoConta",
     "NaturezaDespesa",
     "Nivel",
     "Notificacao",
