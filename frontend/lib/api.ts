@@ -1068,7 +1068,7 @@ export interface ContaSaldoPainel {
 export interface Contrato {
   id: number;
   numero: string;
-  id_credor: number;
+  id_fornecedor: number;
   id_unidade: number;
   objeto: string;
   vigencia_inicio: string;

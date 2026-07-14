@@ -6,8 +6,8 @@ import { CrudPage } from "@/components/CrudPage";
 import { api, type Contrato } from "@/lib/api";
 
 export default function ContratosPage() {
-  const credoresQ = useQuery({
-    queryKey: ["pag-credores-select"],
+  const fornecedoresQ = useQuery({
+    queryKey: ["pag-fornecedores-select"],
     queryFn: () => api.pagamentos.cadastros.fornecedores.list(),
   });
 
@@ -22,7 +22,7 @@ export default function ContratosPage() {
       dialogSize="lg"
       emptyForm={{
         numero: "",
-        id_credor: credoresQ.data?.[0]?.id ?? null,
+        id_fornecedor: fornecedoresQ.data?.[0]?.id ?? null,
         id_unidade: null,
         objeto: "",
         vigencia_inicio: "",
@@ -32,8 +32,8 @@ export default function ContratosPage() {
       columns={[
         { header: "Número", render: (r) => r.numero },
         {
-          header: "Credor",
-          render: (r) => credoresQ.data?.find((c) => c.id === r.id_credor)?.nome ?? "—",
+          header: "Fornecedor",
+          render: (r) => fornecedoresQ.data?.find((c) => c.id === r.id_fornecedor)?.nome ?? "—",
         },
         { header: "Objeto", render: (r) => r.objeto },
         {
@@ -45,11 +45,11 @@ export default function ContratosPage() {
       fields={[
         { name: "numero", label: "Número", type: "text", required: true },
         {
-          name: "id_credor",
-          label: "Credor",
+          name: "id_fornecedor",
+          label: "Fornecedor",
           type: "select",
           required: true,
-          options: credoresQ.data?.map((c) => ({ value: c.id, label: c.nome })),
+          options: fornecedoresQ.data?.map((c) => ({ value: c.id, label: c.nome })),
         },
         { name: "id_unidade", label: "ID da unidade", type: "number", required: true },
         { name: "objeto", label: "Objeto", type: "textarea", required: true, colSpan: 2 },
