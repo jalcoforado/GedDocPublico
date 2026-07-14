@@ -4,6 +4,18 @@ from app.core import crypto
 from app.config import get_settings
 
 
+@pytest.fixture(autouse=True)
+def _isolate_settings_cache():
+    """Evita poluição entre módulos: limpa os lru_cache de settings/fernet
+    antes E depois de cada teste, para que nenhum estado (ex.: chave vazia)
+    vaze para módulos executados depois na suíte completa."""
+    get_settings.cache_clear()
+    crypto._fernet.cache_clear()
+    yield
+    get_settings.cache_clear()
+    crypto._fernet.cache_clear()
+
+
 def test_encrypt_decrypt_roundtrip(monkeypatch):
     from cryptography.fernet import Fernet
     key = Fernet.generate_key().decode()
