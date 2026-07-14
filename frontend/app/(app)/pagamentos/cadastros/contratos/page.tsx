@@ -8,7 +8,7 @@ import { api, type Contrato } from "@/lib/api";
 export default function ContratosPage() {
   const credoresQ = useQuery({
     queryKey: ["pag-credores-select"],
-    queryFn: () => api.pagamentos.cadastros.credores.list(),
+    queryFn: () => api.pagamentos.cadastros.fornecedores.list(),
   });
 
   return (

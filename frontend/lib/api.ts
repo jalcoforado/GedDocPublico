@@ -966,7 +966,7 @@ export interface MinutaListItem {
 }
 
 // ---------- Pagamentos (PAG-1) — cadastros ----------
-export interface Credor {
+export interface Fornecedor {
   id: number;
   tipo_pessoa: "FISICA" | "JURIDICA";
   cnpj_cpf: string;
@@ -1012,10 +1012,57 @@ export interface ContaBancaria {
   conta: string;
   id_fonte_recursos: number;
   grupo_despesa: "PESSOAL" | "CUSTEIO" | "INVESTIMENTO" | "DIVIDA" | "OUTRAS";
+  saldo_inicial: string;
   saldo_minimo_alerta: string;
   ativa: boolean;
   criado_em: string;
   atualizado_em: string | null;
+}
+
+// Caixa — movimentações e painel de saldo (Decimals/dates chegam como string)
+export type TipoMovimentacao = "ENTRADA" | "SAIDA";
+export type OrigemMovimentacao = "APORTE" | "RECEITA" | "AJUSTE" | "PAGAMENTO" | "ESTORNO";
+
+export interface Movimentacao {
+  id: number;
+  id_conta: number;
+  tipo: TipoMovimentacao;
+  valor: string;
+  origem: OrigemMovimentacao;
+  data: string;
+  descricao: string | null;
+  id_usuario: number | null;
+  criado_em: string;
+}
+
+export interface MovimentacaoInput {
+  id_conta: number;
+  tipo: TipoMovimentacao;
+  valor: number;
+  origem: OrigemMovimentacao;
+  data: string;
+  descricao?: string | null;
+}
+
+export interface SaldoConta {
+  id_conta: number;
+  saldo_inicial: string;
+  total_entradas: string;
+  total_saidas: string;
+  saldo_atual: string;
+}
+
+export interface ContaSaldoPainel {
+  id_conta: number;
+  nome: string;
+  banco: string;
+  grupo_despesa: string;
+  saldo_inicial: string;
+  total_entradas: string;
+  total_saidas: string;
+  saldo_atual: string;
+  saldo_minimo_alerta: string;
+  abaixo_minimo: boolean;
 }
 
 export interface Contrato {
@@ -2046,23 +2093,23 @@ export const api = {
   // PAG-1 — cadastros de Pagamentos
   pagamentos: {
     cadastros: {
-      credores: {
-        list: (q?: string) => request<Credor[]>(`/pagamentos/credores${qs({ q })}`),
-        get: (id: number) => request<Credor>(`/pagamentos/credores/${id}`),
+      fornecedores: {
+        list: (q?: string) => request<Fornecedor[]>(`/pagamentos/fornecedores${qs({ q })}`),
+        get: (id: number) => request<Fornecedor>(`/pagamentos/fornecedores/${id}`),
         dadosBancarios: (id: number) =>
-          request<DadosBancarios>(`/pagamentos/credores/${id}/dados-bancarios`),
+          request<DadosBancarios>(`/pagamentos/fornecedores/${id}/dados-bancarios`),
         create: (data: unknown) =>
-          request<Credor>("/pagamentos/credores", {
+          request<Fornecedor>("/pagamentos/fornecedores", {
             method: "POST",
             body: JSON.stringify(data),
           }),
         update: (id: number, data: unknown) =>
-          request<Credor>(`/pagamentos/credores/${id}`, {
+          request<Fornecedor>(`/pagamentos/fornecedores/${id}`, {
             method: "PUT",
             body: JSON.stringify(data),
           }),
         remove: (id: number) =>
-          request<void>(`/pagamentos/credores/${id}`, { method: "DELETE" }),
+          request<void>(`/pagamentos/fornecedores/${id}`, { method: "DELETE" }),
       },
       naturezas: {
         list: () => request<NaturezaDespesa[]>("/pagamentos/naturezas"),
@@ -2146,6 +2193,17 @@ export const api = {
       },
       enums: () =>
         request<{ criticidade: string[]; grupo_despesa: string[] }>("/pagamentos/enums"),
+    },
+    caixa: {
+      painel: () => request<ContaSaldoPainel[]>("/pagamentos/caixa/painel"),
+      saldo: (contaId: number) => request<SaldoConta>(`/pagamentos/contas/${contaId}/saldo`),
+      extrato: (contaId: number) =>
+        request<Movimentacao[]>(`/pagamentos/contas/${contaId}/extrato`),
+      lancar: (data: MovimentacaoInput) =>
+        request<Movimentacao>("/pagamentos/movimentacoes", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
     },
   },
 

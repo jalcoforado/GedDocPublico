@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { api, type Credor, type DadosBancarios } from "@/lib/api";
+import { api, type Fornecedor, type DadosBancarios } from "@/lib/api";
 
 interface FormState {
   tipo_pessoa: "FISICA" | "JURIDICA";
@@ -37,7 +37,7 @@ const EMPTY: FormState = {
   chave_pix: "",
 };
 
-export default function CredoresPage() {
+export default function FornecedoresPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
@@ -52,8 +52,8 @@ export default function CredoresPage() {
   const [revealLoading, setRevealLoading] = useState<number | null>(null);
 
   const listQ = useQuery({
-    queryKey: ["pag-credores"],
-    queryFn: () => api.pagamentos.cadastros.credores.list(),
+    queryKey: ["pag-fornecedores"],
+    queryFn: () => api.pagamentos.cadastros.fornecedores.list(),
   });
 
   function openNew() {
@@ -63,7 +63,7 @@ export default function CredoresPage() {
     setOpen(true);
   }
 
-  function openEdit(c: Credor) {
+  function openEdit(c: Fornecedor) {
     setEditId(c.id);
     setForm({
       tipo_pessoa: c.tipo_pessoa,
@@ -100,40 +100,40 @@ export default function CredoresPage() {
         };
       }
       return editId === null
-        ? api.pagamentos.cadastros.credores.create(payload)
-        : api.pagamentos.cadastros.credores.update(editId, payload);
+        ? api.pagamentos.cadastros.fornecedores.create(payload)
+        : api.pagamentos.cadastros.fornecedores.update(editId, payload);
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pag-credores"] });
-      toast.success(editId === null ? "Credor criado." : "Credor atualizado.");
+      qc.invalidateQueries({ queryKey: ["pag-fornecedores"] });
+      toast.success(editId === null ? "Fornecedor criado." : "Fornecedor atualizado.");
       setOpen(false);
     },
     onError: (e: Error) => setErr(e.message),
   });
 
   const removeM = useMutation({
-    mutationFn: (id: number) => api.pagamentos.cadastros.credores.remove(id),
+    mutationFn: (id: number) => api.pagamentos.cadastros.fornecedores.remove(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pag-credores"] });
-      toast.success("Credor excluído.");
+      qc.invalidateQueries({ queryKey: ["pag-fornecedores"] });
+      toast.success("Fornecedor excluído.");
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  async function excluir(c: Credor) {
+  async function excluir(c: Fornecedor) {
     const ok = await confirm({
-      title: "Excluir credor",
-      message: "Esta ação não pode ser desfeita. Deseja realmente excluir este credor?",
+      title: "Excluir fornecedor",
+      message: "Esta ação não pode ser desfeita. Deseja realmente excluir este fornecedor?",
       confirmLabel: "Excluir",
       intent: "danger",
     });
     if (ok) removeM.mutate(c.id);
   }
 
-  async function revelar(c: Credor) {
+  async function revelar(c: Fornecedor) {
     setRevealLoading(c.id);
     try {
-      const dados = await api.pagamentos.cadastros.credores.dadosBancarios(c.id);
+      const dados = await api.pagamentos.cadastros.fornecedores.dadosBancarios(c.id);
       setRevealData(dados);
       setRevealOpen(true);
     } catch (e) {
@@ -143,13 +143,13 @@ export default function CredoresPage() {
     }
   }
 
-  const credores = listQ.data ?? [];
+  const fornecedores = listQ.data ?? [];
   const podeSalvar = form.cnpj_cpf.trim().length > 0 && form.nome.trim().length > 0;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-aprimora">Credores</h1>
+        <h1 className="text-2xl font-bold text-aprimora">Fornecedores</h1>
         <Button onClick={openNew}>Novo</Button>
       </div>
 
@@ -165,14 +165,14 @@ export default function CredoresPage() {
           </TR>
         </THead>
         <TBody>
-          {!listQ.isLoading && credores.length === 0 && (
+          {!listQ.isLoading && fornecedores.length === 0 && (
             <TR>
               <TD colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
-                Nenhum credor cadastrado.
+                Nenhum fornecedor cadastrado.
               </TD>
             </TR>
           )}
-          {credores.map((c) => (
+          {fornecedores.map((c) => (
             <TR key={c.id}>
               <TD>{c.nome}</TD>
               <TD>{c.cnpj_cpf}</TD>
@@ -207,7 +207,7 @@ export default function CredoresPage() {
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title={editId === null ? "Novo credor" : "Editar credor"}
+        title={editId === null ? "Novo fornecedor" : "Editar fornecedor"}
         size="lg"
         footer={
           <>

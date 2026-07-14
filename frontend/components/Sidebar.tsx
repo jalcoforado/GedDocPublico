@@ -29,6 +29,7 @@ import {
   Truck,
   UserCircle,
   Users,
+  Wallet,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -157,7 +158,8 @@ const NAV: NavGroup[] = [
     title: "Pagamentos",
     defaultOpen: false,
     items: [
-      { label: "Credores", href: "/pagamentos/cadastros/credores", icon: UserCircle, perm: "pagamento_cadastro" },
+      { label: "Caixa", href: "/pagamentos/caixa", icon: Wallet, perm: "pagamento_cadastro" },
+      { label: "Fornecedores", href: "/pagamentos/cadastros/fornecedores", icon: UserCircle, perm: "pagamento_cadastro" },
       { label: "Naturezas", href: "/pagamentos/cadastros/naturezas", icon: Layers, perm: "pagamento_cadastro" },
       { label: "Fontes de recursos", href: "/pagamentos/cadastros/fontes", icon: BookOpen, perm: "pagamento_cadastro" },
       { label: "Contas bancárias", href: "/pagamentos/cadastros/contas", icon: ClipboardList, perm: "pagamento_cadastro" },
