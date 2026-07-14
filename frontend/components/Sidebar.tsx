@@ -154,6 +154,18 @@ const NAV: NavGroup[] = [
     ],
   },
   {
+    title: "Pagamentos",
+    defaultOpen: false,
+    items: [
+      { label: "Credores", href: "/pagamentos/cadastros/credores", icon: UserCircle, perm: "pagamento_cadastro" },
+      { label: "Naturezas", href: "/pagamentos/cadastros/naturezas", icon: Layers, perm: "pagamento_cadastro" },
+      { label: "Fontes de recursos", href: "/pagamentos/cadastros/fontes", icon: BookOpen, perm: "pagamento_cadastro" },
+      { label: "Contas bancárias", href: "/pagamentos/cadastros/contas", icon: ClipboardList, perm: "pagamento_cadastro" },
+      { label: "Contratos", href: "/pagamentos/cadastros/contratos", icon: FileText, perm: "pagamento_cadastro" },
+      { label: "Alçadas", href: "/pagamentos/cadastros/alcadas", icon: Shield, perm: "pagamento_cadastro" },
+    ],
+  },
+  {
     title: "Administração",
     defaultOpen: false,
     items: [
