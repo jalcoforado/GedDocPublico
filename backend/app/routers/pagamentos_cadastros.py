@@ -288,3 +288,13 @@ async def delete_alcada(alcada_id: int,
                         tenant_id: int = Depends(require_tenant_id),
                         db: AsyncSession = Depends(get_db)):
     await svc.excluir_alcada(db, tenant_id=tenant_id, alcada_id=alcada_id)
+
+
+enums_router = APIRouter(prefix="/pagamentos/enums", tags=["pagamentos-cadastros"])
+
+
+@enums_router.get("")
+async def get_enums(_: Usuario = Depends(require_permission("pagamento_cadastro")),
+                    __: int = Depends(require_tenant_id)):
+    from ..models import Criticidade, GrupoDespesa
+    return {"criticidade": [e.value for e in Criticidade], "grupo_despesa": [e.value for e in GrupoDespesa]}
