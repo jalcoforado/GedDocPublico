@@ -251,15 +251,18 @@ async def minha_fila(usuario: Usuario = Depends(get_current_user),
         rows = await svc.listar_debitos(db, tenant_id=tenant_id, status_f="APROVADO")
         fila.autorizar = await _out(db, tenant_id, rows)
     if tem("pagamento_pagar"):
-        parcelas = []
+        debitos_pagar = []
         for st in ("AUTORIZADO", "PAGO_PARCIAL"):
-            for d in await svc.listar_debitos(db, tenant_id=tenant_id, status_f=st):
-                nomes = await svc.nomes_fornecedores(db, tenant_id=tenant_id, ids={d.id_fornecedor})
-                for p in await svc.listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id):
-                    if p.status == "A_PAGAR":
-                        parcelas.append(ParcelaFilaOut(
-                            id=p.id, id_debito=d.id, numero=p.numero, valor=p.valor,
-                            vencimento=p.vencimento, nome_fornecedor=nomes.get(d.id_fornecedor, "?"),
-                            descricao_debito=d.descricao, vencida=p.vencimento < _date.today()))
+            debitos_pagar.extend(await svc.listar_debitos(db, tenant_id=tenant_id, status_f=st))
+        nomes = await svc.nomes_fornecedores(db, tenant_id=tenant_id,
+                                             ids={d.id_fornecedor for d in debitos_pagar})
+        parcelas = []
+        for d in debitos_pagar:
+            for p in await svc.listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id):
+                if p.status == "A_PAGAR":
+                    parcelas.append(ParcelaFilaOut(
+                        id=p.id, id_debito=d.id, numero=p.numero, valor=p.valor,
+                        vencimento=p.vencimento, nome_fornecedor=nomes.get(d.id_fornecedor, "?"),
+                        descricao_debito=d.descricao, vencida=p.vencimento < _date.today()))
         fila.pagar = sorted(parcelas, key=lambda x: x.vencimento)
     return fila
