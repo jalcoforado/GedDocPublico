@@ -1095,6 +1095,50 @@ export interface Alcada {
   atualizado_em: string | null;
 }
 
+// ---------- Pagamentos (R2) — débitos, parcelas, autorização, OP ----------
+export type StatusDebito =
+  | "RASCUNHO" | "AGUARDANDO_APROVACAO" | "APROVADO" | "AUTORIZADO"
+  | "PAGO_PARCIAL" | "PAGO" | "REJEITADO" | "CANCELADO";
+
+export interface Parcela {
+  id: number; id_debito: number; numero: number; valor: string; vencimento: string;
+  status: "A_PAGAR" | "PAGA" | "CANCELADA"; data_pagamento: string | null;
+  forma_pagamento: string | null; id_movimentacao: number | null;
+}
+
+export interface Debito {
+  id: number; id_fornecedor: number; nome_fornecedor: string; id_natureza: number;
+  id_conta: number; id_contrato: number | null; valor_total: string; competencia: string;
+  numero_ne: string | null; numero_nf: string | null; criticidade: string; urgente: boolean;
+  justificativa_urgencia: string | null; descricao: string; status: StatusDebito;
+  id_usuario_solicitante: number; criado_em: string; atualizado_em: string | null;
+}
+
+export interface DebitoHistorico {
+  id: number; acao: string; status_anterior: string | null; status_novo: string;
+  justificativa: string | null; id_usuario: number | null; nome_usuario: string | null;
+  criado_em: string;
+}
+
+export interface DebitoDetalhe extends Debito {
+  parcelas: Parcela[]; historico: DebitoHistorico[];
+}
+
+export interface OrdemPagamento {
+  id: number; numero: string; valor_total: string; id_usuario_autorizador: number;
+  nome_autorizador: string | null; qtd_debitos: number; criado_em: string;
+}
+
+export interface ParcelaFila {
+  id: number; id_debito: number; numero: number; valor: string; vencimento: string;
+  nome_fornecedor: string; descricao_debito: string; vencida: boolean;
+}
+
+export interface MinhaFila {
+  solicitar: Debito[] | null; aprovar: Debito[] | null;
+  autorizar: Debito[] | null; pagar: ParcelaFila[] | null;
+}
+
 export interface MinutaCreateInput {
   titulo: string;
   origem?: MinutaOrigem;
@@ -2217,6 +2261,43 @@ export const api = {
           body: JSON.stringify(data),
         }),
     },
+    debitos: {
+      list: (params?: { status?: string; meus?: boolean }) =>
+        request<Debito[]>(`/pagamentos/debitos${qs({ status_f: params?.status, meus: params?.meus })}`),
+      get: (id: number) => request<DebitoDetalhe>(`/pagamentos/debitos/${id}`),
+      create: (data: unknown) =>
+        request<Debito>("/pagamentos/debitos", { method: "POST", body: JSON.stringify(data) }),
+      update: (id: number, data: unknown) =>
+        request<Debito>(`/pagamentos/debitos/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+      remove: (id: number) => request<void>(`/pagamentos/debitos/${id}`, { method: "DELETE" }),
+      enviar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/enviar`, { method: "POST" }),
+      aprovar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/aprovar`, { method: "POST" }),
+      devolver: (id: number, justificativa: string) =>
+        request<Debito>(`/pagamentos/debitos/${id}/devolver`, {
+          method: "POST", body: JSON.stringify({ justificativa }) }),
+      rejeitar: (id: number, justificativa: string) =>
+        request<Debito>(`/pagamentos/debitos/${id}/rejeitar`, {
+          method: "POST", body: JSON.stringify({ justificativa }) }),
+      cancelar: (id: number, justificativa: string) =>
+        request<Debito>(`/pagamentos/debitos/${id}/cancelar`, {
+          method: "POST", body: JSON.stringify({ justificativa }) }),
+    },
+    autorizar: (debitoIds: number[]) =>
+      request<OrdemPagamento>("/pagamentos/autorizacoes", {
+        method: "POST", body: JSON.stringify({ debito_ids: debitoIds }) }),
+    ordens: {
+      list: () => request<OrdemPagamento[]>("/pagamentos/ordens-pagamento"),
+      pdfUrl: (id: number) => `${BROWSER_API_URL}/pagamentos/ordens-pagamento/${id}/pdf`,
+    },
+    parcelas: {
+      pagar: (id: number, data: { forma_pagamento: string; data_pagamento?: string | null }) =>
+        request<Parcela>(`/pagamentos/parcelas/${id}/pagar`, {
+          method: "POST", body: JSON.stringify(data) }),
+      estornar: (id: number, justificativa: string) =>
+        request<Parcela>(`/pagamentos/parcelas/${id}/estornar`, {
+          method: "POST", body: JSON.stringify({ justificativa }) }),
+    },
+    minhaFila: () => request<MinhaFila>("/pagamentos/minha-fila"),
   },
 
   // Fase 3
