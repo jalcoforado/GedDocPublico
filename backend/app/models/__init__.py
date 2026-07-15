@@ -51,6 +51,8 @@ from .pagamentos import (
     Alcada,
     ContaBancaria,
     Contrato,
+    Debito,
+    DebitoHistorico,
     Fornecedor,
     FornecedorSituacaoHistorico,
     Criticidade,
@@ -58,6 +60,9 @@ from .pagamentos import (
     GrupoDespesa,
     MovimentacaoConta,
     NaturezaDespesa,
+    OrdemPagamento,
+    OrdemPagamentoDebito,
+    Parcela,
 )
 from .nivel import Nivel
 from .servico import Servico
@@ -90,6 +95,8 @@ __all__ = [
     "ContaBancaria",
     "Cidade",
     "ComplementacaoDocumental",
+    "Debito",
+    "DebitoHistorico",
     "Despacho",
     "Encaminhamento",
     "Movimentacao",
@@ -124,6 +131,9 @@ __all__ = [
     "NaturezaDespesa",
     "Nivel",
     "Notificacao",
+    "OrdemPagamento",
+    "OrdemPagamentoDebito",
+    "Parcela",
     "Permissionario",
     "NotificacaoPreferencia",
     "Servico",

@@ -210,9 +210,113 @@ class MovimentacaoOut(BaseModel):
 class SaldoConta(BaseModel):
     id_conta: int; saldo_inicial: Decimal; total_entradas: Decimal
     total_saidas: Decimal; saldo_atual: Decimal
+    comprometido: Decimal = Decimal("0"); disponivel: Decimal = Decimal("0")
 
 
 class ContaSaldoPainel(BaseModel):
     id_conta: int; nome: str; banco: str; grupo_despesa: str
     saldo_inicial: Decimal; total_entradas: Decimal; total_saidas: Decimal
     saldo_atual: Decimal; saldo_minimo_alerta: Decimal; abaixo_minimo: bool
+    comprometido: Decimal = Decimal("0"); disponivel: Decimal = Decimal("0")
+
+
+# ---------- débito / parcelas / ordem de pagamento (R2) ----------
+StatusDebito = Literal["RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO", "AUTORIZADO",
+                       "PAGO_PARCIAL", "PAGO", "REJEITADO", "CANCELADO"]
+StatusParcela = Literal["A_PAGAR", "PAGA", "CANCELADA"]
+FormaPagamento = Literal["PIX", "TED", "BOLETO", "DINHEIRO", "OUTRO"]
+
+
+class ParcelaCreate(BaseModel):
+    numero: int = Field(ge=1)
+    valor: Decimal = Field(gt=0)
+    vencimento: date
+
+
+class DebitoCreate(BaseModel):
+    id_fornecedor: int
+    id_natureza: int
+    id_conta: int
+    id_contrato: int | None = None
+    valor_total: Decimal = Field(gt=0)
+    competencia: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    numero_ne: str | None = Field(default=None, max_length=30)
+    numero_nf: str | None = Field(default=None, max_length=40)
+    criticidade: CriticidadeLit = "MEDIA"
+    urgente: bool = False
+    justificativa_urgencia: str | None = Field(default=None, max_length=255)
+    descricao: str = Field(min_length=1, max_length=255)
+    parcelas: list[ParcelaCreate] = Field(min_length=1)
+
+
+class DebitoUpdate(BaseModel):
+    id_fornecedor: int | None = None
+    id_natureza: int | None = None
+    id_conta: int | None = None
+    id_contrato: int | None = None
+    valor_total: Decimal | None = Field(default=None, gt=0)
+    competencia: str | None = Field(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    numero_ne: str | None = Field(default=None, max_length=30)
+    numero_nf: str | None = Field(default=None, max_length=40)
+    criticidade: CriticidadeLit | None = None
+    urgente: bool | None = None
+    justificativa_urgencia: str | None = Field(default=None, max_length=255)
+    descricao: str | None = Field(default=None, min_length=1, max_length=255)
+    parcelas: list[ParcelaCreate] | None = Field(default=None, min_length=1)
+
+
+class ParcelaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; id_debito: int; numero: int; valor: Decimal; vencimento: date
+    status: StatusParcela; data_pagamento: date | None; forma_pagamento: FormaPagamento | None
+    id_movimentacao: int | None
+
+
+class DebitoOut(BaseModel):
+    id: int; id_fornecedor: int; nome_fornecedor: str; id_natureza: int; id_conta: int
+    id_contrato: int | None; valor_total: Decimal; competencia: str
+    numero_ne: str | None; numero_nf: str | None; criticidade: CriticidadeLit
+    urgente: bool; justificativa_urgencia: str | None; descricao: str
+    status: StatusDebito; id_usuario_solicitante: int
+    criado_em: datetime; atualizado_em: datetime | None
+
+
+class DebitoHistoricoOut(BaseModel):
+    id: int; acao: str; status_anterior: str | None; status_novo: str
+    justificativa: str | None; id_usuario: int | None; nome_usuario: str | None
+    criado_em: datetime
+
+
+class DebitoDetalheOut(DebitoOut):
+    parcelas: list[ParcelaOut]
+    historico: list[DebitoHistoricoOut]
+
+
+class JustificativaIn(BaseModel):
+    justificativa: str = Field(min_length=1, max_length=255)
+
+
+class AutorizarLoteIn(BaseModel):
+    debito_ids: list[int] = Field(min_length=1)
+
+
+class PagarParcelaIn(BaseModel):
+    forma_pagamento: FormaPagamento
+    data_pagamento: date | None = None
+
+
+class OrdemPagamentoOut(BaseModel):
+    id: int; numero: str; valor_total: Decimal; id_usuario_autorizador: int
+    nome_autorizador: str | None; qtd_debitos: int; criado_em: datetime
+
+
+class ParcelaFilaOut(BaseModel):
+    id: int; id_debito: int; numero: int; valor: Decimal; vencimento: date
+    nome_fornecedor: str; descricao_debito: str; vencida: bool
+
+
+class MinhaFilaOut(BaseModel):
+    solicitar: list[DebitoOut] | None = None    # meus RASCUNHO (inclui devolvidos)
+    aprovar: list[DebitoOut] | None = None      # AGUARDANDO_APROVACAO
+    autorizar: list[DebitoOut] | None = None    # APROVADO
+    pagar: list[ParcelaFilaOut] | None = None   # A_PAGAR de AUTORIZADO/PAGO_PARCIAL

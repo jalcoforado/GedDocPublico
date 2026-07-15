@@ -139,6 +139,85 @@ class MovimentacaoConta(Base):
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
+class Debito(Base):
+    __tablename__ = "debito"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_fornecedor: Mapped[int] = mapped_column(ForeignKey("pagamentos.fornecedor.id"), nullable=False)
+    id_natureza: Mapped[int] = mapped_column(ForeignKey("pagamentos.natureza_despesa.id"), nullable=False)
+    id_conta: Mapped[int] = mapped_column(ForeignKey("pagamentos.conta_bancaria.id"), nullable=False)
+    id_contrato: Mapped[int | None] = mapped_column(ForeignKey("pagamentos.contrato.id"), nullable=True)
+    valor_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    competencia: Mapped[str] = mapped_column(String(7), nullable=False)
+    numero_ne: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    numero_nf: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    criticidade: Mapped[str] = mapped_column(String(10), nullable=False, default="MEDIA")
+    urgente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    justificativa_urgencia: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    descricao: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(25), nullable=False, default="RASCUNHO")
+    id_usuario_solicitante: Mapped[int] = mapped_column(ForeignKey("utils.usuario.id"), nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class Parcela(Base):
+    __tablename__ = "parcela"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_debito: Mapped[int] = mapped_column(ForeignKey("pagamentos.debito.id"), nullable=False)
+    numero: Mapped[int] = mapped_column(Integer, nullable=False)
+    valor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    vencimento: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="A_PAGAR")
+    data_pagamento: Mapped[date | None] = mapped_column(Date, nullable=True)
+    forma_pagamento: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    id_movimentacao: Mapped[int | None] = mapped_column(ForeignKey("pagamentos.movimentacao_conta.id"), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class DebitoHistorico(Base):
+    """Trilha imutável das transições do débito (append-only)."""
+    __tablename__ = "debito_historico"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_debito: Mapped[int] = mapped_column(ForeignKey("pagamentos.debito.id"), nullable=False)
+    status_anterior: Mapped[str | None] = mapped_column(String(25), nullable=True)
+    status_novo: Mapped[str] = mapped_column(String(25), nullable=False)
+    acao: Mapped[str] = mapped_column(String(20), nullable=False)
+    justificativa: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    ip_origem: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class OrdemPagamento(Base):
+    __tablename__ = "ordem_pagamento"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    numero: Mapped[str] = mapped_column(String(20), nullable=False)
+    id_usuario_autorizador: Mapped[int] = mapped_column(ForeignKey("utils.usuario.id"), nullable=False)
+    valor_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    ip_origem: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class OrdemPagamentoDebito(Base):
+    __tablename__ = "ordem_pagamento_debito"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_ordem: Mapped[int] = mapped_column(ForeignKey("pagamentos.ordem_pagamento.id"), nullable=False)
+    id_debito: Mapped[int] = mapped_column(ForeignKey("pagamentos.debito.id"), nullable=False)
+
+
 class Alcada(Base):
     __tablename__ = "alcada"
     __table_args__ = {"schema": "pagamentos"}
