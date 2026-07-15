@@ -10,6 +10,7 @@ RASCUNHO/REJEITADO/CANCELADO. Mesmo padrão de `test_pagamentos_cadastros.py`
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
@@ -155,6 +156,77 @@ async def test_atualizar_debito_fora_de_rascunho_409(admin_engine):
             with pytest.raises(HTTPException) as exc:
                 await svc.atualizar_debito(s, tenant_id=t.id, debito_id=d.id, usuario_id=uid,
                     payload=DebitoUpdate(descricao="Alterado"))
+            assert exc.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_atualizar_debito_rascunho_troca_parcelas(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        forn, nat, conta = await _base(admin_engine, t.id)
+        async with _sm(admin_engine)() as s:
+            uid = (await s.execute(text(
+                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+                payload=_payload_debito(forn, nat, conta))
+        async with _sm(admin_engine)() as s:
+            atualizado = await svc.atualizar_debito(s, tenant_id=t.id, debito_id=d.id,
+                usuario_id=uid, payload=DebitoUpdate(
+                    descricao="Compra revisada", valor_total="1500.00", parcelas=[
+                        ParcelaCreate(numero=1, valor="900.00", vencimento="2026-08-01"),
+                        ParcelaCreate(numero=2, valor="600.00", vencimento="2026-09-01"),
+                    ]))
+        assert atualizado.descricao == "Compra revisada"
+        assert atualizado.valor_total == Decimal("1500.00")
+        async with _sm(admin_engine)() as s:
+            parcelas = await svc.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+        # parcela antiga (1x 1000.00) soft-deletada; só as novas aparecem
+        assert [(p.numero, p.valor) for p in parcelas] == [
+            (1, Decimal("900.00")), (2, Decimal("600.00"))]
+        async with _sm(admin_engine)() as s:
+            total = (await s.execute(text(
+                "SELECT count(*) FROM pagamentos.parcela WHERE id_debito=:i"),
+                {"i": d.id})).scalar_one()
+        assert total == 3  # 1 antiga (excluido=true) + 2 novas
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_atualizar_valor_total_sem_parcelas_divergente_422(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        forn, nat, conta = await _base(admin_engine, t.id)
+        async with _sm(admin_engine)() as s:
+            uid = (await s.execute(text(
+                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+                payload=_payload_debito(forn, nat, conta))
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.atualizar_debito(s, tenant_id=t.id, debito_id=d.id, usuario_id=uid,
+                    payload=DebitoUpdate(valor_total="2000.00"))
+            assert exc.value.status_code == 422
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_excluir_debito_fora_de_status_permitido_409(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        forn, nat, conta = await _base(admin_engine, t.id)
+        async with _sm(admin_engine)() as s:
+            uid = (await s.execute(text(
+                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+                payload=_payload_debito(forn, nat, conta))
+        async with _sm(admin_engine)() as s:
+            await s.execute(text(
+                "UPDATE pagamentos.debito SET status='APROVADO' WHERE id=:i"), {"i": d.id})
+            await s.commit()
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.excluir_debito(s, tenant_id=t.id, debito_id=d.id)
             assert exc.value.status_code == 409
     finally:
         await _cleanup(admin_engine, t.id)
