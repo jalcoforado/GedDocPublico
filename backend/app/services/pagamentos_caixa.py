@@ -9,7 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import ContaBancaria, MovimentacaoConta
+from ..models import ContaBancaria, Debito, MovimentacaoConta, Parcela
 from ..schemas.pagamentos import ContaSaldoPainel, MovimentacaoCreate, SaldoConta
 
 _ORIGENS_MANUAIS = {"APORTE", "RECEITA", "AJUSTE"}
@@ -43,6 +43,17 @@ async def listar_extrato(db, *, tenant_id, conta_id) -> list[MovimentacaoConta]:
         MovimentacaoConta.id.desc()))).scalars().all())
 
 
+async def comprometido_conta(db, *, tenant_id, conta_id) -> Decimal:
+    """Σ parcelas A_PAGAR (não excluídas) de débitos AUTORIZADO/PAGO_PARCIAL da conta."""
+    stmt = (select(func.coalesce(func.sum(Parcela.valor), 0))
+            .join(Debito, Debito.id == Parcela.id_debito)
+            .where(Parcela.tenant_id == tenant_id, Parcela.status == "A_PAGAR",
+                   Parcela.excluido.is_(False), Debito.id_conta == conta_id,
+                   Debito.excluido.is_(False),
+                   Debito.status.in_(("AUTORIZADO", "PAGO_PARCIAL"))))
+    return (await db.execute(stmt)).scalar_one()
+
+
 async def saldo_conta(db, *, tenant_id, conta_id) -> SaldoConta:
     conta = await _obter_conta(db, tenant_id=tenant_id, conta_id=conta_id)
     def _soma(tipo: str):
@@ -52,8 +63,11 @@ async def saldo_conta(db, *, tenant_id, conta_id) -> SaldoConta:
     entradas = (await db.execute(_soma("ENTRADA"))).scalar_one()
     saidas = (await db.execute(_soma("SAIDA"))).scalar_one()
     inicial = conta.saldo_inicial or Decimal("0")
+    comprometido = await comprometido_conta(db, tenant_id=tenant_id, conta_id=conta_id)
+    saldo_atual = inicial + entradas - saidas
     return SaldoConta(id_conta=conta_id, saldo_inicial=inicial, total_entradas=entradas,
-                      total_saidas=saidas, saldo_atual=inicial + entradas - saidas)
+                      total_saidas=saidas, saldo_atual=saldo_atual,
+                      comprometido=comprometido, disponivel=saldo_atual - comprometido)
 
 
 async def painel_caixa(db, *, tenant_id) -> list[ContaSaldoPainel]:
@@ -69,5 +83,6 @@ async def painel_caixa(db, *, tenant_id) -> list[ContaSaldoPainel]:
             saldo_inicial=saldo.saldo_inicial, total_entradas=saldo.total_entradas,
             total_saidas=saldo.total_saidas, saldo_atual=saldo.saldo_atual,
             saldo_minimo_alerta=minimo, abaixo_minimo=saldo.saldo_atual < minimo,
+            comprometido=saldo.comprometido, disponivel=saldo.disponivel,
         ))
     return painel
