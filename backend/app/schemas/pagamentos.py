@@ -58,6 +58,15 @@ class FornecedorDadosBancariosOut(DadosBancarios):
     pass
 
 
+class FornecedorSituacaoHistoricoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    situacao: SituacaoCadastral
+    motivo: str | None
+    id_usuario: int | None
+    criado_em: datetime
+
+
 # ---------- natureza_despesa ----------
 class NaturezaCreate(BaseModel):
     codigo: str = Field(min_length=1, max_length=20)

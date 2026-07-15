@@ -12,7 +12,8 @@ from ..schemas.pagamentos import (
     AlcadaCreate, AlcadaOut, AlcadaUpdate,
     ContaCreate, ContaOut, ContaUpdate,
     ContratoCreate, ContratoOut, ContratoUpdate,
-    FornecedorCreate, FornecedorDadosBancariosOut, FornecedorOut, FornecedorUpdate,
+    FornecedorCreate, FornecedorDadosBancariosOut, FornecedorOut,
+    FornecedorSituacaoHistoricoOut, FornecedorUpdate,
     FonteCreate, FonteOut, FonteUpdate, NaturezaCreate, NaturezaOut, NaturezaUpdate,
 )
 from ..services import pagamentos_cadastros as svc
@@ -46,21 +47,32 @@ async def get_dados_bancarios(fornecedor_id: int,
     return await svc.dados_bancarios_fornecedor(db, tenant_id=tenant_id, fornecedor_id=fornecedor_id)
 
 
+@fornecedores_router.get("/{fornecedor_id}/situacao-historico",
+                         response_model=list[FornecedorSituacaoHistoricoOut])
+async def get_situacao_historico(fornecedor_id: int,
+                                 _: Usuario = Depends(require_permission("pagamento_cadastro")),
+                                 tenant_id: int = Depends(require_tenant_id),
+                                 db: AsyncSession = Depends(get_db)):
+    rows = await svc.listar_situacao_historico(db, tenant_id=tenant_id, fornecedor_id=fornecedor_id)
+    return [FornecedorSituacaoHistoricoOut.model_validate(r) for r in rows]
+
+
 @fornecedores_router.post("", response_model=FornecedorOut, status_code=status.HTTP_201_CREATED)
 async def create_fornecedor(payload: FornecedorCreate,
-                            _: Usuario = Depends(require_permission("pagamento_cadastro", "inserir")),
+                            usuario: Usuario = Depends(require_permission("pagamento_cadastro", "inserir")),
                             tenant_id: int = Depends(require_tenant_id),
                             db: AsyncSession = Depends(get_db)):
-    c = await svc.criar_fornecedor(db, tenant_id=tenant_id, payload=payload)
+    c = await svc.criar_fornecedor(db, tenant_id=tenant_id, payload=payload, usuario_id=usuario.id)
     return FornecedorOut.model_validate(svc.fornecedor_out(c))
 
 
 @fornecedores_router.put("/{fornecedor_id}", response_model=FornecedorOut)
 async def update_fornecedor(fornecedor_id: int, payload: FornecedorUpdate,
-                            _: Usuario = Depends(require_permission("pagamento_cadastro", "atualizar")),
+                            usuario: Usuario = Depends(require_permission("pagamento_cadastro", "atualizar")),
                             tenant_id: int = Depends(require_tenant_id),
                             db: AsyncSession = Depends(get_db)):
-    c = await svc.atualizar_fornecedor(db, tenant_id=tenant_id, fornecedor_id=fornecedor_id, payload=payload)
+    c = await svc.atualizar_fornecedor(db, tenant_id=tenant_id, fornecedor_id=fornecedor_id,
+                                        payload=payload, usuario_id=usuario.id)
     return FornecedorOut.model_validate(svc.fornecedor_out(c))
 
 

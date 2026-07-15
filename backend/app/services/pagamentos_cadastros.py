@@ -9,7 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core import crypto
-from ..models import Alcada, ContaBancaria, Contrato, Fornecedor, FonteRecursos, NaturezaDespesa, UnidadeTrabalho
+from ..models import (
+    Alcada, ContaBancaria, Contrato, Fornecedor, FornecedorSituacaoHistorico,
+    FonteRecursos, NaturezaDespesa, UnidadeTrabalho,
+)
 from ..schemas.pagamentos import (
     AlcadaCreate, AlcadaUpdate,
     ContaCreate, ContaUpdate,
@@ -28,6 +31,20 @@ class PagamentoCadastroError(HTTPException):
         super().__init__(status_code=code, detail=detail)
 
 
+def _normalizar_situacao_motivo(situacao: str, motivo: str | None) -> str | None:
+    """Acopla motivo_pendencia à situacao_cadastral. Retorna o motivo efetivo a gravar.
+    REGULAR -> motivo sempre None; caso contrário motivo obrigatório (não-vazio)."""
+    if situacao == "REGULAR":
+        return None
+    m = (motivo or "").strip()
+    if not m:
+        raise PagamentoCadastroError(
+            "Informe o motivo da pendência quando a situação não for Regular.",
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+    return m
+
+
 def fornecedor_out(c: Fornecedor) -> dict:
     return {
         "id": c.id, "tipo_pessoa": c.tipo_pessoa, "cnpj_cpf": c.cnpj_cpf, "nome": c.nome,
@@ -44,6 +61,16 @@ async def _validar_doc_unico(db, *, tenant_id: int, cnpj_cpf: str, excluir_id: i
         stmt = stmt.where(Fornecedor.id != excluir_id)
     if (await db.execute(stmt)).scalar_one_or_none() is not None:
         raise PagamentoCadastroError(f"Já existe fornecedor com o documento '{cnpj_cpf}'.", status.HTTP_409_CONFLICT)
+
+
+def _registrar_situacao(db: AsyncSession, *, tenant_id: int, fornecedor_id: int,
+                        situacao: str, motivo: str | None, usuario_id: int | None) -> None:
+    """Adiciona uma linha ao histórico de situação (append-only). Não commita —
+    fica na mesma transação de criar/atualizar."""
+    db.add(FornecedorSituacaoHistorico(
+        tenant_id=tenant_id, id_fornecedor=fornecedor_id, situacao=situacao,
+        motivo=motivo, id_usuario=usuario_id, criado_em=_utcnow(),
+    ))
 
 
 def _aplicar_dados_bancarios(c: Fornecedor, db_dados: DadosBancarios | None) -> None:
@@ -70,29 +97,54 @@ async def listar_fornecedores(db: AsyncSession, *, tenant_id: int, q: str | None
     return list((await db.execute(stmt.order_by(Fornecedor.nome))).scalars().all())
 
 
-async def criar_fornecedor(db: AsyncSession, *, tenant_id: int, payload: FornecedorCreate) -> Fornecedor:
+async def criar_fornecedor(db: AsyncSession, *, tenant_id: int, payload: FornecedorCreate,
+                            usuario_id: int | None = None) -> Fornecedor:
     await _validar_doc_unico(db, tenant_id=tenant_id, cnpj_cpf=payload.cnpj_cpf)
+    motivo = _normalizar_situacao_motivo(payload.situacao_cadastral, payload.motivo_pendencia)
     c = Fornecedor(tenant_id=tenant_id, tipo_pessoa=payload.tipo_pessoa, cnpj_cpf=payload.cnpj_cpf,
                     nome=payload.nome, situacao_cadastral=payload.situacao_cadastral,
-                    motivo_pendencia=payload.motivo_pendencia, criado_em=_utcnow())
+                    motivo_pendencia=motivo, criado_em=_utcnow())
     _aplicar_dados_bancarios(c, payload.dados_bancarios)
-    db.add(c); await db.commit(); await db.refresh(c)
+    db.add(c)
+    await db.flush()  # obtém c.id para a linha de histórico
+    _registrar_situacao(db, tenant_id=tenant_id, fornecedor_id=c.id,
+                        situacao=c.situacao_cadastral, motivo=c.motivo_pendencia, usuario_id=usuario_id)
+    await db.commit(); await db.refresh(c)
     return c
 
 
 async def atualizar_fornecedor(db: AsyncSession, *, tenant_id: int, fornecedor_id: int,
-                                payload: FornecedorUpdate) -> Fornecedor:
+                                payload: FornecedorUpdate, usuario_id: int | None = None) -> Fornecedor:
     c = await obter_fornecedor(db, tenant_id=tenant_id, fornecedor_id=fornecedor_id)
+    situacao_antiga, motivo_antigo = c.situacao_cadastral, c.motivo_pendencia
     dados = payload.model_dump(exclude_unset=True)
     if "cnpj_cpf" in dados:
         await _validar_doc_unico(db, tenant_id=tenant_id, cnpj_cpf=dados["cnpj_cpf"], excluir_id=fornecedor_id)
+    if "situacao_cadastral" in dados or "motivo_pendencia" in dados:
+        situacao_ef = dados.get("situacao_cadastral", c.situacao_cadastral)
+        motivo_ef = dados.get("motivo_pendencia", c.motivo_pendencia)
+        dados["situacao_cadastral"] = situacao_ef
+        dados["motivo_pendencia"] = _normalizar_situacao_motivo(situacao_ef, motivo_ef)
     for campo in ("tipo_pessoa", "cnpj_cpf", "nome", "situacao_cadastral", "motivo_pendencia"):
         if campo in dados:
             setattr(c, campo, dados[campo])
     if "dados_bancarios" in dados and payload.dados_bancarios is not None:
         _aplicar_dados_bancarios(c, payload.dados_bancarios)
+    if c.situacao_cadastral != situacao_antiga or c.motivo_pendencia != motivo_antigo:
+        _registrar_situacao(db, tenant_id=tenant_id, fornecedor_id=c.id,
+                            situacao=c.situacao_cadastral, motivo=c.motivo_pendencia, usuario_id=usuario_id)
     c.atualizado_em = _utcnow(); await db.commit(); await db.refresh(c)
     return c
+
+
+async def listar_situacao_historico(db: AsyncSession, *, tenant_id: int,
+                                    fornecedor_id: int) -> list[FornecedorSituacaoHistorico]:
+    await obter_fornecedor(db, tenant_id=tenant_id, fornecedor_id=fornecedor_id)  # 404 cross-tenant
+    stmt = (select(FornecedorSituacaoHistorico)
+            .where(FornecedorSituacaoHistorico.tenant_id == tenant_id,
+                   FornecedorSituacaoHistorico.id_fornecedor == fornecedor_id)
+            .order_by(FornecedorSituacaoHistorico.criado_em.desc(), FornecedorSituacaoHistorico.id.desc()))
+    return list((await db.execute(stmt)).scalars().all())
 
 
 async def excluir_fornecedor(db: AsyncSession, *, tenant_id: int, fornecedor_id: int) -> None:

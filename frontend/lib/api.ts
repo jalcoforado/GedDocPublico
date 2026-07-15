@@ -978,6 +978,14 @@ export interface Fornecedor {
   atualizado_em: string | null;
 }
 
+export interface FornecedorSituacaoHistorico {
+  id: number;
+  situacao: "REGULAR" | "PENDENTE" | "IRREGULAR";
+  motivo: string | null;
+  id_usuario: number | null;
+  criado_em: string;
+}
+
 export interface DadosBancarios {
   banco: string | null;
   agencia: string | null;
@@ -2098,6 +2106,10 @@ export const api = {
         get: (id: number) => request<Fornecedor>(`/pagamentos/fornecedores/${id}`),
         dadosBancarios: (id: number) =>
           request<DadosBancarios>(`/pagamentos/fornecedores/${id}/dados-bancarios`),
+        situacaoHistorico: (id: number) =>
+          request<FornecedorSituacaoHistorico[]>(
+            `/pagamentos/fornecedores/${id}/situacao-historico`,
+          ),
         create: (data: unknown) =>
           request<Fornecedor>("/pagamentos/fornecedores", {
             method: "POST",

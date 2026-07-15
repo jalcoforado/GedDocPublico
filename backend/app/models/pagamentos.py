@@ -44,6 +44,19 @@ class Fornecedor(Base):
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
+class FornecedorSituacaoHistorico(Base):
+    """Log append-only de mudanças de situação cadastral do fornecedor."""
+    __tablename__ = "fornecedor_situacao_historico"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_fornecedor: Mapped[int] = mapped_column(ForeignKey("pagamentos.fornecedor.id"), nullable=False)
+    situacao: Mapped[str] = mapped_column(String(10), nullable=False)
+    motivo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class NaturezaDespesa(Base):
     __tablename__ = "natureza_despesa"
     __table_args__ = {"schema": "pagamentos"}

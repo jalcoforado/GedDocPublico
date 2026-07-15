@@ -37,6 +37,26 @@ const EMPTY: FormState = {
   chave_pix: "",
 };
 
+const SITUACAO_LABEL: Record<Fornecedor["situacao_cadastral"], string> = {
+  REGULAR: "Regular",
+  PENDENTE: "Pendente",
+  IRREGULAR: "Irregular",
+};
+
+function SituacaoBadge({ situacao }: { situacao: Fornecedor["situacao_cadastral"] }) {
+  const cls =
+    situacao === "REGULAR"
+      ? "bg-success-soft text-success-soft-foreground"
+      : situacao === "PENDENTE"
+        ? "bg-warning-soft text-warning-soft-foreground"
+        : "bg-danger-soft text-danger-soft-foreground";
+  return (
+    <span className={`inline-block whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium ${cls}`}>
+      {SITUACAO_LABEL[situacao]}
+    </span>
+  );
+}
+
 export default function FornecedoresPage() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -54,6 +74,12 @@ export default function FornecedoresPage() {
   const listQ = useQuery({
     queryKey: ["pag-fornecedores"],
     queryFn: () => api.pagamentos.cadastros.fornecedores.list(),
+  });
+
+  const historicoQ = useQuery({
+    queryKey: ["pag-fornecedor-historico", editId],
+    queryFn: () => api.pagamentos.cadastros.fornecedores.situacaoHistorico(editId as number),
+    enabled: open && editId !== null,
   });
 
   function openNew() {
@@ -105,6 +131,7 @@ export default function FornecedoresPage() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pag-fornecedores"] });
+      qc.invalidateQueries({ queryKey: ["pag-fornecedor-historico"] });
       toast.success(editId === null ? "Fornecedor criado." : "Fornecedor atualizado.");
       setOpen(false);
     },
@@ -177,7 +204,9 @@ export default function FornecedoresPage() {
               <TD>{c.nome}</TD>
               <TD>{c.cnpj_cpf}</TD>
               <TD>{c.tipo_pessoa === "FISICA" ? "Física" : "Jurídica"}</TD>
-              <TD>{c.situacao_cadastral}</TD>
+              <TD>
+                <SituacaoBadge situacao={c.situacao_cadastral} />
+              </TD>
               <TD>{c.tem_dados_bancarios ? "Sim" : "Não"}</TD>
               <TD className="text-right">
                 <div className="inline-flex gap-2">
@@ -266,12 +295,14 @@ export default function FornecedoresPage() {
             <Select
               id="cred-situacao"
               value={form.situacao_cadastral}
-              onChange={(e) =>
+              onChange={(e) => {
+                const situacao = e.target.value as FormState["situacao_cadastral"];
                 setForm({
                   ...form,
-                  situacao_cadastral: e.target.value as FormState["situacao_cadastral"],
-                })
-              }
+                  situacao_cadastral: situacao,
+                  motivo_pendencia: situacao === "REGULAR" ? "" : form.motivo_pendencia,
+                });
+              }}
               required
             >
               <option value="REGULAR">Regular</option>
@@ -280,11 +311,15 @@ export default function FornecedoresPage() {
             </Select>
           </div>
           <div>
-            <Label htmlFor="cred-motivo">Motivo da pendência</Label>
+            <Label htmlFor="cred-motivo" required={form.situacao_cadastral !== "REGULAR"}>
+              Motivo da pendência
+            </Label>
             <Input
               id="cred-motivo"
               value={form.motivo_pendencia}
               onChange={(e) => setForm({ ...form, motivo_pendencia: e.target.value })}
+              disabled={form.situacao_cadastral === "REGULAR"}
+              required={form.situacao_cadastral !== "REGULAR"}
             />
           </div>
 
@@ -326,6 +361,31 @@ export default function FornecedoresPage() {
               onChange={(e) => setForm({ ...form, chave_pix: e.target.value })}
             />
           </div>
+
+          {editId !== null && (
+            <div className="col-span-2 mt-2 border-t border-border pt-3">
+              <p className="mb-2 text-sm font-semibold text-foreground">Histórico de situação</p>
+              {historicoQ.isLoading ? (
+                <p className="text-xs text-muted-foreground">Carregando…</p>
+              ) : (historicoQ.data ?? []).length === 0 ? (
+                <p className="text-xs text-muted-foreground">Sem registros.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {(historicoQ.data ?? []).map((h) => (
+                    <li key={h.id} className="flex items-start gap-2">
+                      <SituacaoBadge situacao={h.situacao} />
+                      <div className="min-w-0 flex-1">
+                        {h.motivo && <p className="text-sm text-foreground">{h.motivo}</p>}
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(h.criado_em).toLocaleString("pt-BR")}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           {err && (
             <div

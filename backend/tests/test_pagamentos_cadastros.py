@@ -63,6 +63,7 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
             "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
             "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
             "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
             "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
             "DELETE FROM utils.grupo WHERE tenant_id=:t",
@@ -162,6 +163,179 @@ async def test_atualizar_fornecedor_recifra(admin_engine):
             revelado = await svc.dados_bancarios_fornecedor(s, tenant_id=t.id, fornecedor_id=c.id)
         assert revelado.conta == "NOVOSEGREDO999"
         assert revelado.chave_pix == "novo@pix"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+# ============================ situacao_cadastral x motivo_pendencia ===========
+async def _criar_situacao(engine, tenant_id, *, situacao, motivo):
+    async with _sm(engine)() as s:
+        return await svc.criar_fornecedor(
+            s, tenant_id=tenant_id,
+            payload=FornecedorCreate(
+                tipo_pessoa="JURIDICA", cnpj_cpf=_doc(), nome="Compliance LTDA",
+                situacao_cadastral=situacao, motivo_pendencia=motivo,
+            ),
+        )
+
+
+async def test_criar_irregular_sem_motivo_422(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        with pytest.raises(HTTPException) as exc:
+            await _criar_situacao(admin_engine, t.id, situacao="IRREGULAR", motivo=None)
+        assert exc.value.status_code == 422
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_criar_pendente_motivo_em_branco_422(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        with pytest.raises(HTTPException) as exc:
+            await _criar_situacao(admin_engine, t.id, situacao="PENDENTE", motivo="   ")
+        assert exc.value.status_code == 422
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_criar_irregular_com_motivo_ok(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        c = await _criar_situacao(admin_engine, t.id, situacao="IRREGULAR", motivo="Sancionado CEIS")
+        assert c.situacao_cadastral == "IRREGULAR"
+        assert c.motivo_pendencia == "Sancionado CEIS"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_criar_regular_limpa_motivo(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        c = await _criar_situacao(admin_engine, t.id, situacao="REGULAR", motivo="lixo")
+        assert c.motivo_pendencia is None
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_atualizar_para_irregular_sem_motivo_422(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        c = await _criar(admin_engine, t.id)  # nasce REGULAR
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.atualizar_fornecedor(
+                    s, tenant_id=t.id, fornecedor_id=c.id,
+                    payload=FornecedorUpdate(situacao_cadastral="IRREGULAR"),
+                )
+            assert exc.value.status_code == 422
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_atualizar_para_regular_limpa_motivo(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        c = await _criar_situacao(admin_engine, t.id, situacao="IRREGULAR", motivo="Sancionado")
+        async with _sm(admin_engine)() as s:
+            atualizado = await svc.atualizar_fornecedor(
+                s, tenant_id=t.id, fornecedor_id=c.id,
+                payload=FornecedorUpdate(situacao_cadastral="REGULAR"),
+            )
+        assert atualizado.situacao_cadastral == "REGULAR"
+        assert atualizado.motivo_pendencia is None
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_atualizar_esvaziar_motivo_de_irregular_422(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        c = await _criar_situacao(admin_engine, t.id, situacao="IRREGULAR", motivo="Sancionado")
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.atualizar_fornecedor(
+                    s, tenant_id=t.id, fornecedor_id=c.id,
+                    payload=FornecedorUpdate(motivo_pendencia=""),
+                )
+            assert exc.value.status_code == 422
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+# ============================ histórico de situação ===========================
+async def test_historico_registra_na_criacao(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        c = await _criar_situacao(admin_engine, t.id, situacao="PENDENTE", motivo="CND vencida")
+        async with _sm(admin_engine)() as s:
+            hist = await svc.listar_situacao_historico(s, tenant_id=t.id, fornecedor_id=c.id)
+        assert len(hist) == 1
+        assert hist[0].situacao == "PENDENTE"
+        assert hist[0].motivo == "CND vencida"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_historico_acumula_mudancas_em_ordem(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        # nasce REGULAR -> PENDENTE -> REGULAR -> IRREGULAR
+        c = await _criar(admin_engine, t.id)  # REGULAR (baseline)
+        for situacao, motivo in [
+            ("PENDENTE", "Faltando dados bancários"),
+            ("REGULAR", None),
+            ("IRREGULAR", "Sancionado CEIS"),
+        ]:
+            async with _sm(admin_engine)() as s:
+                await svc.atualizar_fornecedor(
+                    s, tenant_id=t.id, fornecedor_id=c.id,
+                    payload=FornecedorUpdate(situacao_cadastral=situacao, motivo_pendencia=motivo),
+                )
+        async with _sm(admin_engine)() as s:
+            hist = await svc.listar_situacao_historico(s, tenant_id=t.id, fornecedor_id=c.id)
+        # 1 baseline + 3 mudanças; ordenado do mais recente para o mais antigo
+        assert [h.situacao for h in hist] == ["IRREGULAR", "REGULAR", "PENDENTE", "REGULAR"]
+        assert hist[0].motivo == "Sancionado CEIS"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_historico_nao_registra_sem_mudanca_de_situacao(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        c = await _criar(admin_engine, t.id)  # 1 baseline
+        # muda só o nome — não deve gerar linha de histórico
+        async with _sm(admin_engine)() as s:
+            await svc.atualizar_fornecedor(
+                s, tenant_id=t.id, fornecedor_id=c.id,
+                payload=FornecedorUpdate(nome="Novo Nome LTDA"),
+            )
+        async with _sm(admin_engine)() as s:
+            hist = await svc.listar_situacao_historico(s, tenant_id=t.id, fornecedor_id=c.id)
+        assert len(hist) == 1
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_historico_grava_usuario(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            id_usuario = (await s.execute(
+                text("SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id},
+            )).scalar_one()
+        async with _sm(admin_engine)() as s:
+            c = await svc.criar_fornecedor(
+                s, tenant_id=t.id, usuario_id=id_usuario,
+                payload=FornecedorCreate(
+                    tipo_pessoa="JURIDICA", cnpj_cpf=_doc(), nome="Com Usuario LTDA",
+                    situacao_cadastral="IRREGULAR", motivo_pendencia="Suspenso TCE",
+                ),
+            )
+        async with _sm(admin_engine)() as s:
+            hist = await svc.listar_situacao_historico(s, tenant_id=t.id, fornecedor_id=c.id)
+        assert hist[0].id_usuario == id_usuario
     finally:
         await _cleanup(admin_engine, t.id)
 
