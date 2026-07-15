@@ -253,3 +253,108 @@ async def test_excluir_debito_rascunho_soft_delete(admin_engine):
         assert row[0] is True
     finally:
         await _cleanup(admin_engine, t.id)
+
+
+async def _debito_pronto(engine, tenant_id, **kw):
+    forn, nat, conta = await _base(engine, tenant_id)
+    async with _sm(engine)() as s:
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": tenant_id})).scalar_one()
+        d = await svc.criar_debito(s, tenant_id=tenant_id, usuario_id=uid,
+                                   payload=_payload_debito(forn, nat, conta, **kw))
+    return d, uid, conta
+
+
+async def _novo_usuario(engine, tenant_id, sufixo):
+    """Segundo usuário no tenant (para segregação)."""
+    async with _sm(engine)() as s:
+        r = await s.execute(text(
+            """INSERT INTO utils.usuario (tenant_id, nome, email, cpf, senha, ativo, excluido, data_criacao)
+               VALUES (:t, :n, :e, :c, 'x', true, false, NOW()) RETURNING id"""),
+            {"t": tenant_id, "n": f"User {sufixo}", "e": f"{sufixo}@t.local",
+             "c": uuid.uuid4().hex[:11]})
+        uid = r.scalar_one(); await s.commit()
+    return uid
+
+
+async def test_fluxo_enviar_aprovar(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        d, solicitante, _ = await _debito_pronto(admin_engine, t.id)
+        aprovador = await _novo_usuario(admin_engine, t.id, f"apr{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            d2 = await svc.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante)
+        assert d2.status == "AGUARDANDO_APROVACAO"
+        async with _sm(admin_engine)() as s:
+            d3 = await svc.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=aprovador)
+        assert d3.status == "APROVADO"
+        async with _sm(admin_engine)() as s:
+            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
+        assert [h.acao for h in hist] == ["APROVADO", "ENVIADO", "CRIADO"]
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_aprovar_pelo_proprio_solicitante_403(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        d, solicitante, _ = await _debito_pronto(admin_engine, t.id)
+        async with _sm(admin_engine)() as s:
+            await svc.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante)
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante)
+            assert exc.value.status_code == 403
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_devolver_volta_a_rascunho_com_motivo(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        d, solicitante, _ = await _debito_pronto(admin_engine, t.id)
+        aprovador = await _novo_usuario(admin_engine, t.id, f"dev{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            await svc.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante)
+        async with _sm(admin_engine)() as s:
+            d2 = await svc.devolver(s, tenant_id=t.id, debito_id=d.id, usuario_id=aprovador,
+                                    justificativa="Falta nota fiscal")
+        assert d2.status == "RASCUNHO"
+        async with _sm(admin_engine)() as s:
+            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
+        assert hist[0].acao == "DEVOLVIDO" and hist[0].justificativa == "Falta nota fiscal"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_transicao_invalida_409(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        d, solicitante, _ = await _debito_pronto(admin_engine, t.id)
+        # aprovar direto de RASCUNHO → 409
+        outro = await _novo_usuario(admin_engine, t.id, f"inv{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=outro)
+            assert exc.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_cancelar_apos_parcela_paga_409(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        d, solicitante, _ = await _debito_pronto(admin_engine, t.id)
+        async with _sm(admin_engine)() as s:
+            parcelas = await svc.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+        async with _sm(admin_engine)() as s:
+            await s.execute(text(
+                "UPDATE pagamentos.parcela SET status='PAGA' WHERE id=:i"), {"i": parcelas[0].id})
+            await s.commit()
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.cancelar(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante,
+                                   justificativa="Cancelamento indevido")
+            assert exc.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, t.id)

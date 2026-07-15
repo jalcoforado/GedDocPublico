@@ -165,6 +165,87 @@ async def nomes_usuarios(db: AsyncSession, *, tenant_id: int, ids: set[int]) -> 
     return {r[0]: r[1] for r in rows}
 
 
+async def aprovadores_do_debito(db: AsyncSession, *, tenant_id: int, debito_id: int) -> set[int]:
+    rows = (await db.execute(select(DebitoHistorico.id_usuario).where(
+        DebitoHistorico.tenant_id == tenant_id, DebitoHistorico.id_debito == debito_id,
+        DebitoHistorico.acao == "APROVADO"))).scalars().all()
+    return {r for r in rows if r is not None}
+
+
+def _exigir_status(d: Debito, *esperados: str) -> None:
+    if d.status not in esperados:
+        raise PagamentoDebitoError(
+            f"Transição inválida: débito está '{d.status}' (esperado: {', '.join(esperados)}).",
+            status.HTTP_409_CONFLICT)
+
+
+async def enviar_aprovacao(db: AsyncSession, *, tenant_id: int, debito_id: int,
+                           usuario_id: int, ip: str | None = None) -> Debito:
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    _exigir_status(d, "RASCUNHO")
+    parcelas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
+    if not parcelas:
+        raise PagamentoDebitoError("Débito sem parcelas.", status.HTTP_422_UNPROCESSABLE_ENTITY)
+    soma = sum((p.valor for p in parcelas), Decimal("0"))
+    if soma != d.valor_total:
+        raise PagamentoDebitoError(
+            f"Soma das parcelas ({soma}) difere do valor total ({d.valor_total}).",
+            status.HTTP_422_UNPROCESSABLE_ENTITY)
+    _registrar_transicao(db, debito=d, novo_status="AGUARDANDO_APROVACAO", acao="ENVIADO",
+                         usuario_id=usuario_id, ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    return d
+
+
+async def aprovar(db: AsyncSession, *, tenant_id: int, debito_id: int,
+                  usuario_id: int, ip: str | None = None) -> Debito:
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    _exigir_status(d, "AGUARDANDO_APROVACAO")
+    if usuario_id == d.id_usuario_solicitante:
+        raise PagamentoDebitoError("Segregação de funções: o solicitante não pode aprovar o próprio débito.",
+                                   status.HTTP_403_FORBIDDEN)
+    _registrar_transicao(db, debito=d, novo_status="APROVADO", acao="APROVADO",
+                         usuario_id=usuario_id, ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    return d
+
+
+async def devolver(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_id: int,
+                   justificativa: str, ip: str | None = None) -> Debito:
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    _exigir_status(d, "AGUARDANDO_APROVACAO")
+    _registrar_transicao(db, debito=d, novo_status="RASCUNHO", acao="DEVOLVIDO",
+                         usuario_id=usuario_id, justificativa=justificativa, ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    return d
+
+
+async def rejeitar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_id: int,
+                   justificativa: str, ip: str | None = None) -> Debito:
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    _exigir_status(d, "AGUARDANDO_APROVACAO")
+    _registrar_transicao(db, debito=d, novo_status="REJEITADO", acao="REJEITADO",
+                         usuario_id=usuario_id, justificativa=justificativa, ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    return d
+
+
+async def cancelar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_id: int,
+                   justificativa: str, ip: str | None = None) -> Debito:
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    _exigir_status(d, "RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO", "AUTORIZADO")
+    parcelas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
+    if any(p.status == "PAGA" for p in parcelas):
+        raise PagamentoDebitoError("Débito com parcela paga não pode ser cancelado — estorne antes.",
+                                   status.HTTP_409_CONFLICT)
+    for p in parcelas:
+        p.status = "CANCELADA"; p.atualizado_em = _utcnow()
+    _registrar_transicao(db, debito=d, novo_status="CANCELADO", acao="CANCELADO",
+                         usuario_id=usuario_id, justificativa=justificativa, ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    return d
+
+
 def debito_out(d: Debito, *, nome_fornecedor: str) -> dict:
     return {
         "id": d.id, "id_fornecedor": d.id_fornecedor, "nome_fornecedor": nome_fornecedor,
