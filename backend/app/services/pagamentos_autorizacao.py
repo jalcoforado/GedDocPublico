@@ -2,17 +2,17 @@
 Ordem de Pagamento e consultas. Pagamento/estorno de parcela na Task 5."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Alcada, Debito, OrdemPagamento, OrdemPagamentoDebito
+from ..models import Alcada, Debito, MovimentacaoConta, OrdemPagamento, OrdemPagamentoDebito, Parcela
 from . import pagamentos_caixa as caixa
 from .pagamentos_debitos import (
-    PagamentoDebitoError, _registrar_transicao, aprovadores_do_debito, obter_debito,
+    PagamentoDebitoError, _registrar_transicao, aprovadores_do_debito, listar_parcelas, obter_debito,
 )
 
 
@@ -119,3 +119,64 @@ async def debitos_da_ordem(db: AsyncSession, *, tenant_id: int, ordem_id: int) -
         .where(OrdemPagamentoDebito.tenant_id == tenant_id,
                OrdemPagamentoDebito.id_ordem == ordem_id)
         .order_by(Debito.id))).scalars().all())
+
+
+async def obter_parcela(db: AsyncSession, *, tenant_id: int, parcela_id: int) -> Parcela:
+    p = (await db.execute(select(Parcela).where(Parcela.id == parcela_id,
+        Parcela.tenant_id == tenant_id, Parcela.excluido.is_(False)))).scalar_one_or_none()
+    if p is None:
+        raise PagamentoDebitoError("Parcela não encontrada", status.HTTP_404_NOT_FOUND)
+    return p
+
+
+async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, parcela_id: int,
+                        forma_pagamento: str, data_pagamento: date | None = None,
+                        ip: str | None = None) -> Parcela:
+    """Atômico: movimentação SAIDA/PAGAMENTO + parcela PAGA + status do débito, num commit."""
+    p = await obter_parcela(db, tenant_id=tenant_id, parcela_id=parcela_id)
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito)
+    if d.status not in ("AUTORIZADO", "PAGO_PARCIAL"):
+        raise PagamentoDebitoError(
+            f"Débito não autorizado para pagamento (está '{d.status}').", status.HTTP_409_CONFLICT)
+    if p.status != "A_PAGAR":
+        raise PagamentoDebitoError(f"Parcela não está a pagar (está '{p.status}').",
+                                   status.HTTP_409_CONFLICT)
+    quando = data_pagamento or _utcnow().date()
+    mov = MovimentacaoConta(tenant_id=tenant_id, id_conta=d.id_conta, tipo="SAIDA",
+                            valor=p.valor, origem="PAGAMENTO", id_debito=d.id, id_parcela=p.id,
+                            data=quando, id_usuario=usuario_id,
+                            descricao=f"Pagamento parcela {p.numero} — débito #{d.id}",
+                            criado_em=_utcnow())
+    db.add(mov); await db.flush()
+    p.status = "PAGA"; p.data_pagamento = quando
+    p.forma_pagamento = forma_pagamento; p.id_movimentacao = mov.id; p.atualizado_em = _utcnow()
+    todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
+    pendentes = [x for x in todas if x.id != p.id and x.status == "A_PAGAR"]
+    novo = "PAGO" if not pendentes else "PAGO_PARCIAL"
+    _registrar_transicao(db, debito=d, novo_status=novo, acao="PAGAMENTO", usuario_id=usuario_id,
+                         justificativa=f"Parcela {p.numero} — {forma_pagamento}", ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)
+    return p
+
+
+async def estornar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, parcela_id: int,
+                           justificativa: str, ip: str | None = None) -> Parcela:
+    p = await obter_parcela(db, tenant_id=tenant_id, parcela_id=parcela_id)
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito)
+    if p.status != "PAGA":
+        raise PagamentoDebitoError("Só parcelas pagas podem ser estornadas.", status.HTTP_409_CONFLICT)
+    mov = MovimentacaoConta(tenant_id=tenant_id, id_conta=d.id_conta, tipo="ENTRADA",
+                            valor=p.valor, origem="ESTORNO", id_debito=d.id, id_parcela=p.id,
+                            data=_utcnow().date(), id_usuario=usuario_id,
+                            descricao=f"Estorno parcela {p.numero} — débito #{d.id}: {justificativa}",
+                            criado_em=_utcnow())
+    db.add(mov)
+    p.status = "A_PAGAR"; p.data_pagamento = None
+    p.forma_pagamento = None; p.id_movimentacao = None; p.atualizado_em = _utcnow()
+    todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
+    alguma_paga = any(x.id != p.id and x.status == "PAGA" for x in todas)
+    novo = "PAGO_PARCIAL" if alguma_paga else "AUTORIZADO"
+    _registrar_transicao(db, debito=d, novo_status=novo, acao="ESTORNO", usuario_id=usuario_id,
+                         justificativa=justificativa, ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)
+    return p

@@ -55,8 +55,9 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
             "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
+            "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
             "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
             "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
             "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
@@ -144,6 +145,20 @@ async def _autorizador_com_alcada(engine, tenant_id, *, valor_maximo="999999.00"
     uid = await _novo_usuario(engine, tenant_id, f"aut{uuid.uuid4().hex[:6]}")
     await _dar_alcada(engine, tenant_id, uid, valor_maximo=valor_maximo)
     return uid
+
+
+async def _debito_autorizado(engine, tenant_id, *, valor="1000.00", saldo_inicial="10000.00",
+                             parcelas=None, base=None):
+    """Débito RASCUNHO→...→APROVADO→AUTORIZADO. Retorna (debito, solicitante_id,
+    aprovador_id, autorizador_id, conta)."""
+    d, solicitante, aprovador, conta = await _debito_aprovado(
+        engine, tenant_id, valor=valor, saldo_inicial=saldo_inicial, parcelas=parcelas, base=base)
+    autorizador = await _autorizador_com_alcada(engine, tenant_id)
+    async with _sm(engine)() as s:
+        await aut.autorizar_lote(s, tenant_id=tenant_id, usuario_id=autorizador, debito_ids=[d.id])
+    async with _sm(engine)() as s:
+        d = await deb.obter_debito(s, tenant_id=tenant_id, debito_id=d.id)
+    return d, solicitante, aprovador, autorizador, conta
 
 
 async def test_autorizar_gera_op_e_muda_status(admin_engine):
@@ -293,5 +308,128 @@ async def test_autorizacao_em_lote_all_or_nothing(admin_engine):
             d_b2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_b.id)
         assert d_a2.status == "APROVADO"
         assert d_b2.status == "APROVADO"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_pagar_parcela_deduz_saldo_e_finaliza_debito(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        d, _sol, _apr, conta = await _debito_aprovado(
+            admin_engine, t.id, valor="1000.00",
+            parcelas=[ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-01"),
+                      ParcelaCreate(numero=2, valor="400.00", vencimento="2026-09-01")])
+        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+        tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador, debito_ids=[d.id])
+        async with _sm(admin_engine)() as s:
+            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+            p1 = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                         parcela_id=parcelas[0].id, forma_pagamento="PIX")
+        assert p1.status == "PAGA" and p1.id_movimentacao is not None
+        async with _sm(admin_engine)() as s:
+            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+            saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+        assert d2.status == "PAGO_PARCIAL"
+        assert saldo.saldo_atual == Decimal("9400.00")
+        assert saldo.comprometido == Decimal("400.00")
+        async with _sm(admin_engine)() as s:
+            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                    parcela_id=parcelas[1].id, forma_pagamento="TED")
+        async with _sm(admin_engine)() as s:
+            d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+            saldo2 = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+        assert d3.status == "PAGO"
+        assert saldo2.saldo_atual == Decimal("9000.00")
+        assert saldo2.comprometido == Decimal("0")
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_pagar_parcela_de_debito_nao_autorizado_409(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        d, _sol, _apr, _conta = await _debito_aprovado(admin_engine, t.id, valor="1000.00")
+        tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                        parcela_id=parcelas[0].id, forma_pagamento="PIX")
+            assert exc.value.status_code == 409
+        async with _sm(admin_engine)() as s:
+            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+            p2 = (await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id))[0]
+        assert d2.status == "APROVADO"
+        assert p2.status == "A_PAGAR"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_pagar_parcela_ja_paga_409(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        d, _sol, _apr, _autorizador, _conta = await _debito_autorizado(admin_engine, t.id, valor="1000.00")
+        tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                    parcela_id=parcelas[0].id, forma_pagamento="PIX")
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                        parcela_id=parcelas[0].id, forma_pagamento="PIX")
+            assert exc.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_estornar_parcela_repoe_saldo_e_reabre(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        d, _sol, _apr, _autorizador, conta = await _debito_autorizado(
+            admin_engine, t.id, valor="1000.00",
+            parcelas=[ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-01"),
+                      ParcelaCreate(numero=2, valor="400.00", vencimento="2026-09-01")])
+        tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                    parcela_id=parcelas[0].id, forma_pagamento="PIX")
+        async with _sm(admin_engine)() as s:
+            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                    parcela_id=parcelas[1].id, forma_pagamento="TED")
+        async with _sm(admin_engine)() as s:
+            d1 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+        assert d1.status == "PAGO"
+
+        async with _sm(admin_engine)() as s:
+            p2_estornada = await aut.estornar_parcela(
+                s, tenant_id=t.id, usuario_id=tesoureiro, parcela_id=parcelas[1].id,
+                justificativa="Pagamento em duplicidade")
+        assert p2_estornada.status == "A_PAGAR"
+        assert p2_estornada.data_pagamento is None
+        assert p2_estornada.forma_pagamento is None
+        assert p2_estornada.id_movimentacao is None
+        async with _sm(admin_engine)() as s:
+            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+            saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+        assert d2.status == "PAGO_PARCIAL"
+        assert saldo.saldo_atual == Decimal("9400.00")
+        assert saldo.comprometido == Decimal("400.00")
+
+        async with _sm(admin_engine)() as s:
+            await aut.estornar_parcela(
+                s, tenant_id=t.id, usuario_id=tesoureiro, parcela_id=parcelas[0].id,
+                justificativa="Pagamento em duplicidade")
+        async with _sm(admin_engine)() as s:
+            d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+            saldo2 = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+        assert d3.status == "AUTORIZADO"
+        assert saldo2.saldo_atual == Decimal("10000.00")
+        assert saldo2.comprometido == Decimal("1000.00")
     finally:
         await _cleanup(admin_engine, t.id)
