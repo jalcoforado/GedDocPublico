@@ -88,11 +88,14 @@ def upgrade() -> None:
         sa.Column("excluido", sa.Boolean(), nullable=False, server_default=sa.text("FALSE")),
         sa.CheckConstraint("valor > 0", name="ck_parcela_valor_positivo"),
         sa.CheckConstraint("status IN ('A_PAGAR','PAGA','CANCELADA')", name="ck_parcela_status"),
-        sa.UniqueConstraint("id_debito", "numero", name="uq_parcela_debito_numero"),
         schema=S,
     )
     op.create_index("ix_parcela_tenant_debito", "parcela", ["tenant_id", "id_debito"], schema=S)
     op.create_index("ix_parcela_tenant_status_venc", "parcela", ["tenant_id", "status", "vencimento"], schema=S)
+    # Único parcial (padrão do módulo, cf. 0045): soft-delete libera o par (id_debito, numero)
+    # para re-inserção ao substituir parcelas de um rascunho.
+    op.create_index("uq_parcela_debito_numero", "parcela", ["id_debito", "numero"],
+                    unique=True, schema=S, postgresql_where=sa.text("excluido = false"))
 
     op.create_table(  # append-only: sem excluido/atualizado_em
         "debito_historico",
