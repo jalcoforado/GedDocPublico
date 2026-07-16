@@ -121,7 +121,7 @@ function CardAutorizar({ itens }: { itens: Debito[] | null }) {
               </li>
             ))}
           </ul>
-          <VerTodas total={itens.length} href="/pagamentos/contas-a-pagar" />
+          <VerTodas total={itens.length} href="/pagamentos/autorizacao" />
           <Button
             className="mt-3"
             size="sm"
@@ -132,6 +132,12 @@ function CardAutorizar({ itens }: { itens: Debito[] | null }) {
           </Button>
         </>
       )}
+      <Link
+        href="/pagamentos/autorizacao"
+        className="mt-2 block text-xs text-primary hover:underline"
+      >
+        abrir tela de autorização →
+      </Link>
     </div>
   );
 }
