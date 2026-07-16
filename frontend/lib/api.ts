@@ -1058,6 +1058,8 @@ export interface SaldoConta {
   total_entradas: string;
   total_saidas: string;
   saldo_atual: string;
+  comprometido: string;
+  disponivel: string;
 }
 
 export interface ContaSaldoPainel {
@@ -1069,6 +1071,8 @@ export interface ContaSaldoPainel {
   total_entradas: string;
   total_saidas: string;
   saldo_atual: string;
+  comprometido: string;
+  disponivel: string;
   saldo_minimo_alerta: string;
   abaixo_minimo: boolean;
 }

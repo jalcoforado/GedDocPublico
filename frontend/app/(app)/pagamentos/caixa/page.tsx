@@ -125,6 +125,8 @@ export default function CaixaPage() {
             <TH className="text-right">Saldo inicial</TH>
             <TH className="text-right">Entradas</TH>
             <TH className="text-right">Saídas</TH>
+            <TH className="text-right">Comprometido</TH>
+            <TH className="text-right">Disponível</TH>
             <TH className="text-right">Saldo atual</TH>
             <TH></TH>
           </TR>
@@ -132,7 +134,7 @@ export default function CaixaPage() {
         <TBody>
           {!painelQ.isLoading && painel.length === 0 && (
             <TR>
-              <TD colSpan={7} className="py-6 text-center text-sm text-muted-foreground">
+              <TD colSpan={9} className="py-6 text-center text-sm text-muted-foreground">
                 Nenhuma conta cadastrada.
               </TD>
             </TR>
@@ -152,6 +154,8 @@ export default function CaixaPage() {
               <TD className="text-right tabular-nums text-danger-soft-foreground">
                 {fmtMoeda(c.total_saidas)}
               </TD>
+              <TD className="text-right tabular-nums">{fmtMoeda(c.comprometido)}</TD>
+              <TD className="text-right tabular-nums">{fmtMoeda(c.disponivel)}</TD>
               <TD className="text-right text-base font-semibold tabular-nums">
                 {fmtMoeda(c.saldo_atual)}
               </TD>

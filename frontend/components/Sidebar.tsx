@@ -49,6 +49,7 @@ interface NavItem {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   perm?: string;
+  anyOf?: string[];
 }
 
 interface NavGroup {
@@ -158,11 +159,15 @@ const NAV: NavGroup[] = [
     title: "Pagamentos",
     defaultOpen: false,
     items: [
+      { label: "Início", href: "/pagamentos", icon: Inbox,
+        anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"] },
+      { label: "Contas a pagar", href: "/pagamentos/contas-a-pagar", icon: ClipboardList,
+        anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar"] },
       { label: "Caixa", href: "/pagamentos/caixa", icon: Wallet, perm: "pagamento_cadastro" },
       { label: "Fornecedores", href: "/pagamentos/cadastros/fornecedores", icon: UserCircle, perm: "pagamento_cadastro" },
       { label: "Naturezas", href: "/pagamentos/cadastros/naturezas", icon: Layers, perm: "pagamento_cadastro" },
       { label: "Fontes de recursos", href: "/pagamentos/cadastros/fontes", icon: BookOpen, perm: "pagamento_cadastro" },
-      { label: "Contas bancárias", href: "/pagamentos/cadastros/contas", icon: ClipboardList, perm: "pagamento_cadastro" },
+      { label: "Contas bancárias", href: "/pagamentos/cadastros/contas", icon: Building2, perm: "pagamento_cadastro" },
       { label: "Contratos", href: "/pagamentos/cadastros/contratos", icon: FileText, perm: "pagamento_cadastro" },
       { label: "Alçadas", href: "/pagamentos/cadastros/alcadas", icon: Shield, perm: "pagamento_cadastro" },
     ],
@@ -345,7 +350,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         {/* Items */}
         <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 py-2">
           {NAV.map((group) => {
-            const visible = group.items.filter((item) => !item.perm || can(item.perm));
+            const visible = group.items.filter(
+              (item) =>
+                (!item.perm && !item.anyOf) ||
+                (item.perm && can(item.perm)) ||
+                (item.anyOf && item.anyOf.some((p) => can(p))),
+            );
             if (visible.length === 0) return null;
             const isOpen = groupOpen[group.title] ?? group.defaultOpen ?? true;
             const groupIsActive = activeGroupTitle === group.title;
