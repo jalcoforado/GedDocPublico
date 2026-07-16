@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -95,6 +95,7 @@ export default function ContasAPagarPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const { can } = useAuth();
+  const router = useRouter();
 
   const [status, setStatus] = useState<StatusDebito | "">("");
   const [open, setOpen] = useState(false);
@@ -239,12 +240,12 @@ export default function ContasAPagarPage() {
       <Table>
         <THead>
           <TR>
+            <TH>Status</TH>
             <TH>Fornecedor</TH>
             <TH>Descrição</TH>
             <TH>Competência</TH>
             <TH className="text-right">Valor</TH>
             <TH>Criticidade</TH>
-            <TH>Status</TH>
           </TR>
         </THead>
         <TBody>
@@ -256,16 +257,17 @@ export default function ContasAPagarPage() {
             </TR>
           )}
           {debitos.map((d) => (
-            <TR key={d.id}>
+            <TR
+              key={d.id}
+              onClickRow={() => router.push(`/pagamentos/contas-a-pagar/${d.id}`)}
+            >
               <TD>
-                <Link
-                  href={`/pagamentos/contas-a-pagar/${d.id}`}
-                  className="text-primary hover:underline"
-                >
-                  {d.nome_fornecedor}
-                </Link>
+                <StatusBadge status={d.status} />
               </TD>
-              <TD>{d.descricao}</TD>
+              <TD className="min-w-0 max-w-0 truncate font-medium text-foreground">
+                {d.nome_fornecedor}
+              </TD>
+              <TD className="min-w-0 max-w-0 truncate">{d.descricao}</TD>
               <TD>{d.competencia}</TD>
               <TD className="text-right tabular-nums">{fmtMoeda(d.valor_total)}</TD>
               <TD>
@@ -273,9 +275,6 @@ export default function ContasAPagarPage() {
                   {d.criticidade}
                   {d.urgente && <Badge intent="danger">URGENTE</Badge>}
                 </div>
-              </TD>
-              <TD>
-                <StatusBadge status={d.status} />
               </TD>
             </TR>
           ))}

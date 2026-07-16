@@ -15,8 +15,22 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import { RitoPagamento, type PassoRito } from "@/components/pagamentos/RitoPagamento";
+import { fmtDataCurta } from "@/components/pagamentos/format";
 import { useAuth } from "@/lib/auth";
 import { api, type Parcela, type StatusDebito } from "@/lib/api";
+
+// Passos do rito já concluídos + próximo passo pendente, derivados do status do débito.
+const RITO_POR_STATUS: Record<StatusDebito, { concluidos: PassoRito[]; atual?: PassoRito }> = {
+  RASCUNHO: { concluidos: [], atual: "solicitar" },
+  AGUARDANDO_APROVACAO: { concluidos: ["solicitar"], atual: "aprovar" },
+  APROVADO: { concluidos: ["solicitar", "aprovar"], atual: "autorizar" },
+  AUTORIZADO: { concluidos: ["solicitar", "aprovar", "autorizar"], atual: "liberar" },
+  PAGO_PARCIAL: { concluidos: ["solicitar", "aprovar", "autorizar"], atual: "pagar" },
+  PAGO: { concluidos: ["solicitar", "aprovar", "autorizar", "liberar", "pagar"] },
+  REJEITADO: { concluidos: ["solicitar"] },
+  CANCELADO: { concluidos: [] },
+};
 
 function fmtMoeda(v: string): string {
   const n = Number(v);
@@ -243,6 +257,13 @@ export default function DebitoDetalhePage() {
         </div>
       </div>
 
+      <div className="rounded-lg border border-border bg-surface-1 px-4 py-3">
+        <RitoPagamento
+          atual={RITO_POR_STATUS[d.status].atual}
+          concluidos={RITO_POR_STATUS[d.status].concluidos}
+        />
+      </div>
+
       <div className="grid grid-cols-2 gap-4 rounded-lg border border-border bg-surface-1 p-4 sm:grid-cols-4">
         <div>
           <p className="text-xs uppercase tracking-wider text-muted-foreground">Valor total</p>
@@ -298,17 +319,25 @@ export default function DebitoDetalhePage() {
                   <Badge intent={PARCELA_STATUS_BADGE[p.status].intent}>
                     {PARCELA_STATUS_BADGE[p.status].label}
                   </Badge>
+                  {p.status === "LIBERADA" && p.data_liberacao && (
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      liberada em {fmtDataCurta(p.data_liberacao)}
+                    </p>
+                  )}
                 </TD>
                 <TD>{p.forma_pagamento ?? "—"}</TD>
                 <TD>{fmtData(p.data_pagamento)}</TD>
                 <TD className="text-right">
-                  {p.status === "A_PAGAR" &&
-                    (d.status === "AUTORIZADO" || d.status === "PAGO_PARCIAL") &&
-                    podePagar && (
-                      <Button size="sm" onClick={() => abrirPagar(p)}>
-                        Pagar
-                      </Button>
-                    )}
+                  {p.status === "LIBERADA" && podePagar && (
+                    <Button size="sm" onClick={() => abrirPagar(p)}>
+                      Pagar
+                    </Button>
+                  )}
+                  {p.status === "A_PAGAR" && (
+                    <span className="text-xs text-muted-foreground">
+                      aguardando liberação
+                    </span>
+                  )}
                   {p.status === "PAGA" && podePagar && (
                     <Button
                       size="sm"

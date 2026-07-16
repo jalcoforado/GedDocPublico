@@ -1,25 +1,13 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import { useToast } from "@/components/ui/toast";
+import { RitoPagamento } from "@/components/pagamentos/RitoPagamento";
+import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
 import { api, type Debito, type ParcelaFila } from "@/lib/api";
-
-function fmtMoeda(v: string): string {
-  const n = Number(v);
-  if (Number.isNaN(n)) return v;
-  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-function fmtData(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  return `${d}/${m}/${y.slice(2)}`;
-}
 
 // Filas podem ter dezenas de itens (massa real): cada card mostra os primeiros e
 // aponta para a lista completa, mantendo a home compacta.
@@ -30,6 +18,14 @@ function VerTodas({ total, href }: { total: number; href: string }) {
   return (
     <Link href={href} className="mt-2 block text-xs text-primary hover:underline">
       + {total - MAX_ITENS_CARD} outras — ver todas
+    </Link>
+  );
+}
+
+function AbrirTela({ href, label }: { href: string; label: string }) {
+  return (
+    <Link href={href} className="mt-3 block text-xs text-primary hover:underline">
+      {label} →
     </Link>
   );
 }
@@ -58,7 +54,17 @@ function DebitoLista({ itens }: { itens: Debito[] }) {
   );
 }
 
-function CardFila({ title, itens }: { title: string; itens: Debito[] | null }) {
+function CardFila({
+  title,
+  itens,
+  abrirHref,
+  abrirLabel,
+}: {
+  title: string;
+  itens: Debito[] | null;
+  abrirHref: string;
+  abrirLabel: string;
+}) {
   if (itens === null) return null;
   return (
     <div className="rounded-lg border border-border bg-surface-1 p-4">
@@ -67,87 +73,27 @@ function CardFila({ title, itens }: { title: string; itens: Debito[] | null }) {
         <Badge intent={itens.length > 0 ? "warning" : "neutral"}>{itens.length}</Badge>
       </div>
       <DebitoLista itens={itens} />
+      <AbrirTela href={abrirHref} label={abrirLabel} />
     </div>
   );
 }
 
-function CardAutorizar({ itens }: { itens: Debito[] | null }) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const [selecionados, setSelecionados] = useState<number[]>([]);
-
-  const autorizarM = useMutation({
-    mutationFn: () => api.pagamentos.autorizar(selecionados),
-    onSuccess: (op) => {
-      qc.invalidateQueries({ queryKey: ["pag-fila"] });
-      qc.invalidateQueries({ queryKey: ["pag-debitos"] });
-      toast.success(`Ordem de pagamento ${op.numero} gerada.`);
-      setSelecionados([]);
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  if (itens === null) return null;
-
-  function toggle(id: number) {
-    setSelecionados((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
-  }
-
-  return (
-    <div className="rounded-lg border border-border bg-surface-1 p-4">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-foreground">Aguardando autorização</h2>
-        <Badge intent={itens.length > 0 ? "warning" : "neutral"}>{itens.length}</Badge>
-      </div>
-      {itens.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nada pendente.</p>
-      ) : (
-        <>
-          <ul className="space-y-1">
-            {itens.slice(0, MAX_ITENS_CARD).map((d) => (
-              <li key={d.id} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={selecionados.includes(d.id)}
-                  onChange={() => toggle(d.id)}
-                />
-                <Link
-                  href={`/pagamentos/contas-a-pagar/${d.id}`}
-                  className="min-w-0 flex-1 truncate text-primary hover:underline"
-                >
-                  {d.nome_fornecedor} — {d.descricao}
-                </Link>
-                <span className="shrink-0 tabular-nums">{fmtMoeda(d.valor_total)}</span>
-              </li>
-            ))}
-          </ul>
-          <VerTodas total={itens.length} href="/pagamentos/autorizacao" />
-          <Button
-            className="mt-3"
-            size="sm"
-            disabled={selecionados.length === 0 || autorizarM.isPending}
-            onClick={() => autorizarM.mutate()}
-          >
-            {autorizarM.isPending ? "Autorizando..." : "Autorizar selecionados"}
-          </Button>
-        </>
-      )}
-      <Link
-        href="/pagamentos/autorizacao"
-        className="mt-2 block text-xs text-primary hover:underline"
-      >
-        abrir tela de autorização →
-      </Link>
-    </div>
-  );
-}
-
-function CardParcelas({ itens }: { itens: ParcelaFila[] | null }) {
+function CardParcelas({
+  title,
+  itens,
+  abrirHref,
+  abrirLabel,
+}: {
+  title: string;
+  itens: ParcelaFila[] | null;
+  abrirHref: string;
+  abrirLabel: string;
+}) {
   if (itens === null) return null;
   return (
     <div className="rounded-lg border border-border bg-surface-1 p-4">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-foreground">Parcelas a pagar</h2>
+        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         <Badge intent={itens.length > 0 ? "warning" : "neutral"}>{itens.length}</Badge>
       </div>
       {itens.length === 0 ? (
@@ -180,6 +126,7 @@ function CardParcelas({ itens }: { itens: ParcelaFila[] | null }) {
           <VerTodas total={itens.length} href="/pagamentos/contas-a-pagar" />
         </>
       )}
+      <AbrirTela href={abrirHref} label={abrirLabel} />
     </div>
   );
 }
@@ -206,12 +153,42 @@ export default function PagamentosHomePage() {
         </p>
       </div>
 
+      <div className="rounded-lg border border-border bg-surface-1 px-4 py-3">
+        <RitoPagamento />
+      </div>
+
       {fila && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <CardFila title="Meus rascunhos" itens={fila.solicitar} />
-          <CardFila title="Aguardando minha aprovação" itens={fila.aprovar} />
-          <CardAutorizar itens={fila.autorizar} />
-          <CardParcelas itens={fila.pagar} />
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <CardFila
+            title="Meus rascunhos"
+            itens={fila.solicitar}
+            abrirHref="/pagamentos/contas-a-pagar"
+            abrirLabel="abrir tela de contas a pagar"
+          />
+          <CardFila
+            title="Aguardando minha aprovação"
+            itens={fila.aprovar}
+            abrirHref="/pagamentos/contas-a-pagar"
+            abrirLabel="abrir tela de contas a pagar"
+          />
+          <CardFila
+            title="Aguardando autorização"
+            itens={fila.autorizar}
+            abrirHref="/pagamentos/autorizacao"
+            abrirLabel="abrir tela de autorização"
+          />
+          <CardParcelas
+            title="Pagamentos a liberar"
+            itens={fila.liberar}
+            abrirHref="/pagamentos/autorizacao?tab=pagamento"
+            abrirLabel="abrir tela de liberação"
+          />
+          <CardParcelas
+            title="Tesouraria — a pagar"
+            itens={fila.pagar}
+            abrirHref="/pagamentos/tesouraria"
+            abrirLabel="abrir tesouraria"
+          />
         </div>
       )}
 
