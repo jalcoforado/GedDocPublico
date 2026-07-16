@@ -91,7 +91,16 @@ class FilaTesourariaOut(BaseModel):
 - [ ] `seed_pagamentos_demo.py`: fluxo PAGO/PAGO_PARCIAL agora libera (data_prevista = vencimento) antes de pagar; criar ~15 parcelas LIBERADAS não pagas (metade vencidas) e manter A_PAGAR não liberadas nos AUTORIZADOS restantes. Re-rodar `--tenant sobral --reset`; resumo com contagens por estado de parcela (assert: ≥10 LIBERADAS pendentes, ≥20 A_PAGAR liberáveis).
 - [ ] Regressão módulo. Commit: `feat(pagamentos): seed com o passo de liberação do rito`
 
-### Task 4: Frontend — RitoPagamento + Sidebar + api.ts
+### Task 4: Frontend — RitoPagamento + Sidebar + api.ts + tema
+
+**Tema (pedido do Jorge 2026-07-16):** lateral (Sidebar) muda para **verde-petróleo escuro**
+(base ~`#123f33`; derivar hover/ativo/borda dessa base — ativo pode usar um degrau mais claro
+ou um filete na cor da marca; textos/ícones da lateral passam a claros com contraste AA);
+fundo da área de conteúdo (tema claro) deixa de ser branco puro → **off-white** discreto
+(~`#f6f7f6`, viés frio/verde) mantendo cards/tabelas brancos para contraste. Implementar nos
+TOKENS do tema (globals.css/tailwind.config), não com cores hardcoded nos componentes; tema
+escuro: a lateral pode herdar o mesmo verde-petróleo (mais profundo, ~`#0c2b23`) — validar
+contraste nos dois temas.
 
 - [ ] `components/pagamentos/RitoPagamento.tsx`: props `{ atual: "solicitar"|"aprovar"|"autorizar"|"liberar"|"pagar", concluidos?: string[] }`; linha horizontal dos 5 passos (número pequeno em círculo + rótulo), atual em cor da marca (fundo soft), concluídos com ✓ muted, demais muted; responsivo (rótulos somem em <sm, ficam só números com title); sem animação.
 - [ ] Sidebar: suporte a `children?: NavItem[]` num item (subgrupo colapsável com chevron, useState); grupo Pagamentos reescrito conforme spec §2 (7 itens, Cadastros ▸ com os 6 filhos). Ícones já importados; "Tesouraria" usa `Banknote` ou `HandCoins` (importar de lucide se preciso).
