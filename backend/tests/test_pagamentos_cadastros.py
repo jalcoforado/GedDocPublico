@@ -106,6 +106,31 @@ async def test_dados_bancarios_fornecedor_decifra_corretamente(admin_engine):
         await _cleanup(admin_engine, t.id)
 
 
+async def test_dados_bancarios_fornecedor_gera_audit_log(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        dados = DadosBancarios(banco="001", agencia="1234", conta="5678-9", chave_pix="pix@medlar")
+        c = await _criar(admin_engine, t.id, dados_bancarios=dados)
+        async with _sm(admin_engine)() as s:
+            r = await s.execute(text(
+                """INSERT INTO utils.usuario (tenant_id, nome, email, cpf, senha, ativo, excluido, data_criacao)
+                   VALUES (:t, :n, :e, :c, 'x', true, false, NOW()) RETURNING id"""),
+                {"t": t.id, "n": "Usuario Reveal", "e": f"{uuid.uuid4().hex[:8]}@t.local",
+                 "c": uuid.uuid4().hex[:11]})
+            uid = r.scalar_one(); await s.commit()
+        async with _sm(admin_engine)() as s:
+            await svc.dados_bancarios_fornecedor(s, tenant_id=t.id, fornecedor_id=c.id, usuario_id=uid)
+        async with _sm(admin_engine)() as s:
+            row = (await s.execute(text(
+                "SELECT count(*) FROM aprimora_py.audit_log "
+                "WHERE tenant_id=:t AND acao=:a AND id_entidade=:e AND id_usuario=:u"),
+                {"t": t.id, "a": "fornecedor.dados_bancarios_revelados", "e": c.id, "u": uid}
+            )).scalar_one()
+        assert row == 1
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
 async def test_dados_bancarios_cifrados_em_repouso(admin_engine):
     t = await _provisionar(admin_engine)
     try:

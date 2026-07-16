@@ -152,10 +152,24 @@ async def excluir_fornecedor(db: AsyncSession, *, tenant_id: int, fornecedor_id:
     c.excluido = True; c.atualizado_em = _utcnow(); await db.commit()
 
 
-async def dados_bancarios_fornecedor(db: AsyncSession, *, tenant_id: int, fornecedor_id: int) -> DadosBancarios:
+async def dados_bancarios_fornecedor(db: AsyncSession, *, tenant_id: int, fornecedor_id: int,
+                                     usuario_id: int | None = None) -> DadosBancarios:
     c = await obter_fornecedor(db, tenant_id=tenant_id, fornecedor_id=fornecedor_id)
-    return DadosBancarios(banco=crypto.decrypt(c.banco_cif), agencia=crypto.decrypt(c.agencia_cif),
-                          conta=crypto.decrypt(c.conta_cif), chave_pix=crypto.decrypt(c.chave_pix_cif))
+    revelado = DadosBancarios(banco=crypto.decrypt(c.banco_cif), agencia=crypto.decrypt(c.agencia_cif),
+                              conta=crypto.decrypt(c.conta_cif), chave_pix=crypto.decrypt(c.chave_pix_cif))
+
+    from .audit import log as audit_log
+
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="fornecedor.dados_bancarios_revelados",
+        entidade="fornecedor",
+        id_entidade=c.id,
+    )
+    await db.commit()
+    return revelado
 
 
 # ============================ natureza_despesa / fonte_recursos ==============

@@ -123,7 +123,8 @@ async def debitos_da_ordem(db: AsyncSession, *, tenant_id: int, ordem_id: int) -
 
 async def obter_parcela(db: AsyncSession, *, tenant_id: int, parcela_id: int) -> Parcela:
     p = (await db.execute(select(Parcela).where(Parcela.id == parcela_id,
-        Parcela.tenant_id == tenant_id, Parcela.excluido.is_(False)))).scalar_one_or_none()
+        Parcela.tenant_id == tenant_id, Parcela.excluido.is_(False)).with_for_update())
+        ).scalar_one_or_none()
     if p is None:
         raise PagamentoDebitoError("Parcela não encontrada", status.HTTP_404_NOT_FOUND)
     return p
@@ -134,7 +135,7 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
                         ip: str | None = None) -> Parcela:
     """Atômico: movimentação SAIDA/PAGAMENTO + parcela PAGA + status do débito, num commit."""
     p = await obter_parcela(db, tenant_id=tenant_id, parcela_id=parcela_id)
-    d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito)
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito, for_update=True)
     if d.status not in ("AUTORIZADO", "PAGO_PARCIAL"):
         raise PagamentoDebitoError(
             f"Débito não autorizado para pagamento (está '{d.status}').", status.HTTP_409_CONFLICT)
@@ -145,7 +146,7 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
     mov = MovimentacaoConta(tenant_id=tenant_id, id_conta=d.id_conta, tipo="SAIDA",
                             valor=p.valor, origem="PAGAMENTO", id_debito=d.id, id_parcela=p.id,
                             data=quando, id_usuario=usuario_id,
-                            descricao=f"Pagamento parcela {p.numero} — débito #{d.id}",
+                            descricao=f"Pagamento parcela {p.numero} — débito #{d.id}"[:255],
                             criado_em=_utcnow())
     db.add(mov); await db.flush()
     p.status = "PAGA"; p.data_pagamento = quando
@@ -162,13 +163,13 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
 async def estornar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, parcela_id: int,
                            justificativa: str, ip: str | None = None) -> Parcela:
     p = await obter_parcela(db, tenant_id=tenant_id, parcela_id=parcela_id)
-    d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito)
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito, for_update=True)
     if p.status != "PAGA":
         raise PagamentoDebitoError("Só parcelas pagas podem ser estornadas.", status.HTTP_409_CONFLICT)
     mov = MovimentacaoConta(tenant_id=tenant_id, id_conta=d.id_conta, tipo="ENTRADA",
                             valor=p.valor, origem="ESTORNO", id_debito=d.id, id_parcela=p.id,
                             data=_utcnow().date(), id_usuario=usuario_id,
-                            descricao=f"Estorno parcela {p.numero} — débito #{d.id}: {justificativa}",
+                            descricao=f"Estorno parcela {p.numero} — débito #{d.id}: {justificativa}"[:255],
                             criado_em=_utcnow())
     db.add(mov)
     p.status = "A_PAGAR"; p.data_pagamento = None

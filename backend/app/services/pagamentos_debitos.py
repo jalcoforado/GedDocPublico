@@ -74,9 +74,13 @@ async def criar_debito(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     return d
 
 
-async def obter_debito(db: AsyncSession, *, tenant_id: int, debito_id: int) -> Debito:
-    d = (await db.execute(select(Debito).where(Debito.id == debito_id,
-        Debito.tenant_id == tenant_id, Debito.excluido.is_(False)))).scalar_one_or_none()
+async def obter_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
+                       for_update: bool = False) -> Debito:
+    stmt = select(Debito).where(Debito.id == debito_id,
+        Debito.tenant_id == tenant_id, Debito.excluido.is_(False))
+    if for_update:
+        stmt = stmt.with_for_update()
+    d = (await db.execute(stmt)).scalar_one_or_none()
     if d is None:
         raise PagamentoDebitoError("Débito não encontrado", status.HTTP_404_NOT_FOUND)
     return d

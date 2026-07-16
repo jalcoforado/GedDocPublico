@@ -41,10 +41,11 @@ async def get_fornecedor(fornecedor_id: int,
 
 @fornecedores_router.get("/{fornecedor_id}/dados-bancarios", response_model=FornecedorDadosBancariosOut)
 async def get_dados_bancarios(fornecedor_id: int,
-                              _: Usuario = Depends(require_permission("pagamento_cadastro")),
+                              usuario: Usuario = Depends(require_permission("pagamento_cadastro")),
                               tenant_id: int = Depends(require_tenant_id),
                               db: AsyncSession = Depends(get_db)):
-    return await svc.dados_bancarios_fornecedor(db, tenant_id=tenant_id, fornecedor_id=fornecedor_id)
+    return await svc.dados_bancarios_fornecedor(db, tenant_id=tenant_id, fornecedor_id=fornecedor_id,
+                                                 usuario_id=usuario.id)
 
 
 @fornecedores_router.get("/{fornecedor_id}/situacao-historico",

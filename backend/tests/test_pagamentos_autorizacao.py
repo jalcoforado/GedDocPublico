@@ -433,3 +433,28 @@ async def test_estornar_parcela_repoe_saldo_e_reabre(admin_engine):
         assert saldo2.comprometido == Decimal("1000.00")
     finally:
         await _cleanup(admin_engine, t.id)
+
+
+async def test_estornar_parcela_com_justificativa_longa_trunca_descricao(admin_engine):
+    """justificativa com 255 chars pode estourar o String(255) da descrição
+    (que também inclui o prefixo 'Estorno parcela N — débito #ID: '). A
+    descrição gravada deve ser truncada em 255 chars — sem erro de banco."""
+    t = await _provisionar(admin_engine)
+    try:
+        d, _sol, _apr, _autorizador, _conta = await _debito_autorizado(admin_engine, t.id, valor="1000.00")
+        tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+        justificativa_longa = "J" * 255
+        async with _sm(admin_engine)() as s:
+            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                    parcela_id=parcelas[0].id, forma_pagamento="PIX")
+        async with _sm(admin_engine)() as s:
+            p_estornada = await aut.estornar_parcela(
+                s, tenant_id=t.id, usuario_id=tesoureiro, parcela_id=parcelas[0].id,
+                justificativa=justificativa_longa)
+        assert p_estornada.status == "A_PAGAR"
+        async with _sm(admin_engine)() as s:
+            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+        assert d2.status == "AUTORIZADO"
+    finally:
+        await _cleanup(admin_engine, t.id)
