@@ -1,4 +1,4 @@
-"""Transporte Regulado — modelos de Permissionário e Empresa.
+"""Transporte Regulado — modelos de Permissionário, Empresa e Veículo regulado.
 
 Domínio SEPARADO da Frota Interna (schema `transporte_regulado`, permissão
 `transporte_regulado`). Tenant-scoped, RLS nas tabelas do schema (ver migrations
@@ -79,6 +79,51 @@ class Empresa(Base):
     id_representante_permissionario: Mapped[int | None] = mapped_column(
         ForeignKey("transporte_regulado.permissionario.id"), nullable=True
     )
+    situacao: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pendente"
+    )
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoRegulado(Base):
+    """Veículo regulado/permissionário. Nome de classe distinto de `frota.Veiculo`
+    para evitar colisão de domínio (tabela `transporte_regulado.veiculo`). NÃO
+    referencia `frota.veiculo`. Vínculo a permissionário e/ou empresa (ao menos um);
+    `placa` única por tenant entre não excluídos; `renavam`/`chassi` únicos quando
+    informados (coerências garantidas no serviço)."""
+
+    __tablename__ = "veiculo"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_permissionario: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.permissionario.id"), nullable=True
+    )
+    id_empresa: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.empresa.id"), nullable=True
+    )
+    placa: Mapped[str] = mapped_column(String(7), nullable=False)
+    renavam: Mapped[str | None] = mapped_column(String(11), nullable=True)
+    chassi: Mapped[str | None] = mapped_column(String(17), nullable=True)
+    marca: Mapped[str] = mapped_column(String(60), nullable=False)
+    modelo: Mapped[str] = mapped_column(String(60), nullable=False)
+    ano_fabricacao: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ano_modelo: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cor: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    categoria: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    tipo_servico: Mapped[str] = mapped_column(String(30), nullable=False)
+    capacidade_passageiros: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tipo_combustivel: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    adaptado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    numero_autorizacao: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    data_inicio_autorizacao: Mapped[date | None] = mapped_column(Date, nullable=True)
+    data_validade_autorizacao: Mapped[date | None] = mapped_column(Date, nullable=True)
     situacao: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pendente"
     )

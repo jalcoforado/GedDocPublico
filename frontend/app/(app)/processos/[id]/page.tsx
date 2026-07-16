@@ -27,6 +27,7 @@ function isTabId(v: string | null): v is TabId {
 
 import { AcoesProcesso } from "@/components/AcoesProcesso";
 import { AnexosProcesso } from "@/components/AnexosProcesso";
+import { MinutasProcesso } from "@/components/MinutasProcesso";
 import { CancelarComplementacaoDialog } from "@/components/CancelarComplementacaoDialog";
 import { ChecklistDocumentosCard } from "@/components/ChecklistDocumentosCard";
 import { ClassificarSigiloDialog } from "@/components/ClassificarSigiloDialog";
@@ -714,6 +715,15 @@ export default function ProcessoDetailPage() {
             </CardHeader>
             <CardContent>
               <AnexosProcesso processo={p} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Documentos redigidos</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <MinutasProcesso processo={p} />
             </CardContent>
           </Card>
 

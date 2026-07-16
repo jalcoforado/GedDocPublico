@@ -9,6 +9,9 @@ x-backend-env: &backend-env
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/1
   JOBS_RESULTS_DIR: /app/uploads/jobs
+  # DEV-ONLY: chave Fernet de dados sensíveis. Em produção NÃO usar este valor —
+  # sobrescrever via secret real (env/secret store), como o dev DB password.
+  DADOS_SENSIVEIS_ENCRYPTION_KEY: 7qeLLAFqcrdD_Zo5A4Ip28YUi7x7M_7BxlFv-knsnP0=
 
 x-backend-volumes: &backend-volumes
   - ./backend:/app

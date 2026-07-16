@@ -903,6 +903,259 @@ export interface AnexoUploadInput {
   publico?: boolean;
 }
 
+// Minutas de documento + templates (editor interno / Google Docs)
+export type MinutaOrigem = "interno" | "google";
+export type MinutaStatus = "rascunho" | "finalizada" | "cancelada";
+
+export interface PlaceholderInfo {
+  chave: string;
+  descricao: string;
+}
+
+export interface TemplateDocumento {
+  id: number;
+  nome: string;
+  descricao: string | null;
+  categoria: string | null;
+  corpo_html: string;
+  placeholders_utilizados: string[] | null;
+  ativo: boolean;
+  id_usuario_criacao: number | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface TemplateDocumentoInput {
+  nome: string;
+  descricao?: string | null;
+  categoria?: string | null;
+  corpo_html: string;
+  ativo?: boolean;
+}
+
+export interface Minuta {
+  id: number;
+  id_processo: number;
+  id_template_origem: number | null;
+  titulo: string;
+  origem: MinutaOrigem;
+  status: MinutaStatus;
+  versao: number;
+  corpo_html: string | null;
+  google_doc_id: string | null;
+  google_doc_url: string | null;
+  id_anexo_final: number | null;
+  id_usuario_criacao: number;
+  id_usuario_finalizacao: number | null;
+  finalizada_em: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface MinutaListItem {
+  id: number;
+  id_processo: number;
+  titulo: string;
+  origem: MinutaOrigem;
+  status: MinutaStatus;
+  versao: number;
+  id_anexo_final: number | null;
+  id_usuario_criacao: number;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+// ---------- Pagamentos (PAG-1) — cadastros ----------
+export interface Fornecedor {
+  id: number;
+  tipo_pessoa: "FISICA" | "JURIDICA";
+  cnpj_cpf: string;
+  nome: string;
+  situacao_cadastral: "REGULAR" | "PENDENTE" | "IRREGULAR";
+  motivo_pendencia: string | null;
+  tem_dados_bancarios: boolean;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface FornecedorSituacaoHistorico {
+  id: number;
+  situacao: "REGULAR" | "PENDENTE" | "IRREGULAR";
+  motivo: string | null;
+  id_usuario: number | null;
+  criado_em: string;
+}
+
+export interface DadosBancarios {
+  banco: string | null;
+  agencia: string | null;
+  conta: string | null;
+  chave_pix: string | null;
+}
+
+export interface NaturezaDespesa {
+  id: number;
+  codigo: string;
+  descricao: string;
+  criticidade_padrao: "URGENTE" | "ALTA" | "MEDIA" | "BAIXA";
+  ativa: boolean;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface FonteRecursos {
+  id: number;
+  codigo: string;
+  descricao: string;
+  grupos_despesa_permitidos: string[];
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface ContaBancaria {
+  id: number;
+  nome: string;
+  banco: string;
+  agencia: string;
+  conta: string;
+  id_fonte_recursos: number;
+  grupo_despesa: "PESSOAL" | "CUSTEIO" | "INVESTIMENTO" | "DIVIDA" | "OUTRAS";
+  saldo_inicial: string;
+  saldo_minimo_alerta: string;
+  ativa: boolean;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+// Caixa — movimentações e painel de saldo (Decimals/dates chegam como string)
+export type TipoMovimentacao = "ENTRADA" | "SAIDA";
+export type OrigemMovimentacao = "APORTE" | "RECEITA" | "AJUSTE" | "PAGAMENTO" | "ESTORNO";
+
+export interface Movimentacao {
+  id: number;
+  id_conta: number;
+  tipo: TipoMovimentacao;
+  valor: string;
+  origem: OrigemMovimentacao;
+  data: string;
+  descricao: string | null;
+  id_usuario: number | null;
+  criado_em: string;
+}
+
+export interface MovimentacaoInput {
+  id_conta: number;
+  tipo: TipoMovimentacao;
+  valor: number;
+  origem: OrigemMovimentacao;
+  data: string;
+  descricao?: string | null;
+}
+
+export interface SaldoConta {
+  id_conta: number;
+  saldo_inicial: string;
+  total_entradas: string;
+  total_saidas: string;
+  saldo_atual: string;
+  comprometido: string;
+  disponivel: string;
+}
+
+export interface ContaSaldoPainel {
+  id_conta: number;
+  nome: string;
+  banco: string;
+  grupo_despesa: string;
+  saldo_inicial: string;
+  total_entradas: string;
+  total_saidas: string;
+  saldo_atual: string;
+  comprometido: string;
+  disponivel: string;
+  saldo_minimo_alerta: string;
+  abaixo_minimo: boolean;
+}
+
+export interface Contrato {
+  id: number;
+  numero: string;
+  id_fornecedor: number;
+  id_unidade: number;
+  objeto: string;
+  vigencia_inicio: string;
+  vigencia_fim: string;
+  valor_total: string;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface Alcada {
+  id: number;
+  id_usuario: number;
+  id_natureza: number | null;
+  valor_maximo: string;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+// ---------- Pagamentos (R2) — débitos, parcelas, autorização, OP ----------
+export type StatusDebito =
+  | "RASCUNHO" | "AGUARDANDO_APROVACAO" | "APROVADO" | "AUTORIZADO"
+  | "PAGO_PARCIAL" | "PAGO" | "REJEITADO" | "CANCELADO";
+
+export interface Parcela {
+  id: number; id_debito: number; numero: number; valor: string; vencimento: string;
+  status: "A_PAGAR" | "PAGA" | "CANCELADA"; data_pagamento: string | null;
+  forma_pagamento: string | null; id_movimentacao: number | null;
+}
+
+export interface Debito {
+  id: number; id_fornecedor: number; nome_fornecedor: string; id_natureza: number;
+  id_conta: number; id_contrato: number | null; valor_total: string; competencia: string;
+  numero_ne: string | null; numero_nf: string | null; criticidade: string; urgente: boolean;
+  justificativa_urgencia: string | null; descricao: string; status: StatusDebito;
+  id_usuario_solicitante: number; criado_em: string; atualizado_em: string | null;
+}
+
+export interface DebitoHistorico {
+  id: number; acao: string; status_anterior: string | null; status_novo: string;
+  justificativa: string | null; id_usuario: number | null; nome_usuario: string | null;
+  criado_em: string;
+}
+
+export interface DebitoDetalhe extends Debito {
+  parcelas: Parcela[]; historico: DebitoHistorico[];
+}
+
+export interface OrdemPagamento {
+  id: number; numero: string; valor_total: string; id_usuario_autorizador: number;
+  nome_autorizador: string | null; qtd_debitos: number; criado_em: string;
+}
+
+export interface ParcelaFila {
+  id: number; id_debito: number; numero: number; valor: string; vencimento: string;
+  nome_fornecedor: string; descricao_debito: string; vencida: boolean;
+}
+
+export interface MinhaFila {
+  solicitar: Debito[] | null; aprovar: Debito[] | null;
+  autorizar: Debito[] | null; pagar: ParcelaFila[] | null;
+}
+
+export interface MinutaCreateInput {
+  titulo: string;
+  origem?: MinutaOrigem;
+  id_template_origem?: number | null;
+  corpo_html?: string | null;
+}
+
+export interface MinutaUpdateInput {
+  titulo?: string;
+  corpo_html?: string | null;
+  versao?: number;
+}
+
 type QsValue = string | number | boolean | undefined | null;
 
 function qs(params: Record<string, QsValue>): string {
@@ -1349,6 +1602,57 @@ export interface Empresa {
   atualizado_em: string | null;
 }
 
+// --- Transporte Regulado: Veículo regulado ----------------------------------
+export type VeiculoReguladoSituacao =
+  | "ativo"
+  | "pendente"
+  | "suspenso"
+  | "cassado"
+  | "inativo";
+export type VeiculoCategoria =
+  | "automovel"
+  | "motocicleta"
+  | "van"
+  | "micro_onibus"
+  | "onibus"
+  | "utilitario"
+  | "outro";
+export type TipoCombustivel =
+  | "gasolina"
+  | "etanol"
+  | "diesel"
+  | "flex"
+  | "gnv"
+  | "eletrico"
+  | "hibrido"
+  | "outro";
+
+export interface VeiculoRegulado {
+  id: number;
+  id_permissionario: number | null;
+  id_empresa: number | null;
+  placa: string;
+  renavam: string | null;
+  chassi: string | null;
+  marca: string;
+  modelo: string;
+  ano_fabricacao: number | null;
+  ano_modelo: number | null;
+  cor: string | null;
+  categoria: VeiculoCategoria | null;
+  tipo_servico: TipoServico;
+  capacidade_passageiros: number | null;
+  tipo_combustivel: TipoCombustivel | null;
+  adaptado: boolean;
+  numero_autorizacao: string | null;
+  data_inicio_autorizacao: string | null;
+  data_validade_autorizacao: string | null;
+  situacao: VeiculoReguladoSituacao;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -1748,6 +2052,42 @@ export const api = {
     remove: (id: number) =>
       request<void>(`/transporte-regulado/empresas/${id}`, { method: "DELETE" }),
   },
+  veiculosRegulados: {
+    list: (params?: {
+      situacao?: string;
+      tipo_servico?: string;
+      id_permissionario?: number;
+      id_empresa?: number;
+      q?: string;
+    }) => request<VeiculoRegulado[]>(`/transporte-regulado/veiculos${qs(params ?? {})}`),
+    get: (id: number) => request<VeiculoRegulado>(`/transporte-regulado/veiculos/${id}`),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    create: (data: any) =>
+      request<VeiculoRegulado>("/transporte-regulado/veiculos", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    update: (id: number, data: any) =>
+      request<VeiculoRegulado>(`/transporte-regulado/veiculos/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    inativar: (id: number) =>
+      request<VeiculoRegulado>(`/transporte-regulado/veiculos/${id}/inativar`, {
+        method: "POST",
+      }),
+    reativar: (id: number) =>
+      request<VeiculoRegulado>(`/transporte-regulado/veiculos/${id}/reativar`, {
+        method: "POST",
+      }),
+    suspender: (id: number) =>
+      request<VeiculoRegulado>(`/transporte-regulado/veiculos/${id}/suspender`, {
+        method: "POST",
+      }),
+    remove: (id: number) =>
+      request<void>(`/transporte-regulado/veiculos/${id}`, { method: "DELETE" }),
+  },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),
     create: (data: Omit<TipoAnexo, "id">) =>
@@ -1761,6 +2101,207 @@ export const api = {
         body: JSON.stringify(data),
       }),
     remove: (id: number) => request<void>(`/tipos-anexo/${id}`, { method: "DELETE" }),
+  },
+
+  // Templates de documento (admin) + placeholders disponíveis
+  templatesDocumento: {
+    list: (params?: { categoria?: string; apenas_ativos?: boolean }) =>
+      request<TemplateDocumento[]>(
+        `/templates-documento${qs((params ?? {}) as Record<string, QsValue>)}`,
+      ),
+    get: (id: number) => request<TemplateDocumento>(`/templates-documento/${id}`),
+    create: (data: TemplateDocumentoInput) =>
+      request<TemplateDocumento>("/templates-documento", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<TemplateDocumentoInput>) =>
+      request<TemplateDocumento>(`/templates-documento/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) =>
+      request<void>(`/templates-documento/${id}`, { method: "DELETE" }),
+    placeholders: () =>
+      request<PlaceholderInfo[]>("/templates-documento/placeholders-disponiveis"),
+  },
+
+  // Minutas de documento (por processo)
+  minutas: {
+    list: (processoId: number) =>
+      request<MinutaListItem[]>(`/processos/${processoId}/minutas`),
+    get: (id: number) => request<Minuta>(`/minutas/${id}`),
+    create: (processoId: number, data: MinutaCreateInput) =>
+      request<Minuta>(`/processos/${processoId}/minutas`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: MinutaUpdateInput) =>
+      request<Minuta>(`/minutas/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) => request<void>(`/minutas/${id}`, { method: "DELETE" }),
+    finalizar: (id: number) =>
+      request<Minuta>(`/minutas/${id}/finalizar`, { method: "POST" }),
+  },
+
+  // PAG-1 — cadastros de Pagamentos
+  pagamentos: {
+    cadastros: {
+      fornecedores: {
+        list: (q?: string) => request<Fornecedor[]>(`/pagamentos/fornecedores${qs({ q })}`),
+        get: (id: number) => request<Fornecedor>(`/pagamentos/fornecedores/${id}`),
+        dadosBancarios: (id: number) =>
+          request<DadosBancarios>(`/pagamentos/fornecedores/${id}/dados-bancarios`),
+        situacaoHistorico: (id: number) =>
+          request<FornecedorSituacaoHistorico[]>(
+            `/pagamentos/fornecedores/${id}/situacao-historico`,
+          ),
+        create: (data: unknown) =>
+          request<Fornecedor>("/pagamentos/fornecedores", {
+            method: "POST",
+            body: JSON.stringify(data),
+          }),
+        update: (id: number, data: unknown) =>
+          request<Fornecedor>(`/pagamentos/fornecedores/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+          }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/fornecedores/${id}`, { method: "DELETE" }),
+      },
+      naturezas: {
+        list: () => request<NaturezaDespesa[]>("/pagamentos/naturezas"),
+        get: (id: number) => request<NaturezaDespesa>(`/pagamentos/naturezas/${id}`),
+        create: (data: unknown) =>
+          request<NaturezaDespesa>("/pagamentos/naturezas", {
+            method: "POST",
+            body: JSON.stringify(data),
+          }),
+        update: (id: number, data: unknown) =>
+          request<NaturezaDespesa>(`/pagamentos/naturezas/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+          }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/naturezas/${id}`, { method: "DELETE" }),
+      },
+      fontes: {
+        list: () => request<FonteRecursos[]>("/pagamentos/fontes"),
+        get: (id: number) => request<FonteRecursos>(`/pagamentos/fontes/${id}`),
+        create: (data: unknown) =>
+          request<FonteRecursos>("/pagamentos/fontes", {
+            method: "POST",
+            body: JSON.stringify(data),
+          }),
+        update: (id: number, data: unknown) =>
+          request<FonteRecursos>(`/pagamentos/fontes/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+          }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/fontes/${id}`, { method: "DELETE" }),
+      },
+      contas: {
+        list: () => request<ContaBancaria[]>("/pagamentos/contas"),
+        get: (id: number) => request<ContaBancaria>(`/pagamentos/contas/${id}`),
+        create: (data: unknown) =>
+          request<ContaBancaria>("/pagamentos/contas", {
+            method: "POST",
+            body: JSON.stringify(data),
+          }),
+        update: (id: number, data: unknown) =>
+          request<ContaBancaria>(`/pagamentos/contas/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+          }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/contas/${id}`, { method: "DELETE" }),
+      },
+      contratos: {
+        list: () => request<Contrato[]>("/pagamentos/contratos"),
+        get: (id: number) => request<Contrato>(`/pagamentos/contratos/${id}`),
+        create: (data: unknown) =>
+          request<Contrato>("/pagamentos/contratos", {
+            method: "POST",
+            body: JSON.stringify(data),
+          }),
+        update: (id: number, data: unknown) =>
+          request<Contrato>(`/pagamentos/contratos/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+          }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/contratos/${id}`, { method: "DELETE" }),
+      },
+      alcadas: {
+        list: () => request<Alcada[]>("/pagamentos/alcadas"),
+        get: (id: number) => request<Alcada>(`/pagamentos/alcadas/${id}`),
+        create: (data: unknown) =>
+          request<Alcada>("/pagamentos/alcadas", {
+            method: "POST",
+            body: JSON.stringify(data),
+          }),
+        update: (id: number, data: unknown) =>
+          request<Alcada>(`/pagamentos/alcadas/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+          }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/alcadas/${id}`, { method: "DELETE" }),
+      },
+      enums: () =>
+        request<{ criticidade: string[]; grupo_despesa: string[] }>("/pagamentos/enums"),
+    },
+    caixa: {
+      painel: () => request<ContaSaldoPainel[]>("/pagamentos/caixa/painel"),
+      saldo: (contaId: number) => request<SaldoConta>(`/pagamentos/contas/${contaId}/saldo`),
+      extrato: (contaId: number) =>
+        request<Movimentacao[]>(`/pagamentos/contas/${contaId}/extrato`),
+      lancar: (data: MovimentacaoInput) =>
+        request<Movimentacao>("/pagamentos/movimentacoes", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+    },
+    debitos: {
+      list: (params?: { status?: string; meus?: boolean }) =>
+        request<Debito[]>(`/pagamentos/debitos${qs({ status_f: params?.status, meus: params?.meus })}`),
+      get: (id: number) => request<DebitoDetalhe>(`/pagamentos/debitos/${id}`),
+      create: (data: unknown) =>
+        request<Debito>("/pagamentos/debitos", { method: "POST", body: JSON.stringify(data) }),
+      update: (id: number, data: unknown) =>
+        request<Debito>(`/pagamentos/debitos/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+      remove: (id: number) => request<void>(`/pagamentos/debitos/${id}`, { method: "DELETE" }),
+      enviar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/enviar`, { method: "POST" }),
+      aprovar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/aprovar`, { method: "POST" }),
+      devolver: (id: number, justificativa: string) =>
+        request<Debito>(`/pagamentos/debitos/${id}/devolver`, {
+          method: "POST", body: JSON.stringify({ justificativa }) }),
+      rejeitar: (id: number, justificativa: string) =>
+        request<Debito>(`/pagamentos/debitos/${id}/rejeitar`, {
+          method: "POST", body: JSON.stringify({ justificativa }) }),
+      cancelar: (id: number, justificativa: string) =>
+        request<Debito>(`/pagamentos/debitos/${id}/cancelar`, {
+          method: "POST", body: JSON.stringify({ justificativa }) }),
+    },
+    autorizar: (debitoIds: number[]) =>
+      request<OrdemPagamento>("/pagamentos/autorizacoes", {
+        method: "POST", body: JSON.stringify({ debito_ids: debitoIds }) }),
+    ordens: {
+      list: () => request<OrdemPagamento[]>("/pagamentos/ordens-pagamento"),
+      pdfUrl: (id: number) => `${BROWSER_API_URL}/pagamentos/ordens-pagamento/${id}/pdf`,
+    },
+    parcelas: {
+      pagar: (id: number, data: { forma_pagamento: string; data_pagamento?: string | null }) =>
+        request<Parcela>(`/pagamentos/parcelas/${id}/pagar`, {
+          method: "POST", body: JSON.stringify(data) }),
+      estornar: (id: number, justificativa: string) =>
+        request<Parcela>(`/pagamentos/parcelas/${id}/estornar`, {
+          method: "POST", body: JSON.stringify({ justificativa }) }),
+    },
+    minhaFila: () => request<MinhaFila>("/pagamentos/minha-fila"),
   },
 
   // Fase 3

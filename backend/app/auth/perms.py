@@ -61,3 +61,22 @@ def require_permission(codigo: str, action: Action | None = None):
         return user
 
     return _check
+
+
+def require_any_permission(*codigos: str):
+    """Dependency que exige QUALQUER uma das transações (leitura). Super-usuário bypassa."""
+
+    async def _check(
+        user: Usuario = Depends(get_current_user),
+        tenant_id: int = Depends(require_tenant_id),
+        db: AsyncSession = Depends(get_db),
+    ) -> Usuario:
+        perms = await load_permissions(db, user.id, tenant_id=tenant_id)
+        if perms.is_super_usuario or any(p.codigo in codigos for p in perms.items):
+            return user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Sem permissão (requer uma de: {', '.join(codigos)})",
+        )
+
+    return _check

@@ -41,15 +41,34 @@ from .grupo import (
     UsuarioGrupo,
     UsuarioUnidadeTrabalho,
 )
+from .google_credencial import GoogleCredencial
 from .localizacao import Bairro, Cidade, Endereco, Estado
 from .manifestante import Manifestante, TipoManifestante
+from .minuta import Minuta, MinutaHistorico, TemplateDocumento
 from .modulo import ConfiguracoesModulos, Modulo
 from .notificacao import Notificacao, NotificacaoPreferencia
+from .pagamentos import (
+    Alcada,
+    ContaBancaria,
+    Contrato,
+    Debito,
+    DebitoHistorico,
+    Fornecedor,
+    FornecedorSituacaoHistorico,
+    Criticidade,
+    FonteRecursos,
+    GrupoDespesa,
+    MovimentacaoConta,
+    NaturezaDespesa,
+    OrdemPagamento,
+    OrdemPagamentoDebito,
+    Parcela,
+)
 from .nivel import Nivel
 from .servico import Servico
 from .sistema import Sistema
 from .tenant import Tenant
-from .transporte_regulado import Empresa, Permissionario
+from .transporte_regulado import Empresa, Permissionario, VeiculoRegulado
 from .unidade_trabalho import TipoUnidadeTrabalho, UnidadeTrabalho
 from .usuario import Usuario
 from .usuario_externo import UsuarioExterno
@@ -70,10 +89,14 @@ __all__ = [
     "Assunto",
     "AssuntoTipoProcessoTipoAnexo",
     "AuditLog",
+    "Alcada",
     "Bairro",
     "CcdClasse",
+    "ContaBancaria",
     "Cidade",
     "ComplementacaoDocumental",
+    "Debito",
+    "DebitoHistorico",
     "Despacho",
     "Encaminhamento",
     "Movimentacao",
@@ -85,24 +108,39 @@ __all__ = [
     "TipoAssinatura",
     "Configuracao",
     "ConfiguracoesModulos",
+    "Contrato",
+    "Fornecedor",
+    "FornecedorSituacaoHistorico",
+    "Criticidade",
     "Empresa",
     "Endereco",
     "EspecieDocumental",
     "Estado",
+    "FonteRecursos",
+    "GoogleCredencial",
     "Grupo",
+    "GrupoDespesa",
     "GrupoTransacao",
     "Job",
     "Manifestante",
+    "Minuta",
+    "MinutaHistorico",
     "Modulo",
     "Motorista",
+    "MovimentacaoConta",
+    "NaturezaDespesa",
     "Nivel",
     "Notificacao",
+    "OrdemPagamento",
+    "OrdemPagamentoDebito",
+    "Parcela",
     "Permissionario",
     "NotificacaoPreferencia",
     "Servico",
     "Sistema",
     "SistemaTransacao",
     "SolicitacaoVeiculo",
+    "TemplateDocumento",
     "Tenant",
     "TipoAnexo",
     "TipoProcessoWorkflow",
@@ -117,6 +155,7 @@ __all__ = [
     "VeiculoDocumento",
     "VeiculoManutencao",
     "VeiculoOcorrencia",
+    "VeiculoRegulado",
     "VeiculoVistoria",
     "Usuario",
     "UsuarioExterno",

@@ -24,9 +24,13 @@ from .routers import (
     jobs,
     localizacao,
     manifestantes,
+    minutas,
     modulos,
     notificacoes,
     organograma,
+    pagamentos_cadastros,
+    pagamentos_caixa,
+    pagamentos_debitos,
     permissoes,
     processos,
     protocolo,
@@ -110,6 +114,19 @@ app.include_router(frota.vistorias_router, prefix="/api/v2")
 app.include_router(frota.ocorrencias_router, prefix="/api/v2")
 app.include_router(transporte_regulado.permissionarios_router, prefix="/api/v2")
 app.include_router(transporte_regulado.empresas_router, prefix="/api/v2")
+app.include_router(transporte_regulado.veiculos_router, prefix="/api/v2")
+app.include_router(pagamentos_cadastros.fornecedores_router, prefix="/api/v2")
+app.include_router(pagamentos_cadastros.naturezas_router, prefix="/api/v2")
+app.include_router(pagamentos_cadastros.fontes_router, prefix="/api/v2")
+app.include_router(pagamentos_cadastros.contas_router, prefix="/api/v2")
+app.include_router(pagamentos_cadastros.contratos_router, prefix="/api/v2")
+app.include_router(pagamentos_cadastros.alcadas_router, prefix="/api/v2")
+app.include_router(pagamentos_cadastros.enums_router, prefix="/api/v2")
+app.include_router(pagamentos_caixa.caixa_router, prefix="/api/v2")
+app.include_router(pagamentos_debitos.debitos_router, prefix="/api/v2")
+app.include_router(pagamentos_debitos.operacoes_router, prefix="/api/v2")
+app.include_router(minutas.templates_router, prefix="/api/v2")
+app.include_router(minutas.minutas_router, prefix="/api/v2")
 app.include_router(workflow.router, prefix="/api/v2")
 app.include_router(workflow.instances_router, prefix="/api/v2")
 app.include_router(workflow.mapeamento_router, prefix="/api/v2")
