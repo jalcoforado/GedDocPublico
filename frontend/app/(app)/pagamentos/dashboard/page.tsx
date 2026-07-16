@@ -402,17 +402,22 @@ export default function PagamentosDashboardPage() {
                         onClickRow={() => router.push(`/pagamentos/contas-a-pagar/${deb.id}`)}
                         className="cursor-pointer"
                       >
-                        <TD>
+                        <TD className="max-w-[170px]">
                           <Link
                             href={`/pagamentos/contas-a-pagar/${deb.id}`}
-                            className="text-primary hover:underline"
+                            className="block truncate whitespace-nowrap text-primary hover:underline"
+                            title={deb.nome_fornecedor}
                             onClick={(e) => e.stopPropagation()}
                           >
                             {deb.nome_fornecedor}
                           </Link>
                         </TD>
-                        <TD className="truncate">{deb.descricao}</TD>
-                        <TD className="text-right tabular-nums">{fmtBRL(deb.valor_total)}</TD>
+                        <TD className="max-w-[190px]">
+                          <span className="block truncate whitespace-nowrap" title={deb.descricao}>
+                            {deb.descricao}
+                          </span>
+                        </TD>
+                        <TD className="whitespace-nowrap text-right tabular-nums">{fmtBRL(deb.valor_total)}</TD>
                         <TD>
                           <Badge intent={badge.intent}>{badge.label}</Badge>
                         </TD>
