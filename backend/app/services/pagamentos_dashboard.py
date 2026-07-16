@@ -97,7 +97,7 @@ async def _kpis(db, *, tenant_id: int, hoje: date) -> DashboardKpis:
         return (select(func.coalesce(func.sum(Parcela.valor), 0), func.count(Parcela.id))
                 .join(Debito, Debito.id == Parcela.id_debito)
                 .where(Parcela.tenant_id == tenant_id, Parcela.excluido.is_(False),
-                       Parcela.status == "A_PAGAR", Debito.excluido.is_(False),
+                       Parcela.status.in_(("A_PAGAR", "LIBERADA")), Debito.excluido.is_(False),
                        Debito.status.in_(_STATUS_COMPROMETIDO), *extra))
 
     # prospectivo: só parcelas ainda não vencidas (vencidas têm KPI próprio)
@@ -185,7 +185,7 @@ async def _alertas(db, *, tenant_id: int, hoje: date, limite: int = 10) -> Dashb
     base = (select(Parcela, Debito)
             .join(Debito, Debito.id == Parcela.id_debito)
             .where(Parcela.tenant_id == tenant_id, Parcela.excluido.is_(False),
-                   Parcela.status == "A_PAGAR", Debito.excluido.is_(False),
+                   Parcela.status.in_(("A_PAGAR", "LIBERADA")), Debito.excluido.is_(False),
                    Debito.status.in_(_STATUS_COMPROMETIDO)))
 
     vencidas_rows = (await db.execute(base.where(Parcela.vencimento < hoje)

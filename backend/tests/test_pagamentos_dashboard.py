@@ -155,6 +155,9 @@ async def _cenario(engine, tenant_id):
     async with _sm(engine)() as s:
         parcelas = await deb.listar_parcelas(s, tenant_id=tenant_id, debito_id=d.id)
         p1 = next(p for p in parcelas if p.valor == Decimal("600.00"))
+        await aut.liberar_parcelas(s, tenant_id=tenant_id, usuario_id=autorizador,
+                                   parcela_ids=[p1.id])
+    async with _sm(engine)() as s:
         await aut.pagar_parcela(s, tenant_id=tenant_id, usuario_id=tesoureiro,
                                 parcela_id=p1.id, forma_pagamento="PIX",
                                 data_pagamento=hoje)

@@ -9,7 +9,9 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Alcada, Debito, MovimentacaoConta, OrdemPagamento, OrdemPagamentoDebito, Parcela
+from ..models import (
+    Alcada, Debito, DebitoHistorico, MovimentacaoConta, OrdemPagamento, OrdemPagamentoDebito, Parcela,
+)
 from . import pagamentos_caixa as caixa
 from .pagamentos_debitos import (
     PagamentoDebitoError, _registrar_transicao, aprovadores_do_debito, listar_parcelas, obter_debito,
@@ -130,6 +132,70 @@ async def obter_parcela(db: AsyncSession, *, tenant_id: int, parcela_id: int) ->
     return p
 
 
+async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
+                           parcela_ids: list[int], data_prevista: date | None = None,
+                           ip: str | None = None) -> list[Parcela]:
+    """Liberação de pagamento (2º ato do rito): parcela A_PAGAR de débito
+    AUTORIZADO|PAGO_PARCIAL → LIBERADA. Lote all-or-nothing: valida (com lock)
+    TODAS as parcelas e débitos antes de mudar qualquer status. Histórico: uma
+    ação LIBERADO por débito envolvido, agrupando os números das parcelas."""
+    pares: list[tuple[Parcela, Debito]] = []
+    debitos_por_id: dict[int, Debito] = {}
+    for pid in parcela_ids:
+        p = await obter_parcela(db, tenant_id=tenant_id, parcela_id=pid)
+        d = debitos_por_id.get(p.id_debito)
+        if d is None:
+            d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito, for_update=True)
+            debitos_por_id[d.id] = d
+        if d.status not in ("AUTORIZADO", "PAGO_PARCIAL"):
+            raise PagamentoDebitoError(
+                f"Débito {d.id} não autorizado para liberação de pagamento (está '{d.status}').",
+                status.HTTP_409_CONFLICT)
+        if p.status != "A_PAGAR":
+            raise PagamentoDebitoError(
+                f"Parcela {pid} não está a pagar (está '{p.status}').", status.HTTP_409_CONFLICT)
+        pares.append((p, d))
+
+    numeros_por_debito: dict[int, list[int]] = {}
+    for p, d in pares:
+        p.status = "LIBERADA"; p.data_liberacao = _utcnow().date()
+        p.id_usuario_liberacao = usuario_id; p.data_prevista_pagamento = data_prevista
+        p.atualizado_em = _utcnow()
+        numeros_por_debito.setdefault(d.id, []).append(p.numero)
+
+    for d_id, numeros in numeros_por_debito.items():
+        d = debitos_por_id[d_id]
+        justificativa = f"Parcelas {', '.join(str(n) for n in sorted(numeros))}"
+        db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
+                               status_novo=d.status, acao="LIBERADO", justificativa=justificativa,
+                               id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
+        d.atualizado_em = _utcnow()
+
+    await db.commit()
+    for p, _d in pares:
+        await db.refresh(p)
+    return [p for p, _d in pares]
+
+
+async def revogar_liberacao(db: AsyncSession, *, tenant_id: int, usuario_id: int, parcela_id: int,
+                            justificativa: str, ip: str | None = None) -> Parcela:
+    """Reverte a liberação: LIBERADA → A_PAGAR, limpa os campos de liberação.
+    Histórico do débito: ação LIBERACAO_REVOGADA."""
+    p = await obter_parcela(db, tenant_id=tenant_id, parcela_id=parcela_id)
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito, for_update=True)
+    if p.status != "LIBERADA":
+        raise PagamentoDebitoError(f"Parcela não está liberada (está '{p.status}').",
+                                   status.HTTP_409_CONFLICT)
+    p.status = "A_PAGAR"; p.data_liberacao = None
+    p.id_usuario_liberacao = None; p.data_prevista_pagamento = None
+    p.atualizado_em = _utcnow()
+    db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
+                           status_novo=d.status, acao="LIBERACAO_REVOGADA", justificativa=justificativa,
+                           id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)
+    return p
+
+
 async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, parcela_id: int,
                         forma_pagamento: str, data_pagamento: date | None = None,
                         ip: str | None = None) -> Parcela:
@@ -139,9 +205,9 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
     if d.status not in ("AUTORIZADO", "PAGO_PARCIAL"):
         raise PagamentoDebitoError(
             f"Débito não autorizado para pagamento (está '{d.status}').", status.HTTP_409_CONFLICT)
-    if p.status != "A_PAGAR":
-        raise PagamentoDebitoError(f"Parcela não está a pagar (está '{p.status}').",
-                                   status.HTTP_409_CONFLICT)
+    if p.status != "LIBERADA":
+        raise PagamentoDebitoError(
+            f"Parcela não liberada para pagamento (está '{p.status}').", status.HTTP_409_CONFLICT)
     quando = data_pagamento or _utcnow().date()
     mov = MovimentacaoConta(tenant_id=tenant_id, id_conta=d.id_conta, tipo="SAIDA",
                             valor=p.valor, origem="PAGAMENTO", id_debito=d.id, id_parcela=p.id,
@@ -173,7 +239,9 @@ async def estornar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                             criado_em=_utcnow())
     db.add(mov)
     p.status = "A_PAGAR"; p.data_pagamento = None
-    p.forma_pagamento = None; p.id_movimentacao = None; p.atualizado_em = _utcnow()
+    p.forma_pagamento = None; p.id_movimentacao = None
+    p.data_liberacao = None; p.id_usuario_liberacao = None; p.data_prevista_pagamento = None
+    p.atualizado_em = _utcnow()
     todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
     alguma_paga = any(x.id != p.id and x.status == "PAGA" for x in todas)
     novo = "PAGO_PARCIAL" if alguma_paga else "AUTORIZADO"

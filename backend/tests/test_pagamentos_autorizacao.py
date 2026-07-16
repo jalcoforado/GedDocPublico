@@ -325,6 +325,9 @@ async def test_pagar_parcela_deduz_saldo_e_finaliza_debito(admin_engine):
             await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador, debito_ids=[d.id])
         async with _sm(admin_engine)() as s:
             parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
+                                       parcela_ids=[parcelas[0].id])
+        async with _sm(admin_engine)() as s:
             p1 = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
                                          parcela_id=parcelas[0].id, forma_pagamento="PIX")
         assert p1.status == "PAGA" and p1.id_movimentacao is not None
@@ -334,6 +337,9 @@ async def test_pagar_parcela_deduz_saldo_e_finaliza_debito(admin_engine):
         assert d2.status == "PAGO_PARCIAL"
         assert saldo.saldo_atual == Decimal("9400.00")
         assert saldo.comprometido == Decimal("400.00")
+        async with _sm(admin_engine)() as s:
+            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
+                                       parcela_ids=[parcelas[1].id])
         async with _sm(admin_engine)() as s:
             await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
                                     parcela_id=parcelas[1].id, forma_pagamento="TED")
@@ -371,10 +377,13 @@ async def test_pagar_parcela_de_debito_nao_autorizado_409(admin_engine):
 async def test_pagar_parcela_ja_paga_409(admin_engine):
     t = await _provisionar(admin_engine)
     try:
-        d, _sol, _apr, _autorizador, _conta = await _debito_autorizado(admin_engine, t.id, valor="1000.00")
+        d, _sol, _apr, autorizador, _conta = await _debito_autorizado(admin_engine, t.id, valor="1000.00")
         tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
             parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
+                                       parcela_ids=[parcelas[0].id])
+        async with _sm(admin_engine)() as s:
             await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
                                     parcela_id=parcelas[0].id, forma_pagamento="PIX")
         async with _sm(admin_engine)() as s:
@@ -389,17 +398,23 @@ async def test_pagar_parcela_ja_paga_409(admin_engine):
 async def test_estornar_parcela_repoe_saldo_e_reabre(admin_engine):
     t = await _provisionar(admin_engine)
     try:
-        d, _sol, _apr, _autorizador, conta = await _debito_autorizado(
+        d, _sol, _apr, autorizador, conta = await _debito_autorizado(
             admin_engine, t.id, valor="1000.00",
             parcelas=[ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-01"),
                       ParcelaCreate(numero=2, valor="400.00", vencimento="2026-09-01")])
         tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
             parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
+                                       parcela_ids=[parcelas[0].id])
+        async with _sm(admin_engine)() as s:
             await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
                                     parcela_id=parcelas[0].id, forma_pagamento="PIX")
         async with _sm(admin_engine)() as s:
             parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
+                                       parcela_ids=[parcelas[1].id])
+        async with _sm(admin_engine)() as s:
             await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
                                     parcela_id=parcelas[1].id, forma_pagamento="TED")
         async with _sm(admin_engine)() as s:
@@ -441,11 +456,14 @@ async def test_estornar_parcela_com_justificativa_longa_trunca_descricao(admin_e
     descrição gravada deve ser truncada em 255 chars — sem erro de banco."""
     t = await _provisionar(admin_engine)
     try:
-        d, _sol, _apr, _autorizador, _conta = await _debito_autorizado(admin_engine, t.id, valor="1000.00")
+        d, _sol, _apr, autorizador, _conta = await _debito_autorizado(admin_engine, t.id, valor="1000.00")
         tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
         justificativa_longa = "J" * 255
         async with _sm(admin_engine)() as s:
             parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
+                                       parcela_ids=[parcelas[0].id])
+        async with _sm(admin_engine)() as s:
             await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
                                     parcela_id=parcelas[0].id, forma_pagamento="PIX")
         async with _sm(admin_engine)() as s:

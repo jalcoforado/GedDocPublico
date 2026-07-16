@@ -223,7 +223,7 @@ class ContaSaldoPainel(BaseModel):
 # ---------- débito / parcelas / ordem de pagamento (R2) ----------
 StatusDebito = Literal["RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO", "AUTORIZADO",
                        "PAGO_PARCIAL", "PAGO", "REJEITADO", "CANCELADO"]
-StatusParcela = Literal["A_PAGAR", "PAGA", "CANCELADA"]
+StatusParcela = Literal["A_PAGAR", "LIBERADA", "PAGA", "CANCELADA"]
 FormaPagamento = Literal["PIX", "TED", "BOLETO", "DINHEIRO", "OUTRO"]
 
 
@@ -270,6 +270,9 @@ class ParcelaOut(BaseModel):
     id: int; id_debito: int; numero: int; valor: Decimal; vencimento: date
     status: StatusParcela; data_pagamento: date | None; forma_pagamento: FormaPagamento | None
     id_movimentacao: int | None
+    data_liberacao: date | None = None
+    id_usuario_liberacao: int | None = None
+    data_prevista_pagamento: date | None = None
 
 
 class DebitoOut(BaseModel):
