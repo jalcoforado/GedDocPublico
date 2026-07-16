@@ -1104,10 +1104,14 @@ export type StatusDebito =
   | "RASCUNHO" | "AGUARDANDO_APROVACAO" | "APROVADO" | "AUTORIZADO"
   | "PAGO_PARCIAL" | "PAGO" | "REJEITADO" | "CANCELADO";
 
+export type StatusParcela = "A_PAGAR" | "LIBERADA" | "PAGA" | "CANCELADA";
+
 export interface Parcela {
   id: number; id_debito: number; numero: number; valor: string; vencimento: string;
-  status: "A_PAGAR" | "PAGA" | "CANCELADA"; data_pagamento: string | null;
+  status: StatusParcela; data_pagamento: string | null;
   forma_pagamento: string | null; id_movimentacao: number | null;
+  data_liberacao?: string | null; id_usuario_liberacao?: number | null;
+  data_prevista_pagamento?: string | null;
 }
 
 export interface Debito {
@@ -1140,7 +1144,43 @@ export interface ParcelaFila {
 
 export interface MinhaFila {
   solicitar: Debito[] | null; aprovar: Debito[] | null;
-  autorizar: Debito[] | null; pagar: ParcelaFila[] | null;
+  autorizar: Debito[] | null; liberar: ParcelaFila[] | null;
+  pagar: ParcelaFila[] | null;
+}
+
+// ---------- filas agregadas por conta (autorização / liberação / tesouraria) ----------
+export interface DebitoFilaItem {
+  id: number; nome_fornecedor: string; descricao: string; natureza_codigo: string;
+  natureza_descricao: string; competencia: string; urgente: boolean;
+  aprovado_por: string | null; aprovado_em: string | null; valor_total: string;
+}
+
+export interface ParcelaFilaLibItem {
+  id: number; id_debito: number; nome_fornecedor: string; descricao_debito: string;
+  numero: number; qtd_parcelas: number; valor: string; vencimento: string;
+  vencida: boolean; dias_atraso: number; op_numero: string | null; op_id: number | null;
+}
+
+export interface ParcelaTesourariaItem extends ParcelaFilaLibItem {
+  data_liberacao: string | null; liberado_por: string | null;
+  data_prevista_pagamento: string | null; data_pagamento?: string | null;
+}
+
+export interface GrupoConta {
+  id_conta: number; nome_conta: string; disponivel: string; abaixo_minimo: boolean;
+}
+
+export interface FilaAutorizacaoGrupo extends GrupoConta {
+  debitos: DebitoFilaItem[];
+}
+
+export interface FilaLiberacaoGrupo extends GrupoConta {
+  parcelas: ParcelaFilaLibItem[];
+}
+
+export interface FilaTesourariaOut {
+  liberadas: ParcelaTesourariaItem[];
+  pagas_recentes: ParcelaTesourariaItem[];
 }
 
 // ---------- dashboard financeiro ----------
@@ -2345,6 +2385,22 @@ export const api = {
       estornar: (id: number, justificativa: string) =>
         request<Parcela>(`/pagamentos/parcelas/${id}/estornar`, {
           method: "POST", body: JSON.stringify({ justificativa }) }),
+      liberar: (parcelaIds: number[], dataPrevista?: string | null) =>
+        request<void>("/pagamentos/parcelas/liberar", {
+          method: "POST",
+          body: JSON.stringify({ parcela_ids: parcelaIds, data_prevista: dataPrevista ?? undefined }),
+        }),
+      revogarLiberacao: (id: number, justificativa: string) =>
+        request<Parcela>(`/pagamentos/parcelas/${id}/revogar-liberacao`, {
+          method: "POST", body: JSON.stringify({ justificativa }) }),
+    },
+    filas: {
+      autorizacao: () =>
+        request<FilaAutorizacaoGrupo[]>("/pagamentos/autorizacao/fila"),
+      liberacao: () =>
+        request<FilaLiberacaoGrupo[]>("/pagamentos/liberacao/fila"),
+      tesouraria: () =>
+        request<FilaTesourariaOut>("/pagamentos/tesouraria/fila"),
     },
     minhaFila: () => request<MinhaFila>("/pagamentos/minha-fila"),
     dashboard: (meses = 12) =>

@@ -50,8 +50,9 @@ function StatusBadge({ status }: { status: StatusDebito }) {
   return <Badge intent={cfg.intent}>{cfg.label}</Badge>;
 }
 
-const PARCELA_STATUS_BADGE: Record<Parcela["status"], { intent: "neutral" | "success" | "danger"; label: string }> = {
+const PARCELA_STATUS_BADGE: Record<Parcela["status"], { intent: "neutral" | "info" | "success" | "danger"; label: string }> = {
   A_PAGAR: { intent: "neutral", label: "A pagar" },
+  LIBERADA: { intent: "info", label: "Liberada" },
   PAGA: { intent: "success", label: "Paga" },
   CANCELADA: { intent: "danger", label: "Cancelada" },
 };

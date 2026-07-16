@@ -2,11 +2,13 @@
 
 import {
   BarChart3,
+  Banknote,
   BookOpen,
   Building2,
   Bus,
   CalendarClock,
   ChevronDown,
+  ChevronRight,
   ClipboardList,
   ChevronsLeft,
   ChevronsRight,
@@ -51,6 +53,8 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   perm?: string;
   anyOf?: string[];
+  /** Subitens — vira um subgrupo colapsável (chevron) dentro do grupo pai. */
+  children?: NavItem[];
 }
 
 interface NavGroup {
@@ -160,21 +164,31 @@ const NAV: NavGroup[] = [
     title: "Pagamentos",
     defaultOpen: false,
     items: [
-      { label: "Início", href: "/pagamentos", icon: Inbox,
+      { label: "Visão geral", href: "/pagamentos", icon: Inbox,
         anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"] },
       { label: "Dashboard", href: "/pagamentos/dashboard", icon: BarChart3,
         anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"] },
       { label: "Contas a pagar", href: "/pagamentos/contas-a-pagar", icon: ClipboardList,
         anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar"] },
-      { label: "Autorização", href: "/pagamentos/autorizacao", icon: ShieldCheck,
+      { label: "Autorizações", href: "/pagamentos/autorizacao", icon: ShieldCheck,
         anyOf: ["pagamento_autorizar"] },
+      { label: "Tesouraria", href: "/pagamentos/tesouraria", icon: Banknote,
+        perm: "pagamento_pagar" },
       { label: "Caixa", href: "/pagamentos/caixa", icon: Wallet, perm: "pagamento_cadastro" },
-      { label: "Fornecedores", href: "/pagamentos/cadastros/fornecedores", icon: UserCircle, perm: "pagamento_cadastro" },
-      { label: "Naturezas", href: "/pagamentos/cadastros/naturezas", icon: Layers, perm: "pagamento_cadastro" },
-      { label: "Fontes de recursos", href: "/pagamentos/cadastros/fontes", icon: BookOpen, perm: "pagamento_cadastro" },
-      { label: "Contas bancárias", href: "/pagamentos/cadastros/contas", icon: Building2, perm: "pagamento_cadastro" },
-      { label: "Contratos", href: "/pagamentos/cadastros/contratos", icon: FileText, perm: "pagamento_cadastro" },
-      { label: "Alçadas", href: "/pagamentos/cadastros/alcadas", icon: Shield, perm: "pagamento_cadastro" },
+      {
+        label: "Cadastros",
+        href: "/pagamentos/cadastros/fornecedores",
+        icon: FolderTree,
+        perm: "pagamento_cadastro",
+        children: [
+          { label: "Fornecedores", href: "/pagamentos/cadastros/fornecedores", icon: UserCircle, perm: "pagamento_cadastro" },
+          { label: "Naturezas", href: "/pagamentos/cadastros/naturezas", icon: Layers, perm: "pagamento_cadastro" },
+          { label: "Fontes de recursos", href: "/pagamentos/cadastros/fontes", icon: BookOpen, perm: "pagamento_cadastro" },
+          { label: "Contas bancárias", href: "/pagamentos/cadastros/contas", icon: Building2, perm: "pagamento_cadastro" },
+          { label: "Contratos", href: "/pagamentos/cadastros/contratos", icon: FileText, perm: "pagamento_cadastro" },
+          { label: "Alçadas", href: "/pagamentos/cadastros/alcadas", icon: Shield, perm: "pagamento_cadastro" },
+        ],
+      },
     ],
   },
   {
@@ -190,6 +204,24 @@ const NAV: NavGroup[] = [
     ],
   },
 ];
+
+function canSeeItem(item: NavItem, can: (perm: string) => boolean): boolean {
+  return (
+    (!item.perm && !item.anyOf) ||
+    (!!item.perm && can(item.perm)) ||
+    (!!item.anyOf && item.anyOf.some((p) => can(p)))
+  );
+}
+
+function isPathActive(href: string, pathname: string): boolean {
+  return pathname === href || pathname.startsWith(href + "/");
+}
+
+/** True se o item OU algum descendente corresponde ao pathname atual. */
+function itemMatchesPath(item: NavItem, pathname: string): boolean {
+  if (isPathActive(item.href, pathname)) return true;
+  return item.children?.some((c) => itemMatchesPath(c, pathname)) ?? false;
+}
 
 interface SidebarProps {
   open: boolean;
@@ -218,6 +250,11 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(NAV.map((g) => [g.title, g.defaultOpen ?? true])),
   );
+  // Subgrupos (item com children) abertos/fechados — chave: label do item.
+  // Não persistido (não exigido); abre sozinho se um filho estiver ativo.
+  const [subOpen, setSubOpen] = useState<Record<string, boolean>>({});
+  const toggleSub = (label: string) =>
+    setSubOpen((prev) => ({ ...prev, [label]: !prev[label] }));
 
   useEffect(() => {
     try {
@@ -240,11 +277,16 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
   // Auto-expand o grupo que contém o item ativo (não fecha grupos abertos).
   useEffect(() => {
-    const activeGroup = NAV.find((g) =>
-      g.items.some((i) => pathname === i.href || pathname.startsWith(i.href + "/")),
-    );
+    const activeGroup = NAV.find((g) => g.items.some((i) => itemMatchesPath(i, pathname)));
     if (activeGroup && !groupOpen[activeGroup.title]) {
       setGroupOpen((prev) => ({ ...prev, [activeGroup.title]: true }));
+    }
+    // Auto-expand o subgrupo que contém o filho ativo.
+    const activeParent = NAV.flatMap((g) => g.items).find(
+      (i) => i.children && i.children.some((c) => itemMatchesPath(c, pathname)),
+    );
+    if (activeParent && !subOpen[activeParent.label]) {
+      setSubOpen((prev) => ({ ...prev, [activeParent.label]: true }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
@@ -282,9 +324,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
   // Calcula quais grupos têm o item ativo (pra realçar o header).
   const activeGroupTitle = useMemo(() => {
-    return NAV.find((g) =>
-      g.items.some((i) => pathname === i.href || pathname.startsWith(i.href + "/")),
-    )?.title;
+    return NAV.find((g) => g.items.some((i) => itemMatchesPath(i, pathname)))?.title;
   }, [pathname]);
 
   return (
@@ -337,7 +377,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               <div className="text-base font-semibold leading-tight tracking-tight">
                 {branding?.nome ?? "Aprimora"}
               </div>
-              <div className="text-[10px] uppercase tracking-wider text-foreground-subtle">
+              <div className="text-[10px] uppercase tracking-wider text-sidebar-muted">
                 Gestão de processos
               </div>
             </div>
@@ -346,7 +386,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             type="button"
             onClick={onClose}
             aria-label="Fechar menu"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-muted hover:text-foreground lg:hidden"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:hidden"
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -355,12 +395,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         {/* Items */}
         <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 py-2">
           {NAV.map((group) => {
-            const visible = group.items.filter(
-              (item) =>
-                (!item.perm && !item.anyOf) ||
-                (item.perm && can(item.perm)) ||
-                (item.anyOf && item.anyOf.some((p) => can(p))),
-            );
+            const visible = group.items
+              .filter((item) => canSeeItem(item, can))
+              .map((item) =>
+                item.children
+                  ? { ...item, children: item.children.filter((c) => canSeeItem(c, can)) }
+                  : item,
+              )
+              .filter((item) => !item.children || item.children.length > 0);
             if (visible.length === 0) return null;
             const isOpen = groupOpen[group.title] ?? group.defaultOpen ?? true;
             const groupIsActive = activeGroupTitle === group.title;
@@ -385,12 +427,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                     className={cn(
                       "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors duration-fast",
                       "hover:bg-sidebar-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      groupIsActive && "text-foreground",
+                      groupIsActive && "text-sidebar-foreground",
                     )}
                   >
                     <ChevronDown
                       className={cn(
-                        "h-3 w-3 shrink-0 text-foreground-muted transition-transform duration-fast",
+                        "h-3 w-3 shrink-0 text-sidebar-muted transition-transform duration-fast",
                         !isOpen && "-rotate-90",
                       )}
                       aria-hidden="true"
@@ -398,14 +440,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                     <span
                       className={cn(
                         "flex-1 text-[10px] font-semibold uppercase tracking-wider",
-                        groupIsActive ? "text-foreground" : "text-foreground-subtle",
+                        groupIsActive ? "text-sidebar-foreground" : "text-sidebar-muted",
                       )}
                     >
                       {group.title}
                     </span>
                     {!isOpen && groupIsActive && (
                       <span
-                        className="h-1.5 w-1.5 rounded-full bg-brand"
+                        className="h-1.5 w-1.5 rounded-full bg-accent"
                         aria-label="Página atual neste grupo"
                       />
                     )}
@@ -419,33 +461,109 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 >
                   {visible.map((item) => {
                     const Icon = item.icon;
-                    const active =
-                      pathname === item.href || pathname.startsWith(item.href + "/");
+                    const active = isPathActive(item.href, pathname);
+
+                    if (item.children && item.children.length > 0 && !collapsed) {
+                      const subIsOpen = subOpen[item.label] ?? false;
+                      const subSlugId = `nav-sub-${item.label.toLowerCase().replace(/\s+/g, "-")}`;
+                      const subGroupActive = item.children.some((c) => isPathActive(c.href, pathname));
+                      return (
+                        <div key={item.label}>
+                          <button
+                            type="button"
+                            onClick={() => toggleSub(item.label)}
+                            aria-expanded={subIsOpen}
+                            aria-controls={subSlugId}
+                            className={cn(
+                              "group relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
+                              subGroupActive
+                                ? "text-sidebar-foreground"
+                                : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                            )}
+                          >
+                            <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                            <span className="flex-1 text-left">{item.label}</span>
+                            <ChevronRight
+                              className={cn(
+                                "h-3.5 w-3.5 shrink-0 text-sidebar-muted transition-transform duration-fast",
+                                subIsOpen && "rotate-90",
+                              )}
+                              aria-hidden="true"
+                            />
+                          </button>
+                          <div
+                            id={subSlugId}
+                            className={cn("ml-3 flex flex-col gap-0.5 border-l border-sidebar-border pl-2", !subIsOpen && "hidden")}
+                          >
+                            {item.children.map((child) => {
+                              const ChildIcon = child.icon;
+                              const childActive = isPathActive(child.href, pathname);
+                              return (
+                                <Link
+                                  key={child.href}
+                                  href={child.href}
+                                  aria-current={childActive ? "page" : undefined}
+                                  className={cn(
+                                    "group relative flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-fast",
+                                    childActive
+                                      ? "bg-sidebar-active text-sidebar-foreground"
+                                      : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                                  )}
+                                >
+                                  <span
+                                    aria-hidden="true"
+                                    className={cn(
+                                      "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full transition-all duration-fast",
+                                      childActive ? "bg-accent" : "bg-transparent group-hover:bg-sidebar-border",
+                                    )}
+                                  />
+                                  <ChildIcon
+                                    className={cn(
+                                      "h-4 w-4 shrink-0 transition-colors",
+                                      childActive ? "text-accent" : "",
+                                    )}
+                                    aria-hidden="true"
+                                  />
+                                  <span className="flex-1">{child.label}</span>
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // Item simples (ou pai com children em modo collapsed — vira link p/ 1º filho).
+                    const linkHref = collapsed && item.children?.length ? item.children[0].href : item.href;
+                    const linkActive = collapsed && item.children?.length
+                      ? item.children.some((c) => isPathActive(c.href, pathname))
+                      : active;
+
                     return (
                       <Link
-                        key={item.href}
-                        href={item.href}
-                        aria-current={active ? "page" : undefined}
+                        key={item.label}
+                        href={linkHref}
+                        aria-current={linkActive ? "page" : undefined}
                         title={collapsed ? item.label : undefined}
                         className={cn(
                           "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
                           collapsed && "lg:justify-center lg:gap-0 lg:px-0",
-                          active
-                            ? "bg-brand/12 text-brand dark:bg-brand/25 dark:text-brand-light"
-                            : "text-foreground-muted hover:bg-sidebar-accent hover:text-foreground",
+                          linkActive
+                            ? "bg-sidebar-active text-sidebar-foreground"
+                            : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",
                         )}
                       >
                         <span
                           aria-hidden="true"
                           className={cn(
                             "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full transition-all duration-fast",
-                            active ? "bg-accent" : "bg-transparent group-hover:bg-border-strong",
+                            linkActive ? "bg-accent" : "bg-transparent group-hover:bg-sidebar-border",
                           )}
                         />
                         <Icon
                           className={cn(
                             "h-4 w-4 shrink-0 transition-colors",
-                            active ? "text-brand dark:text-brand-light" : "",
+                            linkActive ? "text-accent" : "",
                           )}
                           aria-hidden="true"
                         />
@@ -469,8 +587,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 "group relative mt-1 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
                 collapsed && "lg:justify-center lg:gap-0 lg:px-0",
                 pathname.startsWith("/admin")
-                  ? "bg-brand/12 text-brand dark:bg-brand/25 dark:text-brand-light"
-                  : "text-foreground-muted hover:bg-sidebar-accent hover:text-foreground",
+                  ? "bg-sidebar-active text-sidebar-foreground"
+                  : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",
               )}
             >
               <Shield className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -496,7 +614,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               onClick={toggleCollapsed}
               aria-label={collapsed ? "Expandir sidebar" : "Recolher sidebar"}
               title={collapsed ? "Expandir sidebar" : "Recolher sidebar"}
-              className="hidden h-9 w-9 items-center justify-center rounded-md border border-sidebar-border bg-sidebar text-foreground-muted transition-colors duration-fast hover:bg-sidebar-accent hover:text-foreground lg:inline-flex"
+              className="hidden h-9 w-9 items-center justify-center rounded-md border border-sidebar-border bg-sidebar text-sidebar-muted transition-colors duration-fast hover:bg-sidebar-accent hover:text-sidebar-foreground lg:inline-flex"
             >
               {collapsed ? (
                 <ChevronsRight className="h-4 w-4" aria-hidden="true" />

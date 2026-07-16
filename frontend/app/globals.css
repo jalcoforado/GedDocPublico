@@ -42,16 +42,19 @@
     --aprimora-light: var(--brand-light);
 
     /* === Surfaces (tonal) === */
-    --bg: 220 18% 97%;             /* canvas geral */
+    --bg: 120 6% 97%;              /* canvas geral — off-white, viés frio/verde */
     --surface-1: 0 0% 100%;        /* cards */
     --surface-2: 220 14% 99%;      /* nested cards / hover */
     --surface-3: 220 12% 96%;      /* popovers / dropdowns */
-    /* Sidebar: slate-azulado mais marcado — claramente diferenciado do
-       canvas branco, mantém undertone navy da brand. */
-    --sidebar: 217 22% 86%;
-    --sidebar-foreground: 222 22% 12%;
-    --sidebar-border: 217 16% 75%;
-    --sidebar-accent: 217 20% 80%;   /* hover/active de items na sidebar */
+    /* Sidebar: verde-petróleo escuro (identidade própria do módulo),
+       destacada tanto do canvas off-white quanto dos cards brancos.
+       Textos/ícones claros; ativo usa um degrau mais claro + filete accent. */
+    --sidebar: 164 56% 16%;              /* base ~#123f33 */
+    --sidebar-foreground: 154 18% 92%;   /* ~#e8efec — itens/ícones */
+    --sidebar-muted-foreground: 158 16% 67%; /* ~#9db8af — títulos de grupo/muted */
+    --sidebar-border: 164 40% 22%;
+    --sidebar-accent: 164 52% 19%;       /* hover ~#17493c */
+    --sidebar-active: 165 50% 21%;       /* item ativo ~#1b5244 */
     --background: var(--bg);
     --foreground: 222 22% 12%;     /* texto principal */
     --foreground-muted: 220 9% 38%;
@@ -134,12 +137,15 @@
     --surface-1: 222 22% 11%;      /* cards */
     --surface-2: 222 20% 14%;      /* nested */
     --surface-3: 222 18% 17%;      /* popovers */
-    /* Sidebar no dark: um pouco MAIS escura que o canvas, pra dar
-       sensação de "elevação invertida" típica de sidebars dark mode. */
-    --sidebar: 222 28% 6%;
-    --sidebar-foreground: 220 14% 96%;
-    --sidebar-border: 222 18% 18%;
-    --sidebar-accent: 222 18% 14%;
+    /* Sidebar no dark: mesmo verde-petróleo, mais profundo — mantém a
+       identidade do módulo e a sensação de "elevação invertida" típica de
+       sidebars dark mode. */
+    --sidebar: 164 56% 11%;              /* base ~#0c2b23 */
+    --sidebar-foreground: 154 18% 92%;
+    --sidebar-muted-foreground: 158 16% 67%;
+    --sidebar-border: 164 40% 17%;
+    --sidebar-accent: 164 45% 15%;       /* hover */
+    --sidebar-active: 165 45% 18%;       /* item ativo */
     --background: var(--bg);
     --foreground: 220 14% 96%;
     --foreground-muted: 220 9% 70%;
