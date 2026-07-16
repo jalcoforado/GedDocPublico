@@ -25,7 +25,6 @@ import asyncio
 import calendar
 import os
 import random
-import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -187,8 +186,11 @@ FORMAS_PAGAMENTO = ["PIX", "PIX", "PIX", "TED", "TED", "BOLETO", "DINHEIRO", "OU
 
 STATUS_KEYS = ["PAGO", "PAGO_PARCIAL", "AUTORIZADO", "APROVADO",
                "AGUARDANDO_APROVACAO", "RASCUNHO", "REJEITADO", "CANCELADO"]
-PESOS_ANTIGO = [66, 10, 4, 3, 3, 2, 7, 5]
-PESOS_RECENTE = [42, 10, 18, 10, 8, 4, 5, 3]
+# Pesos calibrados para o AGREGADO dos 12 meses bater na distribuição da spec §1
+# (~65% PAGO, ~8% PAGO_PARCIAL, ~8% AUTORIZADO, ~6% APROVADO, ~5% AGUARDANDO,
+# ~4% RASCUNHO, ~4% REJEITADO+CANCELADO): agregado = (10*ANTIGO + RECENTE + ATUAL)/12.
+PESOS_ANTIGO = [72, 8, 6, 4, 3, 3, 1, 3]
+PESOS_RECENTE = [48, 12, 20, 8, 4, 2, 3, 3]
 PESOS_ATUAL = [12, 4, 16, 20, 22, 18, 5, 3]
 
 
@@ -292,7 +294,10 @@ async def ensure_actor(db: AsyncSession, *, tenant_id: int, email: str, nome: st
     if uid:
         print(f"  ator '{email}' já existe (id={uid}).")
         return uid
-    cpf = uuid.uuid4().hex[:11]
+    # CPF fictício determinístico: RNG local semeado pelo e-mail — não consome o
+    # stream global do random.seed(42) (que deve ficar idêntico com/sem atores já criados).
+    rng = random.Random(email)
+    cpf = "".join(str(rng.randint(0, 9)) for _ in range(11))
     res = await db.execute(text(
         """INSERT INTO utils.usuario
              (tenant_id, nome, email, senha, senha_bcrypt, cpf, id_unidade_trabalho,
@@ -580,6 +585,9 @@ async def seed_timeline(db: AsyncSession, *, tenant_id: int, cadastros: dict,
                 a_pagar = todas_parcelas[:n_pagar]
             else:
                 a_pagar = todas_parcelas
+            # Sem re-checar saldo aqui: autorizar_lote já validou o disponível e as
+            # parcelas A_PAGAR ficam reservadas via "comprometido" — pagar só converte
+            # comprometido em saída, sem reduzir o disponível além do já contabilizado.
             for p in a_pagar:
                 dt = p.vencimento + timedelta(days=random.randint(-5, 5))
                 dt = min(dt, hoje)
