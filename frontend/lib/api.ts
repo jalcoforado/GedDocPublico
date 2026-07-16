@@ -1143,6 +1143,51 @@ export interface MinhaFila {
   autorizar: Debito[] | null; pagar: ParcelaFila[] | null;
 }
 
+// ---------- dashboard financeiro ----------
+export interface DashboardKpis {
+  saldo_total: string; disponivel_total: string; comprometido_total: string;
+  a_pagar_30d: string; vencidas_qtd: number; vencidas_valor: string;
+  pago_no_mes: string; aguardando_aprovacao_qtd: number; aguardando_autorizacao_qtd: number;
+}
+
+export interface FluxoMensalItem {
+  mes: string; // 'YYYY-MM'
+  entradas: string; saidas: string;
+}
+
+export interface ComposicaoItem {
+  codigo: string; descricao: string; valor: string;
+}
+
+export interface DebitoResumoItem {
+  id: number; nome_fornecedor: string; descricao: string; valor_total: string;
+  status: StatusDebito; competencia: string;
+}
+
+export interface ParcelaAlertaItem {
+  id: number; id_debito: number; nome_fornecedor: string; valor: string;
+  vencimento: string; dias_atraso: number;
+}
+
+export interface ContaAlertaItem {
+  id_conta: number; nome: string; saldo_atual: string; saldo_minimo_alerta: string;
+}
+
+export interface DashboardAlertas {
+  parcelas_vencidas: ParcelaAlertaItem[];
+  parcelas_7dias: ParcelaAlertaItem[];
+  contas_abaixo_minimo: ContaAlertaItem[];
+}
+
+export interface PagamentosDashboard {
+  kpis: DashboardKpis;
+  fluxo_mensal: FluxoMensalItem[];
+  por_natureza: ComposicaoItem[];
+  por_fonte: ComposicaoItem[];
+  maiores_debitos: DebitoResumoItem[];
+  alertas: DashboardAlertas;
+}
+
 export interface MinutaCreateInput {
   titulo: string;
   origem?: MinutaOrigem;
@@ -2302,6 +2347,8 @@ export const api = {
           method: "POST", body: JSON.stringify({ justificativa }) }),
     },
     minhaFila: () => request<MinhaFila>("/pagamentos/minha-fila"),
+    dashboard: (meses = 12) =>
+      request<PagamentosDashboard>(`/pagamentos/dashboard${qs({ meses })}`),
   },
 
   // Fase 3

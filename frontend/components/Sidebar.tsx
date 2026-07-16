@@ -161,6 +161,8 @@ const NAV: NavGroup[] = [
     items: [
       { label: "Início", href: "/pagamentos", icon: Inbox,
         anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"] },
+      { label: "Dashboard", href: "/pagamentos/dashboard", icon: BarChart3,
+        anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"] },
       { label: "Contas a pagar", href: "/pagamentos/contas-a-pagar", icon: ClipboardList,
         anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar"] },
       { label: "Caixa", href: "/pagamentos/caixa", icon: Wallet, perm: "pagamento_cadastro" },
