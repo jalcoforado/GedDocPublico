@@ -24,7 +24,8 @@ async def _contas_by_id(db, *, tenant_id: int, ids: set[int]) -> dict[int, Conta
     if not ids:
         return {}
     rows = (await db.execute(select(ContaBancaria).where(
-        ContaBancaria.tenant_id == tenant_id, ContaBancaria.id.in_(ids)))).scalars().all()
+        ContaBancaria.tenant_id == tenant_id, ContaBancaria.id.in_(ids),
+        ContaBancaria.excluido.is_(False)))).scalars().all()
     return {c.id: c for c in rows}
 
 
@@ -32,7 +33,8 @@ async def _naturezas_by_id(db, *, tenant_id: int, ids: set[int]) -> dict[int, Na
     if not ids:
         return {}
     rows = (await db.execute(select(NaturezaDespesa).where(
-        NaturezaDespesa.tenant_id == tenant_id, NaturezaDespesa.id.in_(ids)))).scalars().all()
+        NaturezaDespesa.tenant_id == tenant_id, NaturezaDespesa.id.in_(ids),
+        NaturezaDespesa.excluido.is_(False)))).scalars().all()
     return {n.id: n for n in rows}
 
 
@@ -191,8 +193,12 @@ async def fila_tesouraria(db: AsyncSession, *, tenant_id: int) -> FilaTesouraria
     debitos_por_id: dict[int, Debito] = {}
     if debito_ids:
         rows = (await db.execute(select(Debito).where(
-            Debito.tenant_id == tenant_id, Debito.id.in_(debito_ids)))).scalars().all()
+            Debito.tenant_id == tenant_id, Debito.id.in_(debito_ids),
+            Debito.excluido.is_(False)))).scalars().all()
         debitos_por_id = {d.id: d for d in rows}
+    # parcelas de débitos soft-deletados ficam fora da fila
+    liberadas = [p for p in liberadas if p.id_debito in debitos_por_id]
+    pagas = [p for p in pagas if p.id_debito in debitos_por_id]
 
     nomes_f = await nomes_fornecedores(
         db, tenant_id=tenant_id, ids={d.id_fornecedor for d in debitos_por_id.values()})
