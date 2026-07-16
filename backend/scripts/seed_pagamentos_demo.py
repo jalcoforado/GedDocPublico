@@ -576,6 +576,16 @@ async def seed_timeline(db: AsyncSession, *, tenant_id: int, cadastros: dict,
             await aut.autorizar_lote(db, tenant_id=tenant_id, usuario_id=autorizador_id,
                                      debito_ids=[d.id])
             if status_alvo == "AUTORIZADO":
+                # Fila do ordenador (A_PAGAR não liberadas) x fila da tesouraria (LIBERADA
+                # pendente): ~55% dos AUTORIZADO ficam liberados-e-não-pagos (demo da fila
+                # de liberação); o restante fica A_PAGAR sem liberação (fila do ordenador).
+                if random.random() < 0.35:
+                    todas_parcelas = await deb.listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
+                    if todas_parcelas:
+                        await aut.liberar_parcelas(
+                            db, tenant_id=tenant_id, usuario_id=autorizador_id,
+                            parcela_ids=[p.id for p in todas_parcelas],
+                            data_prevista=todas_parcelas[0].vencimento)
                 stats["AUTORIZADO"] += 1
                 continue
 
@@ -585,10 +595,14 @@ async def seed_timeline(db: AsyncSession, *, tenant_id: int, cadastros: dict,
                 a_pagar = todas_parcelas[:n_pagar]
             else:
                 a_pagar = todas_parcelas
+            # Segundo ato do rito: libera cada parcela (data_prevista = seu vencimento)
+            # antes de pagar — pagar_parcela agora exige status LIBERADA.
             # Sem re-checar saldo aqui: autorizar_lote já validou o disponível e as
-            # parcelas A_PAGAR ficam reservadas via "comprometido" — pagar só converte
-            # comprometido em saída, sem reduzir o disponível além do já contabilizado.
+            # parcelas A_PAGAR/LIBERADA ficam reservadas via "comprometido" — pagar só
+            # converte comprometido em saída, sem reduzir o disponível além do já contabilizado.
             for p in a_pagar:
+                await aut.liberar_parcelas(db, tenant_id=tenant_id, usuario_id=autorizador_id,
+                                           parcela_ids=[p.id], data_prevista=p.vencimento)
                 dt = p.vencimento + timedelta(days=random.randint(-5, 5))
                 dt = min(dt, hoje)
                 await aut.pagar_parcela(db, tenant_id=tenant_id, usuario_id=autorizador_id,
@@ -644,6 +658,25 @@ async def imprimir_resumo(db: AsyncSession, *, tenant_id: int, cadastros: dict, 
     vencidas = r.scalar_one()
     print(f"\nParcelas vencidas (A_PAGAR, vencimento < hoje): {vencidas}")
 
+    print("\nParcelas por estado:")
+    r = await db.execute(text(
+        "SELECT p.status, count(*) FROM pagamentos.parcela p "
+        "WHERE p.tenant_id=:t AND p.excluido = false GROUP BY p.status"), {"t": tenant_id})
+    parcela_counts = {row[0]: row[1] for row in r.all()}
+    for k in ("A_PAGAR", "LIBERADA", "PAGA", "CANCELADA"):
+        print(f"  {k:12s} {parcela_counts.get(k, 0):4d}")
+
+    r = await db.execute(text(
+        "SELECT count(*) FROM pagamentos.parcela p "
+        "WHERE p.tenant_id=:t AND p.status='LIBERADA' AND p.excluido = false"), {"t": tenant_id})
+    liberadas_pendentes = r.scalar_one()
+
+    r = await db.execute(text(
+        "SELECT count(*) FROM pagamentos.parcela p JOIN pagamentos.debito d ON d.id = p.id_debito "
+        "WHERE p.tenant_id=:t AND p.status='A_PAGAR' AND d.status IN ('AUTORIZADO','PAGO_PARCIAL') "
+        "AND p.excluido = false"), {"t": tenant_id})
+    a_pagar_liberaveis = r.scalar_one()
+
     print("\nAsserts:")
     ok = True
     if saldos_negativos > 0:
@@ -665,6 +698,16 @@ async def imprimir_resumo(db: AsyncSession, *, tenant_id: int, cadastros: dict, 
         print(f"  [OK] {total} débitos (esperado >= 200).")
     else:
         print(f"  [FALHA] apenas {total} débitos (esperado >= 200).")
+        ok = False
+    if liberadas_pendentes >= 10:
+        print(f"  [OK] {liberadas_pendentes} parcela(s) LIBERADA(S) pendente(s) (esperado >= 10).")
+    else:
+        print(f"  [FALHA] apenas {liberadas_pendentes} parcela(s) LIBERADA(S) pendente(s) (esperado >= 10).")
+        ok = False
+    if a_pagar_liberaveis >= 20:
+        print(f"  [OK] {a_pagar_liberaveis} parcela(s) A_PAGAR liberável(eis) (esperado >= 20).")
+    else:
+        print(f"  [FALHA] apenas {a_pagar_liberaveis} parcela(s) A_PAGAR liberável(eis) (esperado >= 20).")
         ok = False
 
     print("=" * 72)
