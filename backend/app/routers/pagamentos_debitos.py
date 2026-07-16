@@ -11,11 +11,12 @@ from ..auth.perms import require_any_permission, require_permission
 from ..database import get_db
 from ..models import Usuario
 from ..schemas.pagamentos import (
-    AutorizarLoteIn, DebitoCreate, DebitoDetalheOut, DebitoHistoricoOut, DebitoOut,
+    AutorizarLoteIn, DashboardOut, DebitoCreate, DebitoDetalheOut, DebitoHistoricoOut, DebitoOut,
     DebitoUpdate, JustificativaIn, MinhaFilaOut, OrdemPagamentoOut, PagarParcelaIn,
     ParcelaFilaOut, ParcelaOut,
 )
 from ..services import pagamentos_autorizacao as aut
+from ..services import pagamentos_dashboard as dash
 from ..services import pagamentos_debitos as svc
 from ..services.html_pdf import html_to_pdf_bytes
 from ..services.permissoes import load_permissions
@@ -229,6 +230,14 @@ async def estornar(parcela_id: int, payload: JustificativaIn, request: Request,
                                    parcela_id=parcela_id, justificativa=payload.justificativa,
                                    ip=_ip(request))
     return ParcelaOut.model_validate(p)
+
+
+@operacoes_router.get("/dashboard", response_model=DashboardOut)
+async def dashboard(meses: int = 12,
+                    _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                    tenant_id: int = Depends(require_tenant_id),
+                    db: AsyncSession = Depends(get_db)):
+    return await dash.montar_dashboard(db, tenant_id=tenant_id, meses=meses)
 
 
 @operacoes_router.get("/minha-fila", response_model=MinhaFilaOut)

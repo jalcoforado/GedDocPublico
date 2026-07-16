@@ -320,3 +320,48 @@ class MinhaFilaOut(BaseModel):
     aprovar: list[DebitoOut] | None = None      # AGUARDANDO_APROVACAO
     autorizar: list[DebitoOut] | None = None    # APROVADO
     pagar: list[ParcelaFilaOut] | None = None   # A_PAGAR de AUTORIZADO/PAGO_PARCIAL
+
+
+# ---------- dashboard financeiro ----------
+class DashboardKpis(BaseModel):
+    saldo_total: Decimal; disponivel_total: Decimal; comprometido_total: Decimal
+    a_pagar_30d: Decimal; vencidas_qtd: int; vencidas_valor: Decimal
+    pago_no_mes: Decimal; aguardando_aprovacao_qtd: int; aguardando_autorizacao_qtd: int
+
+
+class FluxoMensalItem(BaseModel):
+    mes: str  # 'YYYY-MM'
+    entradas: Decimal; saidas: Decimal
+
+
+class ComposicaoItem(BaseModel):
+    codigo: str; descricao: str; valor: Decimal
+
+
+class DebitoResumoItem(BaseModel):
+    id: int; nome_fornecedor: str; descricao: str; valor_total: Decimal
+    status: StatusDebito; competencia: str
+
+
+class ParcelaAlertaItem(BaseModel):
+    id: int; id_debito: int; nome_fornecedor: str; valor: Decimal
+    vencimento: date; dias_atraso: int
+
+
+class ContaAlertaItem(BaseModel):
+    id_conta: int; nome: str; saldo_atual: Decimal; saldo_minimo_alerta: Decimal
+
+
+class DashboardAlertas(BaseModel):
+    parcelas_vencidas: list[ParcelaAlertaItem]
+    parcelas_7dias: list[ParcelaAlertaItem]
+    contas_abaixo_minimo: list[ContaAlertaItem]
+
+
+class DashboardOut(BaseModel):
+    kpis: DashboardKpis
+    fluxo_mensal: list[FluxoMensalItem]
+    por_natureza: list[ComposicaoItem]
+    por_fonte: list[ComposicaoItem]
+    maiores_debitos: list[DebitoResumoItem]
+    alertas: DashboardAlertas
