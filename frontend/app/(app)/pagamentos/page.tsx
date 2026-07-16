@@ -16,24 +16,45 @@ function fmtMoeda(v: string): string {
   return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+function fmtData(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y.slice(2)}`;
+}
+
+// Filas podem ter dezenas de itens (massa real): cada card mostra os primeiros e
+// aponta para a lista completa, mantendo a home compacta.
+const MAX_ITENS_CARD = 8;
+
+function VerTodas({ total, href }: { total: number; href: string }) {
+  if (total <= MAX_ITENS_CARD) return null;
+  return (
+    <Link href={href} className="mt-2 block text-xs text-primary hover:underline">
+      + {total - MAX_ITENS_CARD} outras — ver todas
+    </Link>
+  );
+}
+
 function DebitoLista({ itens }: { itens: Debito[] }) {
   if (itens.length === 0) {
     return <p className="text-sm text-muted-foreground">Nada pendente.</p>;
   }
   return (
-    <ul className="space-y-1">
-      {itens.map((d) => (
-        <li key={d.id} className="flex items-center justify-between gap-2 text-sm">
-          <Link
-            href={`/pagamentos/contas-a-pagar/${d.id}`}
-            className="truncate text-primary hover:underline"
-          >
-            {d.nome_fornecedor} — {d.descricao}
-          </Link>
-          <span className="shrink-0 tabular-nums">{fmtMoeda(d.valor_total)}</span>
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="space-y-1">
+        {itens.slice(0, MAX_ITENS_CARD).map((d) => (
+          <li key={d.id} className="flex items-center justify-between gap-2 text-sm">
+            <Link
+              href={`/pagamentos/contas-a-pagar/${d.id}`}
+              className="min-w-0 flex-1 truncate text-primary hover:underline"
+            >
+              {d.nome_fornecedor} — {d.descricao}
+            </Link>
+            <span className="shrink-0 tabular-nums">{fmtMoeda(d.valor_total)}</span>
+          </li>
+        ))}
+      </ul>
+      <VerTodas total={itens.length} href="/pagamentos/contas-a-pagar" />
+    </>
   );
 }
 
@@ -83,7 +104,7 @@ function CardAutorizar({ itens }: { itens: Debito[] | null }) {
       ) : (
         <>
           <ul className="space-y-1">
-            {itens.map((d) => (
+            {itens.slice(0, MAX_ITENS_CARD).map((d) => (
               <li key={d.id} className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -92,7 +113,7 @@ function CardAutorizar({ itens }: { itens: Debito[] | null }) {
                 />
                 <Link
                   href={`/pagamentos/contas-a-pagar/${d.id}`}
-                  className="flex-1 truncate text-primary hover:underline"
+                  className="min-w-0 flex-1 truncate text-primary hover:underline"
                 >
                   {d.nome_fornecedor} — {d.descricao}
                 </Link>
@@ -100,6 +121,7 @@ function CardAutorizar({ itens }: { itens: Debito[] | null }) {
               </li>
             ))}
           </ul>
+          <VerTodas total={itens.length} href="/pagamentos/contas-a-pagar" />
           <Button
             className="mt-3"
             size="sm"
@@ -125,28 +147,32 @@ function CardParcelas({ itens }: { itens: ParcelaFila[] | null }) {
       {itens.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nada pendente.</p>
       ) : (
-        <ul className="space-y-1">
-          {itens.map((p) => (
-            <li
-              key={p.id}
-              className={
-                "flex items-center justify-between gap-2 text-sm " +
-                (p.vencida ? "text-danger-soft-foreground" : "")
-              }
-            >
-              <Link
-                href={`/pagamentos/contas-a-pagar/${p.id_debito}`}
-                className="truncate hover:underline"
+        <>
+          <ul className="space-y-1">
+            {itens.slice(0, MAX_ITENS_CARD).map((p) => (
+              <li
+                key={p.id}
+                className={
+                  "flex items-center justify-between gap-2 text-sm " +
+                  (p.vencida ? "text-danger-soft-foreground" : "")
+                }
               >
-                {p.nome_fornecedor} — {p.descricao_debito} (parcela {p.numero})
-              </Link>
-              <span className="shrink-0 tabular-nums">
-                {fmtMoeda(p.valor)} — venc. {p.vencimento}
-                {p.vencida && " (vencida)"}
-              </span>
-            </li>
-          ))}
-        </ul>
+                <Link
+                  href={`/pagamentos/contas-a-pagar/${p.id_debito}`}
+                  className="min-w-0 flex-1 truncate hover:underline"
+                  title={`${p.nome_fornecedor} — ${p.descricao_debito} (parcela ${p.numero})`}
+                >
+                  {p.vencida && "⚠ "}
+                  {p.nome_fornecedor}
+                </Link>
+                <span className="shrink-0 whitespace-nowrap tabular-nums">
+                  {fmtMoeda(p.valor)} · {fmtData(p.vencimento)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <VerTodas total={itens.length} href="/pagamentos/contas-a-pagar" />
+        </>
       )}
     </div>
   );
