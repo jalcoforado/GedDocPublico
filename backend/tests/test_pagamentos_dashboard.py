@@ -185,6 +185,58 @@ async def test_kpis(admin_engine):
         await _cleanup(admin_engine, t.id)
 
 
+async def test_kpis_pipeline_e_30d(admin_engine):
+    """a_pagar_30d é PROSPECTIVO (hoje..hoje+30, sem sobrepor vencidas) e os
+    contadores de pipeline contam débitos parados em AGUARDANDO_APROVACAO/APROVADO."""
+    t = await _provisionar(admin_engine)
+    try:
+        hoje = date.today()
+        base = await _base(admin_engine, t.id)
+        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+
+        # débito AUTORIZADO com parcela a vencer em hoje+10 → conta em a_pagar_30d
+        d_futuro, _s1, _a1, _c1 = await _debito_aprovado(
+            admin_engine, t.id, valor="500.00", base=base,
+            parcelas=[ParcelaCreate(numero=1, valor="500.00",
+                                    vencimento=(hoje + timedelta(days=10)).isoformat())])
+        async with _sm(admin_engine)() as s:
+            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
+                                     debito_ids=[d_futuro.id])
+
+        # débito AUTORIZADO com parcela vencida ontem → vencidas, NÃO em a_pagar_30d
+        d_vencido, _s2, _a2, _c2 = await _debito_aprovado(
+            admin_engine, t.id, valor="300.00", base=base,
+            parcelas=[ParcelaCreate(numero=1, valor="300.00",
+                                    vencimento=(hoje - timedelta(days=1)).isoformat())])
+        async with _sm(admin_engine)() as s:
+            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
+                                     debito_ids=[d_vencido.id])
+
+        # débito parado em APROVADO → aguardando_autorizacao_qtd
+        await _debito_aprovado(admin_engine, t.id, valor="200.00", base=base)
+
+        # débito parado em AGUARDANDO_APROVACAO → aguardando_aprovacao_qtd
+        forn, nat, conta = base
+        solicitante = await _novo_usuario(admin_engine, t.id, f"sol{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            d_ag = await deb.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
+                                          payload=_payload_debito(forn, nat, conta, valor="100.00"))
+        async with _sm(admin_engine)() as s:
+            await deb.enviar_aprovacao(s, tenant_id=t.id, debito_id=d_ag.id,
+                                       usuario_id=solicitante)
+
+        async with _sm(admin_engine)() as s:
+            out = await dash.montar_dashboard(s, tenant_id=t.id)
+        k = out.kpis
+        assert k.a_pagar_30d == Decimal("500.00")  # prospectivo: só hoje..hoje+30
+        assert k.vencidas_qtd == 1
+        assert k.vencidas_valor == Decimal("300.00")
+        assert k.aguardando_aprovacao_qtd == 1
+        assert k.aguardando_autorizacao_qtd == 1
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
 async def test_fluxo_mensal(admin_engine):
     t = await _provisionar(admin_engine)
     try:

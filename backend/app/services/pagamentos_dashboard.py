@@ -100,8 +100,10 @@ async def _kpis(db, *, tenant_id: int, hoje: date) -> DashboardKpis:
                        Parcela.status == "A_PAGAR", Debito.excluido.is_(False),
                        Debito.status.in_(_STATUS_COMPROMETIDO), *extra))
 
+    # prospectivo: só parcelas ainda não vencidas (vencidas têm KPI próprio)
     a_pagar_30d, _qtd_30d = (await db.execute(
-        _soma_qtd_parcelas(Parcela.vencimento <= limite_30d))).one()
+        _soma_qtd_parcelas(Parcela.vencimento >= hoje,
+                           Parcela.vencimento <= limite_30d))).one()
 
     vencidas_valor, vencidas_qtd = (await db.execute(
         _soma_qtd_parcelas(Parcela.vencimento < hoje))).one()
@@ -140,7 +142,9 @@ async def _composicao_natureza(db, *, tenant_id: int, inicio: date) -> list[Comp
             .join(Debito, Debito.id == MovimentacaoConta.id_debito)
             .join(NaturezaDespesa, NaturezaDespesa.id == Debito.id_natureza)
             .where(MovimentacaoConta.tenant_id == tenant_id, MovimentacaoConta.excluido.is_(False),
-                   MovimentacaoConta.origem == "PAGAMENTO", MovimentacaoConta.data >= inicio)
+                   MovimentacaoConta.origem == "PAGAMENTO", MovimentacaoConta.data >= inicio,
+                   Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
+                   NaturezaDespesa.tenant_id == tenant_id, NaturezaDespesa.excluido.is_(False))
             .group_by(NaturezaDespesa.codigo, NaturezaDespesa.descricao)
             .order_by(func.sum(MovimentacaoConta.valor).desc()))
     rows = (await db.execute(stmt)).all()
@@ -155,7 +159,10 @@ async def _composicao_fonte(db, *, tenant_id: int, inicio: date) -> list[Composi
             .join(ContaBancaria, ContaBancaria.id == Debito.id_conta)
             .join(FonteRecursos, FonteRecursos.id == ContaBancaria.id_fonte_recursos)
             .where(MovimentacaoConta.tenant_id == tenant_id, MovimentacaoConta.excluido.is_(False),
-                   MovimentacaoConta.origem == "PAGAMENTO", MovimentacaoConta.data >= inicio)
+                   MovimentacaoConta.origem == "PAGAMENTO", MovimentacaoConta.data >= inicio,
+                   Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
+                   ContaBancaria.tenant_id == tenant_id, ContaBancaria.excluido.is_(False),
+                   FonteRecursos.tenant_id == tenant_id, FonteRecursos.excluido.is_(False))
             .group_by(FonteRecursos.codigo, FonteRecursos.descricao)
             .order_by(func.sum(MovimentacaoConta.valor).desc()))
     rows = (await db.execute(stmt)).all()
