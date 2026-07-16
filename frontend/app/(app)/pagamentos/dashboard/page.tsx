@@ -13,11 +13,13 @@ import {
   Wallet,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  LabelList,
   Legend,
   ResponsiveContainer,
   Tooltip,
@@ -65,8 +67,24 @@ const STATUS_BADGE: Record<
 
 function fmtBRL(v: string | number): string {
   const n = typeof v === "string" ? Number(v) : v;
-  if (Number.isNaN(n)) return String(v);
+  if (Number.isNaN(n)) return "—";
   return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+/** BRL compacto pros labels diretos das barras ("R$ 1,2 mi", "R$ 850 mil"). */
+function fmtBRLCompacto(v: unknown): string {
+  const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;
+  if (Number.isNaN(n)) return "—";
+  return n.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  });
+}
+
+function truncaNome(nome: string, max = 18): string {
+  return nome.length > max ? `${nome.slice(0, max)}…` : nome;
 }
 
 function fmtMesLabel(mes: string): string {
@@ -141,7 +159,7 @@ function ComposicaoChart({ titulo, itens }: { titulo: string; itens: ComposicaoI
               <BarChart
                 data={dados}
                 layout="vertical"
-                margin={{ top: 5, right: 60, left: 8, bottom: 5 }}
+                margin={{ top: 5, right: 72, left: 8, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
                 <XAxis type="number" hide />
@@ -150,12 +168,19 @@ function ComposicaoChart({ titulo, itens }: { titulo: string; itens: ComposicaoI
                   type="category"
                   width={140}
                   tick={{ fontSize: 11 }}
+                  tickFormatter={(nome: string) => truncaNome(nome)}
                   axisLine={false}
                   tickLine={false}
                 />
                 <Tooltip content={<TooltipBRL />} cursor={{ fill: "hsl(var(--muted))" }} />
                 <Bar dataKey="valor" fill={COR_BRAND} radius={[0, 4, 4, 0]} barSize={16}>
-                  {/* Rótulo direto com o valor BRL — texto em token, não na cor da série. */}
+                  {/* Rótulo direto (BRL compacto) — texto em token de texto, não na cor da série. */}
+                  <LabelList
+                    dataKey="valor"
+                    position="right"
+                    formatter={fmtBRLCompacto}
+                    style={{ fill: "hsl(var(--foreground))", fontSize: 11 }}
+                  />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -182,6 +207,7 @@ function ComposicaoChart({ titulo, itens }: { titulo: string; itens: ComposicaoI
 export default function PagamentosDashboardPage() {
   const [meses, setMeses] = useState(12);
   const toast = useToast();
+  const router = useRouter();
 
   const q = useQuery({
     queryKey: ["pag-dashboard", meses],
@@ -373,9 +399,7 @@ export default function PagamentosDashboardPage() {
                     return (
                       <TR
                         key={deb.id}
-                        onClickRow={() => {
-                          window.location.href = `/pagamentos/contas-a-pagar/${deb.id}`;
-                        }}
+                        onClickRow={() => router.push(`/pagamentos/contas-a-pagar/${deb.id}`)}
                         className="cursor-pointer"
                       >
                         <TD>
