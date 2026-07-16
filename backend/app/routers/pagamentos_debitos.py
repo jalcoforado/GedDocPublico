@@ -10,16 +10,26 @@ from ..auth.deps import get_current_user, require_tenant_id
 from ..auth.perms import require_any_permission, require_permission
 from ..database import get_db
 from ..models import Usuario
+from datetime import date
+
+from pydantic import BaseModel, Field
+
 from ..schemas.pagamentos import (
     AutorizarLoteIn, DashboardOut, DebitoCreate, DebitoDetalheOut, DebitoHistoricoOut, DebitoOut,
-    DebitoUpdate, JustificativaIn, MinhaFilaOut, OrdemPagamentoOut, PagarParcelaIn,
-    ParcelaFilaOut, ParcelaOut,
+    DebitoUpdate, FilaAutorizacaoGrupo, FilaLiberacaoGrupo, FilaTesourariaOut, JustificativaIn,
+    MinhaFilaOut, OrdemPagamentoOut, PagarParcelaIn, ParcelaFilaOut, ParcelaOut,
 )
 from ..services import pagamentos_autorizacao as aut
 from ..services import pagamentos_dashboard as dash
 from ..services import pagamentos_debitos as svc
+from ..services import pagamentos_filas as filas
 from ..services.html_pdf import html_to_pdf_bytes
 from ..services.permissoes import load_permissions
+
+
+class LiberarParcelasIn(BaseModel):
+    parcela_ids: list[int] = Field(min_length=1)
+    data_prevista: date | None = None
 
 PERMS_LEITURA = ("pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar",
                  "pagamento_pagar", "pagamento_cadastro")
@@ -232,6 +242,49 @@ async def estornar(parcela_id: int, payload: JustificativaIn, request: Request,
     return ParcelaOut.model_validate(p)
 
 
+@operacoes_router.get("/autorizacao/fila", response_model=list[FilaAutorizacaoGrupo])
+async def fila_autorizacao(_: Usuario = Depends(require_permission("pagamento_autorizar")),
+                           tenant_id: int = Depends(require_tenant_id),
+                           db: AsyncSession = Depends(get_db)):
+    return await filas.fila_autorizacao(db, tenant_id=tenant_id)
+
+
+@operacoes_router.get("/liberacao/fila", response_model=list[FilaLiberacaoGrupo])
+async def fila_liberacao(_: Usuario = Depends(require_permission("pagamento_autorizar")),
+                         tenant_id: int = Depends(require_tenant_id),
+                         db: AsyncSession = Depends(get_db)):
+    return await filas.fila_liberacao(db, tenant_id=tenant_id)
+
+
+@operacoes_router.get("/tesouraria/fila", response_model=FilaTesourariaOut)
+async def fila_tesouraria(_: Usuario = Depends(require_permission("pagamento_pagar")),
+                          tenant_id: int = Depends(require_tenant_id),
+                          db: AsyncSession = Depends(get_db)):
+    return await filas.fila_tesouraria(db, tenant_id=tenant_id)
+
+
+@operacoes_router.post("/parcelas/liberar", response_model=list[ParcelaOut])
+async def liberar_parcelas(payload: LiberarParcelasIn, request: Request,
+                           usuario: Usuario = Depends(require_permission("pagamento_autorizar")),
+                           tenant_id: int = Depends(require_tenant_id),
+                           db: AsyncSession = Depends(get_db)):
+    parcelas = await aut.liberar_parcelas(db, tenant_id=tenant_id, usuario_id=usuario.id,
+                                          parcela_ids=payload.parcela_ids,
+                                          data_prevista=payload.data_prevista, ip=_ip(request))
+    return [ParcelaOut.model_validate(p) for p in parcelas]
+
+
+@operacoes_router.post("/parcelas/{parcela_id}/revogar-liberacao", response_model=ParcelaOut)
+async def revogar_liberacao(parcela_id: int, payload: JustificativaIn, request: Request,
+                            usuario: Usuario = Depends(require_permission("pagamento_autorizar")),
+                            tenant_id: int = Depends(require_tenant_id),
+                            db: AsyncSession = Depends(get_db)):
+    p = await aut.revogar_liberacao(db, tenant_id=tenant_id, usuario_id=usuario.id,
+                                    parcela_id=parcela_id, justificativa=payload.justificativa,
+                                    ip=_ip(request))
+    return ParcelaOut.model_validate(p)
+
+
 @operacoes_router.get("/dashboard", response_model=DashboardOut)
 async def dashboard(meses: int = 12,
                     _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
@@ -259,19 +312,31 @@ async def minha_fila(usuario: Usuario = Depends(get_current_user),
     if tem("pagamento_autorizar"):
         rows = await svc.listar_debitos(db, tenant_id=tenant_id, status_f="APROVADO")
         fila.autorizar = await _out(db, tenant_id, rows)
-    if tem("pagamento_pagar"):
-        debitos_pagar = []
+    if tem("pagamento_autorizar") or tem("pagamento_pagar"):
+        debitos_ativos = []
         for st in ("AUTORIZADO", "PAGO_PARCIAL"):
-            debitos_pagar.extend(await svc.listar_debitos(db, tenant_id=tenant_id, status_f=st))
+            debitos_ativos.extend(await svc.listar_debitos(db, tenant_id=tenant_id, status_f=st))
         nomes = await svc.nomes_fornecedores(db, tenant_id=tenant_id,
-                                             ids={d.id_fornecedor for d in debitos_pagar})
-        parcelas = []
-        for d in debitos_pagar:
-            for p in await svc.listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id):
-                if p.status == "A_PAGAR":
-                    parcelas.append(ParcelaFilaOut(
-                        id=p.id, id_debito=d.id, numero=p.numero, valor=p.valor,
-                        vencimento=p.vencimento, nome_fornecedor=nomes.get(d.id_fornecedor, "?"),
-                        descricao_debito=d.descricao, vencida=p.vencimento < _date.today()))
-        fila.pagar = sorted(parcelas, key=lambda x: x.vencimento)
+                                             ids={d.id_fornecedor for d in debitos_ativos})
+
+        if tem("pagamento_autorizar"):
+            parcelas_liberar = []
+            for d in debitos_ativos:
+                for p in await svc.listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id):
+                    if p.status == "A_PAGAR":
+                        parcelas_liberar.append(ParcelaFilaOut(
+                            id=p.id, id_debito=d.id, numero=p.numero, valor=p.valor,
+                            vencimento=p.vencimento, nome_fornecedor=nomes.get(d.id_fornecedor, "?"),
+                            descricao_debito=d.descricao, vencida=p.vencimento < _date.today()))
+            fila.liberar = sorted(parcelas_liberar, key=lambda x: x.vencimento)
+        if tem("pagamento_pagar"):
+            parcelas_pagar = []
+            for d in debitos_ativos:
+                for p in await svc.listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id):
+                    if p.status == "LIBERADA":
+                        parcelas_pagar.append(ParcelaFilaOut(
+                            id=p.id, id_debito=d.id, numero=p.numero, valor=p.valor,
+                            vencimento=p.vencimento, nome_fornecedor=nomes.get(d.id_fornecedor, "?"),
+                            descricao_debito=d.descricao, vencida=p.vencimento < _date.today()))
+            fila.pagar = sorted(parcelas_pagar, key=lambda x: x.vencimento)
     return fila

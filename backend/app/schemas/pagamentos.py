@@ -322,7 +322,44 @@ class MinhaFilaOut(BaseModel):
     solicitar: list[DebitoOut] | None = None    # meus RASCUNHO (inclui devolvidos)
     aprovar: list[DebitoOut] | None = None      # AGUARDANDO_APROVACAO
     autorizar: list[DebitoOut] | None = None    # APROVADO
-    pagar: list[ParcelaFilaOut] | None = None   # A_PAGAR de AUTORIZADO/PAGO_PARCIAL
+    liberar: list[ParcelaFilaOut] | None = None  # A_PAGAR de AUTORIZADO/PAGO_PARCIAL
+    pagar: list[ParcelaFilaOut] | None = None   # LIBERADA
+
+
+# ---------- filas agregadas por conta (autorização / liberação / tesouraria) ----------
+class DebitoFilaItem(BaseModel):
+    id: int; nome_fornecedor: str; descricao: str; natureza_codigo: str
+    natureza_descricao: str; competencia: str; urgente: bool
+    aprovado_por: str | None; aprovado_em: datetime | None; valor_total: Decimal
+
+
+class ParcelaFilaLibItem(BaseModel):
+    id: int; id_debito: int; nome_fornecedor: str; descricao_debito: str
+    numero: int; qtd_parcelas: int; valor: Decimal; vencimento: date
+    vencida: bool; dias_atraso: int; op_numero: str | None; op_id: int | None
+
+
+class ParcelaTesourariaItem(ParcelaFilaLibItem):
+    data_liberacao: date | None; liberado_por: str | None
+    data_prevista_pagamento: date | None
+    data_pagamento: date | None = None
+
+
+class GrupoConta(BaseModel):
+    id_conta: int; nome_conta: str; disponivel: Decimal; abaixo_minimo: bool
+
+
+class FilaAutorizacaoGrupo(GrupoConta):
+    debitos: list[DebitoFilaItem]
+
+
+class FilaLiberacaoGrupo(GrupoConta):
+    parcelas: list[ParcelaFilaLibItem]
+
+
+class FilaTesourariaOut(BaseModel):
+    liberadas: list[ParcelaTesourariaItem]      # ordenadas por data_prevista/vencimento
+    pagas_recentes: list[ParcelaTesourariaItem]  # últimas 15, com data_pagamento no lugar
 
 
 # ---------- dashboard financeiro ----------
