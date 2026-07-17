@@ -4,37 +4,183 @@
 
 /*
  * ============================================================
- * Aprimora Design System v2 — Refined Enterprise
+ * Aprimora Design System v3 — Institucional Refinado
  *
- * Estilo: limpo, profissional, identidade marcante mas sóbria
- *   pra contexto governamental brasileiro. Inspirações: Linear,
- *   Notion, Stripe Dashboard.
+ * Estilo: verde-petróleo formalizado como marca (era navy no v2),
+ *   âmbar mantido como acento-assinatura (par quente/frio),
+ *   acabamento denso/sereno (Linear/Vercel), Inter + numerais
+ *   tabulares. Três camadas: primitivo → semântico → componente.
  *
- * Paleta:
- *   - Brand primary: navy (#1e3a5f) — sobriedade governamental
- *   - Accent assinatura: âmbar (#d97706) — calor, brasilidade sutil,
- *     usado em destaques (logo, badges, filled secundários)
- *   - Neutros: slate (frio profissional)
- *   - Functional: success/danger/warning/info nas convenções padrão
+ * Camada primitiva (novo nesta versão): ramps HSL completos
+ *   (green/amber/neutral/status) + escalas não-cor (space, radius,
+ *   shadow, text, motion, z-index). NUNCA usar primitivos direto
+ *   em componente — sempre via token semântico.
  *
- * Dark mode:
- *   - Tokens dessaturados (não invertidos). Surface elevation tonal
- *     (Material 3 style): cada camada acima é ~5% mais clara.
+ * Camada semântica: MESMOS NOMES públicos do v2 (zero breaking
+ *   change), agora referenciando os primitivos e a nova identidade.
+ *   Legacy aliases (--aprimora*) mantidos.
  *
- * Density:
- *   - data-density="compact" no <html> reduz padding/gap em ~25%
- *     (analistas power-user querem mais info por scroll).
+ * Dark mode: tokens dessaturados (não invertidos), surface
+ *   elevation tonal (Material 3 style).
+ *
+ * Density: data-density="compact" no <html> reduz padding/gap.
  * ============================================================ */
 
 @layer base {
   :root {
+    /* ============================================================
+     * CAMADA PRIMITIVA
+     * ============================================================ */
+
+    /* --- Ramp verde-petróleo (marca) --- */
+    --green-50: 166 40% 96%;
+    --green-100: 166 38% 90%;
+    --green-200: 166 36% 80%;
+    --green-300: 166 38% 67%;
+    --green-400: 166 40% 52%;
+    --green-500: 166 42% 40%;
+    --green-600: 166 44% 33%;
+    --green-700: 166 45% 28%; /* âncora de marca — AA 6.6:1 c/ texto branco */
+    --green-800: 165 48% 22%;
+    --green-900: 164 56% 16%; /* = sidebar base (light), valor v2 preservado */
+    --green-950: 164 56% 11%; /* = sidebar base (dark), valor v2 preservado */
+
+    /* --- Ramp âmbar (acento-assinatura) — valores v2 preservados --- */
+    --amber-50: 33 95% 97%;
+    --amber-100: 34 92% 92%;
+    --amber-200: 35 90% 84%;
+    --amber-300: 36 90% 70%;
+    --amber-400: 38 92% 56%; /* = accent-light v2 */
+    --amber-500: 35 94% 50%;
+    --amber-600: 32 95% 44%; /* = accent v2 (#d97706) */
+    --amber-700: 30 90% 39%;
+    --amber-800: 28 86% 35%; /* = accent-dark v2 */
+    --amber-900: 26 80% 26%;
+    --amber-950: 24 75% 16%;
+
+    /* --- Ramp neutra — viés frio-esverdeado sutil (substitui os slates) --- */
+    --neutral-0: 0 0% 100%;
+    --neutral-25: 120 6% 97%; /* canvas off-white — valor v2 preservado */
+    --neutral-50: 150 8% 99%;
+    --neutral-100: 150 8% 96%;
+    --neutral-200: 150 8% 90%;
+    --neutral-300: 150 8% 82%;
+    --neutral-400: 150 7% 70%;
+    --neutral-500: 150 7% 55%;
+    --neutral-600: 150 8% 52%;
+    --neutral-700: 150 9% 38%;
+    --neutral-800: 152 10% 25%;
+    --neutral-900: 152 14% 16%;
+    --neutral-950: 155 16% 9%;
+
+    /* --- Ramps de status (5 degraus cada: soft-bg / soft-fg / base / dark-soft-bg / dark-soft-fg) --- */
+    --red-100: 0 86% 97%;
+    --red-300: 0 70% 70%;
+    --red-500: 0 72% 51%;
+    --red-700: 0 70% 35%;
+    --red-900: 0 60% 18%;
+
+    --emerald-100: 138 76% 96%;
+    --emerald-300: 142 60% 65%;
+    --emerald-500: 142 71% 38%;
+    --emerald-700: 158 64% 22%;
+    --emerald-900: 158 30% 16%;
+
+    --yellow-100: 48 96% 95%;
+    --yellow-300: 38 95% 70%;
+    --yellow-500: 38 92% 50%;
+    --yellow-700: 31 78% 28%;
+    --yellow-900: 31 50% 18%;
+
+    --blue-100: 214 95% 95%;
+    --blue-300: 217 80% 70%;
+    --blue-500: 217 91% 50%;
+    --blue-700: 217 91% 25%;
+    --blue-900: 217 50% 20%;
+
+    /* --- Espaço (base 4px) --- */
+    --space-0: 0px;
+    --space-1: 0.25rem; /* 4px */
+    --space-2: 0.5rem; /* 8px */
+    --space-3: 0.75rem; /* 12px */
+    --space-4: 1rem; /* 16px */
+    --space-5: 1.25rem; /* 20px */
+    --space-6: 1.5rem; /* 24px */
+    --space-7: 1.75rem; /* 28px */
+    --space-8: 2rem; /* 32px */
+    --space-9: 2.25rem; /* 36px */
+    --space-10: 2.5rem; /* 40px */
+    --space-11: 2.75rem; /* 44px */
+    --space-12: 3rem; /* 48px */
+    --space-14: 3.5rem; /* 56px */
+    --space-16: 4rem; /* 64px */
+    --space-20: 5rem; /* 80px */
+    --space-24: 6rem; /* 96px */
+
+    /* --- Radius primitivo (novo degrau xs; sm/md/lg/xl/2xl semânticos v2 preservados abaixo) --- */
+    --radius-xs: 0.125rem; /* 2px */
+    --radius-full: 9999px;
+
+    /* --- Sombras (primitivo — tom frio neutro, substitui o navy rgba do v2) --- */
+    --shadow-xs: 0 1px 2px 0 rgba(20, 30, 27, 0.04);
+    --shadow-sm: 0 1px 3px 0 rgba(20, 30, 27, 0.07), 0 1px 2px -1px rgba(20, 30, 27, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(20, 30, 27, 0.09), 0 2px 4px -2px rgba(20, 30, 27, 0.05);
+    --shadow-lg: 0 10px 15px -3px rgba(20, 30, 27, 0.09), 0 4px 6px -4px rgba(20, 30, 27, 0.05);
+    --shadow-xl: 0 20px 25px -5px rgba(20, 30, 27, 0.11), 0 8px 10px -6px rgba(20, 30, 27, 0.06);
+
+    /* --- Tipografia primitiva: pares tamanho/altura-de-linha --- */
+    --text-xs: 0.75rem; /* 12px */
+    --leading-xs: 1rem; /* 16px */
+    --text-sm: 0.8125rem; /* 13px */
+    --leading-sm: 1.125rem; /* 18px */
+    --text-base: 0.875rem; /* 14px */
+    --leading-base: 1.25rem; /* 20px */
+    --text-md: 1rem; /* 16px */
+    --leading-md: 1.5rem; /* 24px */
+    --text-lg: 1.125rem; /* 18px */
+    --leading-lg: 1.625rem; /* 26px */
+    --text-xl: 1.375rem; /* 22px */
+    --leading-xl: 1.875rem; /* 30px */
+    --text-2xl: 1.625rem; /* 26px */
+    --leading-2xl: 2.125rem; /* 34px */
+    --text-3xl: 2rem; /* 32px */
+    --leading-3xl: 2.5rem; /* 40px */
+
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; /* sobrescrito por next/font (Inter) via .variable no <html> */
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+    --tracking-tight: -0.01em;
+    --tracking-wide: 0.02em;
+
+    /* --- Motion primitivo --- */
+    --motion-fast: 120ms;
+    --motion-base: 200ms;
+    --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+
+    /* --- Z-index --- */
+    --z-base: 0;
+    --z-dropdown: 1000;
+    --z-sticky: 1100;
+    --z-fixed: 1200;
+    --z-modal-backdrop: 1300;
+    --z-modal: 1400;
+    --z-popover: 1500;
+    --z-tooltip: 1600;
+    --z-toast: 1700;
+
+    /* ============================================================
+     * CAMADA SEMÂNTICA (mesmos nomes públicos do v2)
+     * ============================================================ */
+
     /* === Brand === */
-    --brand: 213 53% 25%;          /* navy primary */
-    --brand-light: 215 47% 34%;
-    --brand-dark: 213 60% 18%;
-    --accent: 32 95% 44%;          /* âmbar #d97706 */
-    --accent-light: 38 92% 56%;
-    --accent-dark: 28 86% 35%;
+    --brand: var(--green-700); /* verde-petróleo — era navy no v2 */
+    --brand-light: var(--green-600);
+    --brand-dark: var(--green-800);
+    --accent: var(--amber-600); /* âmbar #d97706 — inalterado */
+    --accent-light: var(--amber-400);
+    --accent-dark: var(--amber-800);
     --accent-foreground: 0 0% 100%;
 
     /* Legacy aliases (mantém compat) */
@@ -42,84 +188,78 @@
     --aprimora-light: var(--brand-light);
 
     /* === Surfaces (tonal) === */
-    --bg: 120 6% 97%;              /* canvas geral — off-white, viés frio/verde */
-    --surface-1: 0 0% 100%;        /* cards */
-    --surface-2: 220 14% 99%;      /* nested cards / hover */
-    --surface-3: 220 12% 96%;      /* popovers / dropdowns */
+    --bg: var(--neutral-25); /* canvas geral — off-white, viés frio/verde */
+    --surface-1: var(--neutral-0); /* cards */
+    --surface-2: var(--neutral-50); /* nested cards / hover */
+    --surface-3: var(--neutral-100); /* popovers / dropdowns */
     /* Sidebar: verde-petróleo escuro (identidade própria do módulo),
-       destacada tanto do canvas off-white quanto dos cards brancos.
-       Textos/ícones claros; ativo usa um degrau mais claro + filete accent. */
-    --sidebar: 164 56% 16%;              /* base ~#123f33 */
-    --sidebar-foreground: 154 18% 92%;   /* ~#e8efec — itens/ícones */
+       agora referenciando o ramp green-900/950 — look v2 preservado. */
+    --sidebar: var(--green-900); /* base ~#123f33 */
+    --sidebar-foreground: 154 18% 92%; /* ~#e8efec — itens/ícones */
     --sidebar-muted-foreground: 158 16% 67%; /* ~#9db8af — títulos de grupo/muted */
     --sidebar-border: 164 40% 22%;
-    --sidebar-accent: 164 52% 19%;       /* hover ~#17493c */
-    --sidebar-active: 165 50% 21%;       /* item ativo ~#1b5244 */
+    --sidebar-accent: 164 52% 19%; /* hover ~#17493c */
+    --sidebar-active: 165 50% 21%; /* item ativo ~#1b5244 */
     --background: var(--bg);
-    --foreground: 222 22% 12%;     /* texto principal */
-    --foreground-muted: 220 9% 38%;
-    --foreground-subtle: 220 9% 52%;
+    --foreground: 155 16% 10%; /* texto principal — viés frio-esverdeado */
+    --foreground-muted: var(--neutral-700);
+    --foreground-subtle: var(--neutral-600);
     --card: var(--surface-1);
     --card-foreground: var(--foreground);
-    --muted: 220 14% 96%;
+    --muted: var(--neutral-100);
     --muted-foreground: var(--foreground-muted);
-    --border: 220 13% 90%;
-    --border-strong: 220 13% 82%;
-    --input: 220 13% 85%;
+    --border: var(--neutral-200);
+    --border-strong: var(--neutral-300);
+    --input: var(--neutral-200);
     --ring: var(--brand);
 
     /* === Semantic intents === */
     --primary: var(--brand);
     --primary-foreground: 0 0% 100%;
 
-    --danger: 0 72% 51%;
+    --danger: var(--red-500);
     --danger-foreground: 0 0% 100%;
-    --danger-soft: 0 86% 97%;
-    --danger-soft-foreground: 0 70% 35%;
+    --danger-soft: var(--red-100);
+    --danger-soft-foreground: var(--red-700);
 
-    --success: 142 71% 38%;
+    --success: var(--emerald-500);
     --success-foreground: 0 0% 100%;
-    --success-soft: 138 76% 96%;
-    --success-soft-foreground: 158 64% 22%;
+    --success-soft: var(--emerald-100);
+    --success-soft-foreground: var(--emerald-700);
 
-    --warning: 38 92% 50%;
+    --warning: var(--yellow-500);
     --warning-foreground: 26 83% 14%;
-    --warning-soft: 48 96% 95%;
-    --warning-soft-foreground: 31 78% 28%;
+    --warning-soft: var(--yellow-100);
+    --warning-soft-foreground: var(--yellow-700);
 
-    --info: 217 91% 50%;
+    --info: var(--blue-500);
     --info-foreground: 0 0% 100%;
-    --info-soft: 214 95% 95%;
-    --info-soft-foreground: 217 91% 25%;
+    --info-soft: var(--blue-100);
+    --info-soft-foreground: var(--blue-700);
 
     /* === Spacing scale (referência semântica) === */
-    --space-1: 0.25rem;   /* 4px */
-    --space-2: 0.5rem;    /* 8px */
-    --space-3: 0.75rem;   /* 12px */
-    --space-4: 1rem;      /* 16px */
-    --space-5: 1.25rem;   /* 20px */
-    --space-6: 1.5rem;    /* 24px */
-    --space-8: 2rem;      /* 32px */
-    --space-10: 2.5rem;   /* 40px */
-    --space-12: 3rem;     /* 48px */
-    --space-16: 4rem;     /* 64px */
+    --space-1: 0.25rem; /* 4px */
+    --space-2: 0.5rem; /* 8px */
+    --space-3: 0.75rem; /* 12px */
+    --space-4: 1rem; /* 16px */
+    --space-5: 1.25rem; /* 20px */
+    --space-6: 1.5rem; /* 24px */
+    --space-8: 2rem; /* 32px */
+    --space-10: 2.5rem; /* 40px */
+    --space-12: 3rem; /* 48px */
+    --space-16: 4rem; /* 64px */
 
-    /* === Border radius === */
-    --radius-sm: 0.25rem;   /* 4px — badges, inputs internos */
-    --radius-md: 0.375rem;  /* 6px — buttons, inputs */
-    --radius-lg: 0.625rem;  /* 10px — cards */
-    --radius-xl: 1rem;      /* 16px — modais */
-    --radius-2xl: 1.5rem;   /* 24px — heros, painéis grandes */
+    /* === Border radius (v2 preservado — badges/inputs/cards/modais/heroes) === */
+    --radius-sm: 0.25rem; /* 4px — badges, inputs internos */
+    --radius-md: 0.375rem; /* 6px — buttons, inputs */
+    --radius-lg: 0.625rem; /* 10px — cards */
+    --radius-xl: 1rem; /* 16px — modais */
+    --radius-2xl: 1.5rem; /* 24px — heros, painéis grandes */
 
     /* === Elevation === */
-    --shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
-    --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
-    --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
-    --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
-    --shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.10), 0 8px 10px -6px rgba(15, 23, 42, 0.06);
-    /* Brand glow pra elementos de destaque */
+    /* --shadow-xs..xl agora primitivos (acima); mantidos aqui os glows de marca */
     --shadow-brand: 0 4px 14px 0 hsl(var(--brand) / 0.18);
-    --shadow-accent: 0 4px 14px 0 hsl(var(--accent) / 0.20);
+    --shadow-accent: 0 4px 14px 0 hsl(var(--accent) / 0.2);
 
     /* === Motion === */
     --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
@@ -130,57 +270,57 @@
     --duration-slow: 320ms;
   }
 
-  /* === Dark mode: tokens dessaturados, surface tonal === */
+  /* === Dark mode: tokens dessaturados, surface tonal, viés verde === */
   :root.dark,
   :root[data-theme="dark"] {
-    --bg: 222 25% 8%;
-    --surface-1: 222 22% 11%;      /* cards */
-    --surface-2: 222 20% 14%;      /* nested */
-    --surface-3: 222 18% 17%;      /* popovers */
+    --bg: 158 20% 8%;
+    --surface-1: 158 18% 11%; /* cards */
+    --surface-2: 158 16% 14%; /* nested */
+    --surface-3: 156 14% 17%; /* popovers */
     /* Sidebar no dark: mesmo verde-petróleo, mais profundo — mantém a
        identidade do módulo e a sensação de "elevação invertida" típica de
        sidebars dark mode. */
-    --sidebar: 164 56% 11%;              /* base ~#0c2b23 */
+    --sidebar: var(--green-950); /* base ~#0c2b23 */
     --sidebar-foreground: 154 18% 92%;
     --sidebar-muted-foreground: 158 16% 67%;
     --sidebar-border: 164 40% 17%;
-    --sidebar-accent: 164 45% 15%;       /* hover */
-    --sidebar-active: 165 45% 18%;       /* item ativo */
+    --sidebar-accent: 164 45% 15%; /* hover */
+    --sidebar-active: 165 45% 18%; /* item ativo */
     --background: var(--bg);
-    --foreground: 220 14% 96%;
-    --foreground-muted: 220 9% 70%;
-    --foreground-subtle: 220 9% 55%;
+    --foreground: 150 10% 96%;
+    --foreground-muted: 150 6% 70%;
+    --foreground-subtle: 150 6% 55%;
     --card: var(--surface-1);
     --card-foreground: var(--foreground);
-    --muted: 222 18% 17%;
+    --muted: 156 14% 17%;
     --muted-foreground: var(--foreground-muted);
-    --border: 222 14% 22%;
-    --border-strong: 222 14% 30%;
-    --input: 222 14% 22%;
+    --border: 156 12% 22%;
+    --border-strong: 156 12% 30%;
+    --input: 156 12% 22%;
 
-    --brand: 213 60% 60%;          /* navy clareia pra atingir contraste */
-    --brand-light: 213 60% 72%;
-    --brand-dark: 213 53% 40%;
-    --accent: 32 95% 60%;          /* âmbar clareia */
+    --brand: var(--green-400); /* clareia pra atingir contraste no dark */
+    --brand-light: var(--green-300);
+    --brand-dark: var(--green-600);
+    --accent: 32 95% 60%; /* âmbar clareia */
     --accent-light: 38 92% 70%;
     --primary: var(--brand);
-    --primary-foreground: 222 25% 8%;
+    --primary-foreground: 158 20% 10%;
     --ring: var(--brand-light);
 
     --danger: 0 72% 60%;
-    --danger-soft: 0 60% 18%;
+    --danger-soft: var(--red-900);
     --danger-soft-foreground: 0 75% 88%;
 
     --success: 142 60% 50%;
-    --success-soft: 158 30% 16%;
+    --success-soft: var(--emerald-900);
     --success-soft-foreground: 138 60% 85%;
 
     --warning: 38 95% 60%;
     --warning-foreground: 26 83% 8%;
-    --warning-soft: 31 50% 18%;
+    --warning-soft: var(--yellow-900);
     --warning-soft-foreground: 48 96% 85%;
 
-    --info-soft: 217 50% 20%;
+    --info-soft: var(--blue-900);
     --info-soft-foreground: 214 95% 88%;
 
     --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
@@ -192,9 +332,9 @@
 
   /* Density compact — reduz padding em componentes que usam o utility .density-aware */
   :root[data-density="compact"] {
-    --density-pad-y: 0.375rem;     /* vs 0.5 default */
-    --density-pad-x: 0.625rem;     /* vs 0.75 default */
-    --density-row-h: 2.25rem;      /* 36px vs 44px default */
+    --density-pad-y: 0.375rem; /* vs 0.5 default */
+    --density-pad-x: 0.625rem; /* vs 0.75 default */
+    --density-row-h: 2.25rem; /* 36px vs 44px default */
   }
   :root {
     --density-pad-y: 0.5rem;

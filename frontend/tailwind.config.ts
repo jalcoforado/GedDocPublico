@@ -10,7 +10,37 @@ const config: Config = {
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
         display: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
       },
+      fontSize: {
+        xs: ["var(--text-xs)", { lineHeight: "var(--leading-xs)" }], // 12/16
+        sm: ["var(--text-sm)", { lineHeight: "var(--leading-sm)" }], // 13/18 — meta/caption
+        base: ["var(--text-base)", { lineHeight: "var(--leading-base)" }], // 14/20 — body/tabela
+        md: ["var(--text-md)", { lineHeight: "var(--leading-md)" }], // 16/24 — section
+        lg: ["var(--text-lg)", { lineHeight: "var(--leading-lg)" }], // 18/26
+        xl: ["var(--text-xl)", { lineHeight: "var(--leading-xl)" }], // 22/30 — page title
+        "2xl": ["var(--text-2xl)", { lineHeight: "var(--leading-2xl)" }], // 26/34
+        "3xl": ["var(--text-3xl)", { lineHeight: "var(--leading-3xl)" }], // 32/40 — KPI hero
+      },
       colors: {
+        // Primitive ramps expostos apenas onde não colidem com paletas default do
+        // Tailwind já usadas literalmente no app (green-*/amber-* aparecem em
+        // componentes para status "sucesso"/"rascunho" via classes cruas — não
+        // reapontar aqui pra não trocar o significado dessas telas fora de escopo
+        // desta task). `brand-*` e `accent-*` (abaixo) já cobrem o ramp da marca.
+        neutral: {
+          0: "hsl(var(--neutral-0) / <alpha-value>)",
+          25: "hsl(var(--neutral-25) / <alpha-value>)",
+          50: "hsl(var(--neutral-50) / <alpha-value>)",
+          100: "hsl(var(--neutral-100) / <alpha-value>)",
+          200: "hsl(var(--neutral-200) / <alpha-value>)",
+          300: "hsl(var(--neutral-300) / <alpha-value>)",
+          400: "hsl(var(--neutral-400) / <alpha-value>)",
+          500: "hsl(var(--neutral-500) / <alpha-value>)",
+          600: "hsl(var(--neutral-600) / <alpha-value>)",
+          700: "hsl(var(--neutral-700) / <alpha-value>)",
+          800: "hsl(var(--neutral-800) / <alpha-value>)",
+          900: "hsl(var(--neutral-900) / <alpha-value>)",
+          950: "hsl(var(--neutral-950) / <alpha-value>)",
+        },
         // Brand
         aprimora: {
           DEFAULT: "hsl(var(--brand) / <alpha-value>)",
@@ -87,6 +117,7 @@ const config: Config = {
         },
       },
       borderRadius: {
+        xs: "var(--radius-xs)",
         sm: "var(--radius-sm)",
         md: "var(--radius-md)",
         lg: "var(--radius-lg)",
