@@ -44,7 +44,7 @@ export function FilterBar({ children, className, ariaLabel }: FilterBarProps) {
       role="region"
       aria-label={ariaLabel ?? "Filtros"}
       className={cn(
-        "flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface-1 p-3",
+        "flex flex-wrap items-end gap-3 rounded-card border border-border bg-surface-1 p-3 shadow-xs",
         className,
       )}
     >
@@ -57,7 +57,7 @@ function FilterBarGroup({ label, children, className }: FilterBarGroupProps) {
   return (
     <div className={cn("min-w-0", className)}>
       {label && (
-        <div className="mb-1 text-[10px] uppercase tracking-wide text-foreground-subtle">
+        <div className="mb-1 text-xs uppercase tracking-wide text-foreground-subtle">
           {label}
         </div>
       )}

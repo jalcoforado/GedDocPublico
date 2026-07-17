@@ -20,7 +20,7 @@ export function Table({ className, variant = "card", ...props }: TableProps) {
     );
   }
   return (
-    <div className="overflow-hidden overflow-x-auto rounded-lg border border-border bg-surface-1 shadow-xs">
+    <div className="overflow-hidden overflow-x-auto rounded-table border border-border bg-surface-1 shadow-table">
       <table className={cn("w-full text-sm", className)} {...props} />
     </div>
   );
@@ -29,7 +29,7 @@ export function Table({ className, variant = "card", ...props }: TableProps) {
 export function THead(props: React.HTMLAttributes<HTMLTableSectionElement>) {
   return (
     <thead
-      className="sticky top-0 z-[1] bg-surface-2/95 text-left text-[11px] font-semibold uppercase tracking-wider text-foreground-muted backdrop-blur-sm"
+      className="sticky top-0 z-[1] bg-surface-2/95 text-left text-xs font-semibold uppercase tracking-wide text-foreground-muted shadow-table-header backdrop-blur-sm"
       {...props}
     />
   );
@@ -56,8 +56,8 @@ export function TR({ className, highlighted, onClickRow, onClick, ...props }: TR
     <tr
       onClick={onClick || (onClickRow ? () => onClickRow() : undefined)}
       className={cn(
-        "transition-colors duration-fast",
-        "hover:bg-muted/50",
+        "min-h-[var(--table-row-h)] transition-colors duration-fast",
+        "hover:bg-surface-2",
         highlighted && "bg-brand/5 hover:bg-brand/10 dark:bg-brand/15 dark:hover:bg-brand/20",
         (onClick || onClickRow) && "cursor-pointer",
         className,
@@ -109,7 +109,8 @@ export function TH({
         className={cn(
           "flex w-full items-center gap-1 text-left",
           pad,
-          "transition-colors duration-fast hover:text-foreground",
+          "transition-colors duration-fast hover:bg-muted/60 hover:text-foreground",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
           sortState && "text-foreground",
         )}
       >

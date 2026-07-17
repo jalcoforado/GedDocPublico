@@ -84,21 +84,21 @@ export function Dialog({ open, onClose, title, children, footer, size = "md" }: 
         aria-modal="true"
         aria-labelledby={titleId}
         className={cn(
-          "w-full rounded-t-lg bg-card text-card-foreground shadow-xl animate-slide-up",
-          "sm:rounded-lg sm:animate-scale-in",
+          "w-full rounded-t-dialog bg-card text-card-foreground shadow-dialog animate-slide-up",
+          "sm:rounded-dialog sm:animate-scale-in",
           SIZES[size],
         )}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center justify-between border-b border-border px-5 py-3">
-          <h2 id={titleId} className="text-lg font-semibold text-primary">
+          <h2 id={titleId} className="text-md font-semibold text-primary">
             {title}
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Fechar"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors duration-fast hover:bg-muted hover:text-foreground active:bg-muted/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <X className="h-5 w-5" aria-hidden="true" />
           </button>

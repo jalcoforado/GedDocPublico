@@ -21,15 +21,15 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    "bg-brand text-primary-foreground shadow-sm hover:bg-brand-light hover:shadow-md focus-visible:ring-ring",
+    "bg-brand text-primary-foreground shadow-button hover:bg-brand-light hover:shadow-button-hover active:bg-brand-dark focus-visible:ring-ring",
   secondary:
-    "bg-surface-1 text-foreground border border-border-strong shadow-xs hover:bg-muted hover:border-foreground/30 focus-visible:ring-ring",
+    "bg-surface-1 text-foreground border border-border-strong shadow-xs hover:bg-muted hover:border-foreground/30 active:bg-muted/80 focus-visible:ring-ring",
   ghost:
-    "bg-transparent text-foreground hover:bg-muted focus-visible:ring-ring",
+    "bg-transparent text-foreground hover:bg-muted active:bg-muted/80 focus-visible:ring-ring",
   danger:
-    "bg-danger text-danger-foreground shadow-sm hover:bg-danger/90 hover:shadow-md focus-visible:ring-danger",
+    "bg-danger text-danger-foreground shadow-button hover:bg-danger/90 hover:shadow-button-hover active:bg-danger/80 focus-visible:ring-danger",
   accent:
-    "bg-accent text-accent-foreground shadow-sm hover:bg-accent-light hover:shadow-accent focus-visible:ring-accent",
+    "bg-accent text-accent-foreground shadow-button hover:bg-accent-light hover:shadow-accent active:bg-accent-dark focus-visible:ring-accent",
 };
 
 const SIZES: Record<Size, string> = {
@@ -40,11 +40,11 @@ const SIZES: Record<Size, string> = {
 };
 
 const BASE_CLASSES =
-  "inline-flex items-center justify-center rounded-md font-medium whitespace-nowrap " +
+  "inline-flex items-center justify-center rounded-button font-medium whitespace-nowrap " +
   "transition-[background-color,box-shadow,transform,border-color] duration-fast ease-out " +
   "active:scale-[0.98] " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background " +
-  "disabled:pointer-events-none disabled:opacity-50";
+  "disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed";
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (

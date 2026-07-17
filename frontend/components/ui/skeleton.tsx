@@ -41,7 +41,7 @@ export function SkeletonLine({
 /** Skeleton de card KPI (usado no dashboard durante load). */
 export function SkeletonKpi() {
   return (
-    <div className="space-y-2 rounded-lg border border-border bg-surface-1 p-4 sm:p-6">
+    <div className="space-y-2 rounded-card border border-border bg-surface-1 p-4 sm:p-6">
       <SkeletonLine width="60%" className="h-3" />
       <Skeleton className="h-8 w-1/3" variant="shimmer" />
       <SkeletonLine width="40%" className="h-3" />

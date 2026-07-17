@@ -251,9 +251,10 @@ export function Combobox<T>({
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex h-11 w-full items-center justify-between gap-2 rounded-md border border-input bg-card px-3 text-sm transition-colors duration-fast",
-          "hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          "disabled:cursor-not-allowed disabled:opacity-50",
+          "flex h-11 w-full items-center justify-between gap-2 rounded-input border border-input bg-card px-3 text-sm shadow-input transition-colors duration-fast",
+          "hover:border-border-strong hover:bg-muted/50",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+          "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-input disabled:hover:bg-card",
         )}
       >
         <span
@@ -282,7 +283,7 @@ export function Combobox<T>({
               aria-label="Limpar seleção"
               tabIndex={-1}
               onClick={clear}
-              className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded text-foreground-muted hover:bg-muted hover:text-foreground"
+              className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground"
             >
               <X className="h-3.5 w-3.5" aria-hidden="true" />
             </span>
@@ -304,7 +305,7 @@ export function Combobox<T>({
           <div
             ref={panelRef}
             style={panelStyle}
-            className="z-[1000] flex flex-col overflow-hidden rounded-md border border-border bg-card shadow-lg animate-fade-in"
+            className="z-[1000] flex flex-col overflow-hidden rounded-dropdown border border-border bg-card shadow-dropdown animate-fade-in"
           >
             <div className="flex items-center gap-2 border-b border-border bg-card px-3 py-2">
               <Search
@@ -363,10 +364,10 @@ export function Combobox<T>({
                         pick(opt);
                       }}
                       className={cn(
-                        "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm",
+                        "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm transition-colors duration-fast",
                         isActive
-                          ? "bg-brand/5 text-foreground"
-                          : "text-foreground",
+                          ? "bg-muted text-foreground"
+                          : "text-foreground hover:bg-muted/60",
                       )}
                     >
                       <div className="min-w-0 flex-1">

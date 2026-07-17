@@ -41,9 +41,9 @@ function ToolbarButton({ onClick, active, disabled, label, icon: Icon }: Toolbar
       aria-pressed={active}
       className={cn(
         "inline-flex h-8 w-8 items-center justify-center rounded-md text-sm transition-colors duration-fast",
-        "hover:bg-muted hover:text-foreground",
-        "disabled:cursor-not-allowed disabled:opacity-40",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "hover:bg-muted hover:text-foreground active:bg-muted/80",
+        "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
         active
           ? "bg-brand/10 text-brand"
           : "text-foreground-muted",
@@ -139,7 +139,7 @@ export function RichTextEditor({
     return (
       <div
         className={cn(
-          "rounded-md border border-input bg-card",
+          "rounded-input border border-input bg-card shadow-input",
           className,
         )}
         style={{ minHeight: minHeight + 40 }}
@@ -151,7 +151,8 @@ export function RichTextEditor({
   return (
     <div
       className={cn(
-        "group rounded-md border border-input bg-card transition-colors",
+        "group rounded-input border border-input bg-card shadow-input transition-colors duration-fast",
+        "hover:border-border-strong",
         "focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30",
         className,
       )}

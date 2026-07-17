@@ -16,10 +16,11 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputPro
           ref={ref}
           type={show ? "text" : "password"}
           className={cn(
-            "flex h-11 w-full rounded-md border border-input bg-card px-3 py-2 pr-11",
-            "text-base text-foreground shadow-sm placeholder:text-muted-foreground",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            "disabled:cursor-not-allowed disabled:opacity-50",
+            "flex h-11 w-full rounded-input border border-input bg-card px-3 py-2 pr-11 transition-colors duration-fast",
+            "text-base text-foreground shadow-input placeholder:text-muted-foreground",
+            "hover:border-border-strong",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:border-ring",
+            "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-input",
             className,
           )}
           {...props}
@@ -29,7 +30,7 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputPro
           onClick={() => setShow((s) => !s)}
           aria-label={show ? "Ocultar senha" : "Mostrar senha"}
           aria-pressed={show}
-          className="absolute right-0 top-0 inline-flex h-11 w-11 items-center justify-center rounded-r-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          className="absolute right-0 top-0 inline-flex h-11 w-11 items-center justify-center rounded-r-input text-muted-foreground transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
         >
           {show ? (
             <EyeOff className="h-4 w-4" aria-hidden="true" />

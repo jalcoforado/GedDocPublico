@@ -165,7 +165,7 @@ export function ActionsMenu({
       {open && (
         <ul
           role="menu"
-          className="absolute right-0 z-30 mt-1 min-w-[12rem] rounded-md border border-border bg-surface-1 py-1 shadow-md focus:outline-none"
+          className="absolute right-0 z-30 mt-1 min-w-[12rem] rounded-dropdown border border-border bg-surface-1 py-1 shadow-dropdown focus:outline-none"
         >
           {items.map((item, i) => {
             const ItemIcon = item.icon;
@@ -182,10 +182,10 @@ export function ActionsMenu({
                   onClick={() => handleSelect(item)}
                   className={cn(
                     "flex w-full items-center gap-2 px-3 py-2 text-left text-sm",
-                    "transition-colors",
-                    "focus-visible:outline-none focus-visible:bg-muted",
+                    "transition-colors duration-fast",
+                    "focus-visible:outline-none focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
                     item.disabled
-                      ? "cursor-not-allowed text-foreground-subtle"
+                      ? "cursor-not-allowed text-foreground-subtle opacity-50"
                       : "text-foreground hover:bg-muted",
                   )}
                 >

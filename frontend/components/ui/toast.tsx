@@ -110,7 +110,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               key={t.id}
               role="status"
               className={cn(
-                "pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-md border border-border px-4 py-3 shadow-lg animate-slide-up",
+                "pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-dropdown border border-border px-4 py-3 shadow-dropdown animate-slide-up",
                 STYLES[t.intent],
               )}
             >
@@ -123,7 +123,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                     t.action!.onClick();
                     dismiss(t.id);
                   }}
-                  className="rounded border border-current/30 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide transition-colors hover:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
+                  className="rounded border border-current/30 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide transition-colors duration-fast hover:bg-black/10 active:bg-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current focus-visible:ring-offset-2"
                 >
                   {t.action.label}
                 </button>
@@ -132,7 +132,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 type="button"
                 onClick={() => dismiss(t.id)}
                 aria-label="Fechar notificação"
-                className="rounded p-0.5 transition-colors hover:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
+                className="rounded p-0.5 transition-colors duration-fast hover:bg-black/10 active:bg-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current focus-visible:ring-offset-2"
               >
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>

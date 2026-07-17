@@ -123,6 +123,15 @@ const config: Config = {
         lg: "var(--radius-lg)",
         xl: "var(--radius-xl)",
         "2xl": "var(--radius-2xl)",
+        // Camada de componente — DS-2 (rounded-button, rounded-input, ...)
+        button: "var(--button-radius)",
+        input: "var(--input-radius)",
+        table: "var(--table-radius)",
+        badge: "var(--badge-radius)",
+        card: "var(--card-radius)",
+        dialog: "var(--dialog-radius)",
+        popover: "var(--popover-radius)",
+        dropdown: "var(--dropdown-radius)",
       },
       boxShadow: {
         xs: "var(--shadow-xs)",
@@ -132,6 +141,17 @@ const config: Config = {
         xl: "var(--shadow-xl)",
         brand: "var(--shadow-brand)",
         accent: "var(--shadow-accent)",
+        // Camada de componente — DS-2 (shadow-button, shadow-card, ...)
+        button: "var(--button-shadow)",
+        "button-hover": "var(--button-shadow-hover)",
+        input: "var(--input-shadow)",
+        table: "var(--table-shadow)",
+        "table-header": "var(--table-header-shadow)",
+        card: "var(--card-shadow)",
+        "card-hover": "var(--card-shadow-hover)",
+        dialog: "var(--dialog-shadow)",
+        popover: "var(--popover-shadow)",
+        dropdown: "var(--dropdown-shadow)",
       },
       transitionDuration: {
         micro: "var(--duration-micro)",

@@ -41,7 +41,7 @@ export function SectionCard({
   return (
     <section
       className={cn(
-        "rounded-xl border border-border bg-card shadow-xs",
+        "rounded-card border border-border bg-card shadow-card",
         className,
       )}
     >
@@ -61,7 +61,7 @@ export function SectionCard({
                 passo {step}
               </span>
             )}
-            <h2 className="text-sm font-semibold tracking-tight text-foreground">
+            <h2 className="text-md font-semibold tracking-tight text-foreground">
               {title}
             </h2>
           </div>

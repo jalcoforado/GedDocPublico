@@ -79,7 +79,7 @@ function TrendBadge({
   if (delta.kind === "n/a") return null;
   if (delta.kind === "flat") {
     return (
-      <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-foreground-subtle">
+      <span className="inline-flex items-center gap-0.5 text-xs font-medium text-foreground-subtle">
         <Minus className="h-3 w-3" aria-hidden="true" />
         sem alteração
       </span>
@@ -99,7 +99,7 @@ function TrendBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+        "inline-flex items-center gap-0.5 rounded-badge px-1.5 py-0.5 text-xs font-semibold tabular-nums",
         color,
       )}
     >
@@ -133,8 +133,8 @@ export function KpiCard({
   return (
     <div
       className={cn(
-        "group relative overflow-hidden rounded-lg border border-border bg-surface-1 p-4 shadow-xs",
-        "transition-all duration-base hover:-translate-y-0.5 hover:shadow-md",
+        "group relative overflow-hidden rounded-card border border-border bg-surface-1 p-4 shadow-card",
+        "transition-all duration-base hover:-translate-y-0.5 hover:shadow-card-hover",
         "before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r",
         "before:from-transparent before:via-brand/40 before:to-accent/40 before:opacity-0",
         "hover:before:opacity-100 before:transition-opacity before:duration-base",

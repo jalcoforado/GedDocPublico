@@ -66,7 +66,7 @@ export function PageHeader({
         >
           <Link
             href="/home"
-            className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground transition-colors duration-fast"
+            className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             aria-label="Início"
           >
             <Home className="h-3 w-3" aria-hidden="true" />
@@ -80,7 +80,7 @@ export function PageHeader({
               {bc.href ? (
                 <Link
                   href={bc.href}
-                  className="rounded px-1 py-0.5 hover:bg-muted hover:text-foreground transition-colors duration-fast"
+                  className="rounded px-1 py-0.5 hover:bg-muted hover:text-foreground transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   {bc.label}
                 </Link>
@@ -108,7 +108,7 @@ export function PageHeader({
             </div>
           )}
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold leading-tight tracking-tight text-foreground sm:text-[28px]">
+            <h1 className="text-xl font-semibold tracking-tight text-foreground">
               {title}
             </h1>
             {description && (

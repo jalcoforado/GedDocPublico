@@ -268,6 +268,49 @@
     --duration-fast: 180ms;
     --duration-base: 240ms;
     --duration-slow: 320ms;
+
+    /* ============================================================
+     * CAMADA DE COMPONENTE
+     * Só referencia tokens semânticos/primitivos — nunca valores crus.
+     * Regras transversais (spec §3): foco = ring 2px marca + offset 2
+     * (ambos temas); hover nunca só texto (bg/borda); disabled =
+     * opacity-50 + cursor-not-allowed. Radius: cards/dialog/popover lg,
+     * buttons/inputs/table md, badges full.
+     * ============================================================ */
+
+    /* --- Button --- */
+    --button-radius: var(--radius-md);
+    --button-shadow: var(--shadow-sm);
+    --button-shadow-hover: var(--shadow-md);
+    --button-ring-offset: 2px;
+
+    /* --- Input / Select / Textarea / Combobox --- */
+    --input-radius: var(--radius-md);
+    --input-shadow: var(--shadow-xs);
+    --input-border: hsl(var(--input));
+    --input-border-hover: hsl(var(--border-strong));
+
+    /* --- Table --- */
+    --table-radius: var(--radius-lg);
+    --table-shadow: var(--shadow-xs);
+    --table-row-h: var(--density-row-h);
+    --table-header-shadow: var(--shadow-sm);
+
+    /* --- Badge --- */
+    --badge-radius: var(--radius-full);
+
+    /* --- Card / SectionCard / KpiCard --- */
+    --card-radius: var(--radius-lg);
+    --card-shadow: var(--shadow-xs);
+    --card-shadow-hover: var(--shadow-sm);
+
+    /* --- Dialog / Popover / Dropdown (combobox, actions-menu) --- */
+    --dialog-radius: var(--radius-lg);
+    --dialog-shadow: var(--shadow-xl);
+    --popover-radius: var(--radius-md);
+    --popover-shadow: var(--shadow-sm);
+    --dropdown-radius: var(--radius-md);
+    --dropdown-shadow: var(--shadow-sm);
   }
 
   /* === Dark mode: tokens dessaturados, surface tonal, viés verde === */

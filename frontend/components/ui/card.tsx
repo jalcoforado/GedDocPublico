@@ -5,8 +5,8 @@ export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElemen
   return (
     <div
       className={cn(
-        "rounded-lg border border-border bg-surface-1 text-card-foreground shadow-xs",
-        "transition-shadow duration-fast hover:shadow-sm",
+        "rounded-card border border-border bg-surface-1 text-card-foreground shadow-card",
+        "transition-shadow duration-fast hover:shadow-card-hover",
         className,
       )}
       {...props}
@@ -27,7 +27,7 @@ export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHead
   return (
     <h2
       className={cn(
-        "text-base font-semibold leading-tight tracking-tight text-foreground sm:text-lg",
+        "text-md font-semibold tracking-tight text-foreground",
         className,
       )}
       {...props}
