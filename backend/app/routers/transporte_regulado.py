@@ -31,6 +31,7 @@ from ..schemas.transporte_regulado import (
     VeiculoVistoriaCreate,
     VeiculoVistoriaOut,
     VeiculoVistoriaUpdate,
+    VeiculoVistoriaRenovarInput,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -605,3 +606,40 @@ async def delete_vistoria(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await tr_svc.excluir_vistoria(db, tenant_id=tenant_id, vistoria_id=vistoria_id)
+
+
+@vistorias_router.get("/vencidas", response_model=list[VeiculoVistoriaOut])
+async def list_vistorias_vencidas(
+    veiculo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[VeiculoVistoriaOut]:
+    rows = await tr_svc.listar_vistorias_vencidas(
+        db, tenant_id=tenant_id, veiculo_id=veiculo_id
+    )
+    return [VeiculoVistoriaOut.model_validate(r) for r in rows]
+
+
+@vistorias_router.post(
+    "/{vistoria_id}/renovar",
+    response_model=VeiculoVistoriaOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def renovar_vistoria(
+    veiculo_id: int,
+    vistoria_id: int,
+    payload: VeiculoVistoriaRenovarInput,
+    usuario: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoVistoriaOut:
+    v = await tr_svc.renovar_vistoria(
+        db,
+        tenant_id=tenant_id,
+        veiculo_id=veiculo_id,
+        vistoria_id=vistoria_id,
+        auditor_id=usuario.id,
+        payload=payload,
+    )
+    return VeiculoVistoriaOut.model_validate(v)

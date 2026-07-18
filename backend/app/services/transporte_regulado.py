@@ -29,6 +29,7 @@ from ..schemas.transporte_regulado import (
     VeiculoAvaliacaoUpdate,
     VeiculoVistoriaCreate,
     VeiculoVistoriaUpdate,
+    VeiculoVistoriaRenovarInput,
 )
 
 
@@ -907,3 +908,68 @@ async def excluir_vistoria(
     v.excluido = True
     v.atualizado_em = datetime.utcnow()
     await db.commit()
+
+
+async def listar_vistorias_vencidas(
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int
+) -> list[VeiculoVistoria]:
+    """Lista vistorias de um veículo cuja data_validade já passou (vencidas)."""
+    from datetime import date as date_type
+
+    stmt = (
+        select(VeiculoVistoria)
+        .where(
+            VeiculoVistoria.tenant_id == tenant_id,
+            VeiculoVistoria.id_veiculo == veiculo_id,
+            VeiculoVistoria.data_validade <= date_type.today(),
+            VeiculoVistoria.excluido.is_(False),
+        )
+        .order_by(VeiculoVistoria.data_vistoria.desc())
+    )
+    return (await db.execute(stmt)).scalars().all()
+
+
+async def renovar_vistoria(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    veiculo_id: int,
+    vistoria_id: int,
+    auditor_id: int,
+    payload: VeiculoVistoriaRenovarInput,
+) -> VeiculoVistoria:
+    """Cria nova vistoria como renovação da anterior (via renovada_de).
+    Valida que vistoria anterior existe e está vencida."""
+    vistoria_anterior = await obter_vistoria(
+        db, tenant_id=tenant_id, vistoria_id=vistoria_id
+    )
+    if vistoria_anterior.id_veiculo != veiculo_id:
+        raise HTTPException(status_code=409, detail="Vistoria não pertence a este veículo")
+
+    from datetime import date as date_type
+
+    if vistoria_anterior.data_validade and vistoria_anterior.data_validade > date_type.today():
+        raise HTTPException(
+            status_code=409, detail="Vistoria anterior não está vencida"
+        )
+
+    auditor = await _obter_usuario(db, auditor_id)
+    if not auditor:
+        raise HTTPException(status_code=404, detail="Auditor não encontrado")
+
+    v = VeiculoVistoria(
+        tenant_id=tenant_id,
+        id_veiculo=veiculo_id,
+        id_auditor=auditor_id,
+        resultado=payload.resultado,
+        parecer=payload.parecer,
+        observacoes=payload.observacoes,
+        data_vistoria=payload.data_vistoria,
+        data_validade=payload.data_validade,
+        renovada_de=vistoria_id,
+        criado_em=datetime.utcnow(),
+    )
+    db.add(v)
+    await db.commit()
+    await db.refresh(v)
+    return v

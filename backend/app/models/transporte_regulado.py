@@ -232,6 +232,7 @@ class VeiculoVistoria(Base):
 
     Resultado: pendente, aprovado, reprovado, condicional.
     Auditor: usuário (servidor) que realizou a vistoria (mesma tenant — validado no serviço).
+    Renovação: data_validade opcional; renovada_de aponta para vistoria anterior (histórico).
     """
 
     __tablename__ = "veiculo_vistoria"
@@ -251,6 +252,10 @@ class VeiculoVistoria(Base):
     parecer: Mapped[str] = mapped_column(Text, nullable=False)
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
     data_vistoria: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    data_validade: Mapped[date | None] = mapped_column(Date, nullable=True)
+    renovada_de: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.veiculo_vistoria.id"), nullable=True
+    )
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
