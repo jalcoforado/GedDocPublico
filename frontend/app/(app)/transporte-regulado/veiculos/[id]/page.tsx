@@ -29,6 +29,7 @@ import {
   type VeiculoRegulado,
   type VeiculoVistoria,
   type VeiculoVistoriaInput,
+  type VeiculoVistoriaRenovarInput,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
@@ -100,6 +101,14 @@ interface VistoriaForm {
   parecer: string;
   observacoes: string;
   data_vistoria: string;
+  data_validade: string;
+}
+
+interface RenovarForm {
+  resultado: ResultadoAvaliacao;
+  parecer: string;
+  observacoes: string;
+  data_validade: string;
 }
 
 const EMPTY_DOC: DocumentoForm = {
@@ -122,6 +131,14 @@ const EMPTY_VIST: VistoriaForm = {
   parecer: "",
   observacoes: "",
   data_vistoria: new Date().toISOString().split("T")[0],
+  data_validade: "",
+};
+
+const EMPTY_RENOV: RenovarForm = {
+  resultado: "pendente",
+  parecer: "",
+  observacoes: "",
+  data_validade: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
 };
 
 export default function VeiculoDetailPage() {
@@ -136,12 +153,15 @@ export default function VeiculoDetailPage() {
   const [docDialogOpen, setDocDialogOpen] = useState(false);
   const [avalDialogOpen, setAvalDialogOpen] = useState(false);
   const [vistDialogOpen, setVistDialogOpen] = useState(false);
+  const [renovarDialogOpen, setRenovarDialogOpen] = useState(false);
   const [docForm, setDocForm] = useState<DocumentoForm>(EMPTY_DOC);
   const [avalForm, setAvalForm] = useState<AvaliacaoForm>(EMPTY_AVAL);
   const [vistForm, setVistForm] = useState<VistoriaForm>(EMPTY_VIST);
+  const [renovarForm, setRenovarForm] = useState<RenovarForm>(EMPTY_RENOV);
   const [editingDoc, setEditingDoc] = useState<VeiculoDocument | null>(null);
   const [editingAval, setEditingAval] = useState<VeiculoAvaliacao | null>(null);
   const [editingVist, setEditingVist] = useState<VeiculoVistoria | null>(null);
+  const [selectedVistToRenew, setSelectedVistToRenew] = useState<VeiculoVistoria | null>(null);
 
   const veiculoQ = useQuery({
     queryKey: ["tr-veiculo", veiculoId],
@@ -161,6 +181,11 @@ export default function VeiculoDetailPage() {
   const vistQ = useQuery({
     queryKey: ["tr-vistorias", veiculoId],
     queryFn: () => api.veiculosRegulados.vistorias.list(veiculoId),
+  });
+
+  const vistVencidasQ = useQuery({
+    queryKey: ["tr-vistorias-vencidas", veiculoId],
+    queryFn: () => api.veiculosRegulados.vistorias.listarVencidas(veiculoId),
   });
 
   const criarDocM = useMutation({
@@ -262,6 +287,20 @@ export default function VeiculoDetailPage() {
     onError: (e: any) => toast.error(e.message || "Erro ao remover vistoria"),
   });
 
+  const renovarVistM = useMutation({
+    mutationFn: (data: VeiculoVistoriaRenovarInput) =>
+      api.veiculosRegulados.vistorias.renovar(veiculoId, selectedVistToRenew!.id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tr-vistorias"] });
+      qc.invalidateQueries({ queryKey: ["tr-vistorias-vencidas"] });
+      setRenovarDialogOpen(false);
+      setSelectedVistToRenew(null);
+      setRenovarForm(EMPTY_RENOV);
+      toast.success("Vistoria renovada");
+    },
+    onError: (e: any) => toast.error(e.message || "Erro ao renovar vistoria"),
+  });
+
   if (veiculoQ.isLoading) return <div>Carregando...</div>;
   if (veiculoQ.isError) return <div>Erro ao carregar veículo</div>;
 
@@ -314,12 +353,27 @@ export default function VeiculoDetailPage() {
       parecer: vistForm.parecer,
       observacoes: vistForm.observacoes || null,
       data_vistoria: vistForm.data_vistoria,
+      data_validade: vistForm.data_validade || null,
     };
     if (editingVist) {
       await atualizarVistM.mutateAsync(payload);
     } else {
       await criarVistM.mutateAsync(payload);
     }
+  };
+
+  const handleSaveRenov = async () => {
+    if (!renovarForm.parecer.trim() || renovarForm.parecer.length < 10) {
+      toast.error("Parecer deve ter no mínimo 10 caracteres");
+      return;
+    }
+    const payload: VeiculoVistoriaRenovarInput = {
+      resultado: renovarForm.resultado,
+      parecer: renovarForm.parecer,
+      observacoes: renovarForm.observacoes || null,
+      data_validade: renovarForm.data_validade || null,
+    };
+    await renovarVistM.mutateAsync(payload);
   };
 
   return (
@@ -705,46 +759,77 @@ export default function VeiculoDetailPage() {
                 </TR>
               </THead>
               <TBody>
-                {vistQ.data.map((vist) => (
-                  <TR key={vist.id}>
-                    <TD>
-                      <Badge intent={RESULTADO_INTENT[vist.resultado] || "neutral"}>
-                        {vist.resultado}
-                      </Badge>
-                    </TD>
-                    <TD>{new Date(vist.data_vistoria).toLocaleDateString()}</TD>
-                    <TD className="max-w-sm truncate">{vist.parecer}</TD>
-                    <TD className="flex gap-2">
-                      {can("transporte_regulado", "atualizar") && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            setEditingVist(vist);
-                            setVistForm({
-                              resultado: vist.resultado,
-                              parecer: vist.parecer,
-                              observacoes: vist.observacoes || "",
-                              data_vistoria: vist.data_vistoria.split("T")[0],
-                            });
-                            setVistDialogOpen(true);
-                          }}
-                        >
-                          Editar
-                        </Button>
-                      )}
-                      {can("transporte_regulado", "excluir") && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => removerVistM.mutate(vist.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </TD>
-                  </TR>
-                ))}
+                {vistQ.data.map((vist) => {
+                  const isVencida = vist.data_validade && new Date(vist.data_validade) <= new Date();
+                  return (
+                    <TR key={vist.id}>
+                      <TD>
+                        <div className="flex flex-col gap-1">
+                          <Badge intent={RESULTADO_INTENT[vist.resultado] || "neutral"}>
+                            {vist.resultado}
+                          </Badge>
+                          {isVencida && (
+                            <Badge intent="danger">Vencida</Badge>
+                          )}
+                        </div>
+                      </TD>
+                      <TD>
+                        <div className="flex flex-col gap-1">
+                          <span>{new Date(vist.data_vistoria).toLocaleDateString()}</span>
+                          {vist.data_validade && (
+                            <span className="text-xs text-muted-foreground">
+                              Válida até: {new Date(vist.data_validade).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      </TD>
+                      <TD className="max-w-sm truncate">{vist.parecer}</TD>
+                      <TD className="flex gap-2">
+                        {isVencida && can("transporte_regulado", "inserir") && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setSelectedVistToRenew(vist);
+                              setRenovarForm(EMPTY_RENOV);
+                              setRenovarDialogOpen(true);
+                            }}
+                          >
+                            Renovar
+                          </Button>
+                        )}
+                        {can("transporte_regulado", "atualizar") && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setEditingVist(vist);
+                              setVistForm({
+                                resultado: vist.resultado,
+                                parecer: vist.parecer,
+                                observacoes: vist.observacoes || "",
+                                data_vistoria: vist.data_vistoria.split("T")[0],
+                                data_validade: vist.data_validade ? vist.data_validade.split("T")[0] : "",
+                              });
+                              setVistDialogOpen(true);
+                            }}
+                          >
+                            Editar
+                          </Button>
+                        )}
+                        {can("transporte_regulado", "excluir") && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => removerVistM.mutate(vist.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </TD>
+                    </TR>
+                  );
+                })}
               </TBody>
             </Table>
           ) : (
@@ -777,6 +862,14 @@ export default function VeiculoDetailPage() {
                 />
               </div>
               <div>
+                <Label>Data de Validade</Label>
+                <Input
+                  type="date"
+                  value={vistForm.data_validade}
+                  onChange={(e) => setVistForm({ ...vistForm, data_validade: e.target.value })}
+                />
+              </div>
+              <div>
                 <Label>Parecer *</Label>
                 <Textarea
                   value={vistForm.parecer}
@@ -799,6 +892,65 @@ export default function VeiculoDetailPage() {
                 </Button>
                 <Button onClick={handleSaveVist} loading={criarVistM.isPending || atualizarVistM.isPending}>
                   Salvar
+                </Button>
+              </div>
+            </div>
+          </Dialog>
+
+          {/* Renovar Vistoria Dialog */}
+          <Dialog
+            open={renovarDialogOpen}
+            onOpenChange={setRenovarDialogOpen}
+            title="Renovar Vistoria"
+          >
+            <div className="space-y-4">
+              {selectedVistToRenew && (
+                <div className="p-3 bg-muted rounded-md">
+                  <p className="text-sm font-medium">Renovando vistoria de {new Date(selectedVistToRenew.data_vistoria).toLocaleDateString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Válida até: {selectedVistToRenew.data_validade ? new Date(selectedVistToRenew.data_validade).toLocaleDateString() : "Sem validade"}</p>
+                </div>
+              )}
+              <div>
+                <Label>Resultado *</Label>
+                <Select
+                  value={renovarForm.resultado}
+                  onChange={(e) =>
+                    setRenovarForm({ ...renovarForm, resultado: e.target.value as ResultadoAvaliacao })
+                  }
+                  options={RESULTADOS_VISTORIA}
+                />
+              </div>
+              <div>
+                <Label>Data de Validade</Label>
+                <Input
+                  type="date"
+                  value={renovarForm.data_validade}
+                  onChange={(e) => setRenovarForm({ ...renovarForm, data_validade: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label>Parecer *</Label>
+                <Textarea
+                  value={renovarForm.parecer}
+                  onChange={(e) => setRenovarForm({ ...renovarForm, parecer: e.target.value })}
+                  placeholder="Descreva o parecer da renovação (mínimo 10 caracteres)..."
+                  rows={5}
+                />
+              </div>
+              <div>
+                <Label>Observações</Label>
+                <Textarea
+                  value={renovarForm.observacoes}
+                  onChange={(e) => setRenovarForm({ ...renovarForm, observacoes: e.target.value })}
+                  placeholder="Observações adicionais..."
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setRenovarDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleSaveRenov} loading={renovarVistM.isPending}>
+                  Renovar Vistoria
                 </Button>
               </div>
             </div>
