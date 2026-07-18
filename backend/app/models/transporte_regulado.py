@@ -282,6 +282,9 @@ class Alvara(Base):
     id_permissionario: Mapped[int | None] = mapped_column(
         ForeignKey("transporte_regulado.permissionario.id"), nullable=True
     )
+    renovado_de: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.alvara.id"), nullable=True
+    )
     numero_alvara: Mapped[str] = mapped_column(String(40), nullable=False)
     data_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
     data_validade: Mapped[date | None] = mapped_column(Date, nullable=True)

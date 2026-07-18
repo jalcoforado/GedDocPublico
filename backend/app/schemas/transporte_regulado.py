@@ -789,6 +789,22 @@ class AlvaraOut(BaseModel):
     data_validade: date | None
     tipo_servico: str
     observacoes: str | None
+    renovado_de: int | None = None
     criado_em: datetime
     atualizado_em: datetime | None
     excluido: bool
+
+
+class AlvaraRenovarInput(BaseModel):
+    """Renovação de alvará — cria novo alvará atrelado ao anterior via renovado_de.
+    Mantém empresa/permissionário do original, permite atualizar datas e observacões."""
+
+    data_inicio: date | None = None
+    data_validade: date | None = None
+    observacoes: str | None = None
+
+    @model_validator(mode="after")
+    def _datas_consistentes(self) -> "AlvaraRenovarInput":
+        if self.data_inicio and self.data_validade and self.data_inicio > self.data_validade:
+            raise ValueError("data_inicio não pode ser posterior a data_validade.")
+        return self

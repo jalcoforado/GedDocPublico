@@ -35,6 +35,7 @@ from ..schemas.transporte_regulado import (
     AlvaraCreate,
     AlvaraOut,
     AlvaraUpdate,
+    AlvaraRenovarInput,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -716,3 +717,25 @@ async def delete_alvara(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await tr_svc.excluir_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+
+
+@alvaras_router.get("/vencidos", response_model=list[AlvaraOut])
+async def list_alvaras_vencidos(
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[AlvaraOut]:
+    """Lista alvarás vencidos (data_validade <= hoje) do tenant."""
+    return await tr_svc.listar_alvaras_vencidos(db, tenant_id=tenant_id)
+
+
+@alvaras_router.post("/{alvara_id}/renovar", response_model=AlvaraOut)
+async def renovate_alvara(
+    alvara_id: int,
+    payload: AlvaraRenovarInput,
+    _: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraOut:
+    """Renova um alvará vencido — cria novo alvará atrelado ao anterior via renovado_de."""
+    return await tr_svc.renovar_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id, payload=payload)

@@ -33,6 +33,7 @@ from ..schemas.transporte_regulado import (
     AlvaraCreate,
     AlvaraUpdate,
     AlvaraOut,
+    AlvaraRenovarInput,
 )
 
 
@@ -1098,3 +1099,51 @@ async def excluir_alvara(
     a.excluido = True
     a.atualizado_em = datetime.utcnow()
     await db.commit()
+
+
+async def listar_alvaras_vencidos(
+    db: AsyncSession, *, tenant_id: int
+) -> list[Alvara]:
+    """Lista alvarás vencidos (data_validade <= hoje) do tenant, ordenados por data_validade ASC."""
+    hoje = datetime.utcnow().date()
+    stmt = select(Alvara).where(
+        Alvara.tenant_id == tenant_id,
+        Alvara.data_validade.is_not(None),
+        Alvara.data_validade <= hoje,
+        Alvara.excluido.is_(False),
+    ).order_by(Alvara.data_validade.asc())
+    return (await db.execute(stmt)).scalars().all()
+
+
+async def renovar_alvara(
+    db: AsyncSession, *, tenant_id: int, alvara_id: int, payload: AlvaraRenovarInput
+) -> Alvara:
+    """Renova um alvará vencido — cria novo alvará atrelado ao anterior via renovado_de."""
+    # Obter alvará original
+    original = await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+
+    # Validar que está vencido
+    hoje = datetime.utcnow().date()
+    if original.data_validade is None or original.data_validade > hoje:
+        raise HTTPException(
+            status_code=400,
+            detail="Alvará não está vencido; renovação só permitida para alvarás expirados.",
+        )
+
+    # Criar novo alvará com mesmos vínculos e número
+    novo = Alvara(
+        tenant_id=tenant_id,
+        id_empresa=original.id_empresa,
+        id_permissionario=original.id_permissionario,
+        numero_alvara=original.numero_alvara,
+        data_inicio=payload.data_inicio if payload.data_inicio is not None else original.data_inicio,
+        data_validade=payload.data_validade,
+        tipo_servico=original.tipo_servico,
+        observacoes=payload.observacoes if payload.observacoes is not None else original.observacoes,
+        renovado_de=original.id,
+        criado_em=datetime.utcnow(),
+    )
+    db.add(novo)
+    await db.commit()
+    await db.refresh(novo)
+    return novo
