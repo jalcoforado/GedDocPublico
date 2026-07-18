@@ -28,6 +28,9 @@ from ..schemas.transporte_regulado import (
     VeiculoAvaliacaoCreate,
     VeiculoAvaliacaoOut,
     VeiculoAvaliacaoUpdate,
+    VeiculoVistoriaCreate,
+    VeiculoVistoriaOut,
+    VeiculoVistoriaUpdate,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -524,3 +527,81 @@ async def delete_avaliacao(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await tr_svc.excluir_avaliacao(db, tenant_id=tenant_id, avaliacao_id=avaliacao_id)
+
+
+# ============================ Vistorias Veículo ===============================
+vistorias_router = APIRouter(
+    prefix="/transporte-regulado/veiculos/{veiculo_id}/vistorias",
+    tags=["transporte-regulado-vistorias"],
+)
+
+
+@vistorias_router.get("", response_model=list[VeiculoVistoriaOut])
+async def list_vistorias(
+    veiculo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[VeiculoVistoriaOut]:
+    rows = await tr_svc.listar_vistorias(
+        db, tenant_id=tenant_id, veiculo_id=veiculo_id
+    )
+    return [VeiculoVistoriaOut.model_validate(r) for r in rows]
+
+
+@vistorias_router.post(
+    "", response_model=VeiculoVistoriaOut, status_code=status.HTTP_201_CREATED
+)
+async def create_vistoria(
+    veiculo_id: int,
+    payload: VeiculoVistoriaCreate,
+    usuario: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoVistoriaOut:
+    v = await tr_svc.criar_vistoria(
+        db,
+        tenant_id=tenant_id,
+        veiculo_id=veiculo_id,
+        auditor_id=usuario.id,
+        payload=payload,
+    )
+    return VeiculoVistoriaOut.model_validate(v)
+
+
+@vistorias_router.get("/{vistoria_id}", response_model=VeiculoVistoriaOut)
+async def get_vistoria(
+    veiculo_id: int,
+    vistoria_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoVistoriaOut:
+    v = await tr_svc.obter_vistoria(db, tenant_id=tenant_id, vistoria_id=vistoria_id)
+    return VeiculoVistoriaOut.model_validate(v)
+
+
+@vistorias_router.put("/{vistoria_id}", response_model=VeiculoVistoriaOut)
+async def update_vistoria(
+    veiculo_id: int,
+    vistoria_id: int,
+    payload: VeiculoVistoriaUpdate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoVistoriaOut:
+    v = await tr_svc.atualizar_vistoria(
+        db, tenant_id=tenant_id, vistoria_id=vistoria_id, payload=payload
+    )
+    return VeiculoVistoriaOut.model_validate(v)
+
+
+@vistorias_router.delete("/{vistoria_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_vistoria(
+    veiculo_id: int,
+    vistoria_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await tr_svc.excluir_vistoria(db, tenant_id=tenant_id, vistoria_id=vistoria_id)

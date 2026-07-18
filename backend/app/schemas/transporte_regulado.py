@@ -648,3 +648,65 @@ class VeiculoAvaliacaoOut(BaseModel):
     criado_em: datetime
     atualizado_em: datetime | None = None
     excluido: bool
+
+
+# ============================ Vistoria Veículo ================================
+class VeiculoVistoriaCreate(BaseModel):
+    """Vistoria regulatória de veículo (inspeção realizada por auditor).
+    `resultado` em enum, `parecer` obrigatório e com mínimo 10 caracteres,
+    `data_vistoria` não pode ser futura."""
+
+    resultado: ResultadoAvaliacao
+    parecer: str = Field(min_length=10, max_length=5000)
+    observacoes: str | None = None
+    data_vistoria: datetime
+
+    @field_validator("parecer")
+    @classmethod
+    def _parecer(cls, v: str) -> str:
+        if v.strip() == "":
+            raise ValueError("parecer não pode estar vazio.")
+        return v
+
+    @model_validator(mode="after")
+    def _coerencia_data(self) -> "VeiculoVistoriaCreate":
+        from datetime import datetime as dt
+
+        agora = dt.utcnow()
+        if self.data_vistoria > agora:
+            raise ValueError("data_vistoria não pode ser uma data futura.")
+        return self
+
+
+class VeiculoVistoriaUpdate(BaseModel):
+    """Atualização de vistoria — todos os campos opcional."""
+
+    resultado: ResultadoAvaliacao | None = None
+    parecer: str | None = Field(default=None, min_length=10, max_length=5000)
+    observacoes: str | None = None
+    data_vistoria: datetime | None = None
+
+    @field_validator("parecer")
+    @classmethod
+    def _parecer(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v.strip() == "":
+            raise ValueError("parecer não pode estar vazio.")
+        return v
+
+
+class VeiculoVistoriaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    id_veiculo: int
+    id_auditor: int
+    resultado: str
+    parecer: str
+    observacoes: str | None = None
+    data_vistoria: datetime
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+    excluido: bool

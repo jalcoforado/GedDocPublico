@@ -42,6 +42,13 @@ RESULTADO_AVALIACAO_CHOICES = {
     "condicional": "Condicional",
 }
 
+RESULTADO_VISTORIA_CHOICES = {
+    "pendente": "Pendente",
+    "aprovado": "Aprovado",
+    "reprovado": "Reprovado",
+    "condicional": "Condicional",
+}
+
 
 class Permissionario(Base):
     __tablename__ = "permissionario"
@@ -215,6 +222,35 @@ class VeiculoAvaliacao(Base):
     parecer: Mapped[str] = mapped_column(Text, nullable=False)
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
     data_avaliacao: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoVistoria(Base):
+    """Vistorias regulatórias de veículos (inspeção de conformidade realizada por auditor).
+
+    Resultado: pendente, aprovado, reprovado, condicional.
+    Auditor: usuário (servidor) que realizou a vistoria (mesma tenant — validado no serviço).
+    """
+
+    __tablename__ = "veiculo_vistoria"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.veiculo.id"), nullable=False
+    )
+    id_auditor: Mapped[int] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=False
+    )
+    resultado: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente")
+    parecer: Mapped[str] = mapped_column(Text, nullable=False)
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    data_vistoria: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

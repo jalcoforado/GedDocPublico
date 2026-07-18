@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Empresa, Permissionario, VeiculoRegulado, Usuario
-from ..models.transporte_regulado import VeiculoDocumento, VeiculoAvaliacao
+from ..models.transporte_regulado import VeiculoDocumento, VeiculoAvaliacao, VeiculoVistoria
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
     EmpresaUpdate,
@@ -27,6 +27,8 @@ from ..schemas.transporte_regulado import (
     VeiculoDocumentoUpdate,
     VeiculoAvaliacaoCreate,
     VeiculoAvaliacaoUpdate,
+    VeiculoVistoriaCreate,
+    VeiculoVistoriaUpdate,
 )
 
 
@@ -802,4 +804,106 @@ async def excluir_avaliacao(
     av = await obter_avaliacao(db, tenant_id=tenant_id, avaliacao_id=avaliacao_id)
     av.excluido = True
     av.atualizado_em = datetime.utcnow()
+    await db.commit()
+
+
+# ============================ Vistoria Veículo ================================
+async def obter_vistoria(
+    db: AsyncSession, *, tenant_id: int, vistoria_id: int
+) -> VeiculoVistoria:
+    """Obtém vistoria por ID, validando tenant e soft-delete."""
+    v = (
+        await db.execute(
+            select(VeiculoVistoria).where(
+                VeiculoVistoria.id == vistoria_id,
+                VeiculoVistoria.tenant_id == tenant_id,
+                VeiculoVistoria.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if v is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Vistoria não encontrada"
+        )
+    return v
+
+
+async def listar_vistorias(
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int
+) -> list[VeiculoVistoria]:
+    """Lista vistorias de um veículo."""
+    stmt = select(VeiculoVistoria).where(
+        VeiculoVistoria.tenant_id == tenant_id,
+        VeiculoVistoria.id_veiculo == veiculo_id,
+        VeiculoVistoria.excluido.is_(False),
+    )
+    stmt = stmt.order_by(VeiculoVistoria.data_vistoria.desc())
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def criar_vistoria(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    veiculo_id: int,
+    auditor_id: int,
+    payload: VeiculoVistoriaCreate,
+) -> VeiculoVistoria:
+    """Cria nova vistoria para veículo regulado.
+
+    1. Valida que veículo existe no tenant
+    2. Valida que usuário (auditor) existe no tenant
+    3. Insere registro com id_auditor = auditor_id
+    """
+    # 1. Valida veículo
+    await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
+
+    # 2. Valida usuário auditor
+    if not await _validar_usuario_existe(db, tenant_id=tenant_id, usuario_id=auditor_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuário auditor não encontrado neste tenant.",
+        )
+
+    # 3. Insere
+    dados = payload.model_dump()
+    v = VeiculoVistoria(
+        tenant_id=tenant_id,
+        id_veiculo=veiculo_id,
+        id_auditor=auditor_id,
+        criado_em=datetime.utcnow(),
+        **dados,
+    )
+    db.add(v)
+    await db.commit()
+    await db.refresh(v)
+    return v
+
+
+async def atualizar_vistoria(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    vistoria_id: int,
+    payload: VeiculoVistoriaUpdate,
+) -> VeiculoVistoria:
+    """Atualiza vistoria existente com atualizado_em = now()."""
+    v = await obter_vistoria(db, tenant_id=tenant_id, vistoria_id=vistoria_id)
+    dados = payload.model_dump(exclude_unset=True)
+
+    for campo, valor in dados.items():
+        setattr(v, campo, valor)
+    v.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(v)
+    return v
+
+
+async def excluir_vistoria(
+    db: AsyncSession, *, tenant_id: int, vistoria_id: int
+) -> None:
+    """Soft-delete de vistoria (excluido=True)."""
+    v = await obter_vistoria(db, tenant_id=tenant_id, vistoria_id=vistoria_id)
+    v.excluido = True
+    v.atualizado_em = datetime.utcnow()
     await db.commit()
