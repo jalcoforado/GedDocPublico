@@ -718,12 +718,12 @@ class VeiculoVistoriaOut(BaseModel):
 
 class VeiculoVistoriaRenovarInput(BaseModel):
     """Renovação de vistoria — cria nova vistoria atrelada à anterior via renovada_de.
-    Mesmas validações de VeiculoVistoriaCreate, mais campo renovada_de preenchido automaticamente."""
+    data_vistoria preenchida automaticamente no momento da renovação (utcnow).
+    renovada_de preenchido automaticamente apontando para vistoria anterior."""
 
     resultado: ResultadoAvaliacao
     parecer: str = Field(min_length=10, max_length=5000)
     observacoes: str | None = None
-    data_vistoria: datetime
     data_validade: date | None = None
 
     @field_validator("parecer")
@@ -732,12 +732,3 @@ class VeiculoVistoriaRenovarInput(BaseModel):
         if v.strip() == "":
             raise ValueError("parecer não pode estar vazio.")
         return v
-
-    @model_validator(mode="after")
-    def _coerencia_data(self) -> "VeiculoVistoriaRenovarInput":
-        from datetime import datetime as dt
-
-        agora = dt.utcnow()
-        if self.data_vistoria > agora:
-            raise ValueError("data_vistoria não pode ser uma data futura.")
-        return self

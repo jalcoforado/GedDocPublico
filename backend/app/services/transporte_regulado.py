@@ -950,12 +950,15 @@ async def renovar_vistoria(
 
     if vistoria_anterior.data_validade and vistoria_anterior.data_validade > date_type.today():
         raise HTTPException(
-            status_code=409, detail="Vistoria anterior não está vencida"
+            status_code=400, detail="Vistoria anterior não está vencida"
         )
 
-    auditor = await _obter_usuario(db, auditor_id)
-    if not auditor:
-        raise HTTPException(status_code=404, detail="Auditor não encontrado")
+    # Valida auditor
+    if not await _validar_usuario_existe(db, tenant_id=tenant_id, usuario_id=auditor_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuário auditor não encontrado neste tenant.",
+        )
 
     v = VeiculoVistoria(
         tenant_id=tenant_id,
@@ -964,7 +967,7 @@ async def renovar_vistoria(
         resultado=payload.resultado,
         parecer=payload.parecer,
         observacoes=payload.observacoes,
-        data_vistoria=payload.data_vistoria,
+        data_vistoria=datetime.utcnow(),
         data_validade=payload.data_validade,
         renovada_de=vistoria_id,
         criado_em=datetime.utcnow(),

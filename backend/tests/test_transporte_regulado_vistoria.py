@@ -20,6 +20,7 @@ from app.schemas.transporte_regulado import (
     PermissionarioCreate,
     VeiculoReguladoCreate,
     VeiculoVistoriaCreate,
+    VeiculoVistoriaRenovarInput,
     VeiculoVistoriaUpdate,
 )
 from app.services import transporte_regulado as tr_svc
@@ -478,3 +479,518 @@ async def test_vistoria_criar_veiculo_inexistente(admin_engine):
                     data_vistoria=datetime.utcnow(),
                 ),
             )
+
+
+# P1.1: Renovação/Revalidação de Vistorias
+
+
+@pytest.mark.asyncio
+async def test_vistoria_listar_vencidas_basico(admin_engine):
+    """Listar vistorias vencidas (data_validade <= hoje)."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor_id = await _usuario(admin_engine, tenant.id)
+
+    hoje = datetime.utcnow().date()
+    ontem = hoje - timedelta(days=1)
+    amanha = hoje + timedelta(days=1)
+
+    async with _sm(admin_engine)() as s:
+        # Vencida ontem
+        vist_vencida = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Vistoria que venceu ontem.",
+                data_vistoria=datetime.combine(ontem, datetime.min.time()),
+                data_validade=ontem,
+            ),
+        )
+        # Vigente (amanha)
+        vist_vigente = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Vistoria que ainda eh valida.",
+                data_vistoria=datetime.utcnow(),
+                data_validade=amanha,
+            ),
+        )
+
+        vencidas = await tr_svc.listar_vistorias_vencidas(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id
+        )
+
+    assert len(vencidas) == 1
+    assert vencidas[0].id == vist_vencida.id
+
+
+@pytest.mark.asyncio
+async def test_vistoria_listar_vencidas_ordem_descendente(admin_engine):
+    """Listar vencidas retorna ordenadas por data_vistoria descendente."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor_id = await _usuario(admin_engine, tenant.id)
+
+    hoje = datetime.utcnow().date()
+    data_vencida = hoje - timedelta(days=2)
+
+    async with _sm(admin_engine)() as s:
+        vist1_dt = datetime.combine(data_vencida, datetime.min.time()) + timedelta(hours=8)
+        vist2_dt = datetime.combine(data_vencida, datetime.min.time()) + timedelta(hours=10)
+
+        vist1 = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Primeira vistoria vencida (mais antiga).",
+                data_vistoria=vist1_dt,
+                data_validade=data_vencida,
+            ),
+        )
+        vist2 = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Segunda vistoria vencida (mais recente).",
+                data_vistoria=vist2_dt,
+                data_validade=data_vencida,
+            ),
+        )
+
+        vencidas = await tr_svc.listar_vistorias_vencidas(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id
+        )
+
+    # Mais recente primeiro (data_vistoria DESC)
+    assert len(vencidas) == 2
+    assert vencidas[0].id == vist2.id
+    assert vencidas[1].id == vist1.id
+
+
+@pytest.mark.asyncio
+async def test_vistoria_listar_vencidas_vazio(admin_engine):
+    """Listar vencidas de veiculo sem vencidas retorna lista vazia."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor_id = await _usuario(admin_engine, tenant.id)
+
+    hoje = datetime.utcnow().date()
+    amanha = hoje + timedelta(days=1)
+
+    async with _sm(admin_engine)() as s:
+        # Só vistorias vigentes
+        await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Vistoria que ainda eh valida.",
+                data_vistoria=datetime.utcnow(),
+                data_validade=amanha,
+            ),
+        )
+
+        vencidas = await tr_svc.listar_vistorias_vencidas(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id
+        )
+
+    assert len(vencidas) == 0
+
+
+@pytest.mark.asyncio
+async def test_vistoria_listar_vencidas_sem_data_validade(admin_engine):
+    """Listar vencidas exclui vistorias sem data_validade."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor_id = await _usuario(admin_engine, tenant.id)
+
+    async with _sm(admin_engine)() as s:
+        # Vistoria sem data_validade (nao expira)
+        await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Vistoria permanente sem validade.",
+                data_vistoria=datetime.utcnow(),
+            ),
+        )
+
+        vencidas = await tr_svc.listar_vistorias_vencidas(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id
+        )
+
+    assert len(vencidas) == 0
+
+
+@pytest.mark.asyncio
+async def test_vistoria_renovar_basico(admin_engine):
+    """Renovar vistoria vencida cria novo registro."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor_id = await _usuario(admin_engine, tenant.id)
+    novo_auditor_id = await _usuario(admin_engine, tenant.id, nome="Novo Auditor")
+
+    hoje = datetime.utcnow().date()
+    ontem = hoje - timedelta(days=1)
+    proximo_ano = hoje + timedelta(days=365)
+
+    async with _sm(admin_engine)() as s:
+        # Criar vistoria vencida
+        vist_original = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Vistoria original vencida ontem.",
+                data_vistoria=datetime.combine(ontem, datetime.min.time()),
+                data_validade=ontem,
+            ),
+        )
+
+        # Renovar
+        vist_renovada = await tr_svc.renovar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id,
+            vistoria_id=vist_original.id, auditor_id=novo_auditor_id,
+            payload=VeiculoVistoriaRenovarInput(
+                resultado="aprovado",
+                parecer="Vistoria renovada apos vencimento.",
+                data_validade=proximo_ano,
+            ),
+        )
+
+    assert vist_renovada.id != vist_original.id
+    assert vist_renovada.renovada_de == vist_original.id
+    assert vist_renovada.id_auditor == novo_auditor_id
+    assert vist_renovada.id_veiculo == veiculo.id
+    assert vist_renovada.data_validade == proximo_ano
+
+
+@pytest.mark.asyncio
+async def test_vistoria_renovar_com_data_validade(admin_engine):
+    """Renovar pode especificar nova data_validade."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor_id = await _usuario(admin_engine, tenant.id)
+    novo_auditor_id = await _usuario(admin_engine, tenant.id, nome="Novo Auditor")
+
+    hoje = datetime.utcnow().date()
+    ontem = hoje - timedelta(days=1)
+    nova_data_validade = hoje + timedelta(days=180)
+
+    async with _sm(admin_engine)() as s:
+        vist_original = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="condicional",
+                parecer="Vistoria original condicional.",
+                data_vistoria=datetime.combine(ontem, datetime.min.time()),
+                data_validade=ontem,
+            ),
+        )
+
+        vist_renovada = await tr_svc.renovar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id,
+            vistoria_id=vist_original.id, auditor_id=novo_auditor_id,
+            payload=VeiculoVistoriaRenovarInput(
+                resultado="aprovado",
+                parecer="Renovacao apos condicionalidade atendida.",
+                data_validade=nova_data_validade,
+            ),
+        )
+
+    assert vist_renovada.data_validade == nova_data_validade
+
+
+@pytest.mark.asyncio
+async def test_vistoria_renovar_vistoria_inexistente(admin_engine):
+    """Renovar vistoria inexistente falha."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor_id = await _usuario(admin_engine, tenant.id)
+
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await tr_svc.renovar_vistoria(
+                s, tenant_id=tenant.id, veiculo_id=veiculo.id,
+                vistoria_id=99999, auditor_id=auditor_id,
+                payload=VeiculoVistoriaRenovarInput(
+                    resultado="aprovado",
+                    parecer="Renovacao de vistoria inexistente.",
+                    data_validade=datetime.utcnow().date() + timedelta(days=365),
+                ),
+            )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_vistoria_renovar_vistoria_vigente(admin_engine):
+    """Renovar vistoria que ainda eh vigente falha."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor_id = await _usuario(admin_engine, tenant.id)
+    novo_auditor_id = await _usuario(admin_engine, tenant.id, nome="Novo Auditor")
+
+    hoje = datetime.utcnow().date()
+    amanha = hoje + timedelta(days=1)
+
+    async with _sm(admin_engine)() as s:
+        # Criar vistoria vigente
+        vist_vigente = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Vistoria que ainda eh valida.",
+                data_vistoria=datetime.utcnow(),
+                data_validade=amanha,
+            ),
+        )
+
+        # Tentar renovar
+        with pytest.raises(HTTPException) as exc:
+            await tr_svc.renovar_vistoria(
+                s, tenant_id=tenant.id, veiculo_id=veiculo.id,
+                vistoria_id=vist_vigente.id, auditor_id=novo_auditor_id,
+                payload=VeiculoVistoriaRenovarInput(
+                    resultado="aprovado",
+                    parecer="Renovacao de vistoria vigente.",
+                    data_validade=hoje + timedelta(days=365),
+                ),
+            )
+
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_vistoria_renovar_auditor_inexistente(admin_engine):
+    """Renovar com auditor inexistente falha."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor_id = await _usuario(admin_engine, tenant.id)
+
+    hoje = datetime.utcnow().date()
+    ontem = hoje - timedelta(days=1)
+
+    async with _sm(admin_engine)() as s:
+        vist_original = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Vistoria vencida.",
+                data_vistoria=datetime.combine(ontem, datetime.min.time()),
+                data_validade=ontem,
+            ),
+        )
+
+        with pytest.raises(HTTPException):
+            await tr_svc.renovar_vistoria(
+                s, tenant_id=tenant.id, veiculo_id=veiculo.id,
+                vistoria_id=vist_original.id, auditor_id=99999,
+                payload=VeiculoVistoriaRenovarInput(
+                    resultado="aprovado",
+                    parecer="Renovacao com auditor inexistente.",
+                    data_validade=hoje + timedelta(days=365),
+                ),
+            )
+
+
+@pytest.mark.asyncio
+async def test_vistoria_renovar_cross_tenant_404(admin_engine):
+    """Renovar vistoria de outra tenant retorna 404."""
+    tenant1 = await _provisionar(admin_engine)
+    tenant2 = await _provisionar(admin_engine)
+    veiculo1 = await _veiculo(admin_engine, tenant1.id)
+    auditor1_id = await _usuario(admin_engine, tenant1.id)
+    auditor2_id = await _usuario(admin_engine, tenant2.id)
+
+    hoje = datetime.utcnow().date()
+    ontem = hoje - timedelta(days=1)
+
+    async with _sm(admin_engine)() as s:
+        # Criar vistoria em tenant1
+        vist = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant1.id, veiculo_id=veiculo1.id, auditor_id=auditor1_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Vistoria de tenant1.",
+                data_vistoria=datetime.combine(ontem, datetime.min.time()),
+                data_validade=ontem,
+            ),
+        )
+
+    # Tentar renovar como tenant2
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await tr_svc.renovar_vistoria(
+                s, tenant_id=tenant2.id, veiculo_id=veiculo1.id,
+                vistoria_id=vist.id, auditor_id=auditor2_id,
+                payload=VeiculoVistoriaRenovarInput(
+                    resultado="aprovado",
+                    parecer="Tentativa cross-tenant.",
+                    data_validade=hoje + timedelta(days=365),
+                ),
+            )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_vistoria_renovacao_cria_nova_com_novo_id(admin_engine):
+    """Renovacao cria novo registro com ID diferente do original."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor_id = await _usuario(admin_engine, tenant.id)
+    novo_auditor_id = await _usuario(admin_engine, tenant.id, nome="Novo Auditor")
+
+    hoje = datetime.utcnow().date()
+    ontem = hoje - timedelta(days=1)
+
+    async with _sm(admin_engine)() as s:
+        vist_original = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Vistoria original.",
+                data_vistoria=datetime.combine(ontem, datetime.min.time()),
+                data_validade=ontem,
+            ),
+        )
+        vist_id_original = vist_original.id
+
+        vist_renovada = await tr_svc.renovar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id,
+            vistoria_id=vist_id_original, auditor_id=novo_auditor_id,
+            payload=VeiculoVistoriaRenovarInput(
+                resultado="aprovado",
+                parecer="Vistoria renovada.",
+                data_validade=hoje + timedelta(days=365),
+            ),
+        )
+
+    assert vist_renovada.id != vist_id_original
+
+
+@pytest.mark.asyncio
+async def test_vistoria_renovacao_copia_campos_basicos(admin_engine):
+    """Renovacao copia resultado, parecer, observacoes da entrada."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor_id = await _usuario(admin_engine, tenant.id)
+    novo_auditor_id = await _usuario(admin_engine, tenant.id, nome="Novo Auditor")
+
+    hoje = datetime.utcnow().date()
+    ontem = hoje - timedelta(days=1)
+
+    async with _sm(admin_engine)() as s:
+        vist_original = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Vistoria original.",
+                observacoes="Observações da vistoria original.",
+                data_vistoria=datetime.combine(ontem, datetime.min.time()),
+                data_validade=ontem,
+            ),
+        )
+
+        vist_renovada = await tr_svc.renovar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id,
+            vistoria_id=vist_original.id, auditor_id=novo_auditor_id,
+            payload=VeiculoVistoriaRenovarInput(
+                resultado="condicional",
+                parecer="Vistoria renovada com resultado diferente.",
+                observacoes="Observações da renovação.",
+                data_validade=hoje + timedelta(days=365),
+            ),
+        )
+
+    assert vist_renovada.resultado == "condicional"
+    assert vist_renovada.parecer == "Vistoria renovada com resultado diferente."
+    assert vist_renovada.observacoes == "Observações da renovação."
+
+
+@pytest.mark.asyncio
+async def test_vistoria_renovacao_atualiza_criado_em(admin_engine):
+    """Criado_em da renovacao eh atual (diferente do original)."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor_id = await _usuario(admin_engine, tenant.id)
+    novo_auditor_id = await _usuario(admin_engine, tenant.id, nome="Novo Auditor")
+
+    hoje = datetime.utcnow().date()
+    ontem = hoje - timedelta(days=1)
+
+    async with _sm(admin_engine)() as s:
+        vist_original = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Vistoria original.",
+                data_vistoria=datetime.combine(ontem, datetime.min.time()),
+                data_validade=ontem,
+            ),
+        )
+        criado_em_original = vist_original.criado_em
+
+        vist_renovada = await tr_svc.renovar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id,
+            vistoria_id=vist_original.id, auditor_id=novo_auditor_id,
+            payload=VeiculoVistoriaRenovarInput(
+                resultado="aprovado",
+                parecer="Vistoria renovada.",
+                data_validade=hoje + timedelta(days=365),
+            ),
+        )
+
+    # criado_em da renovação é mais recente
+    assert vist_renovada.criado_em > criado_em_original
+
+
+@pytest.mark.asyncio
+async def test_vistoria_renovacao_historico_chain(admin_engine):
+    """Pode renovar uma renovacao (chain de renovacoes)."""
+    tenant = await _provisionar(admin_engine)
+    veiculo = await _veiculo(admin_engine, tenant.id)
+    auditor1_id = await _usuario(admin_engine, tenant.id, nome="Auditor1")
+    auditor2_id = await _usuario(admin_engine, tenant.id, nome="Auditor2")
+    auditor3_id = await _usuario(admin_engine, tenant.id, nome="Auditor3")
+
+    hoje = datetime.utcnow().date()
+    ontem = hoje - timedelta(days=1)
+    semana_passada = hoje - timedelta(days=7)
+
+    async with _sm(admin_engine)() as s:
+        # Vistoria original
+        vist1 = await tr_svc.criar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor1_id,
+            payload=VeiculoVistoriaCreate(
+                resultado="aprovado",
+                parecer="Vistoria original.",
+                data_vistoria=datetime.combine(semana_passada, datetime.min.time()),
+                data_validade=semana_passada,
+            ),
+        )
+
+        # Primeira renovacao
+        vist2 = await tr_svc.renovar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id,
+            vistoria_id=vist1.id, auditor_id=auditor2_id,
+            payload=VeiculoVistoriaRenovarInput(
+                resultado="aprovado",
+                parecer="Primeira renovacao.",
+                data_validade=ontem,
+            ),
+        )
+        assert vist2.renovada_de == vist1.id
+
+        # Segunda renovacao (renovar a renovacao)
+        vist3 = await tr_svc.renovar_vistoria(
+            s, tenant_id=tenant.id, veiculo_id=veiculo.id,
+            vistoria_id=vist2.id, auditor_id=auditor3_id,
+            payload=VeiculoVistoriaRenovarInput(
+                resultado="aprovado",
+                parecer="Segunda renovacao (renovacao da renovacao).",
+                data_validade=hoje + timedelta(days=365),
+            ),
+        )
+        assert vist3.renovada_de == vist2.id
+        assert vist3.renovada_de != vist1.id
