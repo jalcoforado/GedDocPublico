@@ -27,6 +27,8 @@ import {
   type VeiculoAvaliacao,
   type VeiculoDocumento,
   type VeiculoRegulado,
+  type VeiculoVistoria,
+  type VeiculoVistoriaInput,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
@@ -49,6 +51,13 @@ const STATUS_DOCUMENTO: { value: StatusDocumento; label: string }[] = [
 ];
 
 const RESULTADOS_AVALIACAO: { value: ResultadoAvaliacao; label: string }[] = [
+  { value: "pendente", label: "Pendente" },
+  { value: "aprovado", label: "Aprovado" },
+  { value: "reprovado", label: "Reprovado" },
+  { value: "condicional", label: "Condicional" },
+];
+
+const RESULTADOS_VISTORIA: { value: ResultadoAvaliacao; label: string }[] = [
   { value: "pendente", label: "Pendente" },
   { value: "aprovado", label: "Aprovado" },
   { value: "reprovado", label: "Reprovado" },
@@ -86,6 +95,13 @@ interface AvaliacaoForm {
   data_avaliacao: string;
 }
 
+interface VistoriaForm {
+  resultado: ResultadoAvaliacao;
+  parecer: string;
+  observacoes: string;
+  data_vistoria: string;
+}
+
 const EMPTY_DOC: DocumentoForm = {
   tipo_documento: "crlv",
   numero_documento: "",
@@ -101,6 +117,13 @@ const EMPTY_AVAL: AvaliacaoForm = {
   data_avaliacao: new Date().toISOString().split("T")[0],
 };
 
+const EMPTY_VIST: VistoriaForm = {
+  resultado: "pendente",
+  parecer: "",
+  observacoes: "",
+  data_vistoria: new Date().toISOString().split("T")[0],
+};
+
 export default function VeiculoDetailPage() {
   const params = useParams();
   const veiculoId = Number(params.id);
@@ -109,13 +132,16 @@ export default function VeiculoDetailPage() {
   const toast = useToast();
   const confirm = useConfirm();
 
-  const [tab, setTab] = useState<"info" | "documentos" | "avaliacoes">("info");
+  const [tab, setTab] = useState<"info" | "documentos" | "avaliacoes" | "vistorias">("info");
   const [docDialogOpen, setDocDialogOpen] = useState(false);
   const [avalDialogOpen, setAvalDialogOpen] = useState(false);
+  const [vistDialogOpen, setVistDialogOpen] = useState(false);
   const [docForm, setDocForm] = useState<DocumentoForm>(EMPTY_DOC);
   const [avalForm, setAvalForm] = useState<AvaliacaoForm>(EMPTY_AVAL);
+  const [vistForm, setVistForm] = useState<VistoriaForm>(EMPTY_VIST);
   const [editingDoc, setEditingDoc] = useState<VeiculoDocument | null>(null);
   const [editingAval, setEditingAval] = useState<VeiculoAvaliacao | null>(null);
+  const [editingVist, setEditingVist] = useState<VeiculoVistoria | null>(null);
 
   const veiculoQ = useQuery({
     queryKey: ["tr-veiculo", veiculoId],
@@ -130,6 +156,11 @@ export default function VeiculoDetailPage() {
   const avalsQ = useQuery({
     queryKey: ["tr-avaliacoes", veiculoId],
     queryFn: () => api.veiculosRegulados.avaliacoes.list(veiculoId),
+  });
+
+  const vistQ = useQuery({
+    queryKey: ["tr-vistorias", veiculoId],
+    queryFn: () => api.veiculosRegulados.vistorias.list(veiculoId),
   });
 
   const criarDocM = useMutation({
@@ -198,6 +229,39 @@ export default function VeiculoDetailPage() {
     onError: (e: any) => toast.error(e.message || "Erro ao remover avaliação"),
   });
 
+  const criarVistM = useMutation({
+    mutationFn: (data: any) => api.veiculosRegulados.vistorias.create(veiculoId, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tr-vistorias"] });
+      setVistDialogOpen(false);
+      setVistForm(EMPTY_VIST);
+      toast.success("Vistoria criada");
+    },
+    onError: (e: any) => toast.error(e.message || "Erro ao criar vistoria"),
+  });
+
+  const atualizarVistM = useMutation({
+    mutationFn: (data: any) =>
+      api.veiculosRegulados.vistorias.update(veiculoId, editingVist!.id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tr-vistorias"] });
+      setVistDialogOpen(false);
+      setEditingVist(null);
+      setVistForm(EMPTY_VIST);
+      toast.success("Vistoria atualizada");
+    },
+    onError: (e: any) => toast.error(e.message || "Erro ao atualizar vistoria"),
+  });
+
+  const removerVistM = useMutation({
+    mutationFn: (vistId: number) => api.veiculosRegulados.vistorias.remove(veiculoId, vistId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tr-vistorias"] });
+      toast.success("Vistoria removida");
+    },
+    onError: (e: any) => toast.error(e.message || "Erro ao remover vistoria"),
+  });
+
   if (veiculoQ.isLoading) return <div>Carregando...</div>;
   if (veiculoQ.isError) return <div>Erro ao carregar veículo</div>;
 
@@ -240,6 +304,24 @@ export default function VeiculoDetailPage() {
     }
   };
 
+  const handleSaveVist = async () => {
+    if (!vistForm.parecer.trim() || vistForm.parecer.length < 10) {
+      toast.error("Parecer deve ter no mínimo 10 caracteres");
+      return;
+    }
+    const payload = {
+      resultado: vistForm.resultado,
+      parecer: vistForm.parecer,
+      observacoes: vistForm.observacoes || null,
+      data_vistoria: vistForm.data_vistoria,
+    };
+    if (editingVist) {
+      await atualizarVistM.mutateAsync(payload);
+    } else {
+      await criarVistM.mutateAsync(payload);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
@@ -254,7 +336,7 @@ export default function VeiculoDetailPage() {
 
       {/* Abas */}
       <div className="flex gap-2 border-b">
-        {(["info", "documentos", "avaliacoes"] as const).map((t) => (
+        {(["info", "documentos", "avaliacoes", "vistorias"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -267,6 +349,7 @@ export default function VeiculoDetailPage() {
             {t === "info" && "Informações"}
             {t === "documentos" && "Documentos"}
             {t === "avaliacoes" && "Avaliações"}
+            {t === "vistorias" && "Vistorias"}
           </button>
         ))}
       </div>
@@ -581,6 +664,140 @@ export default function VeiculoDetailPage() {
                   Cancelar
                 </Button>
                 <Button onClick={handleSaveAval} loading={criarAvalM.isPending || atualizarAvalM.isPending}>
+                  Salvar
+                </Button>
+              </div>
+            </div>
+          </Dialog>
+        </div>
+      )}
+
+      {/* Vistorias Tab */}
+      {tab === "vistorias" && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold">Vistorias do Veículo</h2>
+            {can("transporte_regulado", "inserir") && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setEditingVist(null);
+                  setVistForm(EMPTY_VIST);
+                  setVistDialogOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Nova Vistoria
+              </Button>
+            )}
+          </div>
+
+          {vistQ.isLoading ? (
+            <div>Carregando...</div>
+          ) : vistQ.data && vistQ.data.length > 0 ? (
+            <Table>
+              <THead>
+                <TR>
+                  <TH>Resultado</TH>
+                  <TH>Data</TH>
+                  <TH>Parecer</TH>
+                  <TH>Ações</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {vistQ.data.map((vist) => (
+                  <TR key={vist.id}>
+                    <TD>
+                      <Badge intent={RESULTADO_INTENT[vist.resultado] || "neutral"}>
+                        {vist.resultado}
+                      </Badge>
+                    </TD>
+                    <TD>{new Date(vist.data_vistoria).toLocaleDateString()}</TD>
+                    <TD className="max-w-sm truncate">{vist.parecer}</TD>
+                    <TD className="flex gap-2">
+                      {can("transporte_regulado", "atualizar") && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setEditingVist(vist);
+                            setVistForm({
+                              resultado: vist.resultado,
+                              parecer: vist.parecer,
+                              observacoes: vist.observacoes || "",
+                              data_vistoria: vist.data_vistoria.split("T")[0],
+                            });
+                            setVistDialogOpen(true);
+                          }}
+                        >
+                          Editar
+                        </Button>
+                      )}
+                      {can("transporte_regulado", "excluir") && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => removerVistM.mutate(vist.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          ) : (
+            <EmptyState icon={CheckCircle} title="Sem vistorias" description="Nenhuma vistoria registrada" />
+          )}
+
+          {/* Vistoria Dialog */}
+          <Dialog
+            open={vistDialogOpen}
+            onOpenChange={setVistDialogOpen}
+            title={editingVist ? "Editar Vistoria" : "Nova Vistoria"}
+          >
+            <div className="space-y-4">
+              <div>
+                <Label>Resultado *</Label>
+                <Select
+                  value={vistForm.resultado}
+                  onChange={(e) =>
+                    setVistForm({ ...vistForm, resultado: e.target.value as ResultadoAvaliacao })
+                  }
+                  options={RESULTADOS_VISTORIA}
+                />
+              </div>
+              <div>
+                <Label>Data da Vistoria</Label>
+                <Input
+                  type="date"
+                  value={vistForm.data_vistoria}
+                  onChange={(e) => setVistForm({ ...vistForm, data_vistoria: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label>Parecer *</Label>
+                <Textarea
+                  value={vistForm.parecer}
+                  onChange={(e) => setVistForm({ ...vistForm, parecer: e.target.value })}
+                  placeholder="Descreva o parecer da vistoria (mínimo 10 caracteres)..."
+                  rows={5}
+                />
+              </div>
+              <div>
+                <Label>Observações</Label>
+                <Textarea
+                  value={vistForm.observacoes}
+                  onChange={(e) => setVistForm({ ...vistForm, observacoes: e.target.value })}
+                  placeholder="Observações adicionais..."
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setVistDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleSaveVist} loading={criarVistM.isPending || atualizarVistM.isPending}>
                   Salvar
                 </Button>
               </div>
