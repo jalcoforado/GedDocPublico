@@ -1830,6 +1830,32 @@ export interface VeiculoVistoriaRenovarInput {
   data_validade?: string | null;
 }
 
+// ============================ Alvara ======================================
+export interface Alvara {
+  id: number;
+  tenant_id: number;
+  id_empresa: number | null;
+  id_permissionario: number | null;
+  numero_alvara: string;
+  data_inicio: string | null;
+  data_validade: string | null;
+  tipo_servico: string;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+  excluido: boolean;
+}
+
+export interface AlvaraInput {
+  numero_alvara: string;
+  data_inicio?: string | null;
+  data_validade?: string | null;
+  tipo_servico: string;
+  observacoes?: string | null;
+  id_empresa?: number | null;
+  id_permissionario?: number | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -2331,6 +2357,24 @@ export const api = {
           body: JSON.stringify(data),
         }),
     },
+  },
+  alvaras: {
+    list: (params?: { empresa_id?: number; permissionario_id?: number }) =>
+      request<Alvara[]>(`/transporte-regulado/alvaras${qs(params ?? {})}`),
+    get: (id: number) =>
+      request<Alvara>(`/transporte-regulado/alvaras/${id}`),
+    create: (data: AlvaraInput) =>
+      request<Alvara>("/transporte-regulado/alvaras", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<AlvaraInput>) =>
+      request<Alvara>(`/transporte-regulado/alvaras/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) =>
+      request<void>(`/transporte-regulado/alvaras/${id}`, { method: "DELETE" }),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),
