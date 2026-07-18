@@ -1809,6 +1809,8 @@ export interface VeiculoVistoria {
   parecer: string;
   observacoes: string | null;
   data_vistoria: string;
+  data_validade: string | null;
+  renovada_de: number | null;
   criado_em: string;
   atualizado_em: string | null;
 }
@@ -1818,6 +1820,14 @@ export interface VeiculoVistoriaInput {
   parecer: string;
   observacoes?: string | null;
   data_vistoria: string;
+  data_validade?: string | null;
+}
+
+export interface VeiculoVistoriaRenovarInput {
+  resultado: ResultadoAvaliacao;
+  parecer: string;
+  observacoes?: string | null;
+  data_validade?: string | null;
 }
 
 export const api = {
@@ -2312,6 +2322,13 @@ export const api = {
       remove: (veiculoId: number, vistoriaId: number) =>
         request<void>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}`, {
           method: "DELETE",
+        }),
+      listarVencidas: (veiculoId: number) =>
+        request<VeiculoVistoria[]>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/vencidas`),
+      renovar: (veiculoId: number, vistoriaId: number, data: VeiculoVistoriaRenovarInput) =>
+        request<VeiculoVistoria>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}/renovar`, {
+          method: "POST",
+          body: JSON.stringify(data),
         }),
     },
   },
