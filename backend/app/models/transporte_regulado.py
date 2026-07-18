@@ -1,8 +1,8 @@
-"""Transporte Regulado — modelos de Permissionário, Empresa e Veículo regulado.
+"""Transporte Regulado — modelos de Permissionário, Empresa, Veículo, Documentos e Avaliações.
 
 Domínio SEPARADO da Frota Interna (schema `transporte_regulado`, permissão
 `transporte_regulado`). Tenant-scoped, RLS nas tabelas do schema (ver migrations
-0041/0042), no mesmo padrão de `frota.veiculo`.
+0041/0042/0043/0044), no mesmo padrão de `frota.veiculo`.
 
 `situacao` é o estado regulatório (pendente / ativo(a) / suspenso(a) /
 cassado(a) / inativo(a)); `excluido` é soft-delete. `cpf`/`cnpj` únicos por tenant
@@ -14,6 +14,33 @@ from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Tex
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
+
+
+# Enums (string-based for DB flexibility)
+TIPO_DOCUMENTO_CHOICES = {
+    "crlv": "CRLV",
+    "cnh_copia": "Cópia CNH",
+    "inspecao": "Inspeção",
+    "vistoria": "Vistoria",
+    "seguro": "Seguro",
+    "autorizacao_especial": "Autorização Especial",
+    "adaptacao": "Adaptação Mobiliário",
+    "outro": "Outro",
+}
+
+STATUS_DOCUMENTO_CHOICES = {
+    "pendente": "Pendente",
+    "valido": "Válido",
+    "vencido": "Vencido",
+    "rejeitado": "Rejeitado",
+}
+
+RESULTADO_AVALIACAO_CHOICES = {
+    "pendente": "Pendente",
+    "aprovado": "Aprovado",
+    "reprovado": "Reprovado",
+    "condicional": "Condicional",
+}
 
 
 class Permissionario(Base):
@@ -128,6 +155,66 @@ class VeiculoRegulado(Base):
         String(20), nullable=False, default="pendente"
     )
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoDocumento(Base):
+    """Documentos de veículos regulados (metadados apenas — sem upload/anexos).
+
+    Tipos: CRLV, CNH, inspeção, vistoria, seguro, autorização especial, adaptação, outro.
+    Status: pendente, válido, vencido, rejeitado (controlado por serviço).
+    Validação: data_emissao ≤ data_validade (quando ambas informadas).
+    """
+
+    __tablename__ = "veiculo_documento"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.veiculo.id"), nullable=False
+    )
+    tipo_documento: Mapped[str] = mapped_column(String(30), nullable=False)
+    numero_documento: Mapped[str] = mapped_column(String(100), nullable=False)
+    data_emissao: Mapped[date | None] = mapped_column(Date, nullable=True)
+    data_validade: Mapped[date | None] = mapped_column(Date, nullable=True)
+    situacao: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pendente"
+    )
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoAvaliacao(Base):
+    """Pareceres regulatórios de veículos (avaliação de conformidade, documentação, etc.).
+
+    Resultado: pendente, aprovado, reprovado, condicional.
+    Avaliador: referência para usuário (mesma tenant — validado no serviço).
+    """
+
+    __tablename__ = "veiculo_avaliacao"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.veiculo.id"), nullable=False
+    )
+    id_usuario_avaliador: Mapped[int] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=False
+    )
+    resultado: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente")
+    parecer: Mapped[str] = mapped_column(Text, nullable=False)
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    data_avaliacao: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

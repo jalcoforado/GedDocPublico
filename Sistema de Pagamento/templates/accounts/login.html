@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Login — Sistema de Pagamentos Municipais{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-4 mt-5">
+        <div class="card p-4">
+            <h4 class="mb-3 text-center">Sistema de Gestão e Autorização<br>de Pagamentos Municipais</h4>
+            {% if form.non_field_errors %}
+            <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+            {% endif %}
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label class="form-label">{{ form.username.label }}</label>
+                    {{ form.username }}
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">{{ form.password.label }}</label>
+                    {{ form.password }}
+                </div>
+                <button type="submit" class="btn btn-primary w-100">Entrar</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Vincular Lançamento{% endblock %}
+{% block content %}
+<h3 class="mb-4">Vincular Lançamento a Pedido</h3>
+<p>{{ lancamento.data|date:"d/m/Y" }} — {{ lancamento.historico }} — R$ {{ lancamento.valor }}</p>
+<div class="card p-4" style="max-width: 600px;">
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label class="form-label">{{ form.pedido.label }}</label>
+            {{ form.pedido }}
+            {% for error in form.pedido.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <button type="submit" class="btn btn-primary">Confirmar Vínculo e Baixar</button>
+        <a href="{% url 'conciliacao:pendencias' %}" class="btn btn-outline-secondary">Cancelar</a>
+    </form>
+</div>
+{% endblock %}

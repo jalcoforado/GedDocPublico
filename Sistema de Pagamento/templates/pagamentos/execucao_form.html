@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Executar Pagamento{% endblock %}
+{% block content %}
+<h3 class="mb-4">Executar Pagamento — {{ pedido.protocolo }}</h3>
+<p>Credor: <strong>{{ pedido.credor }}</strong> — Valor: <strong>R$ {{ pedido.valor }}</strong></p>
+<div class="card p-4" style="max-width: 600px;">
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {% for field in form %}
+        <div class="mb-3">
+            <label class="form-label">{{ field.label }}</label>
+            {{ field }}
+            {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary">Registrar Baixa</button>
+        <a href="{% url 'pagamentos:tesouraria_fila' %}" class="btn btn-outline-secondary">Cancelar</a>
+    </form>
+</div>
+{% endblock %}

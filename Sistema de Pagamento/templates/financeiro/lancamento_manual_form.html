@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Lançamento Manual{% endblock %}
+{% block content %}
+<h3 class="mb-4">Lançamento Manual — {{ conta.nome }}</h3>
+<p class="text-muted small">Uso restrito a situações de contingência (RF36). O saldo diário deve ser preferencialmente atualizado pela conciliação bancária automatizada (M7).</p>
+<div class="card p-4" style="max-width: 600px;">
+    <form method="post">
+        {% csrf_token %}
+        {% for field in form %}
+        <div class="mb-3">
+            <label class="form-label">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+            {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary">Registrar</button>
+        <a href="{% url 'financeiro:detalhe_conta' conta.pk %}" class="btn btn-outline-secondary">Cancelar</a>
+    </form>
+</div>
+{% endblock %}

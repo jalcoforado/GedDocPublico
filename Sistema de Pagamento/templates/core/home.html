@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Início{% endblock %}
+{% block content %}
+<h3 class="mb-4">Bem-vindo(a), {{ user.get_full_name|default:user.email }}</h3>
+<div class="row g-3">
+    {% if perfil.papel == 'SOLICITANTE' or perfil.papel == 'ADMIN' %}
+    <div class="col-md-4">
+        <div class="card p-3">
+            <h5>Solicitação de Pagamento</h5>
+            <p class="text-muted small">Registre e acompanhe pedidos de pagamento da sua secretaria.</p>
+            <a href="{% url 'pagamentos:solicitante_lista' %}" class="btn btn-primary btn-sm">Meus Pedidos</a>
+        </div>
+    </div>
+    {% endif %}
+    {% if perfil.papel == 'SECRETARIO' or perfil.papel == 'ADMIN' %}
+    <div class="col-md-4">
+        <div class="card p-3">
+            <h5>Aprovação (Secretário)</h5>
+            <p class="text-muted small">Analise e aprove pedidos da sua pasta.</p>
+            <a href="{% url 'pagamentos:secretario_fila' %}" class="btn btn-primary btn-sm">Fila de Aprovação</a>
+        </div>
+    </div>
+    {% endif %}
+    {% if perfil.papel == 'AUTORIZADOR' or perfil.papel == 'ADMIN' %}
+    <div class="col-md-4">
+        <div class="card p-3">
+            <h5>Liberação de Pagamento</h5>
+            <p class="text-muted small">Autorize pagamentos com base em saldo e criticidade.</p>
+            <a href="{% url 'pagamentos:autorizador_painel' %}" class="btn btn-primary btn-sm">Painel de Autorização</a>
+        </div>
+    </div>
+    {% endif %}
+    {% if perfil.papel == 'TESOURARIA' or perfil.papel == 'ADMIN' %}
+    <div class="col-md-4">
+        <div class="card p-3">
+            <h5>Execução (Tesouraria)</h5>
+            <p class="text-muted small">Efetive pagamentos autorizados e concilie extratos.</p>
+            <a href="{% url 'pagamentos:tesouraria_fila' %}" class="btn btn-primary btn-sm">Fila de Execução</a>
+            <a href="{% url 'conciliacao:lista_extratos' %}" class="btn btn-outline-primary btn-sm mt-2">Conciliação Bancária</a>
+        </div>
+    </div>
+    {% endif %}
+    {% if perfil.papel == 'CONTROLE_INTERNO' or perfil.papel == 'ADMIN' %}
+    <div class="col-md-4">
+        <div class="card p-3">
+            <h5>Auditoria</h5>
+            <p class="text-muted small">Consulte a trilha completa de ações do sistema.</p>
+            <a href="{% url 'auditoria:consulta' %}" class="btn btn-primary btn-sm">Trilha de Auditoria</a>
+        </div>
+    </div>
+    {% endif %}
+    <div class="col-md-4">
+        <div class="card p-3">
+            <h5>Painéis Gerenciais</h5>
+            <p class="text-muted small">Indicadores consolidados e relatórios.</p>
+            <a href="{% url 'relatorios:painel' %}" class="btn btn-primary btn-sm">Ver Painéis</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

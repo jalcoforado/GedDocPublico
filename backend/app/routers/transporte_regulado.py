@@ -22,6 +22,12 @@ from ..schemas.transporte_regulado import (
     VeiculoReguladoCreate,
     VeiculoReguladoOut,
     VeiculoReguladoUpdate,
+    VeiculoDocumentoCreate,
+    VeiculoDocumentoOut,
+    VeiculoDocumentoUpdate,
+    VeiculoAvaliacaoCreate,
+    VeiculoAvaliacaoOut,
+    VeiculoAvaliacaoUpdate,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -360,3 +366,161 @@ async def delete_veiculo(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await tr_svc.excluir_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
+
+
+# ============================ Documentos Veículo ==============================
+documentos_router = APIRouter(
+    prefix="/transporte-regulado/veiculos/{veiculo_id}/documentos",
+    tags=["transporte-regulado-documentos"],
+)
+
+
+@documentos_router.get("", response_model=list[VeiculoDocumentoOut])
+async def list_documentos(
+    veiculo_id: int,
+    tipo_documento: str | None = None,
+    situacao: str | None = None,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[VeiculoDocumentoOut]:
+    rows = await tr_svc.listar_documentos(
+        db,
+        tenant_id=tenant_id,
+        veiculo_id=veiculo_id,
+        tipo_documento=tipo_documento,
+        situacao=situacao,
+    )
+    return [VeiculoDocumentoOut.model_validate(r) for r in rows]
+
+
+@documentos_router.post(
+    "", response_model=VeiculoDocumentoOut, status_code=status.HTTP_201_CREATED
+)
+async def create_documento(
+    veiculo_id: int,
+    payload: VeiculoDocumentoCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoDocumentoOut:
+    doc = await tr_svc.criar_documento(
+        db, tenant_id=tenant_id, veiculo_id=veiculo_id, payload=payload
+    )
+    return VeiculoDocumentoOut.model_validate(doc)
+
+
+@documentos_router.get("/{documento_id}", response_model=VeiculoDocumentoOut)
+async def get_documento(
+    veiculo_id: int,
+    documento_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoDocumentoOut:
+    doc = await tr_svc.obter_documento(db, tenant_id=tenant_id, documento_id=documento_id)
+    return VeiculoDocumentoOut.model_validate(doc)
+
+
+@documentos_router.put("/{documento_id}", response_model=VeiculoDocumentoOut)
+async def update_documento(
+    veiculo_id: int,
+    documento_id: int,
+    payload: VeiculoDocumentoUpdate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoDocumentoOut:
+    doc = await tr_svc.atualizar_documento(
+        db, tenant_id=tenant_id, documento_id=documento_id, payload=payload
+    )
+    return VeiculoDocumentoOut.model_validate(doc)
+
+
+@documentos_router.delete("/{documento_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_documento(
+    veiculo_id: int,
+    documento_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await tr_svc.excluir_documento(db, tenant_id=tenant_id, documento_id=documento_id)
+
+
+# ============================ Avaliações Veículo ==============================
+avaliacoes_router = APIRouter(
+    prefix="/transporte-regulado/veiculos/{veiculo_id}/avaliacoes",
+    tags=["transporte-regulado-avaliacoes"],
+)
+
+
+@avaliacoes_router.get("", response_model=list[VeiculoAvaliacaoOut])
+async def list_avaliacoes(
+    veiculo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[VeiculoAvaliacaoOut]:
+    rows = await tr_svc.listar_avaliacoes(
+        db, tenant_id=tenant_id, veiculo_id=veiculo_id
+    )
+    return [VeiculoAvaliacaoOut.model_validate(r) for r in rows]
+
+
+@avaliacoes_router.post(
+    "", response_model=VeiculoAvaliacaoOut, status_code=status.HTTP_201_CREATED
+)
+async def create_avaliacao(
+    veiculo_id: int,
+    payload: VeiculoAvaliacaoCreate,
+    usuario: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoAvaliacaoOut:
+    av = await tr_svc.criar_avaliacao(
+        db,
+        tenant_id=tenant_id,
+        veiculo_id=veiculo_id,
+        usuario_id=usuario.id,
+        payload=payload,
+    )
+    return VeiculoAvaliacaoOut.model_validate(av)
+
+
+@avaliacoes_router.get("/{avaliacao_id}", response_model=VeiculoAvaliacaoOut)
+async def get_avaliacao(
+    veiculo_id: int,
+    avaliacao_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoAvaliacaoOut:
+    av = await tr_svc.obter_avaliacao(db, tenant_id=tenant_id, avaliacao_id=avaliacao_id)
+    return VeiculoAvaliacaoOut.model_validate(av)
+
+
+@avaliacoes_router.put("/{avaliacao_id}", response_model=VeiculoAvaliacaoOut)
+async def update_avaliacao(
+    veiculo_id: int,
+    avaliacao_id: int,
+    payload: VeiculoAvaliacaoUpdate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> VeiculoAvaliacaoOut:
+    av = await tr_svc.atualizar_avaliacao(
+        db, tenant_id=tenant_id, avaliacao_id=avaliacao_id, payload=payload
+    )
+    return VeiculoAvaliacaoOut.model_validate(av)
+
+
+@avaliacoes_router.delete("/{avaliacao_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_avaliacao(
+    veiculo_id: int,
+    avaliacao_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await tr_svc.excluir_avaliacao(db, tenant_id=tenant_id, avaliacao_id=avaliacao_id)

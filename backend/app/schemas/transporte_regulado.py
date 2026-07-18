@@ -514,3 +514,137 @@ class VeiculoReguladoOut(BaseModel):
     observacoes: str | None = None
     criado_em: datetime
     atualizado_em: datetime | None = None
+
+
+# ============================ Documento Veículo ==============================
+TipoDocumento = Literal[
+    "crlv", "cnh_copia", "inspecao", "vistoria", "seguro",
+    "autorizacao_especial", "adaptacao", "outro"
+]
+StatusDocumento = Literal["pendente", "valido", "vencido", "rejeitado"]
+ResultadoAvaliacao = Literal["pendente", "aprovado", "reprovado", "condicional"]
+
+
+class VeiculoDocumentoCreate(BaseModel):
+    """Documento de veículo regulado. `tipo_documento` em enum, `numero_documento`
+    não vazio, `data_emissao <= data_validade` se ambas informadas."""
+
+    tipo_documento: TipoDocumento
+    numero_documento: str = Field(min_length=1, max_length=100)
+    data_emissao: date | None = None
+    data_validade: date | None = None
+    observacoes: str | None = None
+
+    @field_validator("numero_documento")
+    @classmethod
+    def _numero_documento(cls, v: str) -> str:
+        if v.strip() == "":
+            raise ValueError("numero_documento não pode estar vazio.")
+        return v
+
+    @model_validator(mode="after")
+    def _coerencia_datas(self) -> "VeiculoDocumentoCreate":
+        if (
+            self.data_emissao is not None
+            and self.data_validade is not None
+            and self.data_emissao > self.data_validade
+        ):
+            raise ValueError("data_emissao deve ser anterior ou igual a data_validade.")
+        return self
+
+
+class VeiculoDocumentoUpdate(BaseModel):
+    """Atualização de documento — todos os campos opcional."""
+
+    tipo_documento: TipoDocumento | None = None
+    numero_documento: str | None = Field(default=None, min_length=1, max_length=100)
+    data_emissao: date | None = None
+    data_validade: date | None = None
+    observacoes: str | None = None
+
+    @field_validator("numero_documento")
+    @classmethod
+    def _numero_documento(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v.strip() == "":
+            raise ValueError("numero_documento não pode estar vazio.")
+        return v
+
+
+class VeiculoDocumentoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    id_veiculo: int
+    tipo_documento: str
+    numero_documento: str
+    data_emissao: date | None = None
+    data_validade: date | None = None
+    situacao: str
+    observacoes: str | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+    excluido: bool
+
+
+# ============================ Avaliação Veículo ==============================
+class VeiculoAvaliacaoCreate(BaseModel):
+    """Avaliação/parecer regulatório de veículo. `resultado` em enum, `parecer`
+    obrigatório e com mínimo 10 caracteres, `data_avaliacao` não pode ser futura."""
+
+    resultado: ResultadoAvaliacao
+    parecer: str = Field(min_length=10, max_length=5000)
+    observacoes: str | None = None
+    data_avaliacao: datetime
+
+    @field_validator("parecer")
+    @classmethod
+    def _parecer(cls, v: str) -> str:
+        if v.strip() == "":
+            raise ValueError("parecer não pode estar vazio.")
+        return v
+
+    @model_validator(mode="after")
+    def _coerencia_data(self) -> "VeiculoAvaliacaoCreate":
+        from datetime import datetime as dt
+
+        agora = dt.utcnow()
+        if self.data_avaliacao > agora:
+            raise ValueError("data_avaliacao não pode ser uma data futura.")
+        return self
+
+
+class VeiculoAvaliacaoUpdate(BaseModel):
+    """Atualização de avaliação — todos os campos opcional."""
+
+    resultado: ResultadoAvaliacao | None = None
+    parecer: str | None = Field(default=None, min_length=10, max_length=5000)
+    observacoes: str | None = None
+    data_avaliacao: datetime | None = None
+
+    @field_validator("parecer")
+    @classmethod
+    def _parecer(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v.strip() == "":
+            raise ValueError("parecer não pode estar vazio.")
+        return v
+
+
+class VeiculoAvaliacaoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    id_veiculo: int
+    id_usuario_avaliador: int
+    resultado: str
+    parecer: str
+    observacoes: str | None = None
+    data_avaliacao: datetime
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+    excluido: bool

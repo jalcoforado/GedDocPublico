@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Justificativa{% endblock %}
+{% block content %}
+<h3 class="mb-4">{{ pedido.protocolo }} — {{ pedido.credor }}</h3>
+<div class="card p-4" style="max-width: 600px;">
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label class="form-label">{{ form.justificativa.label }}</label>
+            {{ form.justificativa }}
+            {% for error in form.justificativa.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <button type="submit" class="btn btn-primary">Confirmar</button>
+        <a href="{% url 'pagamentos:detalhe' pedido.pk %}" class="btn btn-outline-secondary">Cancelar</a>
+    </form>
+</div>
+{% endblock %}

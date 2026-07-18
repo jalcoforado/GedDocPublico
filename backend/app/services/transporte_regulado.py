@@ -14,7 +14,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Empresa, Permissionario, VeiculoRegulado
+from ..models import Empresa, Permissionario, VeiculoRegulado, Usuario
+from ..models.transporte_regulado import VeiculoDocumento, VeiculoAvaliacao
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
     EmpresaUpdate,
@@ -22,6 +23,10 @@ from ..schemas.transporte_regulado import (
     PermissionarioUpdate,
     VeiculoReguladoCreate,
     VeiculoReguladoUpdate,
+    VeiculoDocumentoCreate,
+    VeiculoDocumentoUpdate,
+    VeiculoAvaliacaoCreate,
+    VeiculoAvaliacaoUpdate,
 )
 
 
@@ -537,4 +542,264 @@ async def excluir_veiculo(
     v = await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
     v.excluido = True
     v.atualizado_em = datetime.utcnow()
+    await db.commit()
+
+
+# ============================ Documento Veículo ==============================
+async def _validar_documento_existe(
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int, tipo_documento: str
+) -> bool:
+    """Retorna True se já existe documento não-excluído do mesmo tipo para o veículo."""
+    stmt = select(VeiculoDocumento.id).where(
+        VeiculoDocumento.tenant_id == tenant_id,
+        VeiculoDocumento.id_veiculo == veiculo_id,
+        VeiculoDocumento.tipo_documento == tipo_documento,
+        VeiculoDocumento.excluido.is_(False),
+    )
+    return (await db.execute(stmt)).scalar_one_or_none() is not None
+
+
+async def _validar_usuario_existe(
+    db: AsyncSession, *, tenant_id: int, usuario_id: int
+) -> bool:
+    """Valida se usuário existe no mesmo tenant (retorna True se existe)."""
+    stmt = select(Usuario.id).where(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == tenant_id,
+    )
+    return (await db.execute(stmt)).scalar_one_or_none() is not None
+
+
+async def obter_documento(
+    db: AsyncSession, *, tenant_id: int, documento_id: int
+) -> VeiculoDocumento:
+    """Obtém documento por ID, validando tenant e soft-delete."""
+    doc = (
+        await db.execute(
+            select(VeiculoDocumento).where(
+                VeiculoDocumento.id == documento_id,
+                VeiculoDocumento.tenant_id == tenant_id,
+                VeiculoDocumento.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Documento não encontrado"
+        )
+    return doc
+
+
+async def listar_documentos(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    veiculo_id: int,
+    tipo_documento: str | None = None,
+    situacao: str | None = None,
+) -> list[VeiculoDocumento]:
+    """Lista documentos de um veículo com filtros opcionais."""
+    stmt = select(VeiculoDocumento).where(
+        VeiculoDocumento.tenant_id == tenant_id,
+        VeiculoDocumento.id_veiculo == veiculo_id,
+        VeiculoDocumento.excluido.is_(False),
+    )
+    if tipo_documento is not None:
+        stmt = stmt.where(VeiculoDocumento.tipo_documento == tipo_documento)
+    if situacao is not None:
+        stmt = stmt.where(VeiculoDocumento.situacao == situacao)
+    stmt = stmt.order_by(VeiculoDocumento.criado_em)
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def criar_documento(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    veiculo_id: int,
+    payload: VeiculoDocumentoCreate,
+) -> VeiculoDocumento:
+    """Cria novo documento para veículo regulado.
+
+    1. Valida que veículo existe no tenant
+    2. Valida unicidade do tipo de documento por veículo
+    3. Insere registro com criado_em = now()
+    """
+    # 1. Valida veículo
+    await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
+
+    # 2. Valida unicidade
+    if await _validar_documento_existe(
+        db,
+        tenant_id=tenant_id,
+        veiculo_id=veiculo_id,
+        tipo_documento=payload.tipo_documento,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Documento do tipo '{payload.tipo_documento}' já existe para este veículo.",
+        )
+
+    # 3. Insere
+    dados = payload.model_dump()
+    doc = VeiculoDocumento(
+        tenant_id=tenant_id,
+        id_veiculo=veiculo_id,
+        criado_em=datetime.utcnow(),
+        **dados,
+    )
+    db.add(doc)
+    await db.commit()
+    await db.refresh(doc)
+    return doc
+
+
+async def atualizar_documento(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    documento_id: int,
+    payload: VeiculoDocumentoUpdate,
+) -> VeiculoDocumento:
+    """Atualiza documento existente.
+
+    1. Valida que documento existe no tenant
+    2. Se tipo_documento muda, valida unicidade do novo tipo
+    3. Atualiza com atualizado_em = now()
+    """
+    # 1. Valida documento
+    doc = await obter_documento(db, tenant_id=tenant_id, documento_id=documento_id)
+    dados = payload.model_dump(exclude_unset=True)
+
+    # 2. Valida novo tipo se foi mudado
+    if "tipo_documento" in dados and dados["tipo_documento"] != doc.tipo_documento:
+        if await _validar_documento_existe(
+            db,
+            tenant_id=tenant_id,
+            veiculo_id=doc.id_veiculo,
+            tipo_documento=dados["tipo_documento"],
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Documento do tipo '{dados['tipo_documento']}' já existe para este veículo.",
+            )
+
+    # 3. Atualiza
+    for campo, valor in dados.items():
+        setattr(doc, campo, valor)
+    doc.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(doc)
+    return doc
+
+
+async def excluir_documento(
+    db: AsyncSession, *, tenant_id: int, documento_id: int
+) -> None:
+    """Soft-delete de documento (excluido=True)."""
+    doc = await obter_documento(db, tenant_id=tenant_id, documento_id=documento_id)
+    doc.excluido = True
+    doc.atualizado_em = datetime.utcnow()
+    await db.commit()
+
+
+# ============================ Avaliação Veículo ==============================
+async def obter_avaliacao(
+    db: AsyncSession, *, tenant_id: int, avaliacao_id: int
+) -> VeiculoAvaliacao:
+    """Obtém avaliação por ID, validando tenant e soft-delete."""
+    av = (
+        await db.execute(
+            select(VeiculoAvaliacao).where(
+                VeiculoAvaliacao.id == avaliacao_id,
+                VeiculoAvaliacao.tenant_id == tenant_id,
+                VeiculoAvaliacao.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if av is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Avaliação não encontrada"
+        )
+    return av
+
+
+async def listar_avaliacoes(
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int
+) -> list[VeiculoAvaliacao]:
+    """Lista avaliações de um veículo."""
+    stmt = select(VeiculoAvaliacao).where(
+        VeiculoAvaliacao.tenant_id == tenant_id,
+        VeiculoAvaliacao.id_veiculo == veiculo_id,
+        VeiculoAvaliacao.excluido.is_(False),
+    )
+    stmt = stmt.order_by(VeiculoAvaliacao.data_avaliacao.desc())
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def criar_avaliacao(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    veiculo_id: int,
+    usuario_id: int,
+    payload: VeiculoAvaliacaoCreate,
+) -> VeiculoAvaliacao:
+    """Cria nova avaliação para veículo regulado.
+
+    1. Valida que veículo existe no tenant
+    2. Valida que usuário existe no tenant
+    3. Insere registro com id_usuario_avaliador = usuario_id
+    """
+    # 1. Valida veículo
+    await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
+
+    # 2. Valida usuário
+    if not await _validar_usuario_existe(db, tenant_id=tenant_id, usuario_id=usuario_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuário avaliador não encontrado neste tenant.",
+        )
+
+    # 3. Insere
+    dados = payload.model_dump()
+    av = VeiculoAvaliacao(
+        tenant_id=tenant_id,
+        id_veiculo=veiculo_id,
+        id_usuario_avaliador=usuario_id,
+        criado_em=datetime.utcnow(),
+        **dados,
+    )
+    db.add(av)
+    await db.commit()
+    await db.refresh(av)
+    return av
+
+
+async def atualizar_avaliacao(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    avaliacao_id: int,
+    payload: VeiculoAvaliacaoUpdate,
+) -> VeiculoAvaliacao:
+    """Atualiza avaliação existente com atualizado_em = now()."""
+    av = await obter_avaliacao(db, tenant_id=tenant_id, avaliacao_id=avaliacao_id)
+    dados = payload.model_dump(exclude_unset=True)
+
+    for campo, valor in dados.items():
+        setattr(av, campo, valor)
+    av.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(av)
+    return av
+
+
+async def excluir_avaliacao(
+    db: AsyncSession, *, tenant_id: int, avaliacao_id: int
+) -> None:
+    """Soft-delete de avaliação (excluido=True)."""
+    av = await obter_avaliacao(db, tenant_id=tenant_id, avaliacao_id=avaliacao_id)
+    av.excluido = True
+    av.atualizado_em = datetime.utcnow()
     await db.commit()

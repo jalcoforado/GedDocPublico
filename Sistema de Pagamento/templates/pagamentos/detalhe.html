@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% load core_extras %}
+{% block title %}{{ pedido.protocolo }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start">
+    <h3>{{ pedido.protocolo }} <span class="badge {{ pedido.status|status_class }}">{{ pedido.get_status_display }}</span></h3>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card p-3 mb-3">
+            <h6>Dados do Pedido</h6>
+            <dl class="row mb-0">
+                <dt class="col-sm-4">Órgão</dt><dd class="col-sm-8">{{ pedido.orgao }}</dd>
+                <dt class="col-sm-4">Solicitante</dt><dd class="col-sm-8">{{ pedido.solicitante }}</dd>
+                <dt class="col-sm-4">Credor</dt><dd class="col-sm-8">{{ pedido.credor }}</dd>
+                <dt class="col-sm-4">Natureza</dt><dd class="col-sm-8">{{ pedido.natureza }}</dd>
+                <dt class="col-sm-4">Contrato</dt><dd class="col-sm-8">{{ pedido.contrato|default:"—" }}</dd>
+                <dt class="col-sm-4">Conta Bancária</dt><dd class="col-sm-8">{{ pedido.conta_bancaria }}</dd>
+                <dt class="col-sm-4">Valor</dt><dd class="col-sm-8">R$ {{ pedido.valor }}</dd>
+                <dt class="col-sm-4">Nota de Empenho</dt><dd class="col-sm-8">{{ pedido.numero_ne|default:"—" }}</dd>
+                <dt class="col-sm-4">Nota Fiscal</dt><dd class="col-sm-8">{{ pedido.numero_nf|default:"—" }}</dd>
+                <dt class="col-sm-4">Vencimento</dt><dd class="col-sm-8">{{ pedido.vencimento|date:"d/m/Y" }}</dd>
+                <dt class="col-sm-4">Competência</dt><dd class="col-sm-8">{{ pedido.competencia }}</dd>
+                <dt class="col-sm-4">Criticidade</dt><dd class="col-sm-8"><span class="badge {{ pedido.criticidade|criticidade_class }}">{{ pedido.get_criticidade_display }}</span> {% if pedido.urgente %}<span class="badge bg-danger">URGENTE</span>{% endif %}</dd>
+                {% if pedido.urgente %}<dt class="col-sm-4">Justificativa Urgência</dt><dd class="col-sm-8">{{ pedido.justificativa_urgencia }}</dd>{% endif %}
+                {% if pedido.status == 'PAGO' %}
+                <dt class="col-sm-4">Forma de Pagamento</dt><dd class="col-sm-8">{{ pedido.get_forma_pagamento_display }}</dd>
+                <dt class="col-sm-4">Data do Pagamento</dt><dd class="col-sm-8">{{ pedido.data_pagamento|date:"d/m/Y" }}</dd>
+                {% endif %}
+                {% if pedido.estornado %}<dt class="col-sm-4">Estorno</dt><dd class="col-sm-8 text-danger">{{ pedido.justificativa_estorno }}</dd>{% endif %}
+            </dl>
+        </div>
+
+        <div class="card p-3 mb-3">
+            <h6>Anexos</h6>
+            <ul class="list-group list-group-flush">
+                {% for anexo in pedido.anexos.all %}
+                <li class="list-group-item d-flex justify-content-between">
+                    <span>{{ anexo.get_tipo_display }}{% if anexo.servidor_responsavel %} — {{ anexo.servidor_responsavel }}{% endif %}</span>
+                    <a href="{{ anexo.arquivo.url }}" target="_blank">Abrir</a>
+                </li>
+                {% empty %}<li class="list-group-item text-muted">Nenhum anexo.</li>{% endfor %}
+            </ul>
+            {% if perfil_usuario.papel == 'SOLICITANTE' and pedido.solicitante_id == user.id %}
+            <a href="{% url 'pagamentos:solicitante_anexar' pedido.pk %}" class="btn btn-sm btn-outline-primary mt-2">Anexar Documento</a>
+            {% endif %}
+        </div>
+
+        <div class="card p-3">
+            <h6>Histórico</h6>
+            <ul class="list-group list-group-flush">
+                {% for h in pedido.historico.all %}
+                <li class="list-group-item">
+                    <strong>{{ h.get_status_novo_display }}</strong> — {{ h.criado_em|date:"d/m/Y H:i" }} — {{ h.usuario|default:"Sistema" }}
+                    {% if h.justificativa %}<br><span class="text-muted small">{{ h.justificativa }}</span>{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card p-3">
+            <h6>Ações</h6>
+            {% if perfil_usuario.papel == 'SOLICITANTE' and pedido.solicitante_id == user.id %}
+                {% if pedido.pode_editar %}
+                <a href="{% url 'pagamentos:solicitante_editar' pedido.pk %}" class="btn btn-outline-primary btn-sm w-100 mb-2">Editar</a>
+                <form method="post" action="{% url 'pagamentos:solicitante_enviar' pedido.pk %}">
+                    {% csrf_token %}<button class="btn btn-primary btn-sm w-100 mb-2">Enviar para Aprovação</button>
+                </form>
+                <form method="post" action="{% url 'pagamentos:solicitante_cancelar' pedido.pk %}" onsubmit="return confirm('Cancelar este pedido?');">
+                    {% csrf_token %}<button class="btn btn-outline-danger btn-sm w-100">Cancelar</button>
+                </form>
+                {% endif %}
+            {% endif %}
+            {% if pedido.ordens_pagamento.first %}
+            <a href="{% url 'pagamentos:ordem_detalhe' pedido.ordens_pagamento.first.pk %}" class="btn btn-outline-secondary btn-sm w-100 mt-2">Ver Ordem de Pagamento</a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
