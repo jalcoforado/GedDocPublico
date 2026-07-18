@@ -1841,6 +1841,7 @@ export interface Alvara {
   data_validade: string | null;
   tipo_servico: string;
   observacoes: string | null;
+  renovado_de: number | null;
   criado_em: string;
   atualizado_em: string | null;
   excluido: boolean;
@@ -1854,6 +1855,12 @@ export interface AlvaraInput {
   observacoes?: string | null;
   id_empresa?: number | null;
   id_permissionario?: number | null;
+}
+
+export interface AlvaraRenovarInput {
+  data_inicio?: string | null;
+  data_validade?: string | null;
+  observacoes?: string | null;
 }
 
 export const api = {
@@ -2375,6 +2382,13 @@ export const api = {
       }),
     remove: (id: number) =>
       request<void>(`/transporte-regulado/alvaras/${id}`, { method: "DELETE" }),
+    listarVencidos: () =>
+      request<Alvara[]>("/transporte-regulado/alvaras/vencidos"),
+    renovar: (id: number, data: AlvaraRenovarInput) =>
+      request<Alvara>(`/transporte-regulado/alvaras/${id}/renovar`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),
