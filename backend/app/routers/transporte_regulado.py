@@ -32,6 +32,9 @@ from ..schemas.transporte_regulado import (
     VeiculoVistoriaOut,
     VeiculoVistoriaUpdate,
     VeiculoVistoriaRenovarInput,
+    AlvaraCreate,
+    AlvaraOut,
+    AlvaraUpdate,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -643,3 +646,73 @@ async def renovar_vistoria(
         payload=payload,
     )
     return VeiculoVistoriaOut.model_validate(v)
+
+
+# ================================ Alvarás (P2) ================================
+
+alvaras_router = APIRouter(
+    prefix="/transporte-regulado/alvaras", tags=["transporte-regulado"]
+)
+
+
+@alvaras_router.get("", response_model=list[AlvaraOut])
+async def list_alvaras(
+    empresa_id: int | None = None,
+    permissionario_id: int | None = None,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[AlvaraOut]:
+    rows = await tr_svc.listar_alvaras(
+        db,
+        tenant_id=tenant_id,
+        empresa_id=empresa_id,
+        permissionario_id=permissionario_id,
+    )
+    return [AlvaraOut.model_validate(r) for r in rows]
+
+
+@alvaras_router.get("/{alvara_id}", response_model=AlvaraOut)
+async def get_alvara(
+    alvara_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraOut:
+    a = await tr_svc.obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+    return AlvaraOut.model_validate(a)
+
+
+@alvaras_router.post("", response_model=AlvaraOut, status_code=status.HTTP_201_CREATED)
+async def create_alvara(
+    payload: AlvaraCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraOut:
+    a = await tr_svc.criar_alvara(db, tenant_id=tenant_id, payload=payload)
+    return AlvaraOut.model_validate(a)
+
+
+@alvaras_router.put("/{alvara_id}", response_model=AlvaraOut)
+async def update_alvara(
+    alvara_id: int,
+    payload: AlvaraUpdate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraOut:
+    a = await tr_svc.atualizar_alvara(
+        db, tenant_id=tenant_id, alvara_id=alvara_id, payload=payload
+    )
+    return AlvaraOut.model_validate(a)
+
+
+@alvaras_router.delete("/{alvara_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_alvara(
+    alvara_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await tr_svc.excluir_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)

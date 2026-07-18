@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Empresa, Permissionario, VeiculoRegulado, Usuario
-from ..models.transporte_regulado import VeiculoDocumento, VeiculoAvaliacao, VeiculoVistoria
+from ..models.transporte_regulado import VeiculoDocumento, VeiculoAvaliacao, VeiculoVistoria, Alvara
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
     EmpresaUpdate,
@@ -30,6 +30,9 @@ from ..schemas.transporte_regulado import (
     VeiculoVistoriaCreate,
     VeiculoVistoriaUpdate,
     VeiculoVistoriaRenovarInput,
+    AlvaraCreate,
+    AlvaraUpdate,
+    AlvaraOut,
 )
 
 
@@ -976,3 +979,122 @@ async def renovar_vistoria(
     await db.commit()
     await db.refresh(v)
     return v
+
+
+# ================================= Alvara (P2) =====================================
+
+
+async def obter_alvara(
+    db: AsyncSession, *, tenant_id: int, alvara_id: int
+) -> Alvara:
+    """Obtém alvará pelo ID, filtrando por tenant."""
+    stmt = select(Alvara).where(
+        Alvara.tenant_id == tenant_id,
+        Alvara.id == alvara_id,
+        Alvara.excluido.is_(False),
+    )
+    alvara = (await db.execute(stmt)).scalar_one_or_none()
+    if not alvara:
+        raise HTTPException(status_code=404, detail="Alvará não encontrado")
+    return alvara
+
+
+async def listar_alvaras(
+    db: AsyncSession, *, tenant_id: int, empresa_id: int | None = None, permissionario_id: int | None = None
+) -> list[Alvara]:
+    """Lista alvarás do tenant, opcionalmente filtrando por empresa ou permissionário."""
+    stmt = select(Alvara).where(
+        Alvara.tenant_id == tenant_id,
+        Alvara.excluido.is_(False),
+    )
+    if empresa_id is not None:
+        stmt = stmt.where(Alvara.id_empresa == empresa_id)
+    if permissionario_id is not None:
+        stmt = stmt.where(Alvara.id_permissionario == permissionario_id)
+    stmt = stmt.order_by(Alvara.criado_em.desc())
+    return (await db.execute(stmt)).scalars().all()
+
+
+async def criar_alvara(
+    db: AsyncSession, *, tenant_id: int, payload: AlvaraCreate
+) -> Alvara:
+    """Cria novo alvará — valida número único, ao menos um vínculo."""
+    # Valida número único
+    stmt_check = select(Alvara.id).where(
+        Alvara.tenant_id == tenant_id,
+        Alvara.numero_alvara == payload.numero_alvara,
+        Alvara.excluido.is_(False),
+    )
+    if (await db.execute(stmt_check)).scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=409, detail="Número de alvará já existe neste tenant"
+        )
+
+    # Valida empresa (se informada)
+    if payload.id_empresa:
+        await obter_empresa(db, tenant_id=tenant_id, empresa_id=payload.id_empresa)
+
+    # Valida permissionário (se informado)
+    if payload.id_permissionario:
+        await obter_permissionario(
+            db, tenant_id=tenant_id, permissionario_id=payload.id_permissionario
+        )
+
+    dados = payload.model_dump()
+    a = Alvara(
+        tenant_id=tenant_id,
+        criado_em=datetime.utcnow(),
+        **dados,
+    )
+    db.add(a)
+    await db.commit()
+    await db.refresh(a)
+    return a
+
+
+async def atualizar_alvara(
+    db: AsyncSession, *, tenant_id: int, alvara_id: int, payload: AlvaraUpdate
+) -> Alvara:
+    """Atualiza alvará — todos campos opcionais."""
+    a = await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+
+    # Se atualizando número, valida unicidade
+    if payload.numero_alvara and payload.numero_alvara != a.numero_alvara:
+        stmt_check = select(Alvara.id).where(
+            Alvara.tenant_id == tenant_id,
+            Alvara.numero_alvara == payload.numero_alvara,
+            Alvara.excluido.is_(False),
+            Alvara.id != alvara_id,
+        )
+        if (await db.execute(stmt_check)).scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=409, detail="Número de alvará já existe neste tenant"
+            )
+
+    # Se atualizando empresa, valida
+    if payload.id_empresa:
+        await obter_empresa(db, tenant_id=tenant_id, empresa_id=payload.id_empresa)
+
+    # Se atualizando permissionário, valida
+    if payload.id_permissionario:
+        await obter_permissionario(
+            db, tenant_id=tenant_id, permissionario_id=payload.id_permissionario
+        )
+
+    dados = payload.model_dump(exclude_unset=True)
+    for key, val in dados.items():
+        setattr(a, key, val)
+    a.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(a)
+    return a
+
+
+async def excluir_alvara(
+    db: AsyncSession, *, tenant_id: int, alvara_id: int
+) -> None:
+    """Exclui alvará (soft-delete)."""
+    a = await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+    a.excluido = True
+    a.atualizado_em = datetime.utcnow()
+    await db.commit()

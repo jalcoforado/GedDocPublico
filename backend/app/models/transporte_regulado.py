@@ -259,3 +259,34 @@ class VeiculoVistoria(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class Alvara(Base):
+    """Alvarás/Autorizações de operação para permissionários/empresas.
+
+    Vincula-se a permissionário E/OU empresa (ao menos um). numero_alvara é
+    único por tenant entre não excluídos. Suporta data_validade para rastreamento
+    de expiração (renovação será P2.1).
+    """
+
+    __tablename__ = "alvara"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_empresa: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.empresa.id"), nullable=True
+    )
+    id_permissionario: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.permissionario.id"), nullable=True
+    )
+    numero_alvara: Mapped[str] = mapped_column(String(40), nullable=False)
+    data_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
+    data_validade: Mapped[date | None] = mapped_column(Date, nullable=True)
+    tipo_servico: Mapped[str] = mapped_column(String(30), nullable=False)
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

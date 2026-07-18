@@ -732,3 +732,63 @@ class VeiculoVistoriaRenovarInput(BaseModel):
         if v.strip() == "":
             raise ValueError("parecer não pode estar vazio.")
         return v
+
+
+# ============================ Alvara ======================================
+class AlvaraCreate(BaseModel):
+    """Criação de alvará — número único por tenant, ao menos um de empresa/permissionário."""
+
+    numero_alvara: str = Field(min_length=1, max_length=40)
+    data_inicio: date | None = None
+    data_validade: date | None = None
+    tipo_servico: str = Field(min_length=1, max_length=30)
+    observacoes: str | None = None
+    id_empresa: int | None = None
+    id_permissionario: int | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one_vinculo(self) -> "AlvaraCreate":
+        if not self.id_empresa and not self.id_permissionario:
+            raise ValueError("Alvará deve estar vinculado a empresa ou permissionário.")
+        return self
+
+    @model_validator(mode="after")
+    def _datas_consistentes(self) -> "AlvaraCreate":
+        if self.data_inicio and self.data_validade and self.data_inicio > self.data_validade:
+            raise ValueError("data_inicio não pode ser posterior a data_validade.")
+        return self
+
+
+class AlvaraUpdate(BaseModel):
+    """Atualização de alvará — todos campos opcionais."""
+
+    numero_alvara: str | None = Field(default=None, min_length=1, max_length=40)
+    data_inicio: date | None = None
+    data_validade: date | None = None
+    tipo_servico: str | None = Field(default=None, min_length=1, max_length=30)
+    observacoes: str | None = None
+    id_empresa: int | None = None
+    id_permissionario: int | None = None
+
+    @model_validator(mode="after")
+    def _datas_consistentes(self) -> "AlvaraUpdate":
+        if self.data_inicio and self.data_validade and self.data_inicio > self.data_validade:
+            raise ValueError("data_inicio não pode ser posterior a data_validade.")
+        return self
+
+
+class AlvaraOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    id_empresa: int | None
+    id_permissionario: int | None
+    numero_alvara: str
+    data_inicio: date | None
+    data_validade: date | None
+    tipo_servico: str
+    observacoes: str | None
+    criado_em: datetime
+    atualizado_em: datetime | None
+    excluido: bool
