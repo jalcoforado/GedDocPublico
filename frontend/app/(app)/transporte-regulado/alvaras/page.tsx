@@ -20,6 +20,7 @@ import {
   api,
   type Alvara,
   type AlvaraInput,
+  type AlvaraRenovarInput,
   type Empresa,
   type Permissionario,
   type TipoServico,
@@ -57,6 +58,18 @@ const EMPTY: AlvaraForm = {
   id_permissionario: "",
 };
 
+interface RenovarForm {
+  data_inicio: string;
+  data_validade: string;
+  observacoes: string;
+}
+
+const EMPTY_RENOV: RenovarForm = {
+  data_inicio: "",
+  data_validade: "",
+  observacoes: "",
+};
+
 function nullify(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
@@ -84,6 +97,10 @@ export default function AlvarasPage() {
   const [editing, setEditing] = useState<Alvara | null>(null);
   const [form, setForm] = useState<AlvaraForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
+  const [renovarDialogOpen, setRenovarDialogOpen] = useState(false);
+  const [renovarForm, setRenovarForm] = useState<RenovarForm>(EMPTY_RENOV);
+  const [selectedAlvaraToRenew, setSelectedAlvaraToRenew] = useState<Alvara | null>(null);
+  const [renovarErr, setRenovarErr] = useState<string | null>(null);
 
   const listaQ = useQuery({
     queryKey: ["tr-alvaras", empresaFiltro, permFiltro, busca],
@@ -106,7 +123,16 @@ export default function AlvarasPage() {
     enabled: dialogOpen,
   });
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["tr-alvaras"] });
+  const vencidosQ = useQuery({
+    queryKey: ["tr-alvaras-vencidos"],
+    queryFn: () => api.alvaras.listarVencidos(),
+    enabled: renovarDialogOpen,
+  });
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["tr-alvaras"] });
+    qc.invalidateQueries({ queryKey: ["tr-alvaras-vencidos"] });
+  };
 
   const saveM = useMutation({
     mutationFn: (data: AlvaraInput) =>
@@ -126,6 +152,17 @@ export default function AlvarasPage() {
       toast.success("Alvará excluído.");
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+
+  const renovarM = useMutation({
+    mutationFn: (data: AlvaraRenovarInput) =>
+      selectedAlvaraToRenew ? api.alvaras.renovar(selectedAlvaraToRenew.id, data) : Promise.reject(),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Alvará renovado.");
+      closeRenovarDialog();
+    },
+    onError: (e: Error) => setRenovarErr(e.message),
   });
 
   function set<K extends keyof AlvaraForm>(key: K, value: AlvaraForm[K]) {
@@ -159,6 +196,38 @@ export default function AlvarasPage() {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+  }
+
+  function openRenovar(a: Alvara) {
+    setSelectedAlvaraToRenew(a);
+    setRenovarForm(EMPTY_RENOV);
+    setRenovarErr(null);
+    setRenovarDialogOpen(true);
+  }
+
+  function closeRenovarDialog() {
+    setRenovarDialogOpen(false);
+    setSelectedAlvaraToRenew(null);
+    setRenovarForm(EMPTY_RENOV);
+    setRenovarErr(null);
+  }
+
+  function setRenov<K extends keyof RenovarForm>(key: K, value: RenovarForm[K]) {
+    setRenovarForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function salvarRenov() {
+    setRenovarErr(null);
+    if (renovarForm.data_inicio && renovarForm.data_validade && renovarForm.data_inicio > renovarForm.data_validade) {
+      setRenovarErr("Data de início não pode ser posterior à data de validade.");
+      return;
+    }
+    const payload: AlvaraRenovarInput = {
+      data_inicio: nullify(renovarForm.data_inicio),
+      data_validade: nullify(renovarForm.data_validade),
+      observacoes: nullify(renovarForm.observacoes),
+    };
+    renovarM.mutate(payload);
   }
 
   function salvar() {
@@ -309,6 +378,11 @@ export default function AlvarasPage() {
                         Editar
                       </Button>
                     )}
+                    {canCreate && isExpired(a.data_validade) && (
+                      <Button variant="secondary" size="sm" onClick={() => openRenovar(a)}>
+                        Renovar
+                      </Button>
+                    )}
                     {canDelete && (
                       <Button
                         variant="danger"
@@ -433,6 +507,81 @@ export default function AlvarasPage() {
               value={form.observacoes}
               onChange={(e) => set("observacoes", e.target.value)}
               placeholder="Notas adicionais sobre o alvará"
+              rows={3}
+            />
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={renovarDialogOpen}
+        onClose={closeRenovarDialog}
+        title={selectedAlvaraToRenew ? `Renovar — ${selectedAlvaraToRenew.numero_alvara}` : "Renovar alvará"}
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeRenovarDialog}>
+              Cancelar
+            </Button>
+            <Button onClick={salvarRenov} disabled={renovarM.isPending}>
+              {renovarM.isPending ? "Renovando..." : "Renovar"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          {renovarErr && (
+            <div className="rounded bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+              {renovarErr}
+            </div>
+          )}
+
+          {selectedAlvaraToRenew && (
+            <div className="rounded border border-amber-200 bg-amber-50 p-4">
+              <div className="text-sm font-medium text-amber-900 mb-2">Alvará Original</div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <span className="text-muted-foreground">Número:</span> {selectedAlvaraToRenew.numero_alvara}
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Tipo:</span> {TIPO_LABEL[selectedAlvaraToRenew.tipo_servico]}
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Válido até:</span>{" "}
+                  <span className="line-through text-red-600 font-semibold">{selectedAlvaraToRenew.data_validade}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="renov_data_inicio">Data de início</Label>
+              <Input
+                id="renov_data_inicio"
+                type="date"
+                value={renovarForm.data_inicio}
+                onChange={(e) => setRenov("data_inicio", e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="renov_data_validade">Data de validade</Label>
+              <Input
+                id="renov_data_validade"
+                type="date"
+                value={renovarForm.data_validade}
+                onChange={(e) => setRenov("data_validade", e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="renov_obs">Observações</Label>
+            <Textarea
+              id="renov_obs"
+              value={renovarForm.observacoes}
+              onChange={(e) => setRenov("observacoes", e.target.value)}
+              placeholder="Notas sobre a renovação"
               rows={3}
             />
           </div>
