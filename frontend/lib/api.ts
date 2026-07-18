@@ -1801,6 +1801,25 @@ export interface VeiculoAvaliacaoInput {
   data_avaliacao: string;
 }
 
+export interface VeiculoVistoria {
+  id: number;
+  id_veiculo: number;
+  id_auditor: number;
+  resultado: ResultadoAvaliacao;
+  parecer: string;
+  observacoes: string | null;
+  data_vistoria: string;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface VeiculoVistoriaInput {
+  resultado: ResultadoAvaliacao;
+  parecer: string;
+  observacoes?: string | null;
+  data_vistoria: string;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -2272,6 +2291,26 @@ export const api = {
         }),
       remove: (veiculoId: number, avaliacaoId: number) =>
         request<void>(`/transporte-regulado/veiculos/${veiculoId}/avaliacoes/${avaliacaoId}`, {
+          method: "DELETE",
+        }),
+    },
+    vistorias: {
+      list: (veiculoId: number) =>
+        request<VeiculoVistoria[]>(`/transporte-regulado/veiculos/${veiculoId}/vistorias`),
+      get: (veiculoId: number, vistoriaId: number) =>
+        request<VeiculoVistoria>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}`),
+      create: (veiculoId: number, data: VeiculoVistoriaInput) =>
+        request<VeiculoVistoria>(`/transporte-regulado/veiculos/${veiculoId}/vistorias`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      update: (veiculoId: number, vistoriaId: number, data: Partial<VeiculoVistoriaInput>) =>
+        request<VeiculoVistoria>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}`, {
+          method: "PUT",
+          body: JSON.stringify(data),
+        }),
+      remove: (veiculoId: number, vistoriaId: number) =>
+        request<void>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}`, {
           method: "DELETE",
         }),
     },
