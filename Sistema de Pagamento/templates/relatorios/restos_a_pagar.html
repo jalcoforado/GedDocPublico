@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Restos a Pagar{% endblock %}
+{% block content %}
+<h3 class="mb-4">Restos a Pagar — Exercício {{ ano }} (RF54)</h3>
+<div class="row mb-4">
+    <div class="col-md-6"><div class="card p-3">Processados<br><strong>R$ {{ total_processados }}</strong> ({{ processados.count }} pedidos)</div></div>
+    <div class="col-md-6"><div class="card p-3">Não Processados<br><strong>R$ {{ total_nao_processados }}</strong> ({{ nao_processados.count }} pedidos)</div></div>
+</div>
+
+<h6>Não Processados (autorizados, ainda não pagos)</h6>
+<table class="table table-sm bg-white mb-4">
+    <thead><tr><th>Protocolo</th><th>Credor</th><th>Órgão</th><th>Valor</th><th>Vencimento</th></tr></thead>
+    <tbody>
+        {% for p in nao_processados %}
+        <tr><td>{{ p.protocolo }}</td><td>{{ p.credor }}</td><td>{{ p.orgao }}</td><td>R$ {{ p.valor }}</td><td>{{ p.vencimento|date:"d/m/Y" }}</td></tr>
+        {% empty %}<tr><td colspan="5" class="text-muted text-center">Nenhum.</td></tr>{% endfor %}
+    </tbody>
+</table>
+
+<h6>Processados (pagos em exercício posterior)</h6>
+<table class="table table-sm bg-white">
+    <thead><tr><th>Protocolo</th><th>Credor</th><th>Órgão</th><th>Valor</th><th>Data Pagamento</th></tr></thead>
+    <tbody>
+        {% for p in processados %}
+        <tr><td>{{ p.protocolo }}</td><td>{{ p.credor }}</td><td>{{ p.orgao }}</td><td>R$ {{ p.valor }}</td><td>{{ p.data_pagamento|date:"d/m/Y" }}</td></tr>
+        {% empty %}<tr><td colspan="5" class="text-muted text-center">Nenhum.</td></tr>{% endfor %}
+    </tbody>
+</table>
+{% endblock %}

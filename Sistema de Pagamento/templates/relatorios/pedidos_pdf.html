@@ -1,0 +1,28 @@
+<html>
+<head>
+<style>
+body { font-family: Helvetica, sans-serif; font-size: 10px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #999; padding: 4px; text-align: left; }
+th { background-color: #eee; }
+h2 { font-size: 14px; }
+</style>
+</head>
+<body>
+<h2>Relatório de Pedidos de Pagamento</h2>
+<table>
+    <tr><th>Protocolo</th><th>Credor</th><th>Órgão</th><th>Natureza</th><th>Valor</th><th>Status</th><th>Vencimento</th></tr>
+    {% for p in pedidos %}
+    <tr>
+        <td>{{ p.protocolo }}</td>
+        <td>{{ p.credor }}</td>
+        <td>{{ p.orgao }}</td>
+        <td>{{ p.natureza }}</td>
+        <td>R$ {{ p.valor }}</td>
+        <td>{{ p.get_status_display }}</td>
+        <td>{{ p.vencimento|date:"d/m/Y" }}</td>
+    </tr>
+    {% endfor %}
+</table>
+</body>
+</html>

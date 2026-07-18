@@ -14,7 +14,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Empresa, Permissionario, VeiculoRegulado, VeiculoDocumento, VeiculoAvaliacao, Usuario
+from ..models import Empresa, Permissionario, VeiculoRegulado, Usuario
+from ..models.transporte_regulado import VeiculoDocumento, VeiculoAvaliacao
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
     EmpresaUpdate,

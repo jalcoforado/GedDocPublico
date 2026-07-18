@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Ordem de Pagamento {{ ordem.numero }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center">
+    <h3>Ordem de Pagamento {{ ordem.numero }}</h3>
+    <a href="{% url 'pagamentos:ordem_pdf' ordem.pk %}" class="btn btn-outline-secondary btn-sm">Baixar PDF</a>
+</div>
+<p class="text-muted">Documento formal correspondente ao despacho da autoridade competente determinando o pagamento (art. 64 da Lei nº 4.320/1964).</p>
+<div class="card p-3 mb-3">
+    <dl class="row mb-0">
+        <dt class="col-sm-3">Autorizador</dt><dd class="col-sm-9">{{ ordem.autorizador }}</dd>
+        <dt class="col-sm-3">Data/Hora</dt><dd class="col-sm-9">{{ ordem.criado_em|date:"d/m/Y H:i" }}</dd>
+        <dt class="col-sm-3">Origem (IP)</dt><dd class="col-sm-9">{{ ordem.ip_origem|default:"—" }}</dd>
+        <dt class="col-sm-3">Valor Total</dt><dd class="col-sm-9">R$ {{ ordem.valor_total }}</dd>
+    </dl>
+</div>
+<table class="table table-bordered bg-white">
+    <thead><tr><th>Protocolo</th><th>Credor</th><th>Órgão</th><th>Valor</th></tr></thead>
+    <tbody>
+        {% for pedido in ordem.pedidos.all %}
+        <tr>
+            <td><a href="{% url 'pagamentos:detalhe' pedido.pk %}">{{ pedido.protocolo }}</a></td>
+            <td>{{ pedido.credor }}</td>
+            <td>{{ pedido.orgao }}</td>
+            <td>R$ {{ pedido.valor }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

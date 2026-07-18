@@ -1738,6 +1738,69 @@ export interface VeiculoRegulado {
   atualizado_em: string | null;
 }
 
+// --- Transporte Regulado: Documento de Veiculo --------------------------------
+export type TipoDocumento =
+  | "crlv"
+  | "cnh_copia"
+  | "inspecao"
+  | "vistoria"
+  | "seguro"
+  | "autorizacao_especial"
+  | "adaptacao"
+  | "outro";
+export type StatusDocumento =
+  | "pendente"
+  | "valido"
+  | "vencido"
+  | "rejeitado";
+
+export interface VeiculoDocumento {
+  id: number;
+  id_veiculo: number;
+  tipo_documento: TipoDocumento;
+  numero_documento: string;
+  data_emissao: string | null;
+  data_validade: string | null;
+  situacao: StatusDocumento;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface VeiculoDocumentoInput {
+  tipo_documento: TipoDocumento;
+  numero_documento: string;
+  data_emissao?: string | null;
+  data_validade?: string | null;
+  observacoes?: string | null;
+}
+
+// --- Transporte Regulado: Avaliacao de Veiculo --------------------------------
+export type ResultadoAvaliacao =
+  | "pendente"
+  | "aprovado"
+  | "reprovado"
+  | "condicional";
+
+export interface VeiculoAvaliacao {
+  id: number;
+  id_veiculo: number;
+  id_usuario_avaliador: number;
+  resultado: ResultadoAvaliacao;
+  parecer: string;
+  observacoes: string | null;
+  data_avaliacao: string;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface VeiculoAvaliacaoInput {
+  resultado: ResultadoAvaliacao;
+  parecer: string;
+  observacoes?: string | null;
+  data_avaliacao: string;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -2172,6 +2235,46 @@ export const api = {
       }),
     remove: (id: number) =>
       request<void>(`/transporte-regulado/veiculos/${id}`, { method: "DELETE" }),
+    documentos: {
+      list: (veiculoId: number) =>
+        request<VeiculoDocumento[]>(`/transporte-regulado/veiculos/${veiculoId}/documentos`),
+      get: (veiculoId: number, documentoId: number) =>
+        request<VeiculoDocumento>(`/transporte-regulado/veiculos/${veiculoId}/documentos/${documentoId}`),
+      create: (veiculoId: number, data: VeiculoDocumentoInput) =>
+        request<VeiculoDocumento>(`/transporte-regulado/veiculos/${veiculoId}/documentos`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      update: (veiculoId: number, documentoId: number, data: Partial<VeiculoDocumentoInput>) =>
+        request<VeiculoDocumento>(`/transporte-regulado/veiculos/${veiculoId}/documentos/${documentoId}`, {
+          method: "PUT",
+          body: JSON.stringify(data),
+        }),
+      remove: (veiculoId: number, documentoId: number) =>
+        request<void>(`/transporte-regulado/veiculos/${veiculoId}/documentos/${documentoId}`, {
+          method: "DELETE",
+        }),
+    },
+    avaliacoes: {
+      list: (veiculoId: number) =>
+        request<VeiculoAvaliacao[]>(`/transporte-regulado/veiculos/${veiculoId}/avaliacoes`),
+      get: (veiculoId: number, avaliacaoId: number) =>
+        request<VeiculoAvaliacao>(`/transporte-regulado/veiculos/${veiculoId}/avaliacoes/${avaliacaoId}`),
+      create: (veiculoId: number, data: VeiculoAvaliacaoInput) =>
+        request<VeiculoAvaliacao>(`/transporte-regulado/veiculos/${veiculoId}/avaliacoes`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      update: (veiculoId: number, avaliacaoId: number, data: Partial<VeiculoAvaliacaoInput>) =>
+        request<VeiculoAvaliacao>(`/transporte-regulado/veiculos/${veiculoId}/avaliacoes/${avaliacaoId}`, {
+          method: "PUT",
+          body: JSON.stringify(data),
+        }),
+      remove: (veiculoId: number, avaliacaoId: number) =>
+        request<void>(`/transporte-regulado/veiculos/${veiculoId}/avaliacoes/${avaliacaoId}`, {
+          method: "DELETE",
+        }),
+    },
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),

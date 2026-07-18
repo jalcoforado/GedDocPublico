@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Car, Inbox, Plus } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -384,7 +385,11 @@ export default function VeiculosReguladosPage() {
             )}
             {listaQ.data?.map((v) => (
               <TR key={v.id}>
-                <TD className="font-mono">{v.placa}</TD>
+                <TD className="font-mono">
+                  <Link href={`/transporte-regulado/veiculos/${v.id}`} className="text-blue-600 hover:underline">
+                    {v.placa}
+                  </Link>
+                </TD>
                 <TD>
                   <div className="font-medium">{v.marca}</div>
                   <div className="text-xs text-muted-foreground">{v.modelo}</div>
@@ -403,6 +408,11 @@ export default function VeiculosReguladosPage() {
                 </TD>
                 <TD className="text-right">
                   <div className="inline-flex flex-wrap justify-end gap-2">
+                    <Link href={`/transporte-regulado/veiculos/${v.id}`}>
+                      <Button variant="secondary" size="sm">
+                        Detalhes
+                      </Button>
+                    </Link>
                     {canEdit && (
                       <Button variant="secondary" size="sm" onClick={() => openEdit(v)}>
                         Editar

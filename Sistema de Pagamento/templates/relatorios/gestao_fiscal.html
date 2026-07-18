@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Relatório de Gestão Fiscal{% endblock %}
+{% block content %}
+<h3 class="mb-4">Dados para o Relatório de Gestão Fiscal (RF55)</h3>
+<p class="text-muted small">Dados sob gestão deste Sistema, compatíveis com o conteúdo exigido pelos arts. 54-55 da LC nº 101/2000 — não substitui o RGF consolidado emitido pelo sistema contábil municipal.</p>
+<div class="row mb-4">
+    <div class="col-md-6"><div class="card p-3">Disponibilidade de Caixa (contas ativas)<br><strong>R$ {{ disponibilidade_caixa }}</strong></div></div>
+    <div class="col-md-6"><div class="card p-3">Restos a Pagar Não Processados até {{ ano_anterior }}<br><strong>R$ {{ restos_nao_processados }}</strong></div></div>
+</div>
+<table class="table table-sm bg-white">
+    <thead><tr><th>Conta</th><th>Fonte</th><th>Saldo Disponível Efetivo</th></tr></thead>
+    <tbody>
+        {% for c in contas %}
+        <tr><td>{{ c.nome }}</td><td>{{ c.fonte_recursos }}</td><td>R$ {{ c.saldo_disponivel_efetivo }}</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

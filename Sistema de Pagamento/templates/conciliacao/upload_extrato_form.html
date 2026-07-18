@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Enviar Extrato{% endblock %}
+{% block content %}
+<h3 class="mb-4">Enviar Extrato Bancário</h3>
+<p class="text-muted small">Formatos aceitos: PDF (texto nativo) ou CSV delimitado por ";" (colunas: data;historico;valor;tipo;identificador — valor com vírgula decimal, ex.: 1500,00). Extratos escaneados como imagem não são lidos neste ambiente (sem OCR de imagem).</p>
+<div class="card p-4" style="max-width: 600px;">
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {% for field in form %}
+        <div class="mb-3">
+            <label class="form-label">{{ field.label }}</label>
+            {{ field }}
+            {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary">Enviar e Processar</button>
+        <a href="{% url 'conciliacao:lista_extratos' %}" class="btn btn-outline-secondary">Cancelar</a>
+    </form>
+</div>
+{% endblock %}

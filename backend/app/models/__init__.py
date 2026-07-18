@@ -72,7 +72,7 @@ from .transporte_regulado import (
     Empresa,
     Permissionario,
     VeiculoRegulado,
-    VeiculoDocumento as VeiculoDocumentoTransporteRegulado,
+    VeiculoDocumento as VeiculoDocumentoRegulado,
     VeiculoAvaliacao,
 )
 from .unidade_trabalho import TipoUnidadeTrabalho, UnidadeTrabalho
@@ -163,7 +163,7 @@ __all__ = [
     "VeiculoOcorrencia",
     "VeiculoRegulado",
     "VeiculoVistoria",
-    "VeiculoDocumentoTransporteRegulado",
+    "VeiculoDocumentoRegulado",
     "VeiculoAvaliacao",
     "Usuario",
     "UsuarioExterno",

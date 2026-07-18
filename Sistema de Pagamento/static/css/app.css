@@ -1,0 +1,11 @@
+body {
+    background-color: #f4f6f8;
+}
+.card {
+    border: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.badge-criticidade-URGENTE { background-color: #dc3545; }
+.badge-criticidade-ALTA { background-color: #fd7e14; }
+.badge-criticidade-MEDIA { background-color: #ffc107; color: #212529; }
+.badge-criticidade-BAIXA { background-color: #6c757d; }

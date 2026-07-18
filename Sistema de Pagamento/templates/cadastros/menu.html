@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Cadastros Básicos{% endblock %}
+{% block content %}
+<h3 class="mb-4">Cadastros Básicos (M1)</h3>
+<div class="row g-3">
+    {% for nome, url in secoes %}
+    <div class="col-md-4">
+        <div class="card p-3">
+            <h6>{{ nome }}</h6>
+            <a href="{{ url }}" class="btn btn-sm btn-outline-primary">Gerenciar</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
