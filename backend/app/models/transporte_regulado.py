@@ -344,3 +344,28 @@ class AlvaraResponsavel(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class AlvaraVeiculo(Base):
+    """Veículos vinculados a alvarás (P4).
+
+    Um alvará pode estar operando com múltiplos veículos (ex: táxi amarelo com 2 táxis,
+    mototáxi com 3 motos). Tabela de junção com metadados (data_vinculo).
+    """
+
+    __tablename__ = "alvara_veiculo"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_alvara: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.alvara.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.veiculo.id"), nullable=False
+    )
+    data_vinculo: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
