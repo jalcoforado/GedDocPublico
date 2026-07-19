@@ -1925,6 +1925,20 @@ export interface AlvaraKPIsResponse {
   indefinidos: number;
 }
 
+export interface AlvaraAuditoriaItem {
+  id: number;
+  acao: string;
+  dados_antigos: Record<string, any> | null;
+  dados_novos: Record<string, any> | null;
+  id_usuario: number | null;
+  criado_em: string;
+}
+
+export interface AlvaraAuditoriaListResponse {
+  eventos: AlvaraAuditoriaItem[];
+  total?: number;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -2517,6 +2531,12 @@ export const api = {
         // Retorna a URL para download direto
         return url.toString();
       },
+    },
+    auditoria: {
+      list: (alvaraId: number, params?: { limit?: number; offset?: number }) =>
+        request<AlvaraAuditoriaListResponse>(
+          `/transporte-regulado/alvaras/${alvaraId}/auditoria${qs(params ?? {})}`,
+        ),
     },
   },
   tiposAnexo: {
