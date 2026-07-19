@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, History } from "lucide-react";
+import { ChevronLeft, History, Truck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { AlvaraVeiculosModal } from "@/components/transporte-regulado/alvara-veiculos-modal";
 import {
   api,
   type Alvara,
@@ -87,6 +88,7 @@ export default function AlvaraDetailPage({ params }: PageParams) {
     null,
   );
   const [page, setPage] = useState(0);
+  const [showVeiculosModal, setShowVeiculosModal] = useState(false);
   const LIMIT = 20;
 
   // Resolve params
@@ -214,6 +216,22 @@ export default function AlvaraDetailPage({ params }: PageParams) {
         </div>
       </div>
 
+      {/* Veículos */}
+      <div className="rounded-lg border bg-white shadow-sm">
+        <div className="border-b px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Truck className="h-5 w-5" />
+            <h3 className="text-lg font-semibold">Veículos Vinculados</h3>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => setShowVeiculosModal(true)}
+          >
+            Gerenciar Veículos
+          </Button>
+        </div>
+      </div>
+
       {/* Histórico de Auditoria */}
       <div className="rounded-lg border bg-white shadow-sm">
         <div className="border-b px-6 py-4">
@@ -297,6 +315,13 @@ export default function AlvaraDetailPage({ params }: PageParams) {
           </>
         )}
       </div>
+
+      {/* Modal de Veículos */}
+      <AlvaraVeiculosModal
+        alvaraId={alvaraId}
+        open={showVeiculosModal}
+        onOpenChange={setShowVeiculosModal}
+      />
     </div>
   );
 }

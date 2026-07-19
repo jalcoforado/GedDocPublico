@@ -1939,6 +1939,20 @@ export interface AlvaraAuditoriaListResponse {
   total?: number;
 }
 
+export interface AlvaraVeiculo {
+  id: number;
+  tenant_id: number;
+  id_alvara: number;
+  id_veiculo: number;
+  data_vinculo: string;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface AlvaraVeiculoCreate {
+  id_veiculo: number;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -2536,6 +2550,25 @@ export const api = {
       list: (alvaraId: number, params?: { limit?: number; offset?: number }) =>
         request<AlvaraAuditoriaListResponse>(
           `/transporte-regulado/alvaras/${alvaraId}/auditoria${qs(params ?? {})}`,
+        ),
+    },
+    veiculos: {
+      list: (alvaraId: number) =>
+        request<AlvaraVeiculo[]>(
+          `/transporte-regulado/alvaras/${alvaraId}/veiculos`,
+        ),
+      add: (alvaraId: number, data: AlvaraVeiculoCreate) =>
+        request<AlvaraVeiculo>(
+          `/transporte-regulado/alvaras/${alvaraId}/veiculos`,
+          {
+            method: "POST",
+            body: JSON.stringify(data),
+          },
+        ),
+      remove: (alvaraId: number, veiculoId: number) =>
+        request<void>(
+          `/transporte-regulado/alvaras/${alvaraId}/veiculos/${veiculoId}`,
+          { method: "DELETE" },
         ),
     },
   },
