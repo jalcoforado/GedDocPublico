@@ -58,16 +58,18 @@ async def _criar_permissionario(engine, tenant_id: int, cpf: str = None):
 async def _criar_empresa(engine, tenant_id: int, cnpj: str = None):
     """Helper: cria empresa."""
     from app.schemas.transporte_regulado import EmpresaCreate
+    import random
 
     if cnpj is None:
-        cnpj = uuid.uuid4().hex[:14]
+        cnpj = "".join(str(random.randint(0, 9)) for _ in range(14))
 
     async with _sm(engine)() as db:
         empresa = await tr_svc.criar_empresa(
             db,
             tenant_id=tenant_id,
             payload=EmpresaCreate(
-                nome="Empresa Teste", cnpj=cnpj, email="emp@t.local", telefone="1199999999"
+                razao_social="Empresa Teste", cnpj=cnpj, email="emp@t.local", telefone="1199999999",
+                tipo_servico="taxi"
             ),
         )
     return empresa.id
@@ -85,7 +87,8 @@ async def _criar_veiculo(engine, tenant_id: int, empresa_id: int, placa: str = N
             db,
             tenant_id=tenant_id,
             payload=VeiculoReguladoCreate(
-                placa=placa, tipo="taxi", id_empresa=empresa_id, cor="branco"
+                placa=placa, tipo="taxi", id_empresa=empresa_id, cor="branco",
+                marca="Toyota", modelo="Corolla", tipo_servico="taxi"
             ),
         )
     return v.id
