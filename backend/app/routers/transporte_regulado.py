@@ -6,6 +6,7 @@ autenticado + permissão `transporte_regulado`. Mesmo padrão dos routers de `fr
 Sem portal público nesta etapa.
 """
 from fastapi import APIRouter, Depends, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import require_tenant_id
@@ -44,6 +45,9 @@ from ..schemas.transporte_regulado import (
     AlvaraVeiculoCreate,
     AlvaraVeiculoOut,
     AlvaraAuditoriaListResponse,
+    AlvaraRelatorioListResponse,
+    AlvaraRelatorioItem,
+    AlvaraKPIsResponse,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -735,6 +739,81 @@ async def list_alvaras_vencidos(
 ) -> list[AlvaraOut]:
     """Lista alvarás vencidos (data_validade <= hoje) do tenant."""
     return await tr_svc.listar_alvaras_vencidos(db, tenant_id=tenant_id)
+
+
+# ============================ Relatório (P4.3) ================================
+
+
+@alvaras_router.get("/relatorio/kpis", response_model=AlvaraKPIsResponse)
+async def obter_kpis_relatorio(
+    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraKPIsResponse:
+    """Retorna KPIs agregados de alvarás (total, ativos, vencidos, a_renovar_30d, indefinidos)."""
+    kpis = await tr_svc.obter_kpis_agregados(db, tenant_id=tenant_id)
+    return AlvaraKPIsResponse(**kpis)
+
+
+@alvaras_router.get("/relatorio", response_model=AlvaraRelatorioListResponse)
+async def listar_relatorio(
+    tipo_servico: str | None = None,
+    id_permissionario: int | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraRelatorioListResponse:
+    """Lista alvarás com KPIs para relatório.
+
+    Filtros opcionais:
+    - tipo_servico: filtrar por tipo de serviço
+    - id_permissionario: filtrar por permissionário
+    - status: filtrar por status (ativo, vencido, a_renovar_30d, indefinido)
+    """
+    alvaras, total = await tr_svc.listar_relatorio_alvaras(
+        db,
+        tenant_id=tenant_id,
+        tipo_servico=tipo_servico,
+        id_permissionario=id_permissionario,
+        status_filtro=status,
+        limit=limit,
+        offset=offset,
+    )
+    return AlvaraRelatorioListResponse(
+        alvaras=[AlvaraRelatorioItem.model_validate(a) for a in alvaras],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@alvaras_router.get("/relatorio/export/csv", response_class=Response)
+async def exportar_relatorio_csv(
+    tipo_servico: str | None = None,
+    id_permissionario: int | None = None,
+    status: str | None = None,
+    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Exporta relatório de alvarás em formato CSV."""
+    alvaras, _ = await tr_svc.listar_relatorio_alvaras(
+        db,
+        tenant_id=tenant_id,
+        tipo_servico=tipo_servico,
+        id_permissionario=id_permissionario,
+        status_filtro=status,
+        limit=10000,  # Sem limite para export
+    )
+    csv_content = tr_svc.gerar_csv_alvaras(alvaras)
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=alvaras_relatorio.csv"},
+    )
 
 
 @alvaras_router.post("/{alvara_id}/renovar", response_model=AlvaraOut)

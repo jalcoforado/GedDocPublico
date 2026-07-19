@@ -898,3 +898,41 @@ class AlvaraAuditoriaListResponse(BaseModel):
 
     eventos: list[AlvaraAuditoriaItem]
     total: int | None = None  # Para UI opcional
+
+
+# ============================ Relatório (P4.3) ================================
+class AlvaraRelatorioItem(BaseModel):
+    """Item de alvará com KPIs para relatório."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    numero_alvara: str
+    tipo_servico: str
+    id_permissionario: int | None
+    id_empresa: int | None
+    data_inicio: date | None
+    data_validade: date | None
+    criado_em: datetime
+    # KPIs calculados
+    status: Literal["ativo", "vencido", "a_renovar_30d", "indefinido"]
+    dias_para_vencimento: int | None
+
+
+class AlvaraRelatorioListResponse(BaseModel):
+    """Resposta paginada de relatório de alvarás."""
+
+    alvaras: list[AlvaraRelatorioItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class AlvaraKPIsResponse(BaseModel):
+    """Agregação de KPIs de alvarás."""
+
+    total_alvaras: int
+    ativos: int
+    vencidos: int
+    a_renovar_30d: int
+    indefinidos: int

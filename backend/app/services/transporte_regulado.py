@@ -1494,3 +1494,156 @@ async def listar_auditoria_alvara(
     ).order_by(AlvaraAuditoria.criado_em.desc()).limit(limit).offset(offset)
 
     return (await db.execute(stmt)).scalars().all()
+
+
+# ============================ Relatório (P4.3) ================================
+from datetime import date as date_class, timedelta
+
+
+def _calcular_status_e_dias(data_validade: date_class | None) -> tuple[str, int | None]:
+    """Calcula status do alvará e dias para vencimento.
+
+    Retorna (status, dias_para_vencimento):
+    - "ativo" / dias positivos
+    - "a_renovar_30d" / dias entre 0 e 30
+    - "vencido" / dias negativos (None retorna "indefinido")
+    - "indefinido" / None se data_validade é None
+    """
+    if data_validade is None:
+        return ("indefinido", None)
+
+    hoje = date_class.today()
+    dias = (data_validade - hoje).days
+
+    if dias < 0:
+        return ("vencido", dias)
+    elif dias <= 30:
+        return ("a_renovar_30d", dias)
+    else:
+        return ("ativo", dias)
+
+
+async def listar_relatorio_alvaras(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    tipo_servico: str | None = None,
+    id_permissionario: int | None = None,
+    status_filtro: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """Lista alvarás com KPIs para relatório.
+
+    Filtros opcionais:
+    - tipo_servico: filtrar por tipo
+    - id_permissionario: filtrar por permissionário
+    - status_filtro: filtrar por status (ativo, vencido, a_renovar_30d, indefinido)
+
+    Retorna (alvaras_com_kpis, total_count).
+    """
+    # Query base: alvarás não excluídos do tenant
+    stmt = select(Alvara).where(
+        Alvara.tenant_id == tenant_id,
+        Alvara.excluido.is_(False),
+    )
+
+    # Aplicar filtros
+    if tipo_servico:
+        stmt = stmt.where(Alvara.tipo_servico == tipo_servico)
+    if id_permissionario:
+        stmt = stmt.where(Alvara.id_permissionario == id_permissionario)
+
+    # Contar total antes de paginação
+    count_stmt = select(Alvara).where(
+        Alvara.tenant_id == tenant_id,
+        Alvara.excluido.is_(False),
+    )
+    if tipo_servico:
+        count_stmt = count_stmt.where(Alvara.tipo_servico == tipo_servico)
+    if id_permissionario:
+        count_stmt = count_stmt.where(Alvara.id_permissionario == id_permissionario)
+
+    total = len((await db.execute(count_stmt)).scalars().all())
+
+    # Buscar alvarás
+    stmt = stmt.order_by(Alvara.criado_em.desc()).limit(limit).offset(offset)
+    alvaras = (await db.execute(stmt)).scalars().all()
+
+    # Calcular KPIs e montar resposta
+    resultado = []
+    for alvara in alvaras:
+        status, dias = _calcular_status_e_dias(alvara.data_validade)
+
+        # Filtro por status (aplicado após cálculo)
+        if status_filtro and status != status_filtro:
+            continue
+
+        resultado.append({
+            "id": alvara.id,
+            "numero_alvara": alvara.numero_alvara,
+            "tipo_servico": alvara.tipo_servico,
+            "id_permissionario": alvara.id_permissionario,
+            "id_empresa": alvara.id_empresa,
+            "data_inicio": alvara.data_inicio,
+            "data_validade": alvara.data_validade,
+            "criado_em": alvara.criado_em,
+            "status": status,
+            "dias_para_vencimento": dias,
+        })
+
+    return resultado, total
+
+
+async def obter_kpis_agregados(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+) -> dict:
+    """Retorna KPIs agregados de alvarás do tenant."""
+    stmt = select(Alvara).where(
+        Alvara.tenant_id == tenant_id,
+        Alvara.excluido.is_(False),
+    )
+    alvaras = (await db.execute(stmt)).scalars().all()
+
+    kpis = {
+        "total_alvaras": len(alvaras),
+        "ativos": 0,
+        "vencidos": 0,
+        "a_renovar_30d": 0,
+        "indefinidos": 0,
+    }
+
+    for alvara in alvaras:
+        status, _ = _calcular_status_e_dias(alvara.data_validade)
+        if status in kpis:
+            kpis[status] += 1
+
+    return kpis
+
+
+def gerar_csv_alvaras(alvaras_com_kpis: list[dict]) -> str:
+    """Gera CSV simples a partir de lista de alvarás com KPIs."""
+    import csv
+    from io import StringIO
+
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "id",
+            "numero_alvara",
+            "tipo_servico",
+            "id_permissionario",
+            "id_empresa",
+            "data_inicio",
+            "data_validade",
+            "criado_em",
+            "status",
+            "dias_para_vencimento",
+        ],
+    )
+    writer.writeheader()
+    writer.writerows(alvaras_com_kpis)
+    return output.getvalue()
