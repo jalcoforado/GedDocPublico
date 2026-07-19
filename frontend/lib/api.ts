@@ -1863,6 +1863,24 @@ export interface AlvaraRenovarInput {
   observacoes?: string | null;
 }
 
+export interface AlvaraDocumento {
+  id: number;
+  tenant_id: number;
+  id_alvara: number;
+  tipo_documento: string;
+  arquivo: string;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+  excluido: boolean;
+}
+
+export interface AlvaraDocumentoInput {
+  tipo_documento: string;
+  arquivo: string;
+  observacoes?: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -2389,6 +2407,26 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+    documentos: {
+      list: (alvaraId: number) =>
+        request<AlvaraDocumento[]>(`/transporte-regulado/alvaras/${alvaraId}/documentos`),
+      get: (alvaraId: number, docId: number) =>
+        request<AlvaraDocumento>(`/transporte-regulado/alvaras/${alvaraId}/documentos/${docId}`),
+      create: (alvaraId: number, data: AlvaraDocumentoInput) =>
+        request<AlvaraDocumento>(`/transporte-regulado/alvaras/${alvaraId}/documentos`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      update: (alvaraId: number, docId: number, data: Partial<AlvaraDocumentoInput>) =>
+        request<AlvaraDocumento>(`/transporte-regulado/alvaras/${alvaraId}/documentos/${docId}`, {
+          method: "PUT",
+          body: JSON.stringify(data),
+        }),
+      remove: (alvaraId: number, docId: number) =>
+        request<void>(`/transporte-regulado/alvaras/${alvaraId}/documentos/${docId}`, {
+          method: "DELETE",
+        }),
+    },
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),
