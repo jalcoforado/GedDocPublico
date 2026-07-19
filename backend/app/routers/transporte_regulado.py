@@ -43,6 +43,7 @@ from ..schemas.transporte_regulado import (
     AlvaraResponsavelOut,
     AlvaraVeiculoCreate,
     AlvaraVeiculoOut,
+    AlvaraAuditoriaListResponse,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -927,3 +928,20 @@ async def listar_alvaras_veiculo(
     """Lista alvarás vinculados a um veículo."""
     avs = await tr_svc.listar_alvaras_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
     return [AlvaraVeiculoOut.model_validate(av) for av in avs]
+
+
+# ============================ Auditoria de Alvará (P4) ========================
+@alvaras_router.get("/{alvara_id}/auditoria", response_model=AlvaraAuditoriaListResponse)
+async def listar_auditoria_alvara(
+    alvara_id: int,
+    limit: int = 50,
+    offset: int = 0,
+    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraAuditoriaListResponse:
+    """Lista histórico de auditoria de um alvará (trail de mudanças)."""
+    eventos = await tr_svc.listar_auditoria_alvara(
+        db, tenant_id=tenant_id, alvara_id=alvara_id, limit=limit, offset=offset
+    )
+    return AlvaraAuditoriaListResponse(eventos=[e for e in eventos])

@@ -11,6 +11,7 @@ entre não excluídos.
 from datetime import date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
@@ -369,3 +370,29 @@ class AlvaraVeiculo(Base):
     data_vinculo: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AlvaraAuditoria(Base):
+    """Auditoria e histórico de mudanças de alvarás (P4).
+
+    Trail append-only com snapshots de estado anterior/novo (JSONB) para rastreamento
+    de quem alterou o quê e quando. Suporta diff visual para compliance/regulatório.
+    """
+
+    __tablename__ = "alvara_auditoria"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_alvara: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.alvara.id"), nullable=False
+    )
+    acao: Mapped[str] = mapped_column(String(100), nullable=False)
+    dados_antigos: Mapped[dict | None] = mapped_column(type_=JSONB, nullable=True)
+    dados_novos: Mapped[dict | None] = mapped_column(type_=JSONB, nullable=True)
+    id_usuario: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)

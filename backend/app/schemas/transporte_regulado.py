@@ -879,3 +879,22 @@ class AlvaraVeiculoOut(BaseModel):
     data_vinculo: datetime
     criado_em: datetime
     atualizado_em: datetime | None
+
+
+# ============================ AlvaraAuditoria (P4) ============================
+class AlvaraAuditoriaItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    acao: str
+    dados_antigos: dict | None
+    dados_novos: dict | None
+    id_usuario: int | None
+    criado_em: datetime
+
+
+class AlvaraAuditoriaListResponse(BaseModel):
+    """Resposta paginada de auditoria."""
+
+    eventos: list[AlvaraAuditoriaItem]
+    total: int | None = None  # Para UI opcional

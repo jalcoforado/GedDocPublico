@@ -23,6 +23,7 @@ from ..models.transporte_regulado import (
     AlvaraDocumento,
     AlvaraResponsavel,
     AlvaraVeiculo,
+    AlvaraAuditoria,
 )
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
@@ -1417,4 +1418,79 @@ async def listar_alvaras_veiculo(
         AlvaraVeiculo.tenant_id == tenant_id,
         AlvaraVeiculo.id_veiculo == veiculo_id,
     ).order_by(AlvaraVeiculo.criado_em.desc())
+    return (await db.execute(stmt)).scalars().all()
+
+
+# ============================ Auditoria de Alvará (P4) ===========================
+async def registrar_auditoria_alvara(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    alvara_id: int,
+    acao: str,
+    dados_antigos: dict | None = None,
+    dados_novos: dict | None = None,
+    usuario_id: int | None = None,
+) -> AlvaraAuditoria:
+    """Registra evento de auditoria para um alvará (append-only).
+
+    Args:
+        db: Sessão async
+        tenant_id: Tenant do alvará
+        alvara_id: ID do alvará
+        acao: Ação realizada (alvara.criada, alvara.renovada, etc.)
+        dados_antigos: Snapshot do estado anterior (JSONB)
+        dados_novos: Snapshot do estado novo (JSONB)
+        usuario_id: ID do usuário que fez a ação (opcional)
+
+    Returns:
+        Registro de auditoria criado
+    """
+    # Validar que alvará existe
+    await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+
+    agora = datetime.utcnow()
+    audit = AlvaraAuditoria(
+        tenant_id=tenant_id,
+        id_alvara=alvara_id,
+        acao=acao,
+        dados_antigos=dados_antigos,
+        dados_novos=dados_novos,
+        id_usuario=usuario_id,
+        criado_em=agora,
+    )
+    db.add(audit)
+    await db.commit()
+    await db.refresh(audit)
+    return audit
+
+
+async def listar_auditoria_alvara(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    alvara_id: int,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[AlvaraAuditoria]:
+    """Lista histórico de auditoria de um alvará (DESC por criado_em).
+
+    Args:
+        db: Sessão async
+        tenant_id: Tenant do alvará
+        alvara_id: ID do alvará
+        limit: Máximo de registros (default 50)
+        offset: Offset para paginação
+
+    Returns:
+        Lista de eventos de auditoria (mais recentes primeiro)
+    """
+    # Validar que alvará existe
+    await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+
+    stmt = select(AlvaraAuditoria).where(
+        AlvaraAuditoria.tenant_id == tenant_id,
+        AlvaraAuditoria.id_alvara == alvara_id,
+    ).order_by(AlvaraAuditoria.criado_em.desc()).limit(limit).offset(offset)
+
     return (await db.execute(stmt)).scalars().all()
