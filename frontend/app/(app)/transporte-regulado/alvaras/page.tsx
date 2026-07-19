@@ -19,6 +19,8 @@ import { useToast } from "@/components/ui/toast";
 import {
   api,
   type Alvara,
+  type AlvaraDocumento,
+  type AlvaraDocumentoInput,
   type AlvaraInput,
   type AlvaraRenovarInput,
   type Empresa,
@@ -70,6 +72,18 @@ const EMPTY_RENOV: RenovarForm = {
   observacoes: "",
 };
 
+interface DocumentoForm {
+  tipo_documento: string;
+  arquivo: string;
+  observacoes: string;
+}
+
+const EMPTY_DOC: DocumentoForm = {
+  tipo_documento: "",
+  arquivo: "",
+  observacoes: "",
+};
+
 function nullify(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
@@ -102,6 +116,12 @@ export default function AlvarasPage() {
   const [selectedAlvaraToRenew, setSelectedAlvaraToRenew] = useState<Alvara | null>(null);
   const [renovarErr, setRenovarErr] = useState<string | null>(null);
 
+  const [docsDialogOpen, setDocsDialogOpen] = useState(false);
+  const [selectedAlvaraForDocs, setSelectedAlvaraForDocs] = useState<Alvara | null>(null);
+  const [docForm, setDocForm] = useState<DocumentoForm>(EMPTY_DOC);
+  const [editingDoc, setEditingDoc] = useState<AlvaraDocumento | null>(null);
+  const [docErr, setDocErr] = useState<string | null>(null);
+
   const listaQ = useQuery({
     queryKey: ["tr-alvaras", empresaFiltro, permFiltro, busca],
     queryFn: () =>
@@ -127,6 +147,13 @@ export default function AlvarasPage() {
     queryKey: ["tr-alvaras-vencidos"],
     queryFn: () => api.alvaras.listarVencidos(),
     enabled: renovarDialogOpen,
+  });
+
+  const docsQ = useQuery({
+    queryKey: ["tr-alvara-documentos", selectedAlvaraForDocs?.id],
+    queryFn: () =>
+      selectedAlvaraForDocs ? api.alvaras.documentos.list(selectedAlvaraForDocs.id) : Promise.resolve([]),
+    enabled: docsDialogOpen && selectedAlvaraForDocs !== null,
   });
 
   const invalidate = () => {
@@ -163,6 +190,31 @@ export default function AlvarasPage() {
       closeRenovarDialog();
     },
     onError: (e: Error) => setRenovarErr(e.message),
+  });
+
+  const saveDocM = useMutation({
+    mutationFn: (data: AlvaraDocumentoInput) =>
+      selectedAlvaraForDocs
+        ? editingDoc
+          ? api.alvaras.documentos.update(selectedAlvaraForDocs.id, editingDoc.id, data)
+          : api.alvaras.documentos.create(selectedAlvaraForDocs.id, data)
+        : Promise.reject(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tr-alvara-documentos"] });
+      toast.success(editingDoc ? "Documento atualizado." : "Documento adicionado.");
+      resetDocForm();
+    },
+    onError: (e: Error) => setDocErr(e.message),
+  });
+
+  const deleteDocM = useMutation({
+    mutationFn: (docId: number) =>
+      selectedAlvaraForDocs ? api.alvaras.documentos.remove(selectedAlvaraForDocs.id, docId) : Promise.reject(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tr-alvara-documentos"] });
+      toast.success("Documento removido.");
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   function set<K extends keyof AlvaraForm>(key: K, value: AlvaraForm[K]) {
@@ -214,6 +266,55 @@ export default function AlvarasPage() {
 
   function setRenov<K extends keyof RenovarForm>(key: K, value: RenovarForm[K]) {
     setRenovarForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function setDoc<K extends keyof DocumentoForm>(key: K, value: DocumentoForm[K]) {
+    setDocForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function openDocs(a: Alvara) {
+    setSelectedAlvaraForDocs(a);
+    resetDocForm();
+    setDocsDialogOpen(true);
+  }
+
+  function closeDocs() {
+    setDocsDialogOpen(false);
+    setSelectedAlvaraForDocs(null);
+    resetDocForm();
+  }
+
+  function resetDocForm() {
+    setDocForm(EMPTY_DOC);
+    setEditingDoc(null);
+    setDocErr(null);
+  }
+
+  function openEditDoc(doc: AlvaraDocumento) {
+    setEditingDoc(doc);
+    setDocForm({
+      tipo_documento: doc.tipo_documento,
+      arquivo: doc.arquivo,
+      observacoes: doc.observacoes ?? "",
+    });
+  }
+
+  function salvarDoc() {
+    setDocErr(null);
+    if (docForm.tipo_documento.trim() === "") {
+      setDocErr("Tipo de documento é obrigatório.");
+      return;
+    }
+    if (docForm.arquivo.trim() === "") {
+      setDocErr("Arquivo é obrigatório.");
+      return;
+    }
+    const payload: AlvaraDocumentoInput = {
+      tipo_documento: docForm.tipo_documento.trim(),
+      arquivo: docForm.arquivo.trim(),
+      observacoes: nullify(docForm.observacoes),
+    };
+    saveDocM.mutate(payload);
   }
 
   function salvarRenov() {
@@ -373,6 +474,11 @@ export default function AlvarasPage() {
                 </TD>
                 <TD className="text-right">
                   <div className="inline-flex flex-wrap justify-end gap-2">
+                    {canCreate && (
+                      <Button variant="secondary" size="sm" onClick={() => openDocs(a)}>
+                        Documentos
+                      </Button>
+                    )}
                     {canEdit && (
                       <Button variant="secondary" size="sm" onClick={() => openEdit(a)}>
                         Editar
@@ -585,6 +691,118 @@ export default function AlvarasPage() {
               rows={3}
             />
           </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={docsDialogOpen}
+        onClose={closeDocs}
+        title={selectedAlvaraForDocs ? `Documentos — ${selectedAlvaraForDocs.numero_alvara}` : "Documentos do alvará"}
+        size="lg"
+      >
+        <div className="space-y-4">
+          {docErr && (
+            <div className="rounded bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+              {docErr}
+            </div>
+          )}
+
+          <div className="border-t pt-4">
+            <h3 className="font-semibold mb-3">{editingDoc ? "Editar documento" : "Adicionar documento"}</h3>
+            <div className="space-y-3">
+              <div>
+                <Label htmlFor="doc_tipo" required>
+                  Tipo de documento
+                </Label>
+                <Input
+                  id="doc_tipo"
+                  value={docForm.tipo_documento}
+                  onChange={(e) => setDoc("tipo_documento", e.target.value)}
+                  placeholder="ex: Contrato, Procuração, Comprovante"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="doc_arquivo" required>
+                  Arquivo (filename/path)
+                </Label>
+                <Input
+                  id="doc_arquivo"
+                  value={docForm.arquivo}
+                  onChange={(e) => setDoc("arquivo", e.target.value)}
+                  placeholder="ex: contrato_2026.pdf"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="doc_obs">Observações</Label>
+                <Textarea
+                  id="doc_obs"
+                  value={docForm.observacoes}
+                  onChange={(e) => setDoc("observacoes", e.target.value)}
+                  placeholder="Notas sobre o documento"
+                  rows={2}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                {editingDoc && (
+                  <Button variant="secondary" size="sm" onClick={resetDocForm}>
+                    Cancelar edição
+                  </Button>
+                )}
+                <Button size="sm" onClick={salvarDoc} disabled={saveDocM.isPending}>
+                  {saveDocM.isPending ? "Salvando..." : editingDoc ? "Atualizar" : "Adicionar"}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {docsQ.isLoading ? (
+            <div className="text-center text-muted-foreground py-4">Carregando documentos...</div>
+          ) : (docsQ.data?.length ?? 0) === 0 ? (
+            <div className="text-center text-muted-foreground py-4">Nenhum documento anexado.</div>
+          ) : (
+            <div className="border-t pt-4">
+              <h3 className="font-semibold mb-3">Documentos anexados</h3>
+              <div className="space-y-2">
+                {docsQ.data?.map((doc) => (
+                  <div key={doc.id} className="rounded border p-3 flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="font-medium text-sm">{doc.tipo_documento}</div>
+                      <div className="text-xs text-muted-foreground">{doc.arquivo}</div>
+                      {doc.observacoes && (
+                        <div className="text-xs text-muted-foreground mt-1 italic">{doc.observacoes}</div>
+                      )}
+                    </div>
+                    <div className="inline-flex gap-1 flex-shrink-0">
+                      {canEdit && (
+                        <Button variant="secondary" size="sm" onClick={() => openEditDoc(doc)}>
+                          Editar
+                        </Button>
+                      )}
+                      {canDelete && (
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: "Remover documento",
+                              message: `Remover o documento "${doc.tipo_documento}"? Esta ação não pode ser desfeita.`,
+                            });
+                            if (ok) deleteDocM.mutate(doc.id);
+                          }}
+                          disabled={deleteDocM.isPending}
+                        >
+                          {deleteDocM.isPending ? "Removendo..." : "Remover"}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </Dialog>
     </div>
