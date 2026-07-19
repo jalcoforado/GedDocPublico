@@ -41,6 +41,8 @@ from ..schemas.transporte_regulado import (
     AlvaraDocumentoUpdate,
     AlvaraResponsavelCreate,
     AlvaraResponsavelOut,
+    AlvaraVeiculoCreate,
+    AlvaraVeiculoOut,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -871,3 +873,57 @@ async def delete_alvara_responsavel(
 ) -> None:
     """Soft-deleta um responsável de um alvará."""
     await tr_svc.remover_responsavel(db, tenant_id=tenant_id, responsavel_id=responsavel_id)
+
+
+# ============================ Veículos do Alvará (P4) ========================
+@alvaras_router.post("/{alvara_id}/veiculos", response_model=AlvaraVeiculoOut, status_code=status.HTTP_201_CREATED)
+async def vincular_veiculo_alvara(
+    alvara_id: int,
+    payload: AlvaraVeiculoCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraVeiculoOut:
+    """Vincula um veículo a um alvará."""
+    av = await tr_svc.vincular_veiculo_alvara(
+        db, tenant_id=tenant_id, alvara_id=alvara_id, veiculo_id=payload.id_veiculo
+    )
+    return AlvaraVeiculoOut.model_validate(av)
+
+
+@alvaras_router.delete("/{alvara_id}/veiculos/{veiculo_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def desvincular_veiculo_alvara(
+    alvara_id: int,
+    veiculo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Desvincula um veículo de um alvará."""
+    await tr_svc.desvincular_veiculo_alvara(
+        db, tenant_id=tenant_id, alvara_id=alvara_id, veiculo_id=veiculo_id
+    )
+
+
+@alvaras_router.get("/{alvara_id}/veiculos", response_model=list[AlvaraVeiculoOut])
+async def listar_veiculos_alvara(
+    alvara_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[AlvaraVeiculoOut]:
+    """Lista veículos vinculados a um alvará."""
+    avs = await tr_svc.listar_veiculos_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+    return [AlvaraVeiculoOut.model_validate(av) for av in avs]
+
+
+@alvaras_router.get("/veiculos/{veiculo_id}/alvaras", response_model=list[AlvaraVeiculoOut])
+async def listar_alvaras_veiculo(
+    veiculo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[AlvaraVeiculoOut]:
+    """Lista alvarás vinculados a um veículo."""
+    avs = await tr_svc.listar_alvaras_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
+    return [AlvaraVeiculoOut.model_validate(av) for av in avs]

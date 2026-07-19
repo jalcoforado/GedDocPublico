@@ -860,3 +860,22 @@ class AlvaraResponsavelOut(BaseModel):
     criado_em: datetime
     atualizado_em: datetime | None
     excluido: bool
+
+
+# ============================ AlvaraVeiculo (P4) ============================
+class AlvaraVeiculoCreate(BaseModel):
+    """Vinculação de veículo a um alvará — id_veiculo obrigatório."""
+
+    id_veiculo: int
+
+
+class AlvaraVeiculoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    id_alvara: int
+    id_veiculo: int
+    data_vinculo: datetime
+    criado_em: datetime
+    atualizado_em: datetime | None

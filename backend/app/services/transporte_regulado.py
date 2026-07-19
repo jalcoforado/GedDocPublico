@@ -22,6 +22,7 @@ from ..models.transporte_regulado import (
     Alvara,
     AlvaraDocumento,
     AlvaraResponsavel,
+    AlvaraVeiculo,
 )
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
@@ -1318,3 +1319,102 @@ async def remover_responsavel(
     resp.excluido = True
     resp.atualizado_em = datetime.utcnow()
     await db.commit()
+
+
+# ============================ Veículos do Alvará (P4) ================================
+async def vincular_veiculo_alvara(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    alvara_id: int,
+    veiculo_id: int,
+) -> AlvaraVeiculo:
+    """Vincula um veículo a um alvará.
+
+    Validações:
+    - Alvará existe e pertence ao tenant
+    - Veículo existe e pertence ao tenant
+    - Vínculo não existe (UNIQUE constraint)
+
+    Raises:
+        HTTPException: 404 alvará/veículo não encontrado, 409 já vinculado
+    """
+    await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+    await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
+
+    # Verificar duplicata
+    stmt = select(AlvaraVeiculo).where(
+        AlvaraVeiculo.tenant_id == tenant_id,
+        AlvaraVeiculo.id_alvara == alvara_id,
+        AlvaraVeiculo.id_veiculo == veiculo_id,
+    )
+    if (await db.execute(stmt)).scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Este veículo já está vinculado a este alvará.",
+        )
+
+    agora = datetime.utcnow()
+    av = AlvaraVeiculo(
+        tenant_id=tenant_id,
+        id_alvara=alvara_id,
+        id_veiculo=veiculo_id,
+        data_vinculo=agora,
+        criado_em=agora,
+    )
+    db.add(av)
+    await db.commit()
+    await db.refresh(av)
+    return av
+
+
+async def desvincular_veiculo_alvara(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    alvara_id: int,
+    veiculo_id: int,
+) -> None:
+    """Desvincula um veículo de um alvará (soft-delete)."""
+    av = (
+        await db.execute(
+            select(AlvaraVeiculo).where(
+                AlvaraVeiculo.tenant_id == tenant_id,
+                AlvaraVeiculo.id_alvara == alvara_id,
+                AlvaraVeiculo.id_veiculo == veiculo_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if av is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Vínculo entre alvará e veículo não encontrado.",
+        )
+    db.delete(av)
+    await db.commit()
+
+
+async def listar_veiculos_alvara(
+    db: AsyncSession, *, tenant_id: int, alvara_id: int
+) -> list[AlvaraVeiculo]:
+    """Lista veículos vinculados a um alvará."""
+    await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+
+    stmt = select(AlvaraVeiculo).where(
+        AlvaraVeiculo.tenant_id == tenant_id,
+        AlvaraVeiculo.id_alvara == alvara_id,
+    ).order_by(AlvaraVeiculo.criado_em.desc())
+    return (await db.execute(stmt)).scalars().all()
+
+
+async def listar_alvaras_veiculo(
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int
+) -> list[AlvaraVeiculo]:
+    """Lista alvarás vinculados a um veículo."""
+    await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
+
+    stmt = select(AlvaraVeiculo).where(
+        AlvaraVeiculo.tenant_id == tenant_id,
+        AlvaraVeiculo.id_veiculo == veiculo_id,
+    ).order_by(AlvaraVeiculo.criado_em.desc())
+    return (await db.execute(stmt)).scalars().all()
