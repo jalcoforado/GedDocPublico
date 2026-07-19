@@ -21,6 +21,7 @@ from ..models.transporte_regulado import (
     VeiculoVistoria,
     Alvara,
     AlvaraDocumento,
+    AlvaraResponsavel,
 )
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
@@ -43,6 +44,8 @@ from ..schemas.transporte_regulado import (
     AlvaraDocumentoCreate,
     AlvaraDocumentoUpdate,
     AlvaraDocumentoOut,
+    AlvaraResponsavelCreate,
+    AlvaraResponsavelOut,
 )
 
 
@@ -1245,4 +1248,73 @@ async def excluir_alvara_documento(
     doc = await obter_alvara_documento(db, tenant_id=tenant_id, documento_id=documento_id)
     doc.excluido = True
     doc.atualizado_em = datetime.utcnow()
+    await db.commit()
+
+
+# ============================ AlvaraResponsavel =============================
+
+
+async def adicionar_responsavel(
+    db: AsyncSession, *, tenant_id: int, alvara_id: int, payload: AlvaraResponsavelCreate
+) -> AlvaraResponsavel:
+    """Adiciona usuário como responsável por um alvará."""
+    # Validar que alvará existe (404 cross-tenant)
+    await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+
+    # Validar que usuário existe (mesma tenant)
+    await _validar_usuario_existe(db, tenant_id=tenant_id, usuario_id=payload.id_usuario)
+
+    resp = AlvaraResponsavel(
+        tenant_id=tenant_id,
+        id_alvara=alvara_id,
+        id_usuario=payload.id_usuario,
+        cargo_funcao=payload.cargo_funcao,
+        criado_em=datetime.utcnow(),
+    )
+    db.add(resp)
+    await db.commit()
+    await db.refresh(resp)
+    return resp
+
+
+async def obter_responsavel(
+    db: AsyncSession, *, tenant_id: int, responsavel_id: int
+) -> AlvaraResponsavel:
+    """Obtém responsável — 404 se não encontrado ou cross-tenant."""
+    stmt = select(AlvaraResponsavel).where(
+        AlvaraResponsavel.tenant_id == tenant_id,
+        AlvaraResponsavel.id == responsavel_id,
+        AlvaraResponsavel.excluido.is_(False),
+    )
+    resp = (await db.execute(stmt)).scalar_one_or_none()
+    if resp is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Responsável do alvará não encontrado.",
+        )
+    return resp
+
+
+async def listar_responsaveis(
+    db: AsyncSession, *, tenant_id: int, alvara_id: int
+) -> list[AlvaraResponsavel]:
+    """Lista responsáveis de um alvará."""
+    # Validar que alvará existe
+    await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+
+    stmt = select(AlvaraResponsavel).where(
+        AlvaraResponsavel.tenant_id == tenant_id,
+        AlvaraResponsavel.id_alvara == alvara_id,
+        AlvaraResponsavel.excluido.is_(False),
+    ).order_by(AlvaraResponsavel.criado_em.desc())
+    return (await db.execute(stmt)).scalars().all()
+
+
+async def remover_responsavel(
+    db: AsyncSession, *, tenant_id: int, responsavel_id: int
+) -> None:
+    """Soft-delete responsável de um alvará."""
+    resp = await obter_responsavel(db, tenant_id=tenant_id, responsavel_id=responsavel_id)
+    resp.excluido = True
+    resp.atualizado_em = datetime.utcnow()
     await db.commit()

@@ -318,3 +318,29 @@ class AlvaraDocumento(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class AlvaraResponsavel(Base):
+    """Responsáveis (usuários do sistema) vinculados a alvarás.
+
+    Um alvará pode ter múltiplos responsáveis (gerente, operador, autorizado, etc).
+    Um usuário pode ser responsável por múltiplos alvarás. Soft-delete.
+    """
+
+    __tablename__ = "alvara_responsavel"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_alvara: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.alvara.id"), nullable=False
+    )
+    id_usuario: Mapped[int] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=False
+    )
+    cargo_funcao: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

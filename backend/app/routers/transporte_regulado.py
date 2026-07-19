@@ -39,6 +39,8 @@ from ..schemas.transporte_regulado import (
     AlvaraDocumentoCreate,
     AlvaraDocumentoOut,
     AlvaraDocumentoUpdate,
+    AlvaraResponsavelCreate,
+    AlvaraResponsavelOut,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -813,3 +815,59 @@ async def delete_alvara_documento(
 ) -> None:
     """Soft-deleta um documento de alvará."""
     await tr_svc.excluir_alvara_documento(db, tenant_id=tenant_id, documento_id=documento_id)
+
+
+# ============================ Responsáveis de Alvarás ==========================
+
+
+@alvaras_router.get("/{alvara_id}/responsaveis", response_model=list[AlvaraResponsavelOut])
+async def list_alvara_responsaveis(
+    alvara_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[AlvaraResponsavelOut]:
+    """Lista responsáveis de um alvará."""
+    return await tr_svc.listar_responsaveis(
+        db, tenant_id=tenant_id, alvara_id=alvara_id
+    )
+
+
+@alvaras_router.post(
+    "/{alvara_id}/responsaveis", response_model=AlvaraResponsavelOut, status_code=status.HTTP_201_CREATED
+)
+async def add_alvara_responsavel(
+    alvara_id: int,
+    payload: AlvaraResponsavelCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraResponsavelOut:
+    """Adiciona usuário como responsável por um alvará."""
+    return await tr_svc.adicionar_responsavel(
+        db, tenant_id=tenant_id, alvara_id=alvara_id, payload=payload
+    )
+
+
+@alvaras_router.get("/{alvara_id}/responsaveis/{responsavel_id}", response_model=AlvaraResponsavelOut)
+async def get_alvara_responsavel(
+    alvara_id: int,
+    responsavel_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraResponsavelOut:
+    """Obtém um responsável de um alvará."""
+    return await tr_svc.obter_responsavel(db, tenant_id=tenant_id, responsavel_id=responsavel_id)
+
+
+@alvaras_router.delete("/{alvara_id}/responsaveis/{responsavel_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_alvara_responsavel(
+    alvara_id: int,
+    responsavel_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Soft-deleta um responsável de um alvará."""
+    await tr_svc.remover_responsavel(db, tenant_id=tenant_id, responsavel_id=responsavel_id)

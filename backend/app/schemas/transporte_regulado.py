@@ -839,3 +839,24 @@ class AlvaraDocumentoOut(BaseModel):
     criado_em: datetime
     atualizado_em: datetime | None
     excluido: bool
+
+
+# ============================ AlvaraResponsavel =============================
+class AlvaraResponsavelCreate(BaseModel):
+    """Adição de responsável a um alvará — usuário obrigatório, cargo opcional."""
+
+    id_usuario: int
+    cargo_funcao: str | None = Field(default=None, max_length=100)
+
+
+class AlvaraResponsavelOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    id_alvara: int
+    id_usuario: int
+    cargo_funcao: str | None
+    criado_em: datetime
+    atualizado_em: datetime | None
+    excluido: bool
