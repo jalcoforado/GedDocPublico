@@ -909,7 +909,7 @@ export default function AlvarasPage() {
                   onChange={(e) => setRespForm((f) => ({ ...f, id_usuario: e.target.value }))}
                 >
                   <option value="">Selecione um usuário</option>
-                  {usuariosQ.data?.map((u: Usuario) => (
+                  {usuariosQ.data?.items?.map((u: Usuario) => (
                     <option key={u.id} value={String(u.id)}>
                       {u.nome} ({u.email})
                     </option>
