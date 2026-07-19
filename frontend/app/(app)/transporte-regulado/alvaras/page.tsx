@@ -23,9 +23,12 @@ import {
   type AlvaraDocumentoInput,
   type AlvaraInput,
   type AlvaraRenovarInput,
+  type AlvaraResponsavel,
+  type AlvaraResponsavelInput,
   type Empresa,
   type Permissionario,
   type TipoServico,
+  type Usuario,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
@@ -122,6 +125,11 @@ export default function AlvarasPage() {
   const [editingDoc, setEditingDoc] = useState<AlvaraDocumento | null>(null);
   const [docErr, setDocErr] = useState<string | null>(null);
 
+  const [respDialogOpen, setRespDialogOpen] = useState(false);
+  const [selectedAlvaraForResp, setSelectedAlvaraForResp] = useState<Alvara | null>(null);
+  const [respForm, setRespForm] = useState({ id_usuario: "", cargo_funcao: "" });
+  const [respErr, setRespErr] = useState<string | null>(null);
+
   const listaQ = useQuery({
     queryKey: ["tr-alvaras", empresaFiltro, permFiltro, busca],
     queryFn: () =>
@@ -154,6 +162,19 @@ export default function AlvarasPage() {
     queryFn: () =>
       selectedAlvaraForDocs ? api.alvaras.documentos.list(selectedAlvaraForDocs.id) : Promise.resolve([]),
     enabled: docsDialogOpen && selectedAlvaraForDocs !== null,
+  });
+
+  const respQ = useQuery({
+    queryKey: ["tr-alvara-responsaveis", selectedAlvaraForResp?.id],
+    queryFn: () =>
+      selectedAlvaraForResp ? api.alvaras.responsaveis.list(selectedAlvaraForResp.id) : Promise.resolve([]),
+    enabled: respDialogOpen && selectedAlvaraForResp !== null,
+  });
+
+  const usuariosQ = useQuery({
+    queryKey: ["usuarios-list"],
+    queryFn: () => api.usuarios.list(),
+    enabled: respDialogOpen,
   });
 
   const invalidate = () => {
@@ -213,6 +234,27 @@ export default function AlvarasPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tr-alvara-documentos"] });
       toast.success("Documento removido.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const addRespM = useMutation({
+    mutationFn: (data: AlvaraResponsavelInput) =>
+      selectedAlvaraForResp ? api.alvaras.responsaveis.add(selectedAlvaraForResp.id, data) : Promise.reject(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tr-alvara-responsaveis"] });
+      toast.success("Responsável adicionado.");
+      resetRespForm();
+    },
+    onError: (e: Error) => setRespErr(e.message),
+  });
+
+  const deleteRespM = useMutation({
+    mutationFn: (respId: number) =>
+      selectedAlvaraForResp ? api.alvaras.responsaveis.remove(selectedAlvaraForResp.id, respId) : Promise.reject(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tr-alvara-responsaveis"] });
+      toast.success("Responsável removido.");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -315,6 +357,36 @@ export default function AlvarasPage() {
       observacoes: nullify(docForm.observacoes),
     };
     saveDocM.mutate(payload);
+  }
+
+  function openResp(a: Alvara) {
+    setSelectedAlvaraForResp(a);
+    resetRespForm();
+    setRespDialogOpen(true);
+  }
+
+  function closeResp() {
+    setRespDialogOpen(false);
+    setSelectedAlvaraForResp(null);
+    resetRespForm();
+  }
+
+  function resetRespForm() {
+    setRespForm({ id_usuario: "", cargo_funcao: "" });
+    setRespErr(null);
+  }
+
+  function salvarResp() {
+    setRespErr(null);
+    if (respForm.id_usuario === "") {
+      setRespErr("Selecione um usuário.");
+      return;
+    }
+    const payload: AlvaraResponsavelInput = {
+      id_usuario: Number(respForm.id_usuario),
+      cargo_funcao: nullify(respForm.cargo_funcao),
+    };
+    addRespM.mutate(payload);
   }
 
   function salvarRenov() {
@@ -475,9 +547,14 @@ export default function AlvarasPage() {
                 <TD className="text-right">
                   <div className="inline-flex flex-wrap justify-end gap-2">
                     {canCreate && (
-                      <Button variant="secondary" size="sm" onClick={() => openDocs(a)}>
-                        Documentos
-                      </Button>
+                      <>
+                        <Button variant="secondary" size="sm" onClick={() => openDocs(a)}>
+                          Documentos
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={() => openResp(a)}>
+                          Responsáveis
+                        </Button>
+                      </>
                     )}
                     {canEdit && (
                       <Button variant="secondary" size="sm" onClick={() => openEdit(a)}>
@@ -798,6 +875,98 @@ export default function AlvarasPage() {
                         </Button>
                       )}
                     </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={respDialogOpen}
+        onClose={closeResp}
+        title={selectedAlvaraForResp ? `Responsáveis — ${selectedAlvaraForResp.numero_alvara}` : "Responsáveis do alvará"}
+        size="lg"
+      >
+        <div className="space-y-4">
+          {respErr && (
+            <div className="rounded bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+              {respErr}
+            </div>
+          )}
+
+          <div className="border-t pt-4">
+            <h3 className="font-semibold mb-3">Adicionar responsável</h3>
+            <div className="space-y-3">
+              <div>
+                <Label htmlFor="resp_usuario" required>
+                  Usuário
+                </Label>
+                <Select
+                  id="resp_usuario"
+                  value={respForm.id_usuario}
+                  onChange={(e) => setRespForm((f) => ({ ...f, id_usuario: e.target.value }))}
+                >
+                  <option value="">Selecione um usuário</option>
+                  {usuariosQ.data?.map((u: Usuario) => (
+                    <option key={u.id} value={String(u.id)}>
+                      {u.nome} ({u.email})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="resp_cargo">Cargo/Função</Label>
+                <Input
+                  id="resp_cargo"
+                  value={respForm.cargo_funcao}
+                  onChange={(e) => setRespForm((f) => ({ ...f, cargo_funcao: e.target.value }))}
+                  placeholder="ex: Gerente, Operador"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button size="sm" onClick={salvarResp} disabled={addRespM.isPending}>
+                  {addRespM.isPending ? "Adicionando..." : "Adicionar"}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {respQ.isLoading ? (
+            <div className="text-center text-muted-foreground py-4">Carregando responsáveis...</div>
+          ) : (respQ.data?.length ?? 0) === 0 ? (
+            <div className="text-center text-muted-foreground py-4">Nenhum responsável vinculado.</div>
+          ) : (
+            <div className="border-t pt-4">
+              <h3 className="font-semibold mb-3">Responsáveis vinculados</h3>
+              <div className="space-y-2">
+                {respQ.data?.map((resp) => (
+                  <div key={resp.id} className="rounded border p-3 flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="font-medium text-sm">ID Usuário: {resp.id_usuario}</div>
+                      {resp.cargo_funcao && (
+                        <div className="text-xs text-muted-foreground">{resp.cargo_funcao}</div>
+                      )}
+                    </div>
+                    {canDelete && (
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: "Remover responsável",
+                            message: `Remover este responsável? Esta ação não pode ser desfeita.`,
+                          });
+                          if (ok) deleteRespM.mutate(resp.id);
+                        }}
+                        disabled={deleteRespM.isPending}
+                      >
+                        {deleteRespM.isPending ? "Removendo..." : "Remover"}
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>
