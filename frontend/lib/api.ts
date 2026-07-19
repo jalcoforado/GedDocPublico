@@ -1897,6 +1897,34 @@ export interface AlvaraResponsavelInput {
   cargo_funcao?: string | null;
 }
 
+export interface AlvaraRelatorioItem {
+  id: number;
+  numero_alvara: string;
+  tipo_servico: string;
+  id_permissionario: number | null;
+  id_empresa: number | null;
+  data_inicio: string | null;
+  data_validade: string | null;
+  criado_em: string;
+  status: "ativo" | "vencido" | "a_renovar_30d" | "indefinido";
+  dias_para_vencimento: number | null;
+}
+
+export interface AlvaraRelatorioListResponse {
+  alvaras: AlvaraRelatorioItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AlvaraKPIsResponse {
+  total_alvaras: number;
+  ativos: number;
+  vencidos: number;
+  a_renovar_30d: number;
+  indefinidos: number;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -2457,6 +2485,38 @@ export const api = {
         request<void>(`/transporte-regulado/alvaras/${alvaraId}/responsaveis/${respId}`, {
           method: "DELETE",
         }),
+    },
+    relatorio: {
+      list: (params?: {
+        tipo_servico?: string;
+        id_permissionario?: number;
+        status?: "ativo" | "vencido" | "a_renovar_30d" | "indefinido";
+        limit?: number;
+        offset?: number;
+      }) =>
+        request<AlvaraRelatorioListResponse>(
+          `/transporte-regulado/alvaras/relatorio${qs(params ?? {})}`,
+        ),
+      kpis: () =>
+        request<AlvaraKPIsResponse>("/transporte-regulado/alvaras/relatorio/kpis"),
+      exportCsv: (params?: {
+        tipo_servico?: string;
+        id_permissionario?: number;
+        status?: "ativo" | "vencido" | "a_renovar_30d" | "indefinido";
+      }) => {
+        const url = new URL(
+          `${baseUrl()}/transporte-regulado/alvaras/relatorio/export/csv`,
+        );
+        if (params) {
+          Object.entries(params).forEach(([k, v]) => {
+            if (v !== undefined && v !== null) {
+              url.searchParams.append(k, String(v));
+            }
+          });
+        }
+        // Retorna a URL para download direto
+        return url.toString();
+      },
     },
   },
   tiposAnexo: {
