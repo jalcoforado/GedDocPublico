@@ -34,7 +34,9 @@ from ..schemas.minuta import (
 )
 from . import anexos as anexos_svc
 from . import placeholders as ph
+from .audit import log as audit_log
 from .html_pdf import html_to_pdf_bytes
+from .html_sanitizer import sanitizar_html
 
 
 def _utcnow() -> datetime:
@@ -210,6 +212,22 @@ async def listar_minutas(
     return list((await db.execute(stmt)).scalars().all())
 
 
+async def listar_historico_minuta(
+    db: AsyncSession, *, tenant_id: int, minuta_id: int
+) -> list[MinutaHistorico]:
+    m = await obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+
+    stmt = (
+        select(MinutaHistorico)
+        .where(
+            MinutaHistorico.tenant_id == tenant_id,
+            MinutaHistorico.id_minuta == m.id,
+        )
+        .order_by(MinutaHistorico.versao.desc())
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
 async def criar_minuta(
     db: AsyncSession,
     *,
@@ -232,8 +250,10 @@ async def criar_minuta(
             db, tenant_id=tenant_id, processo=processo, usuario=usuario
         )
         corpo_html = ph.resolve(template.corpo_html, contexto)
+        corpo_html = sanitizar_html(corpo_html)
     else:
         corpo_html = payload.corpo_html or ""
+        corpo_html = sanitizar_html(corpo_html)
 
     agora = _utcnow()
     m = Minuta(
@@ -264,6 +284,16 @@ async def criar_minuta(
         )
     await db.commit()
     await db.refresh(m)
+
+    await audit_log(
+        db,
+        acao="minuta.criada",
+        id_entidade=m.id,
+        tipo_entidade="minuta",
+        id_usuario=usuario.id,
+        id_processo=processo_id,
+    )
+
     return m
 
 
@@ -295,7 +325,7 @@ async def atualizar_minuta(
     if "titulo" in dados:
         m.titulo = dados["titulo"]
     if "corpo_html" in dados:
-        m.corpo_html = dados["corpo_html"]
+        m.corpo_html = sanitizar_html(dados["corpo_html"])
 
     agora = _utcnow()
     m.atualizado_em = agora
@@ -314,10 +344,22 @@ async def atualizar_minuta(
         )
     await db.commit()
     await db.refresh(m)
+
+    await audit_log(
+        db,
+        acao="minuta.editada",
+        id_entidade=m.id,
+        tipo_entidade="minuta",
+        id_usuario=usuario.id,
+        id_processo=m.id_processo,
+    )
+
     return m
 
 
-async def excluir_minuta(db: AsyncSession, *, tenant_id: int, minuta_id: int) -> None:
+async def excluir_minuta(
+    db: AsyncSession, *, tenant_id: int, minuta_id: int, usuario_id: int | None = None
+) -> None:
     m = await obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
     if m.status == "finalizada":
         raise HTTPException(
@@ -327,6 +369,16 @@ async def excluir_minuta(db: AsyncSession, *, tenant_id: int, minuta_id: int) ->
     m.excluido = True
     m.atualizado_em = _utcnow()
     await db.commit()
+
+    if usuario_id:
+        await audit_log(
+            db,
+            acao="minuta.excluida",
+            id_entidade=m.id,
+            tipo_entidade="minuta",
+            id_usuario=usuario_id,
+            id_processo=m.id_processo,
+        )
 
 
 async def finalizar_minuta(
@@ -365,7 +417,8 @@ async def finalizar_minuta(
             detail="A minuta está vazia — escreva o conteúdo antes de finalizar.",
         )
 
-    pdf_bytes = html_to_pdf_bytes(m.corpo_html or "", titulo=m.titulo)
+    corpo_sanitizado = sanitizar_html(m.corpo_html or "")
+    pdf_bytes = html_to_pdf_bytes(corpo_sanitizado, titulo=m.titulo)
 
     anexo = await anexos_svc._criar_anexo_from_bytes(
         db,
@@ -390,4 +443,14 @@ async def finalizar_minuta(
 
     await db.commit()
     await db.refresh(m)
+
+    await audit_log(
+        db,
+        acao="minuta.finalizada",
+        id_entidade=m.id,
+        tipo_entidade="minuta",
+        id_usuario=usuario_id,
+        id_processo=m.id_processo,
+    )
+
     return m

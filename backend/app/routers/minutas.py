@@ -16,6 +16,7 @@ from ..database import get_db
 from ..models import Usuario
 from ..schemas.minuta import (
     MinutaCreate,
+    MinutaHistoricoListResponse,
     MinutaListItem,
     MinutaOut,
     MinutaUpdate,
@@ -152,6 +153,17 @@ async def get_minuta(
     return MinutaOut.model_validate(m)
 
 
+@minutas_router.get("/minutas/{minuta_id}/historico", response_model=MinutaHistoricoListResponse)
+async def get_minuta_historico(
+    minuta_id: int,
+    _: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> MinutaHistoricoListResponse:
+    versoes = await svc.listar_historico_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+    return MinutaHistoricoListResponse(versoes=[v for v in versoes])
+
+
 @minutas_router.put("/minutas/{minuta_id}", response_model=MinutaOut)
 async def update_minuta(
     minuta_id: int,
@@ -175,11 +187,11 @@ async def update_minuta(
 )
 async def delete_minuta(
     minuta_id: int,
-    _: Usuario = Depends(require_permission("processo", "atualizar")),
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    await svc.excluir_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+    await svc.excluir_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id, usuario_id=usuario.id)
 
 
 @minutas_router.post("/minutas/{minuta_id}/finalizar", response_model=MinutaOut)

@@ -23,6 +23,7 @@ dependencies = [
   "alembic==1.14.0",
   "simpleeval==1.0.3",
   "aiosmtplib==3.0.2",
+  "bleach==6.1.0",
 ]
 
 [project.optional-dependencies]
