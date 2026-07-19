@@ -808,3 +808,34 @@ class AlvaraRenovarInput(BaseModel):
         if self.data_inicio and self.data_validade and self.data_inicio > self.data_validade:
             raise ValueError("data_inicio não pode ser posterior a data_validade.")
         return self
+
+
+# ============================ AlvaraDocumento ===============================
+class AlvaraDocumentoCreate(BaseModel):
+    """Criação de documento de alvará — tipo obrigatório, arquivo (path/filename)."""
+
+    tipo_documento: str = Field(min_length=1, max_length=30)
+    arquivo: str = Field(min_length=1, max_length=255)
+    observacoes: str | None = None
+
+
+class AlvaraDocumentoUpdate(BaseModel):
+    """Atualização de documento — todos campos opcionais."""
+
+    tipo_documento: str | None = Field(default=None, min_length=1, max_length=30)
+    arquivo: str | None = Field(default=None, min_length=1, max_length=255)
+    observacoes: str | None = None
+
+
+class AlvaraDocumentoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    id_alvara: int
+    tipo_documento: str
+    arquivo: str
+    observacoes: str | None
+    criado_em: datetime
+    atualizado_em: datetime | None
+    excluido: bool

@@ -36,6 +36,9 @@ from ..schemas.transporte_regulado import (
     AlvaraOut,
     AlvaraUpdate,
     AlvaraRenovarInput,
+    AlvaraDocumentoCreate,
+    AlvaraDocumentoOut,
+    AlvaraDocumentoUpdate,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -739,3 +742,74 @@ async def renovate_alvara(
 ) -> AlvaraOut:
     """Renova um alvará vencido — cria novo alvará atrelado ao anterior via renovado_de."""
     return await tr_svc.renovar_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id, payload=payload)
+
+
+# ============================ Documentos de Alvarás ==========================
+
+
+@alvaras_router.get("/{alvara_id}/documentos", response_model=list[AlvaraDocumentoOut])
+async def list_alvara_documentos(
+    alvara_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[AlvaraDocumentoOut]:
+    """Lista documentos de um alvará."""
+    return await tr_svc.listar_alvara_documentos(
+        db, tenant_id=tenant_id, alvara_id=alvara_id
+    )
+
+
+@alvaras_router.post(
+    "/{alvara_id}/documentos", response_model=AlvaraDocumentoOut, status_code=status.HTTP_201_CREATED
+)
+async def create_alvara_documento(
+    alvara_id: int,
+    payload: AlvaraDocumentoCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraDocumentoOut:
+    """Cria documento anexado a um alvará."""
+    return await tr_svc.criar_alvara_documento(
+        db, tenant_id=tenant_id, alvara_id=alvara_id, payload=payload
+    )
+
+
+@alvaras_router.get("/{alvara_id}/documentos/{documento_id}", response_model=AlvaraDocumentoOut)
+async def get_alvara_documento(
+    alvara_id: int,
+    documento_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraDocumentoOut:
+    """Obtém um documento de alvará."""
+    return await tr_svc.obter_alvara_documento(db, tenant_id=tenant_id, documento_id=documento_id)
+
+
+@alvaras_router.put("/{alvara_id}/documentos/{documento_id}", response_model=AlvaraDocumentoOut)
+async def update_alvara_documento(
+    alvara_id: int,
+    documento_id: int,
+    payload: AlvaraDocumentoUpdate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraDocumentoOut:
+    """Atualiza documento de um alvará."""
+    return await tr_svc.atualizar_alvara_documento(
+        db, tenant_id=tenant_id, documento_id=documento_id, payload=payload
+    )
+
+
+@alvaras_router.delete("/{alvara_id}/documentos/{documento_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_alvara_documento(
+    alvara_id: int,
+    documento_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Soft-deleta um documento de alvará."""
+    await tr_svc.excluir_alvara_documento(db, tenant_id=tenant_id, documento_id=documento_id)

@@ -15,7 +15,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Empresa, Permissionario, VeiculoRegulado, Usuario
-from ..models.transporte_regulado import VeiculoDocumento, VeiculoAvaliacao, VeiculoVistoria, Alvara
+from ..models.transporte_regulado import (
+    VeiculoDocumento,
+    VeiculoAvaliacao,
+    VeiculoVistoria,
+    Alvara,
+    AlvaraDocumento,
+)
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
     EmpresaUpdate,
@@ -34,6 +40,9 @@ from ..schemas.transporte_regulado import (
     AlvaraUpdate,
     AlvaraOut,
     AlvaraRenovarInput,
+    AlvaraDocumentoCreate,
+    AlvaraDocumentoUpdate,
+    AlvaraDocumentoOut,
 )
 
 
@@ -1147,3 +1156,93 @@ async def renovar_alvara(
     await db.commit()
     await db.refresh(novo)
     return novo
+
+
+# ============================ AlvaraDocumento ===============================
+
+
+async def criar_alvara_documento(
+    db: AsyncSession, *, tenant_id: int, alvara_id: int, payload: AlvaraDocumentoCreate
+) -> AlvaraDocumento:
+    """Cria documento anexado a um alvará."""
+    # Validar que alvará existe (404 cross-tenant)
+    await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+
+    doc = AlvaraDocumento(
+        tenant_id=tenant_id,
+        id_alvara=alvara_id,
+        tipo_documento=payload.tipo_documento,
+        arquivo=payload.arquivo,
+        observacoes=payload.observacoes,
+        criado_em=datetime.utcnow(),
+    )
+    db.add(doc)
+    await db.commit()
+    await db.refresh(doc)
+    return doc
+
+
+async def obter_alvara_documento(
+    db: AsyncSession, *, tenant_id: int, documento_id: int
+) -> AlvaraDocumento:
+    """Obtém documento de alvará — 404 se não encontrado ou cross-tenant."""
+    stmt = select(AlvaraDocumento).where(
+        AlvaraDocumento.tenant_id == tenant_id,
+        AlvaraDocumento.id == documento_id,
+        AlvaraDocumento.excluido.is_(False),
+    )
+    doc = (await db.execute(stmt)).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento de alvará não encontrado.",
+        )
+    return doc
+
+
+async def listar_alvara_documentos(
+    db: AsyncSession, *, tenant_id: int, alvara_id: int
+) -> list[AlvaraDocumento]:
+    """Lista documentos de um alvará."""
+    # Validar que alvará existe
+    await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+
+    stmt = select(AlvaraDocumento).where(
+        AlvaraDocumento.tenant_id == tenant_id,
+        AlvaraDocumento.id_alvara == alvara_id,
+        AlvaraDocumento.excluido.is_(False),
+    ).order_by(AlvaraDocumento.criado_em.desc())
+    return (await db.execute(stmt)).scalars().all()
+
+
+async def atualizar_alvara_documento(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    documento_id: int,
+    payload: AlvaraDocumentoUpdate,
+) -> AlvaraDocumento:
+    """Atualiza documento de alvará — 404 cross-tenant."""
+    doc = await obter_alvara_documento(db, tenant_id=tenant_id, documento_id=documento_id)
+
+    if payload.tipo_documento is not None:
+        doc.tipo_documento = payload.tipo_documento
+    if payload.arquivo is not None:
+        doc.arquivo = payload.arquivo
+    if payload.observacoes is not None:
+        doc.observacoes = payload.observacoes
+
+    doc.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(doc)
+    return doc
+
+
+async def excluir_alvara_documento(
+    db: AsyncSession, *, tenant_id: int, documento_id: int
+) -> None:
+    """Soft-delete documento de alvará."""
+    doc = await obter_alvara_documento(db, tenant_id=tenant_id, documento_id=documento_id)
+    doc.excluido = True
+    doc.atualizado_em = datetime.utcnow()
+    await db.commit()

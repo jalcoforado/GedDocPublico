@@ -293,3 +293,28 @@ class Alvara(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class AlvaraDocumento(Base):
+    """Documentos anexados a alvarás (contrato, comprovante, procuração, etc.).
+
+    Metadados apenas (sem upload de arquivo nesta fase). Cada documento tem um
+    tipo e referência para arquivo (path/filename). Soft-deleted com alvará (cascade).
+    """
+
+    __tablename__ = "alvara_documento"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_alvara: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.alvara.id", ondelete="CASCADE"), nullable=False
+    )
+    tipo_documento: Mapped[str] = mapped_column(String(30), nullable=False)
+    arquivo: Mapped[str] = mapped_column(String(255), nullable=False)
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
