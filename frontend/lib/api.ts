@@ -1881,6 +1881,22 @@ export interface AlvaraDocumentoInput {
   observacoes?: string | null;
 }
 
+export interface AlvaraResponsavel {
+  id: number;
+  tenant_id: number;
+  id_alvara: number;
+  id_usuario: number;
+  cargo_funcao: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+  excluido: boolean;
+}
+
+export interface AlvaraResponsavelInput {
+  id_usuario: number;
+  cargo_funcao?: string | null;
+}
+
 export const api = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
@@ -2424,6 +2440,21 @@ export const api = {
         }),
       remove: (alvaraId: number, docId: number) =>
         request<void>(`/transporte-regulado/alvaras/${alvaraId}/documentos/${docId}`, {
+          method: "DELETE",
+        }),
+    },
+    responsaveis: {
+      list: (alvaraId: number) =>
+        request<AlvaraResponsavel[]>(`/transporte-regulado/alvaras/${alvaraId}/responsaveis`),
+      get: (alvaraId: number, respId: number) =>
+        request<AlvaraResponsavel>(`/transporte-regulado/alvaras/${alvaraId}/responsaveis/${respId}`),
+      add: (alvaraId: number, data: AlvaraResponsavelInput) =>
+        request<AlvaraResponsavel>(`/transporte-regulado/alvaras/${alvaraId}/responsaveis`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      remove: (alvaraId: number, respId: number) =>
+        request<void>(`/transporte-regulado/alvaras/${alvaraId}/responsaveis/${respId}`, {
           method: "DELETE",
         }),
     },
