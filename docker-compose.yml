@@ -32,7 +32,7 @@ services:
       JWT_SECRET_SOURCE: db
       JWT_TTL_SECONDS: "3600"
       JWT_ALGORITHM: HS256  # Trocar para RS256 no cutover (PHP perde interop JWT, mas usa PHPSESSID próprio)
-      ALLOWED_ORIGINS: http://localhost:8090,http://localhost:3000
+      ALLOWED_ORIGINS: http://localhost:8090,http://localhost:3000,http://localhost:3100
       MAX_UPLOAD_SIZE_MB: "20"
     ports:
       - "8000:8000"
@@ -78,7 +78,7 @@ services:
       INTERNAL_API_URL: http://backend:8000/api/v2
       NODE_ENV: development
     ports:
-      - "3000:3000"
+      - "3100:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules
