@@ -30,6 +30,8 @@ from ..models import (
 _TOKEN_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}")
 
 # Catálogo de placeholders disponíveis (para a UI do admin exibir como chips).
+# Nota PR-E: {{PAGE_COUNT}} e {{PAGE_NUMBER}} não são suportados (bug no WeasyPrint).
+# Será implementado em PR-F.
 PLACEHOLDERS_DISPONIVEIS: list[dict[str, str]] = [
     {"chave": "processo.numero", "descricao": "Número do processo"},
     {"chave": "processo.data_abertura", "descricao": "Data de abertura (dd/mm/aaaa)"},

@@ -103,3 +103,16 @@ class MinutaListItem(BaseModel):
     id_usuario_criacao: int
     criado_em: datetime
     atualizado_em: datetime | None
+
+
+class MinutaHistoricoItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    versao: int
+    corpo_html: str
+    id_usuario: int
+    criado_em: datetime
+
+
+class MinutaHistoricoListResponse(BaseModel):
+    versoes: list[MinutaHistoricoItem]
