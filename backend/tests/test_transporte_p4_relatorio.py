@@ -39,14 +39,16 @@ async def _criar_permissionario(engine, tenant_id: int, cpf: str = None):
     from app.schemas.transporte_regulado import PermissionarioCreate
 
     if cpf is None:
-        cpf = uuid.uuid4().hex[:11]
+        import random
+        cpf = "".join(str(random.randint(0, 9)) for _ in range(11))
 
     async with _sm(engine)() as db:
         perm = await tr_svc.criar_permissionario(
             db,
             tenant_id=tenant_id,
             payload=PermissionarioCreate(
-                nome="Perm Teste", cpf=cpf, telefone="1199999999", email="perm@t.local"
+                nome="Perm Teste", cpf=cpf, telefone="1199999999", email="perm@t.local",
+                tipo_servico="taxi"
             ),
         )
     return perm.id, perm
