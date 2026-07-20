@@ -11,7 +11,8 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func, case
+from sqlalchemy.sql import literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Empresa, Permissionario, VeiculoRegulado, Usuario
@@ -1554,8 +1555,8 @@ async def listar_relatorio_alvaras(
     if id_permissionario:
         stmt = stmt.where(Alvara.id_permissionario == id_permissionario)
 
-    # Contar total antes de paginação
-    count_stmt = select(Alvara).where(
+    # Contar total antes de paginação (usando SQL COUNT, não .all())
+    count_stmt = select(func.count(Alvara.id)).where(
         Alvara.tenant_id == tenant_id,
         Alvara.excluido.is_(False),
     )
@@ -1564,18 +1565,22 @@ async def listar_relatorio_alvaras(
     if id_permissionario:
         count_stmt = count_stmt.where(Alvara.id_permissionario == id_permissionario)
 
-    total = len((await db.execute(count_stmt)).scalars().all())
+    total = (await db.execute(count_stmt)).scalar_one() or 0
 
-    # Buscar alvarás
-    stmt = stmt.order_by(Alvara.criado_em.desc()).limit(limit).offset(offset)
-    alvaras = (await db.execute(stmt)).scalars().all()
+    # Buscar alvarás (sem limit se houver status_filtro para aplicar filtro correto)
+    query_stmt = stmt.order_by(Alvara.criado_em.desc())
+    if not status_filtro:
+        # Sem filtro de status, pode limitar direto
+        query_stmt = query_stmt.limit(limit).offset(offset)
 
-    # Calcular KPIs e montar resposta
+    alvaras = (await db.execute(query_stmt)).scalars().all()
+
+    # Calcular KPIs, aplicar status filter em Python, e montar resposta
     resultado = []
     for alvara in alvaras:
         status, dias = _calcular_status_e_dias(alvara.data_validade)
 
-        # Filtro por status (aplicado após cálculo)
+        # Filtro por status (aplicado antes de limitar resultado)
         if status_filtro and status != status_filtro:
             continue
 
@@ -1591,6 +1596,14 @@ async def listar_relatorio_alvaras(
             "status": status,
             "dias_para_vencimento": dias,
         })
+
+        # Aplicar limit depois de filtrar
+        if len(resultado) >= limit:
+            break
+
+    # Se houver status_filtro, ajustar offset aplicando manualmente
+    if status_filtro:
+        resultado = resultado[offset:offset + limit]
 
     return resultado, total
 
