@@ -84,11 +84,11 @@ async def test_obter_credentials_usuario_found(admin_engine):
 
     async with _sm(admin_engine)() as db:
         result = await service.obter_credentials_usuario(
-            db, tenant_id=tenant.id, usuario_id=1
+            db, tenant_id=tenant.id, usuario_id=admin_id
         )
         assert result.id == cred.id
         assert result.tenant_id == tenant.id
-        assert result.id_usuario == 1
+        assert result.id_usuario == admin_id
         assert result.revogado is False
 
 
@@ -108,16 +108,18 @@ async def test_obter_credentials_usuario_not_found(admin_engine):
 @pytest.mark.asyncio
 async def test_obter_credentials_usuario_revogado(admin_engine):
     """Credencial revogada retorna erro."""
-    tenant, _ = await _provisionar(admin_engine)
+    tenant, admin_id = await _provisionar(admin_engine)
     from app.core.crypto import encrypt
 
     async with _sm(admin_engine)() as s:
         cred = GoogleCredencial(
             tenant_id=tenant.id,
-            id_usuario=1,
+            id_usuario=admin_id,
             access_token_cifrado=encrypt("token"),
             refresh_token_cifrado=encrypt("refresh"),
             escopo="drive.file",
+            expira_em=datetime.utcnow() + timedelta(hours=1),
+            criado_em=datetime.utcnow(),
             revogado=True,  # Revoked!
         )
         s.add(cred)
@@ -128,7 +130,7 @@ async def test_obter_credentials_usuario_revogado(admin_engine):
     async with _sm(admin_engine)() as db:
         with pytest.raises(PermissionDeniedError):
             await service.obter_credentials_usuario(
-                db, tenant_id=tenant.id, usuario_id=1
+                db, tenant_id=tenant.id, usuario_id=admin_id
             )
 
 
