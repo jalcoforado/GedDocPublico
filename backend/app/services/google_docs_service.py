@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import io
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from google.auth.exceptions import RefreshError
@@ -20,7 +20,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.crypto import decrypt_bytes, encrypt_bytes
+from app.core.crypto import decrypt, encrypt
 from app.models.google_credencial import GoogleCredencial
 from app.services.html_pdf import html_to_pdf_bytes
 
@@ -105,6 +105,8 @@ class GoogleDocsService:
 
         if expiry:
             creds.expiry = expiry
+        else:
+            creds.expiry = datetime.utcnow() + timedelta(hours=1)
 
         return creds
 
@@ -126,15 +128,15 @@ class GoogleDocsService:
             TokenExpiredError: If refresh token is invalid or revoked.
         """
         # Decrypt existing tokens
-        access_token = decrypt_bytes(cred.access_token_cifrado)
+        access_token = decrypt(cred.access_token_cifrado)
         refresh_token = (
-            decrypt_bytes(cred.refresh_token_cifrado)
+            decrypt(cred.refresh_token_cifrado)
             if cred.refresh_token_cifrado
             else None
         )
 
         # Check if token is still valid
-        if cred.expira_em and cred.expira_em > datetime.now(timezone.utc):
+        if cred.expira_em and cred.expira_em > datetime.utcnow():
             return cred  # No refresh needed
 
         if not refresh_token:
@@ -159,21 +161,21 @@ class GoogleDocsService:
         # Update database with new tokens
         new_access_token = creds_obj.token or access_token
         new_expiry = creds_obj.expiry or (
-            datetime.now(timezone.utc) + timedelta(hours=1)
+            datetime.utcnow() + timedelta(hours=1)
         )
 
         stmt = (
             update(GoogleCredencial)
             .where(GoogleCredencial.id == cred.id)
             .values(
-                access_token_cifrado=encrypt_bytes(new_access_token),
+                access_token_cifrado=encrypt(new_access_token),
                 expira_em=new_expiry,
             )
         )
         await db.execute(stmt)
         await db.commit()
 
-        cred.access_token_cifrado = encrypt_bytes(new_access_token)
+        cred.access_token_cifrado = encrypt(new_access_token)
         cred.expira_em = new_expiry
 
         return cred
@@ -203,7 +205,7 @@ class GoogleDocsService:
         cred = await self.renovar_access_token(db, cred)
 
         # Get decrypted access token
-        access_token = decrypt_bytes(cred.access_token_cifrado)
+        access_token = decrypt(cred.access_token_cifrado)
 
         # Build credentials object
         creds_obj = self._construir_credentials_obj(
@@ -267,7 +269,7 @@ class GoogleDocsService:
         cred = await self.renovar_access_token(db, cred)
 
         # Get decrypted access token
-        access_token = decrypt_bytes(cred.access_token_cifrado)
+        access_token = decrypt(cred.access_token_cifrado)
 
         # Build credentials object
         creds_obj = self._construir_credentials_obj(
@@ -325,7 +327,7 @@ class GoogleDocsService:
         cred = await self.renovar_access_token(db, cred)
 
         # Get decrypted access token
-        access_token = decrypt_bytes(cred.access_token_cifrado)
+        access_token = decrypt(cred.access_token_cifrado)
 
         # Build credentials object
         creds_obj = self._construir_credentials_obj(
@@ -379,7 +381,7 @@ class GoogleDocsService:
         cred = await self.renovar_access_token(db, cred)
 
         # Get decrypted access token
-        access_token = decrypt_bytes(cred.access_token_cifrado)
+        access_token = decrypt(cred.access_token_cifrado)
 
         # Build credentials object
         creds_obj = self._construir_credentials_obj(

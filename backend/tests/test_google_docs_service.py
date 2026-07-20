@@ -4,6 +4,7 @@ Cobre: token management, document creation, download, sync, export, archival.
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,32 +27,46 @@ def _sm(engine):
 
 
 async def _provisionar(engine):
-    """Cria tenant para testes."""
+    """Cria tenant para testes. Retorna (tenant, admin_id)."""
+    from app.models.usuario import Usuario
+    from sqlalchemy import select
+
+    unique_slug = f"gdocs-{str(uuid.uuid4())[:8]}"
+    admin_email = f"admin-{uuid.uuid4().hex[:8]}@gdocs.local"
+
     async with _sm(engine)() as s:
         tenant, _ = await provisionar_tenant(
             s,
-            slug="gdocs-test",
+            slug=unique_slug,
             nome="Tenant Google Docs Test",
-            admin_email="admin@gdocs.local",
+            admin_email=admin_email,
             admin_nome="Admin",
             admin_cpf="11111111111",
             plano="basico",
         )
-    return tenant
+
+        # Obter o usuário admin que foi criado
+        stmt = select(Usuario).where(Usuario.email == admin_email)
+        result = await s.execute(stmt)
+        admin = result.scalar_one_or_none()
+        admin_id = admin.id if admin else None
+
+    return tenant, admin_id
 
 
 async def _criar_credencial(engine, tenant_id: int, usuario_id: int):
     """Cria credencial Google para teste."""
-    from app.core.crypto import encrypt_bytes
+    from app.core.crypto import encrypt
 
     async with _sm(engine)() as s:
         cred = GoogleCredencial(
             tenant_id=tenant_id,
             id_usuario=usuario_id,
-            access_token_cifrado=encrypt_bytes("mock_access_token"),
-            refresh_token_cifrado=encrypt_bytes("mock_refresh_token"),
+            access_token_cifrado=encrypt("mock_access_token"),
+            refresh_token_cifrado=encrypt("mock_refresh_token"),
             escopo="drive.file",
-            expira_em=datetime.now(timezone.utc) + timedelta(hours=1),
+            expira_em=datetime.utcnow() + timedelta(hours=1),
+            criado_em=datetime.utcnow(),
             revogado=False,
         )
         s.add(cred)
@@ -63,8 +78,8 @@ async def _criar_credencial(engine, tenant_id: int, usuario_id: int):
 @pytest.mark.asyncio
 async def test_obter_credentials_usuario_found(admin_engine):
     """Obter credenciais do usuário."""
-    tenant = await _provisionar(admin_engine)
-    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=1)
+    tenant, admin_id = await _provisionar(admin_engine)
+    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=admin_id)
     service = GoogleDocsService()
 
     async with _sm(admin_engine)() as db:
@@ -80,7 +95,7 @@ async def test_obter_credentials_usuario_found(admin_engine):
 @pytest.mark.asyncio
 async def test_obter_credentials_usuario_not_found(admin_engine):
     """Credencial não encontrada retorna erro."""
-    tenant = await _provisionar(admin_engine)
+    tenant, _ = await _provisionar(admin_engine)
     service = GoogleDocsService()
 
     async with _sm(admin_engine)() as db:
@@ -93,14 +108,16 @@ async def test_obter_credentials_usuario_not_found(admin_engine):
 @pytest.mark.asyncio
 async def test_obter_credentials_usuario_revogado(admin_engine):
     """Credencial revogada retorna erro."""
-    tenant = await _provisionar(admin_engine)
-    from app.core.crypto import encrypt_bytes
+    tenant, _ = await _provisionar(admin_engine)
+    from app.core.crypto import encrypt
 
     async with _sm(admin_engine)() as s:
         cred = GoogleCredencial(
             tenant_id=tenant.id,
             id_usuario=1,
-            access_token_cifrado=encrypt_bytes("token"),
+            access_token_cifrado=encrypt("token"),
+            refresh_token_cifrado=encrypt("refresh"),
+            escopo="drive.file",
             revogado=True,  # Revoked!
         )
         s.add(cred)
@@ -118,8 +135,8 @@ async def test_obter_credentials_usuario_revogado(admin_engine):
 @pytest.mark.asyncio
 async def test_renovar_access_token_not_expired(admin_engine):
     """Token não expirado não é renovado."""
-    tenant = await _provisionar(admin_engine)
-    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=1)
+    tenant, admin_id = await _provisionar(admin_engine)
+    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=admin_id)
     service = GoogleDocsService()
 
     async with _sm(admin_engine)() as db:
@@ -133,8 +150,8 @@ async def test_renovar_access_token_not_expired(admin_engine):
 @pytest.mark.asyncio
 async def test_criar_google_doc_success(admin_engine):
     """Criar novo Google Doc."""
-    tenant = await _provisionar(admin_engine)
-    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=1)
+    tenant, admin_id = await _provisionar(admin_engine)
+    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=admin_id)
     service = GoogleDocsService()
 
     # Mock Google Docs API
@@ -166,8 +183,8 @@ async def test_criar_google_doc_401_token_expired(admin_engine):
     """Criar Google Doc com token expirado."""
     from googleapiclient.errors import HttpError
 
-    tenant = await _provisionar(admin_engine)
-    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=1)
+    tenant, admin_id = await _provisionar(admin_engine)
+    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=admin_id)
     service = GoogleDocsService()
 
     # Mock Google API error 401
@@ -191,8 +208,8 @@ async def test_criar_google_doc_401_token_expired(admin_engine):
 @pytest.mark.asyncio
 async def test_sincronizar_google_doc_success(admin_engine):
     """Sincronizar (baixar) Google Doc como DOCX."""
-    tenant = await _provisionar(admin_engine)
-    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=1)
+    tenant, admin_id = await _provisionar(admin_engine)
+    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=admin_id)
     service = GoogleDocsService()
 
     mock_docx_bytes = b"PK\x03\x04..."  # Fake DOCX magic bytes
@@ -218,8 +235,8 @@ async def test_sincronizar_google_doc_404_not_found(admin_engine):
     """Sincronizar Google Doc não encontrado."""
     from googleapiclient.errors import HttpError
 
-    tenant = await _provisionar(admin_engine)
-    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=1)
+    tenant, admin_id = await _provisionar(admin_engine)
+    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=admin_id)
     service = GoogleDocsService()
 
     with patch("app.services.google_docs_service.build") as mock_build:
@@ -242,8 +259,8 @@ async def test_sincronizar_google_doc_404_not_found(admin_engine):
 @pytest.mark.asyncio
 async def test_exportar_google_doc_como_pdf_success(admin_engine):
     """Exportar Google Doc como PDF."""
-    tenant = await _provisionar(admin_engine)
-    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=1)
+    tenant, admin_id = await _provisionar(admin_engine)
+    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=admin_id)
     service = GoogleDocsService()
 
     mock_pdf_bytes = b"%PDF-1.4\n..."  # Fake PDF magic bytes
@@ -267,8 +284,8 @@ async def test_exportar_google_doc_como_pdf_success(admin_engine):
 @pytest.mark.asyncio
 async def test_arquivar_google_doc_success(admin_engine):
     """Arquivar (mover para lixo) Google Doc."""
-    tenant = await _provisionar(admin_engine)
-    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=1)
+    tenant, admin_id = await _provisionar(admin_engine)
+    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=admin_id)
     service = GoogleDocsService()
 
     with patch("app.services.google_docs_service.build") as mock_build:
@@ -297,8 +314,8 @@ async def test_arquivar_google_doc_404_ignores_error(admin_engine):
     """Arquivar doc não encontrado não falha (idempotente)."""
     from googleapiclient.errors import HttpError
 
-    tenant = await _provisionar(admin_engine)
-    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=1)
+    tenant, admin_id = await _provisionar(admin_engine)
+    cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=admin_id)
     service = GoogleDocsService()
 
     with patch("app.services.google_docs_service.build") as mock_build:
