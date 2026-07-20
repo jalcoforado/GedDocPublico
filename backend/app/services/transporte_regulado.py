@@ -1541,7 +1541,7 @@ async def desvincular_veiculo_alvara(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Vínculo entre alvará e veículo não encontrado.",
         )
-    db.delete(av)
+    await db.delete(av)
     await db.commit()
 
 
