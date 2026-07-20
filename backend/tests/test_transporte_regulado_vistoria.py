@@ -258,7 +258,7 @@ async def test_vistoria_listar(admin_engine):
                 data_vistoria=datetime.utcnow(),
             ),
         )
-        vistorias = await tr_svc.listar_vistorias(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
+        vistorias, _ = await tr_svc.listar_vistorias(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
 
     assert len(vistorias) == 2
     assert vist1.id in [v.id for v in vistorias]
@@ -292,7 +292,7 @@ async def test_vistoria_listar_ordenacao_descendente(admin_engine):
                 data_vistoria=agora,
             ),
         )
-        vistorias = await tr_svc.listar_vistorias(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
+        vistorias, _ = await tr_svc.listar_vistorias(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
 
     # Mais recente primeiro (data_vistoria DESC)
     assert vistorias[0].id == vist2.id
@@ -326,7 +326,7 @@ async def test_vistoria_listar_excluidas_nao_retornadas(admin_engine):
         )
         await tr_svc.excluir_vistoria(s, tenant_id=tenant.id, vistoria_id=vist1.id)
 
-        vistorias = await tr_svc.listar_vistorias(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
+        vistorias, _ = await tr_svc.listar_vistorias(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
 
     assert len(vistorias) == 1
     assert vistorias[0].id == vist2.id
@@ -339,7 +339,7 @@ async def test_vistoria_listar_vazio(admin_engine):
     veiculo = await _veiculo(admin_engine, tenant.id)
 
     async with _sm(admin_engine)() as s:
-        vistorias = await tr_svc.listar_vistorias(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
+        vistorias, _ = await tr_svc.listar_vistorias(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
 
     assert len(vistorias) == 0
 
@@ -517,7 +517,7 @@ async def test_vistoria_listar_vencidas_basico(admin_engine):
             ),
         )
 
-        vencidas = await tr_svc.listar_vistorias_vencidas(
+        vencidas, _ = await tr_svc.listar_vistorias_vencidas(
             s, tenant_id=tenant.id, veiculo_id=veiculo.id
         )
 
@@ -558,7 +558,7 @@ async def test_vistoria_listar_vencidas_ordem_descendente(admin_engine):
             ),
         )
 
-        vencidas = await tr_svc.listar_vistorias_vencidas(
+        vencidas, _ = await tr_svc.listar_vistorias_vencidas(
             s, tenant_id=tenant.id, veiculo_id=veiculo.id
         )
 
@@ -590,7 +590,7 @@ async def test_vistoria_listar_vencidas_vazio(admin_engine):
             ),
         )
 
-        vencidas = await tr_svc.listar_vistorias_vencidas(
+        vencidas, _ = await tr_svc.listar_vistorias_vencidas(
             s, tenant_id=tenant.id, veiculo_id=veiculo.id
         )
 
@@ -615,7 +615,7 @@ async def test_vistoria_listar_vencidas_sem_data_validade(admin_engine):
             ),
         )
 
-        vencidas = await tr_svc.listar_vistorias_vencidas(
+        vencidas, _ = await tr_svc.listar_vistorias_vencidas(
             s, tenant_id=tenant.id, veiculo_id=veiculo.id
         )
 

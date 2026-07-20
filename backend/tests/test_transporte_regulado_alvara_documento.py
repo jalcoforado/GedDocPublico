@@ -208,7 +208,7 @@ async def test_alvara_documento_listar_basico(admin_engine):
             payload=AlvaraDocumentoCreate(tipo_documento="procuracao", arquivo="b.pdf"),
         )
 
-        docs = await tr_svc.listar_alvara_documentos(s, tenant_id=tenant.id, alvara_id=alvara.id)
+        docs, _ = await tr_svc.listar_alvara_documentos(s, tenant_id=tenant.id, alvara_id=alvara.id)
 
     assert len(docs) == 2
     # Ordenado por criado_em DESC (mais recente primeiro)
@@ -223,7 +223,7 @@ async def test_alvara_documento_listar_vazio(admin_engine):
     alvara = await _alvara(admin_engine, tenant.id)
 
     async with _sm(admin_engine)() as s:
-        docs = await tr_svc.listar_alvara_documentos(s, tenant_id=tenant.id, alvara_id=alvara.id)
+        docs, _ = await tr_svc.listar_alvara_documentos(s, tenant_id=tenant.id, alvara_id=alvara.id)
 
     assert len(docs) == 0
 
@@ -248,7 +248,7 @@ async def test_alvara_documento_listar_ignora_excluidos(admin_engine):
         # Soft-delete doc1
         await tr_svc.excluir_alvara_documento(s, tenant_id=tenant.id, documento_id=doc1.id)
 
-        docs = await tr_svc.listar_alvara_documentos(s, tenant_id=tenant.id, alvara_id=alvara.id)
+        docs, _ = await tr_svc.listar_alvara_documentos(s, tenant_id=tenant.id, alvara_id=alvara.id)
 
     assert len(docs) == 1
     assert docs[0].id == doc2.id

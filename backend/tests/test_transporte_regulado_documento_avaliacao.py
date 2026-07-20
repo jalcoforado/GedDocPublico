@@ -257,7 +257,7 @@ async def test_documento_listar(admin_engine):
             s, tenant_id=tenant.id, veiculo_id=veiculo.id,
             payload=VeiculoDocumentoCreate(tipo_documento="cnh_copia", numero_documento="222"),
         )
-        docs = await tr_svc.listar_documentos(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
+        docs, _ = await tr_svc.listar_documentos(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
 
     assert len(docs) == 2
     assert doc1.id in [d.id for d in docs]
@@ -281,7 +281,7 @@ async def test_documento_listar_excluidos_nao_retornados(admin_engine):
         )
         await tr_svc.excluir_documento(s, tenant_id=tenant.id, documento_id=doc1.id)
 
-        docs = await tr_svc.listar_documentos(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
+        docs, _ = await tr_svc.listar_documentos(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
 
     assert len(docs) == 1
     assert docs[0].id == doc2.id
@@ -475,7 +475,7 @@ async def test_avaliacao_listar(admin_engine):
                 data_avaliacao=datetime.utcnow(),
             ),
         )
-        avaliacoes = await tr_svc.listar_avaliacoes(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
+        avaliacoes, _ = await tr_svc.listar_avaliacoes(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
 
     assert len(avaliacoes) == 2
     assert aval1.id in [a.id for a in avaliacoes]
@@ -509,7 +509,7 @@ async def test_avaliacao_listar_excluidas_nao_retornadas(admin_engine):
         )
         await tr_svc.excluir_avaliacao(s, tenant_id=tenant.id, avaliacao_id=aval1.id)
 
-        avaliacoes = await tr_svc.listar_avaliacoes(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
+        avaliacoes, _ = await tr_svc.listar_avaliacoes(s, tenant_id=tenant.id, veiculo_id=veiculo.id)
 
     assert len(avaliacoes) == 1
     assert avaliacoes[0].id == aval2.id

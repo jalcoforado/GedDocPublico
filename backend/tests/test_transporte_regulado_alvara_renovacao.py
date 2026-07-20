@@ -87,7 +87,7 @@ async def test_alvara_listar_vencidos_basico(admin_engine):
             ),
         )
 
-        vencidos = await tr_svc.listar_alvaras_vencidos(s, tenant_id=tenant.id)
+        vencidos, _ = await tr_svc.listar_alvaras_vencidos(s, tenant_id=tenant.id)
 
     assert len(vencidos) == 1
     assert vencidos[0].id == vencido.id
@@ -123,7 +123,7 @@ async def test_alvara_listar_vencidos_ordenacao(admin_engine):
             ),
         )
 
-        vencidos = await tr_svc.listar_alvaras_vencidos(s, tenant_id=tenant.id)
+        vencidos, _ = await tr_svc.listar_alvaras_vencidos(s, tenant_id=tenant.id)
 
     # Mais antigos primeiro (ASC)
     assert vencidos[0].id == vencido1.id
@@ -149,7 +149,7 @@ async def test_alvara_listar_vencidos_vazio(admin_engine):
             ),
         )
 
-        vencidos = await tr_svc.listar_alvaras_vencidos(s, tenant_id=tenant.id)
+        vencidos, _ = await tr_svc.listar_alvaras_vencidos(s, tenant_id=tenant.id)
 
     assert len(vencidos) == 0
 
@@ -171,7 +171,7 @@ async def test_alvara_listar_vencidos_sem_data_validade(admin_engine):
             ),
         )
 
-        vencidos = await tr_svc.listar_alvaras_vencidos(s, tenant_id=tenant.id)
+        vencidos, _ = await tr_svc.listar_alvaras_vencidos(s, tenant_id=tenant.id)
 
     assert len(vencidos) == 0
 

@@ -238,7 +238,7 @@ async def test_alvara_responsavel_listar_basico(admin_engine):
         # Mesmo usuário pode ser adicionado novamente? Não — unique constraint
         # Deixa apenas um responsável para este teste
 
-        resps = await tr_svc.listar_responsaveis(s, tenant_id=tenant.id, alvara_id=alvara.id)
+        resps, _ = await tr_svc.listar_responsaveis(s, tenant_id=tenant.id, alvara_id=alvara.id)
 
     assert len(resps) == 1
     assert resps[0].id == resp1.id
@@ -251,7 +251,7 @@ async def test_alvara_responsavel_listar_vazio(admin_engine):
     alvara = await _alvara(admin_engine, tenant.id)
 
     async with _sm(admin_engine)() as s:
-        resps = await tr_svc.listar_responsaveis(s, tenant_id=tenant.id, alvara_id=alvara.id)
+        resps, _ = await tr_svc.listar_responsaveis(s, tenant_id=tenant.id, alvara_id=alvara.id)
 
     assert len(resps) == 0
 
@@ -273,7 +273,7 @@ async def test_alvara_responsavel_listar_ignora_excluidos(admin_engine):
         # Soft-delete
         await tr_svc.remover_responsavel(s, tenant_id=tenant.id, responsavel_id=resp_id)
 
-        resps = await tr_svc.listar_responsaveis(s, tenant_id=tenant.id, alvara_id=alvara.id)
+        resps, _ = await tr_svc.listar_responsaveis(s, tenant_id=tenant.id, alvara_id=alvara.id)
 
     assert len(resps) == 0
 

@@ -242,8 +242,8 @@ async def test_listar_filtra_situacao_e_tipo(admin_engine):
         await _criar(admin_engine, t.id, tipo="taxi", situacao="ativa")
         await _criar(admin_engine, t.id, tipo="mototaxi", situacao="pendente")
         async with _sm(admin_engine)() as s:
-            ativas = await tr_svc.listar_empresas(s, tenant_id=t.id, situacao="ativa")
-            mototaxi = await tr_svc.listar_empresas(s, tenant_id=t.id, tipo_servico="mototaxi")
+            ativas, _ = await tr_svc.listar_empresas(s, tenant_id=t.id, situacao="ativa")
+            mototaxi, _ = await tr_svc.listar_empresas(s, tenant_id=t.id, tipo_servico="mototaxi")
         assert len(ativas) == 1 and ativas[0].situacao == "ativa"
         assert len(mototaxi) == 1 and mototaxi[0].tipo_servico == "mototaxi"
     finally:

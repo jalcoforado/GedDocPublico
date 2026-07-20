@@ -195,7 +195,7 @@ async def test_desvincular_veiculo_alvara(admin_engine):
         )
 
         # Verificar que foi deletado
-        veiculos = await tr_svc.listar_veiculos_alvara(
+        veiculos, _ = await tr_svc.listar_veiculos_alvara(
             db, tenant_id=tenant.id, alvara_id=alvara_id
         )
         assert len(veiculos) == 0
@@ -239,7 +239,7 @@ async def test_listar_veiculos_alvara(admin_engine):
         )
 
         # Listar
-        veiculos = await tr_svc.listar_veiculos_alvara(
+        veiculos, _ = await tr_svc.listar_veiculos_alvara(
             db, tenant_id=tenant.id, alvara_id=alvara_id
         )
 
@@ -273,7 +273,7 @@ async def test_listar_alvaras_veiculo(admin_engine):
         )
 
         # Listar
-        alvaras = await tr_svc.listar_alvaras_veiculo(
+        alvaras, _ = await tr_svc.listar_alvaras_veiculo(
             db, tenant_id=tenant.id, veiculo_id=veiculo_id
         )
 

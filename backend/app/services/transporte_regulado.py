@@ -94,7 +94,9 @@ async def listar_permissionarios(
     tenant_id: int,
     situacao: str | None = None,
     tipo_servico: str | None = None,
-) -> list[Permissionario]:
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Permissionario], int]:
     stmt = select(Permissionario).where(
         Permissionario.tenant_id == tenant_id,
         Permissionario.excluido.is_(False),
@@ -104,7 +106,20 @@ async def listar_permissionarios(
     if tipo_servico is not None:
         stmt = stmt.where(Permissionario.tipo_servico == tipo_servico)
     stmt = stmt.order_by(Permissionario.nome)
-    return list((await db.execute(stmt)).scalars().all())
+
+    # Contar total antes de limitar
+    count_stmt = select(func.count(Permissionario.id)).where(
+        Permissionario.tenant_id == tenant_id,
+        Permissionario.excluido.is_(False),
+    )
+    if situacao is not None:
+        count_stmt = count_stmt.where(Permissionario.situacao == situacao)
+    if tipo_servico is not None:
+        count_stmt = count_stmt.where(Permissionario.tipo_servico == tipo_servico)
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = list((await db.execute(stmt.limit(limit).offset(offset))).scalars().all())
+    return resultado, total
 
 
 async def criar_permissionario(
@@ -251,7 +266,9 @@ async def listar_empresas(
     situacao: str | None = None,
     tipo_servico: str | None = None,
     q: str | None = None,
-) -> list[Empresa]:
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Empresa], int]:
     stmt = select(Empresa).where(
         Empresa.tenant_id == tenant_id,
         Empresa.excluido.is_(False),
@@ -268,7 +285,27 @@ async def listar_empresas(
             | Empresa.cnpj.ilike(termo)
         )
     stmt = stmt.order_by(Empresa.razao_social)
-    return list((await db.execute(stmt)).scalars().all())
+
+    # Contar total antes de limitar
+    count_stmt = select(func.count(Empresa.id)).where(
+        Empresa.tenant_id == tenant_id,
+        Empresa.excluido.is_(False),
+    )
+    if situacao is not None:
+        count_stmt = count_stmt.where(Empresa.situacao == situacao)
+    if tipo_servico is not None:
+        count_stmt = count_stmt.where(Empresa.tipo_servico == tipo_servico)
+    if q:
+        termo = f"%{q.strip()}%"
+        count_stmt = count_stmt.where(
+            Empresa.razao_social.ilike(termo)
+            | Empresa.nome_fantasia.ilike(termo)
+            | Empresa.cnpj.ilike(termo)
+        )
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = list((await db.execute(stmt.limit(limit).offset(offset))).scalars().all())
+    return resultado, total
 
 
 async def criar_empresa(
@@ -455,7 +492,9 @@ async def listar_veiculos(
     id_permissionario: int | None = None,
     id_empresa: int | None = None,
     q: str | None = None,
-) -> list[VeiculoRegulado]:
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[VeiculoRegulado], int]:
     stmt = select(VeiculoRegulado).where(
         VeiculoRegulado.tenant_id == tenant_id,
         VeiculoRegulado.excluido.is_(False),
@@ -478,7 +517,33 @@ async def listar_veiculos(
             | VeiculoRegulado.chassi.ilike(termo)
         )
     stmt = stmt.order_by(VeiculoRegulado.placa)
-    return list((await db.execute(stmt)).scalars().all())
+
+    # Contar total antes de limitar
+    count_stmt = select(func.count(VeiculoRegulado.id)).where(
+        VeiculoRegulado.tenant_id == tenant_id,
+        VeiculoRegulado.excluido.is_(False),
+    )
+    if situacao is not None:
+        count_stmt = count_stmt.where(VeiculoRegulado.situacao == situacao)
+    if tipo_servico is not None:
+        count_stmt = count_stmt.where(VeiculoRegulado.tipo_servico == tipo_servico)
+    if id_permissionario is not None:
+        count_stmt = count_stmt.where(VeiculoRegulado.id_permissionario == id_permissionario)
+    if id_empresa is not None:
+        count_stmt = count_stmt.where(VeiculoRegulado.id_empresa == id_empresa)
+    if q:
+        termo = f"%{q.strip()}%"
+        count_stmt = count_stmt.where(
+            VeiculoRegulado.placa.ilike(termo)
+            | VeiculoRegulado.marca.ilike(termo)
+            | VeiculoRegulado.modelo.ilike(termo)
+            | VeiculoRegulado.renavam.ilike(termo)
+            | VeiculoRegulado.chassi.ilike(termo)
+        )
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = list((await db.execute(stmt.limit(limit).offset(offset))).scalars().all())
+    return resultado, total
 
 
 async def criar_veiculo(
@@ -619,7 +684,9 @@ async def listar_documentos(
     veiculo_id: int,
     tipo_documento: str | None = None,
     situacao: str | None = None,
-) -> list[VeiculoDocumento]:
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[VeiculoDocumento], int]:
     """Lista documentos de um veículo com filtros opcionais."""
     stmt = select(VeiculoDocumento).where(
         VeiculoDocumento.tenant_id == tenant_id,
@@ -631,7 +698,21 @@ async def listar_documentos(
     if situacao is not None:
         stmt = stmt.where(VeiculoDocumento.situacao == situacao)
     stmt = stmt.order_by(VeiculoDocumento.criado_em)
-    return list((await db.execute(stmt)).scalars().all())
+
+    # Contar total antes de limitar
+    count_stmt = select(func.count(VeiculoDocumento.id)).where(
+        VeiculoDocumento.tenant_id == tenant_id,
+        VeiculoDocumento.id_veiculo == veiculo_id,
+        VeiculoDocumento.excluido.is_(False),
+    )
+    if tipo_documento is not None:
+        count_stmt = count_stmt.where(VeiculoDocumento.tipo_documento == tipo_documento)
+    if situacao is not None:
+        count_stmt = count_stmt.where(VeiculoDocumento.situacao == situacao)
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = list((await db.execute(stmt.limit(limit).offset(offset))).scalars().all())
+    return resultado, total
 
 
 async def criar_documento(
@@ -747,8 +828,8 @@ async def obter_avaliacao(
 
 
 async def listar_avaliacoes(
-    db: AsyncSession, *, tenant_id: int, veiculo_id: int
-) -> list[VeiculoAvaliacao]:
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int, limit: int = 50, offset: int = 0
+) -> tuple[list[VeiculoAvaliacao], int]:
     """Lista avaliações de um veículo."""
     stmt = select(VeiculoAvaliacao).where(
         VeiculoAvaliacao.tenant_id == tenant_id,
@@ -756,7 +837,16 @@ async def listar_avaliacoes(
         VeiculoAvaliacao.excluido.is_(False),
     )
     stmt = stmt.order_by(VeiculoAvaliacao.data_avaliacao.desc())
-    return list((await db.execute(stmt)).scalars().all())
+
+    count_stmt = select(func.count(VeiculoAvaliacao.id)).where(
+        VeiculoAvaliacao.tenant_id == tenant_id,
+        VeiculoAvaliacao.id_veiculo == veiculo_id,
+        VeiculoAvaliacao.excluido.is_(False),
+    )
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = list((await db.execute(stmt.limit(limit).offset(offset))).scalars().all())
+    return resultado, total
 
 
 async def criar_avaliacao(
@@ -849,8 +939,8 @@ async def obter_vistoria(
 
 
 async def listar_vistorias(
-    db: AsyncSession, *, tenant_id: int, veiculo_id: int
-) -> list[VeiculoVistoria]:
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int, limit: int = 50, offset: int = 0
+) -> tuple[list[VeiculoVistoria], int]:
     """Lista vistorias de um veículo."""
     stmt = select(VeiculoVistoria).where(
         VeiculoVistoria.tenant_id == tenant_id,
@@ -858,7 +948,16 @@ async def listar_vistorias(
         VeiculoVistoria.excluido.is_(False),
     )
     stmt = stmt.order_by(VeiculoVistoria.data_vistoria.desc())
-    return list((await db.execute(stmt)).scalars().all())
+
+    count_stmt = select(func.count(VeiculoVistoria.id)).where(
+        VeiculoVistoria.tenant_id == tenant_id,
+        VeiculoVistoria.id_veiculo == veiculo_id,
+        VeiculoVistoria.excluido.is_(False),
+    )
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = list((await db.execute(stmt.limit(limit).offset(offset))).scalars().all())
+    return resultado, total
 
 
 async def criar_vistoria(
@@ -930,8 +1029,8 @@ async def excluir_vistoria(
 
 
 async def listar_vistorias_vencidas(
-    db: AsyncSession, *, tenant_id: int, veiculo_id: int
-) -> list[VeiculoVistoria]:
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int, limit: int = 50, offset: int = 0
+) -> tuple[list[VeiculoVistoria], int]:
     """Lista vistorias de um veículo cuja data_validade já passou (vencidas)."""
     from datetime import date as date_type
 
@@ -945,7 +1044,17 @@ async def listar_vistorias_vencidas(
         )
         .order_by(VeiculoVistoria.data_vistoria.desc())
     )
-    return (await db.execute(stmt)).scalars().all()
+
+    count_stmt = select(func.count(VeiculoVistoria.id)).where(
+        VeiculoVistoria.tenant_id == tenant_id,
+        VeiculoVistoria.id_veiculo == veiculo_id,
+        VeiculoVistoria.data_validade <= date_type.today(),
+        VeiculoVistoria.excluido.is_(False),
+    )
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
+    return resultado, total
 
 
 async def renovar_vistoria(
@@ -1016,8 +1125,8 @@ async def obter_alvara(
 
 
 async def listar_alvaras(
-    db: AsyncSession, *, tenant_id: int, empresa_id: int | None = None, permissionario_id: int | None = None
-) -> list[Alvara]:
+    db: AsyncSession, *, tenant_id: int, empresa_id: int | None = None, permissionario_id: int | None = None, limit: int = 50, offset: int = 0
+) -> tuple[list[Alvara], int]:
     """Lista alvarás do tenant, opcionalmente filtrando por empresa ou permissionário."""
     stmt = select(Alvara).where(
         Alvara.tenant_id == tenant_id,
@@ -1028,7 +1137,19 @@ async def listar_alvaras(
     if permissionario_id is not None:
         stmt = stmt.where(Alvara.id_permissionario == permissionario_id)
     stmt = stmt.order_by(Alvara.criado_em.desc())
-    return (await db.execute(stmt)).scalars().all()
+
+    count_stmt = select(func.count(Alvara.id)).where(
+        Alvara.tenant_id == tenant_id,
+        Alvara.excluido.is_(False),
+    )
+    if empresa_id is not None:
+        count_stmt = count_stmt.where(Alvara.id_empresa == empresa_id)
+    if permissionario_id is not None:
+        count_stmt = count_stmt.where(Alvara.id_permissionario == permissionario_id)
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
+    return resultado, total
 
 
 async def criar_alvara(
@@ -1117,8 +1238,8 @@ async def excluir_alvara(
 
 
 async def listar_alvaras_vencidos(
-    db: AsyncSession, *, tenant_id: int
-) -> list[Alvara]:
+    db: AsyncSession, *, tenant_id: int, limit: int = 50, offset: int = 0
+) -> tuple[list[Alvara], int]:
     """Lista alvarás vencidos (data_validade <= hoje) do tenant, ordenados por data_validade ASC."""
     hoje = datetime.utcnow().date()
     stmt = select(Alvara).where(
@@ -1127,7 +1248,17 @@ async def listar_alvaras_vencidos(
         Alvara.data_validade <= hoje,
         Alvara.excluido.is_(False),
     ).order_by(Alvara.data_validade.asc())
-    return (await db.execute(stmt)).scalars().all()
+
+    count_stmt = select(func.count(Alvara.id)).where(
+        Alvara.tenant_id == tenant_id,
+        Alvara.data_validade.is_not(None),
+        Alvara.data_validade <= hoje,
+        Alvara.excluido.is_(False),
+    )
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
+    return resultado, total
 
 
 async def renovar_alvara(
@@ -1207,8 +1338,8 @@ async def obter_alvara_documento(
 
 
 async def listar_alvara_documentos(
-    db: AsyncSession, *, tenant_id: int, alvara_id: int
-) -> list[AlvaraDocumento]:
+    db: AsyncSession, *, tenant_id: int, alvara_id: int, limit: int = 50, offset: int = 0
+) -> tuple[list[AlvaraDocumento], int]:
     """Lista documentos de um alvará."""
     # Validar que alvará existe
     await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
@@ -1218,7 +1349,16 @@ async def listar_alvara_documentos(
         AlvaraDocumento.id_alvara == alvara_id,
         AlvaraDocumento.excluido.is_(False),
     ).order_by(AlvaraDocumento.criado_em.desc())
-    return (await db.execute(stmt)).scalars().all()
+
+    count_stmt = select(func.count(AlvaraDocumento.id)).where(
+        AlvaraDocumento.tenant_id == tenant_id,
+        AlvaraDocumento.id_alvara == alvara_id,
+        AlvaraDocumento.excluido.is_(False),
+    )
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
+    return resultado, total
 
 
 async def atualizar_alvara_documento(
@@ -1299,8 +1439,8 @@ async def obter_responsavel(
 
 
 async def listar_responsaveis(
-    db: AsyncSession, *, tenant_id: int, alvara_id: int
-) -> list[AlvaraResponsavel]:
+    db: AsyncSession, *, tenant_id: int, alvara_id: int, limit: int = 50, offset: int = 0
+) -> tuple[list[AlvaraResponsavel], int]:
     """Lista responsáveis de um alvará."""
     # Validar que alvará existe
     await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
@@ -1310,7 +1450,16 @@ async def listar_responsaveis(
         AlvaraResponsavel.id_alvara == alvara_id,
         AlvaraResponsavel.excluido.is_(False),
     ).order_by(AlvaraResponsavel.criado_em.desc())
-    return (await db.execute(stmt)).scalars().all()
+
+    count_stmt = select(func.count(AlvaraResponsavel.id)).where(
+        AlvaraResponsavel.tenant_id == tenant_id,
+        AlvaraResponsavel.id_alvara == alvara_id,
+        AlvaraResponsavel.excluido.is_(False),
+    )
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
+    return resultado, total
 
 
 async def remover_responsavel(
@@ -1397,8 +1546,8 @@ async def desvincular_veiculo_alvara(
 
 
 async def listar_veiculos_alvara(
-    db: AsyncSession, *, tenant_id: int, alvara_id: int
-) -> list[AlvaraVeiculo]:
+    db: AsyncSession, *, tenant_id: int, alvara_id: int, limit: int = 50, offset: int = 0
+) -> tuple[list[AlvaraVeiculo], int]:
     """Lista veículos vinculados a um alvará."""
     await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
 
@@ -1406,12 +1555,20 @@ async def listar_veiculos_alvara(
         AlvaraVeiculo.tenant_id == tenant_id,
         AlvaraVeiculo.id_alvara == alvara_id,
     ).order_by(AlvaraVeiculo.criado_em.desc())
-    return (await db.execute(stmt)).scalars().all()
+
+    count_stmt = select(func.count(AlvaraVeiculo.id)).where(
+        AlvaraVeiculo.tenant_id == tenant_id,
+        AlvaraVeiculo.id_alvara == alvara_id,
+    )
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
+    return resultado, total
 
 
 async def listar_alvaras_veiculo(
-    db: AsyncSession, *, tenant_id: int, veiculo_id: int
-) -> list[AlvaraVeiculo]:
+    db: AsyncSession, *, tenant_id: int, veiculo_id: int, limit: int = 50, offset: int = 0
+) -> tuple[list[AlvaraVeiculo], int]:
     """Lista alvarás vinculados a um veículo."""
     await obter_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
 
@@ -1419,7 +1576,15 @@ async def listar_alvaras_veiculo(
         AlvaraVeiculo.tenant_id == tenant_id,
         AlvaraVeiculo.id_veiculo == veiculo_id,
     ).order_by(AlvaraVeiculo.criado_em.desc())
-    return (await db.execute(stmt)).scalars().all()
+
+    count_stmt = select(func.count(AlvaraVeiculo.id)).where(
+        AlvaraVeiculo.tenant_id == tenant_id,
+        AlvaraVeiculo.id_veiculo == veiculo_id,
+    )
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    resultado = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
+    return resultado, total
 
 
 # ============================ Auditoria de Alvará (P4) ===========================

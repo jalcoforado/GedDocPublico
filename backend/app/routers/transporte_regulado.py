@@ -5,7 +5,7 @@
 autenticado + permissão `transporte_regulado`. Mesmo padrão dos routers de `frota`.
 Sem portal público nesta etapa.
 """
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from ..auth.deps import require_tenant_id
 from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Usuario
+from ..schemas.common import Paginated
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
     EmpresaOut,
@@ -56,18 +57,27 @@ permissionarios_router = APIRouter(
 )
 
 
-@permissionarios_router.get("", response_model=list[PermissionarioOut])
+@permissionarios_router.get("", response_model=Paginated[PermissionarioOut])
 async def list_permissionarios(
     situacao: str | None = None,
     tipo_servico: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[PermissionarioOut]:
-    rows = await tr_svc.listar_permissionarios(
-        db, tenant_id=tenant_id, situacao=situacao, tipo_servico=tipo_servico
+) -> Paginated[PermissionarioOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_permissionarios(
+        db, tenant_id=tenant_id, situacao=situacao, tipo_servico=tipo_servico,
+        limit=page_size, offset=offset
     )
-    return [PermissionarioOut.model_validate(r) for r in rows]
+    return Paginated(
+        items=[PermissionarioOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @permissionarios_router.get("/{permissionario_id}", response_model=PermissionarioOut)
@@ -175,19 +185,28 @@ empresas_router = APIRouter(
 )
 
 
-@empresas_router.get("", response_model=list[EmpresaOut])
+@empresas_router.get("", response_model=Paginated[EmpresaOut])
 async def list_empresas(
     situacao: str | None = None,
     tipo_servico: str | None = None,
     q: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[EmpresaOut]:
-    rows = await tr_svc.listar_empresas(
-        db, tenant_id=tenant_id, situacao=situacao, tipo_servico=tipo_servico, q=q
+) -> Paginated[EmpresaOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_empresas(
+        db, tenant_id=tenant_id, situacao=situacao, tipo_servico=tipo_servico, q=q,
+        limit=page_size, offset=offset
     )
-    return [EmpresaOut.model_validate(r) for r in rows]
+    return Paginated(
+        items=[EmpresaOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @empresas_router.get("/{empresa_id}", response_model=EmpresaOut)
@@ -283,22 +302,31 @@ veiculos_router = APIRouter(
 )
 
 
-@veiculos_router.get("", response_model=list[VeiculoReguladoOut])
+@veiculos_router.get("", response_model=Paginated[VeiculoReguladoOut])
 async def list_veiculos(
     situacao: str | None = None,
     tipo_servico: str | None = None,
     id_permissionario: int | None = None,
     id_empresa: int | None = None,
     q: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[VeiculoReguladoOut]:
-    rows = await tr_svc.listar_veiculos(
+) -> Paginated[VeiculoReguladoOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_veiculos(
         db, tenant_id=tenant_id, situacao=situacao, tipo_servico=tipo_servico,
         id_permissionario=id_permissionario, id_empresa=id_empresa, q=q,
+        limit=page_size, offset=offset
     )
-    return [VeiculoReguladoOut.model_validate(r) for r in rows]
+    return Paginated(
+        items=[VeiculoReguladoOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @veiculos_router.get("/{veiculo_id}", response_model=VeiculoReguladoOut)
@@ -395,23 +423,33 @@ documentos_router = APIRouter(
 )
 
 
-@documentos_router.get("", response_model=list[VeiculoDocumentoOut])
+@documentos_router.get("", response_model=Paginated[VeiculoDocumentoOut])
 async def list_documentos(
     veiculo_id: int,
     tipo_documento: str | None = None,
     situacao: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[VeiculoDocumentoOut]:
-    rows = await tr_svc.listar_documentos(
+) -> Paginated[VeiculoDocumentoOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_documentos(
         db,
         tenant_id=tenant_id,
         veiculo_id=veiculo_id,
         tipo_documento=tipo_documento,
         situacao=situacao,
+        limit=page_size,
+        offset=offset,
     )
-    return [VeiculoDocumentoOut.model_validate(r) for r in rows]
+    return Paginated(
+        items=[VeiculoDocumentoOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @documentos_router.post(
@@ -475,17 +513,25 @@ avaliacoes_router = APIRouter(
 )
 
 
-@avaliacoes_router.get("", response_model=list[VeiculoAvaliacaoOut])
+@avaliacoes_router.get("", response_model=Paginated[VeiculoAvaliacaoOut])
 async def list_avaliacoes(
     veiculo_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[VeiculoAvaliacaoOut]:
-    rows = await tr_svc.listar_avaliacoes(
-        db, tenant_id=tenant_id, veiculo_id=veiculo_id
+) -> Paginated[VeiculoAvaliacaoOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_avaliacoes(
+        db, tenant_id=tenant_id, veiculo_id=veiculo_id, limit=page_size, offset=offset
     )
-    return [VeiculoAvaliacaoOut.model_validate(r) for r in rows]
+    return Paginated(
+        items=[VeiculoAvaliacaoOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @avaliacoes_router.post(
@@ -553,17 +599,25 @@ vistorias_router = APIRouter(
 )
 
 
-@vistorias_router.get("", response_model=list[VeiculoVistoriaOut])
+@vistorias_router.get("", response_model=Paginated[VeiculoVistoriaOut])
 async def list_vistorias(
     veiculo_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[VeiculoVistoriaOut]:
-    rows = await tr_svc.listar_vistorias(
-        db, tenant_id=tenant_id, veiculo_id=veiculo_id
+) -> Paginated[VeiculoVistoriaOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_vistorias(
+        db, tenant_id=tenant_id, veiculo_id=veiculo_id, limit=page_size, offset=offset
     )
-    return [VeiculoVistoriaOut.model_validate(r) for r in rows]
+    return Paginated(
+        items=[VeiculoVistoriaOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @vistorias_router.post(
@@ -624,17 +678,25 @@ async def delete_vistoria(
     await tr_svc.excluir_vistoria(db, tenant_id=tenant_id, vistoria_id=vistoria_id)
 
 
-@vistorias_router.get("/vencidas", response_model=list[VeiculoVistoriaOut])
+@vistorias_router.get("/vencidas", response_model=Paginated[VeiculoVistoriaOut])
 async def list_vistorias_vencidas(
     veiculo_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[VeiculoVistoriaOut]:
-    rows = await tr_svc.listar_vistorias_vencidas(
-        db, tenant_id=tenant_id, veiculo_id=veiculo_id
+) -> Paginated[VeiculoVistoriaOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_vistorias_vencidas(
+        db, tenant_id=tenant_id, veiculo_id=veiculo_id, limit=page_size, offset=offset
     )
-    return [VeiculoVistoriaOut.model_validate(r) for r in rows]
+    return Paginated(
+        items=[VeiculoVistoriaOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @vistorias_router.post(
@@ -668,21 +730,31 @@ alvaras_router = APIRouter(
 )
 
 
-@alvaras_router.get("", response_model=list[AlvaraOut])
+@alvaras_router.get("", response_model=Paginated[AlvaraOut])
 async def list_alvaras(
     empresa_id: int | None = None,
     permissionario_id: int | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[AlvaraOut]:
-    rows = await tr_svc.listar_alvaras(
+) -> Paginated[AlvaraOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_alvaras(
         db,
         tenant_id=tenant_id,
         empresa_id=empresa_id,
         permissionario_id=permissionario_id,
+        limit=page_size,
+        offset=offset,
     )
-    return [AlvaraOut.model_validate(r) for r in rows]
+    return Paginated(
+        items=[AlvaraOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @alvaras_router.get("/{alvara_id}", response_model=AlvaraOut)
@@ -731,14 +803,23 @@ async def delete_alvara(
     await tr_svc.excluir_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
 
 
-@alvaras_router.get("/vencidos", response_model=list[AlvaraOut])
+@alvaras_router.get("/vencidos", response_model=Paginated[AlvaraOut])
 async def list_alvaras_vencidos(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[AlvaraOut]:
+) -> Paginated[AlvaraOut]:
     """Lista alvarás vencidos (data_validade <= hoje) do tenant."""
-    return await tr_svc.listar_alvaras_vencidos(db, tenant_id=tenant_id)
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_alvaras_vencidos(db, tenant_id=tenant_id, limit=page_size, offset=offset)
+    return Paginated(
+        items=[AlvaraOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 # ============================ Relatório (P4.3) ================================
@@ -852,16 +933,25 @@ async def renovate_alvara(
 # ============================ Documentos de Alvarás ==========================
 
 
-@alvaras_router.get("/{alvara_id}/documentos", response_model=list[AlvaraDocumentoOut])
+@alvaras_router.get("/{alvara_id}/documentos", response_model=Paginated[AlvaraDocumentoOut])
 async def list_alvara_documentos(
     alvara_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[AlvaraDocumentoOut]:
+) -> Paginated[AlvaraDocumentoOut]:
     """Lista documentos de um alvará."""
-    return await tr_svc.listar_alvara_documentos(
-        db, tenant_id=tenant_id, alvara_id=alvara_id
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_alvara_documentos(
+        db, tenant_id=tenant_id, alvara_id=alvara_id, limit=page_size, offset=offset
+    )
+    return Paginated(
+        items=[AlvaraDocumentoOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -923,16 +1013,25 @@ async def delete_alvara_documento(
 # ============================ Responsáveis de Alvarás ==========================
 
 
-@alvaras_router.get("/{alvara_id}/responsaveis", response_model=list[AlvaraResponsavelOut])
+@alvaras_router.get("/{alvara_id}/responsaveis", response_model=Paginated[AlvaraResponsavelOut])
 async def list_alvara_responsaveis(
     alvara_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[AlvaraResponsavelOut]:
+) -> Paginated[AlvaraResponsavelOut]:
     """Lista responsáveis de um alvará."""
-    return await tr_svc.listar_responsaveis(
-        db, tenant_id=tenant_id, alvara_id=alvara_id
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_responsaveis(
+        db, tenant_id=tenant_id, alvara_id=alvara_id, limit=page_size, offset=offset
+    )
+    return Paginated(
+        items=[AlvaraResponsavelOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -1006,28 +1105,44 @@ async def desvincular_veiculo_alvara(
     )
 
 
-@alvaras_router.get("/{alvara_id}/veiculos", response_model=list[AlvaraVeiculoOut])
+@alvaras_router.get("/{alvara_id}/veiculos", response_model=Paginated[AlvaraVeiculoOut])
 async def listar_veiculos_alvara(
     alvara_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[AlvaraVeiculoOut]:
+) -> Paginated[AlvaraVeiculoOut]:
     """Lista veículos vinculados a um alvará."""
-    avs = await tr_svc.listar_veiculos_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
-    return [AlvaraVeiculoOut.model_validate(av) for av in avs]
+    offset = (page - 1) * page_size
+    avs, total = await tr_svc.listar_veiculos_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id, limit=page_size, offset=offset)
+    return Paginated(
+        items=[AlvaraVeiculoOut.model_validate(av) for av in avs],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
-@alvaras_router.get("/veiculos/{veiculo_id}/alvaras", response_model=list[AlvaraVeiculoOut])
+@alvaras_router.get("/veiculos/{veiculo_id}/alvaras", response_model=Paginated[AlvaraVeiculoOut])
 async def listar_alvaras_veiculo(
     veiculo_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> list[AlvaraVeiculoOut]:
+) -> Paginated[AlvaraVeiculoOut]:
     """Lista alvarás vinculados a um veículo."""
-    avs = await tr_svc.listar_alvaras_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id)
-    return [AlvaraVeiculoOut.model_validate(av) for av in avs]
+    offset = (page - 1) * page_size
+    avs, total = await tr_svc.listar_alvaras_veiculo(db, tenant_id=tenant_id, veiculo_id=veiculo_id, limit=page_size, offset=offset)
+    return Paginated(
+        items=[AlvaraVeiculoOut.model_validate(av) for av in avs],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 # ============================ Auditoria de Alvará (P4) ========================

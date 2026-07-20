@@ -236,7 +236,7 @@ async def test_alvara_listar_sem_filtro(admin_engine):
             ),
         )
 
-        alvaras = await tr_svc.listar_alvaras(s, tenant_id=tenant.id)
+        alvaras, _ = await tr_svc.listar_alvaras(s, tenant_id=tenant.id)
 
     assert len(alvaras) == 2
     assert alv1.id in [a.id for a in alvaras]
@@ -268,7 +268,7 @@ async def test_alvara_listar_filtro_por_permissionario(admin_engine):
             ),
         )
 
-        alvaras = await tr_svc.listar_alvaras(
+        alvaras, _ = await tr_svc.listar_alvaras(
             s, tenant_id=tenant.id, permissionario_id=perm1.id
         )
 
@@ -301,7 +301,7 @@ async def test_alvara_listar_filtro_por_empresa(admin_engine):
             ),
         )
 
-        alvaras = await tr_svc.listar_alvaras(
+        alvaras, _ = await tr_svc.listar_alvaras(
             s, tenant_id=tenant.id, empresa_id=emp1.id
         )
 
@@ -337,7 +337,7 @@ async def test_alvara_listar_ordenacao_descendente(admin_engine):
             ),
         )
 
-        alvaras = await tr_svc.listar_alvaras(s, tenant_id=tenant.id)
+        alvaras, _ = await tr_svc.listar_alvaras(s, tenant_id=tenant.id)
 
     # Mais recente primeiro (criado_em DESC)
     assert alvaras[0].id == alv2.id

@@ -335,10 +335,10 @@ async def test_listar_filtra_situacao_tipo_e_vinculo(admin_engine):
         await _criar(admin_engine, t.id, permissionario=p.id, tipo="taxi", situacao="ativo")
         await _criar(admin_engine, t.id, empresa=e.id, tipo="mototaxi", situacao="pendente")
         async with _sm(admin_engine)() as s:
-            ativos = await tr_svc.listar_veiculos(s, tenant_id=t.id, situacao="ativo")
-            mototaxi = await tr_svc.listar_veiculos(s, tenant_id=t.id, tipo_servico="mototaxi")
-            por_emp = await tr_svc.listar_veiculos(s, tenant_id=t.id, id_empresa=e.id)
-            por_perm = await tr_svc.listar_veiculos(s, tenant_id=t.id, id_permissionario=p.id)
+            ativos, _ = await tr_svc.listar_veiculos(s, tenant_id=t.id, situacao="ativo")
+            mototaxi, _ = await tr_svc.listar_veiculos(s, tenant_id=t.id, tipo_servico="mototaxi")
+            por_emp, _ = await tr_svc.listar_veiculos(s, tenant_id=t.id, id_empresa=e.id)
+            por_perm, _ = await tr_svc.listar_veiculos(s, tenant_id=t.id, id_permissionario=p.id)
         assert len(ativos) == 1 and ativos[0].situacao == "ativo"
         assert len(mototaxi) == 1 and mototaxi[0].tipo_servico == "mototaxi"
         assert len(por_emp) == 1 and por_emp[0].id_empresa == e.id

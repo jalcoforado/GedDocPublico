@@ -220,8 +220,8 @@ async def test_listar_filtra_situacao_e_tipo(admin_engine):
         await _criar(admin_engine, t.id, tipo="taxi", situacao="ativo")
         await _criar(admin_engine, t.id, tipo="mototaxi", situacao="pendente")
         async with _sm(admin_engine)() as s:
-            ativos = await tr_svc.listar_permissionarios(s, tenant_id=t.id, situacao="ativo")
-            mototaxi = await tr_svc.listar_permissionarios(s, tenant_id=t.id, tipo_servico="mototaxi")
+            ativos, _ = await tr_svc.listar_permissionarios(s, tenant_id=t.id, situacao="ativo")
+            mototaxi, _ = await tr_svc.listar_permissionarios(s, tenant_id=t.id, tipo_servico="mototaxi")
         assert len(ativos) == 1 and ativos[0].situacao == "ativo"
         assert len(mototaxi) == 1 and mototaxi[0].tipo_servico == "mototaxi"
     finally:
