@@ -2628,6 +2628,15 @@ export const api = {
     remove: (id: number) => request<void>(`/minutas/${id}`, { method: "DELETE" }),
     finalizar: (id: number) =>
       request<Minuta>(`/minutas/${id}/finalizar`, { method: "POST" }),
+    // Google Docs (PR-F)
+    criarEmGoogle: (id: number) =>
+      request<Minuta>(`/minutas/${id}/criar-em-google`, { method: "POST" }),
+    getGoogleEditorUrl: (id: number) =>
+      request<{ url: string }>(`/minutas/${id}/google-editor-url`),
+    sincronizarGoogle: (id: number) =>
+      request<Minuta>(`/minutas/${id}/sincronizar-google`, { method: "POST" }),
+    arquivarGoogle: (id: number) =>
+      request<void>(`/minutas/${id}/arquivar-google`, { method: "DELETE" }),
   },
 
   // PAG-1 — cadastros de Pagamentos

@@ -210,3 +210,77 @@ async def finalizar_minuta(
         usuario_id=usuario.id,
     )
     return MinutaOut.model_validate(m)
+
+
+# ======================== Google Docs (PR-F) ========================
+
+
+@minutas_router.post("/minutas/{minuta_id}/criar-em-google", response_model=MinutaOut)
+async def criar_minuta_em_google(
+    minuta_id: int,
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> MinutaOut:
+    """Create a Google Doc for this minuta.
+
+    Prerequisites:
+    - User must have connected Google Docs (GoogleCredencial record exists)
+    - Minuta must be in rascunho status
+    """
+    m = await svc.criar_google_doc_para_minuta(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario_id=usuario.id
+    )
+    return MinutaOut.model_validate(m)
+
+
+@minutas_router.get("/minutas/{minuta_id}/google-editor-url")
+async def get_google_editor_url(
+    minuta_id: int,
+    _: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Get URL to open Google Docs editor for this minuta.
+
+    Returns:
+        {"url": "https://docs.google.com/document/d/.../edit"}
+    """
+    m = await svc.obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+    if not m.google_doc_url:
+        raise ValueError("Minuta does not have a Google Doc URL")
+    return {"url": m.google_doc_url}
+
+
+@minutas_router.post("/minutas/{minuta_id}/sincronizar-google", response_model=MinutaOut)
+async def sincronizar_minuta_google(
+    minuta_id: int,
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> MinutaOut:
+    """Sync latest content from Google Doc.
+
+    Note: For now, this is a placeholder. Full DOCX-to-HTML sync
+    would require python-docx parsing and is deferred to v2.
+    """
+    m = await svc.obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+    # Placeholder: just return current minuta
+    # TODO: Pull DOCX, extract text, update corpo_html
+    return MinutaOut.model_validate(m)
+
+
+@minutas_router.delete("/minutas/{minuta_id}/arquivar-google", status_code=status.HTTP_204_NO_CONTENT)
+async def arquivar_minuta_google(
+    minuta_id: int,
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Move Google Doc to trash (soft delete from Google Drive).
+
+    Note: Minuta record is NOT deleted; only the linked Google Doc is archived.
+    """
+    await svc.arquivar_google_doc_para_minuta(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario_id=usuario.id
+    )

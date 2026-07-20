@@ -39,6 +39,7 @@ export function RedigirDocumentoDialog({
 
   const [minutaAtualId, setMinutaAtualId] = useState<number | undefined>(minutaId);
   const [titulo, setTitulo] = useState("");
+  const [origem, setOrigem] = useState<"interno" | "google">("interno");
   const [templateId, setTemplateId] = useState<string>("");
   const [corpo, setCorpo] = useState("");
   const [versao, setVersao] = useState<number | undefined>(undefined);
@@ -47,6 +48,7 @@ export function RedigirDocumentoDialog({
     if (open) {
       setMinutaAtualId(minutaId);
       setTitulo("");
+      setOrigem("interno");
       setTemplateId("");
       setCorpo("");
       setVersao(undefined);
@@ -77,16 +79,37 @@ export function RedigirDocumentoDialog({
     mutationFn: () =>
       api.minutas.create(processoId, {
         titulo: titulo.trim(),
-        origem: "interno",
-        id_template_origem: templateId ? Number(templateId) : null,
+        origem: origem,
+        id_template_origem: origem === "interno" ? (templateId ? Number(templateId) : null) : null,
       }),
     onSuccess: (m) => {
+      if (origem === "google") {
+        // Criar Google Doc para a minuta
+        criarGoogleM.mutate(m.id);
+      } else {
+        setMinutaAtualId(m.id);
+        setCorpo(m.corpo_html ?? "");
+        setVersao(m.versao);
+        qc.invalidateQueries({ queryKey: ["minutas", processoId] });
+        onSaved?.();
+        toast.success("Rascunho criado.");
+      }
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const criarGoogleM = useMutation({
+    mutationFn: (minutaId: number) =>
+      api.minutas.criarEmGoogle(minutaId),
+    onSuccess: (m) => {
       setMinutaAtualId(m.id);
-      setCorpo(m.corpo_html ?? "");
-      setVersao(m.versao);
       qc.invalidateQueries({ queryKey: ["minutas", processoId] });
       onSaved?.();
-      toast.success("Rascunho criado.");
+      toast.success("Documento criado em Google Docs. Redirecionando…");
+      // Redirect to Google Docs editor
+      setTimeout(() => {
+        window.location.href = m.google_doc_url || "";
+      }, 1000);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -127,9 +150,13 @@ export function RedigirDocumentoDialog({
       </Button>
       <Button
         onClick={() => criarM.mutate()}
-        disabled={criarM.isPending || titulo.trim().length === 0}
+        disabled={criarM.isPending || criarGoogleM.isPending || titulo.trim().length === 0}
       >
-        {criarM.isPending ? "Criando…" : "Criar rascunho"}
+        {criarM.isPending || criarGoogleM.isPending
+          ? "Criando…"
+          : origem === "google"
+            ? "Criar em Google Docs"
+            : "Criar rascunho"}
       </Button>
     </div>
   );
@@ -154,25 +181,52 @@ export function RedigirDocumentoDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="minuta-template">Modelo (template)</Label>
-            <Select
-              id="minuta-template"
-              value={templateId}
-              onChange={(e) => setTemplateId(e.target.value)}
-            >
-              <option value="">Documento em branco</option>
-              {(templatesQ.data ?? []).map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.categoria ? `[${t.categoria}] ` : ""}
-                  {t.nome}
-                </option>
-              ))}
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Ao usar um modelo, os campos do processo (número, requerente, data…) são
-              preenchidos automaticamente.
-            </p>
+            <Label>Plataforma de redação</Label>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  value="interno"
+                  checked={origem === "interno"}
+                  onChange={(e) => setOrigem(e.target.value as "interno" | "google")}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">Plataforma (editor interno com templates)</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  value="google"
+                  checked={origem === "google"}
+                  onChange={(e) => setOrigem(e.target.value as "interno" | "google")}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">Google Docs (editor externo)</span>
+              </label>
+            </div>
           </div>
+          {origem === "interno" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="minuta-template">Modelo (template)</Label>
+              <Select
+                id="minuta-template"
+                value={templateId}
+                onChange={(e) => setTemplateId(e.target.value)}
+              >
+                <option value="">Documento em branco</option>
+                {(templatesQ.data ?? []).map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.categoria ? `[${t.categoria}] ` : ""}
+                    {t.nome}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Ao usar um modelo, os campos do processo (número, requerente, data…) são
+                preenchidos automaticamente.
+              </p>
+            </div>
+          )}
         </div>
       ) : carregando ? (
         <p className="text-sm text-muted-foreground">Carregando rascunho…</p>

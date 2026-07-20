@@ -35,6 +35,7 @@ from ..schemas.minuta import (
 from . import anexos as anexos_svc
 from . import placeholders as ph
 from .audit import log as audit_log
+from .google_docs_service import GoogleDocsError, GoogleDocsService
 from .html_pdf import html_to_pdf_bytes
 from .html_sanitizer import sanitizar_html
 
@@ -381,6 +382,185 @@ async def excluir_minuta(
         )
 
 
+async def criar_google_doc_para_minuta(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    minuta_id: int,
+    usuario_id: int,
+) -> Minuta:
+    """Criar um novo Google Doc para a minuta.
+
+    Args:
+        db: Database session.
+        tenant_id: Tenant ID (from context).
+        minuta_id: ID da minuta.
+        usuario_id: ID do usuário solicitante.
+
+    Returns:
+        Minuta updated with google_doc_id e google_doc_url.
+
+    Raises:
+        HTTPException: Se usuário não tem credenciais Google ou API falhar.
+    """
+    m = await obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+
+    if m.status != "rascunho":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Apenas minutas em rascunho podem ser criadas em Google Docs.",
+        )
+
+    service = GoogleDocsService()
+
+    try:
+        # Obter credenciais do usuário
+        cred = await service.obter_credentials_usuario(
+            db, tenant_id=tenant_id, usuario_id=usuario_id
+        )
+
+        # Criar Google Doc
+        result = await service.criar_google_doc(
+            db, cred=cred, titulo=m.titulo, corpo_html=m.corpo_html
+        )
+
+        # Atualizar minuta com google_doc_id e google_doc_url
+        m.google_doc_id = result["google_doc_id"]
+        m.google_doc_url = result["google_doc_url"]
+        m.id_usuario_google = usuario_id
+        m.atualizado_em = _utcnow()
+
+        await db.commit()
+        await db.refresh(m)
+
+        await audit_log(
+            db,
+            acao="minuta.google_doc_criado",
+            id_entidade=m.id,
+            tipo_entidade="minuta",
+            id_usuario=usuario_id,
+            id_processo=m.id_processo,
+            detalhes={"google_doc_id": m.google_doc_id},
+        )
+
+        return m
+
+    except GoogleDocsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Erro ao criar Google Doc: {str(e)}",
+        )
+
+
+async def arquivar_google_doc_para_minuta(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    minuta_id: int,
+    usuario_id: int,
+) -> None:
+    """Arquivar (soft delete) Google Doc da minuta.
+
+    Nota: Minuta record NÃO é deletada; apenas o Google Doc é movido para lixo.
+
+    Args:
+        db: Database session.
+        tenant_id: Tenant ID (from context).
+        minuta_id: ID da minuta.
+        usuario_id: ID do usuário solicitante.
+
+    Raises:
+        HTTPException: Se minuta não tem google_doc_id ou API falhar.
+    """
+    m = await obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+
+    if not m.google_doc_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Minuta não tem Google Doc para arquivar.",
+        )
+
+    service = GoogleDocsService()
+
+    try:
+        # Obter credenciais do usuário
+        cred = await service.obter_credentials_usuario(
+            db, tenant_id=tenant_id, usuario_id=usuario_id
+        )
+
+        # Arquivar Google Doc
+        await service.arquivar_google_doc(db, cred=cred, google_doc_id=m.google_doc_id)
+
+        # Log audit
+        await audit_log(
+            db,
+            acao="minuta.google_doc_arquivado",
+            id_entidade=m.id,
+            tipo_entidade="minuta",
+            id_usuario=usuario_id,
+            id_processo=m.id_processo,
+            detalhes={"google_doc_id": m.google_doc_id},
+        )
+
+    except GoogleDocsError as e:
+        # Log error but don't fail (Google Doc may already be deleted)
+        await audit_log(
+            db,
+            acao="minuta.google_doc_arquivado_erro",
+            id_entidade=m.id,
+            tipo_entidade="minuta",
+            id_usuario=usuario_id,
+            id_processo=m.id_processo,
+            detalhes={"erro": str(e)},
+        )
+
+
+async def _gerar_pdf_minuta_google(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    minuta_id: int,
+    usuario_id: int,
+    m: Minuta,
+) -> bytes:
+    """Gera PDF a partir de Google Doc.
+
+    Estratégia:
+    1. Obtém credenciais OAuth do usuário
+    2. Baixa Google Doc como PDF via API
+    3. Retorna bytes do PDF
+
+    Raises:
+        HTTPException: Se credenciais não encontradas ou API falhar.
+    """
+    if not m.google_doc_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google Doc ID não encontrado na minuta.",
+        )
+
+    service = GoogleDocsService()
+
+    try:
+        # Obter credenciais do usuário
+        cred = await service.obter_credentials_usuario(
+            db, tenant_id=tenant_id, usuario_id=usuario_id
+        )
+
+        # Exportar Google Doc como PDF
+        pdf_bytes = await service.exportar_google_doc_como_pdf(
+            db, cred=cred, google_doc_id=m.google_doc_id
+        )
+
+        return pdf_bytes
+
+    except GoogleDocsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Erro ao finalizar documento Google: {str(e)}",
+        )
+
+
 async def finalizar_minuta(
     db: AsyncSession,
     *,
@@ -405,20 +585,19 @@ async def finalizar_minuta(
         )
 
     if m.origem == "google":
-        # A exportação PDF do Google Doc é implementada no PR-D.
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Finalização via Google Docs ainda não disponível.",
+        # Exportar PDF do Google Doc
+        pdf_bytes = await _gerar_pdf_minuta_google(
+            db, tenant_id=tenant_id, minuta_id=minuta_id, usuario_id=usuario_id, m=m
         )
+    else:
+        if not (m.corpo_html or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A minuta está vazia — escreva o conteúdo antes de finalizar.",
+            )
 
-    if not (m.corpo_html or "").strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A minuta está vazia — escreva o conteúdo antes de finalizar.",
-        )
-
-    corpo_sanitizado = sanitizar_html(m.corpo_html or "")
-    pdf_bytes = html_to_pdf_bytes(corpo_sanitizado, titulo=m.titulo)
+        corpo_sanitizado = sanitizar_html(m.corpo_html or "")
+        pdf_bytes = html_to_pdf_bytes(corpo_sanitizado, titulo=m.titulo)
 
     anexo = await anexos_svc._criar_anexo_from_bytes(
         db,
