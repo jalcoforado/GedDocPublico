@@ -184,6 +184,7 @@ async def test_criar_google_doc_success(admin_engine):
 async def test_criar_google_doc_401_token_expired(admin_engine):
     """Criar Google Doc com token expirado."""
     from googleapiclient.errors import HttpError
+    from unittest.mock import Mock
 
     tenant, admin_id = await _provisionar(admin_engine)
     cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=admin_id)
@@ -194,10 +195,13 @@ async def test_criar_google_doc_401_token_expired(admin_engine):
         mock_docs_service = MagicMock()
         mock_build.return_value = mock_docs_service
 
-        mock_error = MagicMock()
-        mock_error.resp.status = 401
+        # Create a proper mock for HttpError response
+        mock_resp = Mock()
+        mock_resp.status = 401
+
+        http_error = HttpError(mock_resp, b"Unauthorized")
         mock_docs_service.documents.return_value.create.return_value.execute.side_effect = (
-            HttpError(mock_error, b"Unauthorized")
+            http_error
         )
 
         async with _sm(admin_engine)() as db:
@@ -236,6 +240,7 @@ async def test_sincronizar_google_doc_success(admin_engine):
 async def test_sincronizar_google_doc_404_not_found(admin_engine):
     """Sincronizar Google Doc não encontrado."""
     from googleapiclient.errors import HttpError
+    from unittest.mock import Mock
 
     tenant, admin_id = await _provisionar(admin_engine)
     cred = await _criar_credencial(admin_engine, tenant.id, usuario_id=admin_id)
@@ -245,10 +250,13 @@ async def test_sincronizar_google_doc_404_not_found(admin_engine):
         mock_drive_service = MagicMock()
         mock_build.return_value = mock_drive_service
 
-        mock_error = MagicMock()
-        mock_error.resp.status = 404
+        # Create a proper mock for HttpError response
+        mock_resp = Mock()
+        mock_resp.status = 404
+
+        http_error = HttpError(mock_resp, b"Not Found")
         mock_drive_service.files.return_value.export_media.return_value.execute.side_effect = (
-            HttpError(mock_error, b"Not Found")
+            http_error
         )
 
         async with _sm(admin_engine)() as db:
