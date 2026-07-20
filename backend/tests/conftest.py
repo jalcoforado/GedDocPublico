@@ -124,3 +124,16 @@ async def two_tenants(admin_engine) -> AsyncIterator[tuple[int, int]]:
             {"a": tid_a, "b": tid_b},
         )
         await teardown_session.commit()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def redis_client():
+    """Redis client para testes — usa redis de teste (DB 2)."""
+    import redis.asyncio as aioredis
+
+    redis_url = "redis://redis:6379/2"
+    client = aioredis.from_url(redis_url)
+    yield client
+    # Cleanup: flush DB de teste
+    await client.flushdb()
+    await client.aclose()
