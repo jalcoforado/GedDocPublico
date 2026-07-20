@@ -37,8 +37,8 @@ def upgrade() -> None:
         sa.Column("criado_em", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column("atualizado_em", sa.DateTime(), nullable=True),
         sa.CheckConstraint("tenant_id IS NOT NULL", name="ck_alvara_veiculo_tenant_not_null"),
-        sa.ForeignKeyConstraint(["id_alvara"], ["alvara.id"], name="fk_alvara_veiculo_alvara_id"),
-        sa.ForeignKeyConstraint(["id_veiculo"], ["veiculo.id"], name="fk_alvara_veiculo_veiculo_id"),
+        sa.ForeignKeyConstraint(["id_alvara"], ["transporte_regulado.alvara.id"], name="fk_alvara_veiculo_alvara_id"),
+        sa.ForeignKeyConstraint(["id_veiculo"], ["transporte_regulado.veiculo.id"], name="fk_alvara_veiculo_veiculo_id"),
         sa.ForeignKeyConstraint(["tenant_id"], ["aprimora_py.tenant.id"], name="fk_alvara_veiculo_tenant_id"),
         sa.PrimaryKeyConstraint("id", name="pk_alvara_veiculo"),
         sa.UniqueConstraint("tenant_id", "id_alvara", "id_veiculo", name="uq_alvara_veiculo_no_dup"),
@@ -65,12 +65,12 @@ def upgrade() -> None:
 
         CREATE POLICY tenant_isolation_select ON transporte_regulado.alvara_veiculo
             FOR SELECT
-            USING (tenant_id = CAST(current_setting('app.current_tenant_id') AS INT));
+            USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int);
 
         CREATE POLICY tenant_isolation_modify ON transporte_regulado.alvara_veiculo
             FOR ALL
-            USING (tenant_id = CAST(current_setting('app.current_tenant_id') AS INT))
-            WITH CHECK (tenant_id = CAST(current_setting('app.current_tenant_id') AS INT));
+            USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
+            WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int);
     """
     )
 

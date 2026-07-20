@@ -39,7 +39,7 @@ def upgrade() -> None:
         sa.Column("id_usuario", sa.Integer(), nullable=True),
         sa.Column("criado_em", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.CheckConstraint("tenant_id IS NOT NULL", name="ck_alvara_auditoria_tenant_not_null"),
-        sa.ForeignKeyConstraint(["id_alvara"], ["alvara.id"], name="fk_alvara_auditoria_alvara_id"),
+        sa.ForeignKeyConstraint(["id_alvara"], ["transporte_regulado.alvara.id"], name="fk_alvara_auditoria_alvara_id"),
         sa.ForeignKeyConstraint(["id_usuario"], ["utils.usuario.id"], name="fk_alvara_auditoria_usuario_id"),
         sa.ForeignKeyConstraint(["tenant_id"], ["aprimora_py.tenant.id"], name="fk_alvara_auditoria_tenant_id"),
         sa.PrimaryKeyConstraint("id", name="pk_alvara_auditoria"),
@@ -60,7 +60,7 @@ def upgrade() -> None:
 
         CREATE POLICY tenant_isolation_select ON transporte_regulado.alvara_auditoria
             FOR SELECT
-            USING (tenant_id = CAST(current_setting('app.current_tenant_id') AS INT));
+            USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int);
     """
     )
 
