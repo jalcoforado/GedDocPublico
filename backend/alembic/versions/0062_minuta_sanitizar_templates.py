@@ -17,8 +17,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0045"
-down_revision: str | Sequence[str] | None = "0044"
+revision: str = "0062"
+down_revision: str | Sequence[str] | None = "0061"
 
 
 def upgrade() -> None:

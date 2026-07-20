@@ -23,17 +23,29 @@ down_revision: str | Sequence[str] | None = "0059"
 
 def upgrade() -> None:
     # Bleach as templates existentes
-    # SQL puro: não há função PostgreSQL de bleach, então fazemos in-application
-    # Fetch todos os templates, sanitizar em Python, atualizar
+    # NOTA: Tabela protocolos.template_documento pode não existir em algumas envs
+    # Noop se tabela não existir
     conn = op.get_bind()
 
-    # Apenas SELECT para listar — updates feitas abaixo
-    result = conn.execute(sa.text("""
-        SELECT id, conteudo FROM protocolos.template_documento
-        WHERE conteudo IS NOT NULL
-    """))
+    # Verificar se schema/tabela/coluna existem
+    try:
+        check = conn.execute(sa.text("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'protocolos'
+                  AND table_name = 'template_documento'
+                  AND column_name = 'conteudo'
+            )
+        """))
+        table_exists = check.scalar()
+    except Exception:
+        table_exists = False
 
-    # Importar bleach aqui para migration
+    if not table_exists:
+        # Tabela ou coluna não existe — noop
+        return
+
+    # Importar bleach
     import bleach
 
     ALLOWED_TAGS = {
@@ -46,6 +58,13 @@ def upgrade() -> None:
         "div": ["class"],
     }
 
+    # Fetch templates
+    result = conn.execute(sa.text("""
+        SELECT id, conteudo FROM protocolos.template_documento
+        WHERE conteudo IS NOT NULL
+    """))
+
+    # Sanitize each
     for row in result:
         template_id, conteudo = row
         sanitized = bleach.clean(conteudo, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
@@ -55,8 +74,6 @@ def upgrade() -> None:
                 SET conteudo = :conteudo
                 WHERE id = :id
             """), {"conteudo": sanitized, "id": template_id})
-
-    conn.commit()
 
 
 def downgrade() -> None:
