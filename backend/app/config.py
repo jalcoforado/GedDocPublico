@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     # explicitamente. Gerar com: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     dados_sensiveis_encryption_key: str = ""
 
+    # Google OAuth (PR-F) — Google Docs integration.
+    # Obtenha em https://console.cloud.google.com/apis/credentials (OAuth 2.0 Web Application)
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = "http://localhost:8000/api/v2/auth/google/callback"
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]

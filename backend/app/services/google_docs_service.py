@@ -19,7 +19,7 @@ from googleapiclient.errors import HttpError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import get_settings
 from app.core.crypto import decrypt_bytes, encrypt_bytes
 from app.models.google_credencial import GoogleCredencial
 from app.services.html_pdf import html_to_pdf_bytes
@@ -50,6 +50,7 @@ class GoogleDocsService:
 
     def __init__(self):
         """Initialize Google Docs service with credentials."""
+        settings = get_settings()
         self.client_id = settings.google_oauth_client_id
         self.client_secret = settings.google_oauth_client_secret
         self.redirect_uri = settings.google_oauth_redirect_uri
