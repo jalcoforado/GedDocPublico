@@ -97,6 +97,7 @@ class Settings(BaseSettings):
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = "http://localhost:8000/api/v2/auth/google/callback"
+    google_credentials_file: str = "/app/keys/google-credentials.json"
 
     @property
     def cors_origins(self) -> list[str]:
