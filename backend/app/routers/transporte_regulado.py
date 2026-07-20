@@ -6,7 +6,7 @@ autenticado + permissão `transporte_regulado`. Mesmo padrão dos routers de `fr
 Sem portal público nesta etapa.
 """
 from fastapi import APIRouter, Depends, status
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import require_tenant_id
@@ -790,7 +790,7 @@ async def listar_relatorio(
     )
 
 
-@alvaras_router.get("/relatorio/export/csv", response_class=Response)
+@alvaras_router.get("/relatorio/export/csv")
 async def exportar_relatorio_csv(
     tipo_servico: str | None = None,
     id_permissionario: int | None = None,
@@ -799,18 +799,39 @@ async def exportar_relatorio_csv(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Exporta relatório de alvarás em formato CSV."""
-    alvaras, _ = await tr_svc.listar_relatorio_alvaras(
-        db,
-        tenant_id=tenant_id,
-        tipo_servico=tipo_servico,
-        id_permissionario=id_permissionario,
-        status_filtro=status,
-        limit=10000,  # Sem limite para export
-    )
-    csv_content = tr_svc.gerar_csv_alvaras(alvaras)
-    return Response(
-        content=csv_content,
+    """Exporta relatório de alvarás em formato CSV (streaming — sem carregar tudo em RAM)."""
+    async def csv_generator():
+        # Header do CSV
+        header = "id,numero_alvara,tipo_servico,id_permissionario,id_empresa,data_inicio,data_validade,criado_em,status,dias_para_vencimento\r\n"
+        yield header
+
+        # Fetch em batches de 500 para evitar RAM picos
+        offset = 0
+        batch_size = 500
+        while True:
+            alvaras, _ = await tr_svc.listar_relatorio_alvaras(
+                db,
+                tenant_id=tenant_id,
+                tipo_servico=tipo_servico,
+                id_permissionario=id_permissionario,
+                status_filtro=status,
+                limit=batch_size,
+                offset=offset,
+            )
+            if not alvaras:
+                break
+
+            # Converter batch para CSV linhas (escape valores com quote se necessário)
+            import csv
+            for alvara in alvaras:
+                # Usar CSV writer para escape correto
+                row_str = tr_svc.format_csv_row(alvara)
+                yield row_str
+
+            offset += batch_size
+
+    return StreamingResponse(
+        csv_generator(),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=alvaras_relatorio.csv"},
     )

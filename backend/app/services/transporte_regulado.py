@@ -1636,8 +1636,30 @@ async def obter_kpis_agregados(
     return kpis
 
 
+def format_csv_row(alvara: dict) -> str:
+    """Formata uma linha CSV com escape correto de aspas/vírgulas."""
+    import csv
+    from io import StringIO
+
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        alvara.get("id", ""),
+        alvara.get("numero_alvara", ""),
+        alvara.get("tipo_servico", ""),
+        alvara.get("id_permissionario", ""),
+        alvara.get("id_empresa", ""),
+        alvara.get("data_inicio", ""),
+        alvara.get("data_validade", ""),
+        alvara.get("criado_em", ""),
+        alvara.get("status", ""),
+        alvara.get("dias_para_vencimento", ""),
+    ])
+    return output.getvalue()
+
+
 def gerar_csv_alvaras(alvaras_com_kpis: list[dict]) -> str:
-    """Gera CSV simples a partir de lista de alvarás com KPIs."""
+    """Gera CSV simples a partir de lista de alvarás com KPIs (deprecado — usar streaming)."""
     import csv
     from io import StringIO
 
