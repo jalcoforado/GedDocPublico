@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { GoogleConnectDialog } from "@/components/GoogleConnectDialog";
 import { api } from "@/lib/api";
 
 interface Props {
@@ -43,6 +44,15 @@ export function RedigirDocumentoDialog({
   const [templateId, setTemplateId] = useState<string>("");
   const [corpo, setCorpo] = useState("");
   const [versao, setVersao] = useState<number | undefined>(undefined);
+  const [showGoogleConnect, setShowGoogleConnect] = useState(false);
+
+  const credentialQ = useQuery({
+    queryKey: ["user", "google-credential"],
+    queryFn: () => api.users.getGoogleCredential(),
+    enabled: open,
+    throwOnError: false,
+  });
+  const hasGoogleCredentials = credentialQ.data?.connected === true;
 
   useEffect(() => {
     if (open) {
@@ -193,16 +203,31 @@ export function RedigirDocumentoDialog({
                 />
                 <span className="text-sm">Plataforma (editor interno com templates)</span>
               </label>
+
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="radio"
                   value="google"
                   checked={origem === "google"}
                   onChange={(e) => setOrigem(e.target.value as "interno" | "google")}
+                  disabled={!hasGoogleCredentials}
                   className="w-4 h-4"
                 />
                 <span className="text-sm">Google Docs (editor externo)</span>
               </label>
+
+              {!hasGoogleCredentials && (
+                <div className="ml-6 text-xs text-amber-600 space-y-1">
+                  <p>⚠️ Você precisa conectar sua conta Google Docs primeiro.</p>
+                  <button
+                    type="button"
+                    onClick={() => setShowGoogleConnect(true)}
+                    className="text-blue-600 hover:underline font-medium"
+                  >
+                    Conectar agora →
+                  </button>
+                </div>
+              )}
             </div>
           </div>
           {origem === "interno" && (
@@ -255,5 +280,17 @@ export function RedigirDocumentoDialog({
         </div>
       )}
     </Dialog>
+
+    {/* Google Connect Dialog */}
+    <GoogleConnectDialog
+      open={showGoogleConnect}
+      onClose={() => setShowGoogleConnect(false)}
+      minutaId={minutaAtualId || 0}
+      processoId={processoId}
+      onSuccess={() => {
+        setShowGoogleConnect(false);
+        credentialQ.refetch();
+      }}
+    />
   );
 }

@@ -2015,6 +2015,23 @@ export const api = {
       ),
   },
 
+  // User-specific endpoints (current logged-in user)
+  users: {
+    getGoogleCredential: async () => {
+      try {
+        const res = await fetch(`${baseUrl()}/users/me/google-credential`, {
+          cache: "no-store",
+          credentials: "include",
+        });
+        if (res.status === 404) return { connected: false };
+        if (!res.ok) throw new Error("Failed to fetch credential status");
+        return res.json();
+      } catch (err) {
+        return { connected: false };
+      }
+    },
+  },
+
   // PR3a — admin SaaS / gestão de tenants (allowlist de plataforma).
   admin: {
     me: () => request<AdminMe>("/admin/me"),
