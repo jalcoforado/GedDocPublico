@@ -7,9 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.deps import get_current_user, get_current_user_no_password_gate, require_tenant_id
 from ..auth.jwt import build_payload, encode_token, get_jwt_secret
 from ..auth.password import hash_password, verify_password
+from ..auth.perms import require_permission
 from ..config import get_settings
 from ..database import get_db
-from ..models import Usuario
+from ..models import GoogleCredencial, Usuario
 from ..schemas.auth import (
     AlterarSenhaRequest,
     LoginRequest,
@@ -254,3 +255,31 @@ async def handle_google_oauth_callback(
             url="/minuta-error?error=google_api_error",
             status_code=307,
         )
+
+
+@router.get("/users/me/google-credential")
+async def get_google_credential_status(
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get credential status for current user.
+
+    Returns 200 with {connected: true, connected_at: ...} if credentials exist.
+    Returns 404 if user has no non-revoked Google Docs credentials.
+    """
+    stmt = select(GoogleCredencial).where(
+        (GoogleCredencial.tenant_id == tenant_id)
+        & (GoogleCredencial.id_usuario == usuario.id)
+        & (GoogleCredencial.revogado == False)
+    )
+    result = await db.execute(stmt)
+    cred = result.scalar_one_or_none()
+
+    if not cred:
+        raise HTTPException(status_code=404, detail="No credentials found")
+
+    return {
+        "connected": True,
+        "connected_at": cred.criado_em.isoformat(),
+    }

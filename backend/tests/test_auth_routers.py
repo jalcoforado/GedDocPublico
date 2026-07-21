@@ -13,6 +13,7 @@ from datetime import datetime
 
 import pytest
 import pytest_asyncio
+from fastapi import Depends, HTTPException, status
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -135,16 +136,31 @@ async def test_initiate_google_oauth_redirect(
     admin_engine, auth_setup, client, admin_token, redis_client
 ):
     """GET /auth/google redirects to Google consent screen."""
+    from app.auth.deps import _resolve_current_user
+
     s = auth_setup
 
-    # Override tenant_id dependency
+    # Override dependencies
     app.dependency_overrides[require_tenant_id] = lambda: s["tenant_id"]
-    # Mock get_redis para usar o redis_client do teste
     app.dependency_overrides[get_redis] = lambda: redis_client
+
+    # Override get_current_user to bypass must_change_password gate in tests
+    async def mock_get_current_user_no_gate(user: Usuario = Depends(_resolve_current_user)) -> Usuario:
+        """Skip must_change_password gate for testing."""
+        return user
+
+    app.dependency_overrides[get_current_user] = mock_get_current_user_no_gate
+
+    # Create a proper host header matching the test tenant's slug
+    # This ensures TenantMiddleware resolves to the correct tenant
+    host_header = f"{s['tenant_slug']}.aprimora.local"
 
     response = await client.get(
         "/api/v2/auth/google?minuta_id=123&processo_id=456",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "Host": host_header,  # Set Host for TenantMiddleware
+        },
         follow_redirects=False,
     )
 
@@ -161,3 +177,19 @@ async def test_initiate_google_oauth_missing_auth(client):
     response = await client.get("/api/v2/auth/google?minuta_id=123&processo_id=456")
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_google_credential_status_no_credentials(client, auth_setup, admin_token):
+    """GET /users/me/google-credential with no credentials → 404."""
+    s = auth_setup
+
+    # Override tenant_id dependency
+    app.dependency_overrides[require_tenant_id] = lambda: s["tenant_id"]
+
+    response = await client.get(
+        "/api/v2/users/me/google-credential",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 404
