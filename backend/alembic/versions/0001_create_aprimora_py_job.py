@@ -21,6 +21,32 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # Create utils schema and stub tables if they don't exist (for legacy PHP compatibility)
+    op.execute('CREATE SCHEMA IF NOT EXISTS utils')
+    op.execute('''
+        CREATE TABLE IF NOT EXISTS utils.usuario (
+            id INTEGER PRIMARY KEY,
+            login VARCHAR(255),
+            nome VARCHAR(500),
+            email VARCHAR(255),
+            senha VARCHAR(150),
+            criado_em TIMESTAMP DEFAULT NOW()
+        )
+    ''')
+    op.execute('''
+        CREATE TABLE IF NOT EXISTS utils.usuario_externo (
+            id INTEGER PRIMARY KEY,
+            nome VARCHAR(500),
+            email VARCHAR(255),
+            senha VARCHAR(150),
+            cpf_cnpj VARCHAR(14),
+            ativo BOOLEAN DEFAULT true NOT NULL,
+            excluido BOOLEAN DEFAULT false NOT NULL,
+            data_criacao TIMESTAMP DEFAULT NOW() NOT NULL,
+            tenant_id INTEGER NOT NULL
+        )
+    ''')
+
     op.execute('CREATE SCHEMA IF NOT EXISTS aprimora_py')
 
     op.create_table(
