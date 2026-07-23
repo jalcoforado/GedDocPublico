@@ -46,6 +46,14 @@ def upgrade() -> None:
             tenant_id INTEGER NOT NULL
         )
     ''')
+    op.execute('''
+        CREATE TABLE IF NOT EXISTS utils.cidade (
+            id INTEGER PRIMARY KEY,
+            nome VARCHAR(255),
+            uf VARCHAR(2),
+            criado_em TIMESTAMP DEFAULT NOW()
+        )
+    ''')
 
     op.execute('CREATE SCHEMA IF NOT EXISTS aprimora_py')
 
