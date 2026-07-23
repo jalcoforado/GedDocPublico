@@ -31,34 +31,43 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # usuario.email
     try:
-        op.execute("DROP INDEX IF EXISTS utils.usuario_email")
-    except Exception:
-        pass
-    try:
-        op.execute(
-            "CREATE UNIQUE INDEX usuario_email_per_tenant "
-            "ON utils.usuario (tenant_id, email) "
-            "WHERE excluido IS FALSE"
-        )
-    except Exception:
-        # Index may already exist from legacy schema
-        pass
+        # usuario.email
+        try:
+            op.execute("DROP INDEX IF EXISTS utils.usuario_email")
+        except Exception as e:
+            print(f"[0005] DROP usuario_email: {e}")
+            pass
 
-    # usuario.cpf
-    try:
-        op.execute("DROP INDEX IF EXISTS utils.usuario_cpf")
-    except Exception:
-        pass
-    try:
-        op.execute(
-            "CREATE UNIQUE INDEX usuario_cpf_per_tenant "
-            "ON utils.usuario (tenant_id, cpf) "
-            "WHERE excluido IS FALSE"
-        )
-    except Exception:
-        # Index may already exist from legacy schema
+        try:
+            op.execute(
+                "CREATE UNIQUE INDEX usuario_email_per_tenant "
+                "ON utils.usuario (tenant_id, email) "
+                "WHERE excluido IS FALSE"
+            )
+        except Exception as e:
+            print(f"[0005] CREATE usuario_email_per_tenant: {e}")
+            pass
+
+        # usuario.cpf
+        try:
+            op.execute("DROP INDEX IF EXISTS utils.usuario_cpf")
+        except Exception as e:
+            print(f"[0005] DROP usuario_cpf: {e}")
+            pass
+
+        try:
+            op.execute(
+                "CREATE UNIQUE INDEX usuario_cpf_per_tenant "
+                "ON utils.usuario (tenant_id, cpf) "
+                "WHERE excluido IS FALSE"
+            )
+        except Exception as e:
+            print(f"[0005] CREATE usuario_cpf_per_tenant: {e}")
+            pass
+    except Exception as e:
+        print(f"[0005] FATAL: {e}")
+        # Suppress to allow upgrade to continue
         pass
 
 
