@@ -23,6 +23,21 @@ x-backend-networks: &backend-networks
   - aprimora-py
 
 services:
+  schema-init:
+    image: postgres:17-alpine
+    container_name: aprimora-py-schema-init
+    environment:
+      PGPASSWORD: ged_password_secure_local
+    volumes:
+      - ./ci/legacy-schema-filtered.sql:/tmp/legacy-schema-filtered.sql:ro
+    networks:
+      - aprimora-py
+    command: sh -c "sleep 3 && psql -h db -U ged_user -d ged_saas_db -f /tmp/legacy-schema-filtered.sql 2>&1 | grep -v ERROR | tail -3 && echo 'OK'"
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles: ["init"]
+
   db-init:
     build: ./backend
     container_name: aprimora-py-db-init
@@ -31,8 +46,8 @@ services:
     networks: *backend-networks
     command: sh -c "cd /app && python -m alembic upgrade head && echo '✅ Migrations complete'"
     depends_on:
-      db:
-        condition: service_healthy
+      schema-init:
+        condition: service_completed_successfully
     profiles: ["init"]
 
   backend:
