@@ -21,8 +21,9 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # Create utils schema and stub tables if they don't exist (for legacy PHP compatibility)
+    # Create utils and protocolos schemas and stub tables if they don't exist (for legacy PHP compatibility)
     op.execute('CREATE SCHEMA IF NOT EXISTS utils')
+    op.execute('CREATE SCHEMA IF NOT EXISTS protocolos')
     op.execute('''
         CREATE TABLE IF NOT EXISTS utils.usuario (
             id INTEGER PRIMARY KEY,
