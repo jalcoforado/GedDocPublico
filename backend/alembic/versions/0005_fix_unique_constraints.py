@@ -32,7 +32,10 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # usuario.email
-    op.execute("DROP INDEX IF EXISTS utils.usuario_email")
+    try:
+        op.execute("DROP INDEX IF EXISTS utils.usuario_email")
+    except Exception:
+        pass
     try:
         op.execute(
             "CREATE UNIQUE INDEX usuario_email_per_tenant "
@@ -44,7 +47,10 @@ def upgrade() -> None:
         pass
 
     # usuario.cpf
-    op.execute("DROP INDEX IF EXISTS utils.usuario_cpf")
+    try:
+        op.execute("DROP INDEX IF EXISTS utils.usuario_cpf")
+    except Exception:
+        pass
     try:
         op.execute(
             "CREATE UNIQUE INDEX usuario_cpf_per_tenant "
