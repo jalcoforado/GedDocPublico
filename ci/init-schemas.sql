@@ -22,3 +22,28 @@ BEGIN
   END IF;
 END
 $$;
+
+-- Create stub for utils.usuario table (referenced by FK from aprimora_py.job)
+-- Real structure comes from legacy PHP system or local database
+CREATE TABLE IF NOT EXISTS utils.usuario (
+  id INTEGER PRIMARY KEY,
+  login VARCHAR(255),
+  nome VARCHAR(500),
+  email VARCHAR(255),
+  criado_em TIMESTAMP DEFAULT NOW()
+);
+
+-- Create stub for utils.unidade_trabalho (if referenced)
+CREATE TABLE IF NOT EXISTS utils.unidade_trabalho (
+  id INTEGER PRIMARY KEY,
+  nome VARCHAR(255),
+  criado_em TIMESTAMP DEFAULT NOW()
+);
+
+-- Create stub for utils.usuario_externo (if referenced)
+CREATE TABLE IF NOT EXISTS utils.usuario_externo (
+  id INTEGER PRIMARY KEY,
+  nome VARCHAR(500),
+  email VARCHAR(255),
+  criado_em TIMESTAMP DEFAULT NOW()
+);
