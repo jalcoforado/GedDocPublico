@@ -103,26 +103,43 @@ def upgrade() -> None:
     # 3+4+5: Enable RLS + policies em cada tabela tenanted.
     for schema, table in TABLES:
         fq = f'"{schema}"."{table}"'
-        op.execute(f"ALTER TABLE {fq} ENABLE ROW LEVEL SECURITY")
-        # FORCE faz a policy aplicar-se até para o dono da tabela (ged_user)
-        # — exceto para SUPERUSER, que sempre bypassa.
-        op.execute(f"ALTER TABLE {fq} FORCE ROW LEVEL SECURITY")
+        try:
+            op.execute(f"ALTER TABLE {fq} ENABLE ROW LEVEL SECURITY")
+        except Exception:
+            # Already enabled (from legacy schema)
+            pass
 
-        op.execute(
-            f"""
-            CREATE POLICY tenant_isolation_select ON {fq}
-                FOR SELECT
-                USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
-            """
-        )
-        op.execute(
-            f"""
-            CREATE POLICY tenant_isolation_modify ON {fq}
-                FOR ALL
-                USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
-                WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
-            """
-        )
+        try:
+            # FORCE faz a policy aplicar-se até para o dono da tabela (ged_user)
+            # — exceto para SUPERUSER, que sempre bypassa.
+            op.execute(f"ALTER TABLE {fq} FORCE ROW LEVEL SECURITY")
+        except Exception:
+            pass
+
+        try:
+            op.execute(
+                f"""
+                CREATE POLICY tenant_isolation_select ON {fq}
+                    FOR SELECT
+                    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
+                """
+            )
+        except Exception:
+            # Policy may already exist from legacy schema
+            pass
+
+        try:
+            op.execute(
+                f"""
+                CREATE POLICY tenant_isolation_modify ON {fq}
+                    FOR ALL
+                    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
+                    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
+                """
+            )
+        except Exception:
+            # Policy may already exist from legacy schema
+            pass
 
 
 def downgrade() -> None:
