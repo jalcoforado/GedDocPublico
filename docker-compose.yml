@@ -29,11 +29,10 @@ services:
     environment:
       PGPASSWORD: ged_password_secure_local
     volumes:
-      - ./ci/init-schemas.sql:/tmp/init-schemas.sql:ro
-      - ./ci/legacy-schema.sql:/tmp/legacy-schema.sql:ro
+      - ./ci/legacy-schema-protocolos.sql:/tmp/legacy-schema-protocolos.sql:ro
     networks:
       - aprimora-py
-    command: sh -c "sleep 3 && psql -h db -U ged_user -d ged_saas_db -f /tmp/init-schemas.sql && psql -h db -U ged_user -d ged_saas_db -f /tmp/legacy-schema.sql 2>&1 | tail -5 && echo 'OK'"
+    command: sh -c "sleep 3 && psql -h db -U ged_user -d ged_saas_db -f /tmp/legacy-schema-protocolos.sql && echo 'OK'"
     depends_on:
       db:
         condition: service_healthy
