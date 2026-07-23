@@ -86,13 +86,24 @@ def upgrade() -> None:
         fq = f'"{schema}"."{table}"'
         fk_name = f"fk_{table}_tenant_id"
 
+        # Check if table exists (may not be loaded from legacy schema)
+        table_exists = op.get_bind().execute(
+            f"""SELECT 1 FROM information_schema.tables
+               WHERE table_schema = '{schema}' AND table_name = '{table}'"""
+        ).scalar()
+
+        if not table_exists:
+            # Table doesn't exist yet (will be created by other migrations)
+            # Skip for now — it will be added in the migration that creates it
+            continue
+
         # ADD COLUMN IF NOT EXISTS (column may come from legacy PHP schema)
         op.execute(f"ALTER TABLE {fq} ADD COLUMN IF NOT EXISTS tenant_id INTEGER")
         # Backfill NULL values with tenant 1
         op.execute(f"UPDATE {fq} SET tenant_id = 1 WHERE tenant_id IS NULL")
         # Set NOT NULL
         op.execute(f"ALTER TABLE {fq} ALTER COLUMN tenant_id SET NOT NULL")
-        # Add FK constraint (use IF NOT EXISTS via psycopg2 exception handling)
+        # Add FK constraint (use IF NOT EXISTS via exception handling)
         try:
             op.execute(
                 f"ALTER TABLE {fq} ADD CONSTRAINT {fk_name} "
