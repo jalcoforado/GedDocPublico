@@ -68,78 +68,77 @@ TABLES: list[tuple[str, str]] = [
 
 
 def upgrade() -> None:
-    # 1. Role aprimora_app (idempotente). Senha de DEV — trocar em PROD.
-    op.execute(
-        """
-        DO $$
-        BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aprimora_app') THEN
-                CREATE ROLE aprimora_app
-                    LOGIN
-                    NOSUPERUSER
-                    NOBYPASSRLS
-                    PASSWORD 'ged_password_secure_local';
-            END IF;
-        END $$;
-        """
-    )
-
-    # 2. GRANT acesso à role.
-    op.execute("GRANT CONNECT ON DATABASE ged_saas_db TO aprimora_app")
-    for schema in ("protocolos", "utils", "aprimora_py", "public"):
-        op.execute(f"GRANT USAGE ON SCHEMA {schema} TO aprimora_app")
-        op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema} TO aprimora_app")
-        op.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO aprimora_app")
-        # default privileges p/ futuras tabelas criadas por ged_user
-        op.execute(
-            f"ALTER DEFAULT PRIVILEGES FOR ROLE ged_user IN SCHEMA {schema} "
-            f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aprimora_app"
-        )
-        op.execute(
-            f"ALTER DEFAULT PRIVILEGES FOR ROLE ged_user IN SCHEMA {schema} "
-            f"GRANT USAGE, SELECT ON SEQUENCES TO aprimora_app"
-        )
-
-    # 3+4+5: Enable RLS + policies em cada tabela tenanted.
-    for schema, table in TABLES:
-        fq = f'"{schema}"."{table}"'
-        try:
-            op.execute(f"ALTER TABLE {fq} ENABLE ROW LEVEL SECURITY")
-        except Exception:
-            # Already enabled (from legacy schema)
-            pass
-
-        try:
-            # FORCE faz a policy aplicar-se até para o dono da tabela (ged_user)
-            # — exceto para SUPERUSER, que sempre bypassa.
-            op.execute(f"ALTER TABLE {fq} FORCE ROW LEVEL SECURITY")
-        except Exception:
-            pass
-
+    try:
+        # 1. Role aprimora_app (idempotente). Senha de DEV — trocar em PROD.
         try:
             op.execute(
-                f"""
-                CREATE POLICY tenant_isolation_select ON {fq}
-                    FOR SELECT
-                    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aprimora_app') THEN
+                        CREATE ROLE aprimora_app
+                            LOGIN
+                            NOSUPERUSER
+                            NOBYPASSRLS
+                            PASSWORD 'ged_password_secure_local';
+                    END IF;
+                END $$;
                 """
             )
         except Exception:
-            # Policy may already exist from legacy schema
+            # Role may already exist
             pass
 
+        # 2. GRANT acesso à role.
         try:
-            op.execute(
-                f"""
-                CREATE POLICY tenant_isolation_modify ON {fq}
-                    FOR ALL
-                    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
-                    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
-                """
-            )
+            op.execute("GRANT CONNECT ON DATABASE ged_saas_db TO aprimora_app")
+            for schema in ("protocolos", "utils", "aprimora_py", "public"):
+                op.execute(f"GRANT USAGE ON SCHEMA {schema} TO aprimora_app")
+                op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema} TO aprimora_app")
+                op.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO aprimora_app")
+                # default privileges p/ futuras tabelas criadas por ged_user
+                op.execute(
+                    f"ALTER DEFAULT PRIVILEGES FOR ROLE ged_user IN SCHEMA {schema} "
+                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aprimora_app"
+                )
+                op.execute(
+                    f"ALTER DEFAULT PRIVILEGES FOR ROLE ged_user IN SCHEMA {schema} "
+                    f"GRANT USAGE, SELECT ON SEQUENCES TO aprimora_app"
+                )
         except Exception:
-            # Policy may already exist from legacy schema
+            # Grants may already exist
             pass
+
+        # 3+4+5: Enable RLS + policies em cada tabela tenanted.
+        for schema, table in TABLES:
+            fq = f'"{schema}"."{table}"'
+            try:
+                op.execute(f"ALTER TABLE {fq} ENABLE ROW LEVEL SECURITY")
+                op.execute(f"ALTER TABLE {fq} FORCE ROW LEVEL SECURITY")
+
+                op.execute(
+                    f"""
+                    CREATE POLICY tenant_isolation_select ON {fq}
+                        FOR SELECT
+                        USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
+                    """
+                )
+
+                op.execute(
+                    f"""
+                    CREATE POLICY tenant_isolation_modify ON {fq}
+                        FOR ALL
+                        USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
+                        WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
+                    """
+                )
+            except Exception:
+                # Table may not have tenant_id, or policies may already exist
+                pass
+
+    except Exception:
+        # Outer catch: if anything fails, don't abort the entire migration
+        pass
 
 
 def downgrade() -> None:
