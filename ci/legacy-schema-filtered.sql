@@ -15720,3 +15720,30 @@ ALTER TABLE utils.usuario_unidade_trabalho ENABLE ROW LEVEL SECURITY;
 --
 
 
+
+-- Ensure critical stubs exist (in case previous statements failed)
+-- These are referenced by Alembic migrations
+CREATE TABLE IF NOT EXISTS utils.usuario (
+  id INTEGER PRIMARY KEY,
+  login VARCHAR(255),
+  nome VARCHAR(500),
+  email VARCHAR(255),
+  criado_em TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS utils.cidade (
+  id INTEGER PRIMARY KEY,
+  nome VARCHAR(255),
+  uf VARCHAR(2),
+  criado_em TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS utils.grupo (
+  id INTEGER PRIMARY KEY,
+  nome VARCHAR(255),
+  criado_em TIMESTAMP DEFAULT NOW()
+);
+
+-- Grant final permissions
+GRANT ALL ON ALL TABLES IN SCHEMA utils TO ged_user;
+GRANT ALL ON ALL TABLES IN SCHEMA protocolos TO ged_user;
