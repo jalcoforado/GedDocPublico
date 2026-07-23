@@ -29,14 +29,14 @@ services:
     environment:
       PGPASSWORD: ged_password_secure_local
     volumes:
-      - ./ci/legacy-schema.sql:/tmp/legacy-schema.sql:ro
+      - ./ci/init-schemas.sql:/tmp/init-schemas.sql:ro
     networks:
       - aprimora-py
     command: >
       sh -c "
-        sleep 5 &&
-        psql -h db -U ged_user -d ged_saas_db -f /tmp/legacy-schema.sql &&
-        echo '✅ Legacy schema loaded'
+        sleep 3 &&
+        psql -h db -U ged_user -d ged_saas_db -f /tmp/init-schemas.sql &&
+        echo '✅ Schemas initialized'
       "
     depends_on:
       db:
