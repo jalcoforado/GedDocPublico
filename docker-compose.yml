@@ -29,10 +29,10 @@ services:
     environment: *backend-env
     volumes: *backend-volumes
     networks: *backend-networks
-    command: sh -c "cd /app && python -m alembic upgrade head && echo 'Migrations complete'"
+    command: sh -c "cd /app && python -m alembic upgrade head && echo '✅ Migrations complete'"
     depends_on:
       db:
-        condition: service_started
+        condition: service_healthy
     profiles: ["init"]
 
   backend:
@@ -157,6 +157,12 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - aprimora-py
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ged_user -d ged_saas_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
 volumes:
   postgres_data:
