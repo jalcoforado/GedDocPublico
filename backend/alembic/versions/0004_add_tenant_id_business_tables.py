@@ -115,12 +115,20 @@ def upgrade() -> None:
             pass
 
     for schema, table in INDEXED_TABLES:
-        op.create_index(
-            f"ix_{table}_tenant_id_id",
-            table,
-            ["tenant_id", "id"],
-            schema=schema,
-        )
+        # Check if table exists before creating index
+        from sqlalchemy import text
+        table_exists = op.get_bind().execute(
+            text(f"""SELECT 1 FROM information_schema.tables
+                     WHERE table_schema = '{schema}' AND table_name = '{table}'""")
+        ).scalar()
+
+        if table_exists:
+            op.create_index(
+                f"ix_{table}_tenant_id_id",
+                table,
+                ["tenant_id", "id"],
+                schema=schema,
+            )
 
 
 def downgrade() -> None:
