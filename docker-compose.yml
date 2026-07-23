@@ -33,14 +33,7 @@ services:
       - ./ci/legacy-schema.sql:/tmp/legacy-schema.sql:ro
     networks:
       - aprimora-py
-    command: >
-      sh -c "
-        sleep 3 &&
-        psql -h db -U ged_user -d ged_saas_db -f /tmp/init-schemas.sql &&
-        psql -h db -U ged_user -d ged_saas_db -f /tmp/legacy-schema.sql 2>&1 | grep -v 'ERROR' | tail -5 &&
-        echo '✅ Schemas initialized' &&
-        psql -h db -U ged_user -d ged_saas_db -c 'SELECT count(*) as table_count FROM information_schema.tables WHERE table_schema IN (\\'utils\\', \\'protocolos\\', \\'aprimora_py\\');'
-      "
+    command: sh -c "sleep 3 && psql -h db -U ged_user -d ged_saas_db -f /tmp/init-schemas.sql && psql -h db -U ged_user -d ged_saas_db -f /tmp/legacy-schema.sql 2>&1 | tail -5 && echo 'OK'"
     depends_on:
       db:
         condition: service_healthy
