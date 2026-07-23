@@ -57,14 +57,9 @@ def upgrade() -> None:
         # Remove default after setting values
         op.alter_column("usuario", "tenant_id", schema="utils", server_default=None)
         # Add FK constraint
-        op.create_foreign_key(
-            "fk_usuario_tenant_id",
-            "usuario",
-            "tenant",
-            ["tenant_id"],
-            ["id"],
-            source_schema="utils",
-            referrer_schema="aprimora_py",
+        op.execute(
+            'ALTER TABLE utils.usuario ADD CONSTRAINT fk_usuario_tenant_id '
+            'FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id)'
         )
     except Exception:
         # Column or FK already exists
