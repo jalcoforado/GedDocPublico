@@ -47,3 +47,18 @@ CREATE TABLE IF NOT EXISTS utils.usuario_externo (
   email VARCHAR(255),
   criado_em TIMESTAMP DEFAULT NOW()
 );
+
+-- Create stub for utils.cidade (for tenant FK)
+CREATE TABLE IF NOT EXISTS utils.cidade (
+  id INTEGER PRIMARY KEY,
+  nome VARCHAR(255),
+  uf VARCHAR(2),
+  criado_em TIMESTAMP DEFAULT NOW()
+);
+
+-- Create stub for utils.grupo (if referenced)
+CREATE TABLE IF NOT EXISTS utils.grupo (
+  id INTEGER PRIMARY KEY,
+  nome VARCHAR(255),
+  criado_em TIMESTAMP DEFAULT NOW()
+);
