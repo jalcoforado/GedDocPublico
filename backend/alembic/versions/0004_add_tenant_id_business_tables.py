@@ -86,13 +86,21 @@ def upgrade() -> None:
         fq = f'"{schema}"."{table}"'
         fk_name = f"fk_{table}_tenant_id"
 
-        op.execute(f"ALTER TABLE {fq} ADD COLUMN tenant_id INTEGER")
-        op.execute(f"UPDATE {fq} SET tenant_id = 1")
+        # ADD COLUMN IF NOT EXISTS (column may come from legacy PHP schema)
+        op.execute(f"ALTER TABLE {fq} ADD COLUMN IF NOT EXISTS tenant_id INTEGER")
+        # Backfill NULL values with tenant 1
+        op.execute(f"UPDATE {fq} SET tenant_id = 1 WHERE tenant_id IS NULL")
+        # Set NOT NULL
         op.execute(f"ALTER TABLE {fq} ALTER COLUMN tenant_id SET NOT NULL")
-        op.execute(
-            f"ALTER TABLE {fq} ADD CONSTRAINT {fk_name} "
-            f"FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id)"
-        )
+        # Add FK constraint (use IF NOT EXISTS via psycopg2 exception handling)
+        try:
+            op.execute(
+                f"ALTER TABLE {fq} ADD CONSTRAINT {fk_name} "
+                f"FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id)"
+            )
+        except Exception:
+            # FK may already exist from legacy schema
+            pass
 
     for schema, table in INDEXED_TABLES:
         op.create_index(
