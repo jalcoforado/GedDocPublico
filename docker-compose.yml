@@ -1,7 +1,7 @@
 # YAML anchors (Fase 9.4.1 #7) — reduzem duplicação entre backend/worker/beat.
 # Mudar o env aqui propaga pros 3 serviços.
 x-backend-env: &backend-env
-  DATABASE_URL: postgresql+asyncpg://ged_user:ged_password_secure_local@ged-saas-project-db-1:5432/ged_saas_db
+  DATABASE_URL: postgresql+asyncpg://ged_user:ged_password_secure_local@db:5432/ged_saas_db
   APP_NAME: sistemas
   CIDADE_CONN: ged_saas_db
   ENVIRONMENT: desenvolvimento
@@ -23,6 +23,18 @@ x-backend-networks: &backend-networks
   - aprimora-py
 
 services:
+  db-init:
+    build: ./backend
+    container_name: aprimora-py-db-init
+    environment: *backend-env
+    volumes: *backend-volumes
+    networks: *backend-networks
+    command: sh -c "cd /app && python -m alembic upgrade head && echo 'Migrations complete'"
+    depends_on:
+      db:
+        condition: service_started
+    profiles: ["init"]
+
   backend:
     build: ./backend
     container_name: aprimora-py-backend
@@ -38,7 +50,10 @@ services:
       - "8000:8000"
     volumes: *backend-volumes
     networks: *backend-networks
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    depends_on:
+      db:
+        condition: service_started
     # Healthcheck (Fase 9.4.2 #4) — nginx só aceita backend depois disso ficar verde.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v2/health', timeout=2)"]
@@ -127,6 +142,24 @@ services:
     networks:
       - aprimora-py
       - aprimora_default  # alcança aprimora-protocolo (PHP) via alias `protocolo`
+
+  db:
+    image: postgres:17-alpine
+    container_name: aprimora-py-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ged_user
+      POSTGRES_PASSWORD: ged_password_secure_local
+      POSTGRES_DB: ged_saas_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - aprimora-py
+
+volumes:
+  postgres_data:
 
 networks:
   aprimora-py:
