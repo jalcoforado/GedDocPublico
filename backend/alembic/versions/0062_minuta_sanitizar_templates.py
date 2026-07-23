@@ -1,7 +1,7 @@
 """Sanitizar conteúdo HTML de templates_documento existentes.
 
-Revision ID: 0045
-Revises: 0044
+Revision ID: 0062
+Revises: 0061
 Create Date: 2026-07-18
 
 Aplica bleach aos templates criados antes de PR-E (hardening).
