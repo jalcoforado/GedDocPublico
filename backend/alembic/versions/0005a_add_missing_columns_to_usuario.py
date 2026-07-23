@@ -29,41 +29,53 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     # Adiciona colunas que faltam em utils.usuario
     try:
+        print("[0005a] Adding cpf column...")
         op.add_column(
             "usuario",
             sa.Column("cpf", sa.String(14), nullable=True),
             schema="utils",
         )
-    except Exception:
-        # Column already exists
+        print("[0005a] cpf column added ✓")
+    except Exception as e:
+        print(f"[0005a] cpf column failed: {e}")
         pass
 
     try:
+        print("[0005a] Adding excluido column...")
         op.add_column(
             "usuario",
             sa.Column("excluido", sa.Boolean(), nullable=False, server_default=False),
             schema="utils",
         )
-    except Exception:
-        # Column already exists
+        print("[0005a] excluido column added ✓")
+    except Exception as e:
+        print(f"[0005a] excluido column failed: {e}")
         pass
 
     try:
+        print("[0005a] Adding tenant_id column...")
         op.add_column(
             "usuario",
             sa.Column("tenant_id", sa.Integer(), nullable=False, server_default="1"),
             schema="utils",
         )
-        # Remove default after setting values
+        print("[0005a] tenant_id column added ✓")
+
+        print("[0005a] Removing server default...")
         op.alter_column("usuario", "tenant_id", schema="utils", server_default=None)
-        # Add FK constraint
+        print("[0005a] server_default removed ✓")
+
+        print("[0005a] Adding FK constraint...")
         op.execute(
             'ALTER TABLE utils.usuario ADD CONSTRAINT fk_usuario_tenant_id '
             'FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id)'
         )
-    except Exception:
-        # Column or FK already exists
+        print("[0005a] FK constraint added ✓")
+    except Exception as e:
+        print(f"[0005a] tenant_id/FK failed: {e}")
         pass
+
+    print("[0005a] Migration completed")
 
 
 def downgrade() -> None:
