@@ -87,9 +87,10 @@ def upgrade() -> None:
         fk_name = f"fk_{table}_tenant_id"
 
         # Check if table exists (may not be loaded from legacy schema)
+        from sqlalchemy import text
         table_exists = op.get_bind().execute(
-            f"""SELECT 1 FROM information_schema.tables
-               WHERE table_schema = '{schema}' AND table_name = '{table}'"""
+            text(f"""SELECT 1 FROM information_schema.tables
+                     WHERE table_schema = '{schema}' AND table_name = '{table}'""")
         ).scalar()
 
         if not table_exists:
