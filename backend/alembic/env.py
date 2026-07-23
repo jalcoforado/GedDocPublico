@@ -44,8 +44,7 @@ def run_migrations_offline() -> None:
         is_transactional=False,
     )
 
-    with context.begin_transaction():
-        context.run_migrations()
+    context.run_migrations()
 
 
 def run_migrations_online() -> None:
@@ -67,8 +66,7 @@ def run_migrations_online() -> None:
             is_transactional=False,
         )
 
-        with context.begin_transaction():
-            context.run_migrations()
+        context.run_migrations()
 
 
 if context.is_offline_mode():
