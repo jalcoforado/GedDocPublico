@@ -123,12 +123,15 @@ def upgrade() -> None:
         ).scalar()
 
         if table_exists:
-            op.create_index(
-                f"ix_{table}_tenant_id_id",
-                table,
-                ["tenant_id", "id"],
-                schema=schema,
-            )
+            # Create index (may already exist from legacy schema)
+            try:
+                op.execute(f"""
+                    CREATE INDEX IF NOT EXISTS ix_{table}_tenant_id_id
+                    ON "{schema}"."{table}" (tenant_id, id)
+                """)
+            except Exception:
+                # Index may already exist
+                pass
 
 
 def downgrade() -> None:
