@@ -33,19 +33,27 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     # usuario.email
     op.execute("DROP INDEX IF EXISTS utils.usuario_email")
-    op.execute(
-        "CREATE UNIQUE INDEX usuario_email_per_tenant "
-        "ON utils.usuario (tenant_id, email) "
-        "WHERE excluido IS FALSE"
-    )
+    try:
+        op.execute(
+            "CREATE UNIQUE INDEX usuario_email_per_tenant "
+            "ON utils.usuario (tenant_id, email) "
+            "WHERE excluido IS FALSE"
+        )
+    except Exception:
+        # Index may already exist from legacy schema
+        pass
 
     # usuario.cpf
     op.execute("DROP INDEX IF EXISTS utils.usuario_cpf")
-    op.execute(
-        "CREATE UNIQUE INDEX usuario_cpf_per_tenant "
-        "ON utils.usuario (tenant_id, cpf) "
-        "WHERE excluido IS FALSE"
-    )
+    try:
+        op.execute(
+            "CREATE UNIQUE INDEX usuario_cpf_per_tenant "
+            "ON utils.usuario (tenant_id, cpf) "
+            "WHERE excluido IS FALSE"
+        )
+    except Exception:
+        # Index may already exist from legacy schema
+        pass
 
 
 def downgrade() -> None:
