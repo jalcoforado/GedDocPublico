@@ -8,10 +8,9 @@ A tabela utils.usuario vem do legacy com colunas limitadas. Migração 0005 tent
 criar índices UNIQUE particionados por tenant_id nas colunas (email, cpf) —
 mas cpf não estava na tabela.
 
-Esta migration adiciona:
+Migration 0004 já adiciona tenant_id, então esta migration apenas adiciona:
   - cpf (VARCHAR 14, pode ser NULL)
   - excluido (BOOLEAN NOT NULL DEFAULT FALSE)
-  - tenant_id (INTEGER NOT NULL, referencia aprimora_py.tenant)
 """
 from __future__ import annotations
 
@@ -28,67 +27,30 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # Adiciona colunas que faltam em utils.usuario
+    # (tenant_id foi adicionado por migration 0004, então não adicionamos aqui)
+
     try:
-        print("[0005a] Adding cpf column...")
         op.add_column(
             "usuario",
             sa.Column("cpf", sa.String(14), nullable=True),
             schema="utils",
         )
-        print("[0005a] cpf column added ✓")
-    except Exception as e:
-        print(f"[0005a] cpf column failed: {e}")
+    except Exception:
+        # Column already exists
         pass
 
     try:
-        print("[0005a] Adding excluido column...")
         op.add_column(
             "usuario",
-            sa.Column("excluido", sa.Boolean(), nullable=False, server_default=False),
+            sa.Column("excluido", sa.Boolean(), nullable=False, server_default=sa.text("FALSE")),
             schema="utils",
         )
-        print("[0005a] excluido column added ✓")
-    except Exception as e:
-        print(f"[0005a] excluido column failed: {e}")
+    except Exception:
+        # Column already exists
         pass
-
-    try:
-        print("[0005a] Adding tenant_id column...")
-        op.add_column(
-            "usuario",
-            sa.Column("tenant_id", sa.Integer(), nullable=False, server_default="1"),
-            schema="utils",
-        )
-        print("[0005a] tenant_id column added ✓")
-
-        print("[0005a] Removing server default...")
-        op.alter_column("usuario", "tenant_id", schema="utils", server_default=None)
-        print("[0005a] server_default removed ✓")
-
-        print("[0005a] Adding FK constraint...")
-        op.execute(
-            'ALTER TABLE utils.usuario ADD CONSTRAINT fk_usuario_tenant_id '
-            'FOREIGN KEY (tenant_id) REFERENCES aprimora_py.tenant(id)'
-        )
-        print("[0005a] FK constraint added ✓")
-    except Exception as e:
-        print(f"[0005a] tenant_id/FK failed: {e}")
-        pass
-
-    print("[0005a] Migration completed")
 
 
 def downgrade() -> None:
-    try:
-        op.drop_constraint("fk_usuario_tenant_id", "usuario", schema="utils")
-    except Exception:
-        pass
-
-    try:
-        op.drop_column("usuario", "tenant_id", schema="utils")
-    except Exception:
-        pass
-
     try:
         op.drop_column("usuario", "excluido", schema="utils")
     except Exception:
