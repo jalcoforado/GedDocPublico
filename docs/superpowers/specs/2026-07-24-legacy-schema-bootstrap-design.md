@@ -52,13 +52,30 @@ o bootstrap do deploy precisa ser corrigido para espelhar o CI.
 | 0 | Guard | Espera DB pronto; se `protocolos.processo` já existe, pula passos 1-2 (idempotência — o load de dump não é re-executável) |
 | 1 | Stubs | `CREATE EXTENSION uuid-ossp`; `public.trigger_set_timestamp()`; schemas stub `despesas.feempliq`, `empresasimples.cnae_subgrupos`, `agendamento.servico_informacao`, `agendamento.servico_unidade_trabalho`; **`sistema_chamados.tipo_chamado`** (o trigger legado `utils.copia_sistemas_tipochamados()` insere nela ao inserir em `utils.sistema` — sem o stub, o seed falha) |
 | 2 | Dump completo | `psql -v ON_ERROR_STOP=1 -f ci/legacy-schema.sql` (o **completo**, não o `-filtered`) |
-| 3 | Migrations | `alembic stamp 0020` → `alembic upgrade head` (roda só 0021–0062) |
-| 4 | Role RLS | cria `aprimora_app` (LOGIN, NOSUPERUSER, NOBYPASSRLS) + grants nos 4 schemas (0006 é pulada pelo stamp) |
+| 3 | **Role RLS (ANTES do upgrade!)** | cria `aprimora_app` + grants nos 4 schemas. **DEVE vir antes do upgrade** — a migration 0024 faz GRANT à role (validação provou que falha senão) |
+| 4 | Baseline + Migrations | `INSERT INTO aprimora_py.alembic_version VALUES ('0020')` (determinístico) → `alembic upgrade head` (roda 0021–0062) |
 | 5 | Seed | invoca `python -m app.cli.seed_bootstrap` (seção C) |
-| 6 | Sanidade | asserts: `protocolos.processo` existe, alembic em `0062`, tenant Sobral existe, admin é super-usuário |
+| 6 | Sanidade | asserts: `protocolos.processo` existe, alembic em `0062`, ~224 tabelas, tenant Sobral existe, admin é super-usuário |
 
 Config via env (`DATABASE_URL`/PGHOST etc.), defaults de dev. Falha ruidosa
 (`set -e`, `ON_ERROR_STOP=1`) — o oposto do `grep -v ERROR` atual.
+
+### A.1 Correções de bug pré-requisito (descobertas na validação)
+
+Dois bugs **bloqueavam qualquer build limpo** — já corrigidos e a serem
+commitados como parte deste trabalho:
+
+1. **`backend/alembic/env.py` não fazia commit** — `run_migrations_online()`
+   chamava `context.run_migrations()` mas nunca `connection.commit()`. Em
+   SQLAlchemy 2.0 a conexão não faz autocommit, então TODAS as migrations (e o
+   bump de `alembic_version`) faziam rollback ao fechar a conexão. **Causa raiz
+   de `alembic_version` sempre vazio no servidor.** Fix: `connection.commit()`
+   após `run_migrations()`.
+2. **`0062_minuta_sanitizar_templates.py` sem guard** — fazia
+   `SELECT conteudo FROM protocolos.template_documento` sem checar existência
+   (a 0060, idêntica, tem o guard). Quebrava com `column "conteudo" does not
+   exist` em build limpo (a tabela mora em outro schema/nome). Fix: mesmo guard
+   da 0060 (noop se coluna ausente).
 
 ### B. Wiring no compose + imagem
 
@@ -96,14 +113,17 @@ Passos (todos `get_or_create`, seguros para re-execução):
 
 ### E. Validação / testes
 
-- **Primeiro passo da implementação:** validar a hipótese num **DB descartável
-  local** (dump completo + stubs + `stamp 0020` + `upgrade head`). Se `processo`
-  e as tabelas de módulo aparecerem e alembic chegar em `0062`, o design está
-  provado antes de tocar em algo real. (No servidor esse teste já rodou parcial:
-  0001–0005 e 0006-corrigido passam; falta provar com dump completo + stamp.)
+**✅ VALIDADO end-to-end (2026-07-24)** num DB descartável local
+(`ged_bootstrap_test`): stubs → dump completo (181 tabelas, carregou LIMPO com
+`ON_ERROR_STOP=1`) → role → baseline 0020 → `upgrade head` → **`alembic=0062`,
+224 tabelas, `protocolos.processo`+`pagamentos.debito`+`transporte_regulado.*`
+todos presentes**. Os 2 bugs (env.py commit, 0062 guard) foram achados e
+corrigidos nessa validação.
+
 - Check de sanidade automatizado no fim do bootstrap (passo 6).
-- Testes existentes (pytest backend via docker) continuam válidos — o CI já
-  exercita esse caminho.
+- Testes existentes (pytest backend via docker) continuam válidos.
+- Falta validar na implementação: passo 5 (seed) end-to-end (login 200 +
+  `/auth/me` super=true) e o fluxo completo via `docker compose --profile init`.
 
 ## Fora de escopo
 
@@ -114,13 +134,14 @@ Passos (todos `get_or_create`, seguros para re-execução):
 
 ## Riscos
 
-- **Dump pode não estar exatamente na baseline 0020** — se drift, `stamp 0020`
-  + `upgrade` pode colidir. Mitiga: validação em DB descartável primeiro.
-- **`legacy-schema.sql` (completo, May 28) pode estar desatualizado** vs o
-  `-filtered` (Jul 23). Confirmar qual reflete o schema correto na validação;
-  se o filtered for o "bom", ajustar o passo 2.
+- ~~Dump pode não estar na baseline 0020~~ — **RESOLVIDO na validação:** baseline
+  0020 confirmada (0021 rodou sem colisão de tabela).
+- ~~Qual dump é o correto~~ — **RESOLVIDO:** `legacy-schema.sql` (completo) é o
+  certo; carrega limpo com stubs. O `-filtered` é descartado.
 - **Estado atual do servidor** é híbrido/sujo — o rollout é rebuild limpo
   (destrói o DB atual; backup antes). Dados atuais são desprezíveis.
+- **Passo 5 (seed) ainda não validado end-to-end** — o CLI `seed_bootstrap` será
+  escrito e validado na implementação (login 200 + super-usuário).
 
 ## Band-aids atuais a consolidar
 

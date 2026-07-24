@@ -68,6 +68,12 @@ def run_migrations_online() -> None:
 
         context.run_migrations()
 
+        # SQLAlchemy 2.0: a conexão não faz autocommit. Sem este commit
+        # explícito, ao sair do `with` a transação é revertida e NENHUMA
+        # migration (nem o bump de alembic_version) persiste — causa raiz de
+        # `alembic_version` vazio apesar de "upgrade" rodar sem erro.
+        connection.commit()
+
 
 if context.is_offline_mode():
     run_migrations_offline()

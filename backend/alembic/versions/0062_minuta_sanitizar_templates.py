@@ -27,6 +27,25 @@ def upgrade() -> None:
     # Fetch todos os templates, sanitizar em Python, atualizar
     conn = op.get_bind()
 
+    # Guard: a tabela protocolos.template_documento pode não existir (ex.: build
+    # limpo do schema legado, onde a minuta mora em outro schema/nome). Noop se
+    # tabela/coluna ausente — mesmo padrão da 0060.
+    try:
+        check = conn.execute(sa.text("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'protocolos'
+                  AND table_name = 'template_documento'
+                  AND column_name = 'conteudo'
+            )
+        """))
+        col_exists = check.scalar()
+    except Exception:
+        col_exists = False
+
+    if not col_exists:
+        return
+
     # Apenas SELECT para listar — updates feitas abaixo
     result = conn.execute(sa.text("""
         SELECT id, conteudo FROM protocolos.template_documento
