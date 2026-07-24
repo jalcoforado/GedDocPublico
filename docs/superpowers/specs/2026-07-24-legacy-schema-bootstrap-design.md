@@ -109,7 +109,9 @@ Passos (todos `get_or_create`, seguros para re-execução):
    `docker compose down -v` → `docker compose --profile init up bootstrap`
    → `docker compose up -d`. Critérios: `processo` existe, alembic `0062`,
    login 200, `/auth/me` super=true, módulos na sidebar.
-2. **Servidor:** `pg_dump` backup → `git pull` → mesmo fluxo (rebuild limpo).
+2. **Servidor:** `git pull` → mesmo fluxo (rebuild limpo, `docker compose down -v`).
+   Backup **opcional** — sistema em testes, dados atuais descartáveis (confirmado
+   pelo Jorge 2026-07-24).
 
 ### E. Validação / testes
 
