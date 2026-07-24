@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     jwt_private_key_path: str = "/app/keys/jwt_private.pem"
     jwt_public_key_path: str = "/app/keys/jwt_public.pem"
 
-    app_name: str = "sistemas"
+    app_name: str = "aprimora"
     cidade_conn: str = "ged_saas_db"
     environment: str = "desenvolvimento"
 

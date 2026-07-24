@@ -16,6 +16,7 @@ from ..schemas.auth import (
     LoginRequest,
     LoginResponse,
     MeResponse,
+    PermissaoItem,
 )
 from ..services.conta import ContaError, alterar_senha
 from ..services.google_oauth_flow import GoogleOAuthFlow
@@ -103,10 +104,13 @@ async def logout() -> Response:
 @router.get("/me", response_model=MeResponse)
 async def me(
     user: Usuario = Depends(get_current_user_no_password_gate),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(require_tenant_id),
 ) -> MeResponse:
-    # SEC-1 whitelist: o frontend lê /auth/me logo após o login para decidir
-    # se redireciona para a tela de troca obrigatória — não pode ser bloqueado
-    # pelo gate de must_change_password.
+    from ..services.permissoes import load_permissions
+
+    perms = await load_permissions(db, user.id, tenant_id=tenant_id)
+
     return MeResponse(
         id=user.id,
         nome=user.nome,
@@ -114,6 +118,17 @@ async def me(
         cargo=user.cargo,
         id_unidade_trabalho=user.id_unidade_trabalho,
         must_change_password=user.must_change_password,
+        is_super_usuario=perms.is_super_usuario,
+        permissoes=[
+            PermissaoItem(
+                codigo=item.codigo,
+                transacao=item.transacao,
+                inserir=item.inserir,
+                atualizar=item.atualizar,
+                excluir=item.excluir,
+            )
+            for item in perms.items
+        ],
     )
 
 
