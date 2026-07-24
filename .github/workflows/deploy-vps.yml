@@ -1,0 +1,96 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'docker-compose.yml'
+      - 'docker-compose.override.yml'
+      - 'scripts/deploy.sh'
+  workflow_dispatch:
+    inputs:
+      deploy_type:
+        description: 'Deploy type'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - quick
+
+env:
+  VPS_HOST: ${{ secrets.VPS_HOST }}
+  VPS_USER: ${{ secrets.VPS_USER }}
+  VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+  VPS_PORT: ${{ secrets.VPS_PORT || 22 }}
+  DEPLOY_PATH: /app
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Deploy to VPS
+        run: |
+          # Install SSH client and expect
+          sudo apt-get update -qq
+          sudo apt-get install -y openssh-client sshpass expect
+
+          # Create SSH config
+          mkdir -p ~/.ssh
+          cat > ~/.ssh/config << EOF
+          Host vps
+            HostName ${{ env.VPS_HOST }}
+            User ${{ env.VPS_USER }}
+            Port ${{ env.VPS_PORT }}
+            StrictHostKeyChecking no
+            UserKnownHostsFile=/dev/null
+            PasswordAuthentication yes
+            PubkeyAuthentication no
+          EOF
+
+          chmod 600 ~/.ssh/config
+
+          # Execute deploy script
+          DEPLOY_TYPE="${{ github.event.inputs.deploy_type || 'full' }}"
+
+          sshpass -p "${{ env.VPS_PASSWORD }}" ssh -v vps << 'DEPLOY_SCRIPT'
+            set -e
+            cd ${{ env.DEPLOY_PATH }}
+
+            echo "=== Deployment Started ==="
+            echo "Timestamp: $(date)"
+            echo "User: $(whoami)"
+            echo "Path: $(pwd)"
+
+            # Execute deploy command
+            if [ "$DEPLOY_TYPE" = "quick" ]; then
+              bash scripts/deploy.sh quick
+            else
+              bash scripts/deploy.sh start
+            fi
+
+            echo "=== Deployment Finished ==="
+          DEPLOY_SCRIPT
+
+      - name: Notify Success
+        if: success()
+        run: |
+          echo "✅ Deployment to VPS successful!"
+          echo "Backend:  http://${{ env.VPS_HOST }}:8001/api/v2"
+          echo "Frontend: http://${{ env.VPS_HOST }}:8090"
+
+      - name: Notify Failure
+        if: failure()
+        run: |
+          echo "❌ Deployment to VPS failed!"
+          exit 1
