@@ -41,9 +41,9 @@ jobs:
 
       - name: Deploy to VPS
         run: |
-          # Install SSH client and expect
+          # Install SSH client
           sudo apt-get update -qq
-          sudo apt-get install -y openssh-client sshpass expect
+          sudo apt-get install -y openssh-client sshpass
 
           # Create SSH config
           mkdir -p ~/.ssh
@@ -60,9 +60,13 @@ jobs:
 
           chmod 600 ~/.ssh/config
 
-          # Execute deploy script
-          DEPLOY_TYPE="${{ github.event.inputs.deploy_type || 'full' }}"
+          # Ensure deploy path exists
+          sshpass -p "${{ env.VPS_PASSWORD }}" ssh -v vps "mkdir -p ${{ env.DEPLOY_PATH }} && chown -R ${{ env.VPS_USER }}:${{ env.VPS_USER }} ${{ env.DEPLOY_PATH }} || true"
 
+          # Check if repo exists, clone if not
+          sshpass -p "${{ env.VPS_PASSWORD }}" ssh -v vps "[ -d ${{ env.DEPLOY_PATH }}/.git ] || git clone https://github.com/jalcoforado/GedDocPublico.git ${{ env.DEPLOY_PATH }}"
+
+          # Execute deploy script
           sshpass -p "${{ env.VPS_PASSWORD }}" ssh -v vps << 'DEPLOY_SCRIPT'
             set -e
             cd ${{ env.DEPLOY_PATH }}
@@ -71,6 +75,8 @@ jobs:
             echo "Timestamp: $(date)"
             echo "User: $(whoami)"
             echo "Path: $(pwd)"
+
+            DEPLOY_TYPE="${{ github.event.inputs.deploy_type || 'full' }}"
 
             # Execute deploy command
             if [ "$DEPLOY_TYPE" = "quick" ]; then
