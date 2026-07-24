@@ -53,6 +53,7 @@ log "Passo 4: baseline $BASELINE + alembic upgrade head"
 psql_db -v ON_ERROR_STOP=1 <<SQL >/dev/null
 CREATE SCHEMA IF NOT EXISTS aprimora_py;
 CREATE TABLE IF NOT EXISTS aprimora_py.alembic_version (version_num varchar(32) NOT NULL);
+-- Equivalente a `alembic stamp 0020`: INSERT direto evita segunda invocação do alembic e garante determinismo.
 INSERT INTO aprimora_py.alembic_version (version_num)
   SELECT '$BASELINE'
   WHERE NOT EXISTS (SELECT 1 FROM aprimora_py.alembic_version);
@@ -65,10 +66,11 @@ log "Passo 5: seed_bootstrap"
 
 # Passo 6 — sanidade
 log "Passo 6: sanidade"
-VER=$(psql_db -tAc "SELECT version_num FROM aprimora_py.alembic_version")
+HEAD_REV=$( cd "$REPO" && python -m alembic heads 2>/dev/null | awk 'NR==1{print $1}' )
+VER=$(psql_db -tAc "SELECT version_num FROM aprimora_py.alembic_version ORDER BY 1 DESC LIMIT 1")
 PROC=$(psql_db -tAc "SELECT to_regclass('protocolos.processo') IS NOT NULL")
 NTB=$(psql_db -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema')")
-log "alembic=$VER processo=$PROC tabelas=$NTB"
-[ "$VER" = "0062" ] || { echo "[bootstrap] ERRO: alembic esperado 0062, obtido $VER"; exit 1; }
+log "alembic=$VER (head=$HEAD_REV) processo=$PROC tabelas=$NTB"
+[ -n "$VER" ] && [ "$VER" = "$HEAD_REV" ] || { echo "[bootstrap] ERRO: alembic esperado head '$HEAD_REV', obtido '$VER'"; exit 1; }
 [ "$PROC" = "t" ]   || { echo "[bootstrap] ERRO: protocolos.processo ausente"; exit 1; }
 log "OK — bootstrap completo."

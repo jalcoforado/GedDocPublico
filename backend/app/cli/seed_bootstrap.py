@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,7 +60,7 @@ async def seed(db: AsyncSession) -> dict:
             nome="Prefeitura de Sobral",
             plano="basico",
             ativo=True,
-            criado_em=datetime.utcnow(),
+            criado_em=datetime.now(timezone.utc),
         )
         db.add(tenant)
         await db.flush()
