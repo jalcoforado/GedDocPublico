@@ -60,6 +60,17 @@ INSERT INTO aprimora_py.alembic_version (version_num)
 SQL
 ( cd "$REPO" && python -m alembic upgrade head )
 
+# Robustez: em alguns ambientes (combinação de versões alembic/SQLAlchemy) o
+# `upgrade` aplica todo o DDL mas NÃO persiste o bump de `alembic_version`
+# (fica na baseline). Como o upgrade acima saiu 0 sob `set -e`, todas as
+# migrations rodaram — então forçamos a versão pro head de forma determinística
+# (via psql, que comita). Isso também torna re-execuções idempotentes: numa 2a
+# rodada a versão já é o head e o upgrade acima é no-op.
+HEAD_REV=$( cd "$REPO" && python -m alembic heads 2>/dev/null | awk 'NR==1{print $1}' )
+if [ -n "$HEAD_REV" ]; then
+  psql_db -v ON_ERROR_STOP=1 -c "UPDATE aprimora_py.alembic_version SET version_num = '$HEAD_REV'" >/dev/null
+fi
+
 # Passo 5 — seed mínimo
 log "Passo 5: seed_bootstrap"
 ( cd "$REPO" && python -m app.cli.seed_bootstrap )
