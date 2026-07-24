@@ -10,20 +10,23 @@ o próprio Postgres filtra linhas baseado em `current_setting('app.tenant_id')`.
 Estratégia:
 1. Cria role `aprimora_app` (LOGIN, NOSUPERUSER, NOBYPASSRLS). Senha padrão
    em DEV. Em PROD: ALTER ROLE aprimora_app PASSWORD '<senha-real>'.
-2. GRANT USAGE em schemas + SELECT/INSERT/UPDATE/DELETE em todas as 26 tabelas
-   tenanted + aprimora_py.tenant.
-3. ENABLE + FORCE ROW LEVEL SECURITY em cada uma das 26 tabelas.
+2. GRANT USAGE em schemas + SELECT/INSERT/UPDATE/DELETE nas tabelas tenanted.
+3. ENABLE + FORCE ROW LEVEL SECURITY em cada tabela que EXISTE e tem tenant_id.
 4. CREATE POLICY tenant_isolation USING (tenant_id = current setting).
-5. CREATE POLICY tenant_insert WITH CHECK (idem).
 
 A aplicação faz `SET LOCAL app.tenant_id = X` em cada request (ver
 `app.database.get_db`). Sem isso, as policies bloqueiam tudo.
 
-DEV: `ged_user` é SUPERUSER e bypassa RLS — useful pra debug e Alembic. Em
+DEV: `ged_user` é SUPERUSER e bypassa RLS — útil pra debug e Alembic. Em
 PROD, mudar `DATABASE_URL` da app/worker pra usar `aprimora_app`.
 
-`aprimora_py.tenant` NÃO tem RLS — é a tabela meta, todos os tenants devem
-poder ver o seu próprio registro (filtro aplicacional já está em /tenants/me).
+ROBUSTEZ (2026-07): toda a lógica roda dentro de blocos `plpgsql DO` com
+tratamento de exceção POR-STATEMENT (savepoint interno). Isso é essencial:
+no Postgres, um comando que falha aborta a transação inteira — um `try/except`
+Python NÃO contém o erro (a próxima instrução e o stamp do Alembic falhariam
+com "current transaction is aborted"). Só o `BEGIN ... EXCEPTION` do plpgsql
+cria savepoint e contém a falha. Tabelas ausentes ou sem `tenant_id` (o schema
+legado filtrado não tem todas) são puladas silenciosamente.
 """
 from __future__ import annotations
 
@@ -37,6 +40,8 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+# Tabelas alvo de RLS (schema, tabela). Só recebem RLS as que existirem e
+# tiverem coluna tenant_id — o loop plpgsql checa antes.
 TABLES: list[tuple[str, str]] = [
     ("protocolos", "tipo_manifestante"),
     ("protocolos", "tipo_processo"),
@@ -67,100 +72,137 @@ TABLES: list[tuple[str, str]] = [
 ]
 
 
+def _tables_sql_array() -> str:
+    """Monta literal de array 2-D plpgsql: ARRAY[['s','t'],...]."""
+    pairs = ",".join(f"['{s}','{t}']" for s, t in TABLES)
+    return f"ARRAY[{pairs}]"
+
+
 def upgrade() -> None:
-    try:
-        # 1. Role aprimora_app (idempotente). Senha de DEV — trocar em PROD.
-        try:
-            op.execute(
-                """
-                DO $$
+    # 1. Role aprimora_app (idempotente).
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aprimora_app') THEN
+                CREATE ROLE aprimora_app
+                    LOGIN NOSUPERUSER NOBYPASSRLS
+                    PASSWORD 'ged_password_secure_local';
+            END IF;
+        END $$;
+        """
+    )
+
+    # 2. GRANTs — cada statement com savepoint próprio (BEGIN/EXCEPTION).
+    op.execute(
+        """
+        DO $$
+        DECLARE sch text;
+        BEGIN
+            BEGIN EXECUTE 'GRANT CONNECT ON DATABASE ged_saas_db TO aprimora_app';
+            EXCEPTION WHEN OTHERS THEN NULL; END;
+            FOREACH sch IN ARRAY ARRAY['protocolos','utils','aprimora_py','public'] LOOP
+                BEGIN EXECUTE format('GRANT USAGE ON SCHEMA %I TO aprimora_app', sch);
+                EXCEPTION WHEN OTHERS THEN NULL; END;
+                BEGIN EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO aprimora_app', sch);
+                EXCEPTION WHEN OTHERS THEN NULL; END;
+                BEGIN EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO aprimora_app', sch);
+                EXCEPTION WHEN OTHERS THEN NULL; END;
+                BEGIN EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE ged_user IN SCHEMA %I GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aprimora_app', sch);
+                EXCEPTION WHEN OTHERS THEN NULL; END;
+                BEGIN EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE ged_user IN SCHEMA %I GRANT USAGE, SELECT ON SEQUENCES TO aprimora_app', sch);
+                EXCEPTION WHEN OTHERS THEN NULL; END;
+            END LOOP;
+        END $$;
+        """
+    )
+
+    # 3+4. RLS + policies — só em tabelas que existem E têm tenant_id.
+    op.execute(
+        f"""
+        DO $$
+        DECLARE tbls text[][] := {_tables_sql_array()};
+        DECLARE i int;
+        DECLARE sch text; DECLARE tbl text; DECLARE fq text;
+        BEGIN
+            FOR i IN 1 .. array_length(tbls, 1) LOOP
+                sch := tbls[i][1];
+                tbl := tbls[i][2];
+                CONTINUE WHEN to_regclass(format('%I.%I', sch, tbl)) IS NULL;
+                CONTINUE WHEN NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns c
+                    WHERE c.table_schema = sch AND c.table_name = tbl
+                      AND c.column_name = 'tenant_id'
+                );
+                fq := format('%I.%I', sch, tbl);
                 BEGIN
-                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aprimora_app') THEN
-                        CREATE ROLE aprimora_app
-                            LOGIN
-                            NOSUPERUSER
-                            NOBYPASSRLS
-                            PASSWORD 'ged_password_secure_local';
-                    END IF;
-                END $$;
-                """
-            )
-        except Exception:
-            # Role may already exist
-            pass
-
-        # 2. GRANT acesso à role.
-        try:
-            op.execute("GRANT CONNECT ON DATABASE ged_saas_db TO aprimora_app")
-            for schema in ("protocolos", "utils", "aprimora_py", "public"):
-                op.execute(f"GRANT USAGE ON SCHEMA {schema} TO aprimora_app")
-                op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema} TO aprimora_app")
-                op.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO aprimora_app")
-                # default privileges p/ futuras tabelas criadas por ged_user
-                op.execute(
-                    f"ALTER DEFAULT PRIVILEGES FOR ROLE ged_user IN SCHEMA {schema} "
-                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aprimora_app"
-                )
-                op.execute(
-                    f"ALTER DEFAULT PRIVILEGES FOR ROLE ged_user IN SCHEMA {schema} "
-                    f"GRANT USAGE, SELECT ON SEQUENCES TO aprimora_app"
-                )
-        except Exception:
-            # Grants may already exist
-            pass
-
-        # 3+4+5: Enable RLS + policies em cada tabela tenanted.
-        for schema, table in TABLES:
-            fq = f'"{schema}"."{table}"'
-            try:
-                op.execute(f"ALTER TABLE {fq} ENABLE ROW LEVEL SECURITY")
-                op.execute(f"ALTER TABLE {fq} FORCE ROW LEVEL SECURITY")
-
-                op.execute(
-                    f"""
-                    CREATE POLICY tenant_isolation_select ON {fq}
-                        FOR SELECT
-                        USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
-                    """
-                )
-
-                op.execute(
-                    f"""
-                    CREATE POLICY tenant_isolation_modify ON {fq}
-                        FOR ALL
-                        USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
-                        WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int)
-                    """
-                )
-            except Exception:
-                # Table may not have tenant_id, or policies may already exist
-                pass
-
-    except Exception:
-        # Outer catch: if anything fails, don't abort the entire migration
-        pass
+                    EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', fq);
+                    EXECUTE format('ALTER TABLE %s FORCE ROW LEVEL SECURITY', fq);
+                    EXECUTE format('DROP POLICY IF EXISTS tenant_isolation_select ON %s', fq);
+                    EXECUTE format(
+                        'CREATE POLICY tenant_isolation_select ON %s FOR SELECT '
+                        'USING (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''')::int)',
+                        fq
+                    );
+                    EXECUTE format('DROP POLICY IF EXISTS tenant_isolation_modify ON %s', fq);
+                    EXECUTE format(
+                        'CREATE POLICY tenant_isolation_modify ON %s FOR ALL '
+                        'USING (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''')::int) '
+                        'WITH CHECK (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''')::int)',
+                        fq
+                    );
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+            END LOOP;
+        END $$;
+        """
+    )
 
 
 def downgrade() -> None:
-    for schema, table in TABLES:
-        fq = f'"{schema}"."{table}"'
-        op.execute(f"DROP POLICY IF EXISTS tenant_isolation_modify ON {fq}")
-        op.execute(f"DROP POLICY IF EXISTS tenant_isolation_select ON {fq}")
-        op.execute(f"ALTER TABLE {fq} NO FORCE ROW LEVEL SECURITY")
-        op.execute(f"ALTER TABLE {fq} DISABLE ROW LEVEL SECURITY")
-
-    # Revoke / drop role
-    for schema in ("protocolos", "utils", "aprimora_py", "public"):
-        op.execute(
-            f"ALTER DEFAULT PRIVILEGES FOR ROLE ged_user IN SCHEMA {schema} "
-            f"REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM aprimora_app"
-        )
-        op.execute(
-            f"ALTER DEFAULT PRIVILEGES FOR ROLE ged_user IN SCHEMA {schema} "
-            f"REVOKE USAGE, SELECT ON SEQUENCES FROM aprimora_app"
-        )
-        op.execute(f"REVOKE ALL ON ALL SEQUENCES IN SCHEMA {schema} FROM aprimora_app")
-        op.execute(f"REVOKE ALL ON ALL TABLES IN SCHEMA {schema} FROM aprimora_app")
-        op.execute(f"REVOKE USAGE ON SCHEMA {schema} FROM aprimora_app")
-    op.execute("REVOKE CONNECT ON DATABASE ged_saas_db FROM aprimora_app")
-    op.execute("DROP ROLE IF EXISTS aprimora_app")
+    # Remove policies + RLS de forma tolerante (pula tabelas ausentes).
+    op.execute(
+        f"""
+        DO $$
+        DECLARE tbls text[][] := {_tables_sql_array()};
+        DECLARE i int; DECLARE sch text; DECLARE tbl text; DECLARE fq text;
+        BEGIN
+            FOR i IN 1 .. array_length(tbls, 1) LOOP
+                sch := tbls[i][1]; tbl := tbls[i][2];
+                CONTINUE WHEN to_regclass(format('%I.%I', sch, tbl)) IS NULL;
+                fq := format('%I.%I', sch, tbl);
+                BEGIN
+                    EXECUTE format('DROP POLICY IF EXISTS tenant_isolation_modify ON %s', fq);
+                    EXECUTE format('DROP POLICY IF EXISTS tenant_isolation_select ON %s', fq);
+                    EXECUTE format('ALTER TABLE %s NO FORCE ROW LEVEL SECURITY', fq);
+                    EXECUTE format('ALTER TABLE %s DISABLE ROW LEVEL SECURITY', fq);
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+            END LOOP;
+        END $$;
+        """
+    )
+    op.execute(
+        """
+        DO $$
+        DECLARE sch text;
+        BEGIN
+            FOREACH sch IN ARRAY ARRAY['protocolos','utils','aprimora_py','public'] LOOP
+                BEGIN EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE ged_user IN SCHEMA %I REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM aprimora_app', sch);
+                EXCEPTION WHEN OTHERS THEN NULL; END;
+                BEGIN EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE ged_user IN SCHEMA %I REVOKE USAGE, SELECT ON SEQUENCES FROM aprimora_app', sch);
+                EXCEPTION WHEN OTHERS THEN NULL; END;
+                BEGIN EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM aprimora_app', sch);
+                EXCEPTION WHEN OTHERS THEN NULL; END;
+                BEGIN EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM aprimora_app', sch);
+                EXCEPTION WHEN OTHERS THEN NULL; END;
+                BEGIN EXECUTE format('REVOKE USAGE ON SCHEMA %I FROM aprimora_app', sch);
+                EXCEPTION WHEN OTHERS THEN NULL; END;
+            END LOOP;
+            BEGIN EXECUTE 'REVOKE CONNECT ON DATABASE ged_saas_db FROM aprimora_app';
+            EXCEPTION WHEN OTHERS THEN NULL; END;
+            BEGIN EXECUTE 'DROP ROLE IF EXISTS aprimora_app';
+            EXCEPTION WHEN OTHERS THEN NULL; END;
+        END $$;
+        """
+    )
