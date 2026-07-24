@@ -45,6 +45,10 @@ async def load_permissions(
     settings = get_settings()
     app = settings.app_name
 
+    # Set RLS context for this transaction
+    from sqlalchemy import text
+    await db.execute(text(f"SET LOCAL app.tenant_id = {int(tenant_id)}"))
+
     grupos_stmt = (
         select(Grupo, Nivel, Sistema)
         .join(UsuarioGrupo, UsuarioGrupo.id_grupo == Grupo.id)

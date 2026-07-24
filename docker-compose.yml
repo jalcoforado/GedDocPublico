@@ -2,7 +2,7 @@
 # Mudar o env aqui propaga pros 3 serviços.
 x-backend-env: &backend-env
   DATABASE_URL: postgresql+asyncpg://ged_user:ged_password_secure_local@db:5432/ged_saas_db
-  APP_NAME: sistemas
+  APP_NAME: aprimora
   CIDADE_CONN: ged_saas_db
   ENVIRONMENT: desenvolvimento
   UPLOADS_DIR: /app/uploads/anexos

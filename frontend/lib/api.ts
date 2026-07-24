@@ -35,6 +35,8 @@ export interface MeResponse {
   id_unidade_trabalho: number | null;
   /** SEC-1 Commit 4 — espelho da flag, consultável a qualquer momento. */
   must_change_password: boolean;
+  is_super_usuario: boolean;
+  permissoes: PermissaoItem[];
 }
 
 export interface PermissaoItem {

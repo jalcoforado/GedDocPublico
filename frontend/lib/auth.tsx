@@ -3,11 +3,11 @@
 import { useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState } from "react";
 
-import { api, type MeResponse, type PermissaoMeResponse } from "@/lib/api";
+import { api, type MeResponse } from "@/lib/api";
 
 interface AuthContextValue {
   user: MeResponse | null;
-  perms: PermissaoMeResponse | null;
+  perms: MeResponse | null;
   loading: boolean;
   logout: () => void;
   can: (codigo: string, action?: "inserir" | "atualizar" | "excluir") => boolean;
@@ -23,11 +23,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // Cookie HttpOnly: JS não pode ler, mas o navegador envia em /auth/me automaticamente.
-    // Se 401, redireciona pra login.
-    Promise.all([api.me(), api.permissoes()])
-      .then(([u, p]) => {
+    // Se 401, redireciona pra login. /auth/me agora retorna permissões junto.
+    api.me()
+      .then((u) => {
         setUser(u);
-        setPerms(p);
+        setPerms(u);
         // SEC-1 Commit 5 — se o servidor diz que a senha é temporária,
         // empurra para a tela obrigatória. Não redireciona se já estiver
         // lá (evita loop). Sem `pathname` no array de deps: evita re-run
