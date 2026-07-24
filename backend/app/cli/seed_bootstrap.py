@@ -60,7 +60,10 @@ async def seed(db: AsyncSession) -> dict:
             nome="Prefeitura de Sobral",
             plano="basico",
             ativo=True,
-            criado_em=datetime.now(timezone.utc),
+            # Tenant.criado_em é TIMESTAMP WITHOUT TIME ZONE — usar UTC naive
+            # (aware quebra o insert asyncpg num DB fresco: "offset-naive and
+            # offset-aware datetimes").
+            criado_em=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         db.add(tenant)
         await db.flush()
