@@ -12,8 +12,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.pagamentos import (
-    AlcadaCreate, ContaCreate, DebitoCreate, FonteCreate, FornecedorCreate, MovimentacaoCreate,
-    NaturezaCreate, ParcelaCreate,
+    AlcadaCreate, ContaCreate, DebitoCreate, FonteCreate, FornecedorCreate, GrupoAutorizacaoIn,
+    MovimentacaoCreate, NaturezaCreate, ParcelaCreate,
 )
 from app.services import pagamentos_autorizacao as aut
 from app.services import pagamentos_cadastros as cad
@@ -91,7 +91,8 @@ async def _base(engine, tenant_id, *, saldo_inicial="10000.00"):
 
 def _payload_debito(forn, nat, conta, *, valor="1000.00", parcelas=None):
     return DebitoCreate(
-        id_fornecedor=forn.id, id_natureza=nat.id, id_conta=conta.id,
+        id_fornecedor=forn.id, id_natureza=nat.id,
+        id_fonte_recursos=conta.id_fonte_recursos, id_conta=conta.id,
         valor_total=valor, competencia="2026-07", descricao="Compra de material",
         parcelas=parcelas or [ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
     )
@@ -150,7 +151,10 @@ async def _cenario(engine, tenant_id):
                   ParcelaCreate(numero=2, valor="400.00", vencimento=ontem.isoformat())])
     autorizador = await _autorizador_com_alcada(engine, tenant_id)
     async with _sm(engine)() as s:
-        await aut.autorizar_lote(s, tenant_id=tenant_id, usuario_id=autorizador, debito_ids=[d.id])
+        await aut.autorizar_lote(
+            s, tenant_id=tenant_id, usuario_id=autorizador,
+            grupos=[GrupoAutorizacaoIn(id_fonte=d.id_fonte_recursos,
+                                       id_conta_pagadora=d.id_conta, debito_ids=[d.id])])
     tesoureiro = await _novo_usuario(engine, tenant_id, f"tes{uuid.uuid4().hex[:6]}")
     async with _sm(engine)() as s:
         parcelas = await deb.listar_parcelas(s, tenant_id=tenant_id, debito_id=d.id)
@@ -203,8 +207,11 @@ async def test_kpis_pipeline_e_30d(admin_engine):
             parcelas=[ParcelaCreate(numero=1, valor="500.00",
                                     vencimento=(hoje + timedelta(days=10)).isoformat())])
         async with _sm(admin_engine)() as s:
-            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
-                                     debito_ids=[d_futuro.id])
+            await aut.autorizar_lote(
+                s, tenant_id=t.id, usuario_id=autorizador,
+                grupos=[GrupoAutorizacaoIn(id_fonte=d_futuro.id_fonte_recursos,
+                                           id_conta_pagadora=d_futuro.id_conta,
+                                           debito_ids=[d_futuro.id])])
 
         # débito AUTORIZADO com parcela vencida ontem → vencidas, NÃO em a_pagar_30d
         d_vencido, _s2, _a2, _c2 = await _debito_aprovado(
@@ -212,8 +219,11 @@ async def test_kpis_pipeline_e_30d(admin_engine):
             parcelas=[ParcelaCreate(numero=1, valor="300.00",
                                     vencimento=(hoje - timedelta(days=1)).isoformat())])
         async with _sm(admin_engine)() as s:
-            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
-                                     debito_ids=[d_vencido.id])
+            await aut.autorizar_lote(
+                s, tenant_id=t.id, usuario_id=autorizador,
+                grupos=[GrupoAutorizacaoIn(id_fonte=d_vencido.id_fonte_recursos,
+                                           id_conta_pagadora=d_vencido.id_conta,
+                                           debito_ids=[d_vencido.id])])
 
         # débito parado em APROVADO → aguardando_autorizacao_qtd
         await _debito_aprovado(admin_engine, t.id, valor="200.00", base=base)

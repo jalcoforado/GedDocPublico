@@ -10,12 +10,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
-    ContaBancaria, Debito, DebitoHistorico, NaturezaDespesa, OrdemPagamento, OrdemPagamentoDebito, Parcela,
+    ContaBancaria, Debito, DebitoHistorico, FonteRecursos, NaturezaDespesa, OrdemPagamento,
+    OrdemPagamentoDebito, Parcela,
 )
 from ..schemas.pagamentos import (
-    DebitoFilaItem, FilaAutorizacaoGrupo, FilaLiberacaoGrupo, FilaTesourariaOut, GrupoConta,
+    DebitoFilaItem, FilaAutorizacaoFonteGrupo, FilaLiberacaoGrupo, FilaTesourariaOut, GrupoConta,
     ParcelaFilaLibItem, ParcelaTesourariaItem,
 )
+from . import pagamentos_autorizacao as aut
 from . import pagamentos_caixa as caixa
 from .pagamentos_debitos import nomes_fornecedores, nomes_usuarios
 
@@ -91,17 +93,27 @@ def _dias_atraso(vencimento: date, hoje: date) -> tuple[bool, int]:
     return vencida, (hoje - vencimento).days if vencida else 0
 
 
-async def fila_autorizacao(db: AsyncSession, *, tenant_id: int) -> list[FilaAutorizacaoGrupo]:
-    """Débitos APROVADO agrupados por conta. Grupos ordenados por nome da conta
-    (asc); dentro de cada grupo, urgentes primeiro, depois competência asc,
-    valor desc."""
+async def _fontes_by_id(db, *, tenant_id: int, ids: set[int]) -> dict[int, FonteRecursos]:
+    if not ids:
+        return {}
+    rows = (await db.execute(select(FonteRecursos).where(
+        FonteRecursos.tenant_id == tenant_id, FonteRecursos.id.in_(ids),
+        FonteRecursos.excluido.is_(False)))).scalars().all()
+    return {f.id: f for f in rows}
+
+
+async def fila_autorizacao(db: AsyncSession, *, tenant_id: int) -> list[FilaAutorizacaoFonteGrupo]:
+    """Débitos APROVADO agrupados por FONTE (v2.0). Cada grupo traz os débitos e
+    as contas elegíveis (ativas da fonte, com saldo) entre as quais o autorizador
+    escolhe a conta pagadora. Grupos por código de fonte; dentro do grupo,
+    urgentes primeiro, depois competência asc, valor desc."""
     debitos = list((await db.execute(select(Debito).where(
         Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
         Debito.status == "APROVADO"))).scalars().all())
     if not debitos:
         return []
 
-    contas = await _contas_by_id(db, tenant_id=tenant_id, ids={d.id_conta for d in debitos})
+    fontes = await _fontes_by_id(db, tenant_id=tenant_id, ids={d.id_fonte_recursos for d in debitos})
     naturezas = await _naturezas_by_id(db, tenant_id=tenant_id, ids={d.id_natureza for d in debitos})
     nomes_f = await nomes_fornecedores(db, tenant_id=tenant_id, ids={d.id_fornecedor for d in debitos})
     aprovados = await _ultimos_aprovados(db, tenant_id=tenant_id, debito_ids={d.id for d in debitos})
@@ -109,14 +121,13 @@ async def fila_autorizacao(db: AsyncSession, *, tenant_id: int) -> list[FilaAuto
         db, tenant_id=tenant_id,
         ids={h.id_usuario for h in aprovados.values() if h.id_usuario is not None})
 
-    por_conta: dict[int, list[Debito]] = {}
+    por_fonte: dict[int, list[Debito]] = {}
     for d in debitos:
-        por_conta.setdefault(d.id_conta, []).append(d)
+        por_fonte.setdefault(d.id_fonte_recursos, []).append(d)
 
-    grupos: list[FilaAutorizacaoGrupo] = []
-    for conta_id, ds in por_conta.items():
-        conta = contas[conta_id]
-        base = await _grupo_conta(db, tenant_id=tenant_id, conta=conta)
+    grupos: list[FilaAutorizacaoFonteGrupo] = []
+    for fonte_id, ds in por_fonte.items():
+        fonte = fontes.get(fonte_id)
         itens: list[DebitoFilaItem] = []
         for d in sorted(ds, key=lambda x: (not x.urgente, x.competencia, -x.valor_total)):
             hist = aprovados.get(d.id)
@@ -129,8 +140,12 @@ async def fila_autorizacao(db: AsyncSession, *, tenant_id: int) -> list[FilaAuto
                 aprovado_por=nomes_apr.get(hist.id_usuario) if hist and hist.id_usuario else None,
                 aprovado_em=hist.criado_em if hist else None,
                 valor_total=d.valor_total))
-        grupos.append(FilaAutorizacaoGrupo(**base.model_dump(), debitos=itens))
-    return sorted(grupos, key=lambda g: g.nome_conta)
+        contas = await aut.contas_elegiveis(db, tenant_id=tenant_id, id_fonte=fonte_id)
+        grupos.append(FilaAutorizacaoFonteGrupo(
+            id_fonte=fonte_id, codigo_fonte=fonte.codigo if fonte else "?",
+            descricao_fonte=fonte.descricao if fonte else "?",
+            debitos=itens, contas_elegiveis=contas))
+    return sorted(grupos, key=lambda g: g.codigo_fonte)
 
 
 async def fila_liberacao(db: AsyncSession, *, tenant_id: int) -> list[FilaLiberacaoGrupo]:
@@ -149,7 +164,8 @@ async def fila_liberacao(db: AsyncSession, *, tenant_id: int) -> list[FilaLibera
     if not parcelas:
         return []
 
-    contas = await _contas_by_id(db, tenant_id=tenant_id, ids={d.id_conta for d in debitos})
+    # Liberação/tesouraria operam sobre a conta PAGADORA (reservada na autorização).
+    contas = await _contas_by_id(db, tenant_id=tenant_id, ids={d.id_conta_pagadora for d in debitos})
     nomes_f = await nomes_fornecedores(db, tenant_id=tenant_id, ids={d.id_fornecedor for d in debitos})
     ops = await _ops_recentes(db, tenant_id=tenant_id, debito_ids=set(debitos_por_id.keys()))
     qtds = await _qtd_parcelas_por_debito(db, tenant_id=tenant_id, debito_ids=set(debitos_por_id.keys()))
@@ -158,7 +174,7 @@ async def fila_liberacao(db: AsyncSession, *, tenant_id: int) -> list[FilaLibera
     por_conta: dict[int, list[Parcela]] = {}
     for p in parcelas:
         d = debitos_por_id[p.id_debito]
-        por_conta.setdefault(d.id_conta, []).append(p)
+        por_conta.setdefault(d.id_conta_pagadora, []).append(p)
 
     grupos: list[FilaLiberacaoGrupo] = []
     for conta_id, ps in por_conta.items():

@@ -10,12 +10,37 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
-    Alcada, Debito, DebitoHistorico, MovimentacaoConta, OrdemPagamento, OrdemPagamentoDebito, Parcela,
+    Alcada, ContaBancaria, Debito, DebitoHistorico, MovimentacaoConta, OrdemPagamento,
+    OrdemPagamentoDebito, Parcela,
 )
+from ..schemas.pagamentos import ContaElegivelOut, GrupoAutorizacaoIn
 from . import pagamentos_caixa as caixa
 from .pagamentos_debitos import (
     PagamentoDebitoError, _registrar_transicao, aprovadores_do_debito, listar_parcelas, obter_debito,
 )
+
+
+def _mascarar_conta(conta: str) -> str:
+    """Exibe apenas os últimos 4 dígitos da conta (RF-AUT-05/09)."""
+    limpa = (conta or "").strip()
+    return ("****" + limpa[-4:]) if len(limpa) > 4 else (limpa or "****")
+
+
+async def contas_elegiveis(db: AsyncSession, *, tenant_id: int, id_fonte: int) -> list[ContaElegivelOut]:
+    """Contas ATIVAS da fonte, com saldo/disponível — candidatas a conta pagadora."""
+    contas = list((await db.execute(select(ContaBancaria).where(
+        ContaBancaria.tenant_id == tenant_id, ContaBancaria.id_fonte_recursos == id_fonte,
+        ContaBancaria.ativa.is_(True), ContaBancaria.excluido.is_(False))
+        .order_by(ContaBancaria.nome))).scalars().all())
+    out: list[ContaElegivelOut] = []
+    for c in contas:
+        saldo = await caixa.saldo_conta(db, tenant_id=tenant_id, conta_id=c.id)
+        minimo = c.saldo_minimo_alerta or Decimal("0")
+        out.append(ContaElegivelOut(
+            id_conta=c.id, nome=c.nome, banco=c.banco, agencia=c.agencia,
+            conta_mascarada=_mascarar_conta(c.conta), saldo_atual=saldo.saldo_atual,
+            disponivel=saldo.disponivel, abaixo_minimo=saldo.saldo_atual < minimo))
+    return out
 
 
 def _utcnow() -> datetime:
@@ -48,56 +73,100 @@ async def _proximo_numero_op(db, *, tenant_id: int) -> str:
     return f"{prefixo}{seq:04d}"
 
 
-async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
-                         debito_ids: list[int], ip: str | None = None) -> OrdemPagamento:
-    """All-or-nothing: valida TODOS os débitos antes de mudar qualquer status."""
-    debitos: list[Debito] = []
-    for did in debito_ids:
-        d = await obter_debito(db, tenant_id=tenant_id, debito_id=did)
-        if d.status != "APROVADO":
-            raise PagamentoDebitoError(
-                f"Débito {did} não está APROVADO (está '{d.status}').", status.HTTP_409_CONFLICT)
-        if usuario_id == d.id_usuario_solicitante:
-            raise PagamentoDebitoError(
-                f"Segregação de funções: o solicitante do débito {did} não pode autorizá-lo.",
-                status.HTTP_403_FORBIDDEN)
-        if usuario_id in await aprovadores_do_debito(db, tenant_id=tenant_id, debito_id=did):
-            raise PagamentoDebitoError(
-                f"Segregação de funções: quem aprovou o débito {did} não pode autorizá-lo.",
-                status.HTTP_403_FORBIDDEN)
-        limite = await _alcada_do_usuario(db, tenant_id=tenant_id, usuario_id=usuario_id,
-                                          id_natureza=d.id_natureza)
-        if d.valor_total > limite:
-            raise PagamentoDebitoError(
-                f"Débito {did} (R$ {d.valor_total}) excede a alçada do autorizador (R$ {limite}).",
-                status.HTTP_403_FORBIDDEN)
-        debitos.append(d)
+async def _obter_conta_pagadora(db, *, tenant_id: int, conta_id: int) -> ContaBancaria:
+    c = (await db.execute(select(ContaBancaria).where(
+        ContaBancaria.id == conta_id, ContaBancaria.tenant_id == tenant_id,
+        ContaBancaria.excluido.is_(False)))).scalar_one_or_none()
+    if c is None:
+        raise PagamentoDebitoError("Conta pagadora não encontrada.", status.HTTP_404_NOT_FOUND)
+    if not c.ativa:
+        raise PagamentoDebitoError(
+            f"Conta pagadora {conta_id} não está ativa.", status.HTTP_422_UNPROCESSABLE_ENTITY)
+    return c
 
-    # saldo por conta: disponível deve cobrir o Σ do lote naquela conta
-    por_conta: dict[int, Decimal] = {}
-    for d in debitos:
-        por_conta[d.id_conta] = por_conta.get(d.id_conta, Decimal("0")) + d.valor_total
-    for conta_id, total in por_conta.items():
+
+async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
+                         grupos: list[GrupoAutorizacaoIn], ip: str | None = None) -> list[OrdemPagamento]:
+    """Autoriza por grupo {fonte, conta_pagadora, débitos} — v2.0 (RF-AUT-02..15).
+    All-or-nothing sobre TODOS os grupos: valida tudo (fonte↔conta, segregação,
+    alçada, saldo projetado) antes de gravar conta pagadora / criar qualquer OP.
+    A conta pagadora é escolhida aqui e gravada imutável em debito.id_conta_pagadora."""
+    if not grupos:
+        raise PagamentoDebitoError("Nenhum grupo informado para autorização.",
+                                   status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+    # 1) valida cada grupo e coleta os débitos; acumula necessidade por conta pagadora.
+    grupos_val: list[tuple[GrupoAutorizacaoIn, ContaBancaria, list[Debito], Decimal]] = []
+    necessidade_por_conta: dict[int, Decimal] = {}
+    vistos: set[int] = set()
+    for g in grupos:
+        conta = await _obter_conta_pagadora(db, tenant_id=tenant_id, conta_id=g.id_conta_pagadora)
+        if conta.id_fonte_recursos != g.id_fonte:
+            raise PagamentoDebitoError(
+                f"Conta pagadora {conta.id} não pertence à fonte {g.id_fonte} (RN-06).",
+                status.HTTP_422_UNPROCESSABLE_ENTITY)
+        debitos: list[Debito] = []
+        for did in g.debito_ids:
+            if did in vistos:
+                raise PagamentoDebitoError(
+                    f"Débito {did} informado em mais de um grupo.", status.HTTP_409_CONFLICT)
+            vistos.add(did)
+            d = await obter_debito(db, tenant_id=tenant_id, debito_id=did, for_update=True)
+            if d.status != "APROVADO":
+                raise PagamentoDebitoError(
+                    f"Débito {did} não está APROVADO (está '{d.status}').", status.HTTP_409_CONFLICT)
+            if d.id_fonte_recursos != g.id_fonte:
+                raise PagamentoDebitoError(
+                    f"Débito {did} não pertence à fonte {g.id_fonte} do grupo (RF-AUT-15).",
+                    status.HTTP_422_UNPROCESSABLE_ENTITY)
+            if usuario_id == d.id_usuario_solicitante:
+                raise PagamentoDebitoError(
+                    f"Segregação de funções: o solicitante do débito {did} não pode autorizá-lo.",
+                    status.HTTP_403_FORBIDDEN)
+            if usuario_id in await aprovadores_do_debito(db, tenant_id=tenant_id, debito_id=did):
+                raise PagamentoDebitoError(
+                    f"Segregação de funções: quem aprovou o débito {did} não pode autorizá-lo.",
+                    status.HTTP_403_FORBIDDEN)
+            limite = await _alcada_do_usuario(db, tenant_id=tenant_id, usuario_id=usuario_id,
+                                              id_natureza=d.id_natureza)
+            if d.valor_total > limite:
+                raise PagamentoDebitoError(
+                    f"Débito {did} (R$ {d.valor_total}) excede a alçada do autorizador (R$ {limite}).",
+                    status.HTTP_403_FORBIDDEN)
+            debitos.append(d)
+        total = sum((d.valor_total for d in debitos), Decimal("0"))
+        necessidade_por_conta[conta.id] = necessidade_por_conta.get(conta.id, Decimal("0")) + total
+        grupos_val.append((g, conta, debitos, total))
+
+    # 2) saldo disponível projetado de cada conta pagadora cobre o Σ que ela receberá.
+    for conta_id, necessario in necessidade_por_conta.items():
         saldo = await caixa.saldo_conta(db, tenant_id=tenant_id, conta_id=conta_id)
-        if saldo.disponivel < total:
+        if saldo.disponivel < necessario:
             raise PagamentoDebitoError(
                 f"Saldo disponível insuficiente na conta {conta_id}: "
-                f"disponível R$ {saldo.disponivel}, necessário R$ {total}.",
+                f"disponível R$ {saldo.disponivel}, necessário R$ {necessario}.",
                 status.HTTP_422_UNPROCESSABLE_ENTITY)
 
-    op = OrdemPagamento(tenant_id=tenant_id,
-                        numero=await _proximo_numero_op(db, tenant_id=tenant_id),
-                        id_usuario_autorizador=usuario_id,
-                        valor_total=sum((d.valor_total for d in debitos), Decimal("0")),
-                        ip_origem=ip, criado_em=_utcnow())
-    db.add(op); await db.flush()
-    for d in debitos:
-        db.add(OrdemPagamentoDebito(tenant_id=tenant_id, id_ordem=op.id, id_debito=d.id))
-        _registrar_transicao(db, debito=d, novo_status="AUTORIZADO", acao="AUTORIZADO",
-                             usuario_id=usuario_id, justificativa=f"OP {op.numero}", ip=ip)
-        d.atualizado_em = _utcnow()
-    await db.commit(); await db.refresh(op)
-    return op
+    # 3) grava: uma OP por grupo, reserva na conta pagadora escolhida (imutável).
+    ordens: list[OrdemPagamento] = []
+    for g, conta, debitos, total in grupos_val:
+        op = OrdemPagamento(tenant_id=tenant_id,
+                            numero=await _proximo_numero_op(db, tenant_id=tenant_id),
+                            id_usuario_autorizador=usuario_id,
+                            id_conta_pagadora=conta.id, valor_reservado=total,
+                            valor_total=total, ip_origem=ip, criado_em=_utcnow())
+        db.add(op); await db.flush()
+        for d in debitos:
+            d.id_conta_pagadora = conta.id
+            db.add(OrdemPagamentoDebito(tenant_id=tenant_id, id_ordem=op.id, id_debito=d.id))
+            _registrar_transicao(db, debito=d, novo_status="AUTORIZADO", acao="AUTORIZADO",
+                                 usuario_id=usuario_id, justificativa=f"OP {op.numero}", ip=ip)
+            d.atualizado_em = _utcnow()
+        ordens.append(op)
+    await db.commit()
+    for op in ordens:
+        await db.refresh(op)
+    return ordens
 
 
 async def listar_ordens(db: AsyncSession, *, tenant_id: int) -> list[OrdemPagamento]:
@@ -209,7 +278,11 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
         raise PagamentoDebitoError(
             f"Parcela não liberada para pagamento (está '{p.status}').", status.HTTP_409_CONFLICT)
     quando = data_pagamento or _utcnow().date()
-    mov = MovimentacaoConta(tenant_id=tenant_id, id_conta=d.id_conta, tipo="SAIDA",
+    if d.id_conta_pagadora is None:
+        raise PagamentoDebitoError(
+            "Débito sem conta pagadora definida (não autorizado corretamente).",
+            status.HTTP_409_CONFLICT)
+    mov = MovimentacaoConta(tenant_id=tenant_id, id_conta=d.id_conta_pagadora, tipo="SAIDA",
                             valor=p.valor, origem="PAGAMENTO", id_debito=d.id, id_parcela=p.id,
                             data=quando, id_usuario=usuario_id,
                             descricao=f"Pagamento parcela {p.numero} — débito #{d.id}"[:255],
@@ -232,7 +305,7 @@ async def estornar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito, for_update=True)
     if p.status != "PAGA":
         raise PagamentoDebitoError("Só parcelas pagas podem ser estornadas.", status.HTTP_409_CONFLICT)
-    mov = MovimentacaoConta(tenant_id=tenant_id, id_conta=d.id_conta, tipo="ENTRADA",
+    mov = MovimentacaoConta(tenant_id=tenant_id, id_conta=d.id_conta_pagadora, tipo="ENTRADA",
                             valor=p.valor, origem="ESTORNO", id_debito=d.id, id_parcela=p.id,
                             data=_utcnow().date(), id_usuario=usuario_id,
                             descricao=f"Estorno parcela {p.numero} — débito #{d.id}: {justificativa}"[:255],

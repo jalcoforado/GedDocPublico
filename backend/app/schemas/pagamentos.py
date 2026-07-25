@@ -236,7 +236,8 @@ class ParcelaCreate(BaseModel):
 class DebitoCreate(BaseModel):
     id_fornecedor: int
     id_natureza: int
-    id_conta: int
+    id_fonte_recursos: int           # fonte do empenho (vinculante, v2.0)
+    id_conta: int | None = None      # conta sugerida (não-vinculante)
     id_contrato: int | None = None
     valor_total: Decimal = Field(gt=0)
     competencia: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
@@ -252,6 +253,7 @@ class DebitoCreate(BaseModel):
 class DebitoUpdate(BaseModel):
     id_fornecedor: int | None = None
     id_natureza: int | None = None
+    id_fonte_recursos: int | None = None
     id_conta: int | None = None
     id_contrato: int | None = None
     valor_total: Decimal | None = Field(default=None, gt=0)
@@ -276,7 +278,8 @@ class ParcelaOut(BaseModel):
 
 
 class DebitoOut(BaseModel):
-    id: int; id_fornecedor: int; nome_fornecedor: str; id_natureza: int; id_conta: int
+    id: int; id_fornecedor: int; nome_fornecedor: str; id_natureza: int
+    id_fonte_recursos: int; id_conta: int | None; id_conta_pagadora: int | None
     id_contrato: int | None; valor_total: Decimal; competencia: str
     numero_ne: str | None; numero_nf: str | None; criticidade: CriticidadeLit
     urgente: bool; justificativa_urgencia: str | None; descricao: str
@@ -299,8 +302,15 @@ class JustificativaIn(BaseModel):
     justificativa: str = Field(min_length=1, max_length=255)
 
 
-class AutorizarLoteIn(BaseModel):
+class GrupoAutorizacaoIn(BaseModel):
+    """Autorização de um lote de débitos de uma fonte, pagos por uma conta escolhida."""
+    id_fonte: int
+    id_conta_pagadora: int
     debito_ids: list[int] = Field(min_length=1)
+
+
+class AutorizarLoteIn(BaseModel):
+    grupos: list[GrupoAutorizacaoIn] = Field(min_length=1)
 
 
 class PagarParcelaIn(BaseModel):
@@ -311,6 +321,7 @@ class PagarParcelaIn(BaseModel):
 class OrdemPagamentoOut(BaseModel):
     id: int; numero: str; valor_total: Decimal; id_usuario_autorizador: int
     nome_autorizador: str | None; qtd_debitos: int; criado_em: datetime
+    id_conta_pagadora: int | None = None; valor_reservado: Decimal | None = None
 
 
 class ParcelaFilaOut(BaseModel):
@@ -349,8 +360,17 @@ class GrupoConta(BaseModel):
     id_conta: int; nome_conta: str; disponivel: Decimal; abaixo_minimo: bool
 
 
-class FilaAutorizacaoGrupo(GrupoConta):
+class ContaElegivelOut(BaseModel):
+    """Conta ativa de uma fonte, elegível como conta pagadora (v2.0 RF-AUT-02/05)."""
+    id_conta: int; nome: str; banco: str; agencia: str; conta_mascarada: str
+    saldo_atual: Decimal; disponivel: Decimal; abaixo_minimo: bool
+
+
+class FilaAutorizacaoFonteGrupo(BaseModel):
+    """Débitos APROVADO de uma fonte + contas elegíveis para pagá-los (v2.0)."""
+    id_fonte: int; codigo_fonte: str; descricao_fonte: str
     debitos: list[DebitoFilaItem]
+    contas_elegiveis: list[ContaElegivelOut]
 
 
 class FilaLiberacaoGrupo(GrupoConta):

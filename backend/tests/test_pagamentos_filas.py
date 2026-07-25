@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.pagamentos import (
     AlcadaCreate, ContaCreate, DebitoCreate, FonteCreate, FornecedorCreate,
-    NaturezaCreate, ParcelaCreate,
+    GrupoAutorizacaoIn, NaturezaCreate, ParcelaCreate,
 )
 from app.services import pagamentos_autorizacao as aut
 from app.services import pagamentos_cadastros as cad
@@ -92,7 +92,8 @@ async def _base(engine, tenant_id, *, saldo_inicial="10000.00", nome_conta="Cont
 def _payload_debito(forn, nat, conta, *, valor="1000.00", competencia="2026-07",
                     urgente=False, parcelas=None):
     return DebitoCreate(
-        id_fornecedor=forn.id, id_natureza=nat.id, id_conta=conta.id,
+        id_fornecedor=forn.id, id_natureza=nat.id,
+        id_fonte_recursos=conta.id_fonte_recursos, id_conta=conta.id,
         valor_total=valor, competencia=competencia, urgente=urgente,
         descricao="Compra de material",
         parcelas=parcelas or [ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
@@ -152,30 +153,38 @@ async def _debito_autorizado(engine, tenant_id, *, base, valor="1000.00", compet
     if autorizador is None:
         autorizador = await _autorizador_com_alcada(engine, tenant_id)
     async with _sm(engine)() as s:
-        op = await aut.autorizar_lote(s, tenant_id=tenant_id, usuario_id=autorizador, debito_ids=[d.id])
+        ops = await aut.autorizar_lote(
+            s, tenant_id=tenant_id, usuario_id=autorizador,
+            grupos=[GrupoAutorizacaoIn(id_fonte=d.id_fonte_recursos,
+                                       id_conta_pagadora=d.id_conta, debito_ids=[d.id])])
+        op = ops[0]
     async with _sm(engine)() as s:
         d = await deb.obter_debito(s, tenant_id=tenant_id, debito_id=d.id)
     return d, solicitante, aprovador, autorizador, op
 
 
 # ============================ fila_autorizacao ==================================
-async def test_fila_autorizacao_agrupa_por_conta_urgente_primeiro(admin_engine):
+async def test_fila_autorizacao_agrupa_por_fonte_urgente_primeiro(admin_engine):
+    """v2.0: fila agrupada por FONTE; cada grupo traz débitos (urgentes primeiro)
+    e as contas elegíveis da fonte com saldo/disponível."""
     t = await _provisionar(admin_engine)
     try:
-        base_a = await _base(admin_engine, t.id, nome_conta="Conta A")
-        base_b = await _base(admin_engine, t.id, nome_conta="Conta B")
+        base_a = await _base(admin_engine, t.id, nome_conta="Conta A")  # fonte A
+        base_b = await _base(admin_engine, t.id, nome_conta="Conta B")  # fonte B
+        fonte_a_id = base_a[2].id_fonte_recursos
+        fonte_b_id = base_b[2].id_fonte_recursos
 
         aprovador_unico = await _novo_usuario(admin_engine, t.id, f"aprX{uuid.uuid4().hex[:6]}")
 
-        # Conta B: normal (competencia 2026-06) + urgente (competencia 2026-07)
-        d_normal, _s1, apr1 = await _debito_aprovado(
+        # Fonte B: normal (competencia 2026-06) + urgente (competencia 2026-07)
+        d_normal, _s1, _apr1 = await _debito_aprovado(
             admin_engine, t.id, base=base_b, valor="500.00", competencia="2026-06",
             urgente=False, aprovador=aprovador_unico)
-        d_urgente, _s2, apr2 = await _debito_aprovado(
+        d_urgente, _s2, _apr2 = await _debito_aprovado(
             admin_engine, t.id, base=base_b, valor="300.00", competencia="2026-07",
             urgente=True, aprovador=aprovador_unico)
-        # Conta A: 1 débito
-        d_a, _s3, apr3 = await _debito_aprovado(
+        # Fonte A: 1 débito
+        d_a, _s3, _apr3 = await _debito_aprovado(
             admin_engine, t.id, base=base_a, valor="900.00", competencia="2026-07",
             urgente=False, aprovador=aprovador_unico)
 
@@ -183,18 +192,20 @@ async def test_fila_autorizacao_agrupa_por_conta_urgente_primeiro(admin_engine):
             grupos = await filas.fila_autorizacao(s, tenant_id=t.id)
 
         assert len(grupos) == 2
-        assert [g.nome_conta for g in grupos] == ["Conta A", "Conta B"]
+        por_fonte = {g.id_fonte: g for g in grupos}
+        assert set(por_fonte) == {fonte_a_id, fonte_b_id}
 
-        grupo_a = grupos[0]
-        assert len(grupo_a.debitos) == 1
-        assert grupo_a.debitos[0].id == d_a.id
-        assert grupo_a.disponivel == Decimal("10000.00")
-        assert grupo_a.abaixo_minimo is False
+        grupo_a = por_fonte[fonte_a_id]
+        assert [it.id for it in grupo_a.debitos] == [d_a.id]
+        # conta elegível da fonte A com disponível cheio
+        assert [c.id_conta for c in grupo_a.contas_elegiveis] == [base_a[2].id]
+        assert grupo_a.contas_elegiveis[0].disponivel == Decimal("10000.00")
+        assert grupo_a.contas_elegiveis[0].abaixo_minimo is False
 
         async with _sm(admin_engine)() as s:
             nomes_u = await deb.nomes_usuarios(s, tenant_id=t.id, ids={aprovador_unico})
 
-        grupo_b = grupos[1]
+        grupo_b = por_fonte[fonte_b_id]
         assert [it.id for it in grupo_b.debitos] == [d_urgente.id, d_normal.id]
         item_urgente = grupo_b.debitos[0]
         assert item_urgente.urgente is True

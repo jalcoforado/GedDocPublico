@@ -38,7 +38,14 @@ def _validar_parcelas(parcelas, valor_total: Decimal) -> None:
 async def _validar_refs(db, *, tenant_id: int, payload) -> None:
     await cad.obter_fornecedor(db, tenant_id=tenant_id, fornecedor_id=payload.id_fornecedor)
     await cad.obter_natureza(db, tenant_id=tenant_id, natureza_id=payload.id_natureza)
-    await cad.obter_conta(db, tenant_id=tenant_id, conta_id=payload.id_conta)
+    await cad.obter_fonte(db, tenant_id=tenant_id, fonte_id=payload.id_fonte_recursos)
+    # Conta é apenas uma sugestão (não-vinculante); se informada, deve ser da mesma fonte.
+    if payload.id_conta is not None:
+        conta = await cad.obter_conta(db, tenant_id=tenant_id, conta_id=payload.id_conta)
+        if conta.id_fonte_recursos != payload.id_fonte_recursos:
+            raise PagamentoDebitoError(
+                "Conta sugerida não pertence à fonte de recursos informada.",
+                status.HTTP_422_UNPROCESSABLE_ENTITY)
     if payload.id_contrato is not None:
         await cad.obter_contrato(db, tenant_id=tenant_id, contrato_id=payload.id_contrato)
 
@@ -58,8 +65,9 @@ async def criar_debito(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     await _validar_refs(db, tenant_id=tenant_id, payload=payload)
     _validar_parcelas(payload.parcelas, payload.valor_total)
     d = Debito(tenant_id=tenant_id, id_fornecedor=payload.id_fornecedor,
-               id_natureza=payload.id_natureza, id_conta=payload.id_conta,
-               id_contrato=payload.id_contrato, valor_total=payload.valor_total,
+               id_natureza=payload.id_natureza, id_fonte_recursos=payload.id_fonte_recursos,
+               id_conta=payload.id_conta, id_contrato=payload.id_contrato,
+               valor_total=payload.valor_total,
                competencia=payload.competencia, numero_ne=payload.numero_ne,
                numero_nf=payload.numero_nf, criticidade=payload.criticidade,
                urgente=payload.urgente, justificativa_urgencia=payload.justificativa_urgencia,
@@ -130,6 +138,7 @@ async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
     class _Ref:  # payload efetivo para _validar_refs
         id_fornecedor = dados.get("id_fornecedor", d.id_fornecedor)
         id_natureza = dados.get("id_natureza", d.id_natureza)
+        id_fonte_recursos = dados.get("id_fonte_recursos", d.id_fonte_recursos)
         id_conta = dados.get("id_conta", d.id_conta)
         id_contrato = dados.get("id_contrato", d.id_contrato)
     await _validar_refs(db, tenant_id=tenant_id, payload=_Ref)
@@ -253,7 +262,9 @@ async def cancelar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_
 def debito_out(d: Debito, *, nome_fornecedor: str) -> dict:
     return {
         "id": d.id, "id_fornecedor": d.id_fornecedor, "nome_fornecedor": nome_fornecedor,
-        "id_natureza": d.id_natureza, "id_conta": d.id_conta, "id_contrato": d.id_contrato,
+        "id_natureza": d.id_natureza, "id_fonte_recursos": d.id_fonte_recursos,
+        "id_conta": d.id_conta, "id_conta_pagadora": d.id_conta_pagadora,
+        "id_contrato": d.id_contrato,
         "valor_total": d.valor_total, "competencia": d.competencia,
         "numero_ne": d.numero_ne, "numero_nf": d.numero_nf, "criticidade": d.criticidade,
         "urgente": d.urgente, "justificativa_urgencia": d.justificativa_urgencia,

@@ -15,9 +15,10 @@ from datetime import date
 from pydantic import BaseModel, Field
 
 from ..schemas.pagamentos import (
-    AutorizarLoteIn, DashboardOut, DebitoCreate, DebitoDetalheOut, DebitoHistoricoOut, DebitoOut,
-    DebitoUpdate, FilaAutorizacaoGrupo, FilaLiberacaoGrupo, FilaTesourariaOut, JustificativaIn,
-    MinhaFilaOut, OrdemPagamentoOut, PagarParcelaIn, ParcelaFilaOut, ParcelaOut,
+    AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
+    DebitoHistoricoOut, DebitoOut, DebitoUpdate, FilaAutorizacaoFonteGrupo, FilaLiberacaoGrupo,
+    FilaTesourariaOut, JustificativaIn, MinhaFilaOut, OrdemPagamentoOut, PagarParcelaIn,
+    ParcelaFilaOut, ParcelaOut,
 )
 from ..services import pagamentos_autorizacao as aut
 from ..services import pagamentos_dashboard as dash
@@ -165,19 +166,20 @@ async def _op_out(db, tenant_id: int, ops) -> list[OrdemPagamentoOut]:
             id=o.id, numero=o.numero, valor_total=o.valor_total,
             id_usuario_autorizador=o.id_usuario_autorizador,
             nome_autorizador=nomes.get(o.id_usuario_autorizador),
-            qtd_debitos=len(debs), criado_em=o.criado_em))
+            qtd_debitos=len(debs), criado_em=o.criado_em,
+            id_conta_pagadora=o.id_conta_pagadora, valor_reservado=o.valor_reservado))
     return out
 
 
-@operacoes_router.post("/autorizacoes", response_model=OrdemPagamentoOut,
+@operacoes_router.post("/autorizacoes", response_model=list[OrdemPagamentoOut],
                        status_code=status.HTTP_201_CREATED)
 async def autorizar(payload: AutorizarLoteIn, request: Request,
                     usuario: Usuario = Depends(require_permission("pagamento_autorizar")),
                     tenant_id: int = Depends(require_tenant_id),
                     db: AsyncSession = Depends(get_db)):
-    op = await aut.autorizar_lote(db, tenant_id=tenant_id, usuario_id=usuario.id,
-                                  debito_ids=payload.debito_ids, ip=_ip(request))
-    return (await _op_out(db, tenant_id, [op]))[0]
+    ops = await aut.autorizar_lote(db, tenant_id=tenant_id, usuario_id=usuario.id,
+                                   grupos=payload.grupos, ip=_ip(request))
+    return await _op_out(db, tenant_id, ops)
 
 
 @operacoes_router.get("/ordens-pagamento", response_model=list[OrdemPagamentoOut])
@@ -242,11 +244,19 @@ async def estornar(parcela_id: int, payload: JustificativaIn, request: Request,
     return ParcelaOut.model_validate(p)
 
 
-@operacoes_router.get("/autorizacao/fila", response_model=list[FilaAutorizacaoGrupo])
+@operacoes_router.get("/autorizacao/fila", response_model=list[FilaAutorizacaoFonteGrupo])
 async def fila_autorizacao(_: Usuario = Depends(require_permission("pagamento_autorizar")),
                            tenant_id: int = Depends(require_tenant_id),
                            db: AsyncSession = Depends(get_db)):
     return await filas.fila_autorizacao(db, tenant_id=tenant_id)
+
+
+@operacoes_router.get("/fontes/{fonte_id}/contas-elegiveis", response_model=list[ContaElegivelOut])
+async def contas_elegiveis(fonte_id: int,
+                           _: Usuario = Depends(require_permission("pagamento_autorizar")),
+                           tenant_id: int = Depends(require_tenant_id),
+                           db: AsyncSession = Depends(get_db)):
+    return await aut.contas_elegiveis(db, tenant_id=tenant_id, id_fonte=fonte_id)
 
 
 @operacoes_router.get("/liberacao/fila", response_model=list[FilaLiberacaoGrupo])
