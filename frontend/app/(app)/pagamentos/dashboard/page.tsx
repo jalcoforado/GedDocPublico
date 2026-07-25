@@ -63,6 +63,7 @@ const STATUS_BADGE: Record<
   PAGO: { intent: "success", label: "Pago" },
   REJEITADO: { intent: "danger", label: "Rejeitado" },
   CANCELADO: { intent: "danger", label: "Cancelado" },
+  SUSPENSO: { intent: "warning", label: "Suspenso" },
 };
 
 function fmtBRL(v: string | number): string {

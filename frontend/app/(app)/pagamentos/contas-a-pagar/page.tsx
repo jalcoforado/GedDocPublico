@@ -31,6 +31,7 @@ const STATUS_TABS: { value: StatusDebito | ""; label: string }[] = [
   { value: "PAGO", label: "Pago" },
   { value: "REJEITADO", label: "Rejeitado" },
   { value: "CANCELADO", label: "Cancelado" },
+  { value: "SUSPENSO", label: "Suspenso" },
 ];
 
 const STATUS_BADGE: Record<StatusDebito, { intent: "neutral" | "warning" | "info" | "success" | "danger"; label: string }> = {
@@ -42,6 +43,7 @@ const STATUS_BADGE: Record<StatusDebito, { intent: "neutral" | "warning" | "info
   PAGO: { intent: "success", label: "Pago" },
   REJEITADO: { intent: "danger", label: "Rejeitado" },
   CANCELADO: { intent: "danger", label: "Cancelado" },
+  SUSPENSO: { intent: "warning", label: "Suspenso" },
 };
 
 function StatusBadge({ status }: { status: StatusDebito }) {

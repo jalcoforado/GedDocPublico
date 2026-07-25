@@ -1010,6 +1010,13 @@ export interface FonteRecursos {
   codigo: string;
   descricao: string;
   grupos_despesa_permitidos: string[];
+  // v2.0
+  exercicio: number | null;
+  esfera_origem: string | null;
+  tipo_vinculacao: string | null;
+  situacao: "ATIVA" | "SUSPENSA" | "ENCERRADA";
+  vigencia_inicio: string | null;
+  vigencia_fim: string | null;
   criado_em: string;
   atualizado_em: string | null;
 }
@@ -1025,6 +1032,14 @@ export interface ContaBancaria {
   saldo_inicial: string;
   saldo_minimo_alerta: string;
   ativa: boolean;
+  // v2.0
+  digito: string | null;
+  tipo: string | null;
+  titularidade: string | null;
+  orgao_gestor: string | null;
+  finalidade: string | null;
+  data_abertura: string | null;
+  modo_movimentacao: "PAGA" | "RECEBE" | "TRANSFERE" | "RESTRITA";
   criado_em: string;
   atualizado_em: string | null;
 }
@@ -1062,6 +1077,11 @@ export interface SaldoConta {
   saldo_atual: string;
   comprometido: string;
   disponivel: string;
+  // v2.0 — 5 saldos
+  bloqueado: string;
+  saldo_bancario: string;
+  saldo_conciliado: string;
+  disponivel_projetado: string;
 }
 
 export interface ContaSaldoPainel {
@@ -1077,6 +1097,31 @@ export interface ContaSaldoPainel {
   disponivel: string;
   saldo_minimo_alerta: string;
   abaixo_minimo: boolean;
+  // v2.0
+  bloqueado: string;
+  saldo_conciliado: string;
+  disponivel_projetado: string;
+}
+
+export interface BloqueioSaldo {
+  id: number;
+  id_conta: number;
+  valor: string;
+  motivo: string;
+  periodo_inicio: string;
+  periodo_fim: string | null;
+  id_usuario_responsavel: number | null;
+  ativo: boolean;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface BloqueioSaldoInput {
+  id_conta: number;
+  valor: number;
+  motivo: string;
+  periodo_inicio: string;
+  periodo_fim?: string | null;
 }
 
 export interface Contrato {
@@ -1104,7 +1149,7 @@ export interface Alcada {
 // ---------- Pagamentos (R2) — débitos, parcelas, autorização, OP ----------
 export type StatusDebito =
   | "RASCUNHO" | "AGUARDANDO_APROVACAO" | "APROVADO" | "AUTORIZADO"
-  | "PAGO_PARCIAL" | "PAGO" | "REJEITADO" | "CANCELADO";
+  | "PAGO_PARCIAL" | "PAGO" | "REJEITADO" | "CANCELADO" | "SUSPENSO";
 
 export type StatusParcela = "A_PAGAR" | "LIBERADA" | "PAGA" | "CANCELADA";
 
@@ -1122,7 +1167,9 @@ export interface Debito {
   id_contrato: number | null; valor_total: string; competencia: string;
   numero_ne: string | null; numero_nf: string | null; criticidade: string; urgente: boolean;
   justificativa_urgencia: string | null; descricao: string; status: StatusDebito;
-  id_usuario_solicitante: number; criado_em: string; atualizado_em: string | null;
+  id_usuario_solicitante: number;
+  liquidacao_confirmada: boolean; data_liquidacao: string | null;
+  criado_em: string; atualizado_em: string | null;
 }
 
 export interface DebitoHistorico {
@@ -2809,6 +2856,30 @@ export const api = {
       cancelar: (id: number, justificativa: string) =>
         request<Debito>(`/pagamentos/debitos/${id}/cancelar`, {
           method: "POST", body: JSON.stringify({ justificativa }) }),
+      // v2.0
+      confirmarLiquidacao: (id: number, dataLiquidacao?: string | null) =>
+        request<Debito>(`/pagamentos/debitos/${id}/confirmar-liquidacao`, {
+          method: "POST", body: JSON.stringify({ data_liquidacao: dataLiquidacao ?? null }) }),
+      suspender: (id: number, justificativa: string) =>
+        request<Debito>(`/pagamentos/debitos/${id}/suspender`, {
+          method: "POST", body: JSON.stringify({ justificativa }) }),
+      reativar: (id: number, justificativa: string) =>
+        request<Debito>(`/pagamentos/debitos/${id}/reativar`, {
+          method: "POST", body: JSON.stringify({ justificativa }) }),
+    },
+    // v2.0: bloqueios administrativos de saldo por conta.
+    bloqueios: {
+      list: (params?: { conta_id?: number; apenas_ativos?: boolean }) =>
+        request<BloqueioSaldo[]>(`/pagamentos/bloqueios${qs({
+          conta_id: params?.conta_id, apenas_ativos: params?.apenas_ativos })}`),
+      create: (data: BloqueioSaldoInput) =>
+        request<BloqueioSaldo>("/pagamentos/bloqueios", {
+          method: "POST", body: JSON.stringify(data) }),
+      update: (id: number, data: Partial<BloqueioSaldoInput> & { ativo?: boolean }) =>
+        request<BloqueioSaldo>(`/pagamentos/bloqueios/${id}`, {
+          method: "PUT", body: JSON.stringify(data) }),
+      remove: (id: number) =>
+        request<void>(`/pagamentos/bloqueios/${id}`, { method: "DELETE" }),
     },
     // v2.0: autoriza por grupo {fonte, conta pagadora, débitos}; retorna as OPs criadas.
     autorizar: (grupos: { id_fonte: number; id_conta_pagadora: number; debito_ids: number[] }[]) =>
