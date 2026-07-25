@@ -18,7 +18,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [user, setUser] = useState<MeResponse | null>(null);
-  const [perms, setPerms] = useState<PermissaoMeResponse | null>(null);
+  const [perms, setPerms] = useState<MeResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Download, TrendingDown, TrendingUp } from "lucide-react";
+import { BarChart3, Download, Inbox, TrendingDown, TrendingUp } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,9 +19,7 @@ import {
   type AlvaraRelatorioListResponse,
   type Permissionario,
   type TipoServico,
-  type Usuario,
 } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
 
 const TIPOS: { value: TipoServico; label: string }[] = [
   { value: "taxi", label: "Táxi" },
@@ -50,7 +48,7 @@ const STATUS_COLORS: Record<string, string> = {
 interface Filters {
   tipo_servico?: string;
   id_permissionario?: number;
-  status?: string;
+  status?: "ativo" | "vencido" | "a_renovar_30d" | "indefinido";
   limit: number;
   offset: number;
 }
@@ -70,7 +68,6 @@ function KPICard({ label, value, icon: Icon, color }: any) {
 }
 
 export default function RelatorioPage() {
-  const { usuario } = useAuth();
   const { toast } = useToast();
 
   const [filters, setFilters] = useState<Filters>({
@@ -104,9 +101,9 @@ export default function RelatorioPage() {
       const link = document.createElement("a");
       link.href = url;
       link.click();
-      toast({ title: "CSV exportado com sucesso!" });
+      toast({ message: "CSV exportado com sucesso!", intent: "success" });
     } catch (err) {
-      toast({ title: "Erro ao exportar CSV", variant: "destructive" });
+      toast({ message: "Erro ao exportar CSV", intent: "error" });
     }
   };
 
@@ -120,7 +117,7 @@ export default function RelatorioPage() {
 
   return (
     <div className="space-y-6 pb-8">
-      <PageHeader title="Relatório de Alvarás" description="KPIs e análise de alvarás regulados" />
+      <PageHeader title="Relatório de Alvarás" description="KPIs e análise de alvarás regulados" icon={BarChart3} />
 
       {/* KPIs */}
       {kpisLoading ? (
@@ -184,7 +181,10 @@ export default function RelatorioPage() {
             <Select
               value={filters.status || ""}
               onChange={(e) =>
-                handleFilterChange("status", e.target.value || undefined)
+                handleFilterChange(
+                  "status",
+                  (e.target.value || undefined) as Filters["status"],
+                )
               }
             >
               <option value="">Todos</option>
@@ -197,7 +197,7 @@ export default function RelatorioPage() {
 
           <div className="flex items-end">
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={() =>
                 setFilters({
                   tipo_servico: undefined,
@@ -216,7 +216,7 @@ export default function RelatorioPage() {
           <div className="flex items-end">
             <Button
               onClick={handleExportCsv}
-              variant="outline"
+              variant="secondary"
               className="w-full"
               disabled={!relatorio || relatorio.alvaras.length === 0}
             >
@@ -233,7 +233,7 @@ export default function RelatorioPage() {
           <div className="p-6 text-center">Carregando relatório...</div>
         ) : !relatorio || relatorio.alvaras.length === 0 ? (
           <EmptyState
-            icon="inbox"
+            icon={Inbox}
             title="Nenhum alvará encontrado"
             description="Ajuste seus filtros para ver alvarás"
           />
@@ -283,7 +283,7 @@ export default function RelatorioPage() {
               </div>
               <div className="flex gap-2">
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   disabled={filters.offset === 0}
                   onClick={() =>
@@ -296,7 +296,7 @@ export default function RelatorioPage() {
                   Anterior
                 </Button>
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   disabled={
                     (filters.offset + filters.limit) >= relatorio.total

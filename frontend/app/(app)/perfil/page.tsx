@@ -67,7 +67,7 @@ export default function PerfilPage() {
             <p className="mb-2 text-sm text-muted-foreground">
               {perms.is_super_usuario
                 ? "Super Usuário — todas as transações do sistema disponíveis"
-                : `Nível ${perms.nivel_valor}`}
+                : "Acesso conforme as permissões abaixo"}
             </p>
             <ul className="grid grid-cols-1 gap-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
               {perms.permissoes.map((p) => (
