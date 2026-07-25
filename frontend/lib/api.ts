@@ -1118,7 +1118,8 @@ export interface Parcela {
 
 export interface Debito {
   id: number; id_fornecedor: number; nome_fornecedor: string; id_natureza: number;
-  id_conta: number; id_contrato: number | null; valor_total: string; competencia: string;
+  id_fonte_recursos: number; id_conta: number | null; id_conta_pagadora: number | null;
+  id_contrato: number | null; valor_total: string; competencia: string;
   numero_ne: string | null; numero_nf: string | null; criticidade: string; urgente: boolean;
   justificativa_urgencia: string | null; descricao: string; status: StatusDebito;
   id_usuario_solicitante: number; criado_em: string; atualizado_em: string | null;
@@ -1137,6 +1138,7 @@ export interface DebitoDetalhe extends Debito {
 export interface OrdemPagamento {
   id: number; numero: string; valor_total: string; id_usuario_autorizador: number;
   nome_autorizador: string | null; qtd_debitos: number; criado_em: string;
+  id_conta_pagadora?: number | null; valor_reservado?: string | null;
 }
 
 export interface ParcelaFila {
@@ -1172,8 +1174,16 @@ export interface GrupoConta {
   id_conta: number; nome_conta: string; disponivel: string; abaixo_minimo: boolean;
 }
 
-export interface FilaAutorizacaoGrupo extends GrupoConta {
-  debitos: DebitoFilaItem[];
+// v2.0: contas elegíveis como conta pagadora de uma fonte (na autorização)
+export interface ContaElegivel {
+  id_conta: number; nome: string; banco: string; agencia: string; conta_mascarada: string;
+  saldo_atual: string; disponivel: string; abaixo_minimo: boolean;
+}
+
+// v2.0: fila de autorização agrupada por FONTE (não mais por conta)
+export interface FilaAutorizacaoFonteGrupo {
+  id_fonte: number; codigo_fonte: string; descricao_fonte: string;
+  debitos: DebitoFilaItem[]; contas_elegiveis: ContaElegivel[];
 }
 
 export interface FilaLiberacaoGrupo extends GrupoConta {
@@ -2798,9 +2808,12 @@ export const api = {
         request<Debito>(`/pagamentos/debitos/${id}/cancelar`, {
           method: "POST", body: JSON.stringify({ justificativa }) }),
     },
-    autorizar: (debitoIds: number[]) =>
-      request<OrdemPagamento>("/pagamentos/autorizacoes", {
-        method: "POST", body: JSON.stringify({ debito_ids: debitoIds }) }),
+    // v2.0: autoriza por grupo {fonte, conta pagadora, débitos}; retorna as OPs criadas.
+    autorizar: (grupos: { id_fonte: number; id_conta_pagadora: number; debito_ids: number[] }[]) =>
+      request<OrdemPagamento[]>("/pagamentos/autorizacoes", {
+        method: "POST", body: JSON.stringify({ grupos }) }),
+    contasElegiveis: (fonteId: number) =>
+      request<ContaElegivel[]>(`/pagamentos/fontes/${fonteId}/contas-elegiveis`),
     ordens: {
       list: () => request<OrdemPagamento[]>("/pagamentos/ordens-pagamento"),
       pdfUrl: (id: number) => `${BROWSER_API_URL}/pagamentos/ordens-pagamento/${id}/pdf`,
@@ -2823,7 +2836,7 @@ export const api = {
     },
     filas: {
       autorizacao: () =>
-        request<FilaAutorizacaoGrupo[]>("/pagamentos/autorizacao/fila"),
+        request<FilaAutorizacaoFonteGrupo[]>("/pagamentos/autorizacao/fila"),
       liberacao: () =>
         request<FilaLiberacaoGrupo[]>("/pagamentos/liberacao/fila"),
       tesouraria: () =>

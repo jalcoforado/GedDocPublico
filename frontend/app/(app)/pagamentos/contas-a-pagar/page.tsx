@@ -58,7 +58,8 @@ interface ParcelaForm {
 interface FormState {
   id_fornecedor: number | null;
   id_natureza: number | null;
-  id_conta: number | null;
+  id_fonte_recursos: number | null;   // fonte do empenho (vinculante)
+  id_conta: number | null;            // conta sugerida (opcional)
   id_contrato: number | null;
   valor_total: string;
   competencia: string;
@@ -74,6 +75,7 @@ function emptyForm(): FormState {
   return {
     id_fornecedor: null,
     id_natureza: null,
+    id_fonte_recursos: null,
     id_conta: null,
     id_contrato: null,
     valor_total: "",
@@ -116,6 +118,11 @@ export default function ContasAPagarPage() {
   const naturezasQ = useQuery({
     queryKey: ["pag-naturezas"],
     queryFn: () => api.pagamentos.cadastros.naturezas.list(),
+    enabled: open,
+  });
+  const fontesQ = useQuery({
+    queryKey: ["pag-fontes-select"],
+    queryFn: () => api.pagamentos.cadastros.fontes.list(),
     enabled: open,
   });
   const contasQ = useQuery({
@@ -161,11 +168,12 @@ export default function ContasAPagarPage() {
     mutationFn: () => {
       if (form.id_fornecedor === null) throw new Error("Selecione um fornecedor.");
       if (form.id_natureza === null) throw new Error("Selecione uma natureza de despesa.");
-      if (form.id_conta === null) throw new Error("Selecione uma conta.");
+      if (form.id_fonte_recursos === null) throw new Error("Selecione a fonte de recursos.");
       return api.pagamentos.debitos.create({
         id_fornecedor: form.id_fornecedor,
         id_natureza: form.id_natureza,
-        id_conta: form.id_conta,
+        id_fonte_recursos: form.id_fonte_recursos,
+        id_conta: form.id_conta, // sugestão opcional
         id_contrato: form.id_contrato,
         valor_total: Number(form.valor_total),
         competencia: form.competencia,
@@ -197,7 +205,7 @@ export default function ContasAPagarPage() {
   const podeSalvar =
     form.id_fornecedor !== null &&
     form.id_natureza !== null &&
-    form.id_conta !== null &&
+    form.id_fonte_recursos !== null &&
     Number(form.valor_total) > 0 &&
     form.competencia.length > 0 &&
     form.descricao.trim().length > 0 &&
@@ -339,23 +347,46 @@ export default function ContasAPagarPage() {
             </Select>
           </div>
           <div>
-            <Label htmlFor="db-conta" required>
-              Conta
+            <Label htmlFor="db-fonte" required>
+              Fonte de recursos
             </Label>
             <Select
-              id="db-conta"
-              value={form.id_conta ?? ""}
-              onChange={(e) => setForm({ ...form, id_conta: Number(e.target.value) })}
+              id="db-fonte"
+              value={form.id_fonte_recursos ?? ""}
+              onChange={(e) =>
+                // trocar a fonte limpa a conta sugerida (ela precisa ser da nova fonte)
+                setForm({ ...form, id_fonte_recursos: Number(e.target.value), id_conta: null })
+              }
               required
             >
               <option value="" disabled>
                 Selecione...
               </option>
-              {(contasQ.data ?? []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nome} ({c.banco})
+              {(fontesQ.data ?? []).map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.codigo} — {f.descricao}
                 </option>
               ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="db-conta">Conta sugerida (opcional)</Label>
+            <Select
+              id="db-conta"
+              value={form.id_conta ?? ""}
+              onChange={(e) =>
+                setForm({ ...form, id_conta: e.target.value ? Number(e.target.value) : null })
+              }
+              disabled={form.id_fonte_recursos === null}
+            >
+              <option value="">Nenhuma (definida na autorização)</option>
+              {(contasQ.data ?? [])
+                .filter((c) => c.id_fonte_recursos === form.id_fonte_recursos)
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nome} ({c.banco})
+                  </option>
+                ))}
             </Select>
           </div>
           <div className="col-span-2">

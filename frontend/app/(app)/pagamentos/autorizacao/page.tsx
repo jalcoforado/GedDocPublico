@@ -1,10 +1,10 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, FileText, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ExternalLink, FileText, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { GrupoContaCard } from "@/components/pagamentos/GrupoContaCard";
 import { fmtData, fmtDataCurta, fmtMoeda } from "@/components/pagamentos/format";
@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import {
   api,
   type DebitoFilaItem,
-  type FilaAutorizacaoGrupo,
+  type FilaAutorizacaoFonteGrupo,
   type FilaLiberacaoGrupo,
   type OrdemPagamento,
   type ParcelaFilaLibItem,
@@ -95,13 +95,17 @@ function TabButton({
 }
 
 // ---------------------------------------------------------------------------
-// Tab Despesa — fila APROVADO agrupada por conta; autoriza (gera OP).
+// Tab Despesa — fila APROVADO agrupada por FONTE (v2.0). Por fonte, o autorizador
+// escolhe a CONTA PAGADORA entre as contas ativas da fonte e autoriza (gera OP,
+// reserva o valor na conta escolhida).
 // ---------------------------------------------------------------------------
 
 function TabDespesa() {
   const qc = useQueryClient();
   const toast = useToast();
   const [selecionados, setSelecionados] = useState<number[]>([]);
+  // conta pagadora escolhida por fonte (id_fonte -> id_conta)
+  const [contaPorFonte, setContaPorFonte] = useState<Record<number, number>>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const filaQ = useQuery({
@@ -112,21 +116,35 @@ function TabDespesa() {
   const grupos = filaQ.data ?? [];
   const selecionadosSet = useMemo(() => new Set(selecionados), [selecionados]);
 
-  const todosDebitos = useMemo(() => grupos.flatMap((g) => g.debitos), [grupos]);
-  const debitosSelecionados = useMemo(
-    () => todosDebitos.filter((d) => selecionadosSet.has(d.id)),
-    [todosDebitos, selecionadosSet],
-  );
+  // Pré-seleciona a conta quando a fonte tem exatamente uma conta elegível (RF-AUT-10).
+  useEffect(() => {
+    setContaPorFonte((cur) => {
+      const next = { ...cur };
+      let mudou = false;
+      for (const g of grupos) {
+        if (next[g.id_fonte] === undefined && g.contas_elegiveis.length === 1) {
+          next[g.id_fonte] = g.contas_elegiveis[0].id_conta;
+          mudou = true;
+        }
+      }
+      return mudou ? next : cur;
+    });
+  }, [grupos]);
+
   const somaSelecionados = useMemo(
-    () => debitosSelecionados.reduce((acc, d) => acc + (Number(d.valor_total) || 0), 0),
-    [debitosSelecionados],
+    () =>
+      grupos
+        .flatMap((g) => g.debitos)
+        .filter((d) => selecionadosSet.has(d.id))
+        .reduce((acc, d) => acc + (Number(d.valor_total) || 0), 0),
+    [grupos, selecionadosSet],
   );
 
   function toggle(id: number) {
     setSelecionados((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   }
 
-  function toggleGrupo(grupo: FilaAutorizacaoGrupo) {
+  function toggleGrupo(grupo: FilaAutorizacaoFonteGrupo) {
     const ids = grupo.debitos.map((d) => d.id);
     const todosNoGrupo = ids.every((id) => selecionadosSet.has(id));
     setSelecionados((cur) =>
@@ -134,31 +152,49 @@ function TabDespesa() {
     );
   }
 
-  const resumoPorConta = useMemo(
+  // Grupos com débitos selecionados, com a conta escolhida e a soma.
+  const gruposSelecionados = useMemo(
     () =>
       grupos
         .map((g) => {
-          const soma = g.debitos
-            .filter((d) => selecionadosSet.has(d.id))
-            .reduce((acc, d) => acc + (Number(d.valor_total) || 0), 0);
-          return { grupo: g, soma };
+          const debs = g.debitos.filter((d) => selecionadosSet.has(d.id));
+          const soma = debs.reduce((acc, d) => acc + (Number(d.valor_total) || 0), 0);
+          const contaId = contaPorFonte[g.id_fonte];
+          const conta = g.contas_elegiveis.find((c) => c.id_conta === contaId);
+          return { grupo: g, debs, soma, contaId, conta };
         })
-        .filter((r) => r.soma > 0),
-    [grupos, selecionadosSet],
+        .filter((x) => x.debs.length > 0),
+    [grupos, selecionadosSet, contaPorFonte],
   );
 
-  const algumaContaExcedeSaldo = resumoPorConta.some((r) => r.soma > (Number(r.grupo.disponivel) || 0));
+  const faltaConta = gruposSelecionados.some((x) => x.contaId === undefined);
+  const algumExcede = gruposSelecionados.some(
+    (x) => x.conta && x.soma > (Number(x.conta.disponivel) || 0),
+  );
 
   const autorizarM = useMutation({
-    mutationFn: () => api.pagamentos.autorizar(selecionados),
-    onSuccess: (op: OrdemPagamento) => {
+    mutationFn: () =>
+      api.pagamentos.autorizar(
+        gruposSelecionados.map((x) => ({
+          id_fonte: x.grupo.id_fonte,
+          id_conta_pagadora: x.contaId as number,
+          debito_ids: x.debs.map((d) => d.id),
+        })),
+      ),
+    onSuccess: (ops: OrdemPagamento[]) => {
       INVALIDATE_KEYS.forEach((key) => qc.invalidateQueries({ queryKey: key }));
-      toast.success(`OP ${op.numero} gerada — ${fmtMoeda(op.valor_total)}`, {
-        action: {
-          label: "Abrir PDF",
-          onClick: () => window.open(api.pagamentos.ordens.pdfUrl(op.id), "_blank", "noopener"),
-        },
-      });
+      const total = ops.reduce((acc, o) => acc + (Number(o.valor_total) || 0), 0);
+      toast.success(
+        `${ops.length} Ordem(ns) de Pagamento gerada(s) — ${fmtMoeda(total)}`,
+        ops.length === 1
+          ? {
+              action: {
+                label: "Abrir PDF",
+                onClick: () => window.open(api.pagamentos.ordens.pdfUrl(ops[0].id), "_blank", "noopener"),
+              },
+            }
+          : undefined,
+      );
       setSelecionados([]);
       setConfirmOpen(false);
     },
@@ -170,7 +206,7 @@ function TabDespesa() {
       <EmptyState
         icon={ShieldCheck}
         title="Nada aguardando autorização"
-        description="Os débitos aprovados pela chefia aparecem aqui, agrupados por conta, para autorização e emissão da Ordem de Pagamento."
+        description="Os débitos aprovados pela chefia aparecem aqui, agrupados por fonte de recursos, para você escolher a conta pagadora e emitir a Ordem de Pagamento."
       />
     );
   }
@@ -180,56 +216,126 @@ function TabDespesa() {
       {grupos.map((grupo) => {
         const ids = grupo.debitos.map((d) => d.id);
         const groupChecked = ids.length > 0 && ids.every((id) => selecionadosSet.has(id));
+        const semConta = grupo.contas_elegiveis.length === 0;
+        const contaId = contaPorFonte[grupo.id_fonte];
+        const contaSel = grupo.contas_elegiveis.find((c) => c.id_conta === contaId);
         const somaGrupo = grupo.debitos
           .filter((d) => selecionadosSet.has(d.id))
           .reduce((acc, d) => acc + (Number(d.valor_total) || 0), 0);
+        const excede = !!contaSel && somaGrupo > (Number(contaSel.disponivel) || 0);
         return (
-          <GrupoContaCard
-            key={grupo.id_conta}
-            nomeConta={grupo.nome_conta}
-            disponivel={grupo.disponivel}
-            abaixoMinimo={grupo.abaixo_minimo}
-            somaSelecionada={somaGrupo}
-            groupChecked={groupChecked}
-            onToggleGroup={() => toggleGrupo(grupo)}
-            toggleGroupDisabled={ids.length === 0}
-          >
-            {grupo.debitos.map((d: DebitoFilaItem) => (
-              <div key={d.id} className="flex items-center gap-3 px-4 py-3">
-                <input
-                  type="checkbox"
-                  checked={selecionadosSet.has(d.id)}
-                  onChange={() => toggle(d.id)}
-                  aria-label={`Selecionar ${d.nome_fornecedor}`}
-                  className="h-5 w-5 shrink-0 cursor-pointer rounded border-input text-primary focus:ring-2 focus:ring-ring"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="truncate font-semibold text-foreground" title={d.nome_fornecedor}>
-                      {d.nome_fornecedor}
+          <div key={grupo.id_fonte} className="overflow-hidden rounded-lg border border-border bg-surface-1">
+            {/* Cabeçalho da fonte + seletor de conta pagadora */}
+            <div className="space-y-3 border-b border-border bg-surface-2 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={groupChecked}
+                    disabled={ids.length === 0 || semConta}
+                    onChange={() => toggleGrupo(grupo)}
+                    aria-label={`Selecionar todos da fonte ${grupo.codigo_fonte}`}
+                    className="h-5 w-5 cursor-pointer rounded border-input text-primary focus:ring-2 focus:ring-ring disabled:opacity-50"
+                  />
+                  <span>
+                    Fonte {grupo.codigo_fonte}
+                    <span className="ml-1 font-normal text-muted-foreground" title={grupo.descricao_fonte}>
+                      · {grupo.descricao_fonte}
                     </span>
-                    <Link
-                      href={`/pagamentos/contas-a-pagar/${d.id}`}
-                      aria-label={`Ver detalhe de ${d.nome_fornecedor}`}
-                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                  </span>
+                </label>
+                {somaGrupo > 0 && (
+                  <span className="text-sm tabular-nums text-muted-foreground">
+                    Σ selecionado <span className="font-semibold text-foreground">{fmtMoeda(somaGrupo)}</span>
+                  </span>
+                )}
+              </div>
+
+              {semConta ? (
+                <div className="flex items-center gap-2 rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs text-warning-soft-foreground">
+                  <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  Nenhuma conta ativa nesta fonte — cadastre/ative uma conta para autorizar (RF-AUT-11).
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="min-w-[16rem] flex-1">
+                    <Label htmlFor={`conta-fonte-${grupo.id_fonte}`} className="text-xs">
+                      Conta pagadora
+                    </Label>
+                    <select
+                      id={`conta-fonte-${grupo.id_fonte}`}
+                      value={contaId ?? ""}
+                      onChange={(e) =>
+                        setContaPorFonte((cur) => ({ ...cur, [grupo.id_fonte]: Number(e.target.value) }))
+                      }
+                      className="mt-1 h-9 w-full rounded-md border border-input bg-surface-1 px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                     >
-                      <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                    </Link>
-                    {d.urgente && <Badge intent="danger">URGENTE</Badge>}
+                      <option value="" disabled>
+                        Selecione a conta pagadora…
+                      </option>
+                      {grupo.contas_elegiveis.map((c) => (
+                        <option key={c.id_conta} value={c.id_conta}>
+                          {c.nome} · {c.banco} ag.{c.agencia} c/{c.conta_mascarada} — disp.{" "}
+                          {fmtMoeda(c.disponivel)}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  <p className="truncate text-xs text-muted-foreground">
-                    <span title={d.natureza_descricao}>{d.natureza_codigo}</span> · comp. {d.competencia}
-                    {d.aprovado_por && (
-                      <> · aprovado por {d.aprovado_por} em {fmtDataCurta(d.aprovado_em)}</>
-                    )}
+                  {contaSel && (
+                    <p
+                      className={cn(
+                        "pb-1.5 text-xs tabular-nums",
+                        excede ? "text-warning-soft-foreground" : "text-muted-foreground",
+                      )}
+                    >
+                      Disponível {fmtMoeda(contaSel.disponivel)}
+                      {excede && " — insuficiente para o selecionado"}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Débitos da fonte */}
+            <div className="divide-y divide-border">
+              {grupo.debitos.map((d: DebitoFilaItem) => (
+                <div key={d.id} className="flex items-center gap-3 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={selecionadosSet.has(d.id)}
+                    disabled={semConta}
+                    onChange={() => toggle(d.id)}
+                    aria-label={`Selecionar ${d.nome_fornecedor}`}
+                    className="h-5 w-5 shrink-0 cursor-pointer rounded border-input text-primary focus:ring-2 focus:ring-ring disabled:opacity-50"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="truncate font-semibold text-foreground" title={d.nome_fornecedor}>
+                        {d.nome_fornecedor}
+                      </span>
+                      <Link
+                        href={`/pagamentos/contas-a-pagar/${d.id}`}
+                        aria-label={`Ver detalhe de ${d.nome_fornecedor}`}
+                        className="shrink-0 text-muted-foreground hover:text-foreground"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                      </Link>
+                      {d.urgente && <Badge intent="danger">URGENTE</Badge>}
+                    </div>
+                    <p className="truncate text-xs text-muted-foreground">
+                      <span title={d.natureza_descricao}>{d.natureza_codigo}</span> · comp. {d.competencia}
+                      {d.aprovado_por && (
+                        <> · aprovado por {d.aprovado_por} em {fmtDataCurta(d.aprovado_em)}</>
+                      )}
+                    </p>
+                  </div>
+                  <p className="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums text-foreground">
+                    {fmtMoeda(d.valor_total)}
                   </p>
                 </div>
-                <p className="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums text-foreground">
-                  {fmtMoeda(d.valor_total)}
-                </p>
-              </div>
-            ))}
-          </GrupoContaCard>
+              ))}
+            </div>
+          </div>
         );
       })}
 
@@ -239,7 +345,9 @@ function TabDespesa() {
             <span className="font-semibold">{selecionados.length}</span> débito(s) — Σ{" "}
             <span className="font-semibold tabular-nums">{fmtMoeda(somaSelecionados)}</span>
           </p>
-          <Button onClick={() => setConfirmOpen(true)}>Autorizar despesas (gerar OP)</Button>
+          <Button onClick={() => setConfirmOpen(true)} disabled={faltaConta}>
+            {faltaConta ? "Escolha a conta pagadora de cada fonte" : "Autorizar despesas (gerar OP)"}
+          </Button>
         </div>
       )}
 
@@ -253,7 +361,10 @@ function TabDespesa() {
             <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => autorizarM.mutate()} disabled={autorizarM.isPending}>
+            <Button
+              onClick={() => autorizarM.mutate()}
+              disabled={gruposSelecionados.length === 0 || faltaConta || autorizarM.isPending}
+            >
               {autorizarM.isPending ? "Autorizando..." : "Confirmar e gerar OP"}
             </Button>
           </>
@@ -263,36 +374,38 @@ function TabDespesa() {
           <p className="text-sm text-foreground">
             Você está autorizando <span className="font-semibold">{selecionados.length}</span> débito(s),
             totalizando{" "}
-            <span className="font-semibold tabular-nums">{fmtMoeda(somaSelecionados)}</span>. Esta ação
-            gera uma Ordem de Pagamento e não pode ser desfeita.
+            <span className="font-semibold tabular-nums">{fmtMoeda(somaSelecionados)}</span>. Cada fonte
+            gera uma Ordem de Pagamento reservando o valor na conta escolhida — ação não reversível.
           </p>
           <div className="space-y-1.5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Por conta</p>
-            {resumoPorConta.map(({ grupo, soma }) => {
-              const disponivel = Number(grupo.disponivel) || 0;
-              const excede = soma > disponivel;
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Por fonte → conta pagadora
+            </p>
+            {gruposSelecionados.map(({ grupo, soma, conta }) => {
+              const disponivel = Number(conta?.disponivel) || 0;
+              const excede = !!conta && soma > disponivel;
               return (
                 <div
-                  key={grupo.id_conta}
+                  key={grupo.id_fonte}
                   className={cn(
-                    "flex items-center justify-between rounded-md border px-3 py-2 text-sm",
+                    "flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm",
                     excede
                       ? "border-warning/40 bg-warning-soft text-warning-soft-foreground"
                       : "border-border bg-surface-1 text-foreground",
                   )}
                 >
-                  <span className="min-w-0 truncate" title={grupo.nome_conta}>
-                    {grupo.nome_conta}
+                  <span className="min-w-0 truncate" title={grupo.descricao_fonte}>
+                    Fonte {grupo.codigo_fonte} → {conta ? conta.nome : "—"}
                   </span>
                   <span className="shrink-0 whitespace-nowrap tabular-nums">
-                    {fmtMoeda(soma)} de {fmtMoeda(disponivel)} disponível
+                    {fmtMoeda(soma)} de {fmtMoeda(disponivel)} disp.
                   </span>
                 </div>
               );
             })}
-            {algumaContaExcedeSaldo && (
+            {algumExcede && (
               <p className="text-xs text-warning-soft-foreground">
-                Atenção: alguma conta selecionada não tem saldo disponível suficiente — o backend
+                Atenção: alguma conta escolhida não tem saldo disponível suficiente — o backend
                 recusará a autorização por saldo insuficiente.
               </p>
             )}

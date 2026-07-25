@@ -94,7 +94,8 @@ async def _base(engine, tenant_id, *, saldo_inicial="10000.00"):
 
 def _payload_debito(forn, nat, conta, *, valor="1000.00", parcelas=None):
     return DebitoCreate(
-        id_fornecedor=forn.id, id_natureza=nat.id, id_conta=conta.id,
+        id_fornecedor=forn.id, id_natureza=nat.id,
+        id_fonte_recursos=conta.id_fonte_recursos, id_conta=conta.id,
         valor_total=valor, competencia="2026-07", descricao="Compra de material",
         parcelas=parcelas or [ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
     )
@@ -356,5 +357,51 @@ async def test_cancelar_apos_parcela_paga_409(admin_engine):
                 await svc.cancelar(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante,
                                    justificativa="Cancelamento indevido")
             assert exc.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_criar_debito_sem_conta_sugerida_ok(admin_engine):
+    """v2.0: a conta sugerida é opcional; a fonte é obrigatória e vinculante."""
+    t = await _provisionar(admin_engine)
+    try:
+        forn, nat, conta = await _base(admin_engine, t.id)
+        async with _sm(admin_engine)() as s:
+            uid = (await s.execute(text(
+                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid, payload=DebitoCreate(
+                id_fornecedor=forn.id, id_natureza=nat.id,
+                id_fonte_recursos=conta.id_fonte_recursos, id_conta=None,
+                valor_total="1000.00", competencia="2026-07", descricao="Sem conta sugerida",
+                parcelas=[ParcelaCreate(numero=1, valor="1000.00", vencimento="2026-08-01")]))
+        assert d.status == "RASCUNHO"
+        assert d.id_conta is None
+        assert d.id_fonte_recursos == conta.id_fonte_recursos
+        assert d.id_conta_pagadora is None
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_criar_debito_conta_de_outra_fonte_422(admin_engine):
+    """A conta sugerida, se informada, deve pertencer à fonte do débito."""
+    t = await _provisionar(admin_engine)
+    try:
+        forn, nat, conta = await _base(admin_engine, t.id)
+        async with _sm(admin_engine)() as s:
+            outra_fonte = await cad.criar_fonte(s, tenant_id=t.id, payload=FonteCreate(
+                codigo=f"F{uuid.uuid4().hex[:6]}", descricao="Outra", grupos_despesa_permitidos=[]))
+            outra_conta = await cad.criar_conta(s, tenant_id=t.id, payload=ContaCreate(
+                nome="Conta Outra", banco="002", agencia="2", conta=uuid.uuid4().hex[:8],
+                id_fonte_recursos=outra_fonte.id, grupo_despesa="CUSTEIO"))
+            uid = (await s.execute(text(
+                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid, payload=DebitoCreate(
+                    id_fornecedor=forn.id, id_natureza=nat.id,
+                    id_fonte_recursos=conta.id_fonte_recursos, id_conta=outra_conta.id,
+                    valor_total="1000.00", competencia="2026-07", descricao="Conta divergente",
+                    parcelas=[ParcelaCreate(numero=1, valor="1000.00", vencimento="2026-08-01")]))
+            assert exc.value.status_code == 422
     finally:
         await _cleanup(admin_engine, t.id)

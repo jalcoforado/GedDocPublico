@@ -152,16 +152,15 @@ async def _composicao_natureza(db, *, tenant_id: int, inicio: date) -> list[Comp
 
 
 async def _composicao_fonte(db, *, tenant_id: int, inicio: date) -> list[ComposicaoItem]:
+    # Fonte vem direto do débito (v2.0) — não mais derivada da conta.
     stmt = (select(FonteRecursos.codigo, FonteRecursos.descricao,
                    func.sum(MovimentacaoConta.valor))
             .select_from(MovimentacaoConta)
             .join(Debito, Debito.id == MovimentacaoConta.id_debito)
-            .join(ContaBancaria, ContaBancaria.id == Debito.id_conta)
-            .join(FonteRecursos, FonteRecursos.id == ContaBancaria.id_fonte_recursos)
+            .join(FonteRecursos, FonteRecursos.id == Debito.id_fonte_recursos)
             .where(MovimentacaoConta.tenant_id == tenant_id, MovimentacaoConta.excluido.is_(False),
                    MovimentacaoConta.origem == "PAGAMENTO", MovimentacaoConta.data >= inicio,
                    Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
-                   ContaBancaria.tenant_id == tenant_id, ContaBancaria.excluido.is_(False),
                    FonteRecursos.tenant_id == tenant_id, FonteRecursos.excluido.is_(False))
             .group_by(FonteRecursos.codigo, FonteRecursos.descricao)
             .order_by(func.sum(MovimentacaoConta.valor).desc()))

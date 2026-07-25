@@ -146,7 +146,14 @@ class Debito(Base):
     tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
     id_fornecedor: Mapped[int] = mapped_column(ForeignKey("pagamentos.fornecedor.id"), nullable=False)
     id_natureza: Mapped[int] = mapped_column(ForeignKey("pagamentos.natureza_despesa.id"), nullable=False)
-    id_conta: Mapped[int] = mapped_column(ForeignKey("pagamentos.conta_bancaria.id"), nullable=False)
+    # Fonte do empenho — vinculante (v2.0 RN-02/05). A conta pagadora é escolhida
+    # na autorização apenas entre contas desta fonte.
+    id_fonte_recursos: Mapped[int] = mapped_column(ForeignKey("pagamentos.fonte_recursos.id"), nullable=False)
+    # Conta sugerida na criação (não-vinculante, seção 6.1) — pode ser nula.
+    id_conta: Mapped[int | None] = mapped_column(ForeignKey("pagamentos.conta_bancaria.id"), nullable=True)
+    # Conta pagadora escolhida/reservada na autorização — imutável após gravada.
+    id_conta_pagadora: Mapped[int | None] = mapped_column(
+        ForeignKey("pagamentos.conta_bancaria.id"), nullable=True)
     id_contrato: Mapped[int | None] = mapped_column(ForeignKey("pagamentos.contrato.id"), nullable=True)
     valor_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     competencia: Mapped[str] = mapped_column(String(7), nullable=False)
@@ -207,6 +214,10 @@ class OrdemPagamento(Base):
     tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
     numero: Mapped[str] = mapped_column(String(20), nullable=False)
     id_usuario_autorizador: Mapped[int] = mapped_column(ForeignKey("utils.usuario.id"), nullable=False)
+    # Conta pagadora + valor reservado da autorização (registro histórico v2.0 seção 19).
+    id_conta_pagadora: Mapped[int | None] = mapped_column(
+        ForeignKey("pagamentos.conta_bancaria.id"), nullable=True)
+    valor_reservado: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     valor_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     ip_origem: Mapped[str | None] = mapped_column(String(45), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)

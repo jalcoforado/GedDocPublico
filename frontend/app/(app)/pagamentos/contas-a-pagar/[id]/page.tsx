@@ -84,6 +84,8 @@ export default function DebitoDetalhePage() {
   const [formaPagamento, setFormaPagamento] = useState("PIX");
   const [dataPagamento, setDataPagamento] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [autorizarOpen, setAutorizarOpen] = useState(false);
+  const [contaPagadora, setContaPagadora] = useState<number | null>(null);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["pag-debito", id] });
@@ -94,6 +96,14 @@ export default function DebitoDetalhePage() {
     queryKey: ["pag-debito", id],
     queryFn: () => api.pagamentos.debitos.get(id),
     enabled: Number.isFinite(id),
+  });
+
+  // Contas elegíveis para pagar este débito (contas ativas da fonte) — v2.0.
+  const fonteDoDebito = debitoQ.data?.id_fonte_recursos;
+  const contasElegiveisQ = useQuery({
+    queryKey: ["pag-contas-elegiveis", fonteDoDebito],
+    queryFn: () => api.pagamentos.contasElegiveis(fonteDoDebito as number),
+    enabled: autorizarOpen && fonteDoDebito !== undefined,
   });
 
   function abrirPagar(p: Parcela) {
@@ -150,10 +160,19 @@ export default function DebitoDetalhePage() {
   });
 
   const autorizarM = useMutation({
-    mutationFn: () => api.pagamentos.autorizar([id]),
-    onSuccess: (op) => {
+    mutationFn: () => {
+      if (fonteDoDebito === undefined) throw new Error("Fonte do débito indisponível.");
+      if (contaPagadora === null) throw new Error("Escolha a conta pagadora.");
+      return api.pagamentos.autorizar([
+        { id_fonte: fonteDoDebito, id_conta_pagadora: contaPagadora, debito_ids: [id] },
+      ]);
+    },
+    onSuccess: (ops) => {
       invalidate();
-      toast.success(`Débito autorizado. OP ${op.numero} gerada.`);
+      setAutorizarOpen(false);
+      setContaPagadora(null);
+      const numero = ops[0]?.numero ?? "";
+      toast.success(`Débito autorizado. OP ${numero} gerada.`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -384,7 +403,12 @@ export default function DebitoDetalhePage() {
             </>
           )}
           {d.status === "APROVADO" && can("pagamento_autorizar") && (
-            <Button onClick={() => autorizarM.mutate()} disabled={autorizarM.isPending}>
+            <Button
+              onClick={() => {
+                setContaPagadora(null);
+                setAutorizarOpen(true);
+              }}
+            >
               Autorizar
             </Button>
           )}
@@ -480,6 +504,60 @@ export default function DebitoDetalhePage() {
             >
               {err}
             </div>
+          )}
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={autorizarOpen}
+        onClose={() => setAutorizarOpen(false)}
+        title="Autorizar despesa"
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setAutorizarOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => autorizarM.mutate()}
+              disabled={contaPagadora === null || autorizarM.isPending}
+            >
+              {autorizarM.isPending ? "Autorizando..." : "Confirmar e gerar OP"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-foreground">
+            Escolha a <span className="font-semibold">conta pagadora</span> — apenas contas ativas da
+            fonte de recursos deste débito. O valor será reservado nessa conta ao gerar a Ordem de
+            Pagamento.
+          </p>
+          <div>
+            <Label htmlFor="autorizar-conta" required>
+              Conta pagadora
+            </Label>
+            <Select
+              id="autorizar-conta"
+              value={contaPagadora ?? ""}
+              onChange={(e) => setContaPagadora(e.target.value ? Number(e.target.value) : null)}
+              disabled={contasElegiveisQ.isLoading}
+            >
+              <option value="" disabled>
+                {contasElegiveisQ.isLoading ? "Carregando..." : "Selecione a conta pagadora..."}
+              </option>
+              {(contasElegiveisQ.data ?? []).map((c) => (
+                <option key={c.id_conta} value={c.id_conta}>
+                  {c.nome} · {c.banco} ag.{c.agencia} c/{c.conta_mascarada} — disp.{" "}
+                  {fmtMoeda(c.disponivel)}
+                </option>
+              ))}
+            </Select>
+          </div>
+          {!contasElegiveisQ.isLoading && (contasElegiveisQ.data ?? []).length === 0 && (
+            <p className="text-xs text-warning-soft-foreground">
+              Nenhuma conta ativa nesta fonte — cadastre/ative uma conta para autorizar.
+            </p>
           )}
         </div>
       </Dialog>

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.pagamentos import (
     AlcadaCreate, ContaCreate, DebitoCreate, FonteCreate, FornecedorCreate,
-    NaturezaCreate, ParcelaCreate,
+    GrupoAutorizacaoIn, NaturezaCreate, ParcelaCreate,
 )
 from app.services import pagamentos_autorizacao as aut
 from app.services import pagamentos_caixa as caixa
@@ -93,7 +93,8 @@ async def _base(engine, tenant_id, *, saldo_inicial="10000.00"):
 
 def _payload_debito(forn, nat, conta, *, valor="1000.00", parcelas=None):
     return DebitoCreate(
-        id_fornecedor=forn.id, id_natureza=nat.id, id_conta=conta.id,
+        id_fornecedor=forn.id, id_natureza=nat.id,
+        id_fonte_recursos=conta.id_fonte_recursos, id_conta=conta.id,
         valor_total=valor, competencia="2026-07", descricao="Compra de material",
         parcelas=parcelas or [ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
     )
@@ -153,7 +154,10 @@ async def _debito_autorizado(engine, tenant_id, *, valor="1000.00", saldo_inicia
     if autorizador is None:
         autorizador = await _autorizador_com_alcada(engine, tenant_id)
     async with _sm(engine)() as s:
-        await aut.autorizar_lote(s, tenant_id=tenant_id, usuario_id=autorizador, debito_ids=[d.id])
+        await aut.autorizar_lote(
+            s, tenant_id=tenant_id, usuario_id=autorizador,
+            grupos=[GrupoAutorizacaoIn(id_fonte=d.id_fonte_recursos,
+                                       id_conta_pagadora=d.id_conta, debito_ids=[d.id])])
     async with _sm(engine)() as s:
         d = await deb.obter_debito(s, tenant_id=tenant_id, debito_id=d.id)
     return d, solicitante, aprovador, autorizador, conta
