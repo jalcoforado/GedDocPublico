@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from ..schemas.pagamentos import (
     AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
     DebitoHistoricoOut, DebitoOut, DebitoUpdate, FilaAutorizacaoFonteGrupo, FilaLiberacaoGrupo,
-    FilaTesourariaOut, JustificativaIn, MinhaFilaOut, OrdemPagamentoOut, PagarParcelaIn,
+    FilaTesourariaOut, JustificativaIn, LiquidacaoIn, MinhaFilaOut, OrdemPagamentoOut, PagarParcelaIn,
     ParcelaFilaOut, ParcelaOut,
 )
 from ..services import pagamentos_autorizacao as aut
@@ -152,6 +152,37 @@ async def cancelar(debito_id: int, payload: JustificativaIn, request: Request,
                    tenant_id: int = Depends(require_tenant_id),
                    db: AsyncSession = Depends(get_db)):
     d = await svc.cancelar(db, tenant_id=tenant_id, debito_id=debito_id, usuario_id=usuario.id,
+                           justificativa=payload.justificativa, ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+@debitos_router.post("/{debito_id}/confirmar-liquidacao", response_model=DebitoOut)
+async def confirmar_liquidacao(debito_id: int, payload: LiquidacaoIn, request: Request,
+                               usuario: Usuario = Depends(require_permission("pagamento_aprovar")),
+                               tenant_id: int = Depends(require_tenant_id),
+                               db: AsyncSession = Depends(get_db)):
+    d = await svc.confirmar_liquidacao(db, tenant_id=tenant_id, debito_id=debito_id,
+                                       usuario_id=usuario.id, data_liquidacao=payload.data_liquidacao,
+                                       ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+@debitos_router.post("/{debito_id}/suspender", response_model=DebitoOut)
+async def suspender(debito_id: int, payload: JustificativaIn, request: Request,
+                    usuario: Usuario = Depends(require_permission("pagamento_pagar")),
+                    tenant_id: int = Depends(require_tenant_id),
+                    db: AsyncSession = Depends(get_db)):
+    d = await svc.suspender(db, tenant_id=tenant_id, debito_id=debito_id, usuario_id=usuario.id,
+                            justificativa=payload.justificativa, ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+@debitos_router.post("/{debito_id}/reativar", response_model=DebitoOut)
+async def reativar(debito_id: int, payload: JustificativaIn, request: Request,
+                   usuario: Usuario = Depends(require_permission("pagamento_pagar")),
+                   tenant_id: int = Depends(require_tenant_id),
+                   db: AsyncSession = Depends(get_db)):
+    d = await svc.reativar(db, tenant_id=tenant_id, debito_id=debito_id, usuario_id=usuario.id,
                            justificativa=payload.justificativa, ip=_ip(request))
     return (await _out(db, tenant_id, [d]))[0]
 

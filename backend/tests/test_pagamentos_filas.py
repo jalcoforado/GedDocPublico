@@ -128,6 +128,8 @@ async def _debito_aprovado(engine, tenant_id, *, base, valor="1000.00", competen
         await deb.enviar_aprovacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante)
     async with _sm(engine)() as s:
         d = await deb.aprovar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
+    async with _sm(engine)() as s:  # v2.0: liquidação é pré-requisito p/ autorizar (RN-01)
+        d = await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
     return d, solicitante, aprovador
 
 

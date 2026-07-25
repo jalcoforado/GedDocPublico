@@ -14,6 +14,7 @@ from ..models import (
     OrdemPagamentoDebito, Parcela,
 )
 from ..schemas.pagamentos import ContaElegivelOut, GrupoAutorizacaoIn
+from . import pagamentos_cadastros as cad
 from . import pagamentos_caixa as caixa
 from .pagamentos_debitos import (
     PagamentoDebitoError, _registrar_transicao, aprovadores_do_debito, listar_parcelas, obter_debito,
@@ -123,6 +124,15 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
             if d.id_fonte_recursos != g.id_fonte:
                 raise PagamentoDebitoError(
                     f"Débito {did} não pertence à fonte {g.id_fonte} do grupo (RF-AUT-15).",
+                    status.HTTP_422_UNPROCESSABLE_ENTITY)
+            if not d.liquidacao_confirmada:
+                raise PagamentoDebitoError(
+                    f"Débito {did} não pode ser autorizado sem liquidação confirmada (RN-01).",
+                    status.HTTP_422_UNPROCESSABLE_ENTITY)
+            forn = await cad.obter_fornecedor(db, tenant_id=tenant_id, fornecedor_id=d.id_fornecedor)
+            if forn.situacao_cadastral == "IRREGULAR":
+                raise PagamentoDebitoError(
+                    f"Fornecedor do débito {did} está IRREGULAR — pagamento bloqueado (RF-VAL-03).",
                     status.HTTP_422_UNPROCESSABLE_ENTITY)
             if usuario_id == d.id_usuario_solicitante:
                 raise PagamentoDebitoError(

@@ -60,10 +60,37 @@ def _registrar_transicao(db, *, debito: Debito, novo_status: str, acao: str,
     debito.status = novo_status
 
 
+async def detectar_duplicidade(db, *, tenant_id: int, id_fornecedor: int, numero_nf: str | None,
+                               numero_ne: str | None, valor_total, competencia: str,
+                               excluir_id: int | None = None) -> list[int]:
+    """IDs de débitos ativos com mesmo credor+NF+empenho+valor+competência (RF-SOL-09).
+    Só considera quando há nota fiscal (numero_nf) — o documento que caracteriza a
+    despesa. Ignora débitos já REJEITADO/CANCELADO."""
+    if not numero_nf:
+        return []
+    stmt = select(Debito.id).where(
+        Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
+        Debito.id_fornecedor == id_fornecedor, Debito.numero_nf == numero_nf,
+        Debito.valor_total == valor_total, Debito.competencia == competencia,
+        Debito.status.notin_(("REJEITADO", "CANCELADO")))
+    if numero_ne:
+        stmt = stmt.where(Debito.numero_ne == numero_ne)
+    if excluir_id is not None:
+        stmt = stmt.where(Debito.id != excluir_id)
+    return list((await db.execute(stmt)).scalars().all())
+
+
 async def criar_debito(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                        payload: DebitoCreate) -> Debito:
     await _validar_refs(db, tenant_id=tenant_id, payload=payload)
     _validar_parcelas(payload.parcelas, payload.valor_total)
+    dups = await detectar_duplicidade(
+        db, tenant_id=tenant_id, id_fornecedor=payload.id_fornecedor, numero_nf=payload.numero_nf,
+        numero_ne=payload.numero_ne, valor_total=payload.valor_total, competencia=payload.competencia)
+    if dups:
+        raise PagamentoDebitoError(
+            f"Possível duplicidade: já existe(m) débito(s) {dups} com mesmo credor, NF, "
+            f"empenho, valor e competência.", status.HTTP_409_CONFLICT)
     d = Debito(tenant_id=tenant_id, id_fornecedor=payload.id_fornecedor,
                id_natureza=payload.id_natureza, id_fonte_recursos=payload.id_fonte_recursos,
                id_conta=payload.id_conta, id_contrato=payload.id_contrato,
@@ -259,6 +286,44 @@ async def cancelar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_
     return d
 
 
+async def confirmar_liquidacao(db: AsyncSession, *, tenant_id: int, debito_id: int,
+                               usuario_id: int, data_liquidacao=None, ip: str | None = None) -> Debito:
+    """Confirma a liquidação (recebimento/atesto) — pré-requisito para autorizar
+    (RF-VAL-02/RN-01). Permitido antes da autorização; não muda o status."""
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    _exigir_status(d, "RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO")
+    d.liquidacao_confirmada = True
+    d.data_liquidacao = data_liquidacao or _utcnow().date()
+    db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
+                           status_novo=d.status, acao="LIQUIDADO",
+                           justificativa=f"Liquidação em {d.data_liquidacao.isoformat()}",
+                           id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    return d
+
+
+async def suspender(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_id: int,
+                    justificativa: str, ip: str | None = None) -> Debito:
+    """Tesouraria suspende um débito suspeito (RF-TES-06). APROVADO → SUSPENSO."""
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    _exigir_status(d, "AGUARDANDO_APROVACAO", "APROVADO")
+    _registrar_transicao(db, debito=d, novo_status="SUSPENSO", acao="SUSPENSO",
+                         usuario_id=usuario_id, justificativa=justificativa, ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    return d
+
+
+async def reativar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_id: int,
+                   justificativa: str | None = None, ip: str | None = None) -> Debito:
+    """Reverte a suspensão: SUSPENSO → APROVADO."""
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    _exigir_status(d, "SUSPENSO")
+    _registrar_transicao(db, debito=d, novo_status="APROVADO", acao="REATIVADO",
+                         usuario_id=usuario_id, justificativa=justificativa, ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    return d
+
+
 def debito_out(d: Debito, *, nome_fornecedor: str) -> dict:
     return {
         "id": d.id, "id_fornecedor": d.id_fornecedor, "nome_fornecedor": nome_fornecedor,
@@ -270,5 +335,6 @@ def debito_out(d: Debito, *, nome_fornecedor: str) -> dict:
         "urgente": d.urgente, "justificativa_urgencia": d.justificativa_urgencia,
         "descricao": d.descricao, "status": d.status,
         "id_usuario_solicitante": d.id_usuario_solicitante,
+        "liquidacao_confirmada": d.liquidacao_confirmada, "data_liquidacao": d.data_liquidacao,
         "criado_em": d.criado_em, "atualizado_em": d.atualizado_em,
     }

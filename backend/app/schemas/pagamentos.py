@@ -318,7 +318,7 @@ class ContaSaldoPainel(BaseModel):
 
 # ---------- débito / parcelas / ordem de pagamento (R2) ----------
 StatusDebito = Literal["RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO", "AUTORIZADO",
-                       "PAGO_PARCIAL", "PAGO", "REJEITADO", "CANCELADO"]
+                       "PAGO_PARCIAL", "PAGO", "REJEITADO", "CANCELADO", "SUSPENSO"]
 StatusParcela = Literal["A_PAGAR", "LIBERADA", "PAGA", "CANCELADA"]
 FormaPagamento = Literal["PIX", "TED", "BOLETO", "DINHEIRO", "OUTRO"]
 
@@ -380,6 +380,7 @@ class DebitoOut(BaseModel):
     numero_ne: str | None; numero_nf: str | None; criticidade: CriticidadeLit
     urgente: bool; justificativa_urgencia: str | None; descricao: str
     status: StatusDebito; id_usuario_solicitante: int
+    liquidacao_confirmada: bool = False; data_liquidacao: date | None = None
     criado_em: datetime; atualizado_em: datetime | None
 
 
@@ -396,6 +397,10 @@ class DebitoDetalheOut(DebitoOut):
 
 class JustificativaIn(BaseModel):
     justificativa: str = Field(min_length=1, max_length=255)
+
+
+class LiquidacaoIn(BaseModel):
+    data_liquidacao: date | None = None  # default = hoje no serviço
 
 
 class GrupoAutorizacaoIn(BaseModel):
