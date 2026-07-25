@@ -144,7 +144,7 @@ async def _novo_usuario(engine, tenant_id, sufixo):
 
 
 async def _debito_aprovado(engine, tenant_id, *, valor="1000.00", saldo_inicial="10000.00",
-                           parcelas=None, base=None):
+                           parcelas=None, base=None, liquidar=True):
     """Débito RASCUNHO→ENVIADO→APROVADO com solicitante/aprovador distintos.
     Retorna (debito, solicitante_id, aprovador_id, fonte, conta). `base` reusa
     (forn, nat, fonte, conta)."""
@@ -162,6 +162,10 @@ async def _debito_aprovado(engine, tenant_id, *, valor="1000.00", saldo_inicial=
         await deb.enviar_aprovacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante)
     async with _sm(engine)() as s:
         d = await deb.aprovar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
+    if liquidar:  # v2.0: liquidação confirmada é pré-requisito para autorizar (RN-01)
+        async with _sm(engine)() as s:
+            d = await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id,
+                                               usuario_id=aprovador)
     return d, solicitante, aprovador, fonte, conta
 
 
@@ -359,6 +363,28 @@ async def test_rf_aut_15_fontes_distintas_no_grupo_bloqueadas(admin_engine):
             d1b = await deb.obter_debito(s, tenant_id=t.id, debito_id=d1.id)
             d2b = await deb.obter_debito(s, tenant_id=t.id, debito_id=d2.id)
         assert d1b.status == "APROVADO" and d2b.status == "APROVADO"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_autorizar_sem_liquidacao_422(admin_engine):
+    """RN-01: sem liquidação confirmada, o débito não pode ser autorizado."""
+    t = await _provisionar(admin_engine)
+    try:
+        d, _sol, _apr, fonte, conta = await _debito_aprovado(
+            admin_engine, t.id, valor="1000.00", liquidar=False)
+        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
+                                         grupos=[_grupo(fonte, conta, [d])])
+            assert exc.value.status_code == 422
+            assert "liquidação" in exc.value.detail.lower()
+        # confirmando a liquidação, a autorização passa
+        async with _sm(admin_engine)() as s:
+            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=_apr)
+        ops = await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d])
+        assert len(ops) == 1
     finally:
         await _cleanup(admin_engine, t.id)
 

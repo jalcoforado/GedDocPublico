@@ -2,14 +2,15 @@
 movimentações + conta.saldo_inicial (fonte única da verdade)."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import ContaBancaria, Debito, MovimentacaoConta, Parcela
+from ..models import BloqueioSaldo, ContaBancaria, Debito, MovimentacaoConta, Parcela, SaldoHistorico
 from ..schemas.pagamentos import ContaSaldoPainel, MovimentacaoCreate, SaldoConta
 
 _ORIGENS_MANUAIS = {"APORTE", "RECEITA", "AJUSTE"}
@@ -55,6 +56,17 @@ async def comprometido_conta(db, *, tenant_id, conta_id) -> Decimal:
     return (await db.execute(stmt)).scalar_one()
 
 
+async def bloqueado_conta(db, *, tenant_id, conta_id, ref: date | None = None) -> Decimal:
+    """Σ dos bloqueios administrativos ATIVOS vigentes na data de referência (RF-SLD-07)."""
+    hoje = ref or datetime.utcnow().date()
+    stmt = (select(func.coalesce(func.sum(BloqueioSaldo.valor), 0))
+            .where(BloqueioSaldo.tenant_id == tenant_id, BloqueioSaldo.id_conta == conta_id,
+                   BloqueioSaldo.ativo.is_(True), BloqueioSaldo.excluido.is_(False),
+                   BloqueioSaldo.periodo_inicio <= hoje,
+                   or_(BloqueioSaldo.periodo_fim.is_(None), BloqueioSaldo.periodo_fim >= hoje)))
+    return (await db.execute(stmt)).scalar_one()
+
+
 async def saldo_conta(db, *, tenant_id, conta_id) -> SaldoConta:
     conta = await _obter_conta(db, tenant_id=tenant_id, conta_id=conta_id)
     def _soma(tipo: str):
@@ -65,10 +77,39 @@ async def saldo_conta(db, *, tenant_id, conta_id) -> SaldoConta:
     saidas = (await db.execute(_soma("SAIDA"))).scalar_one()
     inicial = conta.saldo_inicial or Decimal("0")
     comprometido = await comprometido_conta(db, tenant_id=tenant_id, conta_id=conta_id)
+    bloqueado = await bloqueado_conta(db, tenant_id=tenant_id, conta_id=conta_id)
     saldo_atual = inicial + entradas - saidas
+    # Conciliado := saldo bancário até a conciliação da Fase 3 existir (spec seção 10).
+    # Disponível projetado = conciliado − reservado (autorizados-não-debitados) − bloqueado.
+    # Estornos já são ENTRADAS, portanto já compõem o saldo.
+    disponivel = saldo_atual - comprometido - bloqueado
     return SaldoConta(id_conta=conta_id, saldo_inicial=inicial, total_entradas=entradas,
                       total_saidas=saidas, saldo_atual=saldo_atual,
-                      comprometido=comprometido, disponivel=saldo_atual - comprometido)
+                      comprometido=comprometido, bloqueado=bloqueado, disponivel=disponivel,
+                      saldo_bancario=saldo_atual, saldo_conciliado=saldo_atual,
+                      disponivel_projetado=disponivel)
+
+
+async def registrar_snapshot_saldos(db, *, tenant_id, ref: date | None = None) -> int:
+    """Grava/atualiza o snapshot diário dos saldos de cada conta do tenant
+    (RF-SLD-03). Idempotente por (tenant_id, id_conta, data). Retorna nº de contas."""
+    dia = ref or datetime.utcnow().date()
+    contas = (await db.execute(select(ContaBancaria).where(
+        ContaBancaria.tenant_id == tenant_id, ContaBancaria.excluido.is_(False)))).scalars().all()
+    n = 0
+    for conta in contas:
+        s = await saldo_conta(db, tenant_id=tenant_id, conta_id=conta.id)
+        valores = dict(saldo_bancario=s.saldo_bancario, saldo_conciliado=s.saldo_conciliado,
+                       saldo_reservado=s.comprometido, saldo_bloqueado=s.bloqueado)
+        stmt = pg_insert(SaldoHistorico).values(
+            tenant_id=tenant_id, id_conta=conta.id, data=dia,
+            criado_em=datetime.utcnow(), **valores)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_saldohist_conta_data", set_=valores)
+        await db.execute(stmt)
+        n += 1
+    await db.commit()
+    return n
 
 
 async def painel_caixa(db, *, tenant_id) -> list[ContaSaldoPainel]:
@@ -85,5 +126,7 @@ async def painel_caixa(db, *, tenant_id) -> list[ContaSaldoPainel]:
             total_saidas=saldo.total_saidas, saldo_atual=saldo.saldo_atual,
             saldo_minimo_alerta=minimo, abaixo_minimo=saldo.saldo_atual < minimo,
             comprometido=saldo.comprometido, disponivel=saldo.disponivel,
+            bloqueado=saldo.bloqueado, saldo_conciliado=saldo.saldo_conciliado,
+            disponivel_projetado=saldo.disponivel_projetado,
         ))
     return painel

@@ -49,6 +49,7 @@ from .modulo import ConfiguracoesModulos, Modulo
 from .notificacao import Notificacao, NotificacaoPreferencia
 from .pagamentos import (
     Alcada,
+    BloqueioSaldo,
     ContaBancaria,
     Contrato,
     Debito,
@@ -63,6 +64,8 @@ from .pagamentos import (
     OrdemPagamento,
     OrdemPagamentoDebito,
     Parcela,
+    SaldoHistorico,
+    TagPrioridade,
 )
 from .nivel import Nivel
 from .servico import Servico
@@ -97,6 +100,7 @@ __all__ = [
     "AuditLog",
     "Alcada",
     "Bairro",
+    "BloqueioSaldo",
     "CcdClasse",
     "ContaBancaria",
     "Cidade",
@@ -123,6 +127,8 @@ __all__ = [
     "EspecieDocumental",
     "Estado",
     "FonteRecursos",
+    "SaldoHistorico",
+    "TagPrioridade",
     "GoogleCredencial",
     "Grupo",
     "GrupoDespesa",

@@ -26,6 +26,7 @@ celery_app = Celery(
         "app.tasks.relatorio_tramitacao_bg",
         "app.tasks.limpar_jobs_antigos",
         "app.tasks.verificar_sla_workflows",
+        "app.tasks.snapshot_saldos_pagamentos",
     ],
 )
 
@@ -54,5 +55,10 @@ celery_app.conf.beat_schedule = {
     "verificar-sla-workflows": {
         "task": "app.tasks.verificar_sla_workflows.run",
         "schedule": crontab(hour="0,6,12,18", minute=0),
+    },
+    # Pagamentos v2.0 — snapshot diário dos saldos por conta (RF-SLD-03).
+    "snapshot-saldos-pagamentos-diario": {
+        "task": "app.tasks.snapshot_saldos_pagamentos.run",
+        "schedule": crontab(hour=23, minute=30),  # fim do dia
     },
 }

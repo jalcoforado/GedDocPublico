@@ -14,6 +14,7 @@ from ..models import (
     OrdemPagamentoDebito, Parcela,
 )
 from ..schemas.pagamentos import ContaElegivelOut, GrupoAutorizacaoIn
+from . import pagamentos_cadastros as cad
 from . import pagamentos_caixa as caixa
 from .pagamentos_debitos import (
     PagamentoDebitoError, _registrar_transicao, aprovadores_do_debito, listar_parcelas, obter_debito,
@@ -30,7 +31,8 @@ async def contas_elegiveis(db: AsyncSession, *, tenant_id: int, id_fonte: int) -
     """Contas ATIVAS da fonte, com saldo/disponível — candidatas a conta pagadora."""
     contas = list((await db.execute(select(ContaBancaria).where(
         ContaBancaria.tenant_id == tenant_id, ContaBancaria.id_fonte_recursos == id_fonte,
-        ContaBancaria.ativa.is_(True), ContaBancaria.excluido.is_(False))
+        ContaBancaria.ativa.is_(True), ContaBancaria.excluido.is_(False),
+        ContaBancaria.modo_movimentacao == "PAGA")  # só contas que admitem pagamento (RF-CTA-08)
         .order_by(ContaBancaria.nome))).scalars().all())
     out: list[ContaElegivelOut] = []
     for c in contas:
@@ -82,6 +84,10 @@ async def _obter_conta_pagadora(db, *, tenant_id: int, conta_id: int) -> ContaBa
     if not c.ativa:
         raise PagamentoDebitoError(
             f"Conta pagadora {conta_id} não está ativa.", status.HTTP_422_UNPROCESSABLE_ENTITY)
+    if c.modo_movimentacao != "PAGA":
+        raise PagamentoDebitoError(
+            f"Conta {conta_id} não admite pagamento (modo '{c.modo_movimentacao}').",
+            status.HTTP_422_UNPROCESSABLE_ENTITY)
     return c
 
 
@@ -118,6 +124,15 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
             if d.id_fonte_recursos != g.id_fonte:
                 raise PagamentoDebitoError(
                     f"Débito {did} não pertence à fonte {g.id_fonte} do grupo (RF-AUT-15).",
+                    status.HTTP_422_UNPROCESSABLE_ENTITY)
+            if not d.liquidacao_confirmada:
+                raise PagamentoDebitoError(
+                    f"Débito {did} não pode ser autorizado sem liquidação confirmada (RN-01).",
+                    status.HTTP_422_UNPROCESSABLE_ENTITY)
+            forn = await cad.obter_fornecedor(db, tenant_id=tenant_id, fornecedor_id=d.id_fornecedor)
+            if forn.situacao_cadastral == "IRREGULAR":
+                raise PagamentoDebitoError(
+                    f"Fornecedor do débito {did} está IRREGULAR — pagamento bloqueado (RF-VAL-03).",
                     status.HTTP_422_UNPROCESSABLE_ENTITY)
             if usuario_id == d.id_usuario_solicitante:
                 raise PagamentoDebitoError(
