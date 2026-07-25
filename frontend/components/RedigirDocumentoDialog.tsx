@@ -172,6 +172,7 @@ export function RedigirDocumentoDialog({
   );
 
   return (
+    <>
     <Dialog
       open={open}
       onClose={onClose}
@@ -292,5 +293,6 @@ export function RedigirDocumentoDialog({
         credentialQ.refetch();
       }}
     />
+    </>
   );
 }

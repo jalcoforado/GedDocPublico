@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, X } from "lucide-react";
+import { Inbox, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +30,7 @@ export function AlvaraVeiculosModal({
   onOpenChange,
 }: AlvaraVeiculosModalProps) {
   const { toast } = useToast();
-  const { confirm } = useConfirm();
+  const confirm = useConfirm();
   const queryClient = useQueryClient();
   const [selectedVeiculo, setSelectedVeiculo] = useState<number | null>(null);
 
@@ -46,7 +46,7 @@ export function AlvaraVeiculosModal({
   // Lista de todos os veículos para vincular
   const { data: todosVeiculos } = useQuery<VeiculoRegulado[]>({
     queryKey: ["/transporte-regulado/veiculos"],
-    queryFn: () => api.veiculos.list(),
+    queryFn: () => api.veiculosRegulados.list(),
     enabled: open,
   });
 
@@ -57,7 +57,7 @@ export function AlvaraVeiculosModal({
       await api.alvaras.veiculos.add(alvaraId, { id_veiculo: selectedVeiculo });
     },
     onSuccess: () => {
-      toast({ title: "Veículo vinculado com sucesso!" });
+      toast({ message: "Veículo vinculado com sucesso!", intent: "success" });
       queryClient.invalidateQueries({
         queryKey: [`/transporte-regulado/alvaras/${alvaraId}/veiculos`],
       });
@@ -65,7 +65,7 @@ export function AlvaraVeiculosModal({
     },
     onError: (err: any) => {
       const msg = err.message || "Erro ao vincular veículo";
-      toast({ title: msg, variant: "destructive" });
+      toast({ message: msg, intent: "error" });
     },
   });
 
@@ -75,13 +75,13 @@ export function AlvaraVeiculosModal({
       await api.alvaras.veiculos.remove(alvaraId, veiculoId);
     },
     onSuccess: () => {
-      toast({ title: "Veículo desvinculado com sucesso!" });
+      toast({ message: "Veículo desvinculado com sucesso!", intent: "success" });
       queryClient.invalidateQueries({
         queryKey: [`/transporte-regulado/alvaras/${alvaraId}/veiculos`],
       });
     },
     onError: (err: any) => {
-      toast({ title: "Erro ao desvincular veículo", variant: "destructive" });
+      toast({ message: "Erro ao desvincular veículo", intent: "error" });
     },
   });
 
@@ -96,7 +96,7 @@ export function AlvaraVeiculosModal({
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onClose={() => onOpenChange(false)} title="Veículos do alvará">
       <div className="w-full max-w-2xl space-y-6 rounded-lg bg-white p-6">
         {/* Header */}
         <div className="flex items-center justify-between border-b pb-4">
@@ -153,7 +153,7 @@ export function AlvaraVeiculosModal({
             <div className="text-center text-gray-600">Carregando...</div>
           ) : !veiculosAlvara || veiculosAlvara.length === 0 ? (
             <EmptyState
-              icon="inbox"
+              icon={Inbox}
               title="Nenhum veículo vinculado"
               description="Vincule um veículo para começar"
             />
@@ -182,9 +182,11 @@ export function AlvaraVeiculosModal({
                       size="sm"
                       onClick={async () => {
                         if (
-                          await confirm(
-                            "Desvincular este veículo?",
-                          )
+                          await confirm({
+                            title: "Desvincular veículo",
+                            message: "Desvincular este veículo do alvará?",
+                            intent: "danger",
+                          })
                         ) {
                           desvinculateMutation.mutate(av.id_veiculo);
                         }
@@ -204,7 +206,7 @@ export function AlvaraVeiculosModal({
         {/* Footer */}
         <div className="border-t pt-4 flex justify-end">
           <Button
-            variant="outline"
+            variant="secondary"
             onClick={() => onOpenChange(false)}
           >
             Fechar

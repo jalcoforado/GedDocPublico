@@ -23,17 +23,16 @@ import {
   api,
   type ResultadoAvaliacao,
   type StatusDocumento,
-  type TipoDocumento,
+  type TipoDocumentoTR,
   type VeiculoAvaliacao,
-  type VeiculoDocumento,
+  type VeiculoDocumentoTR,
   type VeiculoRegulado,
-  type VeiculoVistoria,
-  type VeiculoVistoriaInput,
+  type VeiculoVistoriaTR,
   type VeiculoVistoriaRenovarInput,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
-const TIPOS_DOCUMENTO: { value: TipoDocumento; label: string }[] = [
+const TIPOS_DOCUMENTO: { value: TipoDocumentoTR; label: string }[] = [
   { value: "crlv", label: "CRLV" },
   { value: "cnh_copia", label: "Cópia CNH" },
   { value: "inspecao", label: "Inspeção" },
@@ -82,7 +81,7 @@ const RESULTADO_INTENT: Record<string, "success" | "warning" | "danger" | "info"
 };
 
 interface DocumentoForm {
-  tipo_documento: TipoDocumento;
+  tipo_documento: TipoDocumentoTR;
   numero_documento: string;
   data_emissao: string;
   data_validade: string;
@@ -112,7 +111,7 @@ interface RenovarForm {
 }
 
 const EMPTY_DOC: DocumentoForm = {
-  tipo_documento: "crlv",
+  tipo_documento: "crlv" as TipoDocumentoTR,
   numero_documento: "",
   data_emissao: "",
   data_validade: "",
@@ -158,10 +157,10 @@ export default function VeiculoDetailPage() {
   const [avalForm, setAvalForm] = useState<AvaliacaoForm>(EMPTY_AVAL);
   const [vistForm, setVistForm] = useState<VistoriaForm>(EMPTY_VIST);
   const [renovarForm, setRenovarForm] = useState<RenovarForm>(EMPTY_RENOV);
-  const [editingDoc, setEditingDoc] = useState<VeiculoDocument | null>(null);
+  const [editingDoc, setEditingDoc] = useState<VeiculoDocumentoTR | null>(null);
   const [editingAval, setEditingAval] = useState<VeiculoAvaliacao | null>(null);
-  const [editingVist, setEditingVist] = useState<VeiculoVistoria | null>(null);
-  const [selectedVistToRenew, setSelectedVistToRenew] = useState<VeiculoVistoria | null>(null);
+  const [editingVist, setEditingVist] = useState<VeiculoVistoriaTR | null>(null);
+  const [selectedVistToRenew, setSelectedVistToRenew] = useState<VeiculoVistoriaTR | null>(null);
 
   const veiculoQ = useQuery({
     queryKey: ["tr-veiculo", veiculoId],
@@ -385,7 +384,7 @@ export default function VeiculoDetailPage() {
             Voltar
           </Button>
         </Link>
-        <PageHeader title={veiculo.placa} subtitle={`${veiculo.marca} ${veiculo.modelo}`} />
+        <PageHeader title={veiculo.placa} description={`${veiculo.marca} ${veiculo.modelo}`} />
       </div>
 
       {/* Abas */}
@@ -531,7 +530,7 @@ export default function VeiculoDetailPage() {
           {/* Documento Dialog */}
           <Dialog
             open={docDialogOpen}
-            onOpenChange={setDocDialogOpen}
+            onClose={() => setDocDialogOpen(false)}
             title={editingDoc ? "Editar Documento" : "Novo Documento"}
           >
             <div className="space-y-4">
@@ -540,10 +539,13 @@ export default function VeiculoDetailPage() {
                 <Select
                   value={docForm.tipo_documento}
                   onChange={(e) =>
-                    setDocForm({ ...docForm, tipo_documento: e.target.value as TipoDocumento })
+                    setDocForm({ ...docForm, tipo_documento: e.target.value as TipoDocumentoTR })
                   }
-                  options={TIPOS_DOCUMENTO}
-                />
+                >
+                  {TIPOS_DOCUMENTO.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </Select>
               </div>
               <div>
                 <Label>Número do Documento *</Label>
@@ -580,10 +582,10 @@ export default function VeiculoDetailPage() {
                 />
               </div>
               <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setDocDialogOpen(false)}>
+                <Button variant="secondary" onClick={() => setDocDialogOpen(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={handleSaveDoc} loading={criarDocM.isPending || atualizarDocM.isPending}>
+                <Button onClick={handleSaveDoc} disabled={criarDocM.isPending || atualizarDocM.isPending}>
                   Salvar
                 </Button>
               </div>
@@ -674,7 +676,7 @@ export default function VeiculoDetailPage() {
           {/* Avaliacao Dialog */}
           <Dialog
             open={avalDialogOpen}
-            onOpenChange={setAvalDialogOpen}
+            onClose={() => setAvalDialogOpen(false)}
             title={editingAval ? "Editar Avaliação" : "Nova Avaliação"}
           >
             <div className="space-y-4">
@@ -685,8 +687,11 @@ export default function VeiculoDetailPage() {
                   onChange={(e) =>
                     setAvalForm({ ...avalForm, resultado: e.target.value as ResultadoAvaliacao })
                   }
-                  options={RESULTADOS_AVALIACAO}
-                />
+                >
+                  {RESULTADOS_AVALIACAO.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </Select>
               </div>
               <div>
                 <Label>Data da Avaliação</Label>
@@ -714,10 +719,10 @@ export default function VeiculoDetailPage() {
                 />
               </div>
               <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setAvalDialogOpen(false)}>
+                <Button variant="secondary" onClick={() => setAvalDialogOpen(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={handleSaveAval} loading={criarAvalM.isPending || atualizarAvalM.isPending}>
+                <Button onClick={handleSaveAval} disabled={criarAvalM.isPending || atualizarAvalM.isPending}>
                   Salvar
                 </Button>
               </div>
@@ -839,7 +844,7 @@ export default function VeiculoDetailPage() {
           {/* Vistoria Dialog */}
           <Dialog
             open={vistDialogOpen}
-            onOpenChange={setVistDialogOpen}
+            onClose={() => setVistDialogOpen(false)}
             title={editingVist ? "Editar Vistoria" : "Nova Vistoria"}
           >
             <div className="space-y-4">
@@ -850,8 +855,11 @@ export default function VeiculoDetailPage() {
                   onChange={(e) =>
                     setVistForm({ ...vistForm, resultado: e.target.value as ResultadoAvaliacao })
                   }
-                  options={RESULTADOS_VISTORIA}
-                />
+                >
+                  {RESULTADOS_VISTORIA.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </Select>
               </div>
               <div>
                 <Label>Data da Vistoria</Label>
@@ -887,10 +895,10 @@ export default function VeiculoDetailPage() {
                 />
               </div>
               <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setVistDialogOpen(false)}>
+                <Button variant="secondary" onClick={() => setVistDialogOpen(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={handleSaveVist} loading={criarVistM.isPending || atualizarVistM.isPending}>
+                <Button onClick={handleSaveVist} disabled={criarVistM.isPending || atualizarVistM.isPending}>
                   Salvar
                 </Button>
               </div>
@@ -900,7 +908,7 @@ export default function VeiculoDetailPage() {
           {/* Renovar Vistoria Dialog */}
           <Dialog
             open={renovarDialogOpen}
-            onOpenChange={setRenovarDialogOpen}
+            onClose={() => setRenovarDialogOpen(false)}
             title="Renovar Vistoria"
           >
             <div className="space-y-4">
@@ -917,8 +925,11 @@ export default function VeiculoDetailPage() {
                   onChange={(e) =>
                     setRenovarForm({ ...renovarForm, resultado: e.target.value as ResultadoAvaliacao })
                   }
-                  options={RESULTADOS_VISTORIA}
-                />
+                >
+                  {RESULTADOS_VISTORIA.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </Select>
               </div>
               <div>
                 <Label>Data de Validade</Label>
@@ -946,10 +957,10 @@ export default function VeiculoDetailPage() {
                 />
               </div>
               <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setRenovarDialogOpen(false)}>
+                <Button variant="secondary" onClick={() => setRenovarDialogOpen(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={handleSaveRenov} loading={renovarVistM.isPending}>
+                <Button onClick={handleSaveRenov} disabled={renovarVistM.isPending}>
                   Renovar Vistoria
                 </Button>
               </div>

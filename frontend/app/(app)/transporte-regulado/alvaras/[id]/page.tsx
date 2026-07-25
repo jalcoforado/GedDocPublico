@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, History, Truck } from "lucide-react";
+import { ChevronLeft, History, Inbox, Truck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -248,7 +248,7 @@ export default function AlvaraDetailPage({ params }: PageParams) {
         ) : !auditoria || auditoria.eventos.length === 0 ? (
           <div className="p-6">
             <EmptyState
-              icon="inbox"
+              icon={Inbox}
               title="Nenhum evento de auditoria"
               description="Nenhuma alteração registrada ainda"
             />
@@ -294,7 +294,7 @@ export default function AlvaraDetailPage({ params }: PageParams) {
                 </div>
                 <div className="flex gap-2">
                   <Button
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     disabled={page === 0}
                     onClick={() => setPage(Math.max(0, page - 1))}
@@ -302,7 +302,7 @@ export default function AlvaraDetailPage({ params }: PageParams) {
                     Anterior
                   </Button>
                   <Button
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     disabled={(page + 1) * LIMIT >= (auditoria.total || 0)}
                     onClick={() => setPage(page + 1)}

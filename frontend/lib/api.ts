@@ -1741,7 +1741,9 @@ export interface VeiculoRegulado {
 }
 
 // --- Transporte Regulado: Documento de Veiculo --------------------------------
-export type TipoDocumento =
+// Documentos de veículo do Transporte Regulado (nomes com sufixo TR para não
+// colidir com os documentos de Frota, que usam os mesmos nomes-base acima).
+export type TipoDocumentoTR =
   | "crlv"
   | "cnh_copia"
   | "inspecao"
@@ -1756,10 +1758,10 @@ export type StatusDocumento =
   | "vencido"
   | "rejeitado";
 
-export interface VeiculoDocumento {
+export interface VeiculoDocumentoTR {
   id: number;
   id_veiculo: number;
-  tipo_documento: TipoDocumento;
+  tipo_documento: TipoDocumentoTR;
   numero_documento: string;
   data_emissao: string | null;
   data_validade: string | null;
@@ -1769,8 +1771,8 @@ export interface VeiculoDocumento {
   atualizado_em: string | null;
 }
 
-export interface VeiculoDocumentoInput {
-  tipo_documento: TipoDocumento;
+export interface VeiculoDocumentoInputTR {
+  tipo_documento: TipoDocumentoTR;
   numero_documento: string;
   data_emissao?: string | null;
   data_validade?: string | null;
@@ -1803,7 +1805,7 @@ export interface VeiculoAvaliacaoInput {
   data_avaliacao: string;
 }
 
-export interface VeiculoVistoria {
+export interface VeiculoVistoriaTR {
   id: number;
   id_veiculo: number;
   id_auditor: number;
@@ -1817,7 +1819,7 @@ export interface VeiculoVistoria {
   atualizado_em: string | null;
 }
 
-export interface VeiculoVistoriaInput {
+export interface VeiculoVistoriaInputTR {
   resultado: ResultadoAvaliacao;
   parecer: string;
   observacoes?: string | null;
@@ -2408,16 +2410,16 @@ export const api = {
       request<void>(`/transporte-regulado/veiculos/${id}`, { method: "DELETE" }),
     documentos: {
       list: (veiculoId: number) =>
-        request<VeiculoDocumento[]>(`/transporte-regulado/veiculos/${veiculoId}/documentos`),
+        request<VeiculoDocumentoTR[]>(`/transporte-regulado/veiculos/${veiculoId}/documentos`),
       get: (veiculoId: number, documentoId: number) =>
-        request<VeiculoDocumento>(`/transporte-regulado/veiculos/${veiculoId}/documentos/${documentoId}`),
-      create: (veiculoId: number, data: VeiculoDocumentoInput) =>
-        request<VeiculoDocumento>(`/transporte-regulado/veiculos/${veiculoId}/documentos`, {
+        request<VeiculoDocumentoTR>(`/transporte-regulado/veiculos/${veiculoId}/documentos/${documentoId}`),
+      create: (veiculoId: number, data: VeiculoDocumentoInputTR) =>
+        request<VeiculoDocumentoTR>(`/transporte-regulado/veiculos/${veiculoId}/documentos`, {
           method: "POST",
           body: JSON.stringify(data),
         }),
-      update: (veiculoId: number, documentoId: number, data: Partial<VeiculoDocumentoInput>) =>
-        request<VeiculoDocumento>(`/transporte-regulado/veiculos/${veiculoId}/documentos/${documentoId}`, {
+      update: (veiculoId: number, documentoId: number, data: Partial<VeiculoDocumentoInputTR>) =>
+        request<VeiculoDocumentoTR>(`/transporte-regulado/veiculos/${veiculoId}/documentos/${documentoId}`, {
           method: "PUT",
           body: JSON.stringify(data),
         }),
@@ -2448,16 +2450,16 @@ export const api = {
     },
     vistorias: {
       list: (veiculoId: number) =>
-        request<VeiculoVistoria[]>(`/transporte-regulado/veiculos/${veiculoId}/vistorias`),
+        request<VeiculoVistoriaTR[]>(`/transporte-regulado/veiculos/${veiculoId}/vistorias`),
       get: (veiculoId: number, vistoriaId: number) =>
-        request<VeiculoVistoria>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}`),
-      create: (veiculoId: number, data: VeiculoVistoriaInput) =>
-        request<VeiculoVistoria>(`/transporte-regulado/veiculos/${veiculoId}/vistorias`, {
+        request<VeiculoVistoriaTR>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}`),
+      create: (veiculoId: number, data: VeiculoVistoriaInputTR) =>
+        request<VeiculoVistoriaTR>(`/transporte-regulado/veiculos/${veiculoId}/vistorias`, {
           method: "POST",
           body: JSON.stringify(data),
         }),
-      update: (veiculoId: number, vistoriaId: number, data: Partial<VeiculoVistoriaInput>) =>
-        request<VeiculoVistoria>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}`, {
+      update: (veiculoId: number, vistoriaId: number, data: Partial<VeiculoVistoriaInputTR>) =>
+        request<VeiculoVistoriaTR>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}`, {
           method: "PUT",
           body: JSON.stringify(data),
         }),
@@ -2466,9 +2468,9 @@ export const api = {
           method: "DELETE",
         }),
       listarVencidas: (veiculoId: number) =>
-        request<VeiculoVistoria[]>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/vencidas`),
+        request<VeiculoVistoriaTR[]>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/vencidas`),
       renovar: (veiculoId: number, vistoriaId: number, data: VeiculoVistoriaRenovarInput) =>
-        request<VeiculoVistoria>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}/renovar`, {
+        request<VeiculoVistoriaTR>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}/renovar`, {
           method: "POST",
           body: JSON.stringify(data),
         }),
