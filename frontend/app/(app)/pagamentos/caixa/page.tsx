@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm";
 import {
   api,
   type ContaSaldoPainel,
@@ -48,14 +49,26 @@ function emptyForm(idConta: number | null): FormState {
   };
 }
 
+interface BloqForm {
+  valor: string;
+  motivo: string;
+  periodo_inicio: string;
+  periodo_fim: string;
+}
+
 export default function CaixaPage() {
   const qc = useQueryClient();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [selecionada, setSelecionada] = useState<ContaSaldoPainel | null>(null);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm(null));
   const [err, setErr] = useState<string | null>(null);
+  const [bloqOpen, setBloqOpen] = useState(false);
+  const [bloqForm, setBloqForm] = useState<BloqForm>({
+    valor: "", motivo: "", periodo_inicio: hojeISO(), periodo_fim: "",
+  });
 
   const painelQ = useQuery({
     queryKey: ["pag-caixa-painel"],
@@ -101,8 +114,58 @@ export default function CaixaPage() {
     },
   });
 
+  const bloqueiosQ = useQuery({
+    queryKey: ["pag-bloqueios", selecionada?.id_conta],
+    queryFn: () => api.pagamentos.bloqueios.list({ conta_id: selecionada!.id_conta }),
+    enabled: selecionada !== null,
+  });
+
+  function invalidarSaldos() {
+    qc.invalidateQueries({ queryKey: ["pag-caixa-painel"] });
+    qc.invalidateQueries({ queryKey: ["pag-bloqueios"] });
+  }
+
+  const criarBloqM = useMutation({
+    mutationFn: () => {
+      if (selecionada === null) throw new Error("Selecione uma conta.");
+      return api.pagamentos.bloqueios.create({
+        id_conta: selecionada.id_conta,
+        valor: Number(bloqForm.valor),
+        motivo: bloqForm.motivo.trim(),
+        periodo_inicio: bloqForm.periodo_inicio,
+        periodo_fim: bloqForm.periodo_fim || null,
+      });
+    },
+    onSuccess: () => {
+      invalidarSaldos();
+      toast.success("Bloqueio registrado.");
+      setBloqOpen(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const removerBloqM = useMutation({
+    mutationFn: (bloqId: number) => api.pagamentos.bloqueios.remove(bloqId),
+    onSuccess: () => {
+      invalidarSaldos();
+      toast.success("Bloqueio removido.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  async function removerBloqueio(bloqId: number) {
+    const ok = await confirm({
+      title: "Remover bloqueio",
+      message: "Remover este bloqueio de saldo? O valor volta a ficar disponível.",
+      confirmLabel: "Remover",
+      intent: "danger",
+    });
+    if (ok) removerBloqM.mutate(bloqId);
+  }
+
   const painel = painelQ.data ?? [];
   const extrato = extratoQ.data ?? [];
+  const bloqueios = bloqueiosQ.data ?? [];
   const podeSalvar = form.id_conta !== null && Number(form.valor) > 0 && form.data.length > 0;
 
   return (
@@ -125,8 +188,9 @@ export default function CaixaPage() {
             <TH className="text-right">Saldo inicial</TH>
             <TH className="text-right">Entradas</TH>
             <TH className="text-right">Saídas</TH>
-            <TH className="text-right">Comprometido</TH>
-            <TH className="text-right">Disponível</TH>
+            <TH className="text-right">Reservado</TH>
+            <TH className="text-right">Bloqueado</TH>
+            <TH className="text-right">Disp. projetado</TH>
             <TH className="text-right">Saldo atual</TH>
             <TH></TH>
           </TR>
@@ -134,7 +198,7 @@ export default function CaixaPage() {
         <TBody>
           {!painelQ.isLoading && painel.length === 0 && (
             <TR>
-              <TD colSpan={9} className="py-6 text-center text-sm text-muted-foreground">
+              <TD colSpan={10} className="py-6 text-center text-sm text-muted-foreground">
                 Nenhuma conta cadastrada.
               </TD>
             </TR>
@@ -155,7 +219,10 @@ export default function CaixaPage() {
                 {fmtMoeda(c.total_saidas)}
               </TD>
               <TD className="text-right tabular-nums">{fmtMoeda(c.comprometido)}</TD>
-              <TD className="text-right tabular-nums">{fmtMoeda(c.disponivel)}</TD>
+              <TD className="text-right tabular-nums text-warning-soft-foreground">
+                {fmtMoeda(c.bloqueado)}
+              </TD>
+              <TD className="text-right tabular-nums">{fmtMoeda(c.disponivel_projetado)}</TD>
               <TD className="text-right text-base font-semibold tabular-nums">
                 {fmtMoeda(c.saldo_atual)}
               </TD>
@@ -221,6 +288,126 @@ export default function CaixaPage() {
           </Table>
         )}
       </div>
+
+      {selecionada !== null && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-foreground">
+              Bloqueios — {selecionada.nome}
+            </h2>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setBloqForm({ valor: "", motivo: "", periodo_inicio: hojeISO(), periodo_fim: "" });
+                setBloqOpen(true);
+              }}
+            >
+              Novo bloqueio
+            </Button>
+          </div>
+          <Table>
+            <THead>
+              <TR>
+                <TH className="text-right">Valor</TH>
+                <TH>Motivo</TH>
+                <TH>Início</TH>
+                <TH>Fim</TH>
+                <TH></TH>
+                <TH></TH>
+              </TR>
+            </THead>
+            <TBody>
+              {!bloqueiosQ.isLoading && bloqueios.length === 0 && (
+                <TR>
+                  <TD colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
+                    Nenhum bloqueio nesta conta.
+                  </TD>
+                </TR>
+              )}
+              {bloqueios.map((b) => (
+                <TR key={b.id}>
+                  <TD className="text-right tabular-nums">{fmtMoeda(b.valor)}</TD>
+                  <TD>{b.motivo}</TD>
+                  <TD>{b.periodo_inicio}</TD>
+                  <TD>{b.periodo_fim ?? "—"}</TD>
+                  <TD>
+                    <Badge intent={b.ativo ? "warning" : "neutral"}>
+                      {b.ativo ? "Ativo" : "Inativo"}
+                    </Badge>
+                  </TD>
+                  <TD className="text-right">
+                    {b.ativo && (
+                      <Button variant="ghost" size="sm" onClick={() => removerBloqueio(b.id)}
+                        disabled={removerBloqM.isPending}>
+                        Remover
+                      </Button>
+                    )}
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </div>
+      )}
+
+      <Dialog
+        open={bloqOpen}
+        onClose={() => setBloqOpen(false)}
+        title="Novo bloqueio de saldo"
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setBloqOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => criarBloqM.mutate()}
+              disabled={
+                Number(bloqForm.valor) <= 0 ||
+                bloqForm.motivo.trim().length === 0 ||
+                criarBloqM.isPending
+              }
+            >
+              {criarBloqM.isPending ? "Salvando..." : "Bloquear"}
+            </Button>
+          </>
+        }
+      >
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label>Valor</Label>
+            <Input
+              type="number"
+              step="0.01"
+              value={bloqForm.valor}
+              onChange={(e) => setBloqForm((f) => ({ ...f, valor: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>Motivo</Label>
+            <Input
+              value={bloqForm.motivo}
+              onChange={(e) => setBloqForm((f) => ({ ...f, motivo: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Início da vigência</Label>
+            <Input
+              type="date"
+              value={bloqForm.periodo_inicio}
+              onChange={(e) => setBloqForm((f) => ({ ...f, periodo_inicio: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Fim da vigência (opcional)</Label>
+            <Input
+              type="date"
+              value={bloqForm.periodo_fim}
+              onChange={(e) => setBloqForm((f) => ({ ...f, periodo_fim: e.target.value }))}
+            />
+          </div>
+        </div>
+      </Dialog>
 
       <Dialog
         open={open}

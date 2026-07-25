@@ -22,6 +22,8 @@ const GRUPO_LABELS: Record<string, string> = {
   OUTRAS: "Outras",
 };
 
+type ModoMovimentacao = "PAGA" | "RECEBE" | "TRANSFERE" | "RESTRITA";
+
 interface FormState {
   nome: string;
   banco: string;
@@ -31,6 +33,13 @@ interface FormState {
   grupo_despesa: string;
   saldo_minimo_alerta: number;
   ativa: boolean;
+  modo_movimentacao: ModoMovimentacao;
+  digito: string;
+  tipo: string;
+  titularidade: string;
+  orgao_gestor: string;
+  finalidade: string;
+  data_abertura: string;
 }
 
 const EMPTY: FormState = {
@@ -42,6 +51,13 @@ const EMPTY: FormState = {
   grupo_despesa: "CUSTEIO",
   saldo_minimo_alerta: 0,
   ativa: true,
+  modo_movimentacao: "PAGA",
+  digito: "",
+  tipo: "",
+  titularidade: "",
+  orgao_gestor: "",
+  finalidade: "",
+  data_abertura: "",
 };
 
 export default function ContasPage() {
@@ -83,6 +99,13 @@ export default function ContasPage() {
       grupo_despesa: c.grupo_despesa,
       saldo_minimo_alerta: Number(c.saldo_minimo_alerta),
       ativa: c.ativa,
+      modo_movimentacao: c.modo_movimentacao ?? "PAGA",
+      digito: c.digito ?? "",
+      tipo: c.tipo ?? "",
+      titularidade: c.titularidade ?? "",
+      orgao_gestor: c.orgao_gestor ?? "",
+      finalidade: c.finalidade ?? "",
+      data_abertura: c.data_abertura ?? "",
     });
     setOpen(true);
   }
@@ -98,6 +121,13 @@ export default function ContasPage() {
         grupo_despesa: form.grupo_despesa,
         saldo_minimo_alerta: form.saldo_minimo_alerta ?? 0,
         ativa: form.ativa,
+        modo_movimentacao: form.modo_movimentacao,
+        digito: form.digito.trim() || null,
+        tipo: form.tipo.trim() || null,
+        titularidade: form.titularidade.trim() || null,
+        orgao_gestor: form.orgao_gestor.trim() || null,
+        finalidade: form.finalidade.trim() || null,
+        data_abertura: form.data_abertura || null,
       };
       return editId === null
         ? api.pagamentos.cadastros.contas.create(payload)
@@ -307,6 +337,72 @@ export default function ContasPage() {
                 </option>
               ))}
             </Select>
+          </div>
+          <div>
+            <Label htmlFor="conta-modo" required>
+              Modo de movimentação
+            </Label>
+            <Select
+              id="conta-modo"
+              value={form.modo_movimentacao}
+              onChange={(e) =>
+                setForm({ ...form, modo_movimentacao: e.target.value as ModoMovimentacao })
+              }
+            >
+              <option value="PAGA">Paga (elegível como conta pagadora)</option>
+              <option value="RECEBE">Recebe</option>
+              <option value="TRANSFERE">Transfere</option>
+              <option value="RESTRITA">Restrita</option>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="conta-digito">Dígito</Label>
+            <Input
+              id="conta-digito"
+              value={form.digito}
+              onChange={(e) => setForm({ ...form, digito: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="conta-tipo">Tipo</Label>
+            <Input
+              id="conta-tipo"
+              value={form.tipo}
+              onChange={(e) => setForm({ ...form, tipo: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="conta-titularidade">Titularidade</Label>
+            <Input
+              id="conta-titularidade"
+              value={form.titularidade}
+              onChange={(e) => setForm({ ...form, titularidade: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="conta-orgao">Órgão gestor</Label>
+            <Input
+              id="conta-orgao"
+              value={form.orgao_gestor}
+              onChange={(e) => setForm({ ...form, orgao_gestor: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="conta-abertura">Data de abertura</Label>
+            <Input
+              id="conta-abertura"
+              type="date"
+              value={form.data_abertura}
+              onChange={(e) => setForm({ ...form, data_abertura: e.target.value })}
+            />
+          </div>
+          <div className="col-span-2">
+            <Label htmlFor="conta-finalidade">Finalidade</Label>
+            <Input
+              id="conta-finalidade"
+              value={form.finalidade}
+              onChange={(e) => setForm({ ...form, finalidade: e.target.value })}
+            />
           </div>
           <div className="col-span-2 flex items-center gap-2">
             <Checkbox

@@ -30,6 +30,7 @@ const RITO_POR_STATUS: Record<StatusDebito, { concluidos: PassoRito[]; atual?: P
   PAGO: { concluidos: ["solicitar", "aprovar", "autorizar", "liberar", "pagar"] },
   REJEITADO: { concluidos: ["solicitar"] },
   CANCELADO: { concluidos: [] },
+  SUSPENSO: { concluidos: ["solicitar"] },
 };
 
 function fmtMoeda(v: string): string {
@@ -57,6 +58,7 @@ const STATUS_BADGE: Record<StatusDebito, { intent: "neutral" | "warning" | "info
   PAGO: { intent: "success", label: "Pago" },
   REJEITADO: { intent: "danger", label: "Rejeitado" },
   CANCELADO: { intent: "danger", label: "Cancelado" },
+  SUSPENSO: { intent: "warning", label: "Suspenso" },
 };
 
 function StatusBadge({ status }: { status: StatusDebito }) {
@@ -177,6 +179,33 @@ export default function DebitoDetalhePage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const liquidacaoM = useMutation({
+    mutationFn: () => api.pagamentos.debitos.confirmarLiquidacao(id),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Liquidação confirmada.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const suspenderM = useMutation({
+    mutationFn: (justificativa: string) => api.pagamentos.debitos.suspender(id, justificativa),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Débito suspenso.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const reativarM = useMutation({
+    mutationFn: (justificativa: string) => api.pagamentos.debitos.reativar(id, justificativa),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Débito reativado.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const pagarM = useMutation({
     mutationFn: () => {
       if (!pagarParcela) throw new Error("Parcela inválida.");
@@ -234,6 +263,26 @@ export default function DebitoDetalhePage() {
       confirmLabel: "Cancelar débito",
     });
     if (j) cancelarM.mutate(j);
+  }
+
+  async function suspender() {
+    const j = await prompt({
+      title: "Suspender débito",
+      label: "Motivo da suspensão",
+      required: true,
+      confirmLabel: "Suspender",
+    });
+    if (j) suspenderM.mutate(j);
+  }
+
+  async function reativar() {
+    const j = await prompt({
+      title: "Reativar débito",
+      label: "Justificativa",
+      required: true,
+      confirmLabel: "Reativar",
+    });
+    if (j) reativarM.mutate(j);
   }
 
   async function estornar(p: Parcela) {
@@ -379,6 +428,16 @@ export default function DebitoDetalhePage() {
           Ações do fluxo
         </h2>
         <div className="flex flex-wrap gap-2">
+          {/* v2.0: liquidação é pré-requisito para autorizar (RN-01). Quem aprova
+              OU quem autoriza pode confirmá-la, para não travar o autorizador. */}
+          {!d.liquidacao_confirmada &&
+            ["RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO"].includes(d.status) &&
+            (can("pagamento_aprovar") || can("pagamento_autorizar")) && (
+              <Button variant="secondary" onClick={() => liquidacaoM.mutate()}
+                disabled={liquidacaoM.isPending}>
+                Confirmar liquidação
+              </Button>
+            )}
           {d.status === "RASCUNHO" && can("pagamento_solicitar") && (
             <>
               <Button onClick={() => enviarM.mutate()} disabled={enviarM.isPending}>
@@ -403,19 +462,41 @@ export default function DebitoDetalhePage() {
             </>
           )}
           {d.status === "APROVADO" && can("pagamento_autorizar") && (
-            <Button
-              onClick={() => {
-                setContaPagadora(null);
-                setAutorizarOpen(true);
-              }}
-            >
-              Autorizar
+            d.liquidacao_confirmada ? (
+              <Button
+                onClick={() => {
+                  setContaPagadora(null);
+                  setAutorizarOpen(true);
+                }}
+              >
+                Autorizar
+              </Button>
+            ) : (
+              <p className="self-center text-sm text-muted-foreground">
+                Confirme a liquidação antes de autorizar.
+              </p>
+            )
+          )}
+          {/* v2.0: tesouraria suspende/reativa débito suspeito (RF-TES-06) */}
+          {["AGUARDANDO_APROVACAO", "APROVADO"].includes(d.status) && can("pagamento_pagar") && (
+            <Button variant="danger" onClick={suspender} disabled={suspenderM.isPending}>
+              Suspender
+            </Button>
+          )}
+          {d.status === "SUSPENSO" && can("pagamento_pagar") && (
+            <Button onClick={reativar} disabled={reativarM.isPending}>
+              Reativar
             </Button>
           )}
           {!(
+            (!d.liquidacao_confirmada &&
+              ["RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO"].includes(d.status) &&
+              (can("pagamento_aprovar") || can("pagamento_autorizar"))) ||
             (d.status === "RASCUNHO" && can("pagamento_solicitar")) ||
-            (d.status === "AGUARDANDO_APROVACAO" && can("pagamento_aprovar")) ||
-            (d.status === "APROVADO" && can("pagamento_autorizar"))
+            (d.status === "AGUARDANDO_APROVACAO" &&
+              (can("pagamento_aprovar") || can("pagamento_pagar"))) ||
+            (d.status === "APROVADO" && (can("pagamento_autorizar") || can("pagamento_pagar"))) ||
+            (d.status === "SUSPENSO" && can("pagamento_pagar"))
           ) && <p className="text-sm text-muted-foreground">Nenhuma ação disponível.</p>}
         </div>
       </section>

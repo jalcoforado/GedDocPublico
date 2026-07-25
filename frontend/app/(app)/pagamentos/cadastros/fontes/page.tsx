@@ -9,6 +9,7 @@ import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, type FonteRecursos } from "@/lib/api";
@@ -21,13 +22,25 @@ const GRUPO_LABELS: Record<string, string> = {
   OUTRAS: "Outras",
 };
 
+type SituacaoFonte = "ATIVA" | "SUSPENSA" | "ENCERRADA";
+
 interface FormState {
   codigo: string;
   descricao: string;
   grupos_despesa_permitidos: string[];
+  exercicio: string;
+  esfera_origem: string;
+  tipo_vinculacao: string;
+  situacao: SituacaoFonte;
+  vigencia_inicio: string;
+  vigencia_fim: string;
 }
 
-const EMPTY: FormState = { codigo: "", descricao: "", grupos_despesa_permitidos: [] };
+const EMPTY: FormState = {
+  codigo: "", descricao: "", grupos_despesa_permitidos: [],
+  exercicio: "", esfera_origem: "", tipo_vinculacao: "", situacao: "ATIVA",
+  vigencia_inicio: "", vigencia_fim: "",
+};
 
 export default function FontesPage() {
   const qc = useQueryClient();
@@ -61,6 +74,12 @@ export default function FontesPage() {
       codigo: f.codigo,
       descricao: f.descricao,
       grupos_despesa_permitidos: f.grupos_despesa_permitidos,
+      exercicio: f.exercicio != null ? String(f.exercicio) : "",
+      esfera_origem: f.esfera_origem ?? "",
+      tipo_vinculacao: f.tipo_vinculacao ?? "",
+      situacao: f.situacao ?? "ATIVA",
+      vigencia_inicio: f.vigencia_inicio ?? "",
+      vigencia_fim: f.vigencia_fim ?? "",
     });
     setErr(null);
     setOpen(true);
@@ -81,6 +100,12 @@ export default function FontesPage() {
         codigo: form.codigo.trim(),
         descricao: form.descricao.trim(),
         grupos_despesa_permitidos: form.grupos_despesa_permitidos,
+        exercicio: form.exercicio ? Number(form.exercicio) : null,
+        esfera_origem: form.esfera_origem.trim() || null,
+        tipo_vinculacao: form.tipo_vinculacao.trim() || null,
+        situacao: form.situacao,
+        vigencia_inicio: form.vigencia_inicio || null,
+        vigencia_fim: form.vigencia_fim || null,
       };
       return editId === null
         ? api.pagamentos.cadastros.fontes.create(payload)
@@ -214,6 +239,61 @@ export default function FontesPage() {
                 </label>
               ))}
             </div>
+          </div>
+          <div>
+            <Label htmlFor="fonte-exercicio">Exercício</Label>
+            <Input
+              id="fonte-exercicio"
+              type="number"
+              value={form.exercicio}
+              onChange={(e) => setForm({ ...form, exercicio: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="fonte-situacao">Situação</Label>
+            <Select
+              id="fonte-situacao"
+              value={form.situacao}
+              onChange={(e) => setForm({ ...form, situacao: e.target.value as SituacaoFonte })}
+            >
+              <option value="ATIVA">Ativa</option>
+              <option value="SUSPENSA">Suspensa</option>
+              <option value="ENCERRADA">Encerrada</option>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="fonte-esfera">Esfera de origem</Label>
+            <Input
+              id="fonte-esfera"
+              value={form.esfera_origem}
+              onChange={(e) => setForm({ ...form, esfera_origem: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="fonte-vinculacao">Tipo de vinculação</Label>
+            <Input
+              id="fonte-vinculacao"
+              value={form.tipo_vinculacao}
+              onChange={(e) => setForm({ ...form, tipo_vinculacao: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="fonte-vig-inicio">Vigência (início)</Label>
+            <Input
+              id="fonte-vig-inicio"
+              type="date"
+              value={form.vigencia_inicio}
+              onChange={(e) => setForm({ ...form, vigencia_inicio: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="fonte-vig-fim">Vigência (fim)</Label>
+            <Input
+              id="fonte-vig-fim"
+              type="date"
+              value={form.vigencia_fim}
+              onChange={(e) => setForm({ ...form, vigencia_fim: e.target.value })}
+            />
           </div>
           {err && (
             <div
