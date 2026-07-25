@@ -13,6 +13,8 @@ TipoPessoa = Literal["FISICA", "JURIDICA"]
 SituacaoCadastral = Literal["REGULAR", "PENDENTE", "IRREGULAR"]
 CriticidadeLit = Literal["URGENTE", "ALTA", "MEDIA", "BAIXA"]
 GrupoDespesaLit = Literal["PESSOAL", "CUSTEIO", "INVESTIMENTO", "DIVIDA", "OUTRAS"]
+SituacaoFonte = Literal["ATIVA", "SUSPENSA", "ENCERRADA"]
+ModoMovimentacao = Literal["PAGA", "RECEBE", "TRANSFERE", "RESTRITA"]
 
 
 # ---------- fornecedor ----------
@@ -93,17 +95,32 @@ class FonteCreate(BaseModel):
     codigo: str = Field(min_length=1, max_length=20)
     descricao: str = Field(min_length=1, max_length=200)
     grupos_despesa_permitidos: list[GrupoDespesaLit] = Field(default_factory=list)
+    exercicio: int | None = None
+    esfera_origem: str | None = Field(default=None, max_length=20)
+    tipo_vinculacao: str | None = Field(default=None, max_length=30)
+    situacao: SituacaoFonte = "ATIVA"
+    vigencia_inicio: date | None = None
+    vigencia_fim: date | None = None
 
 
 class FonteUpdate(BaseModel):
     codigo: str | None = Field(default=None, max_length=20)
     descricao: str | None = Field(default=None, max_length=200)
     grupos_despesa_permitidos: list[GrupoDespesaLit] | None = None
+    exercicio: int | None = None
+    esfera_origem: str | None = Field(default=None, max_length=20)
+    tipo_vinculacao: str | None = Field(default=None, max_length=30)
+    situacao: SituacaoFonte | None = None
+    vigencia_inicio: date | None = None
+    vigencia_fim: date | None = None
 
 
 class FonteOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int; codigo: str; descricao: str; grupos_despesa_permitidos: list[str]
+    exercicio: int | None = None; esfera_origem: str | None = None
+    tipo_vinculacao: str | None = None; situacao: SituacaoFonte = "ATIVA"
+    vigencia_inicio: date | None = None; vigencia_fim: date | None = None
     criado_em: datetime; atualizado_em: datetime | None
 
 
@@ -118,6 +135,13 @@ class ContaCreate(BaseModel):
     saldo_minimo_alerta: Decimal = Decimal("0")
     saldo_inicial: Decimal = Decimal("0")
     ativa: bool = True
+    digito: str | None = Field(default=None, max_length=5)
+    tipo: str | None = Field(default=None, max_length=20)
+    titularidade: str | None = Field(default=None, max_length=150)
+    orgao_gestor: str | None = Field(default=None, max_length=150)
+    finalidade: str | None = Field(default=None, max_length=255)
+    data_abertura: date | None = None
+    modo_movimentacao: ModoMovimentacao = "PAGA"
 
 
 class ContaUpdate(BaseModel):
@@ -130,6 +154,13 @@ class ContaUpdate(BaseModel):
     saldo_minimo_alerta: Decimal | None = None
     saldo_inicial: Decimal | None = None
     ativa: bool | None = None
+    digito: str | None = Field(default=None, max_length=5)
+    tipo: str | None = Field(default=None, max_length=20)
+    titularidade: str | None = Field(default=None, max_length=150)
+    orgao_gestor: str | None = Field(default=None, max_length=150)
+    finalidade: str | None = Field(default=None, max_length=255)
+    data_abertura: date | None = None
+    modo_movimentacao: ModoMovimentacao | None = None
 
 
 class ContaOut(BaseModel):
@@ -137,6 +168,9 @@ class ContaOut(BaseModel):
     id: int; nome: str; banco: str; agencia: str; conta: str
     id_fonte_recursos: int; grupo_despesa: GrupoDespesaLit
     saldo_minimo_alerta: Decimal; saldo_inicial: Decimal; ativa: bool
+    digito: str | None = None; tipo: str | None = None; titularidade: str | None = None
+    orgao_gestor: str | None = None; finalidade: str | None = None
+    data_abertura: date | None = None; modo_movimentacao: ModoMovimentacao = "PAGA"
     criado_em: datetime; atualizado_em: datetime | None
 
 
@@ -173,17 +207,71 @@ class AlcadaCreate(BaseModel):
     id_usuario: int
     id_natureza: int | None = None
     valor_maximo: Decimal
+    id_unidade: int | None = None
+    id_fonte: int | None = None
+    tipo_despesa: GrupoDespesaLit | None = None
 
 
 class AlcadaUpdate(BaseModel):
     id_usuario: int | None = None
     id_natureza: int | None = None
     valor_maximo: Decimal | None = None
+    id_unidade: int | None = None
+    id_fonte: int | None = None
+    tipo_despesa: GrupoDespesaLit | None = None
 
 
 class AlcadaOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int; id_usuario: int; id_natureza: int | None; valor_maximo: Decimal
+    id_unidade: int | None = None; id_fonte: int | None = None
+    tipo_despesa: GrupoDespesaLit | None = None
+    criado_em: datetime; atualizado_em: datetime | None
+
+
+# ---------- bloqueio_saldo (v2.0) ----------
+class BloqueioSaldoCreate(BaseModel):
+    id_conta: int
+    valor: Decimal = Field(gt=0)
+    motivo: str = Field(min_length=1, max_length=255)
+    periodo_inicio: date
+    periodo_fim: date | None = None
+
+
+class BloqueioSaldoUpdate(BaseModel):
+    valor: Decimal | None = Field(default=None, gt=0)
+    motivo: str | None = Field(default=None, max_length=255)
+    periodo_inicio: date | None = None
+    periodo_fim: date | None = None
+    ativo: bool | None = None
+
+
+class BloqueioSaldoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; id_conta: int; valor: Decimal; motivo: str
+    periodo_inicio: date; periodo_fim: date | None
+    id_usuario_responsavel: int | None; ativo: bool
+    criado_em: datetime; atualizado_em: datetime | None
+
+
+# ---------- tag_prioridade (v2.0) ----------
+class TagPrioridadeCreate(BaseModel):
+    nome: str = Field(min_length=1, max_length=50)
+    cor: str | None = Field(default=None, max_length=20)
+    ordem: int = 0
+    ativa: bool = True
+
+
+class TagPrioridadeUpdate(BaseModel):
+    nome: str | None = Field(default=None, max_length=50)
+    cor: str | None = Field(default=None, max_length=20)
+    ordem: int | None = None
+    ativa: bool | None = None
+
+
+class TagPrioridadeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; nome: str; cor: str | None; ordem: int; ativa: bool
     criado_em: datetime; atualizado_em: datetime | None
 
 

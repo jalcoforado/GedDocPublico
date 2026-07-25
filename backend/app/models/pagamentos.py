@@ -79,6 +79,13 @@ class FonteRecursos(Base):
     codigo: Mapped[str] = mapped_column(String(20), nullable=False)
     descricao: Mapped[str] = mapped_column(String(200), nullable=False)
     grupos_despesa_permitidos: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # Campos ricos v2.0 (RF-FON-01/07)
+    exercicio: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    esfera_origem: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    tipo_vinculacao: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    situacao: Mapped[str] = mapped_column(String(20), nullable=False, default="ATIVA")
+    vigencia_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
+    vigencia_fim: Mapped[date | None] = mapped_column(Date, nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -98,6 +105,14 @@ class ContaBancaria(Base):
     saldo_minimo_alerta: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     saldo_inicial: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     ativa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Campos ricos v2.0 (RF-CTA-01/08). modo_movimentacao='PAGA' → elegível como conta pagadora.
+    digito: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    tipo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    titularidade: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    orgao_gestor: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    finalidade: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    data_abertura: Mapped[date | None] = mapped_column(Date, nullable=True)
+    modo_movimentacao: Mapped[str] = mapped_column(String(15), nullable=False, default="PAGA")
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -165,6 +180,9 @@ class Debito(Base):
     descricao: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(25), nullable=False, default="RASCUNHO")
     id_usuario_solicitante: Mapped[int] = mapped_column(ForeignKey("utils.usuario.id"), nullable=False)
+    # Liquidação (v2.0 RF-VAL-02/RN-01) — guarda antes de autorizar.
+    liquidacao_confirmada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    data_liquidacao: Mapped[date | None] = mapped_column(Date, nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -240,6 +258,58 @@ class Alcada(Base):
     id_usuario: Mapped[int] = mapped_column(ForeignKey("utils.usuario.id"), nullable=False)
     id_natureza: Mapped[int | None] = mapped_column(ForeignKey("pagamentos.natureza_despesa.id"), nullable=True)
     valor_maximo: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Dimensões opcionais v2.0 (RF-CAD-06) — nulas = alçada genérica.
+    id_unidade: Mapped[int | None] = mapped_column(ForeignKey("utils.unidade_trabalho.id"), nullable=True)
+    id_fonte: Mapped[int | None] = mapped_column(ForeignKey("pagamentos.fonte_recursos.id"), nullable=True)
+    tipo_despesa: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class BloqueioSaldo(Base):
+    """Valor administrativamente bloqueado numa conta por período (RF-SLD-07)."""
+    __tablename__ = "bloqueio_saldo"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_conta: Mapped[int] = mapped_column(ForeignKey("pagamentos.conta_bancaria.id"), nullable=False)
+    valor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    motivo: Mapped[str] = mapped_column(String(255), nullable=False)
+    periodo_inicio: Mapped[date] = mapped_column(Date, nullable=False)
+    periodo_fim: Mapped[date | None] = mapped_column(Date, nullable=True)
+    id_usuario_responsavel: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class SaldoHistorico(Base):
+    """Snapshot diário dos saldos por conta (RF-SLD-03), preenchido por job."""
+    __tablename__ = "saldo_historico"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_conta: Mapped[int] = mapped_column(ForeignKey("pagamentos.conta_bancaria.id"), nullable=False)
+    data: Mapped[date] = mapped_column(Date, nullable=False)
+    saldo_bancario: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    saldo_conciliado: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    saldo_reservado: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    saldo_bloqueado: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class TagPrioridade(Base):
+    """Rótulos de priorização por tenant (RF-CAD-05)."""
+    __tablename__ = "tag_prioridade"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    nome: Mapped[str] = mapped_column(String(50), nullable=False)
+    cor: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    ordem: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ativa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
