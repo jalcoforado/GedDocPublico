@@ -30,7 +30,8 @@ async def contas_elegiveis(db: AsyncSession, *, tenant_id: int, id_fonte: int) -
     """Contas ATIVAS da fonte, com saldo/disponível — candidatas a conta pagadora."""
     contas = list((await db.execute(select(ContaBancaria).where(
         ContaBancaria.tenant_id == tenant_id, ContaBancaria.id_fonte_recursos == id_fonte,
-        ContaBancaria.ativa.is_(True), ContaBancaria.excluido.is_(False))
+        ContaBancaria.ativa.is_(True), ContaBancaria.excluido.is_(False),
+        ContaBancaria.modo_movimentacao == "PAGA")  # só contas que admitem pagamento (RF-CTA-08)
         .order_by(ContaBancaria.nome))).scalars().all())
     out: list[ContaElegivelOut] = []
     for c in contas:
@@ -82,6 +83,10 @@ async def _obter_conta_pagadora(db, *, tenant_id: int, conta_id: int) -> ContaBa
     if not c.ativa:
         raise PagamentoDebitoError(
             f"Conta pagadora {conta_id} não está ativa.", status.HTTP_422_UNPROCESSABLE_ENTITY)
+    if c.modo_movimentacao != "PAGA":
+        raise PagamentoDebitoError(
+            f"Conta {conta_id} não admite pagamento (modo '{c.modo_movimentacao}').",
+            status.HTTP_422_UNPROCESSABLE_ENTITY)
     return c
 
 

@@ -299,6 +299,11 @@ class SaldoConta(BaseModel):
     id_conta: int; saldo_inicial: Decimal; total_entradas: Decimal
     total_saidas: Decimal; saldo_atual: Decimal
     comprometido: Decimal = Decimal("0"); disponivel: Decimal = Decimal("0")
+    # v2.0 — 5 saldos (spec seção 10). Até a Fase 3, conciliado := bancário.
+    bloqueado: Decimal = Decimal("0")
+    saldo_bancario: Decimal = Decimal("0")
+    saldo_conciliado: Decimal = Decimal("0")
+    disponivel_projetado: Decimal = Decimal("0")
 
 
 class ContaSaldoPainel(BaseModel):
@@ -306,6 +311,9 @@ class ContaSaldoPainel(BaseModel):
     saldo_inicial: Decimal; total_entradas: Decimal; total_saidas: Decimal
     saldo_atual: Decimal; saldo_minimo_alerta: Decimal; abaixo_minimo: bool
     comprometido: Decimal = Decimal("0"); disponivel: Decimal = Decimal("0")
+    bloqueado: Decimal = Decimal("0")
+    saldo_conciliado: Decimal = Decimal("0")
+    disponivel_projetado: Decimal = Decimal("0")
 
 
 # ---------- débito / parcelas / ordem de pagamento (R2) ----------
