@@ -62,10 +62,11 @@ def _registrar_transicao(db, *, debito: Debito, novo_status: str, acao: str,
 
 async def detectar_duplicidade(db, *, tenant_id: int, id_fornecedor: int, numero_nf: str | None,
                                numero_ne: str | None, valor_total, competencia: str,
+                               id_contrato: int | None = None,
                                excluir_id: int | None = None) -> list[int]:
-    """IDs de débitos ativos com mesmo credor+NF+empenho+valor+competência (RF-SOL-09).
-    Só considera quando há nota fiscal (numero_nf) — o documento que caracteriza a
-    despesa. Ignora débitos já REJEITADO/CANCELADO."""
+    """IDs de débitos ativos com mesmo credor+NF+empenho+contrato+valor+competência
+    (RF-SOL-09). Só considera quando há nota fiscal (numero_nf) — o documento que
+    caracteriza a despesa. Ignora débitos já REJEITADO/CANCELADO."""
     if not numero_nf:
         return []
     stmt = select(Debito.id).where(
@@ -75,6 +76,8 @@ async def detectar_duplicidade(db, *, tenant_id: int, id_fornecedor: int, numero
         Debito.status.notin_(("REJEITADO", "CANCELADO")))
     if numero_ne:
         stmt = stmt.where(Debito.numero_ne == numero_ne)
+    if id_contrato is not None:
+        stmt = stmt.where(Debito.id_contrato == id_contrato)
     if excluir_id is not None:
         stmt = stmt.where(Debito.id != excluir_id)
     return list((await db.execute(stmt)).scalars().all())
@@ -86,11 +89,12 @@ async def criar_debito(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     _validar_parcelas(payload.parcelas, payload.valor_total)
     dups = await detectar_duplicidade(
         db, tenant_id=tenant_id, id_fornecedor=payload.id_fornecedor, numero_nf=payload.numero_nf,
-        numero_ne=payload.numero_ne, valor_total=payload.valor_total, competencia=payload.competencia)
+        numero_ne=payload.numero_ne, valor_total=payload.valor_total, competencia=payload.competencia,
+        id_contrato=payload.id_contrato)
     if dups:
         raise PagamentoDebitoError(
             f"Possível duplicidade: já existe(m) débito(s) {dups} com mesmo credor, NF, "
-            f"empenho, valor e competência.", status.HTTP_409_CONFLICT)
+            f"empenho, contrato, valor e competência.", status.HTTP_409_CONFLICT)
     d = Debito(tenant_id=tenant_id, id_fornecedor=payload.id_fornecedor,
                id_natureza=payload.id_natureza, id_fonte_recursos=payload.id_fonte_recursos,
                id_conta=payload.id_conta, id_contrato=payload.id_contrato,

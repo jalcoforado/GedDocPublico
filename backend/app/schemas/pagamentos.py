@@ -408,6 +408,10 @@ class GrupoAutorizacaoIn(BaseModel):
     id_fonte: int
     id_conta_pagadora: int
     debito_ids: list[int] = Field(min_length=1)
+    # RN-15: exceção de saldo insuficiente — só quando expressamente autorizada e
+    # justificada; a justificativa é gravada no histórico (auditável).
+    permitir_saldo_insuficiente: bool = False
+    justificativa_excecao: str | None = Field(default=None, max_length=255)
 
 
 class AutorizarLoteIn(BaseModel):

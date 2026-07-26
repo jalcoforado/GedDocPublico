@@ -104,9 +104,17 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     # 1) valida cada grupo e coleta os débitos; acumula necessidade por conta pagadora.
     grupos_val: list[tuple[GrupoAutorizacaoIn, ContaBancaria, list[Debito], Decimal]] = []
     necessidade_por_conta: dict[int, Decimal] = {}
+    # RN-15: justificativa da exceção de saldo insuficiente, por conta (se autorizada).
+    excecao_por_conta: dict[int, str] = {}
     vistos: set[int] = set()
     for g in grupos:
         conta = await _obter_conta_pagadora(db, tenant_id=tenant_id, conta_id=g.id_conta_pagadora)
+        if g.permitir_saldo_insuficiente:
+            if not (g.justificativa_excecao or "").strip():
+                raise PagamentoDebitoError(
+                    "Exceção de saldo insuficiente exige justificativa (RN-15).",
+                    status.HTTP_422_UNPROCESSABLE_ENTITY)
+            excecao_por_conta[conta.id] = g.justificativa_excecao.strip()
         if conta.id_fonte_recursos != g.id_fonte:
             raise PagamentoDebitoError(
                 f"Conta pagadora {conta.id} não pertence à fonte {g.id_fonte} (RN-06).",
@@ -124,6 +132,10 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
             if d.id_fonte_recursos != g.id_fonte:
                 raise PagamentoDebitoError(
                     f"Débito {did} não pertence à fonte {g.id_fonte} do grupo (RF-AUT-15).",
+                    status.HTTP_422_UNPROCESSABLE_ENTITY)
+            if not (d.numero_ne or "").strip():
+                raise PagamentoDebitoError(
+                    f"Débito {did} não pode ser autorizado sem número de empenho (RN-01).",
                     status.HTTP_422_UNPROCESSABLE_ENTITY)
             if not d.liquidacao_confirmada:
                 raise PagamentoDebitoError(
@@ -154,9 +166,11 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         grupos_val.append((g, conta, debitos, total))
 
     # 2) saldo disponível projetado de cada conta pagadora cobre o Σ que ela receberá.
+    #    RN-15: se a autoridade autorizou expressamente a exceção (com justificativa),
+    #    o bloqueio é dispensado e a exceção fica registrada no histórico.
     for conta_id, necessario in necessidade_por_conta.items():
         saldo = await caixa.saldo_conta(db, tenant_id=tenant_id, conta_id=conta_id)
-        if saldo.disponivel < necessario:
+        if saldo.disponivel < necessario and conta_id not in excecao_por_conta:
             raise PagamentoDebitoError(
                 f"Saldo disponível insuficiente na conta {conta_id}: "
                 f"disponível R$ {saldo.disponivel}, necessário R$ {necessario}.",
@@ -171,11 +185,14 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                             id_conta_pagadora=conta.id, valor_reservado=total,
                             valor_total=total, ip_origem=ip, criado_em=_utcnow())
         db.add(op); await db.flush()
+        justificativa = f"OP {op.numero}"
+        if conta.id in excecao_por_conta:
+            justificativa += f" — EXCEÇÃO DE SALDO (RN-15): {excecao_por_conta[conta.id]}"
         for d in debitos:
             d.id_conta_pagadora = conta.id
             db.add(OrdemPagamentoDebito(tenant_id=tenant_id, id_ordem=op.id, id_debito=d.id))
             _registrar_transicao(db, debito=d, novo_status="AUTORIZADO", acao="AUTORIZADO",
-                                 usuario_id=usuario_id, justificativa=f"OP {op.numero}", ip=ip)
+                                 usuario_id=usuario_id, justificativa=justificativa[:255], ip=ip)
             d.atualizado_em = _utcnow()
         ordens.append(op)
     await db.commit()

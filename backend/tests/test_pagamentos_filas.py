@@ -95,7 +95,7 @@ def _payload_debito(forn, nat, conta, *, valor="1000.00", competencia="2026-07",
         id_fornecedor=forn.id, id_natureza=nat.id,
         id_fonte_recursos=conta.id_fonte_recursos, id_conta=conta.id,
         valor_total=valor, competencia=competencia, urgente=urgente,
-        descricao="Compra de material",
+        descricao="Compra de material", numero_ne="NE-2026-0001",  # empenho p/ autorizar (RN-01)
         parcelas=parcelas or [ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
     )
 
