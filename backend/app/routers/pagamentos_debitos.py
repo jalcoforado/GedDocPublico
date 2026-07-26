@@ -17,12 +17,13 @@ from pydantic import BaseModel, Field
 from ..schemas.pagamentos import (
     AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
     DebitoHistoricoOut, DebitoOut, DebitoUpdate, FichaFonteOut, FilaAutorizacaoFonteGrupo,
-    FilaLiberacaoGrupo, FilaTesourariaOut, JustificativaIn, LiquidacaoIn, MinhaFilaOut,
-    OrdemPagamentoOut, PagarParcelaIn, ParcelaFilaOut, ParcelaOut,
+    ChecklistDebitoItemOut, FilaLiberacaoGrupo, FilaTesourariaOut, JustificativaIn, LiquidacaoIn,
+    MarcarChecklistIn, MinhaFilaOut, OrdemPagamentoOut, PagarParcelaIn, ParcelaFilaOut, ParcelaOut,
     SimulacaoAutorizacaoIn, SimulacaoAutorizacaoOut,
 )
 from ..services import pagamentos_autorizacao as aut
 from ..services import pagamentos_caixa as caixa
+from ..services import pagamentos_checklist as checklist
 from ..services import pagamentos_dashboard as dash
 from ..services import pagamentos_debitos as svc
 from ..services import pagamentos_filas as filas
@@ -197,6 +198,25 @@ async def confirmar_liquidacao(debito_id: int, payload: LiquidacaoIn, request: R
                                        usuario_id=usuario.id, data_liquidacao=payload.data_liquidacao,
                                        ip=_ip(request))
     return (await _out(db, tenant_id, [d]))[0]
+
+
+@debitos_router.get("/{debito_id}/checklist", response_model=list[ChecklistDebitoItemOut])
+async def get_checklist(debito_id: int,
+                        _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                        tenant_id: int = Depends(require_tenant_id),
+                        db: AsyncSession = Depends(get_db)):
+    return await checklist.checklist_do_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+
+
+@debitos_router.post("/{debito_id}/checklist", response_model=list[ChecklistDebitoItemOut])
+async def marcar_checklist(debito_id: int, payload: MarcarChecklistIn,
+                           usuario: Usuario = Depends(require_any_permission(*PERM_VALIDAR)),
+                           tenant_id: int = Depends(require_tenant_id),
+                           db: AsyncSession = Depends(get_db)):
+    await checklist.marcar(db, tenant_id=tenant_id, debito_id=debito_id,
+                           id_checklist_item=payload.id_checklist_item, marcado=payload.marcado,
+                           observacao=payload.observacao, usuario_id=usuario.id)
+    return await checklist.checklist_do_debito(db, tenant_id=tenant_id, debito_id=debito_id)
 
 
 @debitos_router.post("/{debito_id}/suspender", response_model=DebitoOut)

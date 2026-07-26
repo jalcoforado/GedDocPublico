@@ -1245,6 +1245,18 @@ export interface FichaFonte {
   disponivel_total: string; contas: FichaFonteConta[];
 }
 
+// RF-VAL-06: item de checklist parametrizável (template)
+export interface ChecklistItemTemplate {
+  id: number; descricao: string; obrigatorio: boolean;
+  id_natureza: number | null; ordem: number; ativo: boolean;
+}
+
+// RF-VAL-01/06: checklist documental do débito
+export interface ChecklistItemDebito {
+  id_checklist_item: number; descricao: string; obrigatorio: boolean;
+  marcado: boolean; observacao: string | null; atualizado_em: string | null;
+}
+
 // RF-PNL-05: simulação do impacto de um pagamento
 export interface SimulacaoAutorizacao {
   id_conta: number; valor_simulado: string;
@@ -2782,6 +2794,18 @@ export const api = {
         remove: (id: number) =>
           request<void>(`/pagamentos/naturezas/${id}`, { method: "DELETE" }),
       },
+      // RF-VAL-06: itens de checklist documental parametrizáveis.
+      checklistItens: {
+        list: () => request<ChecklistItemTemplate[]>("/pagamentos/checklist-itens"),
+        create: (data: unknown) =>
+          request<ChecklistItemTemplate>("/pagamentos/checklist-itens", {
+            method: "POST", body: JSON.stringify(data) }),
+        update: (id: number, data: unknown) =>
+          request<ChecklistItemTemplate>(`/pagamentos/checklist-itens/${id}`, {
+            method: "PUT", body: JSON.stringify(data) }),
+        remove: (id: number) =>
+          request<void>(`/pagamentos/checklist-itens/${id}`, { method: "DELETE" }),
+      },
       fontes: {
         list: () => request<FonteRecursos[]>("/pagamentos/fontes"),
         get: (id: number) => request<FonteRecursos>(`/pagamentos/fontes/${id}`),
@@ -2883,6 +2907,12 @@ export const api = {
       encaminhar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/encaminhar`, { method: "POST" }),
       emProcessamento: (id: number) =>
         request<Debito>(`/pagamentos/debitos/${id}/em-processamento`, { method: "POST" }),
+      // RF-VAL-01/06: checklist documental do débito
+      checklist: (id: number) =>
+        request<ChecklistItemDebito[]>(`/pagamentos/debitos/${id}/checklist`),
+      marcarChecklist: (id: number, data: { id_checklist_item: number; marcado: boolean; observacao?: string | null }) =>
+        request<ChecklistItemDebito[]>(`/pagamentos/debitos/${id}/checklist`, {
+          method: "POST", body: JSON.stringify(data) }),
       devolver: (id: number, justificativa: string) =>
         request<Debito>(`/pagamentos/debitos/${id}/devolver`, {
           method: "POST", body: JSON.stringify({ justificativa }) }),

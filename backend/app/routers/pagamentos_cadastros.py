@@ -10,6 +10,7 @@ from ..database import get_db
 from ..models import Usuario
 from ..schemas.pagamentos import (
     AlcadaCreate, AlcadaOut, AlcadaUpdate,
+    ChecklistItemCreate, ChecklistItemOut, ChecklistItemUpdate,
     ContaCreate, ContaOut, ContaUpdate,
     ContratoCreate, ContratoOut, ContratoUpdate,
     FornecedorCreate, FornecedorDadosBancariosOut, FornecedorOut,
@@ -17,6 +18,7 @@ from ..schemas.pagamentos import (
     FonteCreate, FonteOut, FonteUpdate, NaturezaCreate, NaturezaOut, NaturezaUpdate,
 )
 from ..services import pagamentos_cadastros as svc
+from ..services import pagamentos_checklist as checklist_svc
 
 fornecedores_router = APIRouter(prefix="/pagamentos/fornecedores", tags=["pagamentos-cadastros"])
 
@@ -302,6 +304,43 @@ async def delete_alcada(alcada_id: int,
                         tenant_id: int = Depends(require_tenant_id),
                         db: AsyncSession = Depends(get_db)):
     await svc.excluir_alcada(db, tenant_id=tenant_id, alcada_id=alcada_id)
+
+
+checklist_router = APIRouter(prefix="/pagamentos/checklist-itens", tags=["pagamentos-cadastros"])
+
+
+@checklist_router.get("", response_model=list[ChecklistItemOut])
+async def list_checklist_itens(_: Usuario = Depends(require_permission("pagamento_cadastro")),
+                               tenant_id: int = Depends(require_tenant_id),
+                               db: AsyncSession = Depends(get_db)):
+    return [ChecklistItemOut.model_validate(r)
+            for r in await checklist_svc.listar_itens(db, tenant_id=tenant_id)]
+
+
+@checklist_router.post("", response_model=ChecklistItemOut, status_code=status.HTTP_201_CREATED)
+async def create_checklist_item(payload: ChecklistItemCreate,
+                                _: Usuario = Depends(require_permission("pagamento_cadastro", "inserir")),
+                                tenant_id: int = Depends(require_tenant_id),
+                                db: AsyncSession = Depends(get_db)):
+    return ChecklistItemOut.model_validate(
+        await checklist_svc.criar_item(db, tenant_id=tenant_id, payload=payload))
+
+
+@checklist_router.put("/{item_id}", response_model=ChecklistItemOut)
+async def update_checklist_item(item_id: int, payload: ChecklistItemUpdate,
+                                _: Usuario = Depends(require_permission("pagamento_cadastro", "atualizar")),
+                                tenant_id: int = Depends(require_tenant_id),
+                                db: AsyncSession = Depends(get_db)):
+    return ChecklistItemOut.model_validate(
+        await checklist_svc.atualizar_item(db, tenant_id=tenant_id, item_id=item_id, payload=payload))
+
+
+@checklist_router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_checklist_item(item_id: int,
+                                _: Usuario = Depends(require_permission("pagamento_cadastro", "excluir")),
+                                tenant_id: int = Depends(require_tenant_id),
+                                db: AsyncSession = Depends(get_db)):
+    await checklist_svc.excluir_item(db, tenant_id=tenant_id, item_id=item_id)
 
 
 enums_router = APIRouter(prefix="/pagamentos/enums", tags=["pagamentos-cadastros"])

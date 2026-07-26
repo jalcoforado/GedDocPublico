@@ -299,6 +299,13 @@ async def validar(db: AsyncSession, *, tenant_id: int, debito_id: int,
         raise PagamentoDebitoError(
             "Não é possível validar sem confirmação de liquidação (RF-VAL-02/RN-01).",
             status.HTTP_422_UNPROCESSABLE_ENTITY)
+    # RF-VAL-01: todos os itens obrigatórios do checklist documental devem estar marcados.
+    from .pagamentos_checklist import checklist_pendente
+    pendentes = await checklist_pendente(db, tenant_id=tenant_id, debito_id=debito_id)
+    if pendentes:
+        raise PagamentoDebitoError(
+            "Checklist documental incompleto: " + ", ".join(pendentes) + " (RF-VAL-01).",
+            status.HTTP_422_UNPROCESSABLE_ENTITY)
     _registrar_transicao(db, debito=d, novo_status=ST_VALIDADO, acao="VALIDADO",
                          usuario_id=usuario_id, ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)

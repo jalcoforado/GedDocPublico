@@ -43,10 +43,12 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
             "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.debito_checklist_marca WHERE tenant_id=:t",
             "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
             "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
             "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.checklist_item WHERE tenant_id=:t",
             "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
             "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
             "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
@@ -266,5 +268,47 @@ async def test_suspender_e_reativar(admin_engine):
         async with _sm(admin_engine)() as s:
             dr = await deb.reativar(s, tenant_id=t.id, debito_id=d.id, usuario_id=tes)
         assert dr.status == "EM_VALIDACAO"  # reativa reentra na validação
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_checklist_obrigatorio_bloqueia_validacao(admin_engine):
+    """RF-VAL-01/06: com item obrigatório não marcado, validar → 422; após marcar,
+    valida. O checklist reflete o estado atual (última marcação)."""
+    from app.schemas.pagamentos import ChecklistItemCreate
+    from app.services import pagamentos_checklist as chk
+    t = await _provisionar(admin_engine)
+    try:
+        forn, nat, fonte, _conta = await _base(admin_engine, t.id)
+        sol = await _novo_usuario(admin_engine, t.id, f"s{uuid.uuid4().hex[:6]}")
+        val = await _novo_usuario(admin_engine, t.id, f"v{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            item = await chk.criar_item(s, tenant_id=t.id, payload=ChecklistItemCreate(
+                descricao="Nota fiscal anexada", obrigatorio=True))
+            d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol,
+                                       payload=_payload(forn, nat, fonte, ne="NE-1"))
+        async with _sm(admin_engine)() as s:
+            await deb.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
+        async with _sm(admin_engine)() as s:
+            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+        # checklist aparece pendente e validar é bloqueado
+        async with _sm(admin_engine)() as s:
+            itens = await chk.checklist_do_debito(s, tenant_id=t.id, debito_id=d.id)
+            assert len(itens) == 1 and itens[0].marcado is False
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+            assert exc.value.status_code == 422
+            assert "checklist" in exc.value.detail.lower()
+        # marca o item e valida
+        async with _sm(admin_engine)() as s:
+            await chk.marcar(s, tenant_id=t.id, debito_id=d.id, id_checklist_item=item.id,
+                             marcado=True, observacao="NF 123", usuario_id=val)
+        async with _sm(admin_engine)() as s:
+            itens = await chk.checklist_do_debito(s, tenant_id=t.id, debito_id=d.id)
+            assert itens[0].marcado is True and itens[0].observacao == "NF 123"
+        async with _sm(admin_engine)() as s:
+            dv = await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+        assert dv.status == "VALIDADO"
     finally:
         await _cleanup(admin_engine, t.id)
