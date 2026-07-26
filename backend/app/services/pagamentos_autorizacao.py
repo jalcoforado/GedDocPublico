@@ -38,10 +38,14 @@ async def contas_elegiveis(db: AsyncSession, *, tenant_id: int, id_fonte: int) -
     for c in contas:
         saldo = await caixa.saldo_conta(db, tenant_id=tenant_id, conta_id=c.id)
         minimo = c.saldo_minimo_alerta or Decimal("0")
+        atualizado = await caixa.ultima_atualizacao_conta(db, tenant_id=tenant_id, conta_id=c.id)
         out.append(ContaElegivelOut(
             id_conta=c.id, nome=c.nome, banco=c.banco, agencia=c.agencia,
             conta_mascarada=_mascarar_conta(c.conta), saldo_atual=saldo.saldo_atual,
-            disponivel=saldo.disponivel, abaixo_minimo=saldo.saldo_atual < minimo))
+            disponivel=saldo.disponivel, abaixo_minimo=saldo.saldo_atual < minimo,
+            reservado=saldo.comprometido, bloqueado=saldo.bloqueado,
+            saldo_conciliado=saldo.saldo_conciliado,
+            disponivel_projetado=saldo.disponivel_projetado, atualizado_em=atualizado))
     return out
 
 
@@ -168,8 +172,10 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     # 2) saldo disponível projetado de cada conta pagadora cobre o Σ que ela receberá.
     #    RN-15: se a autoridade autorizou expressamente a exceção (com justificativa),
     #    o bloqueio é dispensado e a exceção fica registrada no histórico.
+    disponivel_corrente: dict[int, Decimal] = {}
     for conta_id, necessario in necessidade_por_conta.items():
         saldo = await caixa.saldo_conta(db, tenant_id=tenant_id, conta_id=conta_id)
+        disponivel_corrente[conta_id] = saldo.disponivel
         if saldo.disponivel < necessario and conta_id not in excecao_por_conta:
             raise PagamentoDebitoError(
                 f"Saldo disponível insuficiente na conta {conta_id}: "
@@ -179,10 +185,15 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     # 3) grava: uma OP por grupo, reserva na conta pagadora escolhida (imutável).
     ordens: list[OrdemPagamento] = []
     for g, conta, debitos, total in grupos_val:
+        # RF-AUT-16: saldo antes e projetado após esta reserva (sequencial por conta).
+        antes = disponivel_corrente[conta.id]
+        apos = antes - total
+        disponivel_corrente[conta.id] = apos
         op = OrdemPagamento(tenant_id=tenant_id,
                             numero=await _proximo_numero_op(db, tenant_id=tenant_id),
                             id_usuario_autorizador=usuario_id,
                             id_conta_pagadora=conta.id, valor_reservado=total,
+                            saldo_antes=antes, saldo_projetado_apos=apos,
                             valor_total=total, ip_origem=ip, criado_em=_utcnow())
         db.add(op); await db.flush()
         justificativa = f"OP {op.numero}"

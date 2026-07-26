@@ -469,6 +469,10 @@ class ContaElegivelOut(BaseModel):
     """Conta ativa de uma fonte, elegível como conta pagadora (v2.0 RF-AUT-02/05)."""
     id_conta: int; nome: str; banco: str; agencia: str; conta_mascarada: str
     saldo_atual: Decimal; disponivel: Decimal; abaixo_minimo: bool
+    # RF-AUT-05: reservado, conciliado, disponível projetado e última atualização.
+    reservado: Decimal = Decimal("0"); bloqueado: Decimal = Decimal("0")
+    saldo_conciliado: Decimal = Decimal("0"); disponivel_projetado: Decimal = Decimal("0")
+    atualizado_em: datetime | None = None
 
 
 class FilaAutorizacaoFonteGrupo(BaseModel):

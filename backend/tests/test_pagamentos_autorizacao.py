@@ -207,6 +207,9 @@ async def test_autorizar_gera_op_grava_conta_pagadora_e_reserva(admin_engine):
         assert op.valor_total == Decimal("1000.00")
         assert op.id_conta_pagadora == conta.id
         assert op.valor_reservado == Decimal("1000.00")
+        # RF-AUT-16: saldo antes/projetado após a reserva gravados na OP
+        assert op.saldo_antes == Decimal("10000.00")
+        assert op.saldo_projetado_apos == Decimal("9000.00")
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
             hist = await deb.listar_historico(s, tenant_id=t.id, debito_id=d.id)
@@ -232,6 +235,9 @@ async def test_ca_aut_01_contas_elegiveis_apenas_da_fonte(admin_engine):
         assert conta2.id not in ids
         # conta mascarada expõe só os últimos 4 dígitos
         assert elegiveis1[0].conta_mascarada.startswith("****")
+        # RF-AUT-05: reservado e disponível projetado expostos por conta elegível
+        assert elegiveis1[0].reservado == Decimal("0")
+        assert elegiveis1[0].disponivel_projetado == elegiveis1[0].disponivel
     finally:
         await _cleanup(admin_engine, t.id)
 

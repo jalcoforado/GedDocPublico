@@ -236,6 +236,9 @@ class OrdemPagamento(Base):
     id_conta_pagadora: Mapped[int | None] = mapped_column(
         ForeignKey("pagamentos.conta_bancaria.id"), nullable=True)
     valor_reservado: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    # RF-AUT-16: saldo disponível antes e projetado após a reserva (auditoria).
+    saldo_antes: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    saldo_projetado_apos: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     valor_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     ip_origem: Mapped[str | None] = mapped_column(String(45), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)

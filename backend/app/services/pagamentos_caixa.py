@@ -67,6 +67,13 @@ async def bloqueado_conta(db, *, tenant_id, conta_id, ref: date | None = None) -
     return (await db.execute(stmt)).scalar_one()
 
 
+async def ultima_atualizacao_conta(db, *, tenant_id, conta_id) -> datetime | None:
+    """Data/hora da última movimentação da conta (RF-AUT-05/RF-SLD-06)."""
+    return (await db.execute(select(func.max(MovimentacaoConta.criado_em)).where(
+        MovimentacaoConta.tenant_id == tenant_id, MovimentacaoConta.id_conta == conta_id,
+        MovimentacaoConta.excluido.is_(False)))).scalar_one_or_none()
+
+
 async def saldo_conta(db, *, tenant_id, conta_id) -> SaldoConta:
     conta = await _obter_conta(db, tenant_id=tenant_id, conta_id=conta_id)
     def _soma(tipo: str):
