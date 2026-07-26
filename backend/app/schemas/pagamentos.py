@@ -161,6 +161,8 @@ class ContaUpdate(BaseModel):
     finalidade: str | None = Field(default=None, max_length=255)
     data_abertura: date | None = None
     modo_movimentacao: ModoMovimentacao | None = None
+    # RF-CTA-06: obrigatória ao trocar a fonte vinculada (gera trilha).
+    justificativa_troca_fonte: str | None = Field(default=None, max_length=255)
 
 
 class ContaOut(BaseModel):
@@ -478,6 +480,22 @@ class ContaElegivelOut(BaseModel):
     atualizado_em: datetime | None = None
 
 
+class FichaFonteContaItem(BaseModel):
+    """Conta vinculada a uma fonte, com saldos e situação (RF-FON-06)."""
+    id_conta: int; nome: str; banco: str; conta_mascarada: str
+    ativa: bool; modo_movimentacao: str
+    saldo_bancario: Decimal; saldo_conciliado: Decimal; reservado: Decimal
+    bloqueado: Decimal; disponivel_projetado: Decimal; atualizado_em: datetime | None
+
+
+class FichaFonteOut(BaseModel):
+    """Ficha da fonte: dados + todas as contas vinculadas com saldos (RF-FON-06)."""
+    id_fonte: int; codigo: str; descricao: str; situacao: str
+    exercicio: int | None; tipo_vinculacao: str | None
+    disponivel_total: Decimal
+    contas: list[FichaFonteContaItem]
+
+
 class FilaAutorizacaoFonteGrupo(BaseModel):
     """Débitos APROVADO de uma fonte + contas elegíveis para pagá-los (v2.0)."""
     id_fonte: int; codigo_fonte: str; descricao_fonte: str
@@ -524,10 +542,16 @@ class ContaAlertaItem(BaseModel):
     id_conta: int; nome: str; saldo_atual: Decimal; saldo_minimo_alerta: Decimal
 
 
+class ContaDesatualizadaItem(BaseModel):
+    """Conta sem atualização de saldo no dia útil corrente (RF-SLD-06)."""
+    id_conta: int; nome: str; atualizado_em: datetime | None
+
+
 class DashboardAlertas(BaseModel):
     parcelas_vencidas: list[ParcelaAlertaItem]
     parcelas_7dias: list[ParcelaAlertaItem]
     contas_abaixo_minimo: list[ContaAlertaItem]
+    contas_desatualizadas: list[ContaDesatualizadaItem] = []
 
 
 class DashboardOut(BaseModel):

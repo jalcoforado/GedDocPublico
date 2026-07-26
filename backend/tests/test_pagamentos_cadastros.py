@@ -15,8 +15,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.pagamentos import (
-    AlcadaCreate, ContaCreate, ContratoCreate, FornecedorCreate, FornecedorUpdate, DadosBancarios,
-    FonteCreate, NaturezaCreate,
+    AlcadaCreate, ContaCreate, ContaUpdate, ContratoCreate, FornecedorCreate, FornecedorUpdate,
+    DadosBancarios, FonteCreate, NaturezaCreate,
 )
 from app.services import pagamentos_cadastros as svc
 from app.services.provisioning_tenant import provisionar_tenant
@@ -61,6 +61,7 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
             "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
             "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.conta_fonte_historico WHERE tenant_id=:t",
             "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
             "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
             "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
@@ -517,5 +518,44 @@ async def test_contrato_e_alcada_crud(admin_engine):
                     payload=AlcadaCreate(id_usuario=id_usuario, valor_maximo="1.00"),
                 )
             assert exc.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_trocar_fonte_da_conta_exige_justificativa_e_gera_trilha(admin_engine):
+    """RF-CTA-06: trocar a fonte vinculada à conta exige justificativa e preserva
+    o histórico (append-only conta_fonte_historico)."""
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            f1 = await svc.criar_fonte(s, tenant_id=t.id, payload=FonteCreate(
+                codigo=f"F{uuid.uuid4().hex[:6]}", descricao="F1", grupos_despesa_permitidos=["CUSTEIO"]))
+            f2 = await svc.criar_fonte(s, tenant_id=t.id, payload=FonteCreate(
+                codigo=f"F{uuid.uuid4().hex[:6]}", descricao="F2", grupos_despesa_permitidos=["CUSTEIO"]))
+            conta = await svc.criar_conta(s, tenant_id=t.id, payload=ContaCreate(
+                nome="Conta", banco="001", agencia="1", conta=uuid.uuid4().hex[:8],
+                id_fonte_recursos=f1.id, grupo_despesa="CUSTEIO"))
+        # troca sem justificativa → 422
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.atualizar_conta(s, tenant_id=t.id, conta_id=conta.id,
+                                          payload=ContaUpdate(id_fonte_recursos=f2.id))
+            assert exc.value.status_code == 422
+            assert "justificativa" in exc.value.detail.lower()
+        # com justificativa → troca e grava a trilha
+        async with _sm(admin_engine)() as s:
+            c2 = await svc.atualizar_conta(
+                s, tenant_id=t.id, conta_id=conta.id, usuario_id=None,
+                payload=ContaUpdate(id_fonte_recursos=f2.id,
+                                    justificativa_troca_fonte="Reclassificação contábil"))
+        assert c2.id_fonte_recursos == f2.id
+        async with _sm(admin_engine)() as s:
+            rows = (await s.execute(text(
+                "SELECT id_fonte_anterior, id_fonte_nova, justificativa "
+                "FROM pagamentos.conta_fonte_historico WHERE tenant_id=:t AND id_conta=:c"),
+                {"t": t.id, "c": conta.id})).all()
+        assert len(rows) == 1
+        assert rows[0][0] == f1.id and rows[0][1] == f2.id
+        assert rows[0][2] == "Reclassificação contábil"
     finally:
         await _cleanup(admin_engine, t.id)

@@ -10,8 +10,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import BloqueioSaldo, ContaBancaria, Debito, MovimentacaoConta, Parcela, SaldoHistorico
-from ..schemas.pagamentos import ContaSaldoPainel, MovimentacaoCreate, SaldoConta
+from ..models import (
+    BloqueioSaldo, ContaBancaria, Debito, FonteRecursos, MovimentacaoConta, Parcela, SaldoHistorico,
+)
+from ..schemas.pagamentos import (
+    ContaSaldoPainel, FichaFonteContaItem, FichaFonteOut, MovimentacaoCreate, SaldoConta,
+)
 
 _ORIGENS_MANUAIS = {"APORTE", "RECEITA", "AJUSTE"}
 
@@ -117,6 +121,40 @@ async def registrar_snapshot_saldos(db, *, tenant_id, ref: date | None = None) -
         n += 1
     await db.commit()
     return n
+
+
+def _mascara(conta: str) -> str:
+    limpa = (conta or "").strip()
+    return ("****" + limpa[-4:]) if len(limpa) > 4 else (limpa or "****")
+
+
+async def ficha_fonte(db, *, tenant_id, id_fonte) -> FichaFonteOut:
+    """Ficha da fonte com TODAS as contas vinculadas e seus saldos (RF-FON-06)."""
+    fonte = (await db.execute(select(FonteRecursos).where(
+        FonteRecursos.id == id_fonte, FonteRecursos.tenant_id == tenant_id,
+        FonteRecursos.excluido.is_(False)))).scalar_one_or_none()
+    if fonte is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fonte não encontrada")
+    contas = (await db.execute(select(ContaBancaria).where(
+        ContaBancaria.tenant_id == tenant_id, ContaBancaria.id_fonte_recursos == id_fonte,
+        ContaBancaria.excluido.is_(False)).order_by(ContaBancaria.nome))).scalars().all()
+    itens: list[FichaFonteContaItem] = []
+    disponivel_total = Decimal("0")
+    for c in contas:
+        s = await saldo_conta(db, tenant_id=tenant_id, conta_id=c.id)
+        atualizado = await ultima_atualizacao_conta(db, tenant_id=tenant_id, conta_id=c.id)
+        if c.ativa:
+            disponivel_total += s.disponivel_projetado
+        itens.append(FichaFonteContaItem(
+            id_conta=c.id, nome=c.nome, banco=c.banco, conta_mascarada=_mascara(c.conta),
+            ativa=c.ativa, modo_movimentacao=c.modo_movimentacao,
+            saldo_bancario=s.saldo_bancario, saldo_conciliado=s.saldo_conciliado,
+            reservado=s.comprometido, bloqueado=s.bloqueado,
+            disponivel_projetado=s.disponivel_projetado, atualizado_em=atualizado))
+    return FichaFonteOut(
+        id_fonte=fonte.id, codigo=fonte.codigo, descricao=fonte.descricao, situacao=fonte.situacao,
+        exercicio=fonte.exercicio, tipo_vinculacao=fonte.tipo_vinculacao,
+        disponivel_total=disponivel_total, contas=itens)
 
 
 async def painel_caixa(db, *, tenant_id) -> list[ContaSaldoPainel]:

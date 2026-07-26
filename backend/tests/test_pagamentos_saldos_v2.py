@@ -212,3 +212,35 @@ async def test_autorizar_conta_nao_paga_422(admin_engine):
             assert "pagamento" in exc.value.detail.lower()
     finally:
         await _cleanup(admin_engine, t.id)
+
+
+async def test_ficha_fonte_lista_contas_e_saldos(admin_engine):
+    """RF-FON-06: a ficha da fonte traz todas as contas vinculadas com seus saldos."""
+    t = await _provisionar(admin_engine)
+    try:
+        fonte_id, conta1 = await _conta(admin_engine, t.id, saldo="1000.00", modo="PAGA")
+        _f2, conta2 = await _conta(admin_engine, t.id, saldo="500.00", modo="RECEBE", fonte_id=fonte_id)
+        async with _sm(admin_engine)() as s:
+            ficha = await caixa.ficha_fonte(s, tenant_id=t.id, id_fonte=fonte_id)
+        assert ficha.id_fonte == fonte_id
+        ids = {c.id_conta for c in ficha.contas}
+        assert ids == {conta1.id, conta2.id}
+        # disponível_total consolida as contas ativas (RF-SLD-05)
+        assert ficha.disponivel_total == Decimal("1500.00")
+        c1 = next(c for c in ficha.contas if c.id_conta == conta1.id)
+        assert c1.saldo_bancario == Decimal("1000.00")
+        assert c1.conta_mascarada.startswith("****")
+        assert c1.modo_movimentacao == "PAGA"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_ficha_fonte_inexistente_404(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await caixa.ficha_fonte(s, tenant_id=t.id, id_fonte=999999)
+            assert exc.value.status_code == 404
+    finally:
+        await _cleanup(admin_engine, t.id)

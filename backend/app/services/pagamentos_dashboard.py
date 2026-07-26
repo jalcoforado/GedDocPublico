@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import ContaBancaria, Debito, FonteRecursos, MovimentacaoConta, NaturezaDespesa, Parcela
 from ..schemas.pagamentos import (
-    ComposicaoItem, ContaAlertaItem, DashboardAlertas, DashboardKpis, DashboardOut,
+    ComposicaoItem, ContaAlertaItem, ContaDesatualizadaItem, DashboardAlertas, DashboardKpis, DashboardOut,
     DebitoResumoItem, FluxoMensalItem, ParcelaAlertaItem,
 )
 from . import pagamentos_caixa as caixa
@@ -210,5 +210,14 @@ async def _alertas(db, *, tenant_id: int, hoje: date, limite: int = 10) -> Dashb
                                             saldo_minimo_alerta=c.saldo_minimo_alerta)
                             for c in painel if c.abaixo_minimo]
 
+    # RF-SLD-06: contas sem movimentação/atualização de saldo no dia corrente.
+    contas_desatualizadas: list[ContaDesatualizadaItem] = []
+    for c in painel:
+        atualizado = await caixa.ultima_atualizacao_conta(db, tenant_id=tenant_id, conta_id=c.id_conta)
+        if atualizado is None or atualizado.date() < hoje:
+            contas_desatualizadas.append(ContaDesatualizadaItem(
+                id_conta=c.id_conta, nome=c.nome, atualizado_em=atualizado))
+
     return DashboardAlertas(parcelas_vencidas=parcelas_vencidas, parcelas_7dias=parcelas_7dias,
-                            contas_abaixo_minimo=contas_abaixo_minimo)
+                            contas_abaixo_minimo=contas_abaixo_minimo,
+                            contas_desatualizadas=contas_desatualizadas)

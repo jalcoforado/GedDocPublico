@@ -303,6 +303,22 @@ class SaldoHistorico(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class ContaFonteHistorico(Base):
+    """Trilha append-only das trocas de fonte de uma conta (RF-CTA-06)."""
+    __tablename__ = "conta_fonte_historico"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_conta: Mapped[int] = mapped_column(ForeignKey("pagamentos.conta_bancaria.id"), nullable=False)
+    id_fonte_anterior: Mapped[int | None] = mapped_column(
+        ForeignKey("pagamentos.fonte_recursos.id"), nullable=True)
+    id_fonte_nova: Mapped[int] = mapped_column(ForeignKey("pagamentos.fonte_recursos.id"), nullable=False)
+    justificativa: Mapped[str] = mapped_column(String(255), nullable=False)
+    vigencia: Mapped[date] = mapped_column(Date, nullable=False)
+    id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class TagPrioridade(Base):
     """Rótulos de priorização por tenant (RF-CAD-05)."""
     __tablename__ = "tag_prioridade"

@@ -201,11 +201,12 @@ async def create_conta(payload: ContaCreate,
 
 @contas_router.put("/{conta_id}", response_model=ContaOut)
 async def update_conta(conta_id: int, payload: ContaUpdate,
-                       _: Usuario = Depends(require_permission("pagamento_cadastro", "atualizar")),
+                       usuario: Usuario = Depends(require_permission("pagamento_cadastro", "atualizar")),
                        tenant_id: int = Depends(require_tenant_id),
                        db: AsyncSession = Depends(get_db)):
     return ContaOut.model_validate(
-        await svc.atualizar_conta(db, tenant_id=tenant_id, conta_id=conta_id, payload=payload))
+        await svc.atualizar_conta(db, tenant_id=tenant_id, conta_id=conta_id,
+                                  payload=payload, usuario_id=usuario.id))
 
 
 @contas_router.delete("/{conta_id}", status_code=status.HTTP_204_NO_CONTENT)

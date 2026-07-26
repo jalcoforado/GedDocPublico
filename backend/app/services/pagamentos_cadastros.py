@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core import crypto
 from ..models import (
-    Alcada, ContaBancaria, Contrato, Fornecedor, FornecedorSituacaoHistorico,
+    Alcada, ContaBancaria, ContaFonteHistorico, Contrato, Fornecedor, FornecedorSituacaoHistorico,
     FonteRecursos, NaturezaDespesa, UnidadeTrabalho,
 )
 from ..schemas.pagamentos import (
@@ -302,13 +302,25 @@ async def criar_conta(db: AsyncSession, *, tenant_id: int, payload: ContaCreate)
 
 
 async def atualizar_conta(db: AsyncSession, *, tenant_id: int, conta_id: int,
-                           payload: ContaUpdate) -> ContaBancaria:
+                           payload: ContaUpdate, usuario_id: int | None = None) -> ContaBancaria:
     c = await obter_conta(db, tenant_id=tenant_id, conta_id=conta_id)
     dados = payload.model_dump(exclude_unset=True)
+    justificativa = dados.pop("justificativa_troca_fonte", None)  # não é coluna da conta
+    nova_fonte = dados.get("id_fonte_recursos")
+    troca_fonte = nova_fonte is not None and nova_fonte != c.id_fonte_recursos
     if "id_fonte_recursos" in dados or "grupo_despesa" in dados:
         fonte_id = dados.get("id_fonte_recursos", c.id_fonte_recursos)
         grupo = dados.get("grupo_despesa", c.grupo_despesa)
         await _validar_fonte_grupo(db, tenant_id=tenant_id, id_fonte_recursos=fonte_id, grupo_despesa=grupo)
+    if troca_fonte:  # RF-CTA-06: exige justificativa e preserva o histórico
+        if not (justificativa or "").strip():
+            raise PagamentoCadastroError(
+                "Trocar a fonte vinculada à conta exige justificativa (RF-CTA-06).",
+                status.HTTP_422_UNPROCESSABLE_ENTITY)
+        db.add(ContaFonteHistorico(
+            tenant_id=tenant_id, id_conta=c.id, id_fonte_anterior=c.id_fonte_recursos,
+            id_fonte_nova=nova_fonte, justificativa=justificativa.strip(),
+            vigencia=_utcnow().date(), id_usuario=usuario_id, criado_em=_utcnow()))
     for k, v in dados.items():
         setattr(c, k, v)
     c.atualizado_em = _utcnow(); await db.commit(); await db.refresh(c)

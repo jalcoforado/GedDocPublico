@@ -16,11 +16,12 @@ from pydantic import BaseModel, Field
 
 from ..schemas.pagamentos import (
     AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
-    DebitoHistoricoOut, DebitoOut, DebitoUpdate, FilaAutorizacaoFonteGrupo, FilaLiberacaoGrupo,
-    FilaTesourariaOut, JustificativaIn, LiquidacaoIn, MinhaFilaOut, OrdemPagamentoOut, PagarParcelaIn,
-    ParcelaFilaOut, ParcelaOut,
+    DebitoHistoricoOut, DebitoOut, DebitoUpdate, FichaFonteOut, FilaAutorizacaoFonteGrupo,
+    FilaLiberacaoGrupo, FilaTesourariaOut, JustificativaIn, LiquidacaoIn, MinhaFilaOut,
+    OrdemPagamentoOut, PagarParcelaIn, ParcelaFilaOut, ParcelaOut,
 )
 from ..services import pagamentos_autorizacao as aut
+from ..services import pagamentos_caixa as caixa
 from ..services import pagamentos_dashboard as dash
 from ..services import pagamentos_debitos as svc
 from ..services import pagamentos_filas as filas
@@ -323,6 +324,14 @@ async def contas_elegiveis(fonte_id: int,
                            tenant_id: int = Depends(require_tenant_id),
                            db: AsyncSession = Depends(get_db)):
     return await aut.contas_elegiveis(db, tenant_id=tenant_id, id_fonte=fonte_id)
+
+
+@operacoes_router.get("/fontes/{fonte_id}/ficha", response_model=FichaFonteOut)
+async def ficha_fonte(fonte_id: int,
+                      _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                      tenant_id: int = Depends(require_tenant_id),
+                      db: AsyncSession = Depends(get_db)):
+    return await caixa.ficha_fonte(db, tenant_id=tenant_id, id_fonte=fonte_id)
 
 
 @operacoes_router.get("/liberacao/fila", response_model=list[FilaLiberacaoGrupo])
