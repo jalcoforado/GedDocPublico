@@ -19,15 +19,25 @@ import { RitoPagamento, type PassoRito } from "@/components/pagamentos/RitoPagam
 import { fmtDataCurta } from "@/components/pagamentos/format";
 import { useAuth } from "@/lib/auth";
 import { api, type Parcela, type StatusDebito } from "@/lib/api";
+import { DEBITO_STATUS_BADGE } from "@/components/pagamentos/statusDebito";
 
 // Passos do rito já concluídos + próximo passo pendente, derivados do status do débito.
+// Rito v2.0 (16 status) mapeado sobre os passos visuais existentes
+// (solicitar → validar[aprovar] → autorizar → liberar → pagar).
 const RITO_POR_STATUS: Record<StatusDebito, { concluidos: PassoRito[]; atual?: PassoRito }> = {
   RASCUNHO: { concluidos: [], atual: "solicitar" },
-  AGUARDANDO_APROVACAO: { concluidos: ["solicitar"], atual: "aprovar" },
-  APROVADO: { concluidos: ["solicitar", "aprovar"], atual: "autorizar" },
+  DEVOLVIDO: { concluidos: [], atual: "solicitar" },
+  EM_VALIDACAO: { concluidos: ["solicitar"], atual: "aprovar" },
+  VALIDADO: { concluidos: ["solicitar", "aprovar"], atual: "autorizar" },
+  ENVIADO_SECRETARIO: { concluidos: ["solicitar", "aprovar"], atual: "autorizar" },
+  AGUARDANDO_AUTORIZACAO: { concluidos: ["solicitar", "aprovar"], atual: "autorizar" },
   AUTORIZADO: { concluidos: ["solicitar", "aprovar", "autorizar"], atual: "liberar" },
+  ENVIADO_TESOURARIA: { concluidos: ["solicitar", "aprovar", "autorizar", "liberar"], atual: "pagar" },
+  EM_PROCESSAMENTO: { concluidos: ["solicitar", "aprovar", "autorizar", "liberar"], atual: "pagar" },
   PAGO_PARCIAL: { concluidos: ["solicitar", "aprovar", "autorizar"], atual: "pagar" },
   PAGO: { concluidos: ["solicitar", "aprovar", "autorizar", "liberar", "pagar"] },
+  CONCILIADO: { concluidos: ["solicitar", "aprovar", "autorizar", "liberar", "pagar"] },
+  ESTORNADO: { concluidos: ["solicitar", "aprovar", "autorizar"], atual: "liberar" },
   REJEITADO: { concluidos: ["solicitar"] },
   CANCELADO: { concluidos: [] },
   SUSPENSO: { concluidos: ["solicitar"] },
@@ -49,17 +59,7 @@ function fmtDataHora(v: string): string {
   return new Date(v).toLocaleString("pt-BR");
 }
 
-const STATUS_BADGE: Record<StatusDebito, { intent: "neutral" | "warning" | "info" | "success" | "danger"; label: string }> = {
-  RASCUNHO: { intent: "neutral", label: "Rascunho" },
-  AGUARDANDO_APROVACAO: { intent: "warning", label: "Aguardando aprovação" },
-  APROVADO: { intent: "info", label: "Aprovado" },
-  AUTORIZADO: { intent: "info", label: "Autorizado" },
-  PAGO_PARCIAL: { intent: "warning", label: "Pago parcial" },
-  PAGO: { intent: "success", label: "Pago" },
-  REJEITADO: { intent: "danger", label: "Rejeitado" },
-  CANCELADO: { intent: "danger", label: "Cancelado" },
-  SUSPENSO: { intent: "warning", label: "Suspenso" },
-};
+const STATUS_BADGE = DEBITO_STATUS_BADGE;
 
 function StatusBadge({ status }: { status: StatusDebito }) {
   const cfg = STATUS_BADGE[status];
@@ -125,11 +125,29 @@ export default function DebitoDetalhePage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const aprovarM = useMutation({
-    mutationFn: () => api.pagamentos.debitos.aprovar(id),
+  const validarM = useMutation({
+    mutationFn: () => api.pagamentos.debitos.validar(id),
     onSuccess: () => {
       invalidate();
-      toast.success("Débito aprovado.");
+      toast.success("Débito validado.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const encaminharM = useMutation({
+    mutationFn: () => api.pagamentos.debitos.encaminhar(id),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Débito encaminhado à autoridade.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const emProcessamentoM = useMutation({
+    mutationFn: () => api.pagamentos.debitos.emProcessamento(id),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Pagamento marcado em processamento.");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -428,31 +446,37 @@ export default function DebitoDetalhePage() {
           Ações do fluxo
         </h2>
         <div className="flex flex-wrap gap-2">
-          {/* v2.0: liquidação é pré-requisito para autorizar (RN-01). Quem aprova
-              OU quem autoriza pode confirmá-la, para não travar o autorizador. */}
+          {/* v2.0: liquidação é pré-requisito para validar (RN-01). Validador ou
+              autoridade podem confirmá-la nas etapas pré-validação. */}
           {!d.liquidacao_confirmada &&
-            ["RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO"].includes(d.status) &&
-            (can("pagamento_aprovar") || can("pagamento_autorizar")) && (
+            ["RASCUNHO", "DEVOLVIDO", "EM_VALIDACAO", "VALIDADO"].includes(d.status) &&
+            (can("pagamento_validar") || can("pagamento_aprovar") || can("pagamento_autorizar")) && (
               <Button variant="secondary" onClick={() => liquidacaoM.mutate()}
                 disabled={liquidacaoM.isPending}>
                 Confirmar liquidação
               </Button>
             )}
-          {d.status === "RASCUNHO" && can("pagamento_solicitar") && (
+          {["RASCUNHO", "DEVOLVIDO"].includes(d.status) && can("pagamento_solicitar") && (
             <>
               <Button onClick={() => enviarM.mutate()} disabled={enviarM.isPending}>
-                Enviar para aprovação
+                Enviar para validação
               </Button>
               <Button variant="danger" onClick={cancelar} disabled={cancelarM.isPending}>
                 Cancelar
               </Button>
             </>
           )}
-          {d.status === "AGUARDANDO_APROVACAO" && can("pagamento_aprovar") && (
+          {d.status === "EM_VALIDACAO" && (can("pagamento_validar") || can("pagamento_aprovar")) && (
             <>
-              <Button onClick={() => aprovarM.mutate()} disabled={aprovarM.isPending}>
-                Aprovar
-              </Button>
+              {d.liquidacao_confirmada ? (
+                <Button onClick={() => validarM.mutate()} disabled={validarM.isPending}>
+                  Validar
+                </Button>
+              ) : (
+                <p className="self-center text-sm text-muted-foreground">
+                  Confirme a liquidação antes de validar.
+                </p>
+              )}
               <Button variant="secondary" onClick={devolver} disabled={devolverM.isPending}>
                 Devolver
               </Button>
@@ -461,8 +485,13 @@ export default function DebitoDetalhePage() {
               </Button>
             </>
           )}
-          {d.status === "APROVADO" && can("pagamento_autorizar") && (
-            d.liquidacao_confirmada ? (
+          {d.status === "VALIDADO" && (can("pagamento_encaminhar") || can("pagamento_autorizar")) && (
+            <Button onClick={() => encaminharM.mutate()} disabled={encaminharM.isPending}>
+              Encaminhar à autoridade
+            </Button>
+          )}
+          {["ENVIADO_SECRETARIO", "AGUARDANDO_AUTORIZACAO"].includes(d.status) &&
+            can("pagamento_autorizar") && (
               <Button
                 onClick={() => {
                   setContaPagadora(null);
@@ -471,33 +500,29 @@ export default function DebitoDetalhePage() {
               >
                 Autorizar
               </Button>
-            ) : (
-              <p className="self-center text-sm text-muted-foreground">
-                Confirme a liquidação antes de autorizar.
-              </p>
-            )
-          )}
-          {/* v2.0: tesouraria suspende/reativa débito suspeito (RF-TES-06) */}
-          {["AGUARDANDO_APROVACAO", "APROVADO"].includes(d.status) && can("pagamento_pagar") && (
-            <Button variant="danger" onClick={suspender} disabled={suspenderM.isPending}>
-              Suspender
+            )}
+          {/* v2.0: tesouraria marca o pagamento em processamento (RF-TES) */}
+          {d.status === "ENVIADO_TESOURARIA" && can("pagamento_pagar") && (
+            <Button variant="secondary" onClick={() => emProcessamentoM.mutate()}
+              disabled={emProcessamentoM.isPending}>
+              Marcar em processamento
             </Button>
           )}
+          {/* v2.0: suspende/reativa débito suspeito (RF-TES-06/RF-AUT-17) */}
+          {["EM_VALIDACAO", "VALIDADO", "ENVIADO_SECRETARIO", "AGUARDANDO_AUTORIZACAO"].includes(d.status) &&
+            can("pagamento_pagar") && (
+              <Button variant="danger" onClick={suspender} disabled={suspenderM.isPending}>
+                Suspender
+              </Button>
+            )}
           {d.status === "SUSPENSO" && can("pagamento_pagar") && (
             <Button onClick={reativar} disabled={reativarM.isPending}>
               Reativar
             </Button>
           )}
-          {!(
-            (!d.liquidacao_confirmada &&
-              ["RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO"].includes(d.status) &&
-              (can("pagamento_aprovar") || can("pagamento_autorizar"))) ||
-            (d.status === "RASCUNHO" && can("pagamento_solicitar")) ||
-            (d.status === "AGUARDANDO_APROVACAO" &&
-              (can("pagamento_aprovar") || can("pagamento_pagar"))) ||
-            (d.status === "APROVADO" && (can("pagamento_autorizar") || can("pagamento_pagar"))) ||
-            (d.status === "SUSPENSO" && can("pagamento_pagar"))
-          ) && <p className="text-sm text-muted-foreground">Nenhuma ação disponível.</p>}
+          {["PAGO", "CONCILIADO", "REJEITADO", "CANCELADO"].includes(d.status) && (
+            <p className="text-sm text-muted-foreground">Nenhuma ação disponível.</p>
+          )}
         </div>
       </section>
 

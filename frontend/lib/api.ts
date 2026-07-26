@@ -1148,8 +1148,10 @@ export interface Alcada {
 
 // ---------- Pagamentos (R2) — débitos, parcelas, autorização, OP ----------
 export type StatusDebito =
-  | "RASCUNHO" | "AGUARDANDO_APROVACAO" | "APROVADO" | "AUTORIZADO"
-  | "PAGO_PARCIAL" | "PAGO" | "REJEITADO" | "CANCELADO" | "SUSPENSO";
+  | "RASCUNHO" | "EM_VALIDACAO" | "DEVOLVIDO" | "VALIDADO"
+  | "ENVIADO_SECRETARIO" | "AGUARDANDO_AUTORIZACAO" | "AUTORIZADO"
+  | "ENVIADO_TESOURARIA" | "EM_PROCESSAMENTO" | "PAGO_PARCIAL" | "PAGO"
+  | "CONCILIADO" | "REJEITADO" | "SUSPENSO" | "CANCELADO" | "ESTORNADO";
 
 export type StatusParcela = "A_PAGAR" | "LIBERADA" | "PAGA" | "CANCELADA";
 
@@ -1194,9 +1196,9 @@ export interface ParcelaFila {
 }
 
 export interface MinhaFila {
-  solicitar: Debito[] | null; aprovar: Debito[] | null;
-  autorizar: Debito[] | null; liberar: ParcelaFila[] | null;
-  pagar: ParcelaFila[] | null;
+  solicitar: Debito[] | null; validar: Debito[] | null;
+  encaminhar: Debito[] | null; autorizar: Debito[] | null;
+  liberar: ParcelaFila[] | null; pagar: ParcelaFila[] | null;
 }
 
 // ---------- filas agregadas por conta (autorização / liberação / tesouraria) ----------
@@ -1225,6 +1227,9 @@ export interface GrupoConta {
 export interface ContaElegivel {
   id_conta: number; nome: string; banco: string; agencia: string; conta_mascarada: string;
   saldo_atual: string; disponivel: string; abaixo_minimo: boolean;
+  // RF-AUT-05: reservado, conciliado, disponível projetado e última atualização.
+  reservado: string; bloqueado: string; saldo_conciliado: string;
+  disponivel_projetado: string; atualizado_em: string | null;
 }
 
 // v2.0: fila de autorização agrupada por FONTE (não mais por conta)
@@ -2846,7 +2851,11 @@ export const api = {
         request<Debito>(`/pagamentos/debitos/${id}`, { method: "PUT", body: JSON.stringify(data) }),
       remove: (id: number) => request<void>(`/pagamentos/debitos/${id}`, { method: "DELETE" }),
       enviar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/enviar`, { method: "POST" }),
-      aprovar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/aprovar`, { method: "POST" }),
+      // v2.0 rito: validar (validador setorial) e encaminhar (secretário).
+      validar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/validar`, { method: "POST" }),
+      encaminhar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/encaminhar`, { method: "POST" }),
+      emProcessamento: (id: number) =>
+        request<Debito>(`/pagamentos/debitos/${id}/em-processamento`, { method: "POST" }),
       devolver: (id: number, justificativa: string) =>
         request<Debito>(`/pagamentos/debitos/${id}/devolver`, {
           method: "POST", body: JSON.stringify({ justificativa }) }),

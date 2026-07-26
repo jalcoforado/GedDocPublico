@@ -236,6 +236,9 @@ class OrdemPagamento(Base):
     id_conta_pagadora: Mapped[int | None] = mapped_column(
         ForeignKey("pagamentos.conta_bancaria.id"), nullable=True)
     valor_reservado: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    # RF-AUT-16: saldo disponível antes e projetado após a reserva (auditoria).
+    saldo_antes: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    saldo_projetado_apos: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     valor_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     ip_origem: Mapped[str | None] = mapped_column(String(45), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -297,6 +300,22 @@ class SaldoHistorico(Base):
     saldo_conciliado: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     saldo_reservado: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     saldo_bloqueado: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class ContaFonteHistorico(Base):
+    """Trilha append-only das trocas de fonte de uma conta (RF-CTA-06)."""
+    __tablename__ = "conta_fonte_historico"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_conta: Mapped[int] = mapped_column(ForeignKey("pagamentos.conta_bancaria.id"), nullable=False)
+    id_fonte_anterior: Mapped[int | None] = mapped_column(
+        ForeignKey("pagamentos.fonte_recursos.id"), nullable=True)
+    id_fonte_nova: Mapped[int] = mapped_column(ForeignKey("pagamentos.fonte_recursos.id"), nullable=False)
+    justificativa: Mapped[str] = mapped_column(String(255), nullable=False)
+    vigencia: Mapped[date] = mapped_column(Date, nullable=False)
+    id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 

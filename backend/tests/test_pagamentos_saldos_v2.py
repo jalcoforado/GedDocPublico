@@ -192,9 +192,13 @@ async def test_autorizar_conta_nao_paga_422(admin_engine):
                 valor_total="100.00", competencia="2026-07", descricao="x",
                 parcelas=[ParcelaCreate(numero=1, valor="100.00", vencimento="2026-08-01")]))
         async with _sm(admin_engine)() as s:
-            await deb.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
+            await deb.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
         async with _sm(admin_engine)() as s:
-            await deb.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+        async with _sm(admin_engine)() as s:
+            await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+        async with _sm(admin_engine)() as s:
+            await deb.encaminhar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
         autorizador = await _novo_usuario(admin_engine, t.id, f"au{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
             await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
@@ -206,5 +210,37 @@ async def test_autorizar_conta_nao_paga_422(admin_engine):
                                        debito_ids=[d.id])])
             assert exc.value.status_code == 422
             assert "pagamento" in exc.value.detail.lower()
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_ficha_fonte_lista_contas_e_saldos(admin_engine):
+    """RF-FON-06: a ficha da fonte traz todas as contas vinculadas com seus saldos."""
+    t = await _provisionar(admin_engine)
+    try:
+        fonte_id, conta1 = await _conta(admin_engine, t.id, saldo="1000.00", modo="PAGA")
+        _f2, conta2 = await _conta(admin_engine, t.id, saldo="500.00", modo="RECEBE", fonte_id=fonte_id)
+        async with _sm(admin_engine)() as s:
+            ficha = await caixa.ficha_fonte(s, tenant_id=t.id, id_fonte=fonte_id)
+        assert ficha.id_fonte == fonte_id
+        ids = {c.id_conta for c in ficha.contas}
+        assert ids == {conta1.id, conta2.id}
+        # disponível_total consolida as contas ativas (RF-SLD-05)
+        assert ficha.disponivel_total == Decimal("1500.00")
+        c1 = next(c for c in ficha.contas if c.id_conta == conta1.id)
+        assert c1.saldo_bancario == Decimal("1000.00")
+        assert c1.conta_mascarada.startswith("****")
+        assert c1.modo_movimentacao == "PAGA"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_ficha_fonte_inexistente_404(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await caixa.ficha_fonte(s, tenant_id=t.id, id_fonte=999999)
+            assert exc.value.status_code == 404
     finally:
         await _cleanup(admin_engine, t.id)

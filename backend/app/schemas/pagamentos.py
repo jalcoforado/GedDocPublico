@@ -161,6 +161,8 @@ class ContaUpdate(BaseModel):
     finalidade: str | None = Field(default=None, max_length=255)
     data_abertura: date | None = None
     modo_movimentacao: ModoMovimentacao | None = None
+    # RF-CTA-06: obrigatória ao trocar a fonte vinculada (gera trilha).
+    justificativa_troca_fonte: str | None = Field(default=None, max_length=255)
 
 
 class ContaOut(BaseModel):
@@ -317,8 +319,10 @@ class ContaSaldoPainel(BaseModel):
 
 
 # ---------- débito / parcelas / ordem de pagamento (R2) ----------
-StatusDebito = Literal["RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO", "AUTORIZADO",
-                       "PAGO_PARCIAL", "PAGO", "REJEITADO", "CANCELADO", "SUSPENSO"]
+StatusDebito = Literal["RASCUNHO", "EM_VALIDACAO", "DEVOLVIDO", "VALIDADO",
+                       "ENVIADO_SECRETARIO", "AGUARDANDO_AUTORIZACAO", "AUTORIZADO",
+                       "ENVIADO_TESOURARIA", "EM_PROCESSAMENTO", "PAGO_PARCIAL", "PAGO",
+                       "CONCILIADO", "REJEITADO", "SUSPENSO", "CANCELADO", "ESTORNADO"]
 StatusParcela = Literal["A_PAGAR", "LIBERADA", "PAGA", "CANCELADA"]
 FormaPagamento = Literal["PIX", "TED", "BOLETO", "DINHEIRO", "OUTRO"]
 
@@ -408,6 +412,10 @@ class GrupoAutorizacaoIn(BaseModel):
     id_fonte: int
     id_conta_pagadora: int
     debito_ids: list[int] = Field(min_length=1)
+    # RN-15: exceção de saldo insuficiente — só quando expressamente autorizada e
+    # justificada; a justificativa é gravada no histórico (auditável).
+    permitir_saldo_insuficiente: bool = False
+    justificativa_excecao: str | None = Field(default=None, max_length=255)
 
 
 class AutorizarLoteIn(BaseModel):
@@ -431,10 +439,11 @@ class ParcelaFilaOut(BaseModel):
 
 
 class MinhaFilaOut(BaseModel):
-    solicitar: list[DebitoOut] | None = None    # meus RASCUNHO (inclui devolvidos)
-    aprovar: list[DebitoOut] | None = None      # AGUARDANDO_APROVACAO
-    autorizar: list[DebitoOut] | None = None    # APROVADO
-    liberar: list[ParcelaFilaOut] | None = None  # A_PAGAR de AUTORIZADO/PAGO_PARCIAL
+    solicitar: list[DebitoOut] | None = None    # meus RASCUNHO/DEVOLVIDO
+    validar: list[DebitoOut] | None = None      # EM_VALIDACAO
+    encaminhar: list[DebitoOut] | None = None   # VALIDADO
+    autorizar: list[DebitoOut] | None = None    # ENVIADO_SECRETARIO/AGUARDANDO_AUTORIZACAO
+    liberar: list[ParcelaFilaOut] | None = None  # A_PAGAR de autorizados/tesouraria
     pagar: list[ParcelaFilaOut] | None = None   # LIBERADA
 
 
@@ -465,6 +474,26 @@ class ContaElegivelOut(BaseModel):
     """Conta ativa de uma fonte, elegível como conta pagadora (v2.0 RF-AUT-02/05)."""
     id_conta: int; nome: str; banco: str; agencia: str; conta_mascarada: str
     saldo_atual: Decimal; disponivel: Decimal; abaixo_minimo: bool
+    # RF-AUT-05: reservado, conciliado, disponível projetado e última atualização.
+    reservado: Decimal = Decimal("0"); bloqueado: Decimal = Decimal("0")
+    saldo_conciliado: Decimal = Decimal("0"); disponivel_projetado: Decimal = Decimal("0")
+    atualizado_em: datetime | None = None
+
+
+class FichaFonteContaItem(BaseModel):
+    """Conta vinculada a uma fonte, com saldos e situação (RF-FON-06)."""
+    id_conta: int; nome: str; banco: str; conta_mascarada: str
+    ativa: bool; modo_movimentacao: str
+    saldo_bancario: Decimal; saldo_conciliado: Decimal; reservado: Decimal
+    bloqueado: Decimal; disponivel_projetado: Decimal; atualizado_em: datetime | None
+
+
+class FichaFonteOut(BaseModel):
+    """Ficha da fonte: dados + todas as contas vinculadas com saldos (RF-FON-06)."""
+    id_fonte: int; codigo: str; descricao: str; situacao: str
+    exercicio: int | None; tipo_vinculacao: str | None
+    disponivel_total: Decimal
+    contas: list[FichaFonteContaItem]
 
 
 class FilaAutorizacaoFonteGrupo(BaseModel):
@@ -513,10 +542,16 @@ class ContaAlertaItem(BaseModel):
     id_conta: int; nome: str; saldo_atual: Decimal; saldo_minimo_alerta: Decimal
 
 
+class ContaDesatualizadaItem(BaseModel):
+    """Conta sem atualização de saldo no dia útil corrente (RF-SLD-06)."""
+    id_conta: int; nome: str; atualizado_em: datetime | None
+
+
 class DashboardAlertas(BaseModel):
     parcelas_vencidas: list[ParcelaAlertaItem]
     parcelas_7dias: list[ParcelaAlertaItem]
     contas_abaixo_minimo: list[ContaAlertaItem]
+    contas_desatualizadas: list[ContaDesatualizadaItem] = []
 
 
 class DashboardOut(BaseModel):

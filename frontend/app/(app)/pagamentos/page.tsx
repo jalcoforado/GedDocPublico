@@ -158,7 +158,7 @@ export default function PagamentosHomePage() {
       </div>
 
       {fila && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           <CardFila
             title="Meus rascunhos"
             itens={fila.solicitar}
@@ -166,8 +166,14 @@ export default function PagamentosHomePage() {
             abrirLabel="abrir tela de contas a pagar"
           />
           <CardFila
-            title="Aguardando minha aprovação"
-            itens={fila.aprovar}
+            title="Aguardando minha validação"
+            itens={fila.validar}
+            abrirHref="/pagamentos/contas-a-pagar"
+            abrirLabel="abrir tela de contas a pagar"
+          />
+          <CardFila
+            title="Aguardando encaminhamento"
+            itens={fila.encaminhar}
             abrirHref="/pagamentos/contas-a-pagar"
             abrirLabel="abrir tela de contas a pagar"
           />

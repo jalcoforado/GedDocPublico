@@ -135,26 +135,115 @@ async def test_fornecedor_irregular_bloqueia_autorizacao(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         forn, nat, fonte, conta = await _base(admin_engine, t.id, situacao="IRREGULAR")
-        sol = await _novo_usuario(admin_engine, t.id, f"s{uuid.uuid4().hex[:6]}")
-        apr = await _novo_usuario(admin_engine, t.id, f"a{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol, payload=_payload(forn, nat, fonte))
-        async with _sm(admin_engine)() as s:
-            await deb.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
-        async with _sm(admin_engine)() as s:
-            await deb.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
-        async with _sm(admin_engine)() as s:
-            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
-        autorizador = await _novo_usuario(admin_engine, t.id, f"au{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
-                id_usuario=autorizador, id_natureza=None, valor_maximo="999999.00"))
+        d, autorizador = await _pronto_para_autorizar(admin_engine, t.id, forn, nat, fonte)
         async with _sm(admin_engine)() as s:
             with pytest.raises(HTTPException) as exc:
                 await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador, grupos=[
                     GrupoAutorizacaoIn(id_fonte=fonte.id, id_conta_pagadora=conta.id, debito_ids=[d.id])])
             assert exc.value.status_code == 422
             assert "irregular" in exc.value.detail.lower()
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def _pronto_para_autorizar(engine, tenant_id, forn, nat, fonte, *, valor="1000.00", ne="NE-1"):
+    """Débito em ENVIADO_SECRETARIO (liquidado/validado/encaminhado), com autorizador
+    dotado de alçada. Retorna (d, autorizador)."""
+    sol = await _novo_usuario(engine, tenant_id, f"s{uuid.uuid4().hex[:6]}")
+    apr = await _novo_usuario(engine, tenant_id, f"a{uuid.uuid4().hex[:6]}")
+    autorizador = await _novo_usuario(engine, tenant_id, f"au{uuid.uuid4().hex[:6]}")
+    async with _sm(engine)() as s:
+        d = await deb.criar_debito(s, tenant_id=tenant_id, usuario_id=sol,
+                                   payload=_payload(forn, nat, fonte, valor=valor, ne=ne))
+    async with _sm(engine)() as s:
+        await deb.enviar_validacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=sol)
+    async with _sm(engine)() as s:
+        await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=apr)
+    async with _sm(engine)() as s:
+        await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=apr)
+    async with _sm(engine)() as s:
+        await deb.encaminhar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=apr)
+    async with _sm(engine)() as s:
+        await cad.criar_alcada(s, tenant_id=tenant_id, payload=AlcadaCreate(
+            id_usuario=autorizador, id_natureza=None, valor_maximo="9999999.00"))
+    return d, autorizador
+
+
+async def test_autorizar_sem_empenho_bloqueia(admin_engine):
+    """RN-01: sem número de empenho, não pode autorizar (mesmo liquidado)."""
+    t = await _provisionar(admin_engine)
+    try:
+        forn, nat, fonte, conta = await _base(admin_engine, t.id)
+        d, autorizador = await _pronto_para_autorizar(admin_engine, t.id, forn, nat, fonte, ne=None)
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador, grupos=[
+                    GrupoAutorizacaoIn(id_fonte=fonte.id, id_conta_pagadora=conta.id, debito_ids=[d.id])])
+            assert exc.value.status_code == 422
+            assert "empenho" in exc.value.detail.lower()
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_excecao_saldo_permite_com_justificativa(admin_engine):
+    """RN-15: saldo insuficiente pode ser autorizado com exceção justificada; a
+    justificativa é gravada no histórico (auditável)."""
+    t = await _provisionar(admin_engine)
+    try:
+        forn, nat, fonte, conta = await _base(admin_engine, t.id)  # saldo 10.000
+        d, autorizador = await _pronto_para_autorizar(admin_engine, t.id, forn, nat, fonte, valor="50000.00")
+        async with _sm(admin_engine)() as s:
+            ops = await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador, grupos=[
+                GrupoAutorizacaoIn(id_fonte=fonte.id, id_conta_pagadora=conta.id, debito_ids=[d.id],
+                                   permitir_saldo_insuficiente=True,
+                                   justificativa_excecao="Pagamento judicial urgente")])
+        assert len(ops) == 1
+        async with _sm(admin_engine)() as s:
+            hist = await deb.listar_historico(s, tenant_id=t.id, debito_id=d.id)
+        aut_hist = [h for h in hist if h.acao == "AUTORIZADO"]
+        assert aut_hist and "EXCEÇÃO DE SALDO" in (aut_hist[0].justificativa or "")
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_excecao_saldo_sem_justificativa_bloqueia(admin_engine):
+    """RN-15: exceção sem justificativa é rejeitada."""
+    t = await _provisionar(admin_engine)
+    try:
+        forn, nat, fonte, conta = await _base(admin_engine, t.id)
+        d, autorizador = await _pronto_para_autorizar(admin_engine, t.id, forn, nat, fonte, valor="50000.00")
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador, grupos=[
+                    GrupoAutorizacaoIn(id_fonte=fonte.id, id_conta_pagadora=conta.id, debito_ids=[d.id],
+                                       permitir_saldo_insuficiente=True)])
+            assert exc.value.status_code == 422
+            assert "justificativa" in exc.value.detail.lower()
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_detectar_duplicidade_considera_contrato(admin_engine):
+    """RF-SOL-09: o contrato compõe a chave de duplicidade — mesma NF/empenho mas
+    contrato distinto não é duplicata."""
+    t = await _provisionar(admin_engine)
+    try:
+        forn, nat, fonte, _conta = await _base(admin_engine, t.id)
+        uid = await _novo_usuario(admin_engine, t.id, f"u{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+                                       payload=_payload(forn, nat, fonte, nf="NF-7", ne="NE-7"))
+        async with _sm(admin_engine)() as s:
+            # mesma NF/empenho/valor/competência, mas exigindo contrato específico → sem match
+            outro_contrato = await deb.detectar_duplicidade(
+                s, tenant_id=t.id, id_fornecedor=forn.id, numero_nf="NF-7", numero_ne="NE-7",
+                valor_total=d.valor_total, competencia=d.competencia, id_contrato=999999)
+            # sem restrição de contrato → encontra a duplicata
+            sem_contrato = await deb.detectar_duplicidade(
+                s, tenant_id=t.id, id_fornecedor=forn.id, numero_nf="NF-7", numero_ne="NE-7",
+                valor_total=d.valor_total, competencia=d.competencia)
+        assert outro_contrato == []
+        assert d.id in sem_contrato
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -169,15 +258,13 @@ async def test_suspender_e_reativar(admin_engine):
         async with _sm(admin_engine)() as s:
             d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol, payload=_payload(forn, nat, fonte))
         async with _sm(admin_engine)() as s:
-            await deb.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
-        async with _sm(admin_engine)() as s:
-            await deb.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+            await deb.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
         async with _sm(admin_engine)() as s:
             ds = await deb.suspender(s, tenant_id=t.id, debito_id=d.id, usuario_id=tes,
                                      justificativa="Suspeita de duplicidade")
         assert ds.status == "SUSPENSO"
         async with _sm(admin_engine)() as s:
             dr = await deb.reativar(s, tenant_id=t.id, debito_id=d.id, usuario_id=tes)
-        assert dr.status == "APROVADO"
+        assert dr.status == "EM_VALIDACAO"  # reativa reentra na validação
     finally:
         await _cleanup(admin_engine, t.id)

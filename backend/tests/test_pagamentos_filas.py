@@ -95,7 +95,7 @@ def _payload_debito(forn, nat, conta, *, valor="1000.00", competencia="2026-07",
         id_fornecedor=forn.id, id_natureza=nat.id,
         id_fonte_recursos=conta.id_fonte_recursos, id_conta=conta.id,
         valor_total=valor, competencia=competencia, urgente=urgente,
-        descricao="Compra de material",
+        descricao="Compra de material", numero_ne="NE-2026-0001",  # empenho p/ autorizar (RN-01)
         parcelas=parcelas or [ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
     )
 
@@ -125,11 +125,13 @@ async def _debito_aprovado(engine, tenant_id, *, base, valor="1000.00", competen
                                                            competencia=competencia,
                                                            urgente=urgente, parcelas=parcelas))
     async with _sm(engine)() as s:
-        await deb.enviar_aprovacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante)
+        await deb.enviar_validacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante)
+    async with _sm(engine)() as s:  # liquidação é pré-requisito p/ validar (RN-01)
+        await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
     async with _sm(engine)() as s:
-        d = await deb.aprovar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
-    async with _sm(engine)() as s:  # v2.0: liquidação é pré-requisito p/ autorizar (RN-01)
-        d = await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
+        await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
+    async with _sm(engine)() as s:
+        d = await deb.encaminhar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
     return d, solicitante, aprovador
 
 

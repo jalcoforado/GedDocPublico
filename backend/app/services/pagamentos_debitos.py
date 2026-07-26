@@ -62,10 +62,11 @@ def _registrar_transicao(db, *, debito: Debito, novo_status: str, acao: str,
 
 async def detectar_duplicidade(db, *, tenant_id: int, id_fornecedor: int, numero_nf: str | None,
                                numero_ne: str | None, valor_total, competencia: str,
+                               id_contrato: int | None = None,
                                excluir_id: int | None = None) -> list[int]:
-    """IDs de débitos ativos com mesmo credor+NF+empenho+valor+competência (RF-SOL-09).
-    Só considera quando há nota fiscal (numero_nf) — o documento que caracteriza a
-    despesa. Ignora débitos já REJEITADO/CANCELADO."""
+    """IDs de débitos ativos com mesmo credor+NF+empenho+contrato+valor+competência
+    (RF-SOL-09). Só considera quando há nota fiscal (numero_nf) — o documento que
+    caracteriza a despesa. Ignora débitos já REJEITADO/CANCELADO."""
     if not numero_nf:
         return []
     stmt = select(Debito.id).where(
@@ -75,6 +76,8 @@ async def detectar_duplicidade(db, *, tenant_id: int, id_fornecedor: int, numero
         Debito.status.notin_(("REJEITADO", "CANCELADO")))
     if numero_ne:
         stmt = stmt.where(Debito.numero_ne == numero_ne)
+    if id_contrato is not None:
+        stmt = stmt.where(Debito.id_contrato == id_contrato)
     if excluir_id is not None:
         stmt = stmt.where(Debito.id != excluir_id)
     return list((await db.execute(stmt)).scalars().all())
@@ -86,11 +89,12 @@ async def criar_debito(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     _validar_parcelas(payload.parcelas, payload.valor_total)
     dups = await detectar_duplicidade(
         db, tenant_id=tenant_id, id_fornecedor=payload.id_fornecedor, numero_nf=payload.numero_nf,
-        numero_ne=payload.numero_ne, valor_total=payload.valor_total, competencia=payload.competencia)
+        numero_ne=payload.numero_ne, valor_total=payload.valor_total, competencia=payload.competencia,
+        id_contrato=payload.id_contrato)
     if dups:
         raise PagamentoDebitoError(
             f"Possível duplicidade: já existe(m) débito(s) {dups} com mesmo credor, NF, "
-            f"empenho, valor e competência.", status.HTTP_409_CONFLICT)
+            f"empenho, contrato, valor e competência.", status.HTTP_409_CONFLICT)
     d = Debito(tenant_id=tenant_id, id_fornecedor=payload.id_fornecedor,
                id_natureza=payload.id_natureza, id_fonte_recursos=payload.id_fonte_recursos,
                id_conta=payload.id_conta, id_contrato=payload.id_contrato,
@@ -205,11 +209,38 @@ async def nomes_usuarios(db: AsyncSession, *, tenant_id: int, ids: set[int]) -> 
     return {r[0]: r[1] for r in rows}
 
 
-async def aprovadores_do_debito(db: AsyncSession, *, tenant_id: int, debito_id: int) -> set[int]:
+async def validadores_do_debito(db: AsyncSession, *, tenant_id: int, debito_id: int) -> set[int]:
+    """Usuários que VALIDARAM o débito — não podem autorizá-lo (RF-SEG-01)."""
     rows = (await db.execute(select(DebitoHistorico.id_usuario).where(
         DebitoHistorico.tenant_id == tenant_id, DebitoHistorico.id_debito == debito_id,
-        DebitoHistorico.acao == "APROVADO"))).scalars().all()
+        DebitoHistorico.acao == "VALIDADO"))).scalars().all()
     return {r for r in rows if r is not None}
+
+
+# ---- Máquina de estados do pedido — Especificação v2.0 seção 13 (16 status) ----
+ST_RASCUNHO = "RASCUNHO"
+ST_EM_VALIDACAO = "EM_VALIDACAO"
+ST_DEVOLVIDO = "DEVOLVIDO"
+ST_VALIDADO = "VALIDADO"
+ST_ENVIADO_SECRETARIO = "ENVIADO_SECRETARIO"
+ST_AGUARDANDO_AUTORIZACAO = "AGUARDANDO_AUTORIZACAO"
+ST_AUTORIZADO = "AUTORIZADO"
+ST_ENVIADO_TESOURARIA = "ENVIADO_TESOURARIA"
+ST_EM_PROCESSAMENTO = "EM_PROCESSAMENTO"
+ST_PAGO = "PAGO"
+ST_PAGO_PARCIAL = "PAGO_PARCIAL"
+ST_CONCILIADO = "CONCILIADO"
+ST_REJEITADO = "REJEITADO"
+ST_SUSPENSO = "SUSPENSO"
+ST_CANCELADO = "CANCELADO"
+ST_ESTORNADO = "ESTORNADO"
+
+EDITAVEIS = (ST_RASCUNHO, ST_DEVOLVIDO)                      # pedido pode ser editado
+AUTORIZAVEIS = (ST_ENVIADO_SECRETARIO, ST_AGUARDANDO_AUTORIZACAO)  # fila da autoridade
+EM_TESOURARIA = (ST_ENVIADO_TESOURARIA, ST_EM_PROCESSAMENTO, ST_PAGO_PARCIAL)  # execução
+# Débitos cuja autorização mantém valor RESERVADO na conta pagadora (inclui
+# ESTORNADO: a autorização/OP permanece; basta re-liberar para repagar).
+COM_RESERVA = (ST_AUTORIZADO, *EM_TESOURARIA, ST_ESTORNADO)
 
 
 def _exigir_status(d: Debito, *esperados: str) -> None:
@@ -219,10 +250,11 @@ def _exigir_status(d: Debito, *esperados: str) -> None:
             status.HTTP_409_CONFLICT)
 
 
-async def enviar_aprovacao(db: AsyncSession, *, tenant_id: int, debito_id: int,
+async def enviar_validacao(db: AsyncSession, *, tenant_id: int, debito_id: int,
                            usuario_id: int, ip: str | None = None) -> Debito:
+    """Solicitante envia o pedido para validação documental (RASCUNHO/DEVOLVIDO → EM_VALIDACAO)."""
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    _exigir_status(d, "RASCUNHO")
+    _exigir_status(d, *EDITAVEIS)
     parcelas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
     if not parcelas:
         raise PagamentoDebitoError("Débito sem parcelas.", status.HTTP_422_UNPROCESSABLE_ENTITY)
@@ -231,20 +263,38 @@ async def enviar_aprovacao(db: AsyncSession, *, tenant_id: int, debito_id: int,
         raise PagamentoDebitoError(
             f"Soma das parcelas ({soma}) difere do valor total ({d.valor_total}).",
             status.HTTP_422_UNPROCESSABLE_ENTITY)
-    _registrar_transicao(db, debito=d, novo_status="AGUARDANDO_APROVACAO", acao="ENVIADO",
+    _registrar_transicao(db, debito=d, novo_status=ST_EM_VALIDACAO, acao="ENVIADO",
                          usuario_id=usuario_id, ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
 
 
-async def aprovar(db: AsyncSession, *, tenant_id: int, debito_id: int,
+async def validar(db: AsyncSession, *, tenant_id: int, debito_id: int,
                   usuario_id: int, ip: str | None = None) -> Debito:
+    """Validador setorial confere documentos/liquidação (EM_VALIDACAO → VALIDADO).
+    Exige liquidação confirmada (RF-VAL-02/RN-01) e segregação (RF-SEG-01)."""
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    _exigir_status(d, "AGUARDANDO_APROVACAO")
+    _exigir_status(d, ST_EM_VALIDACAO)
     if usuario_id == d.id_usuario_solicitante:
-        raise PagamentoDebitoError("Segregação de funções: o solicitante não pode aprovar o próprio débito.",
+        raise PagamentoDebitoError("Segregação de funções: o solicitante não pode validar o próprio débito.",
                                    status.HTTP_403_FORBIDDEN)
-    _registrar_transicao(db, debito=d, novo_status="APROVADO", acao="APROVADO",
+    if not d.liquidacao_confirmada:
+        raise PagamentoDebitoError(
+            "Não é possível validar sem confirmação de liquidação (RF-VAL-02/RN-01).",
+            status.HTTP_422_UNPROCESSABLE_ENTITY)
+    _registrar_transicao(db, debito=d, novo_status=ST_VALIDADO, acao="VALIDADO",
+                         usuario_id=usuario_id, ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    return d
+
+
+async def encaminhar(db: AsyncSession, *, tenant_id: int, debito_id: int,
+                     usuario_id: int, ip: str | None = None) -> Debito:
+    """Secretário da pasta encaminha o pedido validado à autoridade (VALIDADO →
+    ENVIADO_SECRETARIO). O pedido passa a compor a fila de autorização."""
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    _exigir_status(d, ST_VALIDADO)
+    _registrar_transicao(db, debito=d, novo_status=ST_ENVIADO_SECRETARIO, acao="ENCAMINHADO",
                          usuario_id=usuario_id, ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
@@ -252,9 +302,11 @@ async def aprovar(db: AsyncSession, *, tenant_id: int, debito_id: int,
 
 async def devolver(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_id: int,
                    justificativa: str, ip: str | None = None) -> Debito:
+    """Devolve o pedido para ajuste do solicitante (RF-AUT-17). A partir de qualquer
+    etapa pré-autorização → DEVOLVIDO (reeditável)."""
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    _exigir_status(d, "AGUARDANDO_APROVACAO")
-    _registrar_transicao(db, debito=d, novo_status="RASCUNHO", acao="DEVOLVIDO",
+    _exigir_status(d, ST_EM_VALIDACAO, ST_VALIDADO, *AUTORIZAVEIS)
+    _registrar_transicao(db, debito=d, novo_status=ST_DEVOLVIDO, acao="DEVOLVIDO",
                          usuario_id=usuario_id, justificativa=justificativa, ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
@@ -263,8 +315,8 @@ async def devolver(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_
 async def rejeitar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_id: int,
                    justificativa: str, ip: str | None = None) -> Debito:
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    _exigir_status(d, "AGUARDANDO_APROVACAO")
-    _registrar_transicao(db, debito=d, novo_status="REJEITADO", acao="REJEITADO",
+    _exigir_status(d, ST_EM_VALIDACAO, ST_VALIDADO, *AUTORIZAVEIS)
+    _registrar_transicao(db, debito=d, novo_status=ST_REJEITADO, acao="REJEITADO",
                          usuario_id=usuario_id, justificativa=justificativa, ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
@@ -273,14 +325,15 @@ async def rejeitar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_
 async def cancelar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_id: int,
                    justificativa: str, ip: str | None = None) -> Debito:
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    _exigir_status(d, "RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO", "AUTORIZADO")
+    _exigir_status(d, ST_RASCUNHO, ST_DEVOLVIDO, ST_EM_VALIDACAO, ST_VALIDADO,
+                   *AUTORIZAVEIS, ST_AUTORIZADO)
     parcelas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
     if any(p.status == "PAGA" for p in parcelas):
         raise PagamentoDebitoError("Débito com parcela paga não pode ser cancelado — estorne antes.",
                                    status.HTTP_409_CONFLICT)
     for p in parcelas:
         p.status = "CANCELADA"; p.atualizado_em = _utcnow()
-    _registrar_transicao(db, debito=d, novo_status="CANCELADO", acao="CANCELADO",
+    _registrar_transicao(db, debito=d, novo_status=ST_CANCELADO, acao="CANCELADO",
                          usuario_id=usuario_id, justificativa=justificativa, ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
@@ -288,10 +341,10 @@ async def cancelar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_
 
 async def confirmar_liquidacao(db: AsyncSession, *, tenant_id: int, debito_id: int,
                                usuario_id: int, data_liquidacao=None, ip: str | None = None) -> Debito:
-    """Confirma a liquidação (recebimento/atesto) — pré-requisito para autorizar
-    (RF-VAL-02/RN-01). Permitido antes da autorização; não muda o status."""
+    """Confirma a liquidação (recebimento/atesto) — pré-requisito para validar/autorizar
+    (RF-VAL-02/RN-01). Permitido nas etapas pré-validação; não muda o status."""
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    _exigir_status(d, "RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO")
+    _exigir_status(d, ST_RASCUNHO, ST_DEVOLVIDO, ST_EM_VALIDACAO, ST_VALIDADO)
     d.liquidacao_confirmada = True
     d.data_liquidacao = data_liquidacao or _utcnow().date()
     db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
@@ -304,10 +357,10 @@ async def confirmar_liquidacao(db: AsyncSession, *, tenant_id: int, debito_id: i
 
 async def suspender(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_id: int,
                     justificativa: str, ip: str | None = None) -> Debito:
-    """Tesouraria suspende um débito suspeito (RF-TES-06). APROVADO → SUSPENSO."""
+    """Suspende um débito suspeito (RF-TES-06/RF-AUT-17). Etapas pré-autorização → SUSPENSO."""
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    _exigir_status(d, "AGUARDANDO_APROVACAO", "APROVADO")
-    _registrar_transicao(db, debito=d, novo_status="SUSPENSO", acao="SUSPENSO",
+    _exigir_status(d, ST_EM_VALIDACAO, ST_VALIDADO, *AUTORIZAVEIS)
+    _registrar_transicao(db, debito=d, novo_status=ST_SUSPENSO, acao="SUSPENSO",
                          usuario_id=usuario_id, justificativa=justificativa, ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
@@ -315,10 +368,10 @@ async def suspender(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario
 
 async def reativar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_id: int,
                    justificativa: str | None = None, ip: str | None = None) -> Debito:
-    """Reverte a suspensão: SUSPENSO → APROVADO."""
+    """Reverte a suspensão: SUSPENSO → EM_VALIDACAO (revalidar antes de seguir)."""
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    _exigir_status(d, "SUSPENSO")
-    _registrar_transicao(db, debito=d, novo_status="APROVADO", acao="REATIVADO",
+    _exigir_status(d, ST_SUSPENSO)
+    _registrar_transicao(db, debito=d, novo_status=ST_EM_VALIDACAO, acao="REATIVADO",
                          usuario_id=usuario_id, justificativa=justificativa, ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
