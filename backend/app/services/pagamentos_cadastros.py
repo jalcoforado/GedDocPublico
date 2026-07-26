@@ -387,17 +387,21 @@ async def excluir_contrato(db: AsyncSession, *, tenant_id: int, contrato_id: int
 # ============================ alcada ============================================
 
 async def _alcada_unica(db: AsyncSession, *, tenant_id: int, id_usuario: int, id_natureza: int | None,
-                         excluir_id: int | None = None) -> None:
+                         id_fonte: int | None = None, id_unidade: int | None = None,
+                         tipo_despesa: str | None = None, excluir_id: int | None = None) -> None:
+    """Unicidade pela tupla completa de dimensões (RF-CAD-06): um usuário pode ter
+    várias alçadas desde que difiram em natureza, fonte, unidade ou tipo de despesa."""
     stmt = select(Alcada.id).where(Alcada.tenant_id == tenant_id, Alcada.id_usuario == id_usuario,
                                     Alcada.excluido.is_(False))
-    if id_natureza is None:
-        stmt = stmt.where(Alcada.id_natureza.is_(None))
-    else:
-        stmt = stmt.where(Alcada.id_natureza == id_natureza)
+    for col, val in ((Alcada.id_natureza, id_natureza), (Alcada.id_fonte, id_fonte),
+                     (Alcada.id_unidade, id_unidade), (Alcada.tipo_despesa, tipo_despesa)):
+        stmt = stmt.where(col.is_(None) if val is None else col == val)
     if excluir_id is not None:
         stmt = stmt.where(Alcada.id != excluir_id)
     if (await db.execute(stmt)).scalar_one_or_none() is not None:
-        raise PagamentoCadastroError("Já existe alçada para este usuário/natureza.", status.HTTP_409_CONFLICT)
+        raise PagamentoCadastroError(
+            "Já existe alçada para este usuário com as mesmas dimensões "
+            "(natureza/fonte/unidade/tipo de despesa).", status.HTTP_409_CONFLICT)
 
 
 async def obter_alcada(db: AsyncSession, *, tenant_id: int, alcada_id: int) -> Alcada:
@@ -416,7 +420,8 @@ async def listar_alcadas(db: AsyncSession, *, tenant_id: int) -> list[Alcada]:
 
 async def criar_alcada(db: AsyncSession, *, tenant_id: int, payload: AlcadaCreate) -> Alcada:
     await _alcada_unica(db, tenant_id=tenant_id, id_usuario=payload.id_usuario,
-                         id_natureza=payload.id_natureza)
+                         id_natureza=payload.id_natureza, id_fonte=payload.id_fonte,
+                         id_unidade=payload.id_unidade, tipo_despesa=payload.tipo_despesa)
     a = Alcada(tenant_id=tenant_id, criado_em=_utcnow(), **payload.model_dump())
     db.add(a); await db.commit(); await db.refresh(a)
     return a
@@ -426,11 +431,16 @@ async def atualizar_alcada(db: AsyncSession, *, tenant_id: int, alcada_id: int,
                             payload: AlcadaUpdate) -> Alcada:
     a = await obter_alcada(db, tenant_id=tenant_id, alcada_id=alcada_id)
     dados = payload.model_dump(exclude_unset=True)
-    if "id_usuario" in dados or "id_natureza" in dados:
-        id_usuario = dados.get("id_usuario", a.id_usuario)
-        id_natureza = dados.get("id_natureza", a.id_natureza)
-        await _alcada_unica(db, tenant_id=tenant_id, id_usuario=id_usuario, id_natureza=id_natureza,
-                             excluir_id=alcada_id)
+    _dims = ("id_usuario", "id_natureza", "id_fonte", "id_unidade", "tipo_despesa")
+    if any(k in dados for k in _dims):
+        await _alcada_unica(
+            db, tenant_id=tenant_id,
+            id_usuario=dados.get("id_usuario", a.id_usuario),
+            id_natureza=dados.get("id_natureza", a.id_natureza),
+            id_fonte=dados.get("id_fonte", a.id_fonte),
+            id_unidade=dados.get("id_unidade", a.id_unidade),
+            tipo_despesa=dados.get("tipo_despesa", a.tipo_despesa),
+            excluir_id=alcada_id)
     for k, v in dados.items():
         setattr(a, k, v)
     a.atualizado_em = _utcnow(); await db.commit(); await db.refresh(a)

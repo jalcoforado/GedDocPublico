@@ -53,20 +53,36 @@ def _utcnow() -> datetime:
     return datetime.utcnow()
 
 
-async def _alcada_do_usuario(db, *, tenant_id: int, usuario_id: int, id_natureza: int) -> Decimal:
-    """Alçada específica da natureza; fallback geral (id_natureza IS NULL); sem alçada → 403."""
-    especifica = (await db.execute(select(Alcada).where(
+async def _alcada_do_usuario(db, *, tenant_id: int, usuario_id: int, id_natureza: int,
+                             id_fonte: int | None = None, id_unidade: int | None = None) -> Decimal:
+    """Limite de alçada do usuário para o débito (RF-CAD-06). Cada alçada pode
+    escopar por natureza, fonte e unidade (órgão); dimensão NULA = curinga. Vence
+    a alçada MAIS ESPECÍFICA compatível (mais dimensões casadas); empate → maior
+    limite. Sem nenhuma alçada compatível → 403.
+
+    Obs.: `tipo_despesa` só casa quando NULO — o débito ainda não carrega esse
+    atributo; alçadas escopadas por tipo_despesa entram em vigor quando ele existir."""
+    alcadas = (await db.execute(select(Alcada).where(
         Alcada.tenant_id == tenant_id, Alcada.id_usuario == usuario_id,
-        Alcada.id_natureza == id_natureza, Alcada.excluido.is_(False)))).scalar_one_or_none()
-    if especifica is not None:
-        return especifica.valor_maximo
-    geral = (await db.execute(select(Alcada).where(
-        Alcada.tenant_id == tenant_id, Alcada.id_usuario == usuario_id,
-        Alcada.id_natureza.is_(None), Alcada.excluido.is_(False)))).scalar_one_or_none()
-    if geral is not None:
-        return geral.valor_maximo
-    raise PagamentoDebitoError("Usuário sem alçada cadastrada para autorizar esta natureza.",
-                               status.HTTP_403_FORBIDDEN)
+        Alcada.excluido.is_(False)))).scalars().all()
+
+    def _compat(a: Alcada) -> bool:
+        return (
+            (a.id_natureza is None or a.id_natureza == id_natureza)
+            and (a.id_fonte is None or a.id_fonte == id_fonte)
+            and (a.id_unidade is None or a.id_unidade == id_unidade)
+            and a.tipo_despesa is None
+        )
+
+    def _especificidade(a: Alcada) -> int:
+        return sum(x is not None for x in (a.id_natureza, a.id_fonte, a.id_unidade))
+
+    candidatas = [a for a in alcadas if _compat(a)]
+    if not candidatas:
+        raise PagamentoDebitoError("Usuário sem alçada cadastrada para autorizar este débito.",
+                                   status.HTTP_403_FORBIDDEN)
+    melhor = max(candidatas, key=lambda a: (_especificidade(a), a.valor_maximo))
+    return melhor.valor_maximo
 
 
 async def _proximo_numero_op(db, *, tenant_id: int) -> str:
@@ -158,8 +174,13 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                 raise PagamentoDebitoError(
                     f"Segregação de funções: quem aprovou o débito {did} não pode autorizá-lo.",
                     status.HTTP_403_FORBIDDEN)
+            id_unidade = None
+            if d.id_contrato is not None:  # órgão/unidade da despesa via contrato (RF-CAD-06)
+                contrato = await cad.obter_contrato(db, tenant_id=tenant_id, contrato_id=d.id_contrato)
+                id_unidade = contrato.id_unidade
             limite = await _alcada_do_usuario(db, tenant_id=tenant_id, usuario_id=usuario_id,
-                                              id_natureza=d.id_natureza)
+                                              id_natureza=d.id_natureza, id_fonte=d.id_fonte_recursos,
+                                              id_unidade=id_unidade)
             if d.valor_total > limite:
                 raise PagamentoDebitoError(
                     f"Débito {did} (R$ {d.valor_total}) excede a alçada do autorizador (R$ {limite}).",

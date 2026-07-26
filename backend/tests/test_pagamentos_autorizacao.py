@@ -423,6 +423,28 @@ async def test_autorizar_acima_da_alcada_403(admin_engine):
         await _cleanup(admin_engine, t.id)
 
 
+async def test_alcada_por_fonte_mais_especifica_vence(admin_engine):
+    """RF-CAD-06: alçada escopada pela fonte do débito vence a geral (menor). Um
+    autorizador com geral R$ 500 mas alçada da fonte R$ 5000 autoriza débito R$ 1000."""
+    t = await _provisionar(admin_engine)
+    try:
+        d, _sol, _apr, fonte, conta = await _debito_aprovado(admin_engine, t.id, valor="1000.00")
+        autorizador = await _novo_usuario(admin_engine, t.id, f"au{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
+                id_usuario=autorizador, id_natureza=None, valor_maximo="500.00"))  # geral, baixa
+            await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
+                id_usuario=autorizador, id_natureza=None, id_fonte=fonte.id,
+                valor_maximo="5000.00"))  # específica da fonte, alta
+        ops = await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d])
+        assert len(ops) == 1
+        async with _sm(admin_engine)() as s:
+            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+        assert d2.status == "AUTORIZADO"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
 async def test_autorizar_por_solicitante_ou_aprovador_403(admin_engine):
     t = await _provisionar(admin_engine)
     try:
