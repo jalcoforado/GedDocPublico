@@ -480,6 +480,19 @@ class ContaElegivelOut(BaseModel):
     atualizado_em: datetime | None = None
 
 
+class SimulacaoAutorizacaoIn(BaseModel):
+    """Simulação do impacto de um pagamento numa conta (RF-PNL-05). Informe
+    `debito_ids` (soma os valores) ou um `valor` direto."""
+    id_conta: int
+    debito_ids: list[int] | None = None
+    valor: Decimal | None = None
+
+
+class SimulacaoAutorizacaoOut(BaseModel):
+    id_conta: int; valor_simulado: Decimal
+    disponivel_antes: Decimal; disponivel_projetado_apos: Decimal; suficiente: bool
+
+
 class FichaFonteContaItem(BaseModel):
     """Conta vinculada a uma fonte, com saldos e situação (RF-FON-06)."""
     id_conta: int; nome: str; banco: str; conta_mascarada: str

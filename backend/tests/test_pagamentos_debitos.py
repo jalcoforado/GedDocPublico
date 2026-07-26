@@ -407,3 +407,24 @@ async def test_criar_debito_conta_de_outra_fonte_422(admin_engine):
             assert exc.value.status_code == 422
     finally:
         await _cleanup(admin_engine, t.id)
+
+
+async def test_listar_debitos_filtra_por_fonte_e_urgente(admin_engine):
+    """RF-PNL-02: a listagem filtra por fonte/urgência (dimensões do painel)."""
+    t = await _provisionar(admin_engine)
+    try:
+        forn_a, nat_a, conta_a = await _base(admin_engine, t.id)
+        forn_b, nat_b, conta_b = await _base(admin_engine, t.id)
+        async with _sm(admin_engine)() as s:
+            uid = (await s.execute(text(
+                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+            da = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+                                        payload=_payload_debito(forn_a, nat_a, conta_a))
+            db_ = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+                                         payload=_payload_debito(forn_b, nat_b, conta_b))
+        async with _sm(admin_engine)() as s:
+            so_a = await svc.listar_debitos(s, tenant_id=t.id, id_fonte=conta_a.id_fonte_recursos)
+        ids = {d.id for d in so_a}
+        assert da.id in ids and db_.id not in ids
+    finally:
+        await _cleanup(admin_engine, t.id)

@@ -19,6 +19,7 @@ from ..schemas.pagamentos import (
     DebitoHistoricoOut, DebitoOut, DebitoUpdate, FichaFonteOut, FilaAutorizacaoFonteGrupo,
     FilaLiberacaoGrupo, FilaTesourariaOut, JustificativaIn, LiquidacaoIn, MinhaFilaOut,
     OrdemPagamentoOut, PagarParcelaIn, ParcelaFilaOut, ParcelaOut,
+    SimulacaoAutorizacaoIn, SimulacaoAutorizacaoOut,
 )
 from ..services import pagamentos_autorizacao as aut
 from ..services import pagamentos_caixa as caixa
@@ -57,11 +58,16 @@ async def _out(db, tenant_id: int, debitos) -> list[DebitoOut]:
 
 @debitos_router.get("", response_model=list[DebitoOut])
 async def list_debitos(status_f: str | None = None, meus: bool = False,
+                       id_fonte: int | None = None, id_natureza: int | None = None,
+                       id_fornecedor: int | None = None, id_contrato: int | None = None,
+                       urgente: bool | None = None, competencia: str | None = None,
                        usuario: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
                        tenant_id: int = Depends(require_tenant_id),
                        db: AsyncSession = Depends(get_db)):
-    rows = await svc.listar_debitos(db, tenant_id=tenant_id, status_f=status_f,
-                                    solicitante_id=usuario.id if meus else None)
+    rows = await svc.listar_debitos(
+        db, tenant_id=tenant_id, status_f=status_f,
+        solicitante_id=usuario.id if meus else None, id_fonte=id_fonte, id_natureza=id_natureza,
+        id_fornecedor=id_fornecedor, id_contrato=id_contrato, urgente=urgente, competencia=competencia)
     return await _out(db, tenant_id, rows)
 
 
@@ -332,6 +338,16 @@ async def ficha_fonte(fonte_id: int,
                       tenant_id: int = Depends(require_tenant_id),
                       db: AsyncSession = Depends(get_db)):
     return await caixa.ficha_fonte(db, tenant_id=tenant_id, id_fonte=fonte_id)
+
+
+@operacoes_router.post("/simular-autorizacao", response_model=SimulacaoAutorizacaoOut)
+async def simular_autorizacao(payload: SimulacaoAutorizacaoIn,
+                              _: Usuario = Depends(require_permission("pagamento_autorizar")),
+                              tenant_id: int = Depends(require_tenant_id),
+                              db: AsyncSession = Depends(get_db)):
+    return await caixa.simular_autorizacao(
+        db, tenant_id=tenant_id, id_conta=payload.id_conta,
+        debito_ids=payload.debito_ids, valor=payload.valor)
 
 
 @operacoes_router.get("/liberacao/fila", response_model=list[FilaLiberacaoGrupo])

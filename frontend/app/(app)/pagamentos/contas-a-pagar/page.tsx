@@ -81,14 +81,26 @@ export default function ContasAPagarPage() {
   const router = useRouter();
 
   const [status, setStatus] = useState<StatusDebito | "">("");
+  const [fonteFiltro, setFonteFiltro] = useState<number | "">("");
+  const [soUrgentes, setSoUrgentes] = useState(false);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [parcelas, setParcelas] = useState<ParcelaForm[]>(emptyParcelas());
   const [err, setErr] = useState<string | null>(null);
 
+  // RF-PNL-02: filtros do painel (status, fonte, urgência).
   const listQ = useQuery({
-    queryKey: ["pag-debitos", status],
-    queryFn: () => api.pagamentos.debitos.list({ status: status || undefined }),
+    queryKey: ["pag-debitos", status, fonteFiltro, soUrgentes],
+    queryFn: () => api.pagamentos.debitos.list({
+      status: status || undefined,
+      id_fonte: fonteFiltro === "" ? undefined : fonteFiltro,
+      urgente: soUrgentes ? true : undefined,
+    }),
+  });
+
+  const fontesFiltroQ = useQuery({
+    queryKey: ["pag-fontes-filtro"],
+    queryFn: () => api.pagamentos.cadastros.fontes.list(),
   });
 
   const fornecedoresQ = useQuery({
@@ -224,6 +236,25 @@ export default function ContasAPagarPage() {
             {t.label}
           </button>
         ))}
+      </div>
+
+      {/* RF-PNL-02: filtros adicionais (fonte, urgência) */}
+      <div className="flex flex-wrap items-center gap-3">
+        <select
+          value={fonteFiltro}
+          onChange={(e) => setFonteFiltro(e.target.value === "" ? "" : Number(e.target.value))}
+          className="rounded border border-border-strong bg-surface-1 px-2 py-1 text-sm"
+        >
+          <option value="">Todas as fontes</option>
+          {(fontesFiltroQ.data ?? []).map((f) => (
+            <option key={f.id} value={f.id}>{f.codigo} — {f.descricao}</option>
+          ))}
+        </select>
+        <label className="flex items-center gap-1 text-sm text-muted-foreground">
+          <input type="checkbox" checked={soUrgentes}
+            onChange={(e) => setSoUrgentes(e.target.checked)} />
+          Somente urgentes
+        </label>
       </div>
 
       <Table>

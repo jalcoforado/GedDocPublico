@@ -126,12 +126,29 @@ async def obter_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
 
 
 async def listar_debitos(db: AsyncSession, *, tenant_id: int, status_f: str | None = None,
-                         solicitante_id: int | None = None) -> list[Debito]:
+                         solicitante_id: int | None = None, id_fonte: int | None = None,
+                         id_natureza: int | None = None, id_fornecedor: int | None = None,
+                         id_contrato: int | None = None, urgente: bool | None = None,
+                         competencia: str | None = None) -> list[Debito]:
+    """Lista débitos com filtros do painel (RF-PNL-02): fonte, categoria (natureza),
+    credor, contrato, status, urgência e competência."""
     stmt = select(Debito).where(Debito.tenant_id == tenant_id, Debito.excluido.is_(False))
     if status_f:
         stmt = stmt.where(Debito.status == status_f)
     if solicitante_id is not None:
         stmt = stmt.where(Debito.id_usuario_solicitante == solicitante_id)
+    if id_fonte is not None:
+        stmt = stmt.where(Debito.id_fonte_recursos == id_fonte)
+    if id_natureza is not None:
+        stmt = stmt.where(Debito.id_natureza == id_natureza)
+    if id_fornecedor is not None:
+        stmt = stmt.where(Debito.id_fornecedor == id_fornecedor)
+    if id_contrato is not None:
+        stmt = stmt.where(Debito.id_contrato == id_contrato)
+    if urgente is not None:
+        stmt = stmt.where(Debito.urgente.is_(urgente))
+    if competencia:
+        stmt = stmt.where(Debito.competencia == competencia)
     return list((await db.execute(stmt.order_by(Debito.id.desc()))).scalars().all())
 
 

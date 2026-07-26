@@ -15,6 +15,7 @@ from ..models import (
 )
 from ..schemas.pagamentos import (
     ContaSaldoPainel, FichaFonteContaItem, FichaFonteOut, MovimentacaoCreate, SaldoConta,
+    SimulacaoAutorizacaoOut,
 )
 
 _ORIGENS_MANUAIS = {"APORTE", "RECEITA", "AJUSTE"}
@@ -121,6 +122,24 @@ async def registrar_snapshot_saldos(db, *, tenant_id, ref: date | None = None) -
         n += 1
     await db.commit()
     return n
+
+
+async def simular_autorizacao(db, *, tenant_id, id_conta, debito_ids=None, valor=None):
+    """Impacto projetado de um pagamento na conta (RF-PNL-05), sem gravar nada."""
+    conta = await _obter_conta(db, tenant_id=tenant_id, conta_id=id_conta)
+    if debito_ids:
+        soma = (await db.execute(select(func.coalesce(func.sum(Debito.valor_total), 0)).where(
+            Debito.tenant_id == tenant_id, Debito.id.in_(debito_ids),
+            Debito.excluido.is_(False)))).scalar_one()
+        valor_simulado = Decimal(soma)
+    else:
+        valor_simulado = Decimal(valor or 0)
+    s = await saldo_conta(db, tenant_id=tenant_id, conta_id=conta.id)
+    apos = s.disponivel_projetado - valor_simulado
+    return SimulacaoAutorizacaoOut(
+        id_conta=conta.id, valor_simulado=valor_simulado,
+        disponivel_antes=s.disponivel_projetado, disponivel_projetado_apos=apos,
+        suficiente=apos >= 0)
 
 
 def _mascara(conta: str) -> str:
