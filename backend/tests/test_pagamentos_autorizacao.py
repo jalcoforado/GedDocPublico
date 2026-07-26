@@ -146,28 +146,33 @@ async def _novo_usuario(engine, tenant_id, sufixo):
 
 async def _debito_aprovado(engine, tenant_id, *, valor="1000.00", saldo_inicial="10000.00",
                            parcelas=None, base=None, liquidar=True):
-    """Débito RASCUNHO→ENVIADO→APROVADO com solicitante/aprovador distintos.
-    Retorna (debito, solicitante_id, aprovador_id, fonte, conta). `base` reusa
-    (forn, nat, fonte, conta)."""
+    """Débito no rito v2.0 até ENVIADO_SECRETARIO (fila da autoridade): RASCUNHO →
+    EM_VALIDACAO → (liquidação) → VALIDADO → ENVIADO_SECRETARIO, com solicitante e
+    validador distintos. Retorna (debito, solicitante_id, validador_id, fonte, conta).
+    Com liquidar=False para em EM_VALIDACAO (sem liquidação, não pode validar)."""
     if base is None:
         forn, nat, fonte, conta = await _base(engine, tenant_id, saldo_inicial=saldo_inicial)
     else:
         forn, nat, fonte, conta = base
     solicitante = await _novo_usuario(engine, tenant_id, f"sol{uuid.uuid4().hex[:6]}")
-    aprovador = await _novo_usuario(engine, tenant_id, f"apr{uuid.uuid4().hex[:6]}")
+    validador = await _novo_usuario(engine, tenant_id, f"val{uuid.uuid4().hex[:6]}")
     async with _sm(engine)() as s:
         d = await deb.criar_debito(s, tenant_id=tenant_id, usuario_id=solicitante,
                                    payload=_payload_debito(forn, nat, fonte, conta, valor=valor,
                                                            parcelas=parcelas))
     async with _sm(engine)() as s:
-        await deb.enviar_aprovacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante)
-    async with _sm(engine)() as s:
-        d = await deb.aprovar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
-    if liquidar:  # v2.0: liquidação confirmada é pré-requisito para autorizar (RN-01)
+        await deb.enviar_validacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante)
+    if liquidar:  # liquidação → validar → encaminhar (chega à fila de autorização)
         async with _sm(engine)() as s:
-            d = await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id,
-                                               usuario_id=aprovador)
-    return d, solicitante, aprovador, fonte, conta
+            await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=validador)
+        async with _sm(engine)() as s:
+            await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=validador)
+        async with _sm(engine)() as s:
+            d = await deb.encaminhar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=validador)
+    else:
+        async with _sm(engine)() as s:
+            d = await deb.obter_debito(s, tenant_id=tenant_id, debito_id=d.id)
+    return d, solicitante, validador, fonte, conta
 
 
 async def _dar_alcada(engine, tenant_id, usuario_id, *, valor_maximo="999999.00", id_natureza=None):
@@ -258,7 +263,7 @@ async def test_ca_aut_03_conta_de_outra_fonte_rejeitada(admin_engine):
             assert exc.value.status_code == 422
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.status == "APROVADO" and d2.id_conta_pagadora is None
+        assert d2.status == "ENVIADO_SECRETARIO" and d2.id_conta_pagadora is None
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -278,7 +283,7 @@ async def test_ca_aut_04_saldo_insuficiente_bloqueia_422(admin_engine):
             assert "saldo" in exc.value.detail.lower()
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.status == "APROVADO"
+        assert d2.status == "ENVIADO_SECRETARIO"
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -310,7 +315,7 @@ async def test_ca_aut_05_reserva_reduz_disponivel(admin_engine):
             assert exc.value.status_code == 422
         async with _sm(admin_engine)() as s:
             d_b2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_b.id)
-        assert d_b2.status == "APROVADO"
+        assert d_b2.status == "ENVIADO_SECRETARIO"
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -331,16 +336,20 @@ async def test_rf_aut_11_fonte_sem_conta_ativa_bloqueia(admin_engine):
             elegiveis = await aut.contas_elegiveis(s, tenant_id=t.id, id_fonte=fonte.id)
         assert elegiveis == []
 
-        # débito da fonte (sem conta sugerida) chega a APROVADO
+        # débito da fonte (sem conta sugerida) percorre o rito até ENVIADO_SECRETARIO
         sol = await _novo_usuario(admin_engine, t.id, f"sol{uuid.uuid4().hex[:6]}")
-        apr = await _novo_usuario(admin_engine, t.id, f"apr{uuid.uuid4().hex[:6]}")
+        val = await _novo_usuario(admin_engine, t.id, f"val{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
             d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol,
                                        payload=_payload_debito(forn, nat, fonte, conta=None))
         async with _sm(admin_engine)() as s:
-            await deb.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
+            await deb.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
         async with _sm(admin_engine)() as s:
-            await deb.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+        async with _sm(admin_engine)() as s:
+            await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+        async with _sm(admin_engine)() as s:
+            await deb.encaminhar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
 
         autorizador = await _autorizador_com_alcada(admin_engine, t.id)
         async with _sm(admin_engine)() as s:
@@ -369,27 +378,30 @@ async def test_rf_aut_15_fontes_distintas_no_grupo_bloqueadas(admin_engine):
         async with _sm(admin_engine)() as s:
             d1b = await deb.obter_debito(s, tenant_id=t.id, debito_id=d1.id)
             d2b = await deb.obter_debito(s, tenant_id=t.id, debito_id=d2.id)
-        assert d1b.status == "APROVADO" and d2b.status == "APROVADO"
+        assert d1b.status == "ENVIADO_SECRETARIO" and d2b.status == "ENVIADO_SECRETARIO"
     finally:
         await _cleanup(admin_engine, t.id)
 
 
-async def test_autorizar_sem_liquidacao_422(admin_engine):
-    """RN-01: sem liquidação confirmada, o débito não pode ser autorizado."""
+async def test_validar_sem_liquidacao_422(admin_engine):
+    """RN-01/RF-VAL-02: sem liquidação confirmada, o débito não pode ser validado."""
     t = await _provisionar(admin_engine)
     try:
-        d, _sol, _apr, fonte, conta = await _debito_aprovado(
-            admin_engine, t.id, valor="1000.00", liquidar=False)
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+        d, _sol, val, fonte, conta = await _debito_aprovado(
+            admin_engine, t.id, valor="1000.00", liquidar=False)  # fica em EM_VALIDACAO
         async with _sm(admin_engine)() as s:
             with pytest.raises(HTTPException) as exc:
-                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
-                                         grupos=[_grupo(fonte, conta, [d])])
+                await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
             assert exc.value.status_code == 422
             assert "liquidação" in exc.value.detail.lower()
-        # confirmando a liquidação, a autorização passa
+        # confirmando a liquidação: validar → encaminhar → autoriza
         async with _sm(admin_engine)() as s:
-            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=_apr)
+            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+        async with _sm(admin_engine)() as s:
+            await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+        async with _sm(admin_engine)() as s:
+            await deb.encaminhar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
         ops = await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d])
         assert len(ops) == 1
     finally:
@@ -408,7 +420,7 @@ async def test_autorizar_acima_da_alcada_403(admin_engine):
             assert exc.value.status_code == 403
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.status == "APROVADO"
+        assert d2.status == "ENVIADO_SECRETARIO"
 
         sem_alcada = await _novo_usuario(admin_engine, t.id, f"nal{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
@@ -418,7 +430,7 @@ async def test_autorizar_acima_da_alcada_403(admin_engine):
             assert exc.value.status_code == 403
         async with _sm(admin_engine)() as s:
             d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d3.status == "APROVADO"
+        assert d3.status == "ENVIADO_SECRETARIO"
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -467,7 +479,7 @@ async def test_autorizar_por_solicitante_ou_aprovador_403(admin_engine):
 
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.status == "APROVADO"
+        assert d2.status == "ENVIADO_SECRETARIO"
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -494,8 +506,8 @@ async def test_autorizacao_em_lote_all_or_nothing(admin_engine):
         async with _sm(admin_engine)() as s:
             d_a2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_a.id)
             d_b2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_b.id)
-        assert d_a2.status == "APROVADO"
-        assert d_b2.status == "APROVADO"
+        assert d_a2.status == "ENVIADO_SECRETARIO"
+        assert d_b2.status == "ENVIADO_SECRETARIO"
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -555,7 +567,7 @@ async def test_pagar_parcela_de_debito_nao_autorizado_409(admin_engine):
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
             p2 = (await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id))[0]
-        assert d2.status == "APROVADO"
+        assert d2.status == "ENVIADO_SECRETARIO"
         assert p2.status == "A_PAGAR"
     finally:
         await _cleanup(admin_engine, t.id)
@@ -631,7 +643,8 @@ async def test_estornar_parcela_repoe_saldo_e_reabre(admin_engine):
         async with _sm(admin_engine)() as s:
             d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
             saldo2 = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        assert d3.status == "AUTORIZADO"
+        # pagamento integralmente revertido → ESTORNADO (v2.0 seção 13)
+        assert d3.status == "ESTORNADO"
         assert saldo2.saldo_atual == Decimal("10000.00")
         assert saldo2.comprometido == Decimal("1000.00")
     finally:
@@ -662,6 +675,6 @@ async def test_estornar_parcela_com_justificativa_longa_trunca_descricao(admin_e
         assert p_estornada.status == "A_PAGAR"
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.status == "AUTORIZADO"
+        assert d2.status == "ESTORNADO"  # reversão integral (v2.0 seção 13)
     finally:
         await _cleanup(admin_engine, t.id)

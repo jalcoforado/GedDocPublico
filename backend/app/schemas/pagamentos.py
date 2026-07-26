@@ -317,8 +317,10 @@ class ContaSaldoPainel(BaseModel):
 
 
 # ---------- débito / parcelas / ordem de pagamento (R2) ----------
-StatusDebito = Literal["RASCUNHO", "AGUARDANDO_APROVACAO", "APROVADO", "AUTORIZADO",
-                       "PAGO_PARCIAL", "PAGO", "REJEITADO", "CANCELADO", "SUSPENSO"]
+StatusDebito = Literal["RASCUNHO", "EM_VALIDACAO", "DEVOLVIDO", "VALIDADO",
+                       "ENVIADO_SECRETARIO", "AGUARDANDO_AUTORIZACAO", "AUTORIZADO",
+                       "ENVIADO_TESOURARIA", "EM_PROCESSAMENTO", "PAGO_PARCIAL", "PAGO",
+                       "CONCILIADO", "REJEITADO", "SUSPENSO", "CANCELADO", "ESTORNADO"]
 StatusParcela = Literal["A_PAGAR", "LIBERADA", "PAGA", "CANCELADA"]
 FormaPagamento = Literal["PIX", "TED", "BOLETO", "DINHEIRO", "OUTRO"]
 
@@ -435,10 +437,11 @@ class ParcelaFilaOut(BaseModel):
 
 
 class MinhaFilaOut(BaseModel):
-    solicitar: list[DebitoOut] | None = None    # meus RASCUNHO (inclui devolvidos)
-    aprovar: list[DebitoOut] | None = None      # AGUARDANDO_APROVACAO
-    autorizar: list[DebitoOut] | None = None    # APROVADO
-    liberar: list[ParcelaFilaOut] | None = None  # A_PAGAR de AUTORIZADO/PAGO_PARCIAL
+    solicitar: list[DebitoOut] | None = None    # meus RASCUNHO/DEVOLVIDO
+    validar: list[DebitoOut] | None = None      # EM_VALIDACAO
+    encaminhar: list[DebitoOut] | None = None   # VALIDADO
+    autorizar: list[DebitoOut] | None = None    # ENVIADO_SECRETARIO/AGUARDANDO_AUTORIZACAO
+    liberar: list[ParcelaFilaOut] | None = None  # A_PAGAR de autorizados/tesouraria
     pagar: list[ParcelaFilaOut] | None = None   # LIBERADA
 
 

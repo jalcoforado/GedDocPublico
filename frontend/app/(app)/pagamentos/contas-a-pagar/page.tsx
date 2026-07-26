@@ -14,6 +14,7 @@ import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import { api, type StatusDebito } from "@/lib/api";
+import { DEBITO_STATUS_BADGE, DEBITO_STATUS_TABS } from "@/components/pagamentos/statusDebito";
 
 function fmtMoeda(v: string): string {
   const n = Number(v);
@@ -21,30 +22,8 @@ function fmtMoeda(v: string): string {
   return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-const STATUS_TABS: { value: StatusDebito | ""; label: string }[] = [
-  { value: "", label: "Todos" },
-  { value: "RASCUNHO", label: "Rascunho" },
-  { value: "AGUARDANDO_APROVACAO", label: "Aguardando aprovação" },
-  { value: "APROVADO", label: "Aprovado" },
-  { value: "AUTORIZADO", label: "Autorizado" },
-  { value: "PAGO_PARCIAL", label: "Pago parcial" },
-  { value: "PAGO", label: "Pago" },
-  { value: "REJEITADO", label: "Rejeitado" },
-  { value: "CANCELADO", label: "Cancelado" },
-  { value: "SUSPENSO", label: "Suspenso" },
-];
-
-const STATUS_BADGE: Record<StatusDebito, { intent: "neutral" | "warning" | "info" | "success" | "danger"; label: string }> = {
-  RASCUNHO: { intent: "neutral", label: "Rascunho" },
-  AGUARDANDO_APROVACAO: { intent: "warning", label: "Aguardando aprovação" },
-  APROVADO: { intent: "info", label: "Aprovado" },
-  AUTORIZADO: { intent: "info", label: "Autorizado" },
-  PAGO_PARCIAL: { intent: "warning", label: "Pago parcial" },
-  PAGO: { intent: "success", label: "Pago" },
-  REJEITADO: { intent: "danger", label: "Rejeitado" },
-  CANCELADO: { intent: "danger", label: "Cancelado" },
-  SUSPENSO: { intent: "warning", label: "Suspenso" },
-};
+const STATUS_TABS = DEBITO_STATUS_TABS;
+const STATUS_BADGE = DEBITO_STATUS_BADGE;
 
 function StatusBadge({ status }: { status: StatusDebito }) {
   const cfg = STATUS_BADGE[status];

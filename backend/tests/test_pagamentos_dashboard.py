@@ -123,11 +123,13 @@ async def _debito_aprovado(engine, tenant_id, *, valor="1000.00", saldo_inicial=
                                    payload=_payload_debito(forn, nat, conta, valor=valor,
                                                            parcelas=parcelas))
     async with _sm(engine)() as s:
-        await deb.enviar_aprovacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante)
+        await deb.enviar_validacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante)
+    async with _sm(engine)() as s:  # liquidação é pré-requisito p/ validar (RN-01)
+        await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
     async with _sm(engine)() as s:
-        d = await deb.aprovar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
-    async with _sm(engine)() as s:  # v2.0: liquidação é pré-requisito p/ autorizar (RN-01)
-        d = await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
+        await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
+    async with _sm(engine)() as s:
+        d = await deb.encaminhar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
     return d, solicitante, aprovador, conta
 
 
@@ -231,14 +233,14 @@ async def test_kpis_pipeline_e_30d(admin_engine):
         # débito parado em APROVADO → aguardando_autorizacao_qtd
         await _debito_aprovado(admin_engine, t.id, valor="200.00", base=base)
 
-        # débito parado em AGUARDANDO_APROVACAO → aguardando_aprovacao_qtd
+        # débito parado em EM_VALIDACAO → aguardando_aprovacao_qtd
         forn, nat, conta = base
         solicitante = await _novo_usuario(admin_engine, t.id, f"sol{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
             d_ag = await deb.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
                                           payload=_payload_debito(forn, nat, conta, valor="100.00"))
         async with _sm(admin_engine)() as s:
-            await deb.enviar_aprovacao(s, tenant_id=t.id, debito_id=d_ag.id,
+            await deb.enviar_validacao(s, tenant_id=t.id, debito_id=d_ag.id,
                                        usuario_id=solicitante)
 
         async with _sm(admin_engine)() as s:

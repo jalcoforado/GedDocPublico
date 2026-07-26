@@ -32,8 +32,12 @@ class LiberarParcelasIn(BaseModel):
     parcela_ids: list[int] = Field(min_length=1)
     data_prevista: date | None = None
 
-PERMS_LEITURA = ("pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar",
-                 "pagamento_pagar", "pagamento_cadastro")
+PERMS_LEITURA = ("pagamento_solicitar", "pagamento_validar", "pagamento_encaminhar",
+                 "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
+                 "pagamento_cadastro", "pagamento_aprovar")
+# Validação/encaminhamento aceitam a permissão legada pagamento_aprovar (retrocompat).
+PERM_VALIDAR = ("pagamento_validar", "pagamento_aprovar")
+PERM_ENCAMINHAR = ("pagamento_encaminhar", "pagamento_autorizar")
 
 debitos_router = APIRouter(prefix="/pagamentos/debitos", tags=["pagamentos-debitos"])
 operacoes_router = APIRouter(prefix="/pagamentos", tags=["pagamentos-operacoes"])
@@ -111,24 +115,45 @@ async def enviar(debito_id: int, request: Request,
                  usuario: Usuario = Depends(require_permission("pagamento_solicitar")),
                  tenant_id: int = Depends(require_tenant_id),
                  db: AsyncSession = Depends(get_db)):
-    d = await svc.enviar_aprovacao(db, tenant_id=tenant_id, debito_id=debito_id,
+    d = await svc.enviar_validacao(db, tenant_id=tenant_id, debito_id=debito_id,
                                    usuario_id=usuario.id, ip=_ip(request))
     return (await _out(db, tenant_id, [d]))[0]
 
 
-@debitos_router.post("/{debito_id}/aprovar", response_model=DebitoOut)
-async def aprovar(debito_id: int, request: Request,
-                  usuario: Usuario = Depends(require_permission("pagamento_aprovar")),
+@debitos_router.post("/{debito_id}/validar", response_model=DebitoOut)
+async def validar(debito_id: int, request: Request,
+                  usuario: Usuario = Depends(require_any_permission(*PERM_VALIDAR)),
                   tenant_id: int = Depends(require_tenant_id),
                   db: AsyncSession = Depends(get_db)):
-    d = await svc.aprovar(db, tenant_id=tenant_id, debito_id=debito_id,
+    d = await svc.validar(db, tenant_id=tenant_id, debito_id=debito_id,
                           usuario_id=usuario.id, ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+# Alias retrocompatível: /aprovar continua chamando a validação.
+@debitos_router.post("/{debito_id}/aprovar", response_model=DebitoOut)
+async def aprovar(debito_id: int, request: Request,
+                  usuario: Usuario = Depends(require_any_permission(*PERM_VALIDAR)),
+                  tenant_id: int = Depends(require_tenant_id),
+                  db: AsyncSession = Depends(get_db)):
+    d = await svc.validar(db, tenant_id=tenant_id, debito_id=debito_id,
+                          usuario_id=usuario.id, ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+@debitos_router.post("/{debito_id}/encaminhar", response_model=DebitoOut)
+async def encaminhar(debito_id: int, request: Request,
+                     usuario: Usuario = Depends(require_any_permission(*PERM_ENCAMINHAR)),
+                     tenant_id: int = Depends(require_tenant_id),
+                     db: AsyncSession = Depends(get_db)):
+    d = await svc.encaminhar(db, tenant_id=tenant_id, debito_id=debito_id,
+                             usuario_id=usuario.id, ip=_ip(request))
     return (await _out(db, tenant_id, [d]))[0]
 
 
 @debitos_router.post("/{debito_id}/devolver", response_model=DebitoOut)
 async def devolver(debito_id: int, payload: JustificativaIn, request: Request,
-                   usuario: Usuario = Depends(require_permission("pagamento_aprovar")),
+                   usuario: Usuario = Depends(require_any_permission(*PERM_VALIDAR)),
                    tenant_id: int = Depends(require_tenant_id),
                    db: AsyncSession = Depends(get_db)):
     d = await svc.devolver(db, tenant_id=tenant_id, debito_id=debito_id, usuario_id=usuario.id,
@@ -138,7 +163,7 @@ async def devolver(debito_id: int, payload: JustificativaIn, request: Request,
 
 @debitos_router.post("/{debito_id}/rejeitar", response_model=DebitoOut)
 async def rejeitar(debito_id: int, payload: JustificativaIn, request: Request,
-                   usuario: Usuario = Depends(require_permission("pagamento_aprovar")),
+                   usuario: Usuario = Depends(require_any_permission(*PERM_VALIDAR)),
                    tenant_id: int = Depends(require_tenant_id),
                    db: AsyncSession = Depends(get_db)):
     d = await svc.rejeitar(db, tenant_id=tenant_id, debito_id=debito_id, usuario_id=usuario.id,
@@ -158,7 +183,7 @@ async def cancelar(debito_id: int, payload: JustificativaIn, request: Request,
 
 @debitos_router.post("/{debito_id}/confirmar-liquidacao", response_model=DebitoOut)
 async def confirmar_liquidacao(debito_id: int, payload: LiquidacaoIn, request: Request,
-                               usuario: Usuario = Depends(require_permission("pagamento_aprovar")),
+                               usuario: Usuario = Depends(require_any_permission(*PERM_VALIDAR)),
                                tenant_id: int = Depends(require_tenant_id),
                                db: AsyncSession = Depends(get_db)):
     d = await svc.confirmar_liquidacao(db, tenant_id=tenant_id, debito_id=debito_id,
@@ -275,6 +300,16 @@ async def estornar(parcela_id: int, payload: JustificativaIn, request: Request,
     return ParcelaOut.model_validate(p)
 
 
+@debitos_router.post("/{debito_id}/em-processamento", response_model=DebitoOut)
+async def marcar_em_processamento(debito_id: int, request: Request,
+                                  usuario: Usuario = Depends(require_permission("pagamento_pagar")),
+                                  tenant_id: int = Depends(require_tenant_id),
+                                  db: AsyncSession = Depends(get_db)):
+    d = await aut.marcar_em_processamento(db, tenant_id=tenant_id, usuario_id=usuario.id,
+                                          debito_id=debito_id, ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
 @operacoes_router.get("/autorizacao/fila", response_model=list[FilaAutorizacaoFonteGrupo])
 async def fila_autorizacao(_: Usuario = Depends(require_permission("pagamento_autorizar")),
                            tenant_id: int = Depends(require_tenant_id),
@@ -344,18 +379,25 @@ async def minha_fila(usuario: Usuario = Depends(get_current_user),
         (lambda c: any(p.codigo == c for p in perms.items))
     fila = MinhaFilaOut()
     if tem("pagamento_solicitar"):
-        rows = await svc.listar_debitos(db, tenant_id=tenant_id, status_f="RASCUNHO",
-                                        solicitante_id=usuario.id)
+        rows = []
+        for st in (svc.ST_RASCUNHO, svc.ST_DEVOLVIDO):
+            rows.extend(await svc.listar_debitos(db, tenant_id=tenant_id, status_f=st,
+                                                 solicitante_id=usuario.id))
         fila.solicitar = await _out(db, tenant_id, rows)
-    if tem("pagamento_aprovar"):
-        rows = await svc.listar_debitos(db, tenant_id=tenant_id, status_f="AGUARDANDO_APROVACAO")
-        fila.aprovar = await _out(db, tenant_id, rows)
+    if tem("pagamento_validar") or tem("pagamento_aprovar"):
+        rows = await svc.listar_debitos(db, tenant_id=tenant_id, status_f=svc.ST_EM_VALIDACAO)
+        fila.validar = await _out(db, tenant_id, rows)
+    if tem("pagamento_encaminhar") or tem("pagamento_autorizar"):
+        rows = await svc.listar_debitos(db, tenant_id=tenant_id, status_f=svc.ST_VALIDADO)
+        fila.encaminhar = await _out(db, tenant_id, rows)
     if tem("pagamento_autorizar"):
-        rows = await svc.listar_debitos(db, tenant_id=tenant_id, status_f="APROVADO")
+        rows = []
+        for st in svc.AUTORIZAVEIS:
+            rows.extend(await svc.listar_debitos(db, tenant_id=tenant_id, status_f=st))
         fila.autorizar = await _out(db, tenant_id, rows)
     if tem("pagamento_autorizar") or tem("pagamento_pagar"):
         debitos_ativos = []
-        for st in ("AUTORIZADO", "PAGO_PARCIAL"):
+        for st in (svc.ST_AUTORIZADO, *svc.EM_TESOURARIA):
             debitos_ativos.extend(await svc.listar_debitos(db, tenant_id=tenant_id, status_f=st))
         nomes = await svc.nomes_fornecedores(db, tenant_id=tenant_id,
                                              ids={d.id_fornecedor for d in debitos_ativos})

@@ -150,7 +150,7 @@ async def test_atualizar_debito_fora_de_rascunho_409(admin_engine):
                 payload=_payload_debito(forn, nat, conta))
         async with _sm(admin_engine)() as s:
             await s.execute(text(
-                "UPDATE pagamentos.debito SET status='AGUARDANDO_APROVACAO' WHERE id=:i"),
+                "UPDATE pagamentos.debito SET status='EM_VALIDACAO' WHERE id=:i"),
                 {"i": d.id})
             await s.commit()
         async with _sm(admin_engine)() as s:
@@ -223,7 +223,7 @@ async def test_excluir_debito_fora_de_status_permitido_409(admin_engine):
                 payload=_payload_debito(forn, nat, conta))
         async with _sm(admin_engine)() as s:
             await s.execute(text(
-                "UPDATE pagamentos.debito SET status='APROVADO' WHERE id=:i"), {"i": d.id})
+                "UPDATE pagamentos.debito SET status='VALIDADO' WHERE id=:i"), {"i": d.id})
             await s.commit()
         async with _sm(admin_engine)() as s:
             with pytest.raises(HTTPException) as exc:
@@ -278,49 +278,51 @@ async def _novo_usuario(engine, tenant_id, sufixo):
     return uid
 
 
-async def test_fluxo_enviar_aprovar(admin_engine):
+async def test_fluxo_validacao(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         d, solicitante, _ = await _debito_pronto(admin_engine, t.id)
-        aprovador = await _novo_usuario(admin_engine, t.id, f"apr{uuid.uuid4().hex[:6]}")
+        validador = await _novo_usuario(admin_engine, t.id, f"val{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
-            d2 = await svc.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante)
-        assert d2.status == "AGUARDANDO_APROVACAO"
+            d2 = await svc.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante)
+        assert d2.status == "EM_VALIDACAO"
         async with _sm(admin_engine)() as s:
-            d3 = await svc.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=aprovador)
-        assert d3.status == "APROVADO"
+            await svc.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=validador)
+        async with _sm(admin_engine)() as s:
+            d3 = await svc.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=validador)
+        assert d3.status == "VALIDADO"
         async with _sm(admin_engine)() as s:
             hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        assert [h.acao for h in hist] == ["APROVADO", "ENVIADO", "CRIADO"]
+        assert [h.acao for h in hist] == ["VALIDADO", "LIQUIDADO", "ENVIADO", "CRIADO"]
     finally:
         await _cleanup(admin_engine, t.id)
 
 
-async def test_aprovar_pelo_proprio_solicitante_403(admin_engine):
+async def test_validar_pelo_proprio_solicitante_403(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         d, solicitante, _ = await _debito_pronto(admin_engine, t.id)
         async with _sm(admin_engine)() as s:
-            await svc.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante)
+            await svc.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante)
         async with _sm(admin_engine)() as s:
             with pytest.raises(HTTPException) as exc:
-                await svc.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante)
+                await svc.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante)
             assert exc.value.status_code == 403
     finally:
         await _cleanup(admin_engine, t.id)
 
 
-async def test_devolver_volta_a_rascunho_com_motivo(admin_engine):
+async def test_devolver_para_ajuste_com_motivo(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         d, solicitante, _ = await _debito_pronto(admin_engine, t.id)
-        aprovador = await _novo_usuario(admin_engine, t.id, f"dev{uuid.uuid4().hex[:6]}")
+        validador = await _novo_usuario(admin_engine, t.id, f"dev{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
-            await svc.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante)
+            await svc.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=solicitante)
         async with _sm(admin_engine)() as s:
-            d2 = await svc.devolver(s, tenant_id=t.id, debito_id=d.id, usuario_id=aprovador,
+            d2 = await svc.devolver(s, tenant_id=t.id, debito_id=d.id, usuario_id=validador,
                                     justificativa="Falta nota fiscal")
-        assert d2.status == "RASCUNHO"
+        assert d2.status == "DEVOLVIDO"
         async with _sm(admin_engine)() as s:
             hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
         assert hist[0].acao == "DEVOLVIDO" and hist[0].justificativa == "Falta nota fiscal"
@@ -332,11 +334,11 @@ async def test_transicao_invalida_409(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         d, solicitante, _ = await _debito_pronto(admin_engine, t.id)
-        # aprovar direto de RASCUNHO → 409
+        # validar direto de RASCUNHO (sem enviar para validação) → 409
         outro = await _novo_usuario(admin_engine, t.id, f"inv{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
             with pytest.raises(HTTPException) as exc:
-                await svc.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=outro)
+                await svc.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=outro)
             assert exc.value.status_code == 409
     finally:
         await _cleanup(admin_engine, t.id)

@@ -16,8 +16,10 @@ from ..models import (
 from ..schemas.pagamentos import ContaElegivelOut, GrupoAutorizacaoIn
 from . import pagamentos_cadastros as cad
 from . import pagamentos_caixa as caixa
+from . import pagamentos_debitos as deb
 from .pagamentos_debitos import (
-    PagamentoDebitoError, _registrar_transicao, aprovadores_do_debito, listar_parcelas, obter_debito,
+    AUTORIZAVEIS, PagamentoDebitoError, _registrar_transicao, listar_parcelas, obter_debito,
+    validadores_do_debito,
 )
 
 
@@ -146,9 +148,10 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                     f"Débito {did} informado em mais de um grupo.", status.HTTP_409_CONFLICT)
             vistos.add(did)
             d = await obter_debito(db, tenant_id=tenant_id, debito_id=did, for_update=True)
-            if d.status != "APROVADO":
+            if d.status not in AUTORIZAVEIS:
                 raise PagamentoDebitoError(
-                    f"Débito {did} não está APROVADO (está '{d.status}').", status.HTTP_409_CONFLICT)
+                    f"Débito {did} não está aguardando autorização (está '{d.status}').",
+                    status.HTTP_409_CONFLICT)
             if d.id_fonte_recursos != g.id_fonte:
                 raise PagamentoDebitoError(
                     f"Débito {did} não pertence à fonte {g.id_fonte} do grupo (RF-AUT-15).",
@@ -170,9 +173,9 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                 raise PagamentoDebitoError(
                     f"Segregação de funções: o solicitante do débito {did} não pode autorizá-lo.",
                     status.HTTP_403_FORBIDDEN)
-            if usuario_id in await aprovadores_do_debito(db, tenant_id=tenant_id, debito_id=did):
+            if usuario_id in await validadores_do_debito(db, tenant_id=tenant_id, debito_id=did):
                 raise PagamentoDebitoError(
-                    f"Segregação de funções: quem aprovou o débito {did} não pode autorizá-lo.",
+                    f"Segregação de funções: quem validou o débito {did} não pode autorizá-lo.",
                     status.HTTP_403_FORBIDDEN)
             id_unidade = None
             if d.id_contrato is not None:  # órgão/unidade da despesa via contrato (RF-CAD-06)
@@ -280,7 +283,7 @@ async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         if d is None:
             d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito, for_update=True)
             debitos_por_id[d.id] = d
-        if d.status not in ("AUTORIZADO", "PAGO_PARCIAL"):
+        if d.status not in (deb.ST_AUTORIZADO, *deb.EM_TESOURARIA, deb.ST_ESTORNADO):
             raise PagamentoDebitoError(
                 f"Débito {d.id} não autorizado para liberação de pagamento (está '{d.status}').",
                 status.HTTP_409_CONFLICT)
@@ -299,9 +302,13 @@ async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     for d_id, numeros in numeros_por_debito.items():
         d = debitos_por_id[d_id]
         justificativa = f"Parcelas {', '.join(str(n) for n in sorted(numeros))}"
-        db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
-                               status_novo=d.status, acao="LIBERADO", justificativa=justificativa,
-                               id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
+        if d.status in (deb.ST_AUTORIZADO, deb.ST_ESTORNADO):  # entra na tesouraria
+            _registrar_transicao(db, debito=d, novo_status=deb.ST_ENVIADO_TESOURARIA,
+                                 acao="LIBERADO", usuario_id=usuario_id, justificativa=justificativa, ip=ip)
+        else:  # já em tesouraria: apenas registra a liberação adicional
+            db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
+                                   status_novo=d.status, acao="LIBERADO", justificativa=justificativa,
+                                   id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
         d.atualizado_em = _utcnow()
 
     await db.commit()
@@ -325,6 +332,12 @@ async def revogar_liberacao(db: AsyncSession, *, tenant_id: int, usuario_id: int
     db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
                            status_novo=d.status, acao="LIBERACAO_REVOGADA", justificativa=justificativa,
                            id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
+    # sem parcelas liberadas e nada pago → volta da tesouraria para AUTORIZADO
+    todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
+    if (d.status == deb.ST_ENVIADO_TESOURARIA
+            and not any(x.status in ("LIBERADA", "PAGA") for x in todas)):
+        _registrar_transicao(db, debito=d, novo_status=deb.ST_AUTORIZADO, acao="LIBERACAO_REVOGADA",
+                             usuario_id=usuario_id, justificativa="Todas as liberações revogadas", ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)
     return p
 
@@ -335,9 +348,10 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
     """Atômico: movimentação SAIDA/PAGAMENTO + parcela PAGA + status do débito, num commit."""
     p = await obter_parcela(db, tenant_id=tenant_id, parcela_id=parcela_id)
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito, for_update=True)
-    if d.status not in ("AUTORIZADO", "PAGO_PARCIAL"):
+    if d.status not in deb.EM_TESOURARIA:
         raise PagamentoDebitoError(
-            f"Débito não autorizado para pagamento (está '{d.status}').", status.HTTP_409_CONFLICT)
+            f"Débito não está na tesouraria para pagamento (está '{d.status}').",
+            status.HTTP_409_CONFLICT)
     if p.status != "LIBERADA":
         raise PagamentoDebitoError(
             f"Parcela não liberada para pagamento (está '{p.status}').", status.HTTP_409_CONFLICT)
@@ -363,6 +377,21 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
     return p
 
 
+async def marcar_em_processamento(db: AsyncSession, *, tenant_id: int, usuario_id: int,
+                                  debito_id: int, ip: str | None = None) -> Debito:
+    """Tesouraria marca o pagamento como despachado ao banco, aguardando confirmação
+    (ENVIADO_TESOURARIA → EM_PROCESSAMENTO). Etapa opcional antes de dar baixa."""
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id, for_update=True)
+    if d.status != deb.ST_ENVIADO_TESOURARIA:
+        raise PagamentoDebitoError(
+            f"Débito não está pronto para processamento (está '{d.status}').",
+            status.HTTP_409_CONFLICT)
+    _registrar_transicao(db, debito=d, novo_status=deb.ST_EM_PROCESSAMENTO, acao="PAGAMENTO",
+                         usuario_id=usuario_id, justificativa="Pagamento em processamento", ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    return d
+
+
 async def estornar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, parcela_id: int,
                            justificativa: str, ip: str | None = None) -> Parcela:
     p = await obter_parcela(db, tenant_id=tenant_id, parcela_id=parcela_id)
@@ -381,7 +410,8 @@ async def estornar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     p.atualizado_em = _utcnow()
     todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
     alguma_paga = any(x.id != p.id and x.status == "PAGA" for x in todas)
-    novo = "PAGO_PARCIAL" if alguma_paga else "AUTORIZADO"
+    # nenhuma parcela paga restante → pagamento integralmente revertido (ESTORNADO)
+    novo = deb.ST_PAGO_PARCIAL if alguma_paga else deb.ST_ESTORNADO
     _registrar_transicao(db, debito=d, novo_status=novo, acao="ESTORNO", usuario_id=usuario_id,
                          justificativa=justificativa, ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)

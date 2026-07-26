@@ -135,21 +135,7 @@ async def test_fornecedor_irregular_bloqueia_autorizacao(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         forn, nat, fonte, conta = await _base(admin_engine, t.id, situacao="IRREGULAR")
-        sol = await _novo_usuario(admin_engine, t.id, f"s{uuid.uuid4().hex[:6]}")
-        apr = await _novo_usuario(admin_engine, t.id, f"a{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol,
-                                       payload=_payload(forn, nat, fonte, ne="NE-1"))
-        async with _sm(admin_engine)() as s:
-            await deb.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
-        async with _sm(admin_engine)() as s:
-            await deb.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
-        async with _sm(admin_engine)() as s:
-            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
-        autorizador = await _novo_usuario(admin_engine, t.id, f"au{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
-                id_usuario=autorizador, id_natureza=None, valor_maximo="999999.00"))
+        d, autorizador = await _pronto_para_autorizar(admin_engine, t.id, forn, nat, fonte)
         async with _sm(admin_engine)() as s:
             with pytest.raises(HTTPException) as exc:
                 await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador, grupos=[
@@ -161,7 +147,8 @@ async def test_fornecedor_irregular_bloqueia_autorizacao(admin_engine):
 
 
 async def _pronto_para_autorizar(engine, tenant_id, forn, nat, fonte, *, valor="1000.00", ne="NE-1"):
-    """Débito APROVADO + liquidado, com autorizador dotado de alçada. Retorna (d, autorizador)."""
+    """Débito em ENVIADO_SECRETARIO (liquidado/validado/encaminhado), com autorizador
+    dotado de alçada. Retorna (d, autorizador)."""
     sol = await _novo_usuario(engine, tenant_id, f"s{uuid.uuid4().hex[:6]}")
     apr = await _novo_usuario(engine, tenant_id, f"a{uuid.uuid4().hex[:6]}")
     autorizador = await _novo_usuario(engine, tenant_id, f"au{uuid.uuid4().hex[:6]}")
@@ -169,11 +156,13 @@ async def _pronto_para_autorizar(engine, tenant_id, forn, nat, fonte, *, valor="
         d = await deb.criar_debito(s, tenant_id=tenant_id, usuario_id=sol,
                                    payload=_payload(forn, nat, fonte, valor=valor, ne=ne))
     async with _sm(engine)() as s:
-        await deb.enviar_aprovacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=sol)
-    async with _sm(engine)() as s:
-        await deb.aprovar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=apr)
+        await deb.enviar_validacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=sol)
     async with _sm(engine)() as s:
         await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=apr)
+    async with _sm(engine)() as s:
+        await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=apr)
+    async with _sm(engine)() as s:
+        await deb.encaminhar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=apr)
     async with _sm(engine)() as s:
         await cad.criar_alcada(s, tenant_id=tenant_id, payload=AlcadaCreate(
             id_usuario=autorizador, id_natureza=None, valor_maximo="9999999.00"))
@@ -269,15 +258,13 @@ async def test_suspender_e_reativar(admin_engine):
         async with _sm(admin_engine)() as s:
             d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol, payload=_payload(forn, nat, fonte))
         async with _sm(admin_engine)() as s:
-            await deb.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
-        async with _sm(admin_engine)() as s:
-            await deb.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+            await deb.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
         async with _sm(admin_engine)() as s:
             ds = await deb.suspender(s, tenant_id=t.id, debito_id=d.id, usuario_id=tes,
                                      justificativa="Suspeita de duplicidade")
         assert ds.status == "SUSPENSO"
         async with _sm(admin_engine)() as s:
             dr = await deb.reativar(s, tenant_id=t.id, debito_id=d.id, usuario_id=tes)
-        assert dr.status == "APROVADO"
+        assert dr.status == "EM_VALIDACAO"  # reativa reentra na validação
     finally:
         await _cleanup(admin_engine, t.id)

@@ -45,14 +45,14 @@ async def listar_extrato(db, *, tenant_id, conta_id) -> list[MovimentacaoConta]:
 
 
 async def comprometido_conta(db, *, tenant_id, conta_id) -> Decimal:
-    """Σ parcelas A_PAGAR/LIBERADA (não excluídas) de débitos AUTORIZADO/PAGO_PARCIAL
-    cuja conta PAGADORA (reservada na autorização, v2.0) é esta conta."""
+    """Σ parcelas A_PAGAR/LIBERADA (não excluídas) de débitos com reserva ativa
+    (AUTORIZADO ou em tesouraria) cuja conta PAGADORA é esta conta (v2.0)."""
+    from .pagamentos_debitos import COM_RESERVA
     stmt = (select(func.coalesce(func.sum(Parcela.valor), 0))
             .join(Debito, Debito.id == Parcela.id_debito)
             .where(Parcela.tenant_id == tenant_id, Parcela.status.in_(("A_PAGAR", "LIBERADA")),
                    Parcela.excluido.is_(False), Debito.id_conta_pagadora == conta_id,
-                   Debito.excluido.is_(False),
-                   Debito.status.in_(("AUTORIZADO", "PAGO_PARCIAL"))))
+                   Debito.excluido.is_(False), Debito.status.in_(COM_RESERVA)))
     return (await db.execute(stmt)).scalar_one()
 
 

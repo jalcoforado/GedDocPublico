@@ -192,9 +192,13 @@ async def test_autorizar_conta_nao_paga_422(admin_engine):
                 valor_total="100.00", competencia="2026-07", descricao="x",
                 parcelas=[ParcelaCreate(numero=1, valor="100.00", vencimento="2026-08-01")]))
         async with _sm(admin_engine)() as s:
-            await deb.enviar_aprovacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
+            await deb.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
         async with _sm(admin_engine)() as s:
-            await deb.aprovar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+        async with _sm(admin_engine)() as s:
+            await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+        async with _sm(admin_engine)() as s:
+            await deb.encaminhar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
         autorizador = await _novo_usuario(admin_engine, t.id, f"au{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
             await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(

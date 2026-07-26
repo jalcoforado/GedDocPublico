@@ -36,6 +36,7 @@ import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, type ComposicaoItem, type StatusDebito } from "@/lib/api";
+import { DEBITO_STATUS_BADGE } from "@/components/pagamentos/statusDebito";
 import { cn } from "@/lib/utils";
 
 // Dataviz: entradas/saídas seguem o mesmo semântico usado no caixa
@@ -51,20 +52,7 @@ const PERIODOS = [
   { value: 24, label: "24 meses" },
 ];
 
-const STATUS_BADGE: Record<
-  StatusDebito,
-  { intent: "neutral" | "warning" | "info" | "success" | "danger"; label: string }
-> = {
-  RASCUNHO: { intent: "neutral", label: "Rascunho" },
-  AGUARDANDO_APROVACAO: { intent: "warning", label: "Aguardando aprovação" },
-  APROVADO: { intent: "info", label: "Aprovado" },
-  AUTORIZADO: { intent: "info", label: "Autorizado" },
-  PAGO_PARCIAL: { intent: "warning", label: "Pago parcial" },
-  PAGO: { intent: "success", label: "Pago" },
-  REJEITADO: { intent: "danger", label: "Rejeitado" },
-  CANCELADO: { intent: "danger", label: "Cancelado" },
-  SUSPENSO: { intent: "warning", label: "Suspenso" },
-};
+const STATUS_BADGE = DEBITO_STATUS_BADGE;
 
 function fmtBRL(v: string | number): string {
   const n = typeof v === "string" ? Number(v) : v;

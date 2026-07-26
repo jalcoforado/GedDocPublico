@@ -19,7 +19,7 @@ from ..schemas.pagamentos import (
 )
 from . import pagamentos_autorizacao as aut
 from . import pagamentos_caixa as caixa
-from .pagamentos_debitos import nomes_fornecedores, nomes_usuarios
+from .pagamentos_debitos import AUTORIZAVEIS, EM_TESOURARIA, ST_AUTORIZADO, ST_ESTORNADO, nomes_fornecedores, nomes_usuarios
 
 
 async def _contas_by_id(db, *, tenant_id: int, ids: set[int]) -> dict[int, ContaBancaria]:
@@ -48,12 +48,12 @@ async def _grupo_conta(db, *, tenant_id: int, conta: ContaBancaria) -> GrupoCont
 
 
 async def _ultimos_aprovados(db, *, tenant_id: int, debito_ids: set[int]) -> dict[int, DebitoHistorico]:
-    """Última ação APROVADO do histórico, por débito."""
+    """Última validação do histórico, por débito (quem conferiu a documentação)."""
     if not debito_ids:
         return {}
     rows = (await db.execute(select(DebitoHistorico).where(
         DebitoHistorico.tenant_id == tenant_id, DebitoHistorico.id_debito.in_(debito_ids),
-        DebitoHistorico.acao == "APROVADO")
+        DebitoHistorico.acao == "VALIDADO")
         .order_by(DebitoHistorico.id.desc()))).scalars().all()
     out: dict[int, DebitoHistorico] = {}
     for h in rows:
@@ -109,7 +109,7 @@ async def fila_autorizacao(db: AsyncSession, *, tenant_id: int) -> list[FilaAuto
     urgentes primeiro, depois competência asc, valor desc."""
     debitos = list((await db.execute(select(Debito).where(
         Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
-        Debito.status == "APROVADO"))).scalars().all())
+        Debito.status.in_(AUTORIZAVEIS)))).scalars().all())
     if not debitos:
         return []
 
@@ -149,11 +149,11 @@ async def fila_autorizacao(db: AsyncSession, *, tenant_id: int) -> list[FilaAuto
 
 
 async def fila_liberacao(db: AsyncSession, *, tenant_id: int) -> list[FilaLiberacaoGrupo]:
-    """Parcelas A_PAGAR de débitos AUTORIZADO|PAGO_PARCIAL, agrupadas por conta
+    """Parcelas A_PAGAR de débitos autorizados/na tesouraria, agrupadas por conta
     (nome asc); dentro do grupo, vencimento asc."""
     debitos = list((await db.execute(select(Debito).where(
         Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
-        Debito.status.in_(("AUTORIZADO", "PAGO_PARCIAL"))))).scalars().all())
+        Debito.status.in_((ST_AUTORIZADO, ST_ESTORNADO, *EM_TESOURARIA))))).scalars().all())
     if not debitos:
         return []
     debitos_por_id = {d.id: d for d in debitos}

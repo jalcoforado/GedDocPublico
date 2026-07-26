@@ -128,11 +128,13 @@ async def _debito_aprovado(engine, tenant_id, *, valor="1000.00", saldo_inicial=
                                    payload=_payload_debito(forn, nat, conta, valor=valor,
                                                            parcelas=parcelas))
     async with _sm(engine)() as s:
-        await deb.enviar_aprovacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante)
+        await deb.enviar_validacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante)
+    async with _sm(engine)() as s:  # liquidação é pré-requisito p/ validar (RN-01)
+        await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
     async with _sm(engine)() as s:
-        d = await deb.aprovar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
-    async with _sm(engine)() as s:  # v2.0: liquidação é pré-requisito p/ autorizar (RN-01)
-        d = await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
+        await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
+    async with _sm(engine)() as s:
+        d = await deb.encaminhar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
     return d, solicitante, aprovador, conta
 
 
@@ -239,7 +241,8 @@ async def test_pagar_parcela_a_pagar_409_depois_libera_e_paga(admin_engine):
                 await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
                                         parcela_id=parcela.id, forma_pagamento="PIX")
             assert exc.value.status_code == 409
-            assert "liberada" in exc.value.detail.lower()
+            # antes da liberação o débito não está na tesouraria (rito v2.0)
+            assert "tesouraria" in exc.value.detail.lower()
 
         async with _sm(admin_engine)() as s:
             await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,

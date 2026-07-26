@@ -17,8 +17,8 @@ from ..schemas.pagamentos import (
 from . import pagamentos_caixa as caixa
 from . import pagamentos_debitos as deb
 
-_STATUS_COMPROMETIDO = ("AUTORIZADO", "PAGO_PARCIAL")
-_STATUS_MAIORES = ("AGUARDANDO_APROVACAO", "APROVADO", "AUTORIZADO", "PAGO_PARCIAL")
+_STATUS_COMPROMETIDO = deb.COM_RESERVA
+_STATUS_MAIORES = (deb.ST_EM_VALIDACAO, deb.ST_VALIDADO, *deb.AUTORIZAVEIS, *deb.COM_RESERVA)
 _TOP_NATUREZA_FONTE = 6
 
 
@@ -110,10 +110,10 @@ async def _kpis(db, *, tenant_id: int, hoje: date) -> DashboardKpis:
 
     aguardando_aprovacao_qtd = (await db.execute(select(func.count(Debito.id)).where(
         Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
-        Debito.status == "AGUARDANDO_APROVACAO"))).scalar_one()
+        Debito.status == deb.ST_EM_VALIDACAO))).scalar_one()
     aguardando_autorizacao_qtd = (await db.execute(select(func.count(Debito.id)).where(
         Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
-        Debito.status == "APROVADO"))).scalar_one()
+        Debito.status.in_(deb.AUTORIZAVEIS)))).scalar_one()
 
     return DashboardKpis(
         saldo_total=saldo_total, disponivel_total=disponivel_total,
