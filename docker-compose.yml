@@ -95,22 +95,23 @@ services:
     command: celery -A app.tasks.celery_app beat --loglevel=info
 
   frontend:
-    build: ./frontend
+    # Produção por padrão (build standalone). Para dev com hot-reload use:
+    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+    build:
+      context: ./frontend
+      target: runner
+      args:
+        # same-origin via nginx; inlined no bundle do browser em build-time.
+        NEXT_PUBLIC_API_URL: /api/v2
     container_name: aprimora-py-frontend
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8090/api/v2
       INTERNAL_API_URL: http://backend:8000/api/v2
-      NODE_ENV: development
+      NODE_ENV: production
     ports:
       - "3100:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
     networks:
       - aprimora-py
-    command: npm run dev
 
   redis:
     image: redis:7-alpine

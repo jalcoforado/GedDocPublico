@@ -1,21 +1,25 @@
 import "./globals.css";
 import "@xyflow/react/dist/style.css";
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 
 import { BrandingProvider } from "@/lib/branding";
 import { THEME_INIT_SCRIPT, ThemeProvider } from "@/lib/theme";
 
-const fontSans = Inter({
-  subsets: ["latin"],
+// Fontes self-hosted (woff2 variáveis) — sem dependência de rede no build,
+// diferente de next/font/google que falha o build offline.
+const fontSans = localFont({
+  src: "./fonts/inter.woff2",
   variable: "--font-sans",
   display: "swap",
+  weight: "100 900",
 });
 
-const fontMono = JetBrains_Mono({
-  subsets: ["latin"],
+const fontMono = localFont({
+  src: "./fonts/jetbrains-mono.woff2",
   variable: "--font-mono",
   display: "swap",
+  weight: "100 800",
 });
 
 export const metadata: Metadata = {

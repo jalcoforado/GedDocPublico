@@ -1,0 +1,18 @@
+# Overlay de DESENVOLVIMENTO local — reativa o hot-reload do frontend.
+# Uso:  docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# O docker-compose.yml base roda o frontend em PRODUÇÃO (build standalone).
+# Este overlay volta o serviço `frontend` para `next dev` com o código
+# bind-mounted, para iterar localmente sem rebuild.
+services:
+  frontend:
+    build:
+      target: dev
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8090/api/v2
+      NODE_ENV: development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
