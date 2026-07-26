@@ -244,3 +244,25 @@ async def test_ficha_fonte_inexistente_404(admin_engine):
             assert exc.value.status_code == 404
     finally:
         await _cleanup(admin_engine, t.id)
+
+
+async def test_simular_autorizacao_projeta_disponivel(admin_engine):
+    """RF-PNL-05: simulação projeta o disponível após um pagamento, sem gravar."""
+    t = await _provisionar(admin_engine)
+    try:
+        _fonte, conta = await _conta(admin_engine, t.id, saldo="1000.00")
+        async with _sm(admin_engine)() as s:
+            ok = await caixa.simular_autorizacao(s, tenant_id=t.id, id_conta=conta.id, valor="300.00")
+        assert ok.disponivel_antes == Decimal("1000.00")
+        assert ok.disponivel_projetado_apos == Decimal("700.00")
+        assert ok.suficiente is True
+        async with _sm(admin_engine)() as s:
+            insuf = await caixa.simular_autorizacao(s, tenant_id=t.id, id_conta=conta.id, valor="2000.00")
+        assert insuf.disponivel_projetado_apos == Decimal("-1000.00")
+        assert insuf.suficiente is False
+        # não grava nada: saldo permanece intacto
+        async with _sm(admin_engine)() as s:
+            saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+        assert saldo.saldo_atual == Decimal("1000.00")
+    finally:
+        await _cleanup(admin_engine, t.id)

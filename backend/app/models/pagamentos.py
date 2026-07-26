@@ -319,6 +319,39 @@ class ContaFonteHistorico(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class ChecklistItem(Base):
+    """Item parametrizável de checklist documental (RF-VAL-01/06). id_natureza
+    nulo = aplica a todos os débitos; senão, só à natureza indicada."""
+    __tablename__ = "checklist_item"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    descricao: Mapped[str] = mapped_column(String(200), nullable=False)
+    obrigatorio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    id_natureza: Mapped[int | None] = mapped_column(
+        ForeignKey("pagamentos.natureza_despesa.id"), nullable=True)
+    ordem: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class DebitoChecklistMarca(Base):
+    """Log append-only das marcações de checklist por débito (RF-VAL-06)."""
+    __tablename__ = "debito_checklist_marca"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_debito: Mapped[int] = mapped_column(ForeignKey("pagamentos.debito.id"), nullable=False)
+    id_checklist_item: Mapped[int] = mapped_column(
+        ForeignKey("pagamentos.checklist_item.id"), nullable=False)
+    marcado: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    observacao: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class TagPrioridade(Base):
     """Rótulos de priorização por tenant (RF-CAD-05)."""
     __tablename__ = "tag_prioridade"

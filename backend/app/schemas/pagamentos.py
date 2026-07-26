@@ -480,6 +480,51 @@ class ContaElegivelOut(BaseModel):
     atualizado_em: datetime | None = None
 
 
+class ChecklistItemCreate(BaseModel):
+    descricao: str = Field(min_length=1, max_length=200)
+    obrigatorio: bool = True
+    id_natureza: int | None = None
+    ordem: int = 0
+
+
+class ChecklistItemUpdate(BaseModel):
+    descricao: str | None = Field(default=None, max_length=200)
+    obrigatorio: bool | None = None
+    id_natureza: int | None = None
+    ordem: int | None = None
+    ativo: bool | None = None
+
+
+class ChecklistItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; descricao: str; obrigatorio: bool; id_natureza: int | None; ordem: int; ativo: bool
+
+
+class ChecklistDebitoItemOut(BaseModel):
+    """Item do checklist aplicável a um débito, com seu estado atual (RF-VAL-01/06)."""
+    id_checklist_item: int; descricao: str; obrigatorio: bool
+    marcado: bool; observacao: str | None; atualizado_em: datetime | None
+
+
+class MarcarChecklistIn(BaseModel):
+    id_checklist_item: int
+    marcado: bool
+    observacao: str | None = Field(default=None, max_length=255)
+
+
+class SimulacaoAutorizacaoIn(BaseModel):
+    """Simulação do impacto de um pagamento numa conta (RF-PNL-05). Informe
+    `debito_ids` (soma os valores) ou um `valor` direto."""
+    id_conta: int
+    debito_ids: list[int] | None = None
+    valor: Decimal | None = None
+
+
+class SimulacaoAutorizacaoOut(BaseModel):
+    id_conta: int; valor_simulado: Decimal
+    disponivel_antes: Decimal; disponivel_projetado_apos: Decimal; suficiente: bool
+
+
 class FichaFonteContaItem(BaseModel):
     """Conta vinculada a uma fonte, com saldos e situação (RF-FON-06)."""
     id_conta: int; nome: str; banco: str; conta_mascarada: str

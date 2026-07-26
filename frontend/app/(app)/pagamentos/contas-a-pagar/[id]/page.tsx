@@ -92,12 +92,28 @@ export default function DebitoDetalhePage() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["pag-debito", id] });
     qc.invalidateQueries({ queryKey: ["pag-debitos"] });
+    qc.invalidateQueries({ queryKey: ["pag-debito-checklist", id] });
   };
 
   const debitoQ = useQuery({
     queryKey: ["pag-debito", id],
     queryFn: () => api.pagamentos.debitos.get(id),
     enabled: Number.isFinite(id),
+  });
+
+  // RF-VAL-01/06: checklist documental do débito.
+  const checklistQ = useQuery({
+    queryKey: ["pag-debito-checklist", id],
+    queryFn: () => api.pagamentos.debitos.checklist(id),
+    enabled: Number.isFinite(id),
+  });
+  const marcarChecklistM = useMutation({
+    mutationFn: (v: { id_checklist_item: number; marcado: boolean }) =>
+      api.pagamentos.debitos.marcarChecklist(id, v),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pag-debito-checklist", id] });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   // Contas elegíveis para pagar este débito (contas ativas da fonte) — v2.0.
@@ -440,6 +456,43 @@ export default function DebitoDetalhePage() {
           </TBody>
         </Table>
       </section>
+
+      {/* RF-VAL-01/06: checklist documental */}
+      {(checklistQ.data?.length ?? 0) > 0 && (
+        <section>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Checklist documental
+          </h2>
+          <ul className="space-y-1">
+            {checklistQ.data!.map((item) => {
+              const editavel = d.status === "EM_VALIDACAO" &&
+                (can("pagamento_validar") || can("pagamento_aprovar"));
+              return (
+                <li key={item.id_checklist_item}
+                  className="flex items-center gap-2 rounded border border-border bg-card px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={item.marcado}
+                    disabled={!editavel || marcarChecklistM.isPending}
+                    onChange={(e) => marcarChecklistM.mutate({
+                      id_checklist_item: item.id_checklist_item, marcado: e.target.checked })}
+                  />
+                  <span className={item.marcado ? "line-through text-muted-foreground" : ""}>
+                    {item.descricao}
+                    {item.obrigatorio && <span className="ml-1 text-danger">*</span>}
+                  </span>
+                  {item.observacao && (
+                    <span className="ml-auto text-xs text-muted-foreground">{item.observacao}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-1 text-xs text-muted-foreground">
+            <span className="text-danger">*</span> obrigatório para validar (RF-VAL-01).
+          </p>
+        </section>
+      )}
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
