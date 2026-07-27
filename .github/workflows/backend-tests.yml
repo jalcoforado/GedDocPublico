@@ -80,31 +80,14 @@ jobs:
         #     `empresasimples.cnae_subgrupos` (schemas legados do PHP).
         # Criamos stubs mínimos pra satisfazer essas dependências — testes
         # não usam essas tabelas.
+        #
+        # Usa ci/bootstrap-stubs.sql (mesmo arquivo do scripts/bootstrap-db.sh)
+        # em vez de duplicar o SQL aqui: a cópia inline tinha divergido e não
+        # criava `sistema_chamados.tipo_chamado`, exigida pelo trigger legado
+        # utils.copia_sistemas_tipochamados() ao inserir em utils.sistema.
         run: |
-          psql -h localhost -U ged_user -d ged_saas_db <<'SQL'
-            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
-            CREATE OR REPLACE FUNCTION public.trigger_set_timestamp()
-            RETURNS trigger LANGUAGE plpgsql AS $$
-            BEGIN
-              NEW.updated_at = NOW();
-              RETURN NEW;
-            END;
-            $$;
-
-            CREATE SCHEMA IF NOT EXISTS despesas;
-            CREATE TABLE IF NOT EXISTS despesas.feempliq (id integer PRIMARY KEY);
-
-            CREATE SCHEMA IF NOT EXISTS empresasimples;
-            CREATE TABLE IF NOT EXISTS empresasimples.cnae_subgrupos (id integer PRIMARY KEY);
-
-            -- A view utils.servicosportais (presente no dump) referencia
-            -- agendamento.* — stub mínimo para o load não falhar.
-            CREATE SCHEMA IF NOT EXISTS agendamento;
-            CREATE TABLE IF NOT EXISTS agendamento.servico_informacao
-              (id integer PRIMARY KEY, url varchar, label varchar, id_servico integer);
-            CREATE TABLE IF NOT EXISTS agendamento.servico_unidade_trabalho (id_servico integer);
-          SQL
+          psql -h localhost -U ged_user -d ged_saas_db \
+            -v ON_ERROR_STOP=1 -f ci/bootstrap-stubs.sql
 
       - name: Load full schema dump
         env:
@@ -158,6 +141,27 @@ jobs:
             GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA protocolos, utils, aprimora_py, public, pagamentos, frota TO aprimora_app;
             GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA protocolos, utils, aprimora_py, public, pagamentos, frota TO aprimora_app;
           SQL
+
+      - name: Seed dos catálogos globais
+        env:
+          PGPASSWORD: ged_password_secure_local
+        # ci/legacy-schema.sql é schema-only. `provisionar_tenant` — chamado por
+        # quase todo teste — exige dois registros de catálogo GLOBAL que não vêm
+        # de migration nenhuma: utils.nivel com valor=0 e utils.sistema com
+        # app='sistemas'. Sem eles o provisionamento estoura em cascata
+        # (ProvisioningError: "Pré-requisitos globais ausentes").
+        # ci/seed-e2e.sql já semeia esses dois + protocolos.acao ABERTURA
+        # (exigida ao abrir processo) e é idempotente (ON CONFLICT DO NOTHING).
+        run: |
+          psql -h localhost -U ged_user -d ged_saas_db \
+            -v ON_ERROR_STOP=1 -f ci/seed-e2e.sql
+
+      - name: Seed bootstrap (constantes + tenant/admin padrão)
+        working-directory: backend
+        # Popula utils.sistema_constante — sem KEY_LOGIN_GLOBAL_JWT o login
+        # estoura com "KEY_LOGIN_GLOBAL_JWT not found in utils.sistema_constante".
+        # Mesmo seed usado por scripts/bootstrap-db.sh; idempotente.
+        run: python -m app.cli.seed_bootstrap
 
       - name: Run pytest
         working-directory: backend
