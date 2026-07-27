@@ -31,6 +31,18 @@ jobs:
           --health-timeout 3s
           --health-retries 10
 
+      # A fixture `redis_client` (conftest) e os testes de OAuth precisam de um
+      # Redis real — no compose é o serviço `redis`, aqui responde em localhost.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
     env:
       # Alembic + app rodando localmente fora do Docker compose
       DATABASE_URL: postgresql+asyncpg://ged_user:ged_password_secure_local@localhost:5432/ged_saas_db
@@ -48,6 +60,16 @@ jobs:
       # `encrypt()` levanta CryptoConfigError e os testes de Google Docs/OAuth
       # falham. Valor DEV-ONLY, o mesmo do docker-compose — NÃO usar em produção.
       DADOS_SENSIVEIS_ENCRYPTION_KEY: 7qeLLAFqcrdD_Zo5A4Ip28YUi7x7M_7BxlFv-knsnP0=
+      PYTEST_REDIS_URL: redis://localhost:6379/2
+      CELERY_BROKER_URL: redis://localhost:6379/0
+      CELERY_RESULT_BACKEND: redis://localhost:6379/1
+      # Credenciais FICTÍCIAS de OAuth: os testes mockam as chamadas HTTP ao
+      # Google, mas `google_oauth_flow` recusa operar com a config vazia
+      # ("Google OAuth não está configurado"). Em dev os valores reais vêm de
+      # backend/.env, que é gitignored e não existe no runner.
+      GOOGLE_OAUTH_CLIENT_ID: ci-test-client-id.apps.googleusercontent.com
+      GOOGLE_OAUTH_CLIENT_SECRET: ci-test-client-secret
+      GOOGLE_OAUTH_REDIRECT_URI: http://localhost:8000/api/v2/auth/google/callback
 
     steps:
       - uses: actions/checkout@v4

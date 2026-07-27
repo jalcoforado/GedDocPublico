@@ -131,7 +131,9 @@ async def redis_client():
     """Redis client para testes — usa redis de teste (DB 2)."""
     import redis.asyncio as aioredis
 
-    redis_url = "redis://redis:6379/2"
+    # Host parametrizável, como PYTEST_DB_HOST: no compose o serviço se chama
+    # `redis`; fora dele (CI) o service container responde em localhost.
+    redis_url = os.environ.get("PYTEST_REDIS_URL", "redis://redis:6379/2")
     client = aioredis.from_url(redis_url)
     yield client
     # Cleanup: flush DB de teste
