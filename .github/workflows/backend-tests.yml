@@ -44,6 +44,10 @@ jobs:
       TENANTS_STORAGE_ROOT: /tmp/uploads/tenants
       UPLOADS_DIR: /tmp/uploads/anexos
       JOBS_RESULTS_DIR: /tmp/uploads/jobs
+      # Chave Fernet dos dados sensíveis (credenciais Google). Sem ela,
+      # `encrypt()` levanta CryptoConfigError e os testes de Google Docs/OAuth
+      # falham. Valor DEV-ONLY, o mesmo do docker-compose — NÃO usar em produção.
+      DADOS_SENSIVEIS_ENCRYPTION_KEY: 7qeLLAFqcrdD_Zo5A4Ip28YUi7x7M_7BxlFv-knsnP0=
 
     steps:
       - uses: actions/checkout@v4
