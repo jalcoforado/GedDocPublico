@@ -48,10 +48,37 @@ build_containers() {
   log "✓ Build complete"
 }
 
+# Remove containers presos com os nomes fixos do compose.
+#
+# O docker-compose.yml usa `container_name:` explícito, que é global no daemon.
+# Um container remanescente com esse nome — de um projeto compose anterior, de
+# um `up` interrompido ou criado à mão — faz o `up` abortar com
+# "Conflict. The container name ... is already in use", como aconteceu no
+# deploy do commit 2decf1a. `--remove-orphans` não cobre esse caso: ele só
+# alcança órfãos do MESMO projeto, e o conflito é por nome global.
+remove_conflicting_containers() {
+  local names="aprimora-py-backend aprimora-py-frontend aprimora-py-worker \
+aprimora-py-beat aprimora-py-redis aprimora-py-nginx aprimora-py-db"
+  local projeto
+  projeto=$(basename "$(pwd)")
+
+  for nome in $names; do
+    # Só age se o container existe E não pertence ao projeto compose atual —
+    # containers legítimos são recriados pelo próprio `up`.
+    local dono
+    dono=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$nome" 2>/dev/null || true)
+    if [ -n "$dono" ] && [ "$dono" != "$projeto" ]; then
+      log "⚠ Container '$nome' pertence ao projeto '$dono' (atual: '$projeto') — removendo para liberar o nome"
+      docker rm -f "$nome" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 # Start services
 start_services() {
   log "Starting services..."
-  docker compose up -d
+  remove_conflicting_containers
+  docker compose up -d --remove-orphans
   log "✓ Services started"
 
   log "Waiting for healthchecks..."
@@ -109,6 +136,14 @@ health_check() {
 run_migrations() {
   log "Checking database migrations..."
   docker compose exec -T backend alembic upgrade head || log "Migrations skipped (DB may be initializing)"
+
+  # Seed idempotente: garante os pré-requisitos globais (utils.sistema com o
+  # app corrente, utils.nivel valor=0, KEY_LOGIN_GLOBAL_JWT) e o vínculo do
+  # admin ao grupo SU. Necessário desde a padronização de APP_NAME='sistemas':
+  # admin ligado ao sistema antigo deixa de ser reconhecido como super-usuário
+  # e passa a receber 403. Não remove nem sobrescreve nada existente.
+  log "Aplicando seed_bootstrap (idempotente)..."
+  docker compose exec -T backend python -m app.cli.seed_bootstrap || log "seed_bootstrap falhou — verificar manualmente"
 }
 
 # Backup database (optional)
