@@ -42,6 +42,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.password import hash_password
+from ..config import get_settings
 from ..database import SessionLocal
 from ..models import (
     Acao,
@@ -579,7 +580,7 @@ async def _get_or_create_servidor(
         ativo=True,
         excluido=False,
         cargo=cargo,
-        app="sistemas",
+        app=get_settings().app_name,
         # Demo NÃO força troca — apresentação não pode parar no fluxo SEC-1.
         must_change_password=False,
     )
@@ -824,7 +825,9 @@ async def _vincular_anexos(
             continue
         # Gera PDF físico em uploads/ pra demonstrar viewer (~3 KB).
         pdf_bytes = _gerar_pdf_demo(d["nome"], f"Conteúdo demo para: {d['nome']}.")
-        upload_dir = "/app/uploads"
+        # Respeita UPLOADS_DIR (settings) em vez de fixar /app/uploads: fora do
+        # container — CI, por exemplo — /app não existe nem é gravável.
+        upload_dir = get_settings().uploads_dir
         os.makedirs(upload_dir, exist_ok=True)
         path = f"{upload_dir}/demo-{processo_id}-{_slugify(d['nome'])}.pdf"
         with open(path, "wb") as f:

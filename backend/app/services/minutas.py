@@ -288,12 +288,14 @@ async def criar_minuta(
 
     await audit_log(
         db,
-        acao="minuta.criada",
-        id_entidade=m.id,
-        tipo_entidade="minuta",
+        tenant_id=tenant_id,
         id_usuario=usuario.id,
-        id_processo=processo_id,
+        acao="minuta.criada",
+        entidade="minuta",
+        id_entidade=m.id,
+        payload={"id_processo": processo_id},
     )
+    await db.commit()
 
     return m
 
@@ -348,12 +350,14 @@ async def atualizar_minuta(
 
     await audit_log(
         db,
-        acao="minuta.editada",
-        id_entidade=m.id,
-        tipo_entidade="minuta",
+        tenant_id=tenant_id,
         id_usuario=usuario.id,
-        id_processo=m.id_processo,
+        acao="minuta.editada",
+        entidade="minuta",
+        id_entidade=m.id,
+        payload={"id_processo": m.id_processo},
     )
+    await db.commit()
 
     return m
 
@@ -374,12 +378,14 @@ async def excluir_minuta(
     if usuario_id:
         await audit_log(
             db,
-            acao="minuta.excluida",
-            id_entidade=m.id,
-            tipo_entidade="minuta",
+            tenant_id=tenant_id,
             id_usuario=usuario_id,
-            id_processo=m.id_processo,
+            acao="minuta.excluida",
+            entidade="minuta",
+            id_entidade=m.id,
+            payload={"id_processo": m.id_processo},
         )
+        await db.commit()
 
 
 async def criar_google_doc_para_minuta(
@@ -435,13 +441,14 @@ async def criar_google_doc_para_minuta(
 
         await audit_log(
             db,
-            acao="minuta.google_doc_criado",
-            id_entidade=m.id,
-            tipo_entidade="minuta",
+            tenant_id=tenant_id,
             id_usuario=usuario_id,
-            id_processo=m.id_processo,
-            detalhes={"google_doc_id": m.google_doc_id},
+            acao="minuta.google_doc_criado",
+            entidade="minuta",
+            id_entidade=m.id,
+            payload={"id_processo": m.id_processo, "google_doc_id": m.google_doc_id},
         )
+        await db.commit()
 
         return m
 
@@ -494,25 +501,27 @@ async def arquivar_google_doc_para_minuta(
         # Log audit
         await audit_log(
             db,
-            acao="minuta.google_doc_arquivado",
-            id_entidade=m.id,
-            tipo_entidade="minuta",
+            tenant_id=tenant_id,
             id_usuario=usuario_id,
-            id_processo=m.id_processo,
-            detalhes={"google_doc_id": m.google_doc_id},
+            acao="minuta.google_doc_arquivado",
+            entidade="minuta",
+            id_entidade=m.id,
+            payload={"id_processo": m.id_processo, "google_doc_id": m.google_doc_id},
         )
+        await db.commit()
 
     except GoogleDocsError as e:
         # Log error but don't fail (Google Doc may already be deleted)
         await audit_log(
             db,
-            acao="minuta.google_doc_arquivado_erro",
-            id_entidade=m.id,
-            tipo_entidade="minuta",
+            tenant_id=tenant_id,
             id_usuario=usuario_id,
-            id_processo=m.id_processo,
-            detalhes={"erro": str(e)},
+            acao="minuta.google_doc_arquivado_erro",
+            entidade="minuta",
+            id_entidade=m.id,
+            payload={"id_processo": m.id_processo, "erro": str(e)},
         )
+        await db.commit()
 
 
 async def _gerar_pdf_minuta_google(
@@ -625,11 +634,13 @@ async def finalizar_minuta(
 
     await audit_log(
         db,
-        acao="minuta.finalizada",
-        id_entidade=m.id,
-        tipo_entidade="minuta",
+        tenant_id=tenant_id,
         id_usuario=usuario_id,
-        id_processo=m.id_processo,
+        acao="minuta.finalizada",
+        entidade="minuta",
+        id_entidade=m.id,
+        payload={"id_processo": m.id_processo},
     )
+    await db.commit()
 
     return m

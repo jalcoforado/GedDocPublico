@@ -1793,10 +1793,20 @@ async def obter_kpis_agregados(
         "indefinidos": 0,
     }
 
+    # _calcular_status_e_dias devolve o status no SINGULAR ("ativo", "vencido",
+    # "indefinido"); as chaves do KPI são plurais. Sem esse mapa, `status in kpis`
+    # só casava em "a_renovar_30d" e os outros três contadores ficavam sempre 0.
+    plural = {
+        "ativo": "ativos",
+        "vencido": "vencidos",
+        "a_renovar_30d": "a_renovar_30d",
+        "indefinido": "indefinidos",
+    }
     for alvara in alvaras:
         status, _ = _calcular_status_e_dias(alvara.data_validade)
-        if status in kpis:
-            kpis[status] += 1
+        chave = plural.get(status)
+        if chave in kpis:
+            kpis[chave] += 1
 
     return kpis
 

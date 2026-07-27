@@ -21,7 +21,11 @@ class Settings(BaseSettings):
     jwt_private_key_path: str = "/app/keys/jwt_private.pem"
     jwt_public_key_path: str = "/app/keys/jwt_public.pem"
 
-    app_name: str = "aprimora"
+    # Valor do `app` em utils.sistema/utils.usuario e do claim `app` no JWT.
+    # `load_permissions` filtra grupos por Sistema.app == app_name; provisionar
+    # tenant grava 'sistemas'. Divergir aqui faz o SU do tenant não ser
+    # reconhecido (403 em tudo).
+    app_name: str = "sistemas"
     cidade_conn: str = "ged_saas_db"
     environment: str = "desenvolvimento"
 

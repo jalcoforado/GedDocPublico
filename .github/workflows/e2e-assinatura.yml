@@ -63,6 +63,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Gera chave Fernet efêmera
+        # Mesma razão do backend-tests: chave literal no repositório é segredo
+        # exposto; o e2e sobe e derruba tudo no mesmo job.
+        working-directory: backend
+        run: |
+          python -c "from cryptography.fernet import Fernet; print('DADOS_SENSIVEIS_ENCRYPTION_KEY=' + Fernet.generate_key().decode())" >> "$GITHUB_ENV"
+
       - name: Wait for Postgres
         run: |
           for i in {1..30}; do
@@ -74,24 +81,29 @@ jobs:
       # Stubs cross-schema (igual backend-tests) + agendamento, exigido pela view
       # utils.servicosportais presente no dump.
       - name: Bootstrap extensions + cross-schema stubs
-        run: |
-          psql -h localhost -U ged_user -d ged_saas_db <<'SQL'
-            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-            CREATE OR REPLACE FUNCTION public.trigger_set_timestamp()
-              RETURNS trigger LANGUAGE plpgsql AS $$
-              BEGIN NEW.updated_at = NOW(); RETURN NEW; END; $$;
-            CREATE SCHEMA IF NOT EXISTS despesas;
-            CREATE TABLE IF NOT EXISTS despesas.feempliq (id integer PRIMARY KEY);
-            CREATE SCHEMA IF NOT EXISTS empresasimples;
-            CREATE TABLE IF NOT EXISTS empresasimples.cnae_subgrupos (id integer PRIMARY KEY);
-            CREATE SCHEMA IF NOT EXISTS agendamento;
-            CREATE TABLE IF NOT EXISTS agendamento.servico_informacao
-              (id integer PRIMARY KEY, url varchar, label varchar, id_servico integer);
-            CREATE TABLE IF NOT EXISTS agendamento.servico_unidade_trabalho (id_servico integer);
-          SQL
+        # Usa o arquivo canônico (mesmo do scripts/bootstrap-db.sh) em vez de
+        # duplicar o SQL: a cópia inline não criava sistema_chamados.tipo_chamado,
+        # exigida pelo trigger legado ao inserir em utils.sistema.
+        run: psql -h localhost -U ged_user -d ged_saas_db -v ON_ERROR_STOP=1 -f ci/bootstrap-stubs.sql
 
       - name: Load schema dump
         run: psql -h localhost -U ged_user -d ged_saas_db -v ON_ERROR_STOP=1 -f ci/legacy-schema.sql
+
+      - name: Cria a role aprimora_app (ANTES das migrations)
+        # Mesma correção do backend-tests.yml: migrations posteriores a 0020
+        # fazem `GRANT ... TO aprimora_app` ao criar suas tabelas e falham com
+        # `role "aprimora_app" does not exist` se a role não existir ainda.
+        run: |
+          psql -h localhost -U ged_user -d ged_saas_db <<'SQL'
+            DO $$ BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aprimora_app') THEN
+                CREATE ROLE aprimora_app LOGIN NOSUPERUSER NOBYPASSRLS
+                  PASSWORD 'ged_password_secure_local';
+              END IF;
+            END $$;
+            GRANT CONNECT ON DATABASE ged_saas_db TO aprimora_app;
+            GRANT USAGE ON SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
+          SQL
 
       - name: Stamp baseline do dump + roda migrations pendentes
         working-directory: backend
@@ -121,6 +133,9 @@ jobs:
           TENANTS_STORAGE_ROOT: /tmp/uploads/tenants
           UPLOADS_DIR: /tmp/uploads/anexos
           JOBS_RESULTS_DIR: /tmp/uploads/jobs
+          # Chave Fernet efêmera, gerada no passo anterior (via GITHUB_ENV) —
+          # não fixar valor literal no repositório.
+          DADOS_SENSIVEIS_ENCRYPTION_KEY: ${{ env.DADOS_SENSIVEIS_ENCRYPTION_KEY }}
         run: |
           nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &
           for i in {1..40}; do

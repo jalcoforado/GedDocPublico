@@ -8,6 +8,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.transporte_regulado import AlvaraCreate
@@ -131,18 +132,26 @@ async def test_registrar_auditoria_com_usuario(admin_engine):
     alvara_id, _ = await _criar_alvara(admin_engine, tenant.id, perm_id)
 
     async with _sm(admin_engine)() as db:
-        # Registrar com usuário (perm.id_usuario que foi criado)
-        perm = await tr_svc.obter_permissionario(db, tenant_id=tenant.id, permissionario_id=perm_id)
+        # id_usuario tem FK para utils.usuario — usar o admin real do tenant
+        # provisionado. Fixar `1` violava a FK (esse id não existe aqui).
+        usuario_id = int(
+            (
+                await db.execute(
+                    text("SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"),
+                    {"t": tenant.id},
+                )
+            ).scalar_one()
+        )
 
         audit = await tr_svc.registrar_auditoria_alvara(
             db,
             tenant_id=tenant.id,
             alvara_id=alvara_id,
             acao="alvara.atualizada",
-            usuario_id=1,  # Admin user
+            usuario_id=usuario_id,
         )
 
-        assert audit.id_usuario == 1
+        assert audit.id_usuario == usuario_id
 
 
 @pytest.mark.asyncio

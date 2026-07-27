@@ -180,6 +180,22 @@ async def _arquivar(engine, tenant_id: int, processo_id: int, dias_atras: int) -
     """Simula conclusão por arquivamento (Movimentacao ativa com id_arquivamento)."""
     async with _sm(engine)() as s:
         unidade_id = await _unidade_id(engine, tenant_id)
+        # protocolos.acao é catálogo GLOBAL e o seed só garante ABERTURA — em
+        # banco limpo (CI) não há ARQUIVAMENTO e o SELECT abaixo estourava.
+        # Mesmo padrão idempotente já usado para status_arquivamento.
+        await s.execute(
+            text(
+                "INSERT INTO protocolos.acao "
+                "(flag, acao, status_acao, status_movimentacao, texto_acao, ativo, excluido) "
+                "SELECT 'ARQUIVAMENTO', 'Arquivamento', 'arquivado', 'final', "
+                "       'Processo arquivado', true, false "
+                "WHERE NOT EXISTS ("
+                "  SELECT 1 FROM protocolos.acao "
+                "  WHERE flag='ARQUIVAMENTO' AND ativo=true AND excluido=false"
+                ")"
+            )
+        )
+        await s.commit()
         acao_id = int(
             (
                 await s.execute(

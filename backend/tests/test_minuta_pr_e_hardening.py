@@ -11,8 +11,10 @@ import uuid
 from datetime import datetime
 
 import pytest
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.models import Assunto, TipoProcesso, Usuario
 from app.schemas.minuta import MinutaCreate, MinutaUpdate
 from app.services import minutas as svc
 from app.services.html_sanitizer import sanitizar_html
@@ -28,13 +30,91 @@ def _slug(p: str) -> str:
 
 
 async def _provisionar(engine):
+    """Devolve (tenant, usuario_admin).
+
+    Atenção: provisionar_tenant retorna (tenant, senha_temporária) — o 2º item
+    é `str`, não o usuário. Os serviços de minuta esperam um `Usuario` (acessam
+    `usuario.id`), então carregamos o admin do tenant aqui.
+    """
     slug = _slug("minuta")
     async with _sm(engine)() as s:
-        tenant, user = await provisionar_tenant(
+        tenant, _senha_temp = await provisionar_tenant(
             s, slug=slug, nome="Pref Minuta", admin_email=f"{slug}@t.local",
             admin_nome="Adm", admin_cpf=uuid.uuid4().hex[:11], plano="basico",
         )
+    async with _sm(engine)() as s:
+        user = (
+            await s.execute(select(Usuario).where(Usuario.tenant_id == tenant.id).limit(1))
+        ).scalar_one()
     return tenant, user
+
+
+async def _criar_processo(engine, tenant_id: int) -> int:
+    """Cria um processo mínimo válido e devolve seu id.
+
+    Processo exige id_assunto, id_manifestante e id_unidade_proprietaria (todos
+    FK NOT NULL) — montamos a cadeia inteira. Mesmo padrão de
+    test_pr4d_complementacao.
+    """
+    async with _sm(engine)() as s:
+        tp = TipoProcesso(
+            tenant_id=tenant_id, tipo_processo="Geral",
+            exige_processo_pai=False, ativo=True, excluido=False,
+        )
+        s.add(tp)
+        await s.flush()
+        assunto = Assunto(
+            tenant_id=tenant_id, assunto="Minuta", id_tipo_processo=tp.id,
+            exige_processo_pai=False, ativo=True, excluido=False,
+        )
+        s.add(assunto)
+        await s.flush()
+
+        unidade_id = int(
+            (
+                await s.execute(
+                    text("SELECT id FROM utils.unidade_trabalho WHERE tenant_id=:t LIMIT 1"),
+                    {"t": tenant_id},
+                )
+            ).scalar_one()
+        )
+        await s.execute(
+            text(
+                "INSERT INTO protocolos.manifestante "
+                "(tenant_id, id_tipo_manifestante, nome, cpf_cnpj, ativo, excluido) "
+                "SELECT :t, id, 'Manifestante Minuta', :cpf, true, false "
+                "FROM protocolos.tipo_manifestante WHERE tenant_id=:t LIMIT 1"
+            ),
+            {"t": tenant_id, "cpf": uuid.uuid4().hex[:11]},
+        )
+        manifestante_id = int(
+            (
+                await s.execute(
+                    text("SELECT id FROM protocolos.manifestante WHERE tenant_id=:t LIMIT 1"),
+                    {"t": tenant_id},
+                )
+            ).scalar_one()
+        )
+        processo_id = int(
+            (
+                await s.execute(
+                    text(
+                        "INSERT INTO protocolos.processo "
+                        "(tenant_id, id_assunto, id_manifestante, id_unidade_proprietaria, "
+                        " virtual, data_hora_abertura, numero_processo, nivel_sigilo, "
+                        " externo, migrado, ativo, excluido, canal_entrada) "
+                        "VALUES (:t, :a, :m, :u, true, NOW(), :num, 'ostensivo', "
+                        "        true, false, true, false, 'portal') RETURNING id"
+                    ),
+                    {
+                        "t": tenant_id, "a": assunto.id, "m": manifestante_id,
+                        "u": unidade_id, "num": f"P{uuid.uuid4().hex[:6].upper()}/2026",
+                    },
+                )
+            ).scalar_one()
+        )
+        await s.commit()
+    return processo_id
 
 
 @pytest.mark.asyncio
@@ -80,20 +160,9 @@ async def test_criar_minuta_sanitiza_corpo_html(admin_engine):
     """criar_minuta aplica bleach ao corpo_html fornecido."""
     tenant, user = await _provisionar(admin_engine)
 
+    processo_id = await _criar_processo(admin_engine, tenant.id)
+
     async with _sm(admin_engine)() as db:
-        # Criar processo dummy
-        from app.models import Processo
-        proc = Processo(
-            tenant_id=tenant.id,
-            numero="2024.00001",
-            tipo="protocolo",
-            status_externo="aberto",
-            status_interno="triagem",
-            descricao="Teste",
-        )
-        db.add(proc)
-        await db.flush()
-        processo_id = proc.id
 
         # Minuta com HTML malicioso
         payload = MinutaCreate(
@@ -115,24 +184,13 @@ async def test_criar_minuta_sanitiza_corpo_html(admin_engine):
 async def test_atualizar_minuta_sanitiza_corpo_html(admin_engine):
     """atualizar_minuta aplica bleach ao corpo_html."""
     tenant, user = await _provisionar(admin_engine)
+    processo_id = await _criar_processo(admin_engine, tenant.id)
 
     async with _sm(admin_engine)() as db:
-        # Setup processo + minuta
-        from app.models import Processo
-        proc = Processo(
-            tenant_id=tenant.id,
-            numero="2024.00002",
-            tipo="protocolo",
-            status_externo="aberto",
-            status_interno="triagem",
-            descricao="Teste",
-        )
-        db.add(proc)
-        await db.flush()
 
         payload_create = MinutaCreate(titulo="Teste", origem="interno", corpo_html="<p>Inicial</p>")
         m = await svc.criar_minuta(
-            db, tenant_id=tenant.id, processo_id=proc.id,
+            db, tenant_id=tenant.id, processo_id=processo_id,
             usuario=user, payload=payload_create
         )
         minuta_id = m.id
@@ -155,24 +213,14 @@ async def test_atualizar_minuta_sanitiza_corpo_html(admin_engine):
 async def test_historico_minuta_cria_versoes(admin_engine):
     """Cada atualização cria nova versão em minuta_historico."""
     tenant, user = await _provisionar(admin_engine)
+    processo_id = await _criar_processo(admin_engine, tenant.id)
 
     async with _sm(admin_engine)() as db:
-        from app.models import Processo
-        proc = Processo(
-            tenant_id=tenant.id,
-            numero="2024.00003",
-            tipo="protocolo",
-            status_externo="aberto",
-            status_interno="triagem",
-            descricao="Teste",
-        )
-        db.add(proc)
-        await db.flush()
 
         # Criar minuta (versão 1)
         payload1 = MinutaCreate(titulo="Teste", origem="interno", corpo_html="<p>V1</p>")
         m = await svc.criar_minuta(
-            db, tenant_id=tenant.id, processo_id=proc.id,
+            db, tenant_id=tenant.id, processo_id=processo_id,
             usuario=user, payload=payload1
         )
         assert m.versao == 1

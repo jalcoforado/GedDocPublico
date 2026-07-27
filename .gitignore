@@ -48,6 +48,7 @@ backend/celerybeat-schedule
 tests-e2e/report/
 tests-e2e/test-results/
 tests-e2e/package-lock.json
+frontend/test-results/
 
 # Docker compose overrides locais (porta, env etc)
 docker-compose.override.yml
