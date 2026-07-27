@@ -1,10 +1,10 @@
 """Seed mínimo de bootstrap — sistema logável com todos os módulos.
 
 Idempotente. Cria (get_or_create):
-  1. Catálogo global: utils.sistema(app='aprimora') + utils.nivel(valor=0)
+  1. Catálogo global: utils.sistema(app=settings.app_name) + utils.nivel(valor=0)
   2. Tenant Sobral (aprimora_py.tenant, id=1) — 0003 é pulada pelo baseline 0020
   3. Admin super-usuário admin@local.test (senha dev admin123)
-  4. utils.grupo (nível 0, sistema aprimora) + utils.usuario_grupo (tenant 1)
+  4. utils.grupo (nível 0, sistema do app_name) + utils.usuario_grupo (tenant 1)
   5. Segredo KEY_LOGIN_GLOBAL_JWT em utils.sistema_constante
 
 Uso: docker exec aprimora-py-backend python -m app.cli.seed_bootstrap
@@ -19,8 +19,11 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.password import hash_password
+from ..config import get_settings
 from ..database import SessionLocal
 from ..models import Grupo, Nivel, Sistema, Tenant, Usuario, UsuarioGrupo
+
+APP = get_settings().app_name
 
 ADMIN_EMAIL = "admin@local.test"
 ADMIN_SENHA = "admin123"
@@ -35,10 +38,10 @@ async def seed(db: AsyncSession) -> dict:
     # 1. Catálogo global (sistema app=aprimora + nível 0). O stub
     # sistema_chamados.tipo_chamado (Task 1) deixa o trigger legado passar.
     sistema = (
-        await db.execute(select(Sistema).where(Sistema.app == "aprimora"))
+        await db.execute(select(Sistema).where(Sistema.app == APP))
     ).scalars().first()
     if sistema is None:
-        sistema = Sistema(sistema="Aprimora", app="aprimora", url="/", excluido=False)
+        sistema = Sistema(sistema="Aprimora", app=APP, url="/", excluido=False)
         db.add(sistema)
         await db.flush()
 
@@ -89,7 +92,7 @@ async def seed(db: AsyncSession) -> dict:
             cpf="00000000000",
             ativo=True,
             excluido=False,
-            app="aprimora",
+            app=APP,
             nivel_acesso_sigilo="interno",
             must_change_password=False,
         )

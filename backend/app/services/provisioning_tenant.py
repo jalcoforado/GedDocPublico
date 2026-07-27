@@ -27,6 +27,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.password import hash_password
+from ..config import get_settings
 from .audit import log as audit_log
 from ..models import (
     Grupo,
@@ -113,16 +114,21 @@ async def provisionar_tenant(
     # SET não aceita bind params no Postgres → interpolar o int (seguro).
     await db.execute(text(f"SET LOCAL app.tenant_id = {int(tenant.id)}"))
 
-    # Pré-requisitos globais (SU precisa de nível valor=0 + sistema 'sistemas').
+    # Pré-requisitos globais: nível valor=0 + o sistema do app corrente.
+    # O app vem de settings.app_name — o MESMO filtro que load_permissions usa
+    # (Sistema.app == app_name). Fixar o literal aqui já fez o SU do tenant
+    # provisionado não ser reconhecido, resultando em 403 em todas as rotas.
+    app_name = get_settings().app_name
     nivel_su = (
         await db.execute(select(Nivel).where(Nivel.valor == 0).limit(1))
     ).scalar_one_or_none()
     sistema_app = (
-        await db.execute(select(Sistema).where(Sistema.app == "sistemas").limit(1))
+        await db.execute(select(Sistema).where(Sistema.app == app_name).limit(1))
     ).scalar_one_or_none()
     if nivel_su is None or sistema_app is None:
         raise ProvisioningError(
-            "Pré-requisitos globais ausentes (nível valor=0 ou sistema 'sistemas')."
+            "Pré-requisitos globais ausentes "
+            f"(nível valor=0 ou sistema '{app_name}')."
         )
 
     tu = TipoUnidadeTrabalho(
@@ -160,7 +166,7 @@ async def provisionar_tenant(
         ativo=True,
         excluido=False,
         cargo="Administrador",
-        app="sistemas",
+        app=app_name,
         # SEC-1: admin inicial recebe senha temporária — força troca no
         # primeiro acesso. O guard em get_current_user (Commit 2) já cobre.
         must_change_password=True,
@@ -184,7 +190,7 @@ async def provisionar_tenant(
             id_grupo=grupo_su.id,
             ativo=True,
             excluido=False,
-            app="sistemas",
+            app=app_name,
         )
     )
 

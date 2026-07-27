@@ -42,6 +42,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.password import hash_password
+from ..config import get_settings
 from ..database import SessionLocal
 from ..models import (
     Acao,
@@ -579,7 +580,7 @@ async def _get_or_create_servidor(
         ativo=True,
         excluido=False,
         cargo=cargo,
-        app="sistemas",
+        app=get_settings().app_name,
         # Demo NÃO força troca — apresentação não pode parar no fluxo SEC-1.
         must_change_password=False,
     )
