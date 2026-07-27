@@ -146,9 +146,14 @@ restart_services() {
 health_check() {
   log "Running health checks..."
 
+  # Porta 8000 (o compose publica 8000:8000; 8001 nunca existiu) e endpoint
+  # /health, que é público. A sonda anterior batia em /auth/me, que exige
+  # autenticação: mesmo com o backend sadio, o 401 fazia `curl -sf` falhar e
+  # derrubava o deploy no fim. Só chegamos a exercitá-la quando o resto parou
+  # de quebrar antes.
   BACKEND_READY=0
   for i in {1..30}; do
-    if curl -sf http://localhost:8001/api/v2/auth/me >/dev/null 2>&1; then
+    if curl -sf http://localhost:8000/api/v2/health >/dev/null 2>&1; then
       BACKEND_READY=1
       break
     fi
@@ -252,8 +257,8 @@ show_urls() {
   echo ""
   echo -e "${GREEN}Service URLs:${NC}"
   echo "  Frontend:  http://localhost:8090"
-  echo "  Backend:   http://localhost:8001/api/v2"
-  echo "  API Docs:  http://localhost:8001/docs"
+  echo "  Backend:   http://localhost:8000/api/v2"
+  echo "  API Docs:  http://localhost:8000/docs"
   echo ""
 }
 

@@ -98,7 +98,7 @@ jobs:
         if: success()
         run: |
           echo "✅ Deployment to VPS successful!"
-          echo "Backend:  http://${{ env.VPS_HOST }}:8001/api/v2"
+          echo "Backend:  http://${{ env.VPS_HOST }}:8000/api/v2"
           echo "Frontend: http://${{ env.VPS_HOST }}:8090"
 
       - name: Notify Failure
