@@ -365,3 +365,56 @@ class TagPrioridade(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class Extrato(Base):
+    """Arquivo de extrato bancário importado (RF-EXT-01/10)."""
+    __tablename__ = "extrato"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_conta: Mapped[int] = mapped_column(ForeignKey("pagamentos.conta_bancaria.id"), nullable=False)
+    periodo_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
+    periodo_fim: Mapped[date | None] = mapped_column(Date, nullable=True)
+    nome_arquivo: Mapped[str] = mapped_column(String(255), nullable=False)
+    hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    formato: Mapped[str] = mapped_column(String(10), nullable=False)
+    status_processamento: Mapped[str] = mapped_column(String(20), nullable=False, default="IMPORTADO")
+    qtd_lancamentos: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    importado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class LancamentoExtrato(Base):
+    """Linha de um extrato (RF-EXT-02)."""
+    __tablename__ = "lancamento_extrato"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_extrato: Mapped[int] = mapped_column(ForeignKey("pagamentos.extrato.id"), nullable=False)
+    data: Mapped[date] = mapped_column(Date, nullable=False)
+    historico: Mapped[str] = mapped_column(String(255), nullable=False)
+    documento: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    favorecido: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    valor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    tipo: Mapped[str] = mapped_column(String(10), nullable=False)  # CREDITO | DEBITO
+    conciliado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class Conciliacao(Base):
+    """Correspondência entre um lançamento do extrato e a movimentação da conta
+    (RF-EXT-04/05). Uma por lançamento e uma por movimentação (RN-14)."""
+    __tablename__ = "conciliacao"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_lancamento: Mapped[int] = mapped_column(
+        ForeignKey("pagamentos.lancamento_extrato.id"), nullable=False)
+    id_movimentacao: Mapped[int | None] = mapped_column(
+        ForeignKey("pagamentos.movimentacao_conta.id"), nullable=True)
+    id_parcela: Mapped[int | None] = mapped_column(ForeignKey("pagamentos.parcela.id"), nullable=True)
+    tipo_correspondencia: Mapped[str] = mapped_column(String(15), nullable=False)
+    id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)

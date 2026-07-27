@@ -11,7 +11,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
-    BloqueioSaldo, ContaBancaria, Debito, FonteRecursos, MovimentacaoConta, Parcela, SaldoHistorico,
+    BloqueioSaldo, Conciliacao, ContaBancaria, Debito, FonteRecursos, MovimentacaoConta, Parcela,
+    SaldoHistorico,
 )
 from ..schemas.pagamentos import (
     ContaSaldoPainel, FichaFonteContaItem, FichaFonteOut, MovimentacaoCreate, SaldoConta,
@@ -91,14 +92,23 @@ async def saldo_conta(db, *, tenant_id, conta_id) -> SaldoConta:
     comprometido = await comprometido_conta(db, tenant_id=tenant_id, conta_id=conta_id)
     bloqueado = await bloqueado_conta(db, tenant_id=tenant_id, conta_id=conta_id)
     saldo_atual = inicial + entradas - saidas
-    # Conciliado := saldo bancário até a conciliação da Fase 3 existir (spec seção 10).
-    # Disponível projetado = conciliado − reservado (autorizados-não-debitados) − bloqueado.
-    # Estornos já são ENTRADAS, portanto já compõem o saldo.
+    # Saldo CONCILIADO real (RF-EXT-09): saldo_inicial + Σ movimentações já conciliadas
+    # no extrato. Sem conciliação lançada, reflete só o saldo inicial.
+    def _soma_conc(tipo: str):
+        return (select(func.coalesce(func.sum(MovimentacaoConta.valor), 0))
+                .join(Conciliacao, Conciliacao.id_movimentacao == MovimentacaoConta.id)
+                .where(MovimentacaoConta.tenant_id == tenant_id,
+                       MovimentacaoConta.id_conta == conta_id, MovimentacaoConta.excluido.is_(False),
+                       MovimentacaoConta.tipo == tipo, Conciliacao.tenant_id == tenant_id))
+    ent_conc = (await db.execute(_soma_conc("ENTRADA"))).scalar_one()
+    sai_conc = (await db.execute(_soma_conc("SAIDA"))).scalar_one()
+    saldo_conciliado = inicial + ent_conc - sai_conc
+    # Disponível projetado = saldo bancário − reservado − bloqueado.
     disponivel = saldo_atual - comprometido - bloqueado
     return SaldoConta(id_conta=conta_id, saldo_inicial=inicial, total_entradas=entradas,
                       total_saidas=saidas, saldo_atual=saldo_atual,
                       comprometido=comprometido, bloqueado=bloqueado, disponivel=disponivel,
-                      saldo_bancario=saldo_atual, saldo_conciliado=saldo_atual,
+                      saldo_bancario=saldo_atual, saldo_conciliado=saldo_conciliado,
                       disponivel_projetado=disponivel)
 
 

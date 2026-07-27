@@ -480,6 +480,49 @@ class ContaElegivelOut(BaseModel):
     atualizado_em: datetime | None = None
 
 
+# ---------- conciliação bancária (Onda B / Fase 3) ----------
+class ImportarExtratoIn(BaseModel):
+    """Importa um extrato em CSV (data;historico;documento;favorecido;valor;tipo).
+    tipo = CREDITO|DEBITO; data em DD/MM/AAAA ou AAAA-MM-DD; valor decimal."""
+    id_conta: int
+    nome_arquivo: str = Field(min_length=1, max_length=255)
+    formato: Literal["CSV", "OFX", "XLSX", "CNAB"] = "CSV"
+    conteudo: str = Field(min_length=1)
+
+
+class ExtratoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; id_conta: int; nome_arquivo: str; formato: str
+    periodo_inicio: date | None; periodo_fim: date | None
+    status_processamento: str; qtd_lancamentos: int; importado_em: datetime
+
+
+class LancamentoExtratoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; id_extrato: int; data: date; historico: str
+    documento: str | None; favorecido: str | None; valor: Decimal
+    tipo: str; conciliado: bool
+
+
+class SugestaoBaixaOut(BaseModel):
+    """Sugestão de baixa de um lançamento contra uma movimentação (RF-EXT-04/05)."""
+    id_lancamento: int; lancamento_data: date; lancamento_historico: str; lancamento_valor: Decimal
+    id_movimentacao: int; id_parcela: int | None; id_debito: int | None
+    nome_fornecedor: str | None; movimentacao_data: date; movimentacao_valor: Decimal
+    tipo_correspondencia: str  # EXATA | PROVAVEL
+
+
+class ConciliarIn(BaseModel):
+    id_lancamento: int
+    id_movimentacao: int
+
+
+class ConciliacaoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; id_lancamento: int; id_movimentacao: int | None
+    id_parcela: int | None; tipo_correspondencia: str; criado_em: datetime
+
+
 class ChecklistItemCreate(BaseModel):
     descricao: str = Field(min_length=1, max_length=200)
     obrigatorio: bool = True
