@@ -56,10 +56,9 @@ jobs:
       TENANTS_STORAGE_ROOT: /tmp/uploads/tenants
       UPLOADS_DIR: /tmp/uploads/anexos
       JOBS_RESULTS_DIR: /tmp/uploads/jobs
-      # Chave Fernet dos dados sensíveis (credenciais Google). Sem ela,
-      # `encrypt()` levanta CryptoConfigError e os testes de Google Docs/OAuth
-      # falham. Valor DEV-ONLY, o mesmo do docker-compose — NÃO usar em produção.
-      DADOS_SENSIVEIS_ENCRYPTION_KEY: 7qeLLAFqcrdD_Zo5A4Ip28YUi7x7M_7BxlFv-knsnP0=
+      # DADOS_SENSIVEIS_ENCRYPTION_KEY é gerada em runtime (passo abaixo), não
+      # fixada aqui: chave literal no repositório é segredo exposto. Os testes
+      # cifram e decifram dentro do mesmo job, então uma chave efêmera basta.
       PYTEST_REDIS_URL: redis://localhost:6379/2
       CELERY_BROKER_URL: redis://localhost:6379/0
       CELERY_RESULT_BACKEND: redis://localhost:6379/1
@@ -85,6 +84,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+
+      - name: Gera chave Fernet efêmera para os testes
+        # Sem a chave, `app.core.crypto.encrypt()` levanta CryptoConfigError e
+        # os testes de Google Docs/OAuth caem. Gerar por run evita commitar
+        # segredo — nada precisa decifrar dados de execuções anteriores.
+        working-directory: backend
+        run: |
+          python -c "from cryptography.fernet import Fernet; print('DADOS_SENSIVEIS_ENCRYPTION_KEY=' + Fernet.generate_key().decode())" >> "$GITHUB_ENV"
 
       - name: Wait for Postgres
         run: |
