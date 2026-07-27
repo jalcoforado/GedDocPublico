@@ -13,8 +13,19 @@ log() {
   echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a deploy.log
 }
 
+# Estado dos serviços + logs recentes. Chamado em toda falha: o deploy roda por
+# SSH a partir do CI, então sem isso a única evidência é a mensagem do compose
+# ("container X is unhealthy"), que não diz o motivo.
+dump_diagnostics() {
+  echo "--- docker compose ps ---" | tee -a deploy.log
+  docker compose ps -a 2>&1 | tee -a deploy.log || true
+  echo "--- docker compose logs (tail 80) ---" | tee -a deploy.log
+  docker compose logs --tail=80 --no-color 2>&1 | tee -a deploy.log || true
+}
+
 error() {
   echo "[ERROR] $*" | tee -a deploy.log
+  dump_diagnostics
   exit 1
 }
 
@@ -39,6 +50,21 @@ pull_code() {
   git reset --hard origin/main
   GIT_COMMIT=$(git rev-parse --short HEAD)
   log "✓ Code updated to commit: $GIT_COMMIT"
+}
+
+# Re-executa o deploy com o script recém-baixado.
+#
+# `pull_code` faz `git reset --hard` sobre ESTE arquivo enquanto o bash já o
+# está executando. As funções foram parseadas na entrada, então todo o resto
+# do deploy roda o código do commit ANTERIOR — foi por isso que a correção do
+# conflito de nomes de container pareceu não funcionar e só surtiu efeito um
+# commit depois, confundindo o diagnóstico. Após o pull, trocamos o processo
+# pelo script novo; `DEPLOY_REEXECUTADO` impede laço infinito e faz o segundo
+# processo pular backup/pull (já feitos).
+reexecutar_com_script_novo() {
+  export DEPLOY_REEXECUTADO=1
+  log "Re-executando o deploy com o script do commit ${GIT_COMMIT:-novo}..."
+  exec bash "$0" "$@"
 }
 
 # Build containers
@@ -98,7 +124,8 @@ remove_conflicting_containers() {
 start_services() {
   log "Starting services..."
   remove_conflicting_containers
-  docker compose up -d --remove-orphans
+  # `set -e` abortaria sem diagnóstico; `error` dispara o dump antes de sair.
+  docker compose up -d --remove-orphans || error "docker compose up falhou"
   log "✓ Services started"
 
   log "Waiting for healthchecks..."
@@ -184,8 +211,11 @@ deploy_full() {
   log "=========================================="
 
   check_requirements
-  backup_database
-  pull_code
+  if [ -z "${DEPLOY_REEXECUTADO:-}" ]; then
+    backup_database
+    pull_code
+    reexecutar_com_script_novo "$@"   # não retorna: troca o processo
+  fi
   build_containers
   start_services
   run_migrations
@@ -204,7 +234,10 @@ deploy_quick() {
   log "=========================================="
 
   check_requirements
-  pull_code
+  if [ -z "${DEPLOY_REEXECUTADO:-}" ]; then
+    pull_code
+    reexecutar_com_script_novo "$@"   # não retorna: troca o processo
+  fi
   restart_services
   health_check
 
@@ -255,10 +288,10 @@ cleanup() {
 # Main logic
 case "${1:-start}" in
   start)
-    deploy_full
+    deploy_full "$@"
     ;;
   quick)
-    deploy_quick
+    deploy_quick "$@"
     ;;
   restart)
     restart_services

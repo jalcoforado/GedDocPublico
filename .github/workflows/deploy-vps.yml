@@ -26,7 +26,13 @@ env:
   VPS_USER: ${{ secrets.VPS_USER }}
   VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
   VPS_PORT: ${{ secrets.VPS_PORT || 22 }}
-  DEPLOY_PATH: /app
+  # Diretório da instalação REAL no VPS. Apontava para /app, que era um clone
+  # paralelo e vazio: como o compose deriva o nome do projeto do diretório, /app
+  # virava o projeto `app` e ganhava um volume `app_postgres_data` novo — sem
+  # schema nem dados — enquanto os dados de verdade seguiam em
+  # `geddocpublico_postgres_data`. Os `container_name:` fixos são globais no
+  # daemon, então as duas instalações colidiam por nome a cada deploy.
+  DEPLOY_PATH: /root/GedDocPublico
 
 jobs:
   deploy:
