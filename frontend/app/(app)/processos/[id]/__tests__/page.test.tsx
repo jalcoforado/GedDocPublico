@@ -83,6 +83,12 @@ vi.mock("@/components/ProcessoVolumes", () => ({
 vi.mock("@/components/AssinaturasProcesso", () => ({
   AssinaturasProcesso: () => <div data-testid="assinaturas" />,
 }));
+// MinutasProcesso chama useConfirm(), que exige <ConfirmProvider> na árvore —
+// sem o mock o render quebra com "useConfirm deve ser usado dentro de
+// <ConfirmProvider>". Mesmo tratamento dado aos demais filhos pesados.
+vi.mock("@/components/MinutasProcesso", () => ({
+  MinutasProcesso: () => <div data-testid="minutas" />,
+}));
 vi.mock("@/components/ClassificarSigiloDialog", () => ({
   ClassificarSigiloDialog: () => (
     <div data-testid="classificar-sigilo-dialog" />
