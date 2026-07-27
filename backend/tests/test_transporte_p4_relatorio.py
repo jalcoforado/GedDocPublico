@@ -68,7 +68,10 @@ async def _criar_alvara(engine, tenant_id: int, perm_id: int, numero: str = None
                 numero_alvara=numero,
                 tipo_servico=tipo_servico,
                 id_permissionario=perm_id,
-                data_inicio=date.today(),
+                # AlvaraCreate valida data_inicio <= data_validade. Para os
+                # cenários de alvará VENCIDO (validade no passado), começar
+                # "hoje" seria inválido — o alvará começou antes de vencer.
+                data_inicio=min(date.today(), data_validade) if data_validade else date.today(),
                 data_validade=data_validade,
             ),
         )
@@ -158,10 +161,11 @@ async def test_listar_relatorio_com_filtro_tipo_servico(admin_engine):
             db, tenant_id=tenant.id, tipo_servico="taxi", limit=50
         )
 
-        assert total == 2  # Total contado antes do filtro
-        # Após filtro de status, pode haver alteração
+        # `total` acompanha o filtro (semântica de paginação): dos 2 alvarás
+        # criados, só 1 é "taxi".
+        assert total == 1
         taxistas = [a for a in alvaras if a["tipo_servico"] == "taxi"]
-        assert len(taxistas) >= 1
+        assert len(taxistas) == 1
 
 
 @pytest.mark.asyncio
