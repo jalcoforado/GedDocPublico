@@ -116,6 +116,25 @@ jobs:
           psql -h localhost -U ged_user -d ged_saas_db \
             -v ON_ERROR_STOP=1 -f ci/legacy-schema.sql
 
+      - name: Cria a role aprimora_app (ANTES das migrations)
+        env:
+          PGPASSWORD: ged_password_secure_local
+        # A migration 0006 (pulada via stamp) cria a role `aprimora_app`.
+        # Precisa existir ANTES do `upgrade head`: migrations posteriores a 0020
+        # fazem `GRANT ... TO aprimora_app` ao criar suas tabelas e falham com
+        # `role "aprimora_app" does not exist` se a role vier depois.
+        run: |
+          psql -h localhost -U ged_user -d ged_saas_db <<'SQL'
+            DO $$ BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aprimora_app') THEN
+                CREATE ROLE aprimora_app LOGIN NOSUPERUSER NOBYPASSRLS
+                  PASSWORD 'ged_password_secure_local';
+              END IF;
+            END $$;
+            GRANT CONNECT ON DATABASE ged_saas_db TO aprimora_app;
+            GRANT USAGE ON SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
+          SQL
+
       - name: Stamp baseline do dump + roda migrations pendentes
         working-directory: backend
         # O dump (ci/legacy-schema.sql) reflete o schema na revision 0020 e tem
@@ -127,23 +146,17 @@ jobs:
           alembic stamp 0020
           alembic upgrade head
 
-      - name: Bootstrap RLS role (aprimora_app)
+      - name: GRANTs finais para aprimora_app (DEPOIS das migrations)
         env:
           PGPASSWORD: ged_password_secure_local
-        # A migration 0006 (que estamos pulando via stamp) cria a role
-        # `aprimora_app` que test_rls_isolation usa. Replicamos aqui.
+        # Roda após o `upgrade head` para cobrir também as tabelas criadas pelas
+        # migrations (schemas `pagamentos`/`frota` nascem depois do baseline 0020).
+        # As migrations já fazem GRANT explícito; isto é a rede de segurança.
         run: |
           psql -h localhost -U ged_user -d ged_saas_db <<'SQL'
-            DO $$ BEGIN
-              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aprimora_app') THEN
-                CREATE ROLE aprimora_app LOGIN NOSUPERUSER NOBYPASSRLS
-                  PASSWORD 'ged_password_secure_local';
-              END IF;
-            END $$;
-            GRANT CONNECT ON DATABASE ged_saas_db TO aprimora_app;
-            GRANT USAGE ON SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
-            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
-            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
+            GRANT USAGE ON SCHEMA protocolos, utils, aprimora_py, public, pagamentos, frota TO aprimora_app;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA protocolos, utils, aprimora_py, public, pagamentos, frota TO aprimora_app;
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA protocolos, utils, aprimora_py, public, pagamentos, frota TO aprimora_app;
           SQL
 
       - name: Run pytest
