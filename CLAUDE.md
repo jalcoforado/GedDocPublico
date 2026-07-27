@@ -30,15 +30,17 @@ Containers: `aprimora-py-backend` (:8000), `-frontend` (:3100), `-worker`, `-bea
 ### Testes
 
 ```bash
-# Backend — suíte completa (~3-6 min)
-docker exec aprimora-py-backend pytest -q
+# Backend — suíte completa (~8 min). PYTEST_DB_HOST é obrigatório: o default do
+# conftest é `ged-saas-project-db-1`, container do stack legado que não existe
+# mais aqui. Sem ele todo teste morre com socket.gaierror.
+docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest -q
 
 # Um arquivo / um teste
-docker exec aprimora-py-backend pytest tests/test_frota_designacao.py -v
-docker exec aprimora-py-backend pytest tests/test_rls_isolation.py::test_select_isolado -v
+docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest tests/test_frota_designacao.py -v
+docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest tests/test_rls_isolation.py::test_select_isolado -v
 
 # Cobertura
-docker exec aprimora-py-backend pytest --cov=app --cov-report=term-missing
+docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest --cov=app --cov-report=term-missing
 
 # Frontend — vitest (no host; a imagem `runner` é standalone e não tem devDeps)
 cd frontend && npm test
@@ -54,6 +56,12 @@ docker compose --profile test run --rm e2e
 **Não rode `npm run lint`** — o projeto não tem ESLint configurado e `next lint` é interativo/trava.
 
 O backend roda com bind-mount do working tree (`./backend:/app`), então `docker exec ... pytest` valida o código da branch atual sem rebuild.
+
+**Testes HTTP usam duas conexões.** As fixtures (`admin_engine`) vão por `PYTEST_DB_HOST`, mas o app FastAPI vai por `DATABASE_URL`. Ao apontar os testes para outro banco, redirecione **as duas** — senão os requests consultam o banco de dev enquanto os dados foram criados no outro, e o sintoma é 403/404 inexplicável.
+
+**Verde local não garante verde no CI.** O container tem coisas que o runner não tem: `/app` gravável, o serviço `redis` na rede e o `backend/.env` (gitignored) com credenciais reais do Google. O CI supre isso via env do job — ao adicionar teste que dependa de credencial, storage ou Redis, confira `.github/workflows/backend-tests.yml`.
+
+**São três workflows** (`backend-tests`, `frontend-tests`, `e2e-assinatura`) e os dois que tocam o banco repetem a mesma sequência de bootstrap (stubs → dump → role `aprimora_app` → `alembic stamp 0020` → `upgrade head` → seeds). Corrigiu bootstrap num, verifique o outro.
 
 ### Migrations
 
