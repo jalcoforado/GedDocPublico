@@ -48,27 +48,47 @@ build_containers() {
   log "✓ Build complete"
 }
 
-# Remove containers presos com os nomes fixos do compose.
+# Nomes fixos declarados via `container_name:` no docker-compose.yml.
+COMPOSE_FIXED_NAMES="aprimora-py-backend aprimora-py-frontend aprimora-py-worker \
+aprimora-py-beat aprimora-py-redis aprimora-py-nginx aprimora-py-db"
+
+# Libera os nomes fixos do compose antes do `up`.
 #
 # O docker-compose.yml usa `container_name:` explícito, que é global no daemon.
-# Um container remanescente com esse nome — de um projeto compose anterior, de
-# um `up` interrompido ou criado à mão — faz o `up` abortar com
-# "Conflict. The container name ... is already in use", como aconteceu no
-# deploy do commit 2decf1a. `--remove-orphans` não cobre esse caso: ele só
-# alcança órfãos do MESMO projeto, e o conflito é por nome global.
+# Qualquer container remanescente com esse nome — de um projeto compose com
+# outro nome, de um `up` interrompido, ou criado à mão sem as labels do
+# compose — faz o `up` abortar com "Conflict. The container name ... is
+# already in use" (deploys 2decf1a e 7cee422). `--remove-orphans` não cobre:
+# ele só alcança órfãos do MESMO projeto, e o conflito é por nome global.
+#
+# A remoção é INCONDICIONAL de propósito. A primeira tentativa condicionava ao
+# label `com.docker.compose.project` divergir do projeto atual, e não removeu
+# nada — o container preso ou tem o mesmo label, ou não tem label nenhum.
+# Como `deploy_full` recria todos os containers de qualquer forma, remover é
+# inócuo: os dados vivem no volume nomeado `postgres_data`, que `down` sem
+# `-v` e `docker rm` não tocam.
 remove_conflicting_containers() {
-  local names="aprimora-py-backend aprimora-py-frontend aprimora-py-worker \
-aprimora-py-beat aprimora-py-redis aprimora-py-nginx aprimora-py-db"
-  local projeto
-  projeto=$(basename "$(pwd)")
+  log "Liberando nomes fixos do compose antes do up..."
 
-  for nome in $names; do
-    # Só age se o container existe E não pertence ao projeto compose atual —
-    # containers legítimos são recriados pelo próprio `up`.
-    local dono
-    dono=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$nome" 2>/dev/null || true)
-    if [ -n "$dono" ] && [ "$dono" != "$projeto" ]; then
-      log "⚠ Container '$nome' pertence ao projeto '$dono' (atual: '$projeto') — removendo para liberar o nome"
+  # Diagnóstico: registra o que está ocupando cada nome (dono e estado) antes
+  # de remover, para que a próxima investigação tenha evidência no deploy.log.
+  for nome in $COMPOSE_FIXED_NAMES; do
+    local info
+    info=$(docker inspect -f 'projeto={{ index .Config.Labels "com.docker.compose.project" }} servico={{ index .Config.Labels "com.docker.compose.service" }} estado={{ .State.Status }} criado={{ .Created }}' "$nome" 2>/dev/null || true)
+    # `if` em vez de `[ ... ] && log`: sob `set -e`, uma lista AND-OR que
+    # termina em falso derruba o script.
+    if [ -n "$info" ]; then
+      log "  ocupado: $nome → $info"
+    fi
+  done
+
+  # Derruba o projeto atual pelo caminho normal (respeita ordem/rede).
+  docker compose down --remove-orphans >/dev/null 2>&1 || true
+
+  # O que sobrou segurando os nomes é resíduo: remove à força.
+  for nome in $COMPOSE_FIXED_NAMES; do
+    if docker inspect "$nome" >/dev/null 2>&1; then
+      log "⚠ Nome '$nome' ainda ocupado após o down — removendo à força"
       docker rm -f "$nome" >/dev/null 2>&1 || true
     fi
   done
