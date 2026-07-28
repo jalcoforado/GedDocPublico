@@ -481,6 +481,67 @@ async def _get_or_create_unidade(
     return u.id, True
 
 
+async def _resolver_admin_id(db: AsyncSession, tenant_id: int) -> int:
+    """Usuário que "abre" os processos demo.
+
+    Em tenant `demo` o `provisionar_tenant` cria `admin@demo.test`. Num tenant
+    que veio do `seed_bootstrap` (o `sobral` da VPS) esse e-mail não existe e o
+    `scalar_one()` anterior derrubava o seed — cai então no usuário mais antigo
+    do tenant, que é o admin dele.
+    """
+    admin = (
+        await db.execute(
+            select(Usuario.id).where(
+                Usuario.tenant_id == tenant_id,
+                Usuario.email == f"admin@{DEMO_EMAIL_DOMAIN}",
+            )
+        )
+    ).scalar_one_or_none()
+    if admin is not None:
+        return admin
+    return (
+        await db.execute(
+            select(Usuario.id)
+            .where(
+                Usuario.tenant_id == tenant_id,
+                Usuario.ativo.is_(True),
+                Usuario.excluido.is_(False),
+            )
+            .order_by(Usuario.id)
+            .limit(1)
+        )
+    ).scalar_one()
+
+
+async def _get_or_create_tipo_manifestante(
+    db: AsyncSession, *, tenant_id: int, nome: str
+) -> tuple[int, bool]:
+    """"Pessoa Física" costuma vir do `provisionar_tenant`, mas não em tenant
+    criado pelo `seed_bootstrap` (caso do `sobral` na VPS). `id_categoria` é
+    NOT NULL sem FK — 1 é a categoria "Cidadão" do catálogo legado."""
+    row = (
+        await db.execute(
+            select(TipoManifestante.id).where(
+                TipoManifestante.tenant_id == tenant_id,
+                TipoManifestante.tipo_manifestante == nome,
+                TipoManifestante.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if row:
+        return row, False
+    t = TipoManifestante(
+        tenant_id=tenant_id,
+        tipo_manifestante=nome,
+        id_categoria=1,
+        ativo=True,
+        excluido=False,
+    )
+    db.add(t)
+    await db.flush()
+    return t.id, True
+
+
 async def _get_or_create_tipo_processo(
     db: AsyncSession, *, tenant_id: int, nome: str
 ) -> tuple[int, bool]:
@@ -989,16 +1050,19 @@ async def _apply(args: argparse.Namespace) -> int:
         if criou_tu:
             contagens["tipos_catalogo_criados"] += 1
         unidades_by_sigla: dict[str, int] = {}
-        # Protocolo Geral já vem do provisioning; pega o id.
-        pg_id = (
-            await db.execute(
-                select(UnidadeTrabalho.id).where(
-                    UnidadeTrabalho.tenant_id == tenant_id,
-                    UnidadeTrabalho.unidade_trabalho == "Protocolo Geral",
-                    UnidadeTrabalho.excluido.is_(False),
-                )
-            )
-        ).scalar_one()
+        # "Protocolo Geral" vem do `provisionar_tenant`, mas nem todo tenant
+        # nasce dele: o `sobral` da VPS veio do `seed_bootstrap`, que não cria
+        # unidades. O `scalar_one()` anterior derrubava o seed inteiro com
+        # NoResultFound. Cria se faltar — mesmo get_or_create das demais.
+        pg_id, criou_pg = await _get_or_create_unidade(
+            db,
+            tenant_id=tenant_id,
+            nome="Protocolo Geral",
+            sigla="PG",
+            id_tipo_unidade=tipo_unidade_id,
+        )
+        if criou_pg:
+            contagens["unidades_criadas"] += 1
         unidades_by_sigla["PG"] = pg_id
 
         for nome, sigla in UNIDADES:
@@ -1032,15 +1096,11 @@ async def _apply(args: argparse.Namespace) -> int:
         if criou_ta:
             contagens["tipos_catalogo_criados"] += 1
 
-        tipo_manif_pf = (
-            await db.execute(
-                select(TipoManifestante.id).where(
-                    TipoManifestante.tenant_id == tenant_id,
-                    TipoManifestante.tipo_manifestante == "Pessoa Física",
-                    TipoManifestante.excluido.is_(False),
-                )
-            )
-        ).scalar_one()
+        tipo_manif_pf, criou_tmpf = await _get_or_create_tipo_manifestante(
+            db, tenant_id=tenant_id, nome="Pessoa Física"
+        )
+        if criou_tmpf:
+            contagens["tipos_catalogo_criados"] += 1
 
         # Fase 3: servidores (admin já existe). CPF derivado do email_local de
         # forma determinística — deve ser estável entre runs para preservar
@@ -1061,14 +1121,7 @@ async def _apply(args: argparse.Namespace) -> int:
             if criou:
                 contagens["servidores_criados"] += 1
 
-        admin_id = (
-            await db.execute(
-                select(Usuario.id).where(
-                    Usuario.tenant_id == tenant_id,
-                    Usuario.email == f"admin@{DEMO_EMAIL_DOMAIN}",
-                )
-            )
-        ).scalar_one()
+        admin_id = await _resolver_admin_id(db, tenant_id)
 
         # Fase 4: serviços (idempotente: cria novo OU atualiza descritivos)
         servicos_by_slug: dict[str, int] = {}
@@ -1149,14 +1202,7 @@ async def _apply(args: argparse.Namespace) -> int:
                 )
             )
         ).scalar_one()
-        admin_id = (
-            await db.execute(
-                select(Usuario.id).where(
-                    Usuario.tenant_id == tenant_id,
-                    Usuario.email == f"admin@{DEMO_EMAIL_DOMAIN}",
-                )
-            )
-        ).scalar_one()
+        admin_id = await _resolver_admin_id(db, tenant_id)
         assunto_id = (
             await db.execute(
                 select(Assunto.id).where(
@@ -1480,8 +1526,14 @@ def _print_resumo(
         print()
         print("Credenciais demo (gravar no roteiro):")
         print(f"  URL:    http://{tenant_slug}.aprimora.local:8090/login")
-        print(f"  Email:  admin@{DEMO_EMAIL_DOMAIN}")
-        print(f"  Senha:  {DEMO_PASSWORD}")
+        if tenant_slug.startswith(DEMO_SLUG_PREFIX):
+            print(f"  Email:  admin@{DEMO_EMAIL_DOMAIN}")
+        else:
+            # Fora do tenant `demo` o admin é o que já existia; anunciar
+            # admin@demo.test aqui mandaria o usuário para um login inexistente.
+            print(f"  Email:  o admin já existente do tenant '{tenant_slug}'")
+            print(f"          (servidores demo: *@{DEMO_EMAIL_DOMAIN})")
+        print(f"  Senha:  {DEMO_PASSWORD} (apenas os usuários demo)")
         print()
 
 

@@ -360,3 +360,84 @@ async def test_apply_recusa_tenant_nao_demo(admin_engine):
     with pytest.raises(SystemExit) as excinfo:
         await _apply(_ns("sobral"))
     assert excinfo.value.code == 2
+
+
+# ----------------------------------------------------------------------
+# 9. tenant que NÃO nasceu do provisionamento (regressão)
+# ----------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def tenant_sem_provisionamento(admin_engine):
+    """Tenant cru, no molde do `seed_bootstrap`: só tenant + admin.
+
+    Sem "Protocolo Geral", sem tipo_manifestante "Pessoa Física" e sem
+    admin@demo.test — os três artefatos que o `provisionar_tenant` cria e que o
+    seed_demo assumia existir. É o estado do `sobral` na VPS.
+    """
+    from datetime import datetime, timezone
+
+    slug = f"bare-pytest-{uuid.uuid4().hex[:8]}"
+    async with _sm(admin_engine)() as s:
+        tid = (
+            await s.execute(
+                text(
+                    "INSERT INTO aprimora_py.tenant (slug, nome, plano, ativo, criado_em) "
+                    "VALUES (:s, :n, 'basico', true, :c) RETURNING id"
+                ),
+                {"s": slug, "n": "Tenant Cru", "c": datetime.now(timezone.utc).replace(tzinfo=None)},
+            )
+        ).scalar_one()
+        await s.execute(text(f"SET LOCAL app.tenant_id = {int(tid)}"))
+        await s.execute(
+            text(
+                "INSERT INTO utils.usuario "
+                "(tenant_id, nome, email, senha, senha_bcrypt, cpf, ativo, excluido, "
+                " app, nivel_acesso_sigilo, must_change_password) "
+                "VALUES (:t, 'Admin Cru', :e, '', '', :c, true, false, "
+                "        'sistemas', 'interno', false)"
+            ),
+            {"t": tid, "e": f"admin@{slug}.test", "c": str(uuid.uuid4().int)[:11]},
+        )
+        await s.commit()
+    try:
+        yield slug
+    finally:
+        await _cleanup_demo_tenant(admin_engine, slug)
+        from app.database import engine as app_engine
+
+        await app_engine.dispose()
+
+
+async def test_apply_em_tenant_sem_provisionamento(
+    admin_engine, tenant_sem_provisionamento
+):
+    """Antes da correção isto morria com NoResultFound e nada era semeado."""
+    slug = tenant_sem_provisionamento
+    rc = await _apply(_ns(slug, allow_non_demo=True))
+    assert rc == 0
+
+    async with _sm(admin_engine)() as s:
+        tid = (
+            await s.execute(
+                text("SELECT id FROM aprimora_py.tenant WHERE slug=:s"), {"s": slug}
+            )
+        ).scalar_one()
+        n_proc = (
+            await s.execute(
+                select(Processo).where(Processo.tenant_id == tid)
+            )
+        ).scalars().all()
+        pg = (
+            await s.execute(
+                text(
+                    "SELECT 1 FROM utils.unidade_trabalho "
+                    "WHERE tenant_id=:t AND unidade_trabalho='Protocolo Geral' "
+                    "  AND excluido=false"
+                ),
+                {"t": tid},
+            )
+        ).scalar_one_or_none()
+
+    assert len(n_proc) == len(PROCESSOS)
+    assert pg == 1, "seed deveria ter criado a unidade Protocolo Geral"
