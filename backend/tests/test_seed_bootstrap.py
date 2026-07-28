@@ -35,6 +35,54 @@ async def test_seed_bootstrap_cria_super_usuario():
 
 
 @pytest.mark.asyncio
+async def test_seed_bootstrap_cria_acoes_de_protocolo():
+    """Sem estas ações o módulo de protocolo é inutilizável.
+
+    `protocolos.acao` é catálogo GLOBAL. Faltando ABERTURA, abrir processo
+    morre com "Ação 'ABERTURA' não cadastrada"; faltando ENCAMINHAMENTO/
+    RECEBIMENTO, não se tramita. Foi o estado da VPS até 2026-07-27, porque
+    quem semeava era `ci/seed-e2e.sql` — que só roda no CI.
+    """
+    async with SessionLocal() as db:
+        await seed(db)
+        await db.commit()
+    async with SessionLocal() as db:
+        flags = set(
+            (
+                await db.execute(
+                    text(
+                        "SELECT flag FROM protocolos.acao "
+                        "WHERE ativo = true AND excluido = false"
+                    )
+                )
+            ).scalars()
+        )
+    assert {"ABERTURA", "ENCAMINHAMENTO", "RECEBIMENTO"} <= flags
+
+
+@pytest.mark.asyncio
+async def test_seed_bootstrap_nao_duplica_acoes():
+    """Compara antes/depois em vez de fixar a contagem em 1.
+
+    A suíte compartilha o banco e outros testes inserem em `protocolos.acao`
+    (ver test_pr5b_prazos), então contagem global absoluta daria falso negativo.
+    """
+    conta = text(
+        "SELECT count(*) FROM protocolos.acao "
+        "WHERE flag = 'ABERTURA' AND excluido = false"
+    )
+    async with SessionLocal() as db:
+        await seed(db); await db.commit()
+    async with SessionLocal() as db:
+        antes = (await db.execute(conta)).scalar_one()
+    async with SessionLocal() as db:
+        await seed(db); await db.commit()  # 2a vez não duplica
+    async with SessionLocal() as db:
+        depois = (await db.execute(conta)).scalar_one()
+    assert depois == antes
+
+
+@pytest.mark.asyncio
 async def test_seed_bootstrap_idempotente():
     async with SessionLocal() as db:
         await seed(db); await db.commit()

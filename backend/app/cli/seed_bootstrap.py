@@ -6,6 +6,8 @@ Idempotente. Cria (get_or_create):
   3. Admin super-usuário admin@local.test (senha dev admin123)
   4. utils.grupo (nível 0, sistema do app_name) + utils.usuario_grupo (tenant 1)
   5. Segredo KEY_LOGIN_GLOBAL_JWT em utils.sistema_constante
+  6. Catálogo global protocolos.acao (ABERTURA/ENCAMINHAMENTO/RECEBIMENTO) —
+     sem ele não se abre nem tramita processo
 
 Uso: docker exec aprimora-py-backend python -m app.cli.seed_bootstrap
 """
@@ -156,6 +158,46 @@ async def seed(db: AsyncSession) -> dict:
             ),
             {"v": secrets.token_urlsafe(48)},
         )
+
+    # 6. Catálogo global protocolos.acao.
+    #
+    # Sem estas linhas o módulo de protocolo fica INUTILIZÁVEL: abrir processo
+    # falha com "Ação 'ABERTURA' não cadastrada em protocolos.acao — execute o
+    # seed", e encaminhar/receber falham igual. Era o caso da VPS até
+    # 2026-07-27 — quem semeava era `ci/seed-e2e.sql`, que só roda no CI, e o
+    # deploy não tinha equivalente.
+    #
+    # A tabela é catálogo GLOBAL (não tem tenant_id), então o escopo é este
+    # seed e não o provisionamento de tenant. `status_acao`/`status_movimentacao`
+    # são descritivos — só aparecem na listagem de movimentações; o código usa
+    # apenas `acao.id`.
+    for flag, nome, status_acao, status_mov, texto in [
+        ("ABERTURA", "Abertura", "aberto", "inicial", "Processo aberto"),
+        ("ENCAMINHAMENTO", "Encaminhamento", "aberto", "encaminhado",
+         "Processo encaminhado"),
+        ("RECEBIMENTO", "Recebimento", "aberto", "recebido",
+         "Processo recebido"),
+    ]:
+        existe = (
+            await db.execute(
+                text(
+                    "SELECT 1 FROM protocolos.acao "
+                    "WHERE flag = :f AND excluido = false LIMIT 1"
+                ),
+                {"f": flag},
+            )
+        ).first()
+        if existe is None:
+            await db.execute(
+                text(
+                    "INSERT INTO protocolos.acao "
+                    "(flag, acao, status_acao, status_movimentacao, texto_acao, "
+                    " ativo, excluido) "
+                    "VALUES (:f, :n, :sa, :sm, :t, true, false)"
+                ),
+                {"f": flag, "n": nome, "sa": status_acao, "sm": status_mov,
+                 "t": texto},
+            )
 
     return {"tenant_id": tenant_id, "usuario_id": usuario.id, "is_super": True}
 
