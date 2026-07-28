@@ -1069,6 +1069,64 @@ export interface MovimentacaoInput {
   descricao?: string | null;
 }
 
+// Conciliação bancária (Onda B / Fase 3)
+export interface ExtratoBancario {
+  id: number;
+  id_conta: number;
+  nome_arquivo: string;
+  formato: string;
+  periodo_inicio: string | null;
+  periodo_fim: string | null;
+  status_processamento: string;
+  qtd_lancamentos: number;
+  importado_em: string;
+}
+
+export interface LancamentoExtrato {
+  id: number;
+  id_extrato: number;
+  data: string;
+  historico: string;
+  documento: string | null;
+  favorecido: string | null;
+  valor: string;
+  tipo: "CREDITO" | "DEBITO";
+  conciliado: boolean;
+}
+
+/** EXATA = mesmo valor e mesma data; PROVAVEL = mesmo valor, até 3 dias de diferença. */
+export type TipoCorrespondencia = "EXATA" | "PROVAVEL";
+
+export interface SugestaoBaixa {
+  id_lancamento: number;
+  lancamento_data: string;
+  lancamento_historico: string;
+  lancamento_valor: string;
+  id_movimentacao: number;
+  id_parcela: number | null;
+  id_debito: number | null;
+  nome_fornecedor: string | null;
+  movimentacao_data: string;
+  movimentacao_valor: string;
+  tipo_correspondencia: TipoCorrespondencia;
+}
+
+export interface ConciliacaoBancaria {
+  id: number;
+  id_lancamento: number;
+  id_movimentacao: number | null;
+  id_parcela: number | null;
+  tipo_correspondencia: string;
+  criado_em: string;
+}
+
+export interface ImportarExtratoInput {
+  id_conta: number;
+  nome_arquivo: string;
+  formato?: "CSV" | "OFX" | "XLSX" | "CNAB";
+  conteudo: string;
+}
+
 export interface SaldoConta {
   id_conta: number;
   saldo_inicial: string;
@@ -2880,6 +2938,32 @@ export const api = {
         request<Movimentacao[]>(`/pagamentos/contas/${contaId}/extrato`),
       lancar: (data: MovimentacaoInput) =>
         request<Movimentacao>("/pagamentos/movimentacoes", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+    },
+    // Conciliação bancária (Onda B). Escrita exige `pagamento_pagar`; leitura
+    // aceita também autorizar/auditar/cadastro.
+    conciliacao: {
+      extratos: (idConta?: number) =>
+        request<ExtratoBancario[]>(`/pagamentos/extratos${qs({ id_conta: idConta })}`),
+      importar: (data: ImportarExtratoInput) =>
+        request<ExtratoBancario>("/pagamentos/extratos", {
+          method: "POST",
+          body: JSON.stringify({ formato: "CSV", ...data }),
+        }),
+      lancamentos: (extratoId: number) =>
+        request<LancamentoExtrato[]>(`/pagamentos/extratos/${extratoId}/lancamentos`),
+      sugestoes: (extratoId: number) =>
+        request<SugestaoBaixa[]>(`/pagamentos/extratos/${extratoId}/sugestoes`),
+      /** Concilia de uma vez todas as correspondências EXATAS do extrato. */
+      baixaAutomatica: (extratoId: number) =>
+        request<{ baixas: number }>(
+          `/pagamentos/extratos/${extratoId}/baixa-automatica`,
+          { method: "POST" },
+        ),
+      conciliar: (data: { id_lancamento: number; id_movimentacao: number }) =>
+        request<ConciliacaoBancaria>("/pagamentos/conciliacoes", {
           method: "POST",
           body: JSON.stringify(data),
         }),
