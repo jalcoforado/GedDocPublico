@@ -9,9 +9,12 @@ x-backend-env: &backend-env
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/1
   JOBS_RESULTS_DIR: /app/uploads/jobs
-  # DEV-ONLY: chave Fernet de dados sensíveis. Em produção NÃO usar este valor —
-  # sobrescrever via secret real (env/secret store), como o dev DB password.
-  DADOS_SENSIVEIS_ENCRYPTION_KEY: 7qeLLAFqcrdD_Zo5A4Ip28YUi7x7M_7BxlFv-knsnP0=
+  # Chave Fernet dos dados sensíveis (tokens OAuth do Google, dados bancários
+  # de fornecedor). Vem do `.env` da raiz, que é gitignored — versioná-la
+  # tornava pública a chave que cifra o que há de mais sensível no banco.
+  # Sem `.env`, o compose aborta com a mensagem abaixo em vez de subir com um
+  # segredo padrão. Como gerar: ver `.env.example`.
+  DADOS_SENSIVEIS_ENCRYPTION_KEY: ${DADOS_SENSIVEIS_ENCRYPTION_KEY:?defina no .env da raiz — veja .env.example}
 
 x-backend-volumes: &backend-volumes
   - ./backend:/app
