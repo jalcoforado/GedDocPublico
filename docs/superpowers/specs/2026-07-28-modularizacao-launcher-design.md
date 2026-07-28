@@ -88,7 +88,22 @@ código, com teste de isolamento cobrindo a API.
 pertence ao produto, não à prefeitura. Consequência esperada e testada: `tenant_filter()` deve
 levantar `ValueError` se alguém passar tenant neles.
 
-### 4.2 Backfill
+### 4.2 A sexta linha do catálogo: `comum`
+
+*(Refinamento identificado ao escrever o plano de F1, 2026-07-28.)*
+
+O catálogo tem **seis** linhas, não cinco: as cinco de produto mais `comum`, com
+`contratavel = false`. `modulo` ganha a coluna `contratavel BOOLEAN NOT NULL DEFAULT true`.
+
+**Por quê.** As telas transversais da seção 12 também têm transação de permissão — `dashboard` é o
+caso óbvio. Com o teste de guarda de D8 exigindo módulo para toda transação, elas reprovariam o CI
+sem ter para onde ir. `comum` lhes dá dono sem virar produto: nunca aparece no launcher, nunca é
+contratável, nunca é bloqueada — `slugs_contratados()` a inclui sempre, implicitamente.
+
+Isso não contraria D3. Cinco módulos são o que a prefeitura compra e o que o launcher mostra;
+`comum` é infraestrutura, e a própria seção 12 já nomeava esse conjunto.
+
+### 4.3 Backfill
 
 A própria migration 0073 contrata os cinco módulos para **todos os tenants existentes**. Ninguém
 perde acesso no deploy — a fatia F1 é invisível por construção.
