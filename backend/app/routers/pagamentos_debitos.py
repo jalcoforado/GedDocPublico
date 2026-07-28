@@ -26,6 +26,7 @@ from ..services import pagamentos_caixa as caixa
 from ..services import pagamentos_checklist as checklist
 from ..services import pagamentos_dashboard as dash
 from ..services import pagamentos_debitos as svc
+from ..services import pagamentos_export as export
 from ..services import pagamentos_filas as filas
 from ..services.html_pdf import html_to_pdf_bytes
 from ..services.permissoes import load_permissions
@@ -70,6 +71,36 @@ async def list_debitos(status_f: str | None = None, meus: bool = False,
         solicitante_id=usuario.id if meus else None, id_fonte=id_fonte, id_natureza=id_natureza,
         id_fornecedor=id_fornecedor, id_contrato=id_contrato, urgente=urgente, competencia=competencia)
     return await _out(db, tenant_id, rows)
+
+
+# Onda C (C1.1). Precisa vir ANTES de `/{debito_id}`: registrada depois, a rota
+# dinâmica capturaria "exportar.csv" e devolveria 422 ao tentar convertê-la em int.
+@debitos_router.get("/exportar.csv")
+async def exportar_debitos_csv(status_f: str | None = None, meus: bool = False,
+                               id_fonte: int | None = None, id_natureza: int | None = None,
+                               id_fornecedor: int | None = None, id_contrato: int | None = None,
+                               urgente: bool | None = None, competencia: str | None = None,
+                               usuario: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                               tenant_id: int = Depends(require_tenant_id),
+                               db: AsyncSession = Depends(get_db)):
+    """Exporta a lista de débitos no MESMO recorte da tela.
+
+    Os filtros são idênticos aos de `GET /pagamentos/debitos` de propósito: o
+    que o usuário vê é o que ele baixa. CSV `;` + BOM abre direto no Excel
+    pt-BR (ver `services/pagamentos_export`).
+    """
+    filtros = dict(
+        status_f=status_f, solicitante_id=usuario.id if meus else None,
+        id_fonte=id_fonte, id_natureza=id_natureza, id_fornecedor=id_fornecedor,
+        id_contrato=id_contrato, urgente=urgente, competencia=competencia,
+    )
+    conteudo = await export.csv_debitos(db, tenant_id=tenant_id, **filtros)
+    nome = export.nome_arquivo_debitos(status_f=status_f, competencia=competencia)
+    return Response(
+        content=conteudo,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
 
 
 @debitos_router.get("/{debito_id}", response_model=DebitoDetalheOut)
