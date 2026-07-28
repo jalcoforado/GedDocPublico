@@ -19,6 +19,7 @@ import {
   Home,
   IdCard,
   Inbox,
+  Landmark,
   Layers,
   ListChecks,
   Map,
@@ -176,6 +177,10 @@ const NAV: NavGroup[] = [
       { label: "Tesouraria", href: "/pagamentos/tesouraria", icon: Banknote,
         perm: "pagamento_pagar" },
       { label: "Caixa", href: "/pagamentos/caixa", icon: Wallet, perm: "pagamento_cadastro" },
+      // Leitura espelha o `_LEITURA` do router de conciliação; a escrita
+      // (importar/baixar/conciliar) exige `pagamento_pagar`.
+      { label: "Conciliação", href: "/pagamentos/conciliacao", icon: Landmark,
+        anyOf: ["pagamento_pagar", "pagamento_autorizar", "pagamento_auditar", "pagamento_cadastro"] },
       {
         label: "Cadastros",
         href: "/pagamentos/cadastros/fornecedores",
