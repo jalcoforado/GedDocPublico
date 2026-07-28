@@ -242,13 +242,26 @@ async def test_unicidade_parcial_ignora_excluido(admin_session):
     mid = (await admin_session.execute(
         text("SELECT id FROM aprimora_py.modulo WHERE slug = 'frota'")
     )).scalar_one()
-    # Marca o vínculo vivo como excluído e insere outro: deve passar.
+    # Marca o vínculo vivo como excluído e insere outro: o índice parcial
+    # (WHERE excluido = false) tem que permitir a convivência.
     await admin_session.execute(text(
         "UPDATE aprimora_py.tenant_modulo SET excluido = true "
         "WHERE tenant_id = :t AND id_modulo = :m"), {"t": tid, "m": mid})
     await admin_session.execute(text(
         "INSERT INTO aprimora_py.tenant_modulo (tenant_id, id_modulo) "
         "VALUES (:t, :m)"), {"t": tid, "m": mid})
+    await admin_session.flush()
+
+    vivos = (await admin_session.execute(text(
+        "SELECT COUNT(*) FROM aprimora_py.tenant_modulo "
+        "WHERE tenant_id = :t AND id_modulo = :m AND excluido = false"
+    ), {"t": tid, "m": mid})).scalar_one()
+    total = (await admin_session.execute(text(
+        "SELECT COUNT(*) FROM aprimora_py.tenant_modulo "
+        "WHERE tenant_id = :t AND id_modulo = :m"
+    ), {"t": tid, "m": mid})).scalar_one()
+    assert vivos == 1, "deveria haver exatamente um vínculo vivo"
+    assert total == 2, "o vínculo soft-deletado deveria continuar na tabela"
     await admin_session.rollback()
 ```
 
