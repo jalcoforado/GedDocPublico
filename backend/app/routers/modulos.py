@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.deps import get_current_user
 from ..config import get_settings
 from ..database import get_db
-from ..models import ConfiguracoesModulos, Modulo, Usuario
+from ..models import ConfiguracoesModulosLegado, ModuloLegado, Usuario
 from ..schemas.permissao import ModuloItem, ModulosMeResponse
 
 router = APIRouter(prefix="/modulos", tags=["modulos"])
@@ -18,13 +18,13 @@ async def me(
 ) -> ModulosMeResponse:
     settings = get_settings()
     stmt = (
-        select(Modulo, ConfiguracoesModulos)
-        .join(ConfiguracoesModulos, ConfiguracoesModulos.id_modulo == Modulo.id)
+        select(ModuloLegado, ConfiguracoesModulosLegado)
+        .join(ConfiguracoesModulosLegado, ConfiguracoesModulosLegado.id_modulo == ModuloLegado.id)
         .where(
-            ConfiguracoesModulos.ativo.is_(True),
-            ConfiguracoesModulos.ambiente == settings.environment,
+            ConfiguracoesModulosLegado.ativo.is_(True),
+            ConfiguracoesModulosLegado.ambiente == settings.environment,
         )
-        .order_by(Modulo.modulo)
+        .order_by(ModuloLegado.modulo)
     )
     rows = (await db.execute(stmt)).all()
     items = [
