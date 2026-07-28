@@ -14,6 +14,8 @@ O nginx nasceu como *Strangler Fig* na frente de um monolito PHP legado. Hoje a 
 
 ## Comandos
 
+**Antes do primeiro `up`:** copie `.env.example` para `.env` (gitignored) e gere a `DADOS_SENSIVEIS_ENCRYPTION_KEY`. É a chave Fernet que cifra tokens OAuth do Google e dados bancários de fornecedor; sem ela o compose aborta de propósito, em vez de subir com um segredo padrão. Trocá-la torna ilegível o que já foi cifrado com a anterior.
+
 ```powershell
 # Subir tudo (produção-like; frontend em build standalone)
 docker compose up -d --build
