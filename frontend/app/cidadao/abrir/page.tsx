@@ -27,7 +27,11 @@ import { cn } from "@/lib/utils";
 
 type Step = 1 | 2 | 3;
 
-const MAX_UPLOAD_MB = 25;
+// Tem de espelhar `max_upload_size_mb` do backend (app/config.py, hoje 20 e
+// também no MAX_UPLOAD_SIZE_MB do compose). Anunciava 25: o portal aceitava um
+// arquivo de 22 MB, subia tudo e só então o servidor recusava com "Arquivo
+// excede 20 MB". Ao mudar o limite no backend, mudar aqui junto.
+const MAX_UPLOAD_MB = 20;
 const ALLOWED_EXT = [
   "pdf", "png", "jpg", "jpeg", "gif", "webp",
   "doc", "docx", "xls", "xlsx", "odt", "ods",
