@@ -27,6 +27,30 @@ docker compose --profile init up bootstrap
 
 Containers: `aprimora-py-backend` (:8000), `-frontend` (:3100), `-worker`, `-beat`, `-redis`, `-nginx` (:8090), `-db` (:5432). Entrar sempre por `http://localhost:8090` (nginx) — é lá que o roteamento e o header `Host` (resolução de tenant) funcionam.
 
+### Seeds
+
+São **três**, com papéis distintos:
+
+```bash
+# 1. Pré-requisitos globais — roda a cada deploy, idempotente. Garante
+#    utils.sistema/nivel, o tenant+admin padrão, o segredo JWT e o catálogo
+#    protocolos.acao (ABERTURA/ENCAMINHAMENTO/RECEBIMENTO). Sem as ações não
+#    se abre nem tramita processo.
+docker exec aprimora-py-backend python -m app.cli.seed_bootstrap
+
+# 2. Protocolo: 12 processos, 15 anexos, 6 serviços, manifestantes, servidores
+docker exec aprimora-py-backend python -m app.cli.seed_demo apply --tenant sobral --allow-non-demo
+
+# 3. Pagamentos/frota/transporte. Passa pelos SERVIÇOS: os débitos percorrem o
+#    rito real e as baixas geram movimentação de conta — é disso que a
+#    conciliação vive. `--modulo` limita a um deles; `reset`/`status` também.
+docker exec aprimora-py-backend python -m app.cli.seed_demo_operacional apply --tenant sobral --allow-non-demo
+```
+
+`--allow-non-demo` é obrigatório fora de um tenant `demo*`. Na VPS o alvo tem de ser **`sobral`**: o acesso é por IP e o `TenantMiddleware` resolve tudo para o tenant padrão, então dados em outro tenant ficariam invisíveis.
+
+Os dois seeds de demonstração assumiam artefatos que só o `provisionar_tenant` cria ("Protocolo Geral", tipo de manifestante "Pessoa Física", `admin@demo.test`). Hoje caem em get_or_create/fallback — mas é o tipo de acoplamento a vigiar ao estender qualquer um deles.
+
 ### Testes
 
 ```bash
@@ -71,6 +95,14 @@ docker exec aprimora-py-backend alembic current
 docker exec aprimora-py-backend alembic upgrade head
 docker exec aprimora-py-backend alembic downgrade -1   # valide reversibilidade
 ```
+
+### Deploy (VPS de homologação)
+
+Merge em `main` dispara `deploy-vps.yml`, que roda `scripts/deploy.sh start` por SSH. Duas armadilhas custaram várias rodadas de diagnóstico:
+
+**O script se sobrescreve em execução.** `deploy_full` chama `pull_code`, que faz `git reset --hard` sobre o próprio `scripts/deploy.sh` enquanto o bash já o está executando; as funções foram parseadas na entrada. Hoje há um `exec` do script novo após o pull (`DEPLOY_REEXECUTADO` evita laço), mas **mudança no `deploy.sh` ainda leva um deploy para valer** quando a cópia no servidor é anterior a esse `exec` — nesse caso, dispare `gh workflow run deploy-vps.yml` uma segunda vez.
+
+**O nome do projeto compose vem do diretório.** `DEPLOY_PATH` aponta para `/root/GedDocPublico` → projeto `geddocpublico`. Apontar para outro diretório cria uma instalação paralela com volume Postgres **novo e vazio**, e os `container_name:` fixos (globais no daemon) fazem as duas colidirem. Se o deploy falhar com "Conflict. The container name ... is already in use", suspeite disso antes de qualquer outra coisa.
 
 ## Arquitetura
 
