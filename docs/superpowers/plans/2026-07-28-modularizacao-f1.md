@@ -663,29 +663,39 @@ ROUTERS = Path(__file__).resolve().parents[1] / "app" / "routers"
 def codigos_exigidos_pelos_routers() -> set[str]:
     """Extrai os códigos usados em require_permission/require_any_permission.
 
-    Pega tanto a forma literal — require_permission("processo") — quanto as
-    tuplas de constante no topo dos módulos de pagamentos, que são passadas
-    por *splat e por isso não aparecem na chamada.
+    `require_permission("codigo", "action")` tem a AÇÃO como segundo argumento —
+    só o primeiro literal é código. `require_any_permission(*codigos)` só tem
+    códigos. As tuplas de constante no topo dos módulos de pagamentos são
+    passadas por *splat e por isso não aparecem na chamada.
     """
     codigos: set[str] = set()
-    literal = re.compile(r'require_(?:any_)?permission\(\s*((?:"[a-zA-Z_]+"\s*,?\s*)+)')
+    um_so = re.compile(r'require_permission\(\s*"([a-zA-Z_]+)"')
+    varios = re.compile(r'require_any_permission\(\s*((?:"[a-zA-Z_]+"\s*,?\s*)+)')
     constante = re.compile(
         r'^(?:_LEITURA|PERMS_LEITURA|PERM_VALIDAR|PERM_ENCAMINHAR)\s*=\s*\(([^)]*)\)',
         re.MULTILINE,
     )
     for arquivo in ROUTERS.glob("*.py"):
         texto = arquivo.read_text(encoding="utf-8")
-        for bloco in literal.findall(texto):
+        codigos.update(um_so.findall(texto))
+        for bloco in varios.findall(texto):
             codigos.update(re.findall(r'"([a-zA-Z_]+)"', bloco))
         for bloco in constante.findall(texto):
             codigos.update(re.findall(r'"([a-zA-Z_]+)"', bloco))
     return codigos
 
 
+ACOES = {"inserir", "atualizar", "excluir", "visualizar"}
+
+
 @pytest.mark.asyncio
 async def test_toda_transacao_exigida_existe(admin_session):
     exigidos = codigos_exigidos_pelos_routers()
     assert exigidos, "a extração não achou nenhum código — o regex quebrou"
+    assert not (exigidos & ACOES), (
+        f"a extração capturou ações como se fossem códigos: {sorted(exigidos & ACOES)} — "
+        "o segundo argumento de require_permission é a ação, não um código"
+    )
 
     existentes = set((await admin_session.execute(text(
         "SELECT codigo FROM utils.transacao WHERE excluido = false"
@@ -700,15 +710,25 @@ async def test_toda_transacao_exigida_existe(admin_session):
 
 @pytest.mark.asyncio
 async def test_toda_transacao_exigida_esta_no_sistema(admin_session):
-    """Sem o vínculo, o ramo SU de load_permissions devolve lista vazia."""
+    """Sem o vínculo, o ramo SU de load_permissions devolve lista vazia.
+
+    O `app` vem de `get_settings().app_name`, nunca hardcoded: este banco tem
+    DUAS linhas em `utils.sistema` (`aprimora` e `sistemas`) e o container de
+    dev roda com `APP_NAME=aprimora` enquanto o compose versionado diz
+    `sistemas`. Fixar o literal faria o teste consultar um sistema diferente
+    do que `garantir_sistema_transacao` e `load_permissions` de fato usam.
+    """
+    from app.config import get_settings
+
     exigidos = codigos_exigidos_pelos_routers()
+    app = get_settings().app_name
     ligados = set((await admin_session.execute(text("""
         SELECT t.codigo
           FROM utils.transacao t
           JOIN utils.sistema_transacao st ON st.id_transacao = t.id AND st.excluido = false
-          JOIN utils.sistema s ON s.id = st.id_sistema AND s.app = 'sistemas'
+          JOIN utils.sistema s ON s.id = st.id_sistema AND s.app = :app
          WHERE t.excluido = false
-    """))).scalars().all())
+    """), {"app": app})).scalars().all())
 
     faltando = sorted(exigidos - ligados)
     assert not faltando, (
@@ -873,11 +893,22 @@ Esperado: segunda execução do seed reporta zero vínculos novos; 4 testes pass
 
 - [ ] **Step 7: Conferir que o ramo SU passou a significar algo**
 
+O `app` tem de vir do settings, não de literal — ver a nota do teste acima:
+
 ```bash
-docker exec aprimora-py-db psql -U ged_user -d ged_saas_db -c "SELECT COUNT(*) FROM utils.sistema_transacao st JOIN utils.sistema s ON s.id = st.id_sistema AND s.app = 'sistemas' WHERE st.excluido = false;"
+APP=$(docker exec aprimora-py-backend python -c "from app.config import get_settings; print(get_settings().app_name)")
+docker exec aprimora-py-db psql -U ged_user -d ged_saas_db -c "SELECT COUNT(*) FROM utils.sistema_transacao st JOIN utils.sistema s ON s.id = st.id_sistema AND s.app = '$APP' WHERE st.excluido = false;"
 ```
 
 Esperado: 23 (ou mais, se o banco já tinha vínculos). Antes desta task era 1.
+
+> **Deriva de ambiente conhecida, NÃO conserte aqui.** Este banco tem duas linhas em
+> `utils.sistema`: `Aprimora` (app=`aprimora`, id 1) e `Sistemas` (app=`sistemas`, id 2). O
+> container de dev roda com `APP_NAME=aprimora`, enquanto o `docker-compose.yml` versionado e o
+> default de `config.py` dizem `sistemas`. Os dados de RBAC deste ambiente foram construídos sob
+> `aprimora`; recriar o container realinharia para `sistemas` e derrubaria as permissões do admin
+> local. É a mesma classe de bug que o CLAUDE.md registra como já tendo causado 403 geral. Está
+> registrado no backlog — não é escopo do F1.
 
 - [ ] **Step 8: Rodar a regressão de permissões**
 
