@@ -21,6 +21,7 @@ from ..models import (
     Transacao,
     UsuarioGrupo,
 )
+from .modulos import codigos_bloqueados
 
 
 @dataclass
@@ -123,6 +124,10 @@ async def load_permissions(
                     excluir=gt.excluir,
                 )
         items = sorted(merged.values(), key=lambda p: p.codigo)
+
+    bloqueados = await codigos_bloqueados(db, tenant_id)
+    if bloqueados:
+        items = [p for p in items if p.codigo not in bloqueados]
 
     return UserPermissions(
         is_super_usuario=is_su,
