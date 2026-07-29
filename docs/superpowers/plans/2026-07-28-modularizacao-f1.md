@@ -1338,6 +1338,18 @@ E substituir o `return` final da função por:
 O filtro fica **depois** da bifurcação, num ponto só — assim vale para os dois ramos por
 construção, sem chance de alguém aplicar num e esquecer do outro.
 
+> **Isto sozinho NÃO fecha o enforcement — correção de 2026-07-29.** Filtrar `items` não barra o
+> super-usuário, porque `backend/app/auth/perms.py:48` faz `if perms.is_super_usuario: return user`
+> **antes** de ler `items`. Sem o passo abaixo, a fatia filtra o menu e deixa a API aberta — pior
+> que não bloquear, porque parece que bloqueia.
+>
+> **Portanto esta task também:** acrescenta `codigos_bloqueados: frozenset[str]` ao dataclass
+> `UserPermissions`, populado nos **dois** caminhos de retorno (inclusive o early return de usuário
+> sem grupo), e põe o gate em `perms.py` **antes** do bypass do SU, em `require_permission` e em
+> `require_any_permission`. O teste é `codigo in codigos_bloqueados`, **nunca** `codigo not in
+> items` — transação sem vínculo de módulo não está no conjunto bloqueado, e é assim que o
+> fail-open de D8 sobrevive.
+
 - [ ] **Step 4: Rodar os testes**
 
 ```bash

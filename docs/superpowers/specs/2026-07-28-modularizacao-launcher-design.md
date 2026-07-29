@@ -132,6 +132,19 @@ de tenant. Esta é a decisão de segurança central do design e tem teste dedica
 Como `require_permission` e `require_any_permission` já chamam `load_permissions`, os ~38 routers
 ganham o bloqueio **sem uma linha alterada**.
 
+> **Correção, 2026-07-29 — descoberta na execução da F1.** O parágrafo acima era verdadeiro para o
+> usuário comum e **falso para o super-usuário**, que é justamente o caso que a decisão de segurança
+> existe para cobrir. `backend/app/auth/perms.py:48` faz `if perms.is_super_usuario: return user`
+> **antes** de ler `perms.items` — filtrar a lista não bloqueia quem nunca a consulta. Na prática, um
+> SU de tenant sem Pagamentos recebia 200 em `POST /pagamentos/debitos/{id}/pagar`: o módulo sumia do
+> menu e seguia inteiramente usável pela API, o que é pior do que não ter bloqueio.
+>
+> **Correção adotada:** `UserPermissions` passa a carregar `codigos_bloqueados: frozenset[str]`, e
+> `perms.py` barra o código bloqueado **antes** do bypass do SU. O gate testa
+> `codigo in codigos_bloqueados`, nunca `codigo not in items` — a diferença preserva o fail-open de
+> D8 para transação sem vínculo de módulo. Os ~38 routers continuam intocados, mas `perms.py` e o
+> dataclass **são** alterados: a promessa de "nenhuma linha" não se sustentava.
+
 ### 5.1 A lacuna, nomeada
 
 Endpoints que usam só `get_current_user`, sem `require_permission`, não passam por esse caminho.
