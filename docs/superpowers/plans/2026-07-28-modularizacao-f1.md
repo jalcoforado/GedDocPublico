@@ -621,6 +621,282 @@ git commit -m "feat(modulos): seed_bootstrap garante catálogo e vínculos trans
 
 ---
 
+### Task 3B: As nove transações que faltam e o vínculo com o sistema
+
+*(Acrescentada em execução, 2026-07-28, por decisão do Jorge. Ver "Achado que motivou esta task".)*
+
+**Files:**
+- Create: `backend/alembic/versions/0074_transacoes_faltantes.py`
+- Modify: `backend/app/cli/seed_bootstrap.py`
+- Test: `backend/tests/test_transacoes_rbac.py`
+
+**Interfaces:**
+- Consumes: `MODULO_TRANSACOES` e `semear_modulos()` da Task 3
+- Produces: as 23 transações que os routers exigem passam a existir em `utils.transacao` e a
+  estar ligadas ao sistema do app via `utils.sistema_transacao`. Nova função
+  `async def garantir_sistema_transacao(db: AsyncSession) -> int` no `seed_bootstrap`.
+
+**Achado que motivou esta task.** As transações do sistema são criadas por migrations (0023, 0024,
+0028, 0031, 0041, 0044, 0045, 0048, 0069) — não pelo dump legado. Num banco montado pelas nossas
+migrations existem 14, mas os routers exigem 23 códigos distintos. Faltam nove: `processo`,
+`usuario`, `catalogo`, `assunto`, `manifestante`, `cidade`, `endereco`, `workflow`,
+`unidadeTrabalho`. E `utils.sistema_transacao` tem **uma linha só** (`dashboard`, da 0028).
+
+Consequência pré-existente: usuário **não** super-usuário leva 403 em processos, usuários, assuntos
+e cadastros — não por falta de permissão concedida, mas porque a transação não existe para ser
+concedida. Ninguém percebeu porque o SU faz bypass antes de consultar a lista, e porque os testes
+que precisam de uma transação a criam ali mesmo.
+
+- [ ] **Step 1: Escrever o teste primeiro**
+
+```python
+"""Toda transação que os routers exigem existe e está ligada ao sistema do app."""
+import re
+from pathlib import Path
+
+import pytest
+from sqlalchemy import text
+
+ROUTERS = Path(__file__).resolve().parents[1] / "app" / "routers"
+
+
+def codigos_exigidos_pelos_routers() -> set[str]:
+    """Extrai os códigos usados em require_permission/require_any_permission.
+
+    Pega tanto a forma literal — require_permission("processo") — quanto as
+    tuplas de constante no topo dos módulos de pagamentos, que são passadas
+    por *splat e por isso não aparecem na chamada.
+    """
+    codigos: set[str] = set()
+    literal = re.compile(r'require_(?:any_)?permission\(\s*((?:"[a-zA-Z_]+"\s*,?\s*)+)')
+    constante = re.compile(
+        r'^(?:_LEITURA|PERMS_LEITURA|PERM_VALIDAR|PERM_ENCAMINHAR)\s*=\s*\(([^)]*)\)',
+        re.MULTILINE,
+    )
+    for arquivo in ROUTERS.glob("*.py"):
+        texto = arquivo.read_text(encoding="utf-8")
+        for bloco in literal.findall(texto):
+            codigos.update(re.findall(r'"([a-zA-Z_]+)"', bloco))
+        for bloco in constante.findall(texto):
+            codigos.update(re.findall(r'"([a-zA-Z_]+)"', bloco))
+    return codigos
+
+
+@pytest.mark.asyncio
+async def test_toda_transacao_exigida_existe(admin_session):
+    exigidos = codigos_exigidos_pelos_routers()
+    assert exigidos, "a extração não achou nenhum código — o regex quebrou"
+
+    existentes = set((await admin_session.execute(text(
+        "SELECT codigo FROM utils.transacao WHERE excluido = false"
+    ))).scalars().all())
+
+    faltando = sorted(exigidos - existentes)
+    assert not faltando, (
+        f"Códigos exigidos por require_permission sem linha em utils.transacao: {faltando}. "
+        "Usuário não-SU leva 403 nesses endpoints por ausência de cadastro, não de permissão."
+    )
+
+
+@pytest.mark.asyncio
+async def test_toda_transacao_exigida_esta_no_sistema(admin_session):
+    """Sem o vínculo, o ramo SU de load_permissions devolve lista vazia."""
+    exigidos = codigos_exigidos_pelos_routers()
+    ligados = set((await admin_session.execute(text("""
+        SELECT t.codigo
+          FROM utils.transacao t
+          JOIN utils.sistema_transacao st ON st.id_transacao = t.id AND st.excluido = false
+          JOIN utils.sistema s ON s.id = st.id_sistema AND s.app = 'sistemas'
+         WHERE t.excluido = false
+    """))).scalars().all())
+
+    faltando = sorted(exigidos - ligados)
+    assert not faltando, (
+        f"Transações sem vínculo em sistema_transacao: {faltando}. "
+        "Rode `python -m app.cli.seed_bootstrap`."
+    )
+```
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+```bash
+docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest tests/test_transacoes_rbac.py -v
+```
+
+Esperado: os dois falham. O primeiro lista os nove códigos ausentes; o segundo lista praticamente
+todos (só `dashboard` está ligado hoje).
+
+- [ ] **Step 3: Escrever a migration 0074**
+
+```python
+"""Cria as transações que os routers exigem e nenhuma migration criou.
+
+Revision ID: 0074
+Revises: 0073
+Create Date: 2026-07-28
+
+Achado durante a fatia F1 da modularização: os routers exigem 23 códigos via
+require_permission, mas só 14 existem em utils.transacao. Os nove ausentes
+fazem usuário NÃO super-usuário tomar 403 por ausência de cadastro — o SU
+mascarava o problema porque faz bypass antes de consultar a lista.
+
+Idempotente por ON CONFLICT: em bancos que já receberam esses códigos por
+outro caminho (dump do legado, inserção manual), a migration é no-op.
+O vínculo com utils.sistema_transacao NÃO é feito aqui: a linha de
+utils.sistema é criada pelo seed_bootstrap, que roda depois das migrations.
+"""
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from alembic import op
+
+revision: str = "0074"
+down_revision: str | Sequence[str] | None = "0073"
+branch_labels = None
+depends_on = None
+
+TRANSACOES = [
+    ("processo", "Processos"),
+    ("usuario", "Usuários"),
+    ("catalogo", "Catálogos do protocolo"),
+    ("assunto", "Assuntos"),
+    ("manifestante", "Manifestantes"),
+    ("cidade", "Cidades"),
+    ("endereco", "Endereços"),
+    ("workflow", "Workflows"),
+    ("unidadeTrabalho", "Unidades de trabalho"),
+]
+
+
+def upgrade() -> None:
+    for codigo, rotulo in TRANSACOES:
+        op.execute(
+            "INSERT INTO utils.transacao (transacao, codigo, excluido) "
+            f"VALUES ('{rotulo}', '{codigo}', false) "
+            "ON CONFLICT (codigo) DO NOTHING"
+        )
+
+
+def downgrade() -> None:
+    # Remove só o que esta migration poderia ter criado, e só se ninguém
+    # tiver concedido a transação a um grupo — apagar um código em uso
+    # arrancaria a permissão de usuários reais.
+    codigos = ", ".join(f"'{c}'" for c, _ in TRANSACOES)
+    op.execute(f"""
+        DELETE FROM utils.transacao t
+         WHERE t.codigo IN ({codigos})
+           AND NOT EXISTS (
+               SELECT 1 FROM utils.grupo_transacao gt WHERE gt.id_transacao = t.id
+           )
+           AND NOT EXISTS (
+               SELECT 1 FROM utils.sistema_transacao st WHERE st.id_transacao = t.id
+           )
+           AND NOT EXISTS (
+               SELECT 1 FROM aprimora_py.modulo_transacao mt WHERE mt.id_transacao = t.id
+           )
+    """)
+```
+
+- [ ] **Step 4: Aplicar e conferir head único**
+
+```bash
+docker exec aprimora-py-backend alembic upgrade head
+docker exec aprimora-py-backend alembic heads
+```
+
+Esperado: head único `0074`.
+
+- [ ] **Step 5: Implementar `garantir_sistema_transacao` no `seed_bootstrap`**
+
+Acrescentar `SistemaTransacao` e `Sistema` aos imports de model do arquivo, e a função logo antes
+de `semear_modulos`:
+
+```python
+async def garantir_sistema_transacao(db: AsyncSession) -> int:
+    """Liga ao sistema do app toda transação que os módulos declaram.
+
+    Sem esse vínculo o ramo de super-usuário do `load_permissions` devolve
+    lista vazia — ele consulta `sistema_transacao`, não `transacao`. Só as
+    transações declaradas em MODULO_TRANSACOES são ligadas: `utils.transacao`
+    pode conter códigos do PHP legado que não são nossos.
+    """
+    sistema = (
+        await db.execute(select(Sistema).where(Sistema.app == APP, Sistema.excluido.is_(False)))
+    ).scalars().first()
+    if sistema is None:
+        raise RuntimeError(f"Nenhum utils.sistema com app='{APP}' — o seed roda fora de ordem.")
+
+    declarados = {c for codigos in MODULO_TRANSACOES.values() for c in codigos}
+    transacoes = {
+        t.codigo: t.id
+        for t in (await db.execute(
+            select(Transacao).where(
+                Transacao.excluido.is_(False), Transacao.codigo.in_(declarados)
+            )
+        )).scalars().all()
+    }
+    ja_ligadas = set((await db.execute(
+        select(SistemaTransacao.id_transacao).where(
+            SistemaTransacao.id_sistema == sistema.id,
+            SistemaTransacao.excluido.is_(False),
+        )
+    )).scalars().all())
+
+    criados = 0
+    for id_transacao in transacoes.values():
+        if id_transacao in ja_ligadas:
+            continue
+        db.add(SistemaTransacao(
+            id_sistema=sistema.id, id_transacao=id_transacao, excluido=False
+        ))
+        criados += 1
+    return criados
+```
+
+Chamar dentro de `seed(db)`, **antes** de `semear_modulos`, e incluir o resultado no dicionário
+retornado:
+
+```python
+    vinculos_sistema = await garantir_sistema_transacao(db)
+```
+
+- [ ] **Step 6: Rodar o seed duas vezes e os testes**
+
+```bash
+docker exec aprimora-py-backend python -m app.cli.seed_bootstrap
+docker exec aprimora-py-backend python -m app.cli.seed_bootstrap
+docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest tests/test_transacoes_rbac.py tests/test_modulos_seed.py -v
+```
+
+Esperado: segunda execução do seed reporta zero vínculos novos; 4 testes passam.
+
+- [ ] **Step 7: Conferir que o ramo SU passou a significar algo**
+
+```bash
+docker exec aprimora-py-db psql -U ged_user -d ged_saas_db -c "SELECT COUNT(*) FROM utils.sistema_transacao st JOIN utils.sistema s ON s.id = st.id_sistema AND s.app = 'sistemas' WHERE st.excluido = false;"
+```
+
+Esperado: 23 (ou mais, se o banco já tinha vínculos). Antes desta task era 1.
+
+- [ ] **Step 8: Rodar a regressão de permissões**
+
+```bash
+docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest tests/test_permissoes_matriz.py tests/test_pr5a_dashboard_servicos.py -v
+```
+
+Esperado: verde. Ligar transações ao sistema muda o que o ramo SU devolve — se algum teste
+dependia da lista curta, ele aparece aqui.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add backend/alembic/versions/0074_transacoes_faltantes.py backend/app/cli/seed_bootstrap.py backend/tests/test_transacoes_rbac.py
+git commit -m "fix(rbac): cria as 9 transações que os routers exigem e liga todas ao sistema"
+```
+
+---
+
 ### Task 4: Service de módulos
 
 **Files:**
@@ -1383,6 +1659,13 @@ async def test_toda_transacao_do_sistema_tem_modulo(admin_session):
     Escopo: só as transações ligadas ao sistema do app (`sistema.app = 'sistemas'`).
     O dump legado traz transações do PHP que não são nossas e não devem ser
     mapeadas.
+
+    Esta guarda só tem valor encadeada com as da Task 3B
+    (`tests/test_transacoes_rbac.py`), que garantem que todo código exigido por
+    `require_permission` existe em `utils.transacao` E está ligado ao sistema.
+    Juntas as três dizem: todo código que o app de fato enforça tem módulo.
+    Sozinha, esta aqui cobriria só o que estivesse ligado ao sistema — que antes
+    da 3B era uma linha.
 
     Se este teste falhar: acrescente o código em MODULO_TRANSACOES, em
     backend/app/cli/seed_bootstrap.py, e rode o seed.
