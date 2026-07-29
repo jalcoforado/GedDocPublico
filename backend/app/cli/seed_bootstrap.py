@@ -23,7 +23,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.password import hash_password
 from ..config import get_settings
 from ..database import SessionLocal
-from ..models import Grupo, Nivel, Sistema, Tenant, Usuario, UsuarioGrupo
+from ..models import (
+    Grupo,
+    Modulo,
+    ModuloTransacao,
+    Nivel,
+    Sistema,
+    Tenant,
+    Transacao,
+    Usuario,
+    UsuarioGrupo,
+)
 
 APP = get_settings().app_name
 
@@ -34,6 +44,75 @@ TENANT_SLUG = "sobral"
 
 async def _set_local_tenant(db: AsyncSession, tenant_id: int) -> None:
     await db.execute(text(f"SET LOCAL app.tenant_id = {int(tenant_id)}"))
+
+
+# Mapa módulo -> códigos de transação. Ponto de partida; a autoridade é o teste
+# test_toda_transacao_tem_modulo (tests/test_guarda_modularizacao.py), que
+# reprova o PR se sobrar transação do nosso sistema fora daqui.
+MODULO_TRANSACOES: dict[str, tuple[str, ...]] = {
+    "protocolo": (
+        "processo", "catalogo", "assunto", "manifestante", "servico",
+        "minuta_template", "cidade", "endereco", "workflow",
+    ),
+    "pagamentos": (
+        "pagamento_cadastro", "pagamento_solicitar", "pagamento_autorizar",
+        "pagamento_pagar", "pagamento_aprovar", "pagamento_validar",
+        "pagamento_encaminhar", "pagamento_auditar",
+    ),
+    "frota": ("frota",),
+    "transporte": ("transporte_regulado",),
+    "administracao": ("usuario", "unidadeTrabalho", "configuracao"),
+    "comum": ("dashboard",),
+}
+
+
+async def semear_modulos(db: AsyncSession) -> dict:
+    """Garante o catálogo de módulos e os vínculos com as transações.
+
+    Idempotente: roda a cada deploy. Código de transação que ainda não existe
+    em `utils.transacao` é ignorado em silêncio — o vínculo entra no próximo
+    deploy, depois que a transação for criada.
+    """
+    modulos = {
+        m.slug: m
+        for m in (await db.execute(select(Modulo))).scalars().all()
+    }
+    if not modulos:
+        raise RuntimeError(
+            "aprimora_py.modulo está vazia — rode `alembic upgrade head` "
+            "antes do seed (a migration 0073 popula o catálogo)."
+        )
+
+    transacoes = {
+        t.codigo: t.id
+        for t in (await db.execute(
+            select(Transacao).where(Transacao.excluido.is_(False))
+        )).scalars().all()
+    }
+
+    existentes = {
+        (row[0], row[1])
+        for row in (await db.execute(
+            select(ModuloTransacao.id_modulo, ModuloTransacao.id_transacao)
+        )).all()
+    }
+
+    criados = 0
+    for slug, codigos in MODULO_TRANSACOES.items():
+        modulo = modulos.get(slug)
+        if modulo is None:
+            continue
+        for codigo in codigos:
+            id_transacao = transacoes.get(codigo)
+            if id_transacao is None:
+                continue
+            if (modulo.id, id_transacao) in existentes:
+                continue
+            db.add(ModuloTransacao(id_modulo=modulo.id, id_transacao=id_transacao))
+            existentes.add((modulo.id, id_transacao))
+            criados += 1
+
+    return {"modulos": len(modulos), "vinculos": criados}
 
 
 async def seed(db: AsyncSession) -> dict:
@@ -199,7 +278,14 @@ async def seed(db: AsyncSession) -> dict:
                  "t": texto},
             )
 
-    return {"tenant_id": tenant_id, "usuario_id": usuario.id, "is_super": True}
+    resultado_modulos = await semear_modulos(db)
+
+    return {
+        "tenant_id": tenant_id,
+        "usuario_id": usuario.id,
+        "is_super": True,
+        "modulos": resultado_modulos,
+    }
 
 
 async def _main() -> int:
