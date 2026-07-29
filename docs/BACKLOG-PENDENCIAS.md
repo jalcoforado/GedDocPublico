@@ -54,6 +54,34 @@
 
 ## 1. Curto prazo — itens concretos em aberto
 
+### 1.0 Deriva de `APP_NAME` no ambiente de dev — RBAC apontando para o sistema errado
+
+*(Descoberto em 2026-07-28, durante a fatia F1 da modularização.)*
+
+- `utils.sistema` tem **duas** linhas: `Aprimora` (`app = 'aprimora'`, id 1) e `Sistemas`
+  (`app = 'sistemas'`, id 2).
+- O container `aprimora-py-backend` em execução tem `APP_NAME=aprimora`, mas o
+  `docker-compose.yml` **versionado** e o default de `backend/app/config.py` dizem `sistemas`.
+- Todo o RBAC do ambiente local (grupos, `usuario_grupo`, `sistema_transacao`) foi construído sob
+  `aprimora`. **Um `docker compose up -d` que recrie o container realinha para `sistemas` e derruba
+  as permissões do admin local** — `load_permissions` filtra grupos por `Sistema.app == app_name`.
+- É a mesma classe de bug que o `CLAUDE.md` registra como já tendo causado 403 geral em todo tenant
+  provisionado.
+- **Consequência já visível:** explica a falha de
+  `tests/test_pr5a_dashboard_servicos.py::test_http_dashboard_com_perm_acessa`, que estava sendo
+  tratada como "pré-existente inexplicada".
+- Não investigado: qual é o estado na VPS de homologação. **Verificar lá antes de decidir o
+  conserto** — se produção estiver sob `sistemas`, o errado é só o container local; se estiver sob
+  `aprimora`, a correção envolve migrar dados.
+
+### 1.1.5 Suíte não estava verde antes do F1
+
+Duas falhas confirmadas como anteriores à branch `feat/modularizacao-f1` (verificado por
+`git stash`): `test_jwt_compat.py::test_emitted_token_has_required_claims` e
+`test_pr5a_dashboard_servicos.py::test_http_dashboard_com_perm_acessa` (esta última explicada pelo
+item 1.0 acima). O CI em `main` reporta verde, então a divergência é entre ambiente local e CI —
+provavelmente a mesma deriva de env.
+
 Nenhum. Os quatro itens desta seção foram fechados em 2026-07-28 (ver nota acima).
 
 ---
