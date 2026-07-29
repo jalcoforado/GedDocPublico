@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
+from ..auth.perms import require_permission
 from ..config import get_settings
 from ..database import get_db
 from ..models import Usuario
@@ -87,7 +88,9 @@ async def get_job_endpoint(
 )
 async def disparar_processo_completo(
     payload: DispararProcessoCompletoRequest,
-    current: Usuario = Depends(get_current_user),
+    # Monta o PDF integral de um processo: exige acesso ao próprio processo,
+    # o mesmo código que os endpoints síncronos de protocolo exigem.
+    current: Usuario = Depends(require_permission("processo")),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
@@ -110,7 +113,8 @@ async def disparar_processo_completo(
 )
 async def disparar_carimbar_anexos(
     payload: DispararCarimbarAnexosRequest,
-    current: Usuario = Depends(get_current_user),
+    # Reescreve os anexos do processo (carimbo) — é alteração, não leitura.
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
@@ -133,7 +137,8 @@ async def disparar_carimbar_anexos(
 )
 async def disparar_relatorio_tramitacao(
     payload: DispararRelatorioTramitacaoRequest,
-    current: Usuario = Depends(get_current_user),
+    # Relatório sobre processos do tenant — leitura de protocolo.
+    current: Usuario = Depends(require_permission("processo")),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
@@ -168,7 +173,9 @@ async def disparar_relatorio_tramitacao(
 )
 async def disparar_limpeza(
     payload: DispararLimpezaRequest,
-    current: Usuario = Depends(get_current_user),
+    # Apaga artefatos de jobs antigos do tenant — manutenção destrutiva,
+    # não operação de protocolo. Fica sob `configuracao`.
+    current: Usuario = Depends(require_permission("configuracao", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),

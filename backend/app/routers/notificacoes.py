@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Notificacao, Usuario
 from ..config import get_settings
@@ -164,7 +165,9 @@ async def put_telefone(
 @router.post("/whatsapp-test", response_model=WhatsAppTestResponse)
 async def whatsapp_test(
     payload: WhatsAppTestRequest,
-    _: Usuario = Depends(get_current_user),
+    # Dispara mensagem para telefone arbitrário com as credenciais do tenant:
+    # é ferramenta de validação de configuração, não notificação própria.
+    _: Usuario = Depends(require_permission("configuracao", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
