@@ -19,6 +19,16 @@ acima.
 |---|---|
 | Existe um `/modulos/me`, e é lixo legado | `backend/app/routers/modulos.py` lê `public.modulos` + `public.configuracoes_modulos` — tabelas do PHP, **sem `tenant_id`, sem RLS, sem filtro de permissão**. Filtra só por `ambiente`. |
 | O endpoint é código morto | `api.modulos()` existe em `frontend/lib/api.ts:2127` e **nenhuma página o chama**. |
+
+> **Correção, 2026-07-29 — descoberta na execução da F1.** A linha acima está **errada na letra**:
+> `app/(app)/home/page.tsx` chamava `api.modulos()` (via `queryFn: api.modulos`) para renderizar uma
+> seção colapsada "Outros sistemas vinculados". O levantamento original procurou por `modulos/me` e
+> não casou com essa forma de chamada.
+>
+> Ela está **certa no efeito**, e por um motivo pior: `public.modulos` e `public.configuracoes_modulos`
+> **não existem** no schema (`relation does not exist`). A home disparava uma query que falhava a cada
+> carregamento e a seção nunca renderizava. Removê-la é no-op visual e elimina um request quebrado por
+> page load — o critério "F1 não muda nada para o usuário" continua de pé.
 | O RBAC é por transação, não por módulo | `utils.transacao` (código) → `grupo_transacao` (inserir/atualizar/excluir) → `grupo` (tenant-scoped) → `usuario_grupo`. Não há nível "módulo". |
 | O menu é árvore hardcoded | `frontend/components/Sidebar.tsx`, 611 linhas, 8 grupos fixos, cada item com `perm` opcional, filtragem client-side. |
 | `aprimora_py.tenant` não tem RLS | Nenhuma migration habilita RLS nela; é protegida por `require_platform_admin` no router. **Precedente que este design reusa.** |
