@@ -5,6 +5,12 @@ Rules:
 - The user's "highest level" is the group with the lowest `nivel.valor` (0 = Super Usuário).
 - If isSU: return all transactions of the user's sistema (via sistema_transacao) with full perms.
 - Otherwise: union of grupo_transacao across the user's groups for this APP.
+
+Módulo não contratado: transações de módulo que o tenant não contratou são
+descartadas de `items` e listadas em `codigos_bloqueados` — para QUALQUER
+usuário, inclusive super-usuário. Contratação é ato de plataforma, não de
+permissão; por isso o gate correspondente em `auth/perms.py` roda antes do
+bypass de SU, não depois.
 """
 from dataclasses import dataclass
 
@@ -38,6 +44,10 @@ class UserPermissions:
     is_super_usuario: bool
     nivel_valor: int | None
     items: list[PermItem]
+    # Códigos de transação de módulo não contratado pelo tenant. Vive aqui
+    # para que `require_permission` possa barrar ANTES do bypass de
+    # super-usuário, sem pagar uma segunda consulta.
+    codigos_bloqueados: frozenset[str] = frozenset()
 
 
 async def load_permissions(
@@ -69,7 +79,13 @@ async def load_permissions(
     rows = (await db.execute(grupos_stmt)).all()
 
     if not rows:
-        return UserPermissions(is_super_usuario=False, nivel_valor=None, items=[])
+        bloqueados = await codigos_bloqueados(db, tenant_id)
+        return UserPermissions(
+            is_super_usuario=False,
+            nivel_valor=None,
+            items=[],
+            codigos_bloqueados=frozenset(bloqueados),
+        )
 
     rows.sort(key=lambda r: r[1].valor)
     higher_grupo, higher_nivel, higher_sistema = rows[0]
@@ -133,4 +149,5 @@ async def load_permissions(
         is_super_usuario=is_su,
         nivel_valor=higher_nivel.valor,
         items=items,
+        codigos_bloqueados=frozenset(bloqueados),
     )
