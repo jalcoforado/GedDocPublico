@@ -48,8 +48,18 @@ async def codigos_bloqueados(db: AsyncSession, tenant_id: int) -> set[str]:
     (spec §3, D8). O teste test_toda_transacao_tem_modulo garante que o
     esquecimento apareça no CI em vez de virar tela sumida em produção.
     """
-    # Nunca vazio: os não-contratáveis ('comum') estão sempre lá.
     disponiveis = await slugs_contratados(db, tenant_id)
+    if not disponiveis:
+        # `Modulo.slug.not_in(set())` compila para uma cláusula sempre
+        # verdadeira — sem essa guarda, catálogo corrompido (ex.: 'comum'
+        # inativo) faria este WHERE parar de filtrar e devolver TODOS os
+        # códigos de TODOS os módulos, bloqueando todo mundo em silêncio.
+        raise RuntimeError(
+            "Nenhum módulo disponível para o tenant "
+            f"{tenant_id} — nem os não-contratáveis. Isso indica catálogo "
+            "corrompido (verifique se 'comum' existe e está ativo). Abortando "
+            "em vez de bloquear todas as transações silenciosamente."
+        )
     stmt = (
         select(Transacao.codigo)
         .join(ModuloTransacao, ModuloTransacao.id_transacao == Transacao.id)
@@ -60,11 +70,30 @@ async def codigos_bloqueados(db: AsyncSession, tenant_id: int) -> set[str]:
 
 
 async def modulos_do_tenant(db: AsyncSession, tenant_id: int) -> list[dict]:
-    """Catálogo contratável com a flag de contratação do tenant. Para o admin."""
-    contratados = await slugs_contratados(db, tenant_id)
+    """Catálogo contratável com a flag de contratação do tenant. Para o admin.
+
+    Não filtra `Modulo.ativo` na listagem nem no cálculo de `contratado`: o
+    admin precisa enxergar — e poder descontratar — um módulo que o tenant
+    já tinha contratado e que depois virou inativo. Por isso `contratado`
+    aqui é calculado a partir do vínculo vivo em `tenant_modulo`
+    diretamente, e NÃO via `slugs_contratados` — aquela função responde
+    "está disponível para uso" (filtra `Modulo.ativo`, de propósito, para
+    `codigos_bloqueados`); esta responde "o tenant tem contrato", que são
+    perguntas diferentes. Um módulo pode estar contratado e, ao mesmo
+    tempo, indisponível por ter sido desativado na plataforma.
+    """
+    vinculos_vivos = set((await db.execute(
+        select(Modulo.slug)
+        .join(TenantModulo, TenantModulo.id_modulo == Modulo.id)
+        .where(
+            TenantModulo.tenant_id == tenant_id,
+            TenantModulo.excluido.is_(False),
+            TenantModulo.ativo.is_(True),
+        )
+    )).scalars().all())
     modulos = (await db.execute(
         select(Modulo)
-        .where(Modulo.contratavel.is_(True), Modulo.ativo.is_(True))
+        .where(Modulo.contratavel.is_(True))
         .order_by(Modulo.ordem)
     )).scalars().all()
     return [
@@ -74,7 +103,8 @@ async def modulos_do_tenant(db: AsyncSession, tenant_id: int) -> list[dict]:
             "nome": m.nome,
             "icone": m.icone,
             "ordem": m.ordem,
-            "contratado": m.slug in contratados,
+            "contratado": m.slug in vinculos_vivos,
+            "ativo": m.ativo,
         }
         for m in modulos
     ]
@@ -86,6 +116,10 @@ async def contratar(db: AsyncSession, tenant_id: int, slugs: list[str]) -> None:
     Contrata o que falta (reaproveitando linha soft-deletada, se houver) e
     marca `excluido = True` no que saiu. Nunca apaga: descontratar suspende o
     acesso, não destrói o que o módulo produziu.
+
+    O catálogo aqui NÃO filtra `Modulo.ativo` — descontratar precisa
+    alcançar até módulo inativo (senão o vínculo fica preso, contratado
+    para sempre). Só a contratação de um módulo inativo é recusada.
     """
     alvo = set(slugs)
     catalogo = {
@@ -97,6 +131,10 @@ async def contratar(db: AsyncSession, tenant_id: int, slugs: list[str]) -> None:
     desconhecidos = alvo - set(catalogo)
     if desconhecidos:
         raise ValueError(f"Módulo inexistente ou não contratável: {sorted(desconhecidos)}")
+
+    inativos = {s for s in alvo if not catalogo[s].ativo}
+    if inativos:
+        raise ValueError(f"Módulo inativo não pode ser contratado: {sorted(inativos)}")
 
     vinculos = {
         v.id_modulo: v

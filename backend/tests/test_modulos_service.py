@@ -83,3 +83,76 @@ async def test_modulos_do_tenant_marca_contratacao(admin_session, two_tenants):
     assert por_slug["pagamentos"] is False
     assert "comum" not in por_slug, "módulo não-contratável não entra na tela de contratação"
     await admin_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_codigos_bloqueados_falha_alto_quando_catalogo_corrompido(admin_session, two_tenants):
+    tid, _ = two_tenants
+    # Simula catálogo corrompido: 'comum' (não-contratável, sempre
+    # disponível) fica inativo. slugs_contratados passaria a devolver
+    # set() e `Modulo.slug.not_in(set())` compila pra sempre-verdadeiro —
+    # bloquearia TODOS os códigos de TODOS os módulos, em silêncio.
+    # codigos_bloqueados tem que falhar alto em vez disso.
+    await admin_session.execute(text(
+        "UPDATE aprimora_py.modulo SET ativo = false WHERE slug = 'comum'"
+    ))
+    await admin_session.flush()
+    with pytest.raises(RuntimeError):
+        await codigos_bloqueados(admin_session, tid)
+    await admin_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_modulos_do_tenant_lista_modulo_inativo_mas_contratado(admin_session, two_tenants):
+    tid, _ = two_tenants
+    await contratar(admin_session, tid, ["transporte"])
+    await admin_session.flush()
+    # Módulo é desativado na plataforma DEPOIS de contratado: o vínculo
+    # continua vivo em tenant_modulo. O admin precisa ver isso pra poder
+    # descontratar — não pra o módulo simplesmente sumir da tela.
+    await admin_session.execute(text(
+        "UPDATE aprimora_py.modulo SET ativo = false WHERE slug = 'transporte'"
+    ))
+    await admin_session.flush()
+    itens = await modulos_do_tenant(admin_session, tid)
+    por_slug = {m["slug"]: m for m in itens}
+    assert "transporte" in por_slug, "módulo inativo sumiu da listagem do admin"
+    assert por_slug["transporte"]["ativo"] is False
+    assert por_slug["transporte"]["contratado"] is True, (
+        "contrato existente não pode desaparecer só porque o módulo foi desativado"
+    )
+    await admin_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_contratar_recusa_modulo_inativo(admin_session, two_tenants):
+    tid, _ = two_tenants
+    await admin_session.execute(text(
+        "UPDATE aprimora_py.modulo SET ativo = false WHERE slug = 'administracao'"
+    ))
+    await admin_session.flush()
+    with pytest.raises(ValueError):
+        await contratar(admin_session, tid, ["administracao"])
+    await admin_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_contratar_permite_descontratar_modulo_inativo(admin_session, two_tenants):
+    tid, _ = two_tenants
+    await contratar(admin_session, tid, ["transporte"])
+    await admin_session.flush()
+    await admin_session.execute(text(
+        "UPDATE aprimora_py.modulo SET ativo = false WHERE slug = 'transporte'"
+    ))
+    await admin_session.flush()
+    # Descontratar (tirar da lista alvo) tem que funcionar mesmo com o
+    # módulo inativo — só CONTRATAR um inativo é que é recusado.
+    await contratar(admin_session, tid, [])
+    await admin_session.flush()
+    excluido = (await admin_session.execute(text(
+        "SELECT tm.excluido FROM aprimora_py.tenant_modulo tm "
+        "JOIN aprimora_py.modulo m ON m.id = tm.id_modulo "
+        "WHERE tm.tenant_id = :t AND m.slug = 'transporte'"
+    ), {"t": tid})).scalar_one()
+    assert excluido is True, "descontratar não marcou excluido no vínculo do módulo inativo"
+    await admin_session.rollback()
