@@ -200,6 +200,7 @@ async def listar_modulos(
     _: Usuario = Depends(require_platform_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[ModuloAdminOut]:
+    await _get_tenant(db, tenant_id)  # 404 antes de expor catálogo de tenant inexistente
     return [ModuloAdminOut(**m) for m in await modulos_do_tenant(db, tenant_id)]
 
 
@@ -207,12 +208,17 @@ async def listar_modulos(
 async def definir_modulos(
     tenant_id: int,
     payload: ContratacaoIn,
-    _: Usuario = Depends(require_platform_admin),
+    current: Usuario = Depends(require_platform_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[ModuloAdminOut]:
+    await _get_tenant(db, tenant_id)  # 404 antes de gravar TenantModulo órfão (violaria a FK)
     try:
         await contratar(db, tenant_id, payload.slugs)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await audit_log(
+        db, tenant_id=tenant_id, id_usuario=current.id, acao="tenant.modulos_definidos",
+        entidade="tenant", id_entidade=tenant_id, payload={"slugs": sorted(payload.slugs)},
+    )
     await db.commit()
     return [ModuloAdminOut(**m) for m in await modulos_do_tenant(db, tenant_id)]

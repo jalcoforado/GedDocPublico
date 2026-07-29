@@ -13,7 +13,11 @@ na allowlist via `PLATFORM_ADMIN_EMAILS` monkeypatchada).
 
 `tenant_id_default` ancora no tenant `sobral`: é o único tenant com o
 backfill de 5 módulos contratados garantido pela migration 0073 (mesmo
-motivo documentado em `test_modulos_me.py`).
+motivo documentado em `test_modulos_me.py`). Só o teste read-only
+(`test_platform_admin_lista_catalogo`) usa essa fixture — o teste que
+escreve (`test_descontratar_e_recontratar`) roda em tenant isolado da
+fixture `two_tenants` de `conftest.py`, para não deixar `sobral` num estado
+quebrado para o resto da suíte se uma asserção falhar no meio do teste.
 """
 from types import SimpleNamespace
 
@@ -74,7 +78,9 @@ async def client_plataforma(monkeypatch):
     monkeypatch.setenv("PLATFORM_ADMIN_EMAILS", "plataforma@aprimora.test")
 
     async def _get_user():
-        return SimpleNamespace(email="plataforma@aprimora.test", must_change_password=False)
+        # id=None (não amarrado a nenhum utils.usuario real): id_usuario em
+        # audit_log é nullable exatamente para aceitar isso sem violar FK.
+        return SimpleNamespace(id=None, email="plataforma@aprimora.test", must_change_password=False)
 
     app.dependency_overrides[get_current_user] = _get_user
     transport = ASGITransport(app=app)
@@ -102,10 +108,45 @@ async def test_platform_admin_lista_catalogo(client_plataforma, tenant_id_defaul
     assert all(i["contratado"] for i in itens), "backfill deveria ter contratado tudo"
 
 
+@pytest_asyncio.fixture
+async def two_tenants_com_audit_limpo(admin_engine, two_tenants):
+    """`two_tenants`, mas apagando `aprimora_py.audit_log` e
+    `aprimora_py.tenant_modulo` no teardown ANTES do teardown de
+    `two_tenants` (fixtures desfazem na ordem inversa da montagem — como
+    esta pede `two_tenants`, ela é montada por último e desmontada
+    primeiro). `definir_modulos` agora grava auditoria (Important 2 da
+    revisão) e o próprio PUT grava `tenant_modulo`; a limpeza de
+    `two_tenants` em `conftest.py` não conhece nenhuma das duas tabelas —
+    sem isto, o `DELETE FROM aprimora_py.tenant` do teardown de
+    `two_tenants` bate nas FKs `audit_log_tenant_id_fkey` /
+    `tenant_modulo_tenant_id_fkey` e o teste termina em erro mesmo
+    passando."""
+    yield two_tenants
+    tid_a, tid_b = two_tenants
+    async with _sm(admin_engine)() as s:
+        await s.execute(
+            text("DELETE FROM aprimora_py.audit_log WHERE tenant_id IN (:a, :b)"),
+            {"a": tid_a, "b": tid_b},
+        )
+        await s.execute(
+            text("DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id IN (:a, :b)"),
+            {"a": tid_a, "b": tid_b},
+        )
+        await s.commit()
+
+
 @pytest.mark.asyncio
-async def test_descontratar_e_recontratar(client_plataforma, tenant_id_default):
+async def test_descontratar_e_recontratar(client_plataforma, two_tenants_com_audit_limpo):
+    """Em tenant isolado (`two_tenants`), não no `sobral` compartilhado — este
+    teste ESCREVE (PUT), e se uma asserção falhar entre os dois PUTs a
+    restauração nunca roda. Num tenant descartável isso é inofensivo; no
+    `sobral` deixaria o backfill de módulos quebrado para toda a suíte
+    (inclusive test_modulos_me.py) em execuções seguintes. Não depende do
+    backfill da migration 0073: já sobrescreve a lista inteira de slugs no
+    primeiro PUT."""
+    tenant_id, _ = two_tenants_com_audit_limpo
     r = await client_plataforma.put(
-        f"/api/v2/admin/tenants/{tenant_id_default}/modulos",
+        f"/api/v2/admin/tenants/{tenant_id}/modulos",
         json={"slugs": ["protocolo", "frota", "transporte", "administracao"]},
     )
     assert r.status_code == 200
@@ -113,7 +154,7 @@ async def test_descontratar_e_recontratar(client_plataforma, tenant_id_default):
     assert por_slug["pagamentos"] is False
 
     r = await client_plataforma.put(
-        f"/api/v2/admin/tenants/{tenant_id_default}/modulos",
+        f"/api/v2/admin/tenants/{tenant_id}/modulos",
         json={"slugs": ["protocolo", "pagamentos", "frota", "transporte", "administracao"]},
     )
     assert all(i["contratado"] for i in r.json())
@@ -135,3 +176,25 @@ async def test_comum_nao_pode_ser_contratado(client_plataforma, tenant_id_defaul
         json={"slugs": ["comum"]},
     )
     assert r.status_code == 400
+
+
+TENANT_INEXISTENTE = 999999999
+
+
+@pytest.mark.asyncio
+async def test_listar_tenant_inexistente_e_404(client_plataforma):
+    r = await client_plataforma.get(f"/api/v2/admin/tenants/{TENANT_INEXISTENTE}/modulos")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_definir_tenant_inexistente_e_404(client_plataforma):
+    """Sem o 404 antecipado, `contratar()` chegaria a dar `db.add(TenantModulo(
+    tenant_id=<inexistente>, ...))` — no commit isso viola a FK para
+    `aprimora_py.tenant.id` e levanta `IntegrityError`, não `ValueError`, o
+    que escaparia do `except` do endpoint e viraria 500 não tratado."""
+    r = await client_plataforma.put(
+        f"/api/v2/admin/tenants/{TENANT_INEXISTENTE}/modulos",
+        json={"slugs": ["protocolo"]},
+    )
+    assert r.status_code == 404
