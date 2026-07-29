@@ -29,6 +29,7 @@ from ..models import (
     ModuloTransacao,
     Nivel,
     Sistema,
+    SistemaTransacao,
     Tenant,
     Transacao,
     Usuario,
@@ -64,6 +65,47 @@ MODULO_TRANSACOES: dict[str, tuple[str, ...]] = {
     "administracao": ("usuario", "unidadeTrabalho", "configuracao"),
     "comum": ("dashboard",),
 }
+
+
+async def garantir_sistema_transacao(db: AsyncSession) -> int:
+    """Liga ao sistema do app toda transação que os módulos declaram.
+
+    Sem esse vínculo o ramo de super-usuário do `load_permissions` devolve
+    lista vazia — ele consulta `sistema_transacao`, não `transacao`. Só as
+    transações declaradas em MODULO_TRANSACOES são ligadas: `utils.transacao`
+    pode conter códigos do PHP legado que não são nossos.
+    """
+    sistema = (
+        await db.execute(select(Sistema).where(Sistema.app == APP, Sistema.excluido.is_(False)))
+    ).scalars().first()
+    if sistema is None:
+        raise RuntimeError(f"Nenhum utils.sistema com app='{APP}' — o seed roda fora de ordem.")
+
+    declarados = {c for codigos in MODULO_TRANSACOES.values() for c in codigos}
+    transacoes = {
+        t.codigo: t.id
+        for t in (await db.execute(
+            select(Transacao).where(
+                Transacao.excluido.is_(False), Transacao.codigo.in_(declarados)
+            )
+        )).scalars().all()
+    }
+    ja_ligadas = set((await db.execute(
+        select(SistemaTransacao.id_transacao).where(
+            SistemaTransacao.id_sistema == sistema.id,
+            SistemaTransacao.excluido.is_(False),
+        )
+    )).scalars().all())
+
+    criados = 0
+    for id_transacao in transacoes.values():
+        if id_transacao in ja_ligadas:
+            continue
+        db.add(SistemaTransacao(
+            id_sistema=sistema.id, id_transacao=id_transacao, excluido=False
+        ))
+        criados += 1
+    return criados
 
 
 async def semear_modulos(db: AsyncSession) -> dict:
@@ -278,12 +320,14 @@ async def seed(db: AsyncSession) -> dict:
                  "t": texto},
             )
 
+    vinculos_sistema = await garantir_sistema_transacao(db)
     resultado_modulos = await semear_modulos(db)
 
     return {
         "tenant_id": tenant_id,
         "usuario_id": usuario.id,
         "is_super": True,
+        "vinculos_sistema": vinculos_sistema,
         "modulos": resultado_modulos,
     }
 
