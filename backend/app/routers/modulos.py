@@ -12,7 +12,6 @@ from ..auth.deps import get_current_user, require_tenant_id
 from ..database import get_db
 from ..models import Modulo, ModuloTransacao, Transacao, Usuario
 from ..schemas.modulo import ModuloOut, ModulosMeResponse
-from ..services.modulos import slugs_contratados
 from ..services.permissoes import load_permissions
 
 router = APIRouter(prefix="/modulos", tags=["modulos"])
@@ -24,11 +23,17 @@ async def me(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> ModulosMeResponse:
-    disponiveis = await slugs_contratados(db, tenant_id)
     perms = await load_permissions(db, user.id, tenant_id=tenant_id)
     codigos = {p.codigo for p in perms.items}
 
-    # Slug -> códigos de transação daquele módulo.
+    # Slug -> códigos de transação daquele módulo. Não recontrola contratação
+    # aqui via slugs_contratados(): load_permissions() já descartou de `items`
+    # (via codigos_bloqueados) todo código ligado a QUALQUER módulo não
+    # disponível — mesmo quando o código também está ligado a outro módulo
+    # disponível, codigos_bloqueados() o marca como bloqueado (é um EXISTS
+    # sobre todos os vínculos do código, não um ALL). Logo, se `codigo in
+    # codigos`, o módulo desta linha necessariamente está disponível — a
+    # checagem `modulo.slug not in disponiveis` seria sempre falsa aqui.
     linhas = (await db.execute(
         select(Modulo, Transacao.codigo)
         .join(ModuloTransacao, ModuloTransacao.id_modulo == Modulo.id)
@@ -39,8 +44,6 @@ async def me(
 
     vistos: dict[str, Modulo] = {}
     for modulo, codigo in linhas:
-        if modulo.slug not in disponiveis:
-            continue
         if codigo in codigos and modulo.slug not in vistos:
             vistos[modulo.slug] = modulo
 
