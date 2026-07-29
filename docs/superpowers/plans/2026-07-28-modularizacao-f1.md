@@ -941,8 +941,9 @@ git commit -m "fix(rbac): cria as 9 transações que os routers exigem e liga to
     os não-contratáveis (`comum`), que são implícitos e nunca bloqueados.
   - `async def codigos_bloqueados(db, tenant_id: int) -> set[str]` — códigos de transação
     pertencentes a módulos **não** contratados. É o que `load_permissions` usa.
-  - `async def modulos_do_tenant(db, tenant_id: int) -> list[Modulo]` — catálogo com flag de
-    contratação, para o admin de plataforma.
+  - `async def modulos_do_tenant(db, tenant_id: int) -> list[dict]` — catálogo contratável com as
+    chaves `id, slug, nome, icone, ordem, contratado, ativo`, para o admin de plataforma. Lista
+    também os inativos, para o admin não perder de vista um contrato vivo.
   - `async def contratar(db, tenant_id: int, slugs: list[str]) -> None` — reconcilia: contrata os
     ausentes, marca `excluido=True` nos que saíram. Nunca apaga dado de negócio.
 
@@ -1097,8 +1098,17 @@ async def codigos_bloqueados(db: AsyncSession, tenant_id: int) -> set[str]:
     (spec §3, D8). O teste test_toda_transacao_tem_modulo garante que o
     esquecimento apareça no CI em vez de virar tela sumida em produção.
     """
-    # Nunca vazio: os não-contratáveis ('comum') estão sempre lá.
     disponiveis = await slugs_contratados(db, tenant_id)
+    # NÃO confie em "nunca vem vazio". `Modulo.slug.not_in(set())` compila para
+    # uma cláusula sempre-verdadeira (`OR 1=1`): com o conjunto vazio o WHERE
+    # deixa de filtrar e a função devolve TODOS os códigos — o fail-open vira
+    # fail-closed sistêmico, sem exceção e sem log. Falhe alto.
+    if not disponiveis:
+        raise RuntimeError(
+            f"Nenhum módulo disponível para o tenant {tenant_id} — nem os "
+            "não-contratáveis. Catálogo corrompido (verifique se 'comum' existe "
+            "e está ativo). Abortando em vez de bloquear tudo silenciosamente."
+        )
     stmt = (
         select(Transacao.codigo)
         .join(ModuloTransacao, ModuloTransacao.id_transacao == Transacao.id)
@@ -1109,11 +1119,17 @@ async def codigos_bloqueados(db: AsyncSession, tenant_id: int) -> set[str]:
 
 
 async def modulos_do_tenant(db: AsyncSession, tenant_id: int) -> list[dict]:
-    """Catálogo contratável com a flag de contratação do tenant. Para o admin."""
+    """Catálogo contratável com a flag de contratação do tenant. Para o admin.
+
+    Lista também os módulos **inativos**, de propósito: um módulo contratado
+    que depois vire inativo continua com linha viva em `tenant_modulo`, e o
+    admin precisa enxergá-lo para poder descontratar. Filtrar `ativo` aqui
+    esconderia um contrato existente da única tela que o gerencia.
+    """
     contratados = await slugs_contratados(db, tenant_id)
     modulos = (await db.execute(
         select(Modulo)
-        .where(Modulo.contratavel.is_(True), Modulo.ativo.is_(True))
+        .where(Modulo.contratavel.is_(True))
         .order_by(Modulo.ordem)
     )).scalars().all()
     return [
@@ -1124,6 +1140,7 @@ async def modulos_do_tenant(db: AsyncSession, tenant_id: int) -> list[dict]:
             "icone": m.icone,
             "ordem": m.ordem,
             "contratado": m.slug in contratados,
+            "ativo": m.ativo,
         }
         for m in modulos
     ]
@@ -1137,6 +1154,8 @@ async def contratar(db: AsyncSession, tenant_id: int, slugs: list[str]) -> None:
     acesso, não destrói o que o módulo produziu.
     """
     alvo = set(slugs)
+    # Sem filtro de `ativo`: a descontratação precisa alcançar módulo inativo
+    # que ainda tenha contrato vivo. Contratar um inativo é barrado logo abaixo.
     catalogo = {
         m.slug: m
         for m in (await db.execute(
@@ -1146,6 +1165,10 @@ async def contratar(db: AsyncSession, tenant_id: int, slugs: list[str]) -> None:
     desconhecidos = alvo - set(catalogo)
     if desconhecidos:
         raise ValueError(f"Módulo inexistente ou não contratável: {sorted(desconhecidos)}")
+
+    inativos = {s for s in alvo if not catalogo[s].ativo}
+    if inativos:
+        raise ValueError(f"Módulo inativo não pode ser contratado: {sorted(inativos)}")
 
     vinculos = {
         v.id_modulo: v
@@ -1420,6 +1443,9 @@ class ModuloAdminOut(BaseModel):
     icone: str | None = None
     ordem: int
     contratado: bool
+    # `modulos_do_tenant` lista também o módulo inativo, para o admin não perder
+    # de vista um contrato vivo. Ver a correção da Task 4.
+    ativo: bool
 
 
 class ContratacaoIn(BaseModel):
