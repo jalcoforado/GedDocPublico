@@ -24,7 +24,9 @@ from ..schemas.admin_tenant import (
     AdminTenantOut,
     AdminTenantUpdate,
 )
+from ..schemas.modulo import ContratacaoIn, ModuloAdminOut
 from ..services.audit import log as audit_log
+from ..services.modulos import contratar, modulos_do_tenant
 from ..services.provisioning_tenant import (
     ProvisioningError,
     SlugIndisponivelError,
@@ -190,3 +192,27 @@ async def desativar_tenant(
     db: AsyncSession = Depends(get_db),
 ) -> AdminTenantOut:
     return _to_out(await _set_ativo(db, tenant_id, False, current.id))
+
+
+@router.get("/admin/tenants/{tenant_id}/modulos", response_model=list[ModuloAdminOut])
+async def listar_modulos(
+    tenant_id: int,
+    _: Usuario = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[ModuloAdminOut]:
+    return [ModuloAdminOut(**m) for m in await modulos_do_tenant(db, tenant_id)]
+
+
+@router.put("/admin/tenants/{tenant_id}/modulos", response_model=list[ModuloAdminOut])
+async def definir_modulos(
+    tenant_id: int,
+    payload: ContratacaoIn,
+    _: Usuario = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[ModuloAdminOut]:
+    try:
+        await contratar(db, tenant_id, payload.slugs)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await db.commit()
+    return [ModuloAdminOut(**m) for m in await modulos_do_tenant(db, tenant_id)]
