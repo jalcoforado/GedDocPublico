@@ -127,13 +127,13 @@ async def require_acesso_processo(
 
     404 em vez de 403 pra não vazar a existência de processo sigiloso.
 
-    Efeito colateral aceito (achado na revisão da Task 2, 2026-07-30): nas 7
+    Efeito colateral aceito (achado na revisão da Task 2, 2026-07-30): nas 8
     rotas deste arquivo que combinam `dependencies=[Depends(require_acesso_processo),
     Depends(require_modulo("protocolo"))]`, este check roda PRIMEIRO — então
     tenant sem `protocolo` contratado recebe 404 aqui (não o 403 das outras
-    51 rotas gateadas). A ordem da lista não muda o resultado por acaso: é a
+    50 rotas gateadas). A ordem da lista não muda o resultado por acaso: é a
     ordem de resolução do FastAPI. Aceito por ora; não reordenar sem entender
-    que isso troca 404 por 403 nessas 7 rotas.
+    que isso troca 404 por 403 nessas 8 rotas.
     """
     # Delega ao helper reaproveitável de sigilo (mesma lógica de acesso a
     # processo usada também pelos endpoints de assinatura).
