@@ -5,8 +5,6 @@ nenhuma continua lendo, desde que o tenant tenha o módulo. Se algum dia alguém
 "melhorar" a dependência para também exigir permissão, esse teste reprova — e é
 o único aviso de que a fatia mudou de natureza.
 """
-import uuid
-
 import pytest
 from fastapi import HTTPException
 
