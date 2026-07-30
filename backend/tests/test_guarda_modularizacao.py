@@ -176,46 +176,101 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
 
 
 ENDPOINTS_LEITURA_SEM_GATE: set[tuple[str, str]] = {
-    # DÍVIDA REGISTRADA, não absolvição. Estes endpoints PERTENCEM a um módulo
-    # e hoje não têm gate porque os routers da geração protocolo seguem uma
-    # convenção anterior à modularização: *escrita gateada, leitura liberada a
-    # qualquer usuário autenticado do tenant*. Verificado router a router —
-    # todo POST/PUT/DELETE vizinho exige `require_permission` com o código do
-    # módulo, e nenhum GET exige. Os módulos novos (pagamentos, frota,
-    # transporte) já gateiam leitura também: nenhum deles aparece aqui.
+    # DECISÕES REGISTRADAS, não dívida. Até 2026-07-30 esta lista tinha 76
+    # entradas: GETs que pertenciam a um módulo e não tinham gate porque os
+    # routers da geração protocolo seguem uma convenção anterior à
+    # modularização — *escrita gateada, leitura liberada a qualquer usuário
+    # autenticado do tenant*. Nesta fatia (2026-07-30-leitura-por-modulo), a
+    # Task 2 deu `require_modulo("protocolo")` a 58 delas e a Task 3 deu
+    # `require_modulo("administracao")` a outras 12; as 70 saíram daqui no
+    # mesmo commit que as gateou (o destino de cada uma está em
+    # ROTAS_POR_MODULO, mais abaixo).
     #
-    # Consequência real do que está registrado abaixo: tenant sem o módulo
-    # contratado continua LENDO os dados do módulo. Fechar isso é mudança de
-    # política de produto — tira leitura de quem tem hoje — e por isso ficou
-    # fora da Task 8, que entrega as guardas.
-    #
-    # O código anotado em cada grupo é o que o endpoint deve receber quando a
-    # dívida for paga. Ao gatear um item, REMOVA-O daqui: a guarda de higiene
-    # abaixo reprova entrada obsoleta.
+    # Sobram estas 6, e elas NÃO vão ganhar gate — não é trabalho que falta
+    # terminar. É a conclusão de que cada uma delas não pertence a um módulo
+    # só: ou o consumo real é cruzado (gatear com o slug de um quebraria os
+    # outros que a consomem), ou é decisão humana de que o recurso é do
+    # sistema, não do módulo. `test_endpoints_leitura_sem_gate_nao_cresce_sem_decisao`,
+    # mais abaixo, trava o tamanho e o conteúdo exatos desta lista — leia o
+    # docstring dele antes de acrescentar ou remover uma entrada.
 
-    # Task 2 (2026-07-30) pagou a dívida `protocolo`: as 58 rotas que estavam
-    # aqui (processo/catalogo/assunto/manifestante/cidade/endereco/workflow +
-    # relatórios + `/catalogo/prioridades`, que mudou de dono) ganharam
-    # `require_modulo("protocolo")` no mesmo commit. Task 3 (2026-07-30) pagou
-    # a dívida `administracao`: as 12 rotas de grupos/catalogo/jobs/organograma
-    # ganharam `require_modulo("administracao")` no mesmo commit. Fica só a
-    # transversal: `busca`.
+    # Recurso do sistema, não de módulo (decisão humana, 2026-07-30). Hoje
+    # varre só processos, mas o índice vai crescer para outros módulos; um
+    # gate de `protocolo` já nasceria errado para a próxima fatia que o
+    # ampliar.
     ("GET", "/api/v2/busca"),
 
-    # administracao / código `usuario`
+    # Transversal: consumo cruzado comprovado por 3 módulos — protocolo
+    # (relatório de assinaturas, `AssinaturasProcesso`), transporte (alvarás)
+    # e administração. Usuário é gente; todo módulo referencia gente para
+    # exibir quem fez o quê. Gatear com `administracao` daria 403 em
+    # protocolo e transporte, que não têm esse módulo contratado.
     ("GET", "/api/v2/usuarios"),
     ("GET", "/api/v2/usuarios/{usuario_id}"),
 
-    # administracao / código `unidadeTrabalho`
+    # Transversal: consumo cruzado comprovado por 4 módulos — administração,
+    # frota (motoristas, solicitações, veículos) e protocolo (processos,
+    # relatórios, tramitação, serviços, `AcoesProcesso`). Unidade de trabalho
+    # é o organograma da prefeitura: mesmo raciocínio de `/usuarios`, mesmo
+    # risco de quebrar frota e protocolo se gateada com `administracao`.
     ("GET", "/api/v2/unidades-trabalho"),
     ("GET", "/api/v2/unidades-trabalho/{unidade_id}"),
 
-    # Transversal (mapa-rotas.md): compliance registra ações de todos os
-    # módulos, não só administracao. Ficou agrupada com o catálogo de
-    # administração no comentário antigo por engano; o mapa é a fonte de
-    # verdade.
+    # Transversal por decisão humana (2026-07-30): compliance registra ações
+    # de TODOS os módulos, não só administracao. Uma prefeitura sob guarda
+    # legal não pode perder a leitura da própria trilha de auditoria por não
+    # ter contratado o módulo administração.
     ("GET", "/api/v2/audit"),
 }
+
+
+# Snapshot exato da decisão da Task 4 (2026-07-30) — não é uma contagem, é a
+# lista completa. Ver test_endpoints_leitura_sem_gate_nao_cresce_sem_decisao,
+# logo abaixo, para o porquê de comparar o conjunto inteiro em vez de só o
+# tamanho.
+ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS: frozenset[tuple[str, str]] = frozenset({
+    ("GET", "/api/v2/busca"),
+    ("GET", "/api/v2/usuarios"),
+    ("GET", "/api/v2/usuarios/{usuario_id}"),
+    ("GET", "/api/v2/unidades-trabalho"),
+    ("GET", "/api/v2/unidades-trabalho/{unidade_id}"),
+    ("GET", "/api/v2/audit"),
+})
+
+
+def test_endpoints_leitura_sem_gate_nao_cresce_sem_decisao():
+    """ENDPOINTS_LEITURA_SEM_GATE só muda junto com ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS.
+
+    Diferente de `test_allowlist_nao_tem_entrada_obsoleta` (que pega entrada
+    que já ganhou gate e devia ter saído), este teste pega o caso oposto:
+    entrada NOVA aparecendo aqui sem que ninguém tenha registrado por que ela
+    é transversal permanente, e não só mais um GET que ainda não foi gateado.
+
+    Se este teste falhar porque você ACRESCENTOU uma entrada: pare antes de
+    "corrigir" o teste. Volte ao escopo aprovado
+    (docs/superpowers/specs/2026-07-30-leitura-por-modulo-escopo.md) e decida,
+    com o dono do produto, se o endpoint tem consumo cruzado comprovado por
+    módulo ou é decisão humana explícita de recurso do sistema. Se sim,
+    escreva a razão como comentário ao lado da entrada, ali em cima, E
+    acrescente a mesma entrada em ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS — as
+    duas mudam no mesmo commit. Se não for nenhum dos dois casos, o endpoint
+    não pertence a esta lista: ele precisa de `require_modulo`.
+
+    Se este teste falhar porque você REMOVEU uma entrada (por exemplo: ela
+    ganhou `require_modulo` porque deixou de ser transversal): isso é
+    esperado e correto, não um obstáculo. Tire a entrada também de
+    ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS aqui embaixo. O teste não protege a
+    lista contra encolher — só exige que crescer ou encolher seja visível e
+    deliberado no diff do PR, nunca um efeito colateral silencioso.
+    """
+    assert ENDPOINTS_LEITURA_SEM_GATE == ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS, (
+        "ENDPOINTS_LEITURA_SEM_GATE divergiu do snapshot decidido na Task 4. "
+        f"Adicionadas sem decisão registrada: "
+        f"{sorted(ENDPOINTS_LEITURA_SEM_GATE - ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS)}. "
+        f"Removidas do snapshot mas ainda na lista: "
+        f"{sorted(ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS - ENDPOINTS_LEITURA_SEM_GATE)}. "
+        "Leia o docstring deste teste antes de editar qualquer um dos dois conjuntos."
+    )
 
 
 # Origem exata das closures que fazem o enforcement. `require_permission` e
