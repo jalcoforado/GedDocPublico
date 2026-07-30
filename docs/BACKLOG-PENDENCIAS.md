@@ -54,6 +54,115 @@
 
 ## 1. Curto prazo — itens concretos em aberto
 
+### 1.0 Deriva de `APP_NAME` no ambiente de dev — RBAC apontando para o sistema errado
+
+*(Descoberto em 2026-07-28, durante a fatia F1 da modularização.)*
+
+- `utils.sistema` tem **duas** linhas: `Aprimora` (`app = 'aprimora'`, id 1) e `Sistemas`
+  (`app = 'sistemas'`, id 2).
+- O container `aprimora-py-backend` em execução tem `APP_NAME=aprimora`, mas o
+  `docker-compose.yml` **versionado** e o default de `backend/app/config.py` dizem `sistemas`.
+- Todo o RBAC do ambiente local (grupos, `usuario_grupo`, `sistema_transacao`) foi construído sob
+  `aprimora`. **Um `docker compose up -d` que recrie o container realinha para `sistemas` e derruba
+  as permissões do admin local** — `load_permissions` filtra grupos por `Sistema.app == app_name`.
+- É a mesma classe de bug que o `CLAUDE.md` registra como já tendo causado 403 geral em todo tenant
+  provisionado.
+- **Consequência já visível:** explica a falha de
+  `tests/test_pr5a_dashboard_servicos.py::test_http_dashboard_com_perm_acessa`, que estava sendo
+  tratada como "pré-existente inexplicada".
+- Não investigado: qual é o estado na VPS de homologação. **Verificar lá antes de decidir o
+  conserto** — se produção estiver sob `sistemas`, o errado é só o container local; se estiver sob
+  `aprimora`, a correção envolve migrar dados.
+
+### 1.0.5 Leitura de módulo sem gate de permissão — a contratação é meia barreira
+
+*(Descoberto em 2026-07-29, pela varredura de endpoints da fatia F1 da modularização. Jorge decidiu
+tratar em **fatia própria depois do F1**.)*
+
+- A varredura cobriu **136 endpoints** sob `/api/v2`. Destes, **76 GETs pertencem a um módulo e não
+  têm gate de permissão nenhum** — só `get_current_user`.
+- **Não é esquecimento pontual, é convenção sistemática:** os routers da geração protocolo seguem
+  *escrita gateada, leitura liberada a qualquer autenticado do tenant*. Pagamentos, frota e
+  transporte gateiam as duas pontas e não têm o problema (só o `minha-fila`, já corrigido na F1).
+- **Consequência para a modularização:** um tenant que **não contratou** um módulo continua
+  conseguindo **ler** os dados dele pela API. A escrita está barrada pelo gate da F1; a leitura, não.
+  A contratação, portanto, é meia barreira até isso fechar.
+- A lista está viva e vigiada em `backend/tests/test_guarda_modularizacao.py`, no conjunto
+  `ENDPOINTS_LEITURA_SEM_GATE`, **com o código de permissão que cada endpoint deveria receber**. Há
+  um teste (`test_allowlist_nao_tem_entrada_obsoleta`) que reprova o PR se a lista apodrecer — então
+  a dívida não cresce em silêncio nem parece do mesmo tamanho depois de paga.
+- **Estimativa a confirmar:** ~55 expõem dado de negócio; ~21 são catálogos de lookup (estados,
+  cidades, tipos) onde fechar é discutível.
+- **Por que não foi feito na F1:** fechar tira leitura de quem tem hoje — usuário sem a transação
+  concedida passa a levar 403. É mudança de política de acesso para usuário real, não refactor. E
+  fazer isso enquanto a suíte tinha 8 regressões conhecidas impediria distinguir quebra nova de
+  herdada.
+- **Ao retomar:** auditar os 76 por sensibilidade do dado exposto antes de fechar qualquer um. O
+  `ENDPOINTS_LEITURA_SEM_GATE` já traz o código sugerido por endpoint — é o ponto de partida, não a
+  decisão.
+
+### 1.0.6 `/notificacoes/whatsapp-test` sem autorização — qualquer autenticado do tenant dispara
+
+*(Levantado em 2026-07-30 pelo review da fatia F1. **Não é regressão da F1**: `main` tem o mesmo
+`Depends(get_current_user)` e nada mais — verificado em `git show main:`. A F1 chegou a fechar de
+passagem e devolveu ao original, porque o único código de permissão disponível acoplava o endpoint
+ao módulo errado.)*
+
+- `POST /api/v2/notificacoes/whatsapp-test` (`backend/app/routers/notificacoes.py:164`) dispara envio
+  de WhatsApp para **telefone arbitrário do payload**, usando a credencial paga do tenant. Exige
+  apenas estar autenticado — o usuário de menor privilégio do tenant consegue. É vetor de custo e de
+  abuso, não só de vazamento.
+- **Por que a F1 não fechou:** o único código de transação vizinho é `configuracao`, que pertence ao
+  módulo `administracao`. Gatear com ele daria 403 no endpoint para tenant que tem `protocolo` e não
+  tem `administracao` — trocaria um defeito por outro. Não existe transação de notificação em
+  `utils.transacao` (verificado por query), e criar uma exige migration **mais** concessão aos grupos
+  existentes, senão o endpoint passa a dar 403 para todo mundo.
+- **O sujeito certo não existe ainda:** o correto seria "super-usuário **do tenant**".
+  `require_platform_admin` é sujeito errado (é da plataforma, opera sobre outros tenants) e
+  `require_permission` precisa de um código que ainda não há.
+- **Ao retomar:** decidir entre (a) criar a transação `notificacao` vinculada ao módulo `comum` e
+  conceder aos grupos administrativos na mesma migration, ou (b) introduzir a dependência de
+  super-usuário do tenant, que serve a outros endpoints de operação além deste. A (b) é mais
+  trabalho e resolve uma classe; a (a) fecha só este.
+- Enquanto aberto, o endpoint está listado em `ENDPOINTS_TRANSVERSAIS` em
+  `backend/tests/test_guarda_modularizacao.py` — ou seja, a guarda **não** vai reclamar dele. A
+  vigilância é este item, não o teste.
+
+### 1.0.7 As 9 transações da 0074 não estão concedidas a nenhum grupo
+
+*(Levantado em 2026-07-30 pelo review final da F1. Decisão: **fica documentado, não automatizado** —
+ver abaixo por que uma migration de concessão não é escrevível sem definir política de acesso.)*
+
+A migration `0074` criou 9 transações (`processo`, `usuario`, `catalogo`, `assunto`, `manifestante`,
+`cidade`, `endereco`, `workflow`, `unidadeTrabalho`) e a Task 8 gateou 13 endpoints sobre `processo`
+e `workflow` — entre eles `routers/workflow.py:479` (transicionar, usado pelo
+`ProcessoWorkflowPanel.tsx`) e os 4 disparos de job em `routers/jobs.py`. Nenhuma dessas transações
+tem linha em `utils.grupo_transacao`.
+
+- **Não afeta ninguém hoje**, e não por sorte: `is_super_usuario` é `nivel.valor == 0`
+  (`services/permissoes.py:92`), o ramo de SU lê `utils.sistema_transacao` e **não**
+  `grupo_transacao`, e no banco existem **zero** grupos com `nivel.valor <> 0` (verificado por
+  query). Todo grupo do sistema é super-usuário.
+- **Aparece no dia em que o primeiro grupo "Operacional" (nível 1) for criado.** Nesse momento, quem
+  cria o grupo escolhe as transações dele — é o passo já documentado em `RUNBOOK.md`.
+- **Por que não virou migration:** concessão em bloco **abriria** acesso em vez de preservar. As 9
+  transações são novas, então nenhum grupo as tinha; endpoints antigos gateados em `processo,excluir`
+  já eram 403 para não-SU antes da branch. Conceder tudo daria a um Operacional o poder de excluir
+  processo, que ele nunca teve. Escrever a migration correta exige decidir, código por código e ação
+  por ação, quem passa a poder o quê — isso é política de acesso, decisão do dono do produto.
+- **A verificar antes de criar grupo não-SU na VPS:** a apuração acima é do banco **local**. Rodar lá
+  `SELECT count(*) FROM utils.grupo g JOIN utils.nivel n ON n.id=g.id_nivel WHERE n.valor <> 0` — se
+  houver grupo não-SU, existe usuário real perdendo acesso nesses 13 endpoints, e aí a concessão
+  deixa de ser hipótese.
+
+### 1.1.5 Suíte não estava verde antes do F1
+
+Duas falhas confirmadas como anteriores à branch `feat/modularizacao-f1` (verificado por
+`git stash`): `test_jwt_compat.py::test_emitted_token_has_required_claims` e
+`test_pr5a_dashboard_servicos.py::test_http_dashboard_com_perm_acessa` (esta última explicada pelo
+item 1.0 acima). O CI em `main` reporta verde, então a divergência é entre ambiente local e CI —
+provavelmente a mesma deriva de env.
+
 Nenhum. Os quatro itens desta seção foram fechados em 2026-07-28 (ver nota acima).
 
 ---

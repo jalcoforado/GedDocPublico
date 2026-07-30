@@ -8,6 +8,10 @@ Idempotente. Cria (get_or_create):
   5. Segredo KEY_LOGIN_GLOBAL_JWT em utils.sistema_constante
   6. Catálogo global protocolos.acao (ABERTURA/ENCAMINHAMENTO/RECEBIMENTO) —
      sem ele não se abre nem tramita processo
+  7. Contratação inicial de módulos do tenant (aprimora_py.tenant_modulo) —
+     só se o tenant não tiver NENHUMA linha ainda; não ressuscita
+     descontratação deliberada do platform admin (ver
+     garantir_contratacao_inicial)
 
 Uso: docker exec aprimora-py-backend python -m app.cli.seed_bootstrap
 """
@@ -23,7 +27,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.password import hash_password
 from ..config import get_settings
 from ..database import SessionLocal
-from ..models import Grupo, Nivel, Sistema, Tenant, Usuario, UsuarioGrupo
+from ..models import (
+    Grupo,
+    Modulo,
+    ModuloTransacao,
+    Nivel,
+    Sistema,
+    SistemaTransacao,
+    Tenant,
+    TenantModulo,
+    Transacao,
+    Usuario,
+    UsuarioGrupo,
+)
+from ..services.modulos import contratar_modulos_iniciais
 
 APP = get_settings().app_name
 
@@ -34,6 +51,148 @@ TENANT_SLUG = "sobral"
 
 async def _set_local_tenant(db: AsyncSession, tenant_id: int) -> None:
     await db.execute(text(f"SET LOCAL app.tenant_id = {int(tenant_id)}"))
+
+
+# Mapa módulo -> códigos de transação. Ponto de partida; a autoridade é o teste
+# test_toda_transacao_tem_modulo (tests/test_guarda_modularizacao.py), que
+# reprova o PR se sobrar transação do nosso sistema fora daqui.
+MODULO_TRANSACOES: dict[str, tuple[str, ...]] = {
+    "protocolo": (
+        "processo", "catalogo", "assunto", "manifestante", "servico",
+        "minuta_template", "cidade", "endereco", "workflow",
+    ),
+    "pagamentos": (
+        "pagamento_cadastro", "pagamento_solicitar", "pagamento_autorizar",
+        "pagamento_pagar", "pagamento_aprovar", "pagamento_validar",
+        "pagamento_encaminhar", "pagamento_auditar",
+    ),
+    "frota": ("frota",),
+    "transporte": ("transporte_regulado",),
+    "administracao": ("usuario", "unidadeTrabalho", "configuracao"),
+    "comum": ("dashboard",),
+}
+
+
+async def garantir_sistema_transacao(db: AsyncSession) -> int:
+    """Liga ao sistema do app toda transação que os módulos declaram.
+
+    Sem esse vínculo o ramo de super-usuário do `load_permissions` devolve
+    lista vazia — ele consulta `sistema_transacao`, não `transacao`. Só as
+    transações declaradas em MODULO_TRANSACOES são ligadas: `utils.transacao`
+    pode conter códigos do PHP legado que não são nossos.
+    """
+    sistema = (
+        await db.execute(select(Sistema).where(Sistema.app == APP, Sistema.excluido.is_(False)))
+    ).scalars().first()
+    if sistema is None:
+        raise RuntimeError(f"Nenhum utils.sistema com app='{APP}' — o seed roda fora de ordem.")
+
+    declarados = {c for codigos in MODULO_TRANSACOES.values() for c in codigos}
+    transacoes = {
+        t.codigo: t.id
+        for t in (await db.execute(
+            select(Transacao).where(
+                Transacao.excluido.is_(False), Transacao.codigo.in_(declarados)
+            )
+        )).scalars().all()
+    }
+    ja_ligadas = set((await db.execute(
+        select(SistemaTransacao.id_transacao).where(
+            SistemaTransacao.id_sistema == sistema.id,
+            SistemaTransacao.excluido.is_(False),
+        )
+    )).scalars().all())
+
+    criados = 0
+    for id_transacao in transacoes.values():
+        if id_transacao in ja_ligadas:
+            continue
+        db.add(SistemaTransacao(
+            id_sistema=sistema.id, id_transacao=id_transacao, excluido=False
+        ))
+        criados += 1
+    return criados
+
+
+async def semear_modulos(db: AsyncSession) -> dict:
+    """Garante o catálogo de módulos e os vínculos com as transações.
+
+    Idempotente: roda a cada deploy. Código de transação que ainda não existe
+    em `utils.transacao` é ignorado em silêncio — o vínculo entra no próximo
+    deploy, depois que a transação for criada.
+    """
+    modulos = {
+        m.slug: m
+        for m in (await db.execute(select(Modulo))).scalars().all()
+    }
+    if not modulos:
+        raise RuntimeError(
+            "aprimora_py.modulo está vazia — rode `alembic upgrade head` "
+            "antes do seed (a migration 0073 popula o catálogo)."
+        )
+
+    transacoes = {
+        t.codigo: t.id
+        for t in (await db.execute(
+            select(Transacao).where(Transacao.excluido.is_(False))
+        )).scalars().all()
+    }
+
+    existentes = {
+        (row[0], row[1])
+        for row in (await db.execute(
+            select(ModuloTransacao.id_modulo, ModuloTransacao.id_transacao)
+        )).all()
+    }
+
+    criados = 0
+    for slug, codigos in MODULO_TRANSACOES.items():
+        modulo = modulos.get(slug)
+        if modulo is None:
+            continue
+        for codigo in codigos:
+            id_transacao = transacoes.get(codigo)
+            if id_transacao is None:
+                continue
+            if (modulo.id, id_transacao) in existentes:
+                continue
+            db.add(ModuloTransacao(id_modulo=modulo.id, id_transacao=id_transacao))
+            existentes.add((modulo.id, id_transacao))
+            criados += 1
+
+    return {"modulos": len(modulos), "vinculos": criados}
+
+
+async def garantir_contratacao_inicial(db: AsyncSession, tenant_id: int) -> list[str]:
+    """Contrata para o tenant todos os módulos contratáveis e ativos — mas
+    SÓ quando ele ainda não tiver NENHUMA linha em `aprimora_py.tenant_modulo`.
+
+    "Nenhuma linha" e não "nenhuma linha viva": esta função roda a cada
+    deploy (o seed inteiro é idempotente por design). Se contratasse sempre
+    que a lista de disponíveis estivesse vazia, ressuscitaria uma
+    descontratação DELIBERADA feita pelo platform admin — que fica
+    registrada como linha `excluido=true`/`ativo=false`, não como ausência
+    de linha. Checar "nenhuma linha viva" apagaria essa distinção e violaria
+    a garantia de `contratar()` (services/modulos.py) de que descontratar
+    suspende, não é revertido por trás.
+
+    Fechamento do Critical do review de branch: o backfill da migration
+    0073 é um `CROSS JOIN` sobre os tenants que já existem NO MOMENTO em
+    que ela roda. Em banco limpo — CI (`alembic upgrade head` antes de
+    qualquer tenant existir) e `scripts/bootstrap-db.sh` (mesma ordem) — o
+    backfill roda contra zero tenants, e nada depois contratava: tenant
+    novo nascia com `disponiveis = {'comum'}` e todo o resto bloqueado por
+    403, inclusive para o super-usuário (o gate de módulos roda antes do
+    bypass de SU). É este `seed_bootstrap` quem fecha a lacuna.
+    """
+    tem_alguma_linha = (
+        await db.execute(
+            select(TenantModulo.id).where(TenantModulo.tenant_id == tenant_id).limit(1)
+        )
+    ).first()
+    if tem_alguma_linha is not None:
+        return []
+    return await contratar_modulos_iniciais(db, tenant_id, None)
 
 
 async def seed(db: AsyncSession) -> dict:
@@ -199,7 +358,18 @@ async def seed(db: AsyncSession) -> dict:
                  "t": texto},
             )
 
-    return {"tenant_id": tenant_id, "usuario_id": usuario.id, "is_super": True}
+    vinculos_sistema = await garantir_sistema_transacao(db)
+    resultado_modulos = await semear_modulos(db)
+    contratados = await garantir_contratacao_inicial(db, tenant_id)
+
+    return {
+        "tenant_id": tenant_id,
+        "usuario_id": usuario.id,
+        "is_super": True,
+        "vinculos_sistema": vinculos_sistema,
+        "modulos": resultado_modulos,
+        "modulos_contratados": contratados,
+    }
 
 
 async def _main() -> int:

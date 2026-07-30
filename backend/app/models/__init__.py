@@ -45,7 +45,13 @@ from .google_credencial import GoogleCredencial
 from .localizacao import Bairro, Cidade, Endereco, Estado
 from .manifestante import Manifestante, TipoManifestante
 from .minuta import Minuta, MinutaHistorico, TemplateDocumento
-from .modulo import ConfiguracoesModulos, Modulo
+from .modulo import (
+    ConfiguracoesModulosLegado,
+    Modulo,
+    ModuloLegado,
+    ModuloTransacao,
+    TenantModulo,
+)
 from .notificacao import Notificacao, NotificacaoPreferencia
 from .pagamentos import (
     Alcada,
@@ -114,6 +120,7 @@ __all__ = [
     "LancamentoExtrato",
     "ContaFonteHistorico",
     "CcdClasse",
+    "ConfiguracoesModulosLegado",
     "ContaBancaria",
     "Cidade",
     "ComplementacaoDocumental",
@@ -129,7 +136,6 @@ __all__ = [
     "SolicitacaoAssinatura",
     "TipoAssinatura",
     "Configuracao",
-    "ConfiguracoesModulos",
     "Contrato",
     "Fornecedor",
     "FornecedorSituacaoHistorico",
@@ -150,6 +156,8 @@ __all__ = [
     "Minuta",
     "MinutaHistorico",
     "Modulo",
+    "ModuloLegado",
+    "ModuloTransacao",
     "Motorista",
     "MovimentacaoConta",
     "NaturezaDespesa",
@@ -166,6 +174,7 @@ __all__ = [
     "SolicitacaoVeiculo",
     "TemplateDocumento",
     "Tenant",
+    "TenantModulo",
     "TipoAnexo",
     "TipoProcessoWorkflow",
     "TipoManifestante",

@@ -164,6 +164,13 @@ async def put_telefone(
 @router.post("/whatsapp-test", response_model=WhatsAppTestResponse)
 async def whatsapp_test(
     payload: WhatsAppTestRequest,
+    # Sem gate de módulo de propósito: notificação não pertence a módulo nenhum
+    # (todo este router está em ENDPOINTS_TRANSVERSAIS — quem recebe notificação
+    # de protocolo é o mesmo sujeito que recebe de pagamentos), e amarrar este
+    # endpoint a `configuracao` faria um tenant sem `administracao` não conseguir
+    # validar a própria configuração de WhatsApp. Ver a nota no relatório da
+    # Task 8: o que sobra aqui é uma questão de autorização — qualquer usuário
+    # autenticado do tenant dispara um envio —, não de modularização.
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),

@@ -45,6 +45,11 @@ def require_permission(codigo: str, action: Action | None = None):
         db: AsyncSession = Depends(get_db),
     ) -> Usuario:
         perms = await load_permissions(db, user.id, tenant_id=tenant_id)
+        if codigo in perms.codigos_bloqueados:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Módulo não contratado para a transação '{codigo}'",
+            )
         if perms.is_super_usuario:
             return user
         item = next((p for p in perms.items if p.codigo == codigo), None)
@@ -72,7 +77,13 @@ def require_any_permission(*codigos: str):
         db: AsyncSession = Depends(get_db),
     ) -> Usuario:
         perms = await load_permissions(db, user.id, tenant_id=tenant_id)
-        if perms.is_super_usuario or any(p.codigo in codigos for p in perms.items):
+        disponiveis = [c for c in codigos if c not in perms.codigos_bloqueados]
+        if not disponiveis:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Módulo não contratado para nenhuma das transações exigidas",
+            )
+        if perms.is_super_usuario or any(p.codigo in disponiveis for p in perms.items):
             return user
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

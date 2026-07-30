@@ -317,7 +317,9 @@ async def list_versoes_mesmo_slug(
 @router.post("/test-expr", response_model=EvaluateExprResponse)
 async def test_expr(
     payload: EvaluateExprRequest,
-    _: Usuario = Depends(get_current_user),
+    # Ferramenta do desenhista de workflow (mesmo público do CRUD de
+    # definition, que já é gateado). Não tem efeito colateral: leitura basta.
+    _: Usuario = Depends(require_permission("workflow")),
 ):
     """Avalia uma expressão SAFE contra um contexto arbitrário. Não exige
     tenant (mas exige login). Use na UI para testar condições antes de
@@ -403,7 +405,9 @@ async def get_workflow_instance(
 )
 async def create_workflow_instance(
     payload: WorkflowInstanceCreate,
-    current: Usuario = Depends(get_current_user),
+    # Instanciar um workflow é ato de configuração do fluxo, não de
+    # tramitação — alinha com o `inserir` do CRUD de definition.
+    current: Usuario = Depends(require_permission("workflow", "inserir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -424,7 +428,9 @@ async def create_workflow_instance(
 async def migrar(
     instance_id: int,
     payload: dict,  # {id_workflow_definition_destino: int, mapa_estados: dict[str,str] | None}
-    current: Usuario = Depends(get_current_user),
+    # Troca a definição sob uma instância viva — operação de manutenção do
+    # desenho do fluxo, não de tramitação.
+    current: Usuario = Depends(require_permission("workflow", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -467,7 +473,11 @@ async def migrar(
 async def transicionar(
     instance_id: int,
     payload: WorkflowTransicaoExec,
-    current: Usuario = Depends(get_current_user),
+    # Quem transiciona é o servidor que trabalha o processo (a UI chama daqui:
+    # components/ProcessoWorkflowPanel.tsx), não o desenhista do fluxo — por
+    # isso o código é `processo`, e não `workflow`. Ambos caem no módulo
+    # protocolo, então o enforcement de módulo é o mesmo.
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -639,7 +649,8 @@ async def list_alertas(
 async def resolver_alerta(
     alerta_id: int,
     payload: WorkflowSlaAlertaResolve,
-    _: Usuario = Depends(get_current_user),
+    # Alerta de SLA é artefato do workflow; resolvê-lo altera o artefato.
+    _: Usuario = Depends(require_permission("workflow", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -670,7 +681,8 @@ async def resolver_alerta(
 
 @alertas_router.post("/verificar-agora", status_code=status.HTTP_202_ACCEPTED)
 async def verificar_agora(
-    _: Usuario = Depends(get_current_user),
+    # Dispara varredura de SLA no tenant e grava alertas — escrita, não leitura.
+    _: Usuario = Depends(require_permission("workflow", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
 ):
     """Dispara a varredura de SLA imediatamente para o tenant atual.

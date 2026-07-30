@@ -19,6 +19,16 @@ acima.
 |---|---|
 | Existe um `/modulos/me`, e é lixo legado | `backend/app/routers/modulos.py` lê `public.modulos` + `public.configuracoes_modulos` — tabelas do PHP, **sem `tenant_id`, sem RLS, sem filtro de permissão**. Filtra só por `ambiente`. |
 | O endpoint é código morto | `api.modulos()` existe em `frontend/lib/api.ts:2127` e **nenhuma página o chama**. |
+
+> **Correção, 2026-07-29 — descoberta na execução da F1.** A linha acima está **errada na letra**:
+> `app/(app)/home/page.tsx` chamava `api.modulos()` (via `queryFn: api.modulos`) para renderizar uma
+> seção colapsada "Outros sistemas vinculados". O levantamento original procurou por `modulos/me` e
+> não casou com essa forma de chamada.
+>
+> Ela está **certa no efeito**, e por um motivo pior: `public.modulos` e `public.configuracoes_modulos`
+> **não existem** no schema (`relation does not exist`). A home disparava uma query que falhava a cada
+> carregamento e a seção nunca renderizava. Removê-la é no-op visual e elimina um request quebrado por
+> page load — o critério "F1 não muda nada para o usuário" continua de pé.
 | O RBAC é por transação, não por módulo | `utils.transacao` (código) → `grupo_transacao` (inserir/atualizar/excluir) → `grupo` (tenant-scoped) → `usuario_grupo`. Não há nível "módulo". |
 | O menu é árvore hardcoded | `frontend/components/Sidebar.tsx`, 611 linhas, 8 grupos fixos, cada item com `perm` opcional, filtragem client-side. |
 | `aprimora_py.tenant` não tem RLS | Nenhuma migration habilita RLS nela; é protegida por `require_platform_admin` no router. **Precedente que este design reusa.** |
@@ -88,7 +98,22 @@ código, com teste de isolamento cobrindo a API.
 pertence ao produto, não à prefeitura. Consequência esperada e testada: `tenant_filter()` deve
 levantar `ValueError` se alguém passar tenant neles.
 
-### 4.2 Backfill
+### 4.2 A sexta linha do catálogo: `comum`
+
+*(Refinamento identificado ao escrever o plano de F1, 2026-07-28.)*
+
+O catálogo tem **seis** linhas, não cinco: as cinco de produto mais `comum`, com
+`contratavel = false`. `modulo` ganha a coluna `contratavel BOOLEAN NOT NULL DEFAULT true`.
+
+**Por quê.** As telas transversais da seção 12 também têm transação de permissão — `dashboard` é o
+caso óbvio. Com o teste de guarda de D8 exigindo módulo para toda transação, elas reprovariam o CI
+sem ter para onde ir. `comum` lhes dá dono sem virar produto: nunca aparece no launcher, nunca é
+contratável, nunca é bloqueada — `slugs_contratados()` a inclui sempre, implicitamente.
+
+Isso não contraria D3. Cinco módulos são o que a prefeitura compra e o que o launcher mostra;
+`comum` é infraestrutura, e a própria seção 12 já nomeava esse conjunto.
+
+### 4.3 Backfill
 
 A própria migration 0073 contrata os cinco módulos para **todos os tenants existentes**. Ninguém
 perde acesso no deploy — a fatia F1 é invisível por construção.
@@ -116,6 +141,19 @@ de tenant. Esta é a decisão de segurança central do design e tem teste dedica
 
 Como `require_permission` e `require_any_permission` já chamam `load_permissions`, os ~38 routers
 ganham o bloqueio **sem uma linha alterada**.
+
+> **Correção, 2026-07-29 — descoberta na execução da F1.** O parágrafo acima era verdadeiro para o
+> usuário comum e **falso para o super-usuário**, que é justamente o caso que a decisão de segurança
+> existe para cobrir. `backend/app/auth/perms.py:48` faz `if perms.is_super_usuario: return user`
+> **antes** de ler `perms.items` — filtrar a lista não bloqueia quem nunca a consulta. Na prática, um
+> SU de tenant sem Pagamentos recebia 200 em `POST /pagamentos/debitos/{id}/pagar`: o módulo sumia do
+> menu e seguia inteiramente usável pela API, o que é pior do que não ter bloqueio.
+>
+> **Correção adotada:** `UserPermissions` passa a carregar `codigos_bloqueados: frozenset[str]`, e
+> `perms.py` barra o código bloqueado **antes** do bypass do SU. O gate testa
+> `codigo in codigos_bloqueados`, nunca `codigo not in items` — a diferença preserva o fail-open de
+> D8 para transação sem vínculo de módulo. Os ~38 routers continuam intocados, mas `perms.py` e o
+> dataclass **são** alterados: a promessa de "nenhuma linha" não se sustentava.
 
 ### 5.1 A lacuna, nomeada
 

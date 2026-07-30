@@ -53,14 +53,14 @@ export interface PermissaoMeResponse {
   permissoes: PermissaoItem[];
 }
 
-export interface ModuloItem {
-  id: number;
-  modulo: string;
+export interface ModuloOut {
+  slug: string;
+  nome: string;
   icone: string | null;
-  url: string | null;
+  ordem: number;
 }
 export interface ModulosMeResponse {
-  items: ModuloItem[];
+  itens: ModuloOut[];
 }
 
 export interface Paginated<T> {

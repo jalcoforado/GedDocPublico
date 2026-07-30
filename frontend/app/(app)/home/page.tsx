@@ -9,7 +9,6 @@ import {
   Building2,
   FileSignature,
   Inbox,
-  Layers,
   Loader2,
   PenSquare,
   Search,
@@ -117,8 +116,6 @@ export default function HomePage() {
     staleTime: 60_000,
   });
 
-  const modulosQ = useQuery({ queryKey: ["modulos"], queryFn: api.modulos });
-
   const naoLidas = notifQ.data?.nao_lidas ?? 0;
   const assinaturasPendentes = assinaturasQ.data?.length ?? 0;
   const alertasPendentes = alertasQ.data?.length ?? 0;
@@ -216,35 +213,6 @@ export default function HomePage() {
         />
         <AtalhosSection />
       </div>
-
-      {/* Módulos externos — colapsado, no rodapé */}
-      {modulosQ.data && modulosQ.data.items.length > 0 && (
-        <details className="rounded-xl border border-border bg-card/60">
-          <summary className="cursor-pointer px-5 py-3 text-sm font-medium text-foreground-muted hover:bg-surface-2">
-            <span className="inline-flex items-center gap-2">
-              <Layers className="h-4 w-4" aria-hidden="true" />
-              Outros sistemas vinculados ({modulosQ.data.items.length})
-            </span>
-          </summary>
-          <div className="grid gap-2 px-5 pb-4 pt-2 sm:grid-cols-2 lg:grid-cols-3">
-            {modulosQ.data.items.map((m) => (
-              <a
-                key={m.id}
-                href={m.url ?? "#"}
-                target={m.url ? "_blank" : undefined}
-                rel="noreferrer"
-                className="flex items-center justify-between rounded-md border border-border bg-surface-1 px-3 py-2 text-sm transition-colors hover:border-brand/30 hover:bg-brand/5"
-              >
-                <span className="min-w-0 truncate">{m.modulo}</span>
-                <ArrowRight
-                  className="h-3.5 w-3.5 shrink-0 text-foreground-muted"
-                  aria-hidden="true"
-                />
-              </a>
-            ))}
-          </div>
-        </details>
-      )}
     </div>
   );
 }

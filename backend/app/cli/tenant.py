@@ -44,6 +44,11 @@ async def _create(args: argparse.Namespace) -> int:
                 admin_nome=args.admin_nome,
                 admin_cpf=args.admin_cpf,
                 senha=args.senha,
+                modulos=(
+                    [s.strip() for s in args.modulos.split(",") if s.strip()]
+                    if args.modulos is not None
+                    else None
+                ),
             )
         except ProvisioningError as e:
             print(f"[ERRO] {e}")
@@ -113,6 +118,11 @@ def main(argv: list[str] | None = None) -> int:
     p_create.add_argument("--admin-email", required=True, help="Email do super-usuário inicial")
     p_create.add_argument("--admin-cpf", required=True, help="CPF do super-usuário (11 dígitos)")
     p_create.add_argument("--senha", help="Senha do admin (gerada se omitido)")
+    p_create.add_argument(
+        "--modulos",
+        default=None,
+        help="Lista separada por vírgula (ex.: protocolo,frota). Default: todos.",
+    )
     p_create.set_defaults(fn=_create)
 
     p_list = sub.add_parser("list", help="Lista tenants existentes")
