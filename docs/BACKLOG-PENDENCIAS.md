@@ -12,6 +12,9 @@
 
 ## Estado de referência
 
+> **Atualizado em 2026-07-30.** O bloco abaixo descrevia o estado de 28/07; o que mudou está logo
+> em seguida.
+
 - `main` em `eb93bd1`, CI verde nos três workflows, VPS de homologação no ar e populada nos
   quatro módulos (protocolo, pagamentos, frota, transporte regulado).
 - Migrations até **0072** (head único).
@@ -19,6 +22,20 @@
   branches de feature antigas já estão dentro de `main`, incluindo `feat/frota-operacional-completo`
   e `feat/transporte-p4-alvaras-complementacoes` (registros anteriores davam essas duas como
   "aguardando decisão de merge" — está desatualizado).
+
+**Estado em 2026-07-30:**
+
+- `main` em `eea6876`. A **fatia F1 da modularização** foi mergeada (`c4dcb53`) e deployada na VPS
+  com sucesso. Migrations até **0075** (head único): 0073 catálogo+contratação, 0074 as 9 transações
+  que faltavam, 0075 FK de `tenant_modulo` com `ON DELETE CASCADE`.
+- **O CI de backend em `main` NÃO está confirmado verde** — ver item 1.0.65, o mais urgente desta
+  seção. E2E, Frontend e Deploy passaram.
+- Existe a branch `feat/modularizacao-f2`, contendo **apenas o plano** da fatia F2
+  (`docs/superpowers/plans/2026-07-30-modularizacao-f2.md`). Nenhum código. Não iniciada.
+- **Ambiente local do Jorge:** o antivírus AVG intercepta HTTPS e **nenhuma imagem docker rebuilda
+  nessa máquina** (npm e PyPI falham com erro de certificado). O frontend local roda por um contorno
+  — build no host copiado para dentro do container — que morre se o container for **recriado**
+  (`docker compose up -d`), não sobrevive a isso. CI e VPS não são afetados.
 
 > **Atualizado em 2026-07-28 (quatro itens fechados, removidos conforme a seção 4):**
 >
@@ -128,6 +145,44 @@ ao módulo errado.)*
   `backend/tests/test_guarda_modularizacao.py` — ou seja, a guarda **não** vai reclamar dele. A
   vigilância é este item, não o teste.
 
+### 1.0.65 Falha da F1 que só aparece em banco limpo — ainda NÃO diagnosticada
+
+*(Aberto em 2026-07-30, depois do merge da F1. **É o item mais urgente desta seção.**)*
+
+O job `Backend tests` do CI não conseguiu reportar em nenhuma das duas primeiras tentativas depois do
+merge: morreu por timeout em 15 min e depois em 30 min. A causa do travamento foi corrigida em
+`eea6876` (ver adiante), e o log parcial mostrou o ponto onde estava:
+
+```
+tests/test_permissoes_matriz.py ..........   [ 47%]
+tests/test_permissoes_modulo.py ...F
+##[error]Process completed with exit code 143
+```
+
+- **Há um `F`** — falha real — em `tests/test_permissoes_modulo.py`, arquivo criado pela própria F1.
+  O pytest foi morto (SIGTERM) antes de imprimir a asserção, então **a mensagem é desconhecida**.
+- **Passa localmente**: a suíte aqui fecha em `2 failed / 863 passed`, e as duas são as
+  pré-existentes do item 1.1.5. Logo, é falha que só o banco limpo do CI expõe — mesma classe do
+  Critical que o review final pegou (contratação ausente em banco limpo).
+- **Hipótese descartada:** deriva de `APP_NAME`. O `backend-tests.yml` **não** seta a variável, então
+  o CI roda consistente com o default (`sistemas`) e o `ci/seed-e2e.sql` cria a linha
+  `utils.sistema` correspondente. Testar com `APP_NAME=sistemas` no container local só quebra a
+  consistência local e produz uma falha diferente — não reproduz o CI.
+- **Como retomar:** rodar `gh run list --workflow="Backend tests" --branch main` e ler o run mais
+  recente. Com o travamento corrigido, o pytest agora **imprime** a falha em vez de ser morto. Se o
+  run mais recente ainda não existir, `gh workflow run backend-tests.yml`.
+- Reproduzir localmente exigiria montar um banco do zero pelo caminho do CI (dump de
+  `ci/legacy-schema.sql` → `alembic stamp 0020` → `upgrade head` → `ci/seed-e2e.sql` →
+  `seed_bootstrap`) e apontar **as duas** conexões (`PYTEST_DB_HOST` e `DATABASE_URL`) para ele —
+  ver a armadilha das duas conexões no `CLAUDE.md`.
+
+### 1.0.66 A suíte de backend cresceu para além do teto do CI
+
+O job levava 13–14 min contra um teto de 15; os ~40 testes da F1 empurraram por cima e o teto subiu
+para 30 (`c51e8a4`). **Subir de novo não é o conserto** — está escrito no próprio workflow. A suíte é
+serial de propósito: compartilha um único Postgres e os testes de RLS dependem disso. Paralelizar
+exige um banco por worker (`pytest-xdist` + schema/database por processo), ou fatiar o job.
+
 ### 1.0.7 As 9 transações da 0074 não estão concedidas a nenhum grupo
 
 *(Levantado em 2026-07-30 pelo review final da F1. Decisão: **fica documentado, não automatizado** —
@@ -163,7 +218,14 @@ Duas falhas confirmadas como anteriores à branch `feat/modularizacao-f1` (verif
 item 1.0 acima). O CI em `main` reporta verde, então a divergência é entre ambiente local e CI —
 provavelmente a mesma deriva de env.
 
-Nenhum. Os quatro itens desta seção foram fechados em 2026-07-28 (ver nota acima).
+> **Correção de 2026-07-30:** "o CI em `main` reporta verde" era verdade quando isto foi escrito, mas
+> deixou de ser depois do merge da F1 — ver item 1.0.65. Não tratar mais essas duas falhas como "o
+> CI está verde, é só ambiente local" sem antes conferir o run mais recente.
+
+> **Nota histórica.** Até 2026-07-29 esta seção terminava com a linha "Nenhum — os quatro itens
+> desta seção foram fechados em 2026-07-28". A execução da fatia F1 da modularização abriu os sete
+> itens acima e a linha virou o oposto do que o arquivo mostra, então foi substituída por esta nota.
+> Os quatro itens fechados em 28/07 continuam descritos na nota do topo do arquivo.
 
 ---
 
