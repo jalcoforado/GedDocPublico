@@ -293,7 +293,12 @@ async def test_usuario_sem_permissao_continua_lendo(tenant_com_protocolo_usuario
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         r = await c.get("/api/v2/processos")
-    assert r.status_code != 403, (
-        "usuário sem permissão perdeu leitura — esta fatia fecha contratação, "
-        "não autorização"
+    # `== 200` (não `!= 403`) pela mesma razão da Task 2: a asserção fraca
+    # deixaria passar um 500 — inclusive o que o próprio `require_modulo`
+    # levanta quando `slugs_contratados` volta vazio (catálogo corrompido).
+    # Este é o teste que prova a propriedade central da fatia; não pode ser
+    # o único vizinho ainda com a asserção que os outros dois abandonaram.
+    assert r.status_code == 200, (
+        f"usuário sem permissão perdeu leitura: {r.status_code} {r.text} — "
+        "esta fatia fecha contratação, não autorização"
     )
