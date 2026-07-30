@@ -6,7 +6,7 @@ import html as _htmlmod
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.deps import require_tenant_id
 from ..auth.perms import require_any_permission, require_permission
 from ..database import get_db
 from ..models import Usuario
@@ -446,7 +446,7 @@ async def dashboard(meses: int = 12,
 
 
 @operacoes_router.get("/minha-fila", response_model=MinhaFilaOut)
-async def minha_fila(usuario: Usuario = Depends(get_current_user),
+async def minha_fila(usuario: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
                      tenant_id: int = Depends(require_tenant_id),
                      db: AsyncSession = Depends(get_db)):
     from datetime import date as _date

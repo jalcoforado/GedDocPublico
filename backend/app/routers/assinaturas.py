@@ -178,7 +178,9 @@ async def cancelar_endpoint(
 async def recusar_endpoint(
     solicitacao_id: int,
     payload: RecusarRequest,
-    current: Usuario = Depends(get_current_user),
+    # Espelho de POST /assinaturas/{id}/assinar, que exige o mesmo código:
+    # recusar altera o estado da solicitação sobre o processo.
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> SolicitacaoOut:

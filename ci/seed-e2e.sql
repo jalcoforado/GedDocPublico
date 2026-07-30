@@ -75,6 +75,26 @@ INSERT INTO protocolos.acao
   VALUES (1, 'ABERTURA', 'Abertura', 'aberto', 'inicial', 'Processo aberto', true, false)
   ON CONFLICT (id) DO NOTHING;
 
+-- === Contratação de módulos (fatia F1 da modularização) ====================
+-- A 0073 faz backfill "para todos os tenants existentes", mas em banco limpo
+-- ela roda ANTES deste arquivo — não há tenant para contratar. Sem as linhas
+-- abaixo o tenant sobe com zero módulos e o gate de contratação nega 22
+-- códigos de transação para TODO MUNDO, inclusive super-usuário: o gate roda
+-- antes do bypass de SU, de propósito.
+--
+-- Fora do CI quem garante isso é o `seed_bootstrap`. Aqui é obrigatório porque
+-- o `e2e-assinatura.yml` NÃO roda o seed_bootstrap — só `upgrade head`, este
+-- arquivo e o uvicorn. Este é o único ponto que cobre os dois workflows.
+--
+-- `comum` fica de fora porque não é contratável: está sempre disponível e
+-- nunca é bloqueado.
+INSERT INTO aprimora_py.tenant_modulo (tenant_id, id_modulo)
+SELECT t.id, m.id
+  FROM aprimora_py.tenant t
+  CROSS JOIN aprimora_py.modulo m
+ WHERE m.contratavel = true AND m.ativo = true
+ ON CONFLICT DO NOTHING;
+
 -- === Ajusta sequências para não colidir com os ids fixos ==================
 SELECT setval(pg_get_serial_sequence('utils.nivel', 'id'), GREATEST((SELECT MAX(id) FROM utils.nivel), 1));
 SELECT setval(pg_get_serial_sequence('utils.sistema', 'id'), GREATEST((SELECT MAX(id) FROM utils.sistema), 1));

@@ -63,6 +63,35 @@ docker exec aprimora-py-backend python -m app.cli.tenant deactivate fortaleza
 docker exec aprimora-py-backend python -m app.cli.tenant activate fortaleza
 ```
 
+### Transações sem concessão pós-modularização F1 (migration 0074)
+
+A migration 0074 criou 9 códigos em `utils.transacao` que os routers passaram
+a exigir via `require_permission` (Task 8 da fatia F1 de modularização):
+`processo`, `usuario`, `catalogo`, `assunto`, `manifestante`, `cidade`,
+`endereco`, `workflow`, `unidadeTrabalho`.
+
+**Por que estão sem concessão:** a migration só cria a linha em
+`utils.transacao`; ela não concede a transação a nenhum `utils.grupo` (nem
+grava `utils.grupo_transacao`) — id de grupo é ambiente-dependente, mesmo
+motivo já registrado para `configuracao` na seção anterior. `seed_bootstrap`
+liga essas transações a `utils.sistema_transacao` (o ramo de super-usuário
+do `load_permissions` consulta essa tabela), mas isso não é o mesmo que uma
+concessão de grupo.
+
+**Quem é afetado:** super-usuário (`nivel.valor == 0`) opera por bypass e não
+percebe nada. **Usuário não-SU leva 403 permanente** nos 13 endpoints que a
+Task 8 moveu de `get_current_user` para `require_permission` sobre
+`processo`/`workflow` — inclui `transicionar` em `routers/workflow.py`
+(usado por `ProcessoWorkflowPanel.tsx` no frontend) e os 4 disparos de job
+em `routers/jobs.py`. Sem concessão, processo/workflow ficam inutilizáveis
+para qualquer grupo administrativo que não seja o SU.
+
+**O que fazer após o deploy que subir esta migration:** para cada grupo
+administrativo não-SU que precisa operar protocolo/workflow/administração,
+conceder as 9 transações acima pela tela **Grupos → Transações** (mesma tela
+usada para `configuracao`). Não há automação disso hoje — é passo manual,
+por tenant, repetido a cada grupo que precisar.
+
 ## Configuração inicial do tenant (PR3b)
 
 O admin **municipal** edita os dados institucionais (nome, sigla, contato,
