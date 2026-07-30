@@ -127,33 +127,39 @@ async def test_garantir_contratacao_inicial_nao_ressuscita_descontratacao(
     que tem que barrar a segunda chamada de recontratar."""
     tenant_id, _ = tenant_modulo_limpo
 
-    await garantir_contratacao_inicial(admin_session, tenant_id)
+    contratados = await garantir_contratacao_inicial(admin_session, tenant_id)
     await admin_session.commit()
 
-    frota_id = (await admin_session.execute(
-        select(Modulo.id).where(Modulo.slug == "frota")
-    )).scalar_one()
+    # Descontrata TODOS, não só um. Com um módulo sobrando vivo, "nenhuma
+    # linha" e "nenhuma linha viva" dão o mesmo resultado (as duas falsas) e o
+    # teste passaria mesmo se alguém trocasse a condição por `excluido=false` —
+    # ou seja, não discriminaria a propriedade que ele existe para proteger.
+    # Zerando as linhas vivas, só a condição correta segura a recontratação.
     await admin_session.execute(
         text(
             "UPDATE aprimora_py.tenant_modulo SET excluido = true, ativo = false "
-            "WHERE tenant_id = :t AND id_modulo = :m"
+            "WHERE tenant_id = :t"
         ),
-        {"t": tenant_id, "m": frota_id},
+        {"t": tenant_id},
     )
     await admin_session.commit()
 
     resultado = await garantir_contratacao_inicial(admin_session, tenant_id)
     await admin_session.commit()
-    assert resultado == [], "tenant já tinha linha — não deveria ter contratado nada"
+    assert resultado == [], (
+        "as linhas continuam existindo (soft-deletadas) — o seed não deveria "
+        "ter contratado nada"
+    )
 
-    excluido, ativo = (await admin_session.execute(
+    vivos = (await admin_session.execute(
         text(
-            "SELECT excluido, ativo FROM aprimora_py.tenant_modulo "
-            "WHERE tenant_id = :t AND id_modulo = :m"
+            "SELECT count(*) FROM aprimora_py.tenant_modulo "
+            "WHERE tenant_id = :t AND excluido = false"
         ),
-        {"t": tenant_id, "m": frota_id},
-    )).one()
-    assert excluido is True and ativo is False, (
-        "descontratação deliberada foi ressuscitada pelo seed — é exatamente "
-        "isso que o Critical do review de branch pedia para nunca acontecer"
+        {"t": tenant_id},
+    )).scalar_one()
+    assert vivos == 0, (
+        f"o seed ressuscitou {vivos} de {len(contratados)} descontratações "
+        "deliberadas — é exatamente isso que o Critical do review de branch "
+        "pedia para nunca acontecer"
     )
