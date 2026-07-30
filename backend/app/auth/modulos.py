@@ -34,9 +34,15 @@ def require_modulo(slug: str):
     ) -> None:
         disponiveis = await slugs_contratados(db, tenant_id)
         if not disponiveis:
-            # Mesma guarda de services/modulos.codigos_bloqueados: catálogo
-            # corrompido (nem os não-contratáveis existem) tem de gritar, não
-            # bloquear todo mundo em silêncio.
+            # NÃO é a mesma armadilha de services/modulos.codigos_bloqueados
+            # (lá o risco é `not_in(set())` virar cláusula sempre-verdadeira e
+            # o WHERE parar de filtrar — aqui `slug not in set()` já dá o 403
+            # correto sozinho, sem esse bug). A razão de gritar é outra:
+            # catálogo sem nem os módulos NÃO-contratáveis (ex.: 'comum'
+            # inativo) é estado impossível em operação normal — indica
+            # corrupção de dados. Um 403 aqui mascararia essa corrupção como
+            # se fosse decisão de negócio (tenant sem o módulo), em vez de
+            # estourar alto o suficiente para alguém investigar o catálogo.
             raise RuntimeError(
                 f"Nenhum módulo disponível para o tenant {tenant_id} — nem os "
                 "não-contratáveis. Catálogo corrompido; verifique se 'comum' "
