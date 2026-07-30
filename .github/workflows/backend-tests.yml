@@ -14,7 +14,13 @@ jobs:
   pytest:
     name: pytest (Python 3.12 + Postgres 16)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 15 min matava a suíte: as execuções verdes de 2026-07-28 já levavam 13–14
+    # min e os ~40 testes da modularização F1 empurraram por cima do limite.
+    # Local a suíte leva ~10,5 min; o runner do CI é mais lento. Se voltar a
+    # raspar, o conserto não é subir o teto de novo — é paralelizar ou fatiar a
+    # suíte (hoje ela é serial porque compartilha um único Postgres e os testes
+    # de RLS dependem disso).
+    timeout-minutes: 30
 
     services:
       postgres:
