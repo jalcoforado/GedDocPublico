@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.modulos import require_modulo
 from ..database import get_db, tenant_filter
 from ..models import Nivel, Prioridade, Sistema, TipoUnidadeTrabalho, Transacao, Usuario
 from ..schemas.grupo import NivelOut, SistemaOut, TransacaoOut
@@ -60,7 +61,11 @@ async def list_tipos_unidade(
     ]
 
 
-@router.get("/prioridades", response_model=list[PrioridadeOut])
+@router.get(
+    "/prioridades",
+    response_model=list[PrioridadeOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_prioridades(
     _: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

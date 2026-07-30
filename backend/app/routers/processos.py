@@ -6,6 +6,7 @@ from sqlalchemy import select as _select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Encaminhamento as _Encaminhamento
@@ -140,7 +141,11 @@ async def require_acesso_processo(
         )
 
 
-@router.get("", response_model=Paginated[ProcessoListItem])
+@router.get(
+    "",
+    response_model=Paginated[ProcessoListItem],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_endpoint(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
@@ -172,7 +177,11 @@ async def list_endpoint(
     return Paginated(items=items, total=total, page=page, page_size=page_size)
 
 
-@router.get("/{processo_id}", response_model=ProcessoDetail)
+@router.get(
+    "/{processo_id}",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def detail_endpoint(
     processo_id: int,
     tenant_id: int = Depends(require_tenant_id),
@@ -190,7 +199,7 @@ async def detail_endpoint(
 @router.get(
     "/{processo_id}/checklist-documentos",
     response_model=ChecklistDocumentosResponse,
-    dependencies=[Depends(require_acesso_processo)],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
 )
 async def checklist_documentos_servidor(
     processo_id: int,
@@ -236,7 +245,7 @@ async def solicitar_complementacao(
 @router.get(
     "/{processo_id}/complementacoes",
     response_model=list[ComplementacaoOut],
-    dependencies=[Depends(require_acesso_processo)],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
 )
 async def listar_complementacoes_servidor(
     processo_id: int,
@@ -337,7 +346,7 @@ async def create_endpoint(
 
 @router.get(
     "/{processo_id}/trail",
-    dependencies=[Depends(require_acesso_processo)],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
 )
 async def get_trail(
     processo_id: int,
@@ -357,7 +366,7 @@ async def get_trail(
 @router.get(
     "/{processo_id}/temporalidade",
     response_model=TemporalidadeOut,
-    dependencies=[Depends(require_acesso_processo)],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
 )
 async def temporalidade_endpoint(
     processo_id: int,
@@ -441,7 +450,10 @@ def _pdf_response(pdf_bytes: bytes, *, inline: bool, fname: str) -> Response:
     )
 
 
-@router.get("/{processo_id}/capa.pdf")
+@router.get(
+    "/{processo_id}/capa.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def capa_pdf_endpoint(
     processo_id: int,
     inline: bool = Query(True),
@@ -459,7 +471,10 @@ async def capa_pdf_endpoint(
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
 
 
-@router.get("/{processo_id}/etiqueta-unica.pdf")
+@router.get(
+    "/{processo_id}/etiqueta-unica.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def etiqueta_unica_pdf(
     processo_id: int,
     inline: bool = Query(True),
@@ -477,7 +492,10 @@ async def etiqueta_unica_pdf(
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
 
 
-@router.get("/{processo_id}/completo.pdf")
+@router.get(
+    "/{processo_id}/completo.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def completo_pdf_endpoint(
     processo_id: int,
     inline: bool = Query(True),
@@ -495,7 +513,10 @@ async def completo_pdf_endpoint(
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
 
 
-@router.get("/{processo_id}/etiqueta-dupla.pdf")
+@router.get(
+    "/{processo_id}/etiqueta-dupla.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def etiqueta_dupla_pdf(
     processo_id: int,
     inline: bool = Query(True),
@@ -513,7 +534,10 @@ async def etiqueta_dupla_pdf(
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
 
 
-@router.get("/encaminhamentos/{encaminhamento_id}/comprovante.pdf")
+@router.get(
+    "/encaminhamentos/{encaminhamento_id}/comprovante.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def comprovante_pdf_endpoint(
     encaminhamento_id: int,
     tipo: str = Query("envio", pattern="^(envio|recebimento)$"),
@@ -694,7 +718,7 @@ async def desapensar_endpoint(
 @router.get(
     "/{processo_id}/apensamentos",
     response_model=list[ApensamentoOut],
-    dependencies=[Depends(require_acesso_processo)],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
 )
 async def list_apensamentos_endpoint(
     processo_id: int,
@@ -719,7 +743,7 @@ async def list_apensamentos_endpoint(
 @router.get(
     "/{processo_id}/apensados",
     response_model=list[ProcessoApensadoItem],
-    dependencies=[Depends(require_acesso_processo)],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
 )
 async def list_processos_apensados_endpoint(
     processo_id: int,
@@ -757,7 +781,10 @@ async def list_processos_apensados_endpoint(
     ]
 
 
-@router.get("/apensamentos/{apensamento_id}/termo.pdf")
+@router.get(
+    "/apensamentos/{apensamento_id}/termo.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def termo_apensamento_pdf(
     apensamento_id: int,
     _: Usuario = Depends(get_current_user),
@@ -899,7 +926,7 @@ async def desentranhar_anexo_endpoint(
 
 @router.get(
     "/{processo_id}/anexos/{anexo_processo_id}/termo-desentranhamento.pdf",
-    dependencies=[Depends(require_acesso_processo)],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
 )
 async def termo_desentranhamento_pdf(
     processo_id: int,
@@ -976,7 +1003,7 @@ async def _vol_hydrate(db: AsyncSession, vol: _VolP6) -> VolumeOut:
 @router.get(
     "/{processo_id}/volumes",
     response_model=list[VolumeOut],
-    dependencies=[Depends(require_acesso_processo)],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
 )
 async def list_volumes_endpoint(
     processo_id: int,

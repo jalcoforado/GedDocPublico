@@ -193,83 +193,20 @@ ENDPOINTS_LEITURA_SEM_GATE: set[tuple[str, str]] = {
     # dívida for paga. Ao gatear um item, REMOVA-O daqui: a guarda de higiene
     # abaixo reprova entrada obsoleta.
 
-    # protocolo / código `processo` — leitura de processo e seus artefatos
-    ("GET", "/api/v2/processos"),
-    ("GET", "/api/v2/processos/{processo_id}"),
-    ("GET", "/api/v2/processos/{processo_id}/capa.pdf"),
-    ("GET", "/api/v2/processos/{processo_id}/completo.pdf"),
-    ("GET", "/api/v2/processos/{processo_id}/etiqueta-dupla.pdf"),
-    ("GET", "/api/v2/processos/{processo_id}/etiqueta-unica.pdf"),
-    ("GET", "/api/v2/processos/{processo_id}/trail"),
-    ("GET", "/api/v2/processos/{processo_id}/volumes"),
-    ("GET", "/api/v2/processos/{processo_id}/apensados"),
-    ("GET", "/api/v2/processos/{processo_id}/apensamentos"),
-    ("GET", "/api/v2/processos/{processo_id}/complementacoes"),
-    ("GET", "/api/v2/processos/{processo_id}/checklist-documentos"),
-    ("GET", "/api/v2/processos/{processo_id}/temporalidade"),
-    ("GET", "/api/v2/processos/{processo_id}/workflow"),
-    ("GET", "/api/v2/processos/{processo_id}/solicitacoes-assinatura"),
-    ("GET", "/api/v2/processos/apensamentos/{apensamento_id}/termo.pdf"),
-    ("GET", "/api/v2/processos/encaminhamentos/{encaminhamento_id}/comprovante.pdf"),
-    ("GET", "/api/v2/processos/{processo_id}/anexos/{anexo_processo_id}/termo-desentranhamento.pdf"),
-    ("GET", "/api/v2/protocolo/{processo_id}/comprovante.pdf"),
-    ("GET", "/api/v2/protocolo/{processo_id}/etiqueta.pdf"),
-    ("GET", "/api/v2/protocolo/vencendo-prazo"),
-    ("GET", "/api/v2/anexos/{anexo_id}/download"),
-    ("GET", "/api/v2/anexos/{anexo_id}/carimbado.pdf"),
-    ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/validar"),
-    ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/evidencias"),
-    ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/comprovante.pdf"),
+    # Task 2 (2026-07-30) pagou a dívida `protocolo`: as 58 rotas que estavam
+    # aqui (processo/catalogo/assunto/manifestante/cidade/endereco/workflow +
+    # relatórios + `/catalogo/prioridades`, que mudou de dono) ganharam
+    # `require_modulo("protocolo")` no mesmo commit. Ficam só as que continuam
+    # sem gate: `busca` (transversal) e `jobs` (administracao, Task 3).
     ("GET", "/api/v2/busca"),
-    # Relatórios são recorte de processo/assinatura/tramitação — mesmo código.
-    ("GET", "/api/v2/relatorios/processos.csv"),
-    ("GET", "/api/v2/relatorios/processos.json"),
-    ("GET", "/api/v2/relatorios/processos.pdf"),
-    ("GET", "/api/v2/relatorios/tramitacao.csv"),
-    ("GET", "/api/v2/relatorios/tramitacao.json"),
-    ("GET", "/api/v2/relatorios/tramitacao.pdf"),
-    ("GET", "/api/v2/relatorios/assinaturas.csv"),
-    ("GET", "/api/v2/relatorios/assinaturas.json"),
-    ("GET", "/api/v2/relatorios/assinaturas.pdf"),
-    # Jobs assíncronos: os artefatos são todos de protocolo. Os POST que
-    # disparam esses jobs passaram a exigir `processo` na Task 8; a listagem e
-    # o download do resultado ficaram como leitura.
+    # Jobs assíncronos: os artefatos são todos de protocolo, mas o próprio
+    # mecanismo de fila é administracao (mapa-rotas.md). Os POST que disparam
+    # esses jobs já exigem `processo` desde a Task 8; a listagem e o download
+    # do resultado ficam como leitura pendente para a Task 3.
     ("GET", "/api/v2/jobs"),
     ("GET", "/api/v2/jobs/agenda"),
     ("GET", "/api/v2/jobs/{job_id}"),
     ("GET", "/api/v2/jobs/{job_id}/resultado"),
-
-    # protocolo / código `catalogo` — tipos e classificação documental
-    ("GET", "/api/v2/tipos-processo"),
-    ("GET", "/api/v2/tipos-anexo"),
-    ("GET", "/api/v2/protocolo/ccd-classes"),
-    ("GET", "/api/v2/protocolo/ccd-classes/tree"),
-    ("GET", "/api/v2/protocolo/especies-documentais"),
-    ("GET", "/api/v2/protocolo/ttd-regras"),
-    ("GET", "/api/v2/protocolo/sugerir-ccd"),
-
-    # protocolo / código `assunto`
-    ("GET", "/api/v2/assuntos"),
-    ("GET", "/api/v2/assunto-tipo-anexo"),
-
-    # protocolo / código `manifestante`
-    ("GET", "/api/v2/manifestantes"),
-    ("GET", "/api/v2/tipos-manifestante"),
-
-    # protocolo / códigos `cidade` e `endereco`
-    ("GET", "/api/v2/estados"),
-    ("GET", "/api/v2/cidades"),
-    ("GET", "/api/v2/bairros"),
-    ("GET", "/api/v2/enderecos"),
-
-    # protocolo / código `workflow` — leitura do desenho e das instâncias
-    ("GET", "/api/v2/workflow-definitions"),
-    ("GET", "/api/v2/workflow-definitions/{wf_id}"),
-    ("GET", "/api/v2/workflow-definitions/{wf_id}/versoes"),
-    ("GET", "/api/v2/workflow-instances"),
-    ("GET", "/api/v2/workflow-instances/{instance_id}"),
-    ("GET", "/api/v2/workflow-alertas"),
-    ("GET", "/api/v2/tipo-processo-workflow"),
 
     # administracao / código `usuario`
     ("GET", "/api/v2/usuarios"),
@@ -290,7 +227,9 @@ ENDPOINTS_LEITURA_SEM_GATE: set[tuple[str, str]] = {
     ("GET", "/api/v2/catalogo/sistemas"),
     ("GET", "/api/v2/catalogo/transacoes"),
     ("GET", "/api/v2/catalogo/tipos-unidade"),
-    ("GET", "/api/v2/catalogo/prioridades"),
+    # `/catalogo/prioridades` mudou de dono na Task 2: quem a consome é
+    # AcoesProcesso.tsx (protocolo), não a tela de administração — já ganhou
+    # require_modulo("protocolo") e saiu daqui.
     ("GET", "/api/v2/audit"),
 }
 
@@ -448,4 +387,30 @@ def test_escrita_so_com_require_modulo_continua_desprotegida():
     assert ("POST", "/api/v2/_fake/so-modulo") in desprotegidos, (
         "Uma rota POST protegida só por require_modulo deveria continuar "
         "desprotegida — a varredura não pode aceitar GATES_DE_MODULO fora de GET."
+    )
+
+
+def test_leitura_so_com_require_modulo_nao_fica_desprotegida():
+    """Metade complementar da assimetria: em GET, `require_modulo` sozinho BASTA.
+
+    É exatamente o mecanismo que a Task 2 usa nas 58 rotas de leitura de
+    `protocolo` — sem este teste, só a metade POST da assimetria estaria
+    coberta e uma regressão que removesse GATES_DE_MODULO do lado GET (ou
+    que trocasse `if metodo == "GET"` por outra condição) passaria batida.
+    """
+    from fastapi import Depends, FastAPI
+
+    from app.auth.modulos import require_modulo
+
+    app_fake = FastAPI()
+
+    @app_fake.get("/api/v2/_fake/leitura-so-modulo", dependencies=[Depends(require_modulo("frota"))])
+    async def _rota_fake():
+        return None
+
+    desprotegidos = endpoints_sem_gate(app=app_fake)
+
+    assert ("GET", "/api/v2/_fake/leitura-so-modulo") not in desprotegidos, (
+        "Uma rota GET protegida só por require_modulo NÃO pode aparecer como "
+        "desprotegida — GATES_DE_MODULO existe justamente para isso."
     )
