@@ -196,12 +196,57 @@ def require_modulo(slug: str):
     return _check_modulo
 ```
 
-- [ ] **Passo 4: A guarda passa a reconhecer o gate novo**
+- [ ] **Passo 4: A guarda passa a reconhecer o gate novo — sem afrouxar a escrita**
 
-Em `backend/tests/test_guarda_modularizacao.py`, acrescentar o par
-`("app.auth.modulos", "require_modulo.<locals>._check_modulo")` à constante `GATES_DE_PERMISSAO`
-(procure-a no arquivo; ela casa `(module, qualname)` **exato**, e existe um teste que a compara com
-o que `auth/perms.py` realmente exporta — estenda-o para cobrir `auth/modulos.py` também).
+> **Correção de 2026-07-30 (decisão do Jorge).** A versão anterior deste passo mandava acrescentar
+> `_check_modulo` a `GATES_DE_PERMISSAO`. Isso estava **errado**: o comentário daquela constante
+> (linhas ~299-304) descreve exatamente esse caso — um `_check_*` que não verifica permissão — como
+> o falso-negativo que ela existe para impedir. Com `require_modulo` lá dentro, um POST que tivesse
+> só o gate de módulo e esquecesse `require_permission` passaria no CI em silêncio, e há escrita no
+> alcance da guarda (dos 48 `ENDPOINTS_TRANSVERSAIS`, 16 são POST e 4 são PUT).
+
+Em `backend/tests/test_guarda_modularizacao.py`:
+
+1. Criar uma constante **separada**, ao lado de `GATES_DE_PERMISSAO` e com comentário próprio
+   explicando que ela **não** é gate de permissão:
+
+```python
+# Gate de CONTRATAÇÃO de módulo (auth/modulos.py). NÃO é gate de permissão: não
+# olha usuário, grupo nem transação. Fica em conjunto separado de propósito —
+# ver `endpoints_sem_gate()`, que só o aceita em leitura.
+GATES_DE_MODULO: set[tuple[str, str]] = {
+    ("app.auth.modulos", "require_modulo.<locals>._check_modulo"),
+}
+```
+
+2. Tornar a varredura **ciente do método**. Escrita continua exigindo gate de permissão; leitura
+   aceita qualquer um dos dois:
+
+```python
+for metodo in getattr(rota, "methods", set()):
+    # Leitura pode ser protegida só pela contratação do módulo (esta fatia).
+    # Escrita, não: afrouxar aqui deixaria um POST com require_modulo e sem
+    # require_permission passar no CI, que é justamente o falso-negativo que
+    # a nota de GATES_DE_PERMISSAO descreve.
+    aceitos = (
+        GATES_DE_PERMISSAO | GATES_DE_MODULO
+        if metodo == "GET"
+        else GATES_DE_PERMISSAO
+    )
+    if not (origens & aceitos):
+        desprotegidos.add((metodo, caminho))
+```
+
+Note que isso move a decisão para **dentro** do laço de métodos — hoje ela está fora dele. Uma rota
+que sirva GET e POST na mesma função passa a ser avaliada corretamente nos dois.
+
+3. Estender `test_gates_de_permissao_batem_com_a_implementacao` para cobrir `auth/modulos.py`
+   também — ele compara o conjunto declarado com o que as fábricas realmente produzem, e sem isso
+   um rename silencioso de `_check_modulo` desligaria o reconhecimento sem ninguém notar.
+
+4. **Acrescentar um teste que trava a assimetria**: uma rota de escrita protegida só por
+   `require_modulo` tem de continuar sendo reportada como desprotegida. Sem ele, alguém "simplifica"
+   a varredura de volta para um único conjunto e o afrouxamento volta sem aviso.
 
 **Ainda não mova nada da allowlist nesta task.** Nenhuma rota foi gateada; a allowlist continua
 correta e a guarda continua verde.
