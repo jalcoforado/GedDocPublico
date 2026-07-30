@@ -101,6 +101,33 @@ tratar em **fatia própria depois do F1**.)*
   `ENDPOINTS_LEITURA_SEM_GATE` já traz o código sugerido por endpoint — é o ponto de partida, não a
   decisão.
 
+### 1.0.6 `/notificacoes/whatsapp-test` sem autorização — qualquer autenticado do tenant dispara
+
+*(Levantado em 2026-07-30 pelo review da fatia F1. **Não é regressão da F1**: `main` tem o mesmo
+`Depends(get_current_user)` e nada mais — verificado em `git show main:`. A F1 chegou a fechar de
+passagem e devolveu ao original, porque o único código de permissão disponível acoplava o endpoint
+ao módulo errado.)*
+
+- `POST /api/v2/notificacoes/whatsapp-test` (`backend/app/routers/notificacoes.py:164`) dispara envio
+  de WhatsApp para **telefone arbitrário do payload**, usando a credencial paga do tenant. Exige
+  apenas estar autenticado — o usuário de menor privilégio do tenant consegue. É vetor de custo e de
+  abuso, não só de vazamento.
+- **Por que a F1 não fechou:** o único código de transação vizinho é `configuracao`, que pertence ao
+  módulo `administracao`. Gatear com ele daria 403 no endpoint para tenant que tem `protocolo` e não
+  tem `administracao` — trocaria um defeito por outro. Não existe transação de notificação em
+  `utils.transacao` (verificado por query), e criar uma exige migration **mais** concessão aos grupos
+  existentes, senão o endpoint passa a dar 403 para todo mundo.
+- **O sujeito certo não existe ainda:** o correto seria "super-usuário **do tenant**".
+  `require_platform_admin` é sujeito errado (é da plataforma, opera sobre outros tenants) e
+  `require_permission` precisa de um código que ainda não há.
+- **Ao retomar:** decidir entre (a) criar a transação `notificacao` vinculada ao módulo `comum` e
+  conceder aos grupos administrativos na mesma migration, ou (b) introduzir a dependência de
+  super-usuário do tenant, que serve a outros endpoints de operação além deste. A (b) é mais
+  trabalho e resolve uma classe; a (a) fecha só este.
+- Enquanto aberto, o endpoint está listado em `ENDPOINTS_TRANSVERSAIS` em
+  `backend/tests/test_guarda_modularizacao.py` — ou seja, a guarda **não** vai reclamar dele. A
+  vigilância é este item, não o teste.
+
 ### 1.1.5 Suíte não estava verde antes do F1
 
 Duas falhas confirmadas como anteriores à branch `feat/modularizacao-f1` (verificado por
