@@ -8,6 +8,10 @@ Idempotente. Cria (get_or_create):
   5. Segredo KEY_LOGIN_GLOBAL_JWT em utils.sistema_constante
   6. Catálogo global protocolos.acao (ABERTURA/ENCAMINHAMENTO/RECEBIMENTO) —
      sem ele não se abre nem tramita processo
+  7. Contratação inicial de módulos do tenant (aprimora_py.tenant_modulo) —
+     só se o tenant não tiver NENHUMA linha ainda; não ressuscita
+     descontratação deliberada do platform admin (ver
+     garantir_contratacao_inicial)
 
 Uso: docker exec aprimora-py-backend python -m app.cli.seed_bootstrap
 """
@@ -31,10 +35,12 @@ from ..models import (
     Sistema,
     SistemaTransacao,
     Tenant,
+    TenantModulo,
     Transacao,
     Usuario,
     UsuarioGrupo,
 )
+from ..services.modulos import contratar_modulos_iniciais
 
 APP = get_settings().app_name
 
@@ -155,6 +161,38 @@ async def semear_modulos(db: AsyncSession) -> dict:
             criados += 1
 
     return {"modulos": len(modulos), "vinculos": criados}
+
+
+async def garantir_contratacao_inicial(db: AsyncSession, tenant_id: int) -> list[str]:
+    """Contrata para o tenant todos os módulos contratáveis e ativos — mas
+    SÓ quando ele ainda não tiver NENHUMA linha em `aprimora_py.tenant_modulo`.
+
+    "Nenhuma linha" e não "nenhuma linha viva": esta função roda a cada
+    deploy (o seed inteiro é idempotente por design). Se contratasse sempre
+    que a lista de disponíveis estivesse vazia, ressuscitaria uma
+    descontratação DELIBERADA feita pelo platform admin — que fica
+    registrada como linha `excluido=true`/`ativo=false`, não como ausência
+    de linha. Checar "nenhuma linha viva" apagaria essa distinção e violaria
+    a garantia de `contratar()` (services/modulos.py) de que descontratar
+    suspende, não é revertido por trás.
+
+    Fechamento do Critical do review de branch: o backfill da migration
+    0073 é um `CROSS JOIN` sobre os tenants que já existem NO MOMENTO em
+    que ela roda. Em banco limpo — CI (`alembic upgrade head` antes de
+    qualquer tenant existir) e `scripts/bootstrap-db.sh` (mesma ordem) — o
+    backfill roda contra zero tenants, e nada depois contratava: tenant
+    novo nascia com `disponiveis = {'comum'}` e todo o resto bloqueado por
+    403, inclusive para o super-usuário (o gate de módulos roda antes do
+    bypass de SU). É este `seed_bootstrap` quem fecha a lacuna.
+    """
+    tem_alguma_linha = (
+        await db.execute(
+            select(TenantModulo.id).where(TenantModulo.tenant_id == tenant_id).limit(1)
+        )
+    ).first()
+    if tem_alguma_linha is not None:
+        return []
+    return await contratar_modulos_iniciais(db, tenant_id, None)
 
 
 async def seed(db: AsyncSession) -> dict:
@@ -322,6 +360,7 @@ async def seed(db: AsyncSession) -> dict:
 
     vinculos_sistema = await garantir_sistema_transacao(db)
     resultado_modulos = await semear_modulos(db)
+    contratados = await garantir_contratacao_inicial(db, tenant_id)
 
     return {
         "tenant_id": tenant_id,
@@ -329,6 +368,7 @@ async def seed(db: AsyncSession) -> dict:
         "is_super": True,
         "vinculos_sistema": vinculos_sistema,
         "modulos": resultado_modulos,
+        "modulos_contratados": contratados,
     }
 
 

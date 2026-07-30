@@ -18,8 +18,13 @@ async def test_catalogo_tem_seis_modulos(admin_session):
 
 @pytest.mark.asyncio
 async def test_backfill_contratou_cinco_no_tenant_default(admin_session):
-    # O backfill roda na migration, então só alcança tenants que já existiam.
-    # O tenant default é o único garantido nessa condição.
+    # O nome do teste é histórico: o backfill desta migration só alcança
+    # tenants que JÁ EXISTIAM no momento em que ela rodou. Em banco limpo
+    # (CI, scripts/bootstrap-db.sh) o `upgrade head` roda antes de qualquer
+    # tenant existir, então o backfill não contrata nada — quem garante as
+    # 5 contratações do tenant default é `seed_bootstrap.
+    # garantir_contratacao_inicial`, que roda depois das migrations. Este
+    # teste verifica só o resultado (5 contratações vivas), não a origem.
     total = (await admin_session.execute(text("""
         SELECT COUNT(*) FROM aprimora_py.tenant_modulo tm
           JOIN aprimora_py.tenant t ON t.id = tm.tenant_id

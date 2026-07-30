@@ -11,9 +11,14 @@ passar — é o que dá o 403 real para `client_admin` (admin comum do tenant,
 e-mail fora da allowlist) e o 200 para `client_plataforma` (e-mail inserido
 na allowlist via `PLATFORM_ADMIN_EMAILS` monkeypatchada).
 
-`tenant_id_default` ancora no tenant `sobral`: é o único tenant com o
-backfill de 5 módulos contratados garantido pela migration 0073 (mesmo
-motivo documentado em `test_modulos_me.py`). Só o teste read-only
+`tenant_id_default` ancora no tenant `sobral`: é o único tenant com os 5
+módulos contratáveis contratados garantidos — pelo backfill da migration
+0073 se o banco já tinha esse tenant no momento em que ela rodou, ou por
+`seed_bootstrap.garantir_contratacao_inicial` se não tinha (banco limpo,
+caso do CI: migrations rodam antes de qualquer tenant existir). Quem
+garante a contratação de ponta a ponta é o seed, não o backfill sozinho —
+o backfill não alcança tenant criado depois dele (mesmo motivo documentado
+em `test_modulos_me.py`). Só o teste read-only
 (`test_platform_admin_lista_catalogo`) usa essa fixture — o teste que
 escreve (`test_descontratar_e_recontratar`) roda em tenant isolado da
 fixture `two_tenants` de `conftest.py`, para não deixar `sobral` num estado
