@@ -114,6 +114,14 @@ async def two_tenants(admin_engine) -> AsyncIterator[tuple[int, int]]:
     ]
     Teardown = async_sessionmaker(admin_engine, expire_on_commit=False, class_=AsyncSession)
     async with Teardown() as teardown_session:
+        # Sem lock_timeout, um teste que falhou segurando transação aberta faz
+        # este DELETE esperar PARA SEMPRE, e a suíte inteira pendura — o job do
+        # CI morre por timeout sem nunca dizer qual teste falhou. Aconteceu em
+        # 2026-07-30: dois runs mortos, em tetos de 15 e de 30 min, e o
+        # diagnóstico só saiu de `pg_stat_activity` (uma sessão
+        # `idle in transaction` contra um DELETE em `wait_event_type = Lock`).
+        # Com o timeout, o teardown falha em 15s dizendo o que houve.
+        await teardown_session.execute(text("SET lock_timeout = '15s'"))
         for table in cleanup_tables:
             await teardown_session.execute(
                 text(f"DELETE FROM {table} WHERE tenant_id IN (:a, :b)"),

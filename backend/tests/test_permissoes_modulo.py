@@ -39,6 +39,21 @@ from app.services.provisioning_tenant import provisionar_tenant
 # realmente exercitado.
 APP = get_settings().app_name
 
+# A ORDEM DAS FIXTURES AQUI É LOAD-BEARING: `two_tenants` vem ANTES de
+# `admin_session` em toda assinatura de teste deste arquivo. O pytest destrói
+# fixtures na ordem inversa da criação, então essa ordem faz a session do teste
+# ser fechada (e sua transação desfeita) ANTES de o teardown do `two_tenants`
+# rodar `DELETE FROM aprimora_py.tenant`.
+#
+# Com a ordem invertida, o `await admin_session.rollback()` do fim de cada teste
+# é o único que solta os locks — e ele não roda quando a asserção falha. O
+# DELETE do teardown então espera para sempre por uma sessão `idle in
+# transaction`, e a suíte inteira pendura: em 2026-07-30 isso matou dois jobs de
+# CI, em tetos de 15 e de 30 minutos, sem nunca reportar qual teste falhou.
+#
+# O `lock_timeout` no teardown do conftest é a rede de proteção; esta ordem é o
+# conserto. Não reordene por estética.
+
 
 async def _cria_su(session, tenant_id: int) -> int:
     """Cria usuário + grupo nível 0 no sistema do app. Devolve o id do usuário."""
@@ -110,7 +125,7 @@ async def _cria_usuario_comum(session, tenant_id: int, *, codigo_transacao: str)
 
 
 @pytest.mark.asyncio
-async def test_su_nao_bypassa_contratacao(admin_session, two_tenants):
+async def test_su_nao_bypassa_contratacao(two_tenants, admin_session):
     """Prova a filtragem no nível do dataclass: `load_permissions()` remove de
     `items` — para o SU — as transações de módulo não contratado.
 
@@ -137,7 +152,7 @@ async def test_su_nao_bypassa_contratacao(admin_session, two_tenants):
 
 
 @pytest.mark.asyncio
-async def test_transacao_de_modulo_comum_sobrevive(admin_session, two_tenants):
+async def test_transacao_de_modulo_comum_sobrevive(two_tenants, admin_session):
     """'comum' não é contratável e nunca pode ser filtrado."""
     tid, _ = two_tenants
     uid = await _cria_su(admin_session, tid)
@@ -150,7 +165,7 @@ async def test_transacao_de_modulo_comum_sobrevive(admin_session, two_tenants):
 
 
 @pytest.mark.asyncio
-async def test_contratar_tudo_nao_muda_nada(admin_session, two_tenants):
+async def test_contratar_tudo_nao_muda_nada(two_tenants, admin_session):
     """Regressão: com os 5 contratados, o resultado é o de antes da mudança."""
     tid, _ = two_tenants
     uid = await _cria_su(admin_session, tid)
@@ -168,7 +183,7 @@ async def test_contratar_tudo_nao_muda_nada(admin_session, two_tenants):
 
 @pytest.mark.asyncio
 async def test_usuario_comum_nao_ve_transacao_de_modulo_nao_contratado(
-    admin_session, two_tenants
+    two_tenants, admin_session
 ):
     """Ramo comum (grupo_transacao) também respeita a contratação — não só o
     ramo SU. Se o filtro tivesse ido para dentro do `if is_su:`, este teste
@@ -197,7 +212,7 @@ async def test_usuario_comum_nao_ve_transacao_de_modulo_nao_contratado(
 
 @pytest.mark.asyncio
 async def test_require_any_permission_bloqueia_quando_todos_de_modulo_nao_contratado(
-    admin_session, two_tenants
+    two_tenants, admin_session
 ):
     """require_any_permission: se TODOS os códigos exigidos são de módulo não
     contratado, 403 — mesmo para SU."""
@@ -217,7 +232,7 @@ async def test_require_any_permission_bloqueia_quando_todos_de_modulo_nao_contra
 
 @pytest.mark.asyncio
 async def test_require_any_permission_passa_com_pelo_menos_um_disponivel(
-    admin_session, two_tenants
+    two_tenants, admin_session
 ):
     """require_any_permission: com pelo menos um código de módulo contratado
     (e concedido via grupo_transacao), passa — mesmo o outro código estando
