@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db, tenant_filter
 from ..models import Manifestante, TipoManifestante, Usuario
@@ -21,7 +22,11 @@ router = APIRouter(tags=["manifestantes"])
 
 
 # --- TipoManifestante ---------------------------------------------------------
-@router.get("/tipos-manifestante", response_model=list[TipoManifestanteOut])
+@router.get(
+    "/tipos-manifestante",
+    response_model=list[TipoManifestanteOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_tipos_manifestante(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -82,7 +87,11 @@ async def delete_tipo_manifestante(
 
 
 # --- Manifestante -------------------------------------------------------------
-@router.get("/manifestantes", response_model=Paginated[ManifestanteOut])
+@router.get(
+    "/manifestantes",
+    response_model=Paginated[ManifestanteOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_manifestantes(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),

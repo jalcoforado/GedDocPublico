@@ -3,6 +3,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
+from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..config import validacao_publica_url
 from ..database import get_db
@@ -73,6 +74,7 @@ async def solicitar_endpoint(
 @router.get(
     "/processos/{processo_id}/solicitacoes-assinatura",
     response_model=list[SolicitacaoOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
 )
 async def listar_do_processo_endpoint(
     processo_id: int,
@@ -209,7 +211,11 @@ async def recusar_endpoint(
     return next(s for s in lista if s.id == solicitacao_id)
 
 
-@router.get("/assinaturas/{assinatura_anexo_id}/validar", response_model=ValidacaoOut)
+@router.get(
+    "/assinaturas/{assinatura_anexo_id}/validar",
+    response_model=ValidacaoOut,
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def validar_endpoint(
     assinatura_anexo_id: int,
     current: Usuario = Depends(get_current_user),
@@ -229,7 +235,11 @@ async def validar_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
-@router.get("/assinaturas/{assinatura_anexo_id}/evidencias", response_model=EvidenciasOut)
+@router.get(
+    "/assinaturas/{assinatura_anexo_id}/evidencias",
+    response_model=EvidenciasOut,
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def evidencias_endpoint(
     assinatura_anexo_id: int,
     current: Usuario = Depends(get_current_user),
@@ -272,7 +282,10 @@ async def revogar_validacao_publica_endpoint(
     return {"id_assinatura_anexo": aa.id, "validacao_publica_revogada": True}
 
 
-@router.get("/assinaturas/{assinatura_anexo_id}/comprovante.pdf")
+@router.get(
+    "/assinaturas/{assinatura_anexo_id}/comprovante.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def comprovante_endpoint(
     assinatura_anexo_id: int,
     current: Usuario = Depends(get_current_user),

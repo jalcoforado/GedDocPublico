@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db, tenant_filter
 from ..models import Assunto, AssuntoTipoProcessoTipoAnexo, TipoAnexo, TipoProcesso, Usuario
@@ -27,7 +28,11 @@ router = APIRouter(tags=["assuntos"])
 
 
 # --- TipoProcesso -------------------------------------------------------------
-@router.get("/tipos-processo", response_model=list[TipoProcessoOut])
+@router.get(
+    "/tipos-processo",
+    response_model=list[TipoProcessoOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_tipos_processo(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -81,7 +86,11 @@ async def delete_tipo_processo(
 
 
 # --- Assunto ------------------------------------------------------------------
-@router.get("/assuntos", response_model=Paginated[AssuntoOut])
+@router.get(
+    "/assuntos",
+    response_model=Paginated[AssuntoOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_assuntos(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -149,7 +158,11 @@ async def delete_assunto(
 
 
 # --- TipoAnexo ----------------------------------------------------------------
-@router.get("/tipos-anexo", response_model=list[TipoAnexoOut])
+@router.get(
+    "/tipos-anexo",
+    response_model=list[TipoAnexoOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_tipos_anexo(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -203,7 +216,11 @@ async def delete_tipo_anexo(
 
 
 # --- AssuntoTipoAnexo (relacionamento) ----------------------------------------
-@router.get("/assunto-tipo-anexo", response_model=list[AssuntoTipoAnexoOut])
+@router.get(
+    "/assunto-tipo-anexo",
+    response_model=list[AssuntoTipoAnexoOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_assunto_tipo_anexo(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),

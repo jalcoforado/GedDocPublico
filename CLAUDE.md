@@ -35,8 +35,20 @@ Três coisas a não quebrar ao mexer nisso:
   `e2e-assinatura.yml` **não** roda o seed_bootstrap). Sem isso o tenant sobe com zero módulos e o
   sistema inteiro dá 403.
 
-Lacuna conhecida: a contratação barra **escrita**, não **leitura** — 76 GETs de módulo não têm gate.
-Detalhes e decisão em `docs/BACKLOG-PENDENCIAS.md`, item 1.0.5.
+Desde 2026-07-30 (fatia `leitura-por-modulo`, `5c47729`) a leitura também é gateada por
+contratação: `require_modulo(slug)` (`auth/modulos.py`) barra 69 GETs (58 `protocolo`, 11
+`administracao`; 7 permanecem transversais, sem gate, com a razão registrada em
+`tests/test_guarda_modularizacao.py::ENDPOINTS_LEITURA_SEM_GATE`). Diferença essencial para
+`require_permission`: **`require_modulo` não olha o usuário** — não consulta grupo, transação nem
+nível. Um usuário sem nenhuma permissão continua lendo o que lê hoje, desde que o tenant tenha o
+módulo contratado. Não "melhore" essa dependência para também checar permissão sem falar com o
+Jorge antes — mudaria política de acesso, e há teste (`test_usuario_sem_permissao_continua_lendo`)
+que trava essa propriedade.
+
+Lacuna que **continua** aberta, e é outro problema: a contratação fecha só a metade de "tenant tem
+o módulo?" — não fecha "este usuário pode ler isto?". `/usuarios`, `/grupos`, `/audit` e outros
+seguem legíveis por **qualquer** autenticado do tenant. Detalhes e decisão em
+`docs/BACKLOG-PENDENCIAS.md`, item 1.0.8.
 
 O launcher (tela de seleção de módulos), os menus particionados e o prefixo `/m/<slug>` na URL são
 as fatias F2/F3, **não implementadas**. Spec e planos em `docs/superpowers/`.
