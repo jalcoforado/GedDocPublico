@@ -51,6 +51,15 @@ async def list_jobs_endpoint(
     )
 
 
+# Efeito colateral aceito (achado no review final, 2026-07-30): este é o caso
+# mais forte dos oito endpoints afetados no repo (ver o comentário equivalente
+# em `routers/catalogo.py` e `routers/localizacao.py`). Antes da branch, esta
+# rota não tocava banco nem tenant algum — só lia `celery_app.conf.beat_schedule`
+# in-process. Agora `require_modulo("administracao")` injeta `require_tenant_id`
+# (400 possível fora do nginx, com `STRICT_TENANT_RESOLUTION=true` e Host sem
+# subdomínio resolvível) E abre uma sessão de banco para dois SELECTs
+# (`slugs_contratados`, que resolve contratados + módulos não-contratáveis).
+# Aceito por ora; atrás do nginx (produção) o tenant sempre resolve.
 @router.get(
     "/agenda",
     response_model=list[AgendaItem],

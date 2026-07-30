@@ -13,6 +13,19 @@ from ..schemas.unidade import TipoUnidadeOut
 
 router = APIRouter(prefix="/catalogo", tags=["catalogo"])
 
+# Efeito colateral aceito (achado na revisão da Task 2/3, 2026-07-30, registrado
+# num lugar só no review final): `/niveis`, `/sistemas`, `/transacoes` e
+# `/prioridades` não declaravam `require_tenant_id` — nenhuma delas filtra por
+# tenant no corpo do endpoint. `require_modulo(...)` injeta essa dependência
+# por baixo (ela mesma precisa do tenant para resolver a contratação). Fora do
+# nginx, com `STRICT_TENANT_RESOLUTION=true` e Host sem subdomínio resolvível,
+# essas 4 rotas passam a poder responder 400 onde antes davam 200. `/tipos-unidade`
+# já declarava `require_tenant_id` por conta própria (filtra `TipoUnidadeTrabalho`
+# por tenant) e não é afetada. Aceito por ora; atrás do nginx (produção) o
+# tenant sempre resolve, então não há regressão observável ali. Mesmo efeito em
+# `/estados`, `/cidades`, `/bairros` (`routers/localizacao.py`) e `/jobs/agenda`
+# (`routers/jobs.py`) — comentário próprio em cada arquivo.
+
 
 @router.get(
     "/niveis",
@@ -77,11 +90,8 @@ async def list_tipos_unidade(
     ]
 
 
-# Efeito colateral aceito (achado na revisão da Task 2, 2026-07-30): esta rota
-# não declarava `require_tenant_id` — `require_modulo("protocolo")` injeta
-# essa dependência por baixo. Fora do nginx, com `STRICT_TENANT_RESOLUTION=true`
-# e Host sem subdomínio resolvível, pode responder 400 onde antes dava 200.
-# Aceito por ora; atrás do nginx (produção) o tenant sempre resolve.
+# Mesmo efeito colateral do comentário no topo do arquivo: `/prioridades`
+# também não declarava `require_tenant_id`.
 @router.get(
     "/prioridades",
     response_model=list[PrioridadeOut],
