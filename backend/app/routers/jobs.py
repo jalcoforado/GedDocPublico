@@ -173,9 +173,13 @@ async def disparar_relatorio_tramitacao(
 )
 async def disparar_limpeza(
     payload: DispararLimpezaRequest,
-    # Apaga artefatos de jobs antigos do tenant — manutenção destrutiva,
-    # não operação de protocolo. Fica sob `configuracao`.
-    current: Usuario = Depends(require_permission("configuracao", "excluir")),
+    # Apaga artefatos de jobs antigos — e todo job deste router é de protocolo
+    # (PDF de processo, carimbo, relatório de tramitação). Por isso `processo`,
+    # como os vizinhos, e não `configuracao`: esse código mora no módulo
+    # `administracao`, e um tenant que contratou só `protocolo` levaria 403 ao
+    # limpar artefatos do próprio protocolo — sem escapatória, já que o gate
+    # de módulo roda antes do bypass de super-usuário.
+    current: Usuario = Depends(require_permission("processo", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),

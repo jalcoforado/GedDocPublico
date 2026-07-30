@@ -25,6 +25,24 @@ async def test_toda_transacao_do_sistema_tem_modulo(admin_session):
     Se este teste falhar: acrescente o código em MODULO_TRANSACOES, em
     backend/app/cli/seed_bootstrap.py, e rode o seed.
     """
+    app = get_settings().app_name
+
+    # O escopo é medido antes da asserção principal: um JOIN vazio faria a
+    # guarda passar sem verificar nada. Não é hipótese — era exatamente o que
+    # aconteceria com o `s.app = 'sistemas'` literal do brief neste ambiente,
+    # onde `utils.sistema` tem duas linhas e o app roda como 'aprimora'.
+    total_no_escopo = (await admin_session.execute(text("""
+        SELECT count(*)
+          FROM utils.transacao t
+          JOIN utils.sistema_transacao st ON st.id_transacao = t.id AND st.excluido = false
+          JOIN utils.sistema s ON s.id = st.id_sistema AND s.app = :app
+         WHERE t.excluido = false
+    """), {"app": app})).scalar()
+    assert total_no_escopo > 0, (
+        "a guarda ficou vacuosa: nenhuma transação no escopo do sistema "
+        f"'{app}'. Verifique APP_NAME e o vínculo em sistema_transacao."
+    )
+
     orfas = (await admin_session.execute(text("""
         SELECT t.codigo
           FROM utils.transacao t
@@ -35,7 +53,7 @@ async def test_toda_transacao_do_sistema_tem_modulo(admin_session):
                SELECT 1 FROM aprimora_py.modulo_transacao mt WHERE mt.id_transacao = t.id
            )
          ORDER BY t.codigo
-    """), {"app": get_settings().app_name})).scalars().all()
+    """), {"app": app})).scalars().all()
     assert not orfas, (
         f"Transações sem módulo: {orfas}. "
         "Mapeie em MODULO_TRANSACOES (app/cli/seed_bootstrap.py) e rode o seed."
@@ -109,6 +127,16 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     ("PUT", "/api/v2/notificacoes/telefone"),
     ("POST", "/api/v2/notificacoes/marcar-todas-lidas"),
     ("POST", "/api/v2/notificacoes/{notif_id}/marcar-lida"),
+    # Envio de teste de WhatsApp: valida a configuração de infraestrutura do
+    # tenant (driver Zenvia), que é transversal como o resto deste router.
+    # Chegou a receber `configuracao` na primeira rodada da Task 8 e foi
+    # revertido: esse código mora no módulo `administracao`, então um tenant
+    # sem `administracao` não conseguiria validar a própria configuração.
+    # Fica registrado que sobra aqui uma questão de AUTORIZAÇÃO, não de
+    # módulo — qualquer usuário autenticado do tenant dispara um envio com a
+    # credencial dele. Fechar isso pede um gate de super-usuário de tenant,
+    # que não existe hoje como dependency; ver relatório da Task 8.
+    ("POST", "/api/v2/notificacoes/whatsapp-test"),
 
     # -- Fila de assinatura do próprio usuário: lista o que foi endereçado a
     # ele. O ato de assinar/recusar é que exige `processo`+`atualizar`.
@@ -201,8 +229,8 @@ ENDPOINTS_LEITURA_SEM_GATE: set[tuple[str, str]] = {
     ("GET", "/api/v2/relatorios/assinaturas.json"),
     ("GET", "/api/v2/relatorios/assinaturas.pdf"),
     # Jobs assíncronos: os artefatos são todos de protocolo. Os POST que
-    # disparam esses jobs passaram a exigir `processo`/`configuracao` na
-    # Task 8; a listagem e o download do resultado ficaram como leitura.
+    # disparam esses jobs passaram a exigir `processo` na Task 8; a listagem e
+    # o download do resultado ficaram como leitura.
     ("GET", "/api/v2/jobs"),
     ("GET", "/api/v2/jobs/agenda"),
     ("GET", "/api/v2/jobs/{job_id}"),
@@ -264,14 +292,28 @@ ENDPOINTS_LEITURA_SEM_GATE: set[tuple[str, str]] = {
 }
 
 
+# Origem exata das closures que fazem o enforcement. `require_permission` e
+# `require_any_permission` devolvem uma função interna chamada `_check`; é o
+# par (módulo, qualname) que identifica o gate de verdade.
+#
+# Casar por substring (`"_check" in qualname`) seria um falso-NEGATIVO
+# esperando acontecer, e falso-negativo é o erro que mata esta guarda: uma
+# dependency futura chamada `_check_ip_permitido` ou `_check_captcha` contaria
+# como gate de permissão sem verificar permissão nenhuma, e o endpoint
+# escaparia do CI. O repo já tem `_check_processo` (services/volumes.py) com
+# essa convenção de nome, sem relação com RBAC.
+GATES_DE_PERMISSAO: set[tuple[str, str]] = {
+    ("app.auth.perms", "require_permission.<locals>._check"),
+    ("app.auth.perms", "require_any_permission.<locals>._check"),
+}
+
+
 def endpoints_sem_permissao() -> set[tuple[str, str]]:
     """Varre o app e devolve (método, caminho) sem gate de permissão.
 
     `dependant.dependencies` cobre tanto `dependencies=[...]` da rota/router
     quanto os `Depends()` da assinatura do endpoint, que é onde a maioria dos
-    routers deste repo põe o gate. `require_permission` e
-    `require_any_permission` devolvem uma closure chamada `_check` — daí o
-    critério pelo `__qualname__`.
+    routers deste repo põe o gate.
     """
     from app.main import app
 
@@ -280,16 +322,35 @@ def endpoints_sem_permissao() -> set[tuple[str, str]]:
         caminho = getattr(rota, "path", "")
         if not caminho.startswith("/api/v2"):
             continue
-        deps = [
-            d.call.__qualname__
+        origens = {
+            (getattr(d.call, "__module__", ""), getattr(d.call, "__qualname__", ""))
             for d in getattr(getattr(rota, "dependant", None), "dependencies", [])
             if getattr(d, "call", None) is not None
-        ]
-        tem_perm = any("_check" in q or "require_permission" in q for q in deps)
-        if not tem_perm:
+        }
+        if not (origens & GATES_DE_PERMISSAO):
             for metodo in getattr(rota, "methods", set()):
                 desprotegidos.add((metodo, caminho))
     return desprotegidos
+
+
+def test_gates_de_permissao_batem_com_a_implementacao():
+    """Se `perms.py` renomear a closure, a varredura silencia — trava isso.
+
+    Sem este teste, `GATES_DE_PERMISSAO` desatualizado faria
+    `endpoints_sem_permissao()` considerar TODOS os endpoints desprotegidos
+    (falso-positivo ruidoso) ou — pior, se alguém "consertasse" relaxando o
+    critério — nenhum. O casamento exato só é seguro se for verificado.
+    """
+    from app.auth.perms import require_any_permission, require_permission
+
+    reais = {
+        (fabrica("x").__module__, fabrica("x").__qualname__)
+        for fabrica in (require_permission, require_any_permission)
+    }
+    assert reais == GATES_DE_PERMISSAO, (
+        f"As closures de perms.py mudaram: {sorted(reais)} != "
+        f"{sorted(GATES_DE_PERMISSAO)}. Atualize GATES_DE_PERMISSAO."
+    )
 
 
 def test_nenhum_endpoint_novo_sem_permissao():
