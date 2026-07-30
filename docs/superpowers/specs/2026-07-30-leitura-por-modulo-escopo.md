@@ -111,9 +111,10 @@ Unidade de trabalho e usuário são o organograma e as pessoas: todo módulo os 
 | | Quantos | Quais |
 |---|---|---|
 | **Gatear `protocolo`** | 58 | processos e artefatos, anexos, assinaturas, relatórios, catálogo documental, assunto, manifestante, localização, workflow — **mais** `/catalogo/prioridades`, que sai de administração |
-| **Gatear `administracao`** | 8 | `/grupos` (3), `/organograma`, `/catalogo/niveis`, `/sistemas`, `/transacoes`, `/tipos-unidade` |
-| **NÃO gatear — transversal comprovado** | 4 | `/usuarios`, `/usuarios/{id}`, `/unidades-trabalho`, `/unidades-trabalho/{id}` |
-| **Decisão pendente** | 6 | `/busca`, `/jobs` (4), `/audit` |
+| **Gatear `administracao`** | 12 | `/grupos` (3), `/organograma`, `/catalogo/niveis`, `/sistemas`, `/transacoes`, `/tipos-unidade`, **`/jobs` (4)** |
+| **NÃO gatear — transversal** | 6 | `/usuarios`, `/usuarios/{id}`, `/unidades-trabalho`, `/unidades-trabalho/{id}` (consumo cruzado comprovado), **`/busca`**, **`/audit`** (decisão do Jorge) |
+
+Total: 58 + 12 + 6 = 76.
 
 Verificações que sustentam o bloco "protocolo": `api.manifestantes`, `api.assuntos`,
 `api.tiposProcesso`, `api.tiposAnexo`, `api.cidades`, `api.bairros`, `api.enderecos`, `api.estados`
@@ -125,7 +126,24 @@ Verificações que sustentam o bloco "administração": `api.grupos` (telas de g
 `api.niveis`, `api.sistemas`, `api.transacoes` (só a tela de grupos), `api.tiposUnidade`
 (`components/organograma/UnidadeEditDrawer.tsx`).
 
-### Os 6 pendentes, e por que cada um é decisão e não descuido
+### Decisões do Jorge sobre os 6 pendentes (2026-07-30)
+
+- **`/busca` — transversal, sem gate.** É recurso do sistema, não do módulo. Quando outros módulos
+  entrarem no índice, um gate de protocolo estaria errado de qualquer forma.
+- **`/audit` — transversal, sem gate.** Auditoria é compliance: registra ações de todos os módulos, e
+  uma prefeitura sob guarda legal não pode perder a leitura da própria trilha por não ter contratado
+  o módulo administração.
+- **`/jobs`, `/jobs/agenda`, `/jobs/{id}`, `/jobs/{id}/resultado` — gatear como `administracao`**,
+  seguindo a tela que os exibe.
+
+  > **Inconsistência conhecida e aceita.** O review da Task 8 fez a chamada oposta para o endpoint
+  > irmão: `/jobs/limpar-antigos` (POST) foi movido de `configuracao` para `processo` exatamente
+  > para não acoplar um recurso de protocolo ao módulo administração. Com esta decisão, o POST e o
+  > GET do mesmo recurso pertencem a módulos diferentes, e um tenant com protocolo e sem
+  > administração dispara o job mas não lê o resultado. Está registrado aqui para que quem encontrar
+  > isso depois saiba que foi decisão, não descuido.
+
+### Os 6 pendentes — o material que sustentou as decisões acima
 
 - **`/busca`** — busca global. Hoje varre processos, mas é apresentada como recurso do sistema, não
   do módulo. Gatear com `protocolo` tira a busca inteira de um tenant sem protocolo.
