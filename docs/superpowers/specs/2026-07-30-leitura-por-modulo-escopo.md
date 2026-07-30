@@ -87,6 +87,55 @@ Não são exceções decididas — são os que eu já sei que vão exigir julgam
 - **`GET /api/v2/assinaturas/{id}/validar`** — confirmado que **este** é o autenticado; a validação
   pública do cidadão é outra rota, então gatear não quebra o portal.
 
+## Resultado da triagem (2026-07-30)
+
+Verificado por consumo real no frontend, endpoint a endpoint. **Tentei automatizar e não convergiu:**
+o `api.ts` mistura métodos planos (`api.prioridades`), objetos aninhados (`api.unidades.list`) e
+construtores de URL usados como `href` (os relatórios), e cada versão do parser errava um subconjunto
+diferente. O que produziu resultado foi verificação dirigida pelo símbolo real de chamada.
+
+**O achado que muda a forma da fatia: os cadastros de "administração" são infraestrutura
+transversal, não features de um módulo.**
+
+| Endpoint | Agrupado como | Consumido de fato por |
+|---|---|---|
+| `GET /unidades-trabalho` | administracao | **4 módulos** — administração, frota (motoristas, solicitações, veículos), protocolo (processos, relatórios, tramitação, serviços, `AcoesProcesso`) |
+| `GET /usuarios` | administracao | **3 módulos** — protocolo (relatório de assinaturas, `AssinaturasProcesso`), transporte (alvarás), administração |
+| `GET /catalogo/prioridades` | administracao | **protocolo** — `AcoesProcesso.tsx` |
+
+Unidade de trabalho e usuário são o organograma e as pessoas: todo módulo os referencia. Gatear com
+`administracao` daria 403 em frota e protocolo de qualquer tenant que não contratasse administração.
+
+### Classificação proposta dos 76
+
+| | Quantos | Quais |
+|---|---|---|
+| **Gatear `protocolo`** | 58 | processos e artefatos, anexos, assinaturas, relatórios, catálogo documental, assunto, manifestante, localização, workflow — **mais** `/catalogo/prioridades`, que sai de administração |
+| **Gatear `administracao`** | 8 | `/grupos` (3), `/organograma`, `/catalogo/niveis`, `/sistemas`, `/transacoes`, `/tipos-unidade` |
+| **NÃO gatear — transversal comprovado** | 4 | `/usuarios`, `/usuarios/{id}`, `/unidades-trabalho`, `/unidades-trabalho/{id}` |
+| **Decisão pendente** | 6 | `/busca`, `/jobs` (4), `/audit` |
+
+Verificações que sustentam o bloco "protocolo": `api.manifestantes`, `api.assuntos`,
+`api.tiposProcesso`, `api.tiposAnexo`, `api.cidades`, `api.bairros`, `api.enderecos`, `api.estados`
+— todos consumidos **só** por telas de protocolo. Os relatórios não passam pelo cliente de API: são
+`href` montados a partir de `BROWSER_API_URL`, o que explica por que nenhuma busca por símbolo os
+encontrava.
+
+Verificações que sustentam o bloco "administração": `api.grupos` (telas de grupos e usuários),
+`api.niveis`, `api.sistemas`, `api.transacoes` (só a tela de grupos), `api.tiposUnidade`
+(`components/organograma/UnidadeEditDrawer.tsx`).
+
+### Os 6 pendentes, e por que cada um é decisão e não descuido
+
+- **`/busca`** — busca global. Hoje varre processos, mas é apresentada como recurso do sistema, não
+  do módulo. Gatear com `protocolo` tira a busca inteira de um tenant sem protocolo.
+- **`/jobs`, `/jobs/agenda`, `/jobs/{id}`, `/jobs/{id}/resultado`** — a Task 8 decidiu que os
+  **disparos** são de protocolo (os artefatos são de protocolo), mas a **tela** `/jobs` fica em
+  administração. É o único caso em que o consumo cruzado é entre a tela dona e o dado processado.
+- **`/audit`** — trilha de auditoria. Nenhum consumo encontrado pelo cliente de API (a tela de
+  auditoria provavelmente monta a chamada de outro jeito — confirmar). Conceitualmente é compliance,
+  não módulo: um tenant sem administração contratada perderia a leitura da própria auditoria.
+
 ## Testes
 
 - Tenant **sem** o módulo: GET representativo de cada grupo devolve **403**.
