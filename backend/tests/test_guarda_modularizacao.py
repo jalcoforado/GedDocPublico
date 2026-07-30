@@ -319,14 +319,20 @@ GATES_DE_MODULO: set[tuple[str, str]] = {
 }
 
 
-def endpoints_sem_gate() -> set[tuple[str, str]]:
-    """Varre o app e devolve (método, caminho) sem gate reconhecido.
+def endpoints_sem_gate(app=None) -> set[tuple[str, str]]:
+    """Varre `app` e devolve (método, caminho) sem gate reconhecido.
+
+    `app=None` (default) resolve `app.main.app` — a aplicação real. Parâmetro
+    existe para o teste de assimetria poder passar uma app fake e exercitar
+    esta função de verdade, em vez de reimplementar o laço por conta própria
+    (reimplementação que não pega regressão nesta função).
 
     `dependant.dependencies` cobre tanto `dependencies=[...]` da rota/router
     quanto os `Depends()` da assinatura do endpoint, que é onde a maioria dos
     routers deste repo põe o gate.
     """
-    from app.main import app
+    if app is None:
+        from app.main import app
 
     desprotegidos: set[tuple[str, str]] = set()
     for rota in app.routes:
@@ -419,11 +425,13 @@ def test_escrita_so_com_require_modulo_continua_desprotegida():
     """Trava a assimetria: `require_modulo` sozinho NUNCA basta para escrita.
 
     Constrói uma app FastAPI isolada com uma rota POST protegida só por
-    `require_modulo` (sem `require_permission`) e confirma que
-    `endpoints_sem_gate` a reporta como desprotegida. Sem este teste, alguém
-    "simplifica" a varredura de volta para um único conjunto aceito em
-    qualquer método, e o afrouxamento de escrita volta sem aviso — é
-    exatamente o falso-negativo que a nota de `GATES_DE_PERMISSAO` descreve.
+    `require_modulo` (sem `require_permission`) e chama `endpoints_sem_gate`
+    de VERDADE sobre ela (via o parâmetro `app`) — não uma cópia do laço.
+    Uma cópia local não pegaria regressão na função de produção; é ela que
+    tem de continuar reportando a rota como desprotegida. Sem este teste,
+    alguém "simplifica" `endpoints_sem_gate` de volta para um único conjunto
+    aceito em qualquer método, e o afrouxamento de escrita volta sem aviso —
+    é exatamente o falso-negativo que a nota de `GATES_DE_PERMISSAO` descreve.
     """
     from fastapi import Depends, FastAPI
 
@@ -435,24 +443,7 @@ def test_escrita_so_com_require_modulo_continua_desprotegida():
     async def _rota_fake():
         return None
 
-    desprotegidos: set[tuple[str, str]] = set()
-    for rota in app_fake.routes:
-        caminho = getattr(rota, "path", "")
-        if not caminho.startswith("/api/v2"):
-            continue
-        origens = {
-            (getattr(d.call, "__module__", ""), getattr(d.call, "__qualname__", ""))
-            for d in getattr(getattr(rota, "dependant", None), "dependencies", [])
-            if getattr(d, "call", None) is not None
-        }
-        for metodo in getattr(rota, "methods", set()):
-            aceitos = (
-                GATES_DE_PERMISSAO | GATES_DE_MODULO
-                if metodo == "GET"
-                else GATES_DE_PERMISSAO
-            )
-            if not (origens & aceitos):
-                desprotegidos.add((metodo, caminho))
+    desprotegidos = endpoints_sem_gate(app=app_fake)
 
     assert ("POST", "/api/v2/_fake/so-modulo") in desprotegidos, (
         "Uma rota POST protegida só por require_modulo deveria continuar "
