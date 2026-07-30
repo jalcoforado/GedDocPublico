@@ -173,9 +173,40 @@ Verificações que sustentam o bloco "administração": `api.grupos` (telas de g
 - Escrita: já está gateada desde a F1.
 - Módulos pagamentos, frota e transporte: já gateiam leitura, não entram.
 
-## Risco conhecido
+## Custo medido — e por que a memoização NÃO foi feita
 
-Cada endpoint gateado ganha o custo de resolver a contratação do tenant — as mesmas consultas que o
-gate da F1 já faz por request. Em 76 rotas de leitura, algumas de listagem quente, vale medir antes
-de assumir que é grátis. Se pesar, o caminho é memorizar o resultado por request
-(`request.state`), não abrir mão do gate.
+**Medição de 2026-07-30**, no container de dev, tenant `sobral` com os 6 módulos contratados.
+Registrada aqui para ninguém refazer a conta.
+
+| O quê | Mediana | p95 |
+|---|---|---|
+| `slugs_contratados()` isolado, 200 repetições | **1,88 ms** | 2,81 ms |
+| `GET /assuntos` (gateada, listagem simples) | 11,97 ms | 15,02 ms |
+| `GET /usuarios` (**não** gateada, listagem simples) | 10,60 ms | 13,40 ms |
+| `GET /processos` (gateada, listagem quente) | 21,91 ms | 36,10 ms |
+
+O gate custa ~1,4 ms na comparação entre pares de listagem equivalente, coerente com os 1,88 ms
+medidos isoladamente. É de 6% a 13% do request, conforme o peso do endpoint.
+
+**Decisão: não memoizar.** Não porque o custo seja desprezível, mas porque a memoização proposta no
+plano não colheria a maior parte dele. Contando as chamadas reais por request numa amostra de 29
+rotas gateadas: **28 resolvem a contratação exatamente uma vez**. Memoizar por request não economiza
+nada onde só há uma chamada.
+
+A exceção é instrutiva. `GET /processos` resolve **duas** vezes:
+
+1. `auth/modulos.py::_check_modulo` → `slugs_contratados` (o gate desta fatia);
+2. `routers/processos.py::_is_super` → `services/permissoes.load_permissions` →
+   `services/modulos.codigos_bloqueados` → `slugs_contratados`.
+
+O mesmo vale para as 8 rotas que passam por `require_acesso_processo` (`services/sigilo.py`), que
+também carrega permissões. São ~9 de 70.
+
+Memoizar de verdade exigiria alcançar **as duas** chamadas — e a segunda nasce dentro de
+`services/`, que não conhece (nem deve conhecer) o `Request` do HTTP. Guardar em `request.state`,
+como o plano sugeria, só alcança a primeira, que é justamente a que já é única. O ganho seria zero
+em 61 rotas e exigiria empurrar concern de HTTP para a camada de serviço nas outras 9.
+
+Se um dia esses ~1,9 ms importarem, o caminho certo não é memoização por request: é tornar
+`slugs_contratados` mais barato na origem (hoje faz dois SELECTs) ou cachear o catálogo de módulos,
+que é global e quase imutável. Ambos ficam fora desta fatia por YAGNI.
