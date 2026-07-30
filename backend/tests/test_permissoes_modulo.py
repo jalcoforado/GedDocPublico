@@ -94,9 +94,19 @@ async def _cria_usuario_comum(session, tenant_id: int, *, codigo_transacao: str)
     sistema_id = (await session.execute(text(
         "SELECT id FROM utils.sistema WHERE app = :app AND excluido = false LIMIT 1"
     ), {"app": APP})).scalar_one()
+    # get-or-create: o bootstrap garante SÓ o nível 0 (super-usuário). Em banco
+    # limpo — CI, instalação nova — não existe nível operacional, e um
+    # `scalar_one()` aqui estoura com NoResultFound. Localmente existe por
+    # herança do legado, então a suposição passava despercebida: foi assim que
+    # este teste ficou verde aqui e vermelho no CI.
     nivel_id = (await session.execute(text(
-        "SELECT id FROM utils.nivel WHERE valor <> 0 LIMIT 1"
-    ))).scalar_one()
+        "SELECT id FROM utils.nivel WHERE valor <> 0 AND excluido = false LIMIT 1"
+    ))).scalar_one_or_none()
+    if nivel_id is None:
+        nivel_id = (await session.execute(text(
+            "INSERT INTO utils.nivel (nivel, valor, excluido) "
+            "VALUES ('Operacional', 1, false) RETURNING id"
+        ))).scalar_one()
     transacao_id = (await session.execute(text(
         "SELECT id FROM utils.transacao WHERE codigo = :c AND excluido = false LIMIT 1"
     ), {"c": codigo_transacao})).scalar_one()
