@@ -74,6 +74,33 @@
   conserto** — se produção estiver sob `sistemas`, o errado é só o container local; se estiver sob
   `aprimora`, a correção envolve migrar dados.
 
+### 1.0.5 Leitura de módulo sem gate de permissão — a contratação é meia barreira
+
+*(Descoberto em 2026-07-29, pela varredura de endpoints da fatia F1 da modularização. Jorge decidiu
+tratar em **fatia própria depois do F1**.)*
+
+- A varredura cobriu **136 endpoints** sob `/api/v2`. Destes, **76 GETs pertencem a um módulo e não
+  têm gate de permissão nenhum** — só `get_current_user`.
+- **Não é esquecimento pontual, é convenção sistemática:** os routers da geração protocolo seguem
+  *escrita gateada, leitura liberada a qualquer autenticado do tenant*. Pagamentos, frota e
+  transporte gateiam as duas pontas e não têm o problema (só o `minha-fila`, já corrigido na F1).
+- **Consequência para a modularização:** um tenant que **não contratou** um módulo continua
+  conseguindo **ler** os dados dele pela API. A escrita está barrada pelo gate da F1; a leitura, não.
+  A contratação, portanto, é meia barreira até isso fechar.
+- A lista está viva e vigiada em `backend/tests/test_guarda_modularizacao.py`, no conjunto
+  `ENDPOINTS_LEITURA_SEM_GATE`, **com o código de permissão que cada endpoint deveria receber**. Há
+  um teste (`test_allowlist_nao_tem_entrada_obsoleta`) que reprova o PR se a lista apodrecer — então
+  a dívida não cresce em silêncio nem parece do mesmo tamanho depois de paga.
+- **Estimativa a confirmar:** ~55 expõem dado de negócio; ~21 são catálogos de lookup (estados,
+  cidades, tipos) onde fechar é discutível.
+- **Por que não foi feito na F1:** fechar tira leitura de quem tem hoje — usuário sem a transação
+  concedida passa a levar 403. É mudança de política de acesso para usuário real, não refactor. E
+  fazer isso enquanto a suíte tinha 8 regressões conhecidas impediria distinguir quebra nova de
+  herdada.
+- **Ao retomar:** auditar os 76 por sensibilidade do dado exposto antes de fechar qualquer um. O
+  `ENDPOINTS_LEITURA_SEM_GATE` já traz o código sugerido por endpoint — é o ponto de partida, não a
+  decisão.
+
 ### 1.1.5 Suíte não estava verde antes do F1
 
 Duas falhas confirmadas como anteriores à branch `feat/modularizacao-f1` (verificado por
