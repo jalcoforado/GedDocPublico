@@ -28,10 +28,13 @@ export function menuDoModulo(slug: string | null): MenuModulo | null {
  * "Geral" vinha primeiro, depois Processos/Protocolo/Cadastros, Frota,
  * Transporte Regulado, Pagamentos e por fim Administração.
  *
- * A ponte temporária da Task 1 em `components/Sidebar.tsx` usa esta ordem —
- * `Object.values(MENUS)` NÃO é confiável para isso porque depende da ordem
- * dos literais do objeto, que não é o mesmo contrato que "ordem visível pro
- * usuário". Sai junto com a ponte, na Task 3.
+ * A ponte temporária da Task 1 em `components/Sidebar.tsx` usava esta ordem
+ * para remontar o NAV inteiro; saiu na Task 3, quando a Sidebar passou a
+ * renderizar só `menuDoModulo(modulo) + MENUS.comum`. A constante continua
+ * viva só como fonte de verdade do `__tests__/menus.test.tsx` ("a ponte
+ * temporária reproduz a ordem original do NAV") — guarda de regressão para
+ * não perder essa ordem de vista caso ela volte a importar (ex.: um launcher
+ * futuro que liste todos os módulos de uma vez).
  */
 export const ORDEM_GRUPOS_ORIGINAL: readonly string[] = [
   "comum",

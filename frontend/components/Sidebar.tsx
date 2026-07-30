@@ -16,17 +16,10 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
-import { MENUS, ORDEM_GRUPOS_ORIGINAL, type NavGroup, type NavItem } from "@/lib/menus";
+import { MENUS, menuDoModulo, type NavGroup, type NavItem } from "@/lib/menus";
 import { cn } from "@/lib/utils";
 import { DensityToggle } from "./DensityToggle";
 import { ThemeToggle } from "./ThemeToggle";
-
-// Ponte temporária da Task 1 (split do menu): junta todos os grupos de todos
-// os módulos, na ORDEM ORIGINAL do NAV monolítico ("Geral" primeiro, depois
-// Processos/Protocolo/Cadastros, Frota, Transporte, Pagamentos, Administração
-// — ver ORDEM_GRUPOS_ORIGINAL). Sai na Task 3, quando a Sidebar passa a
-// receber `modulo` e renderizar só o menu ativo + comum.
-const NAV: NavGroup[] = ORDEM_GRUPOS_ORIGINAL.flatMap((slug) => MENUS[slug].grupos);
 
 function canSeeItem(item: NavItem, can: (perm: string) => boolean): boolean {
   return (
@@ -47,6 +40,8 @@ function itemMatchesPath(item: NavItem, pathname: string): boolean {
 }
 
 interface SidebarProps {
+  /** Slug do módulo ativo (derivado de `moduloDoPathname`), ou `null` em rota transversal. */
+  modulo: string | null;
   open: boolean;
   onClose: () => void;
 }
@@ -54,10 +49,20 @@ interface SidebarProps {
 const COLLAPSED_KEY = "aprimora.sidebar.collapsed";
 const GROUP_STATE_KEY = "aprimora.sidebar.groups.v1";
 
-export function Sidebar({ open, onClose }: SidebarProps) {
+export function Sidebar({ modulo, open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { can } = useAuth();
   const branding = useBranding();
+  // Menu do módulo ativo + transversais (comum), sempre por último — é o
+  // caminho de volta para /home e /dashboard quando o usuário está dentro de
+  // um módulo. "comum" nunca duplica: menuDoModulo(null) devolve null, e o
+  // guard `menu.slug !== "comum"` evita repetir o grupo se algum dia o slug
+  // do pathname vier como "comum" por engano.
+  const menu = menuDoModulo(modulo);
+  const NAV: NavGroup[] = [
+    ...(menu && menu.slug !== "comum" ? menu.grupos : []),
+    ...MENUS.comum.grupos,
+  ];
   // PR3a — link de plataforma só aparece para admin de plataforma (allowlist).
   const adminMeQ = useQuery({
     queryKey: ["admin-me"],

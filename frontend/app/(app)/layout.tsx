@@ -8,12 +8,14 @@ import { Header } from "@/components/Header";
 import { LoadingBar } from "@/components/LoadingBar";
 import { Sidebar } from "@/components/Sidebar";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { moduloDoPathname } from "@/lib/modulos";
 import { Providers } from "@/lib/providers";
 
 function Shell({ children }: { children: React.ReactNode }) {
   const { loading, user } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
+  const modulo = moduloDoPathname(pathname);
 
   if (loading) {
     return (
@@ -26,7 +28,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-dvh bg-background">
       <LoadingBar />
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar modulo={modulo} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onOpenSidebar={() => setSidebarOpen(true)} />
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
