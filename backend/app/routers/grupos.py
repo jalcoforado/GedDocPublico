@@ -3,6 +3,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db, tenant_filter
 from ..models import Grupo, GrupoTransacao, Usuario
@@ -32,7 +33,11 @@ async def _get_grupo_or_404(db: AsyncSession, grupo_id: int, tenant_id: int) -> 
     return g
 
 
-@router.get("", response_model=list[GrupoOut])
+@router.get(
+    "",
+    response_model=list[GrupoOut],
+    dependencies=[Depends(require_modulo("administracao"))],
+)
 async def list_grupos(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -43,7 +48,11 @@ async def list_grupos(
     return [GrupoOut.model_validate(g) for g in (await db.execute(stmt)).scalars().all()]
 
 
-@router.get("/{grupo_id}", response_model=GrupoOut)
+@router.get(
+    "/{grupo_id}",
+    response_model=GrupoOut,
+    dependencies=[Depends(require_modulo("administracao"))],
+)
 async def get_grupo(
     grupo_id: int,
     _: Usuario = Depends(get_current_user),
@@ -84,7 +93,11 @@ async def update_grupo(
     return GrupoOut.model_validate(g)
 
 
-@router.get("/{grupo_id}/transacoes", response_model=list[GrupoTransacaoOut])
+@router.get(
+    "/{grupo_id}/transacoes",
+    response_model=list[GrupoTransacaoOut],
+    dependencies=[Depends(require_modulo("administracao"))],
+)
 async def list_grupo_transacoes(
     grupo_id: int,
     _: Usuario = Depends(get_current_user),

@@ -196,40 +196,24 @@ ENDPOINTS_LEITURA_SEM_GATE: set[tuple[str, str]] = {
     # Task 2 (2026-07-30) pagou a dívida `protocolo`: as 58 rotas que estavam
     # aqui (processo/catalogo/assunto/manifestante/cidade/endereco/workflow +
     # relatórios + `/catalogo/prioridades`, que mudou de dono) ganharam
-    # `require_modulo("protocolo")` no mesmo commit. Ficam só as que continuam
-    # sem gate: `busca` (transversal) e `jobs` (administracao, Task 3).
+    # `require_modulo("protocolo")` no mesmo commit. Task 3 (2026-07-30) pagou
+    # a dívida `administracao`: as 12 rotas de grupos/catalogo/jobs/organograma
+    # ganharam `require_modulo("administracao")` no mesmo commit. Fica só a
+    # transversal: `busca`.
     ("GET", "/api/v2/busca"),
-    # Jobs assíncronos: os artefatos são todos de protocolo, mas o próprio
-    # mecanismo de fila é administracao (mapa-rotas.md). Os POST que disparam
-    # esses jobs já exigem `processo` desde a Task 8; a listagem e o download
-    # do resultado ficam como leitura pendente para a Task 3.
-    ("GET", "/api/v2/jobs"),
-    ("GET", "/api/v2/jobs/agenda"),
-    ("GET", "/api/v2/jobs/{job_id}"),
-    ("GET", "/api/v2/jobs/{job_id}/resultado"),
 
     # administracao / código `usuario`
     ("GET", "/api/v2/usuarios"),
     ("GET", "/api/v2/usuarios/{usuario_id}"),
-    ("GET", "/api/v2/grupos"),
-    ("GET", "/api/v2/grupos/{grupo_id}"),
-    ("GET", "/api/v2/grupos/{grupo_id}/transacoes"),
 
     # administracao / código `unidadeTrabalho`
     ("GET", "/api/v2/unidades-trabalho"),
     ("GET", "/api/v2/unidades-trabalho/{unidade_id}"),
-    ("GET", "/api/v2/organograma"),
 
-    # administracao / código `configuracao` — catálogos de apoio do cadastro de
-    # usuário/grupo/unidade (níveis, sistemas, transações, tipos de unidade) e
-    # a trilha de auditoria.
-    ("GET", "/api/v2/catalogo/niveis"),
-    ("GET", "/api/v2/catalogo/sistemas"),
-    ("GET", "/api/v2/catalogo/transacoes"),
-    ("GET", "/api/v2/catalogo/tipos-unidade"),
-    # `/catalogo/prioridades` mudou de dono na Task 2: quem a consome é
-    # AcoesProcesso.tsx (protocolo), não a tela de administração — já ganhou
-    # require_modulo("protocolo") e saiu daqui.
+    # Transversal (mapa-rotas.md): compliance registra ações de todos os
+    # módulos, não só administracao. Ficou agrupada com o catálogo de
+    # administração no comentário antigo por engano; o mapa é a fonte de
+    # verdade.
     ("GET", "/api/v2/audit"),
 }
 
@@ -270,10 +254,11 @@ GATES_DE_MODULO: set[tuple[str, str]] = {
 # copy-paste que só esta tabela pega.
 #
 # As 58 são as gateadas por `require_modulo("protocolo")` na Task 2
-# (2026-07-30). `test_rotas_por_modulo_bate_com_a_implementacao`, logo abaixo,
-# lê `modulo_slug` de cada dependência real e reprova nos dois sentidos: rota
-# gateada fora daqui, e rota daqui com slug diferente do que a rota realmente
-# exige.
+# (2026-07-30); as 12 seguintes são as gateadas por `require_modulo("administracao")`
+# na Task 3 (mesmo dia). `test_rotas_por_modulo_bate_com_a_implementacao`, logo
+# abaixo, lê `modulo_slug` de cada dependência real e reprova nos dois
+# sentidos: rota gateada fora daqui, e rota daqui com slug diferente do que a
+# rota realmente exige.
 ROTAS_POR_MODULO: dict[tuple[str, str], str] = {
     ("GET", "/api/v2/anexos/{anexo_id}/carimbado.pdf"): "protocolo",
     ("GET", "/api/v2/anexos/{anexo_id}/download"): "protocolo",
@@ -333,6 +318,20 @@ ROTAS_POR_MODULO: dict[tuple[str, str], str] = {
     ("GET", "/api/v2/workflow-definitions/{wf_id}/versoes"): "protocolo",
     ("GET", "/api/v2/workflow-instances"): "protocolo",
     ("GET", "/api/v2/workflow-instances/{instance_id}"): "protocolo",
+
+    # Task 3 (2026-07-30) — as 12 de administracao.
+    ("GET", "/api/v2/catalogo/niveis"): "administracao",
+    ("GET", "/api/v2/catalogo/sistemas"): "administracao",
+    ("GET", "/api/v2/catalogo/tipos-unidade"): "administracao",
+    ("GET", "/api/v2/catalogo/transacoes"): "administracao",
+    ("GET", "/api/v2/grupos"): "administracao",
+    ("GET", "/api/v2/grupos/{grupo_id}"): "administracao",
+    ("GET", "/api/v2/grupos/{grupo_id}/transacoes"): "administracao",
+    ("GET", "/api/v2/jobs"): "administracao",
+    ("GET", "/api/v2/jobs/agenda"): "administracao",
+    ("GET", "/api/v2/jobs/{job_id}"): "administracao",
+    ("GET", "/api/v2/jobs/{job_id}/resultado"): "administracao",
+    ("GET", "/api/v2/organograma"): "administracao",
 }
 
 

@@ -14,7 +14,11 @@ from ..schemas.unidade import TipoUnidadeOut
 router = APIRouter(prefix="/catalogo", tags=["catalogo"])
 
 
-@router.get("/niveis", response_model=list[NivelOut])
+@router.get(
+    "/niveis",
+    response_model=list[NivelOut],
+    dependencies=[Depends(require_modulo("administracao"))],
+)
 async def list_niveis(
     _: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -23,7 +27,11 @@ async def list_niveis(
     return [NivelOut.model_validate(n) for n in (await db.execute(stmt)).scalars().all()]
 
 
-@router.get("/sistemas", response_model=list[SistemaOut])
+@router.get(
+    "/sistemas",
+    response_model=list[SistemaOut],
+    dependencies=[Depends(require_modulo("administracao"))],
+)
 async def list_sistemas(
     _: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -32,7 +40,11 @@ async def list_sistemas(
     return [SistemaOut.model_validate(s) for s in (await db.execute(stmt)).scalars().all()]
 
 
-@router.get("/transacoes", response_model=list[TransacaoOut])
+@router.get(
+    "/transacoes",
+    response_model=list[TransacaoOut],
+    dependencies=[Depends(require_modulo("administracao"))],
+)
 async def list_transacoes(
     _: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -45,7 +57,11 @@ async def list_transacoes(
     return [TransacaoOut.model_validate(t) for t in (await db.execute(stmt)).scalars().all()]
 
 
-@router.get("/tipos-unidade", response_model=list[TipoUnidadeOut])
+@router.get(
+    "/tipos-unidade",
+    response_model=list[TipoUnidadeOut],
+    dependencies=[Depends(require_modulo("administracao"))],
+)
 async def list_tipos_unidade(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),

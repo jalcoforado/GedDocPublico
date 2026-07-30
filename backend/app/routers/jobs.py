@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
+from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..config import get_settings
 from ..database import get_db
@@ -33,7 +34,11 @@ settings = get_settings()
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-@router.get("", response_model=list[JobOut])
+@router.get(
+    "",
+    response_model=list[JobOut],
+    dependencies=[Depends(require_modulo("administracao"))],
+)
 async def list_jobs_endpoint(
     todos: bool = Query(False, description="Se True, retorna jobs de todos os usuários do tenant"),
     limit: int = Query(50, ge=1, le=500),
@@ -46,7 +51,11 @@ async def list_jobs_endpoint(
     )
 
 
-@router.get("/agenda", response_model=list[AgendaItem])
+@router.get(
+    "/agenda",
+    response_model=list[AgendaItem],
+    dependencies=[Depends(require_modulo("administracao"))],
+)
 async def listar_agenda_endpoint(
     _: Usuario = Depends(get_current_user),
 ) -> list[AgendaItem]:
@@ -65,7 +74,11 @@ async def listar_agenda_endpoint(
     return items
 
 
-@router.get("/{job_id}", response_model=JobOut)
+@router.get(
+    "/{job_id}",
+    response_model=JobOut,
+    dependencies=[Depends(require_modulo("administracao"))],
+)
 async def get_job_endpoint(
     job_id: int,
     _: Usuario = Depends(get_current_user),
@@ -179,6 +192,15 @@ async def disparar_limpeza(
     # `administracao`, e um tenant que contratou só `protocolo` levaria 403 ao
     # limpar artefatos do próprio protocolo — sem escapatória, já que o gate
     # de módulo roda antes do bypass de super-usuário.
+    #
+    # Inconsistência aceita (Task 3, 2026-07-30): os 4 GETs deste mesmo router
+    # (listar, agenda, detalhe, resultado) passaram a exigir require_modulo
+    # ("administracao") — é o mecanismo de fila que é administracao no mapa
+    # de rotas, não o conteúdo dos artefatos. Resultado: um tenant com
+    # `protocolo` e sem `administracao` dispara esta limpeza mas não lê o
+    # resultado de nenhum job. Decisão humana registrada no escopo da fatia;
+    # não "corrigir" trocando o gate de um lado ou de outro sem falar com o
+    # Jorge primeiro.
     current: Usuario = Depends(require_permission("processo", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
@@ -195,7 +217,10 @@ async def disparar_limpeza(
     return out
 
 
-@router.get("/{job_id}/resultado")
+@router.get(
+    "/{job_id}/resultado",
+    dependencies=[Depends(require_modulo("administracao"))],
+)
 async def baixar_resultado(
     job_id: int,
     _: Usuario = Depends(get_current_user),

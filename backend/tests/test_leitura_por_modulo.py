@@ -39,6 +39,14 @@ ROTAS_PROTOCOLO = [
     "/api/v2/catalogo/prioridades",
 ]
 
+# Task 3: representativos das 12 rotas de administracao (o mapa completo é
+# ROTAS_POR_MODULO em test_guarda_modularizacao.py).
+ROTAS_ADMINISTRACAO = [
+    "/api/v2/grupos",
+    "/api/v2/catalogo/niveis",
+    "/api/v2/jobs",
+]
+
 
 def _sm(engine):
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
@@ -179,6 +187,40 @@ async def tenant_com_protocolo(admin_engine):
 
 
 @pytest_asyncio.fixture
+async def tenant_sem_administracao(admin_engine):
+    # Contrata `protocolo`, não nenhum — prova que o gate é específico do
+    # slug "administracao", não um "tenant sem módulo nenhum" genérico.
+    tenant = await _provisiona(admin_engine, "leitura-sem-adm-")
+    async with _sm(admin_engine)() as s:
+        await contratar(s, tenant.id, ["protocolo"])  # sem administracao
+        await s.commit()
+    su_id = await _su_id(admin_engine, tenant.id)
+    try:
+        yield _as_user(admin_engine, su_id, tenant.id, tenant.slug)
+    finally:
+        app.dependency_overrides.clear()
+        from app.database import engine as app_engine
+        await app_engine.dispose()
+        await _cleanup_tenant(admin_engine, tenant.id)
+
+
+@pytest_asyncio.fixture
+async def tenant_com_administracao(admin_engine):
+    tenant = await _provisiona(admin_engine, "leitura-com-adm-")
+    async with _sm(admin_engine)() as s:
+        await contratar(s, tenant.id, ["administracao"])
+        await s.commit()
+    su_id = await _su_id(admin_engine, tenant.id)
+    try:
+        yield _as_user(admin_engine, su_id, tenant.id, tenant.slug)
+    finally:
+        app.dependency_overrides.clear()
+        from app.database import engine as app_engine
+        await app_engine.dispose()
+        await _cleanup_tenant(admin_engine, tenant.id)
+
+
+@pytest_asyncio.fixture
 async def tenant_com_protocolo_usuario_nu(admin_engine):
     tenant = await _provisiona(admin_engine, "leitura-nu-")
     async with _sm(admin_engine)() as s:
@@ -212,6 +254,29 @@ async def test_com_protocolo_contratado_leitura_passa(rota, tenant_com_protocolo
     fraca deixaria passar um 500 — inclusive o que o próprio `require_modulo`
     levanta quando `slugs_contratados` volta vazio (catálogo corrompido)."""
     tenant_com_protocolo()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get(rota)
+    assert r.status_code == 200, f"{rota} deveria passar com 200: {r.status_code} {r.text}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rota", ROTAS_ADMINISTRACAO)
+async def test_sem_administracao_contratada_leitura_da_403(rota, tenant_sem_administracao):
+    tenant_sem_administracao()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get(rota)
+    assert r.status_code == 403, f"{rota} deveria estar barrada: {r.status_code} {r.text}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rota", ROTAS_ADMINISTRACAO)
+async def test_com_administracao_contratada_leitura_passa(rota, tenant_com_administracao):
+    """Mesma asserção forte da Task 2: `== 200`, não `!= 403` — as 3 rotas são
+    listagens/catálogo, num tenant recém-provisionado devolvem 200 com lista
+    vazia (ou o catálogo global de níveis, sempre não-vazio)."""
+    tenant_com_administracao()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         r = await c.get(rota)
