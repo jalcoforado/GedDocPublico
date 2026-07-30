@@ -26,8 +26,10 @@ from app.services.provisioning_tenant import provisionar_tenant
 
 APP = get_settings().app_name
 
-# Um representativo por grupo de rota — a cobertura de todos os 58 é estrutural,
-# feita pela guarda (test_guarda_modularizacao.py), não por teste HTTP rota a rota.
+# Um representativo por grupo de rota. A cobertura estrutural das 58 é a
+# tabela ROTAS_POR_MODULO em test_guarda_modularizacao.py (verificada contra
+# `modulo_slug` de cada dependência real) — os testes HTTP abaixo são amostra
+# de COMPORTAMENTO (403/200 de verdade, via ASGI), não substituto da tabela.
 ROTAS_PROTOCOLO = [
     "/api/v2/processos",
     "/api/v2/assuntos",
@@ -205,11 +207,15 @@ async def test_sem_protocolo_contratado_leitura_da_403(rota, tenant_sem_protocol
 @pytest.mark.asyncio
 @pytest.mark.parametrize("rota", ROTAS_PROTOCOLO)
 async def test_com_protocolo_contratado_leitura_passa(rota, tenant_com_protocolo):
+    """As 6 rotas são listagens/catálogo — num tenant recém-provisionado, todas
+    devolvem 200 com lista vazia. `== 200` (não `!= 403`) porque a asserção
+    fraca deixaria passar um 500 — inclusive o que o próprio `require_modulo`
+    levanta quando `slugs_contratados` volta vazio (catálogo corrompido)."""
     tenant_com_protocolo()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         r = await c.get(rota)
-    assert r.status_code != 403, f"{rota} não deveria estar barrada: {r.status_code} {r.text}"
+    assert r.status_code == 200, f"{rota} deveria passar com 200: {r.status_code} {r.text}"
 
 
 @pytest.mark.asyncio

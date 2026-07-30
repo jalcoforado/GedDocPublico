@@ -8,6 +8,14 @@ registrada em docs/superpowers/specs/2026-07-30-leitura-por-modulo-escopo.md.
 Consequência deliberada: um usuário sem permissão nenhuma continua lendo o que
 lê hoje, desde que o tenant tenha o módulo. Fechar isso é mudança de política
 de acesso e tem item próprio no backlog.
+
+Efeito colateral aceito (achado na revisão da Task 2, 2026-07-30): como
+`dependencies=[Depends(require_modulo(...))]` fica na lista de dependências da
+rota, o FastAPI pode resolvê-la antes de `get_current_user`. Requisição SEM
+token, em tenant sem o módulo, recebe 403 em vez do 401 esperado — o que vaza,
+para um chamador anônimo, quais módulos aquele tenant contratou. Baixo valor
+de exploração (não vaza dado de negócio, só o catálogo de módulos) e aceito
+por ora; não é motivo para reordenar as 58 rotas gateadas.
 """
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,4 +48,8 @@ def require_modulo(slug: str):
                 detail=f"Módulo '{slug}' não contratado para este tenant",
             )
 
+    # O slug fica legível de fora: a guarda casa a closure por (módulo,
+    # qualname), que é igual para qualquer slug, e sem isto não teria como
+    # verificar se a rota exige o módulo CERTO — só que exige algum.
+    _check_modulo.modulo_slug = slug
     return _check_modulo

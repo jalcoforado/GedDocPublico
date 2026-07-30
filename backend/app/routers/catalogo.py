@@ -61,6 +61,11 @@ async def list_tipos_unidade(
     ]
 
 
+# Efeito colateral aceito (achado na revisão da Task 2, 2026-07-30): esta rota
+# não declarava `require_tenant_id` — `require_modulo("protocolo")` injeta
+# essa dependência por baixo. Fora do nginx, com `STRICT_TENANT_RESOLUTION=true`
+# e Host sem subdomínio resolvível, pode responder 400 onde antes dava 200.
+# Aceito por ora; atrás do nginx (produção) o tenant sempre resolve.
 @router.get(
     "/prioridades",
     response_model=list[PrioridadeOut],

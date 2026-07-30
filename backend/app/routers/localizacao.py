@@ -24,6 +24,14 @@ from ._crud import get_or_404, paginated_list
 
 router = APIRouter(tags=["localizacao"])
 
+# Efeito colateral aceito (achado na revisão da Task 2, 2026-07-30): `/estados`,
+# `/cidades` e `/bairros` não declaravam `require_tenant_id` (catálogo GLOBAL,
+# não filtra por tenant) — `require_modulo("protocolo")` injeta essa
+# dependência por baixo. Fora do nginx, com `STRICT_TENANT_RESOLUTION=true` e
+# Host sem subdomínio resolvível, essas 3 rotas passam a poder responder 400
+# onde antes davam 200. Aceito por ora; atrás do nginx (produção) o tenant
+# sempre resolve, então não há regressão observável ali.
+
 
 # --- Estado (read only, catálogo GLOBAL) -------------------------------------
 @router.get(

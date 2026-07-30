@@ -258,6 +258,136 @@ GATES_DE_MODULO: set[tuple[str, str]] = {
 }
 
 
+# Qual módulo cada rota de leitura gateada exige. `GATES_DE_MODULO` só
+# consegue dizer "tem gate de módulo" — o par (módulo, qualname) da closure é
+# IGUAL para qualquer slug (`require_modulo("frota")` e
+# `require_modulo("protocolo")` produzem a mesma `_check_modulo`). Sem esta
+# tabela, `require_modulo("frota")` colado por engano numa rota de protocolo
+# passaria batido em `test_nenhum_endpoint_novo_sem_permissao`,
+# `test_allowlist_nao_tem_entrada_obsoleta` e nos testes HTTP (que amostram só
+# 6 das 58). O risco é concreto: a Task 3 gateia `administracao` nos MESMOS
+# arquivos (`catalogo.py` já mistura os dois módulos) — é o cenário exato de
+# copy-paste que só esta tabela pega.
+#
+# As 58 são as gateadas por `require_modulo("protocolo")` na Task 2
+# (2026-07-30). `test_rotas_por_modulo_bate_com_a_implementacao`, logo abaixo,
+# lê `modulo_slug` de cada dependência real e reprova nos dois sentidos: rota
+# gateada fora daqui, e rota daqui com slug diferente do que a rota realmente
+# exige.
+ROTAS_POR_MODULO: dict[tuple[str, str], str] = {
+    ("GET", "/api/v2/anexos/{anexo_id}/carimbado.pdf"): "protocolo",
+    ("GET", "/api/v2/anexos/{anexo_id}/download"): "protocolo",
+    ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/comprovante.pdf"): "protocolo",
+    ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/evidencias"): "protocolo",
+    ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/validar"): "protocolo",
+    ("GET", "/api/v2/assunto-tipo-anexo"): "protocolo",
+    ("GET", "/api/v2/assuntos"): "protocolo",
+    ("GET", "/api/v2/bairros"): "protocolo",
+    ("GET", "/api/v2/catalogo/prioridades"): "protocolo",
+    ("GET", "/api/v2/cidades"): "protocolo",
+    ("GET", "/api/v2/enderecos"): "protocolo",
+    ("GET", "/api/v2/estados"): "protocolo",
+    ("GET", "/api/v2/manifestantes"): "protocolo",
+    ("GET", "/api/v2/processos"): "protocolo",
+    ("GET", "/api/v2/processos/apensamentos/{apensamento_id}/termo.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/encaminhamentos/{encaminhamento_id}/comprovante.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/anexos/{anexo_processo_id}/termo-desentranhamento.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/apensados"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/apensamentos"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/capa.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/checklist-documentos"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/complementacoes"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/completo.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/etiqueta-dupla.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/etiqueta-unica.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/solicitacoes-assinatura"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/temporalidade"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/trail"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/volumes"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/workflow"): "protocolo",
+    ("GET", "/api/v2/protocolo/ccd-classes"): "protocolo",
+    ("GET", "/api/v2/protocolo/ccd-classes/tree"): "protocolo",
+    ("GET", "/api/v2/protocolo/especies-documentais"): "protocolo",
+    ("GET", "/api/v2/protocolo/sugerir-ccd"): "protocolo",
+    ("GET", "/api/v2/protocolo/ttd-regras"): "protocolo",
+    ("GET", "/api/v2/protocolo/vencendo-prazo"): "protocolo",
+    ("GET", "/api/v2/protocolo/{processo_id}/comprovante.pdf"): "protocolo",
+    ("GET", "/api/v2/protocolo/{processo_id}/etiqueta.pdf"): "protocolo",
+    ("GET", "/api/v2/relatorios/assinaturas.csv"): "protocolo",
+    ("GET", "/api/v2/relatorios/assinaturas.json"): "protocolo",
+    ("GET", "/api/v2/relatorios/assinaturas.pdf"): "protocolo",
+    ("GET", "/api/v2/relatorios/processos.csv"): "protocolo",
+    ("GET", "/api/v2/relatorios/processos.json"): "protocolo",
+    ("GET", "/api/v2/relatorios/processos.pdf"): "protocolo",
+    ("GET", "/api/v2/relatorios/tramitacao.csv"): "protocolo",
+    ("GET", "/api/v2/relatorios/tramitacao.json"): "protocolo",
+    ("GET", "/api/v2/relatorios/tramitacao.pdf"): "protocolo",
+    ("GET", "/api/v2/tipo-processo-workflow"): "protocolo",
+    ("GET", "/api/v2/tipos-anexo"): "protocolo",
+    ("GET", "/api/v2/tipos-manifestante"): "protocolo",
+    ("GET", "/api/v2/tipos-processo"): "protocolo",
+    ("GET", "/api/v2/workflow-alertas"): "protocolo",
+    ("GET", "/api/v2/workflow-definitions"): "protocolo",
+    ("GET", "/api/v2/workflow-definitions/{wf_id}"): "protocolo",
+    ("GET", "/api/v2/workflow-definitions/{wf_id}/versoes"): "protocolo",
+    ("GET", "/api/v2/workflow-instances"): "protocolo",
+    ("GET", "/api/v2/workflow-instances/{instance_id}"): "protocolo",
+}
+
+
+def slugs_de_modulo_por_rota(app=None) -> dict[tuple[str, str], str]:
+    """Para cada rota GET com gate de módulo, devolve o slug que ela exige.
+
+    Lê `modulo_slug`, atributo exposto por `require_modulo` na própria
+    closure (`app/auth/modulos.py`) — é o único jeito de diferenciar
+    `require_modulo("protocolo")` de `require_modulo("frota")` de fora, já
+    que ambos compilam para o mesmo `(__module__, __qualname__)`.
+    """
+    if app is None:
+        from app.main import app
+
+    resultado: dict[tuple[str, str], str] = {}
+    for rota in app.routes:
+        caminho = getattr(rota, "path", "")
+        if not caminho.startswith("/api/v2"):
+            continue
+        deps = getattr(getattr(rota, "dependant", None), "dependencies", [])
+        for metodo in getattr(rota, "methods", set()):
+            if metodo != "GET":
+                continue
+            for d in deps:
+                slug = getattr(getattr(d, "call", None), "modulo_slug", None)
+                if slug is not None:
+                    resultado[(metodo, caminho)] = slug
+    return resultado
+
+
+def test_rotas_por_modulo_bate_com_a_implementacao():
+    """ROTAS_POR_MODULO é a decisão humana de QUAL módulo — não só QUE há gate.
+
+    Reprova nos dois sentidos: rota com gate de módulo fora da tabela (nova e
+    não registrada), e rota da tabela com slug diferente do que a rota
+    realmente exige (copy-paste do slug errado).
+    """
+    reais = slugs_de_modulo_por_rota()
+
+    fora_da_tabela = set(reais) - set(ROTAS_POR_MODULO)
+    assert not fora_da_tabela, (
+        f"Rotas com gate de módulo sem entrada em ROTAS_POR_MODULO: "
+        f"{sorted(fora_da_tabela)}. Registre qual módulo cada uma exige."
+    )
+
+    divergentes = {
+        rota: {"esperado": esperado, "real": reais.get(rota)}
+        for rota, esperado in ROTAS_POR_MODULO.items()
+        if reais.get(rota) != esperado
+    }
+    assert not divergentes, (
+        f"Rotas com slug diferente do declarado em ROTAS_POR_MODULO: {divergentes}"
+    )
+
+
 def endpoints_sem_gate(app=None) -> set[tuple[str, str]]:
     """Varre `app` e devolve (método, caminho) sem gate reconhecido.
 
