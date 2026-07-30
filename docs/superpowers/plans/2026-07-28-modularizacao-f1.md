@@ -1841,51 +1841,210 @@ git commit -m "test(modulos): guardas de transação órfã e endpoint sem permi
 
 ### Task 9: `provisionar_tenant --modulos` e fechamento
 
+> **CORREÇÃO DE 2026-07-30 (controller).** A versão anterior desta task punha a contratação em
+> `cli/tenant.py` e mandava rodar a suíte esperando "tudo verde". Ambas as coisas estavam erradas, e
+> a primeira impediria a task de cumprir o próprio critério de aceite. O que a investigação mostrou:
+>
+> 1. **`cli/tenant.py` é casca.** O `_create` (linha 31) só delega para
+>    `services/provisioning_tenant.py::provisionar_tenant`. Os 8 testes que esta task tem de
+>    consertar importam `provisionar_tenant` **direto do service** — nenhum deles passa pela CLI.
+>    Contratar só na CLI deixaria a suíte vermelha do mesmo jeito. A contratação tem de acontecer
+>    **dentro de `provisionar_tenant`**.
+> 2. **`contratar_modulos_iniciais` não pode morar na CLI.** `provisioning_tenant.py` é service;
+>    service importando de `cli/` inverte as camadas. Vai para `services/modulos.py`, ao lado de
+>    `contratar()`.
+> 3. **Contratar no provisionamento quebra 51 arquivos de teste** se nada mais mudar. O teardown
+>    deles faz `DELETE FROM aprimora_py.tenant`, e a FK `tenant_modulo.tenant_id` está como
+>    `NO ACTION` (`confdeltype = 'a'`, verificado em `pg_constraint`) — o vínculo novo passa a travar
+>    o delete. Editar 51 teardowns é remendo que a próxima pessoa a escrever teste vai reencontrar,
+>    então a FK vira `ON DELETE CASCADE` na migration 0075. É defensável por si: `tenant_modulo` é
+>    filho puro do tenant, não tem existência própria, e produção nunca apaga tenant fisicamente
+>    (convenção de soft-delete). De passagem, isso fecha o minor parkeado da Task 7.
+> 4. **A suíte não estava verde antes.** São 2 falhas pré-existentes, nominadas no Step 7. O critério
+>    é voltar a exatamente 2 — acima disso sobrou coisa nossa.
+> 5. O head não é mais `0073`: a Task 3B acrescentou a `0074`, e esta acrescenta a `0075`.
+
 **Files:**
-- Modify: `backend/app/cli/tenant.py`
+- Create: `backend/alembic/versions/0075_tenant_modulo_cascade.py`
+- Modify: `backend/app/services/modulos.py` (nova `contratar_modulos_iniciais`)
+- Modify: `backend/app/services/provisioning_tenant.py` (novo kwarg `modulos`)
+- Modify: `backend/app/cli/tenant.py` (novo `--modulos`, só parsing)
 - Test: `backend/tests/test_modulos_provisionamento.py`
 
 **Interfaces:**
-- Consumes: `contratar()` da Task 4
-- Produces: `provisionar_tenant` aceita `--modulos protocolo,frota` (default: todos os
-  contratáveis).
+- Consumes: `contratar(db, tenant_id, slugs: list[str])` da Task 4, em `services/modulos.py`
+- Produces:
+  - `services.modulos.contratar_modulos_iniciais(db, tenant_id, slugs: list[str] | None) -> list[str]`
+    — `None` significa "todos os contratáveis e ativos"
+  - `provisionar_tenant(..., modulos: list[str] | None = None)` — kwarg-only, como os demais
+  - `tenant create --modulos protocolo,frota` na CLI (default: todos)
 
-- [ ] **Step 1: Escrever o teste**
+- [ ] **Step 1: Migration 0075 — a FK do vínculo passa a CASCADE**
+
+Criar `backend/alembic/versions/0075_tenant_modulo_cascade.py`:
+
+```python
+"""FK de tenant_modulo passa a CASCADE no delete do tenant.
+
+Revision ID: 0075
+Revises: 0074
+Create Date: 2026-07-30
+
+Esta fatia faz o provisionamento contratar módulos, então todo tenant novo
+passa a ter linha em aprimora_py.tenant_modulo. A FK nasceu NO ACTION na 0073
+e 51 arquivos de teste apagam a linha do tenant no teardown — todos passariam
+a morrer com violação de FK.
+
+CASCADE é correto por si, não por conveniência de teste: tenant_modulo é filho
+puro do tenant e não tem existência própria. Produção não apaga tenant
+fisicamente (convenção de soft-delete do projeto), então o CASCADE só se
+manifesta em teste e em ferramenta de remoção de tenant — exatamente onde se
+quer que o vínculo vá junto.
+
+A FK de id_modulo continua NO ACTION de propósito: modulo é catálogo global, e
+apagar linha de catálogo que algum tenant contratou DEVE falhar.
+"""
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from alembic import op
+
+revision: str = "0075"
+down_revision: str | Sequence[str] | None = "0074"
+branch_labels = None
+depends_on = None
+
+S = "aprimora_py"
+FK = "tenant_modulo_tenant_id_fkey"
+
+
+def upgrade() -> None:
+    op.drop_constraint(FK, "tenant_modulo", schema=S, type_="foreignkey")
+    op.create_foreign_key(
+        FK,
+        "tenant_modulo",
+        "tenant",
+        ["tenant_id"],
+        ["id"],
+        source_schema=S,
+        referent_schema=S,
+        ondelete="CASCADE",
+    )
+
+
+def downgrade() -> None:
+    op.drop_constraint(FK, "tenant_modulo", schema=S, type_="foreignkey")
+    op.create_foreign_key(
+        FK,
+        "tenant_modulo",
+        "tenant",
+        ["tenant_id"],
+        ["id"],
+        source_schema=S,
+        referent_schema=S,
+    )
+```
+
+- [ ] **Step 2: Aplicar e conferir no catálogo do Postgres**
+
+```bash
+docker exec aprimora-py-backend alembic upgrade head
+docker exec aprimora-py-db psql -U ged_user -d ged_saas_db -tAc "SELECT conname, confdeltype FROM pg_constraint WHERE conrelid='aprimora_py.tenant_modulo'::regclass AND contype='f' ORDER BY conname"
+```
+
+Esperado: `tenant_modulo_id_modulo_fkey|a` (segue NO ACTION) e
+`tenant_modulo_tenant_id_fkey|c` (virou CASCADE). O nome do banco é
+`ged_saas_db` — `ged_saas` não existe.
+
+- [ ] **Step 3: Escrever os testes**
+
+Criar `backend/tests/test_modulos_provisionamento.py`:
 
 ```python
 """Tenant provisionado nasce com módulos contratados."""
+import uuid
+
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.services.modulos import slugs_contratados
+from app.services.modulos import contratar_modulos_iniciais, slugs_contratados
+from app.services.provisioning_tenant import provisionar_tenant
+
+CONTRATAVEIS = {"protocolo", "pagamentos", "frota", "transporte", "administracao"}
+
+
+def _sm(engine):
+    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+
+async def _cleanup_tenant(engine, tenant_id: int) -> None:
+    """Não apaga tenant_modulo de propósito: o CASCADE da 0075 tem de levá-lo.
+
+    Se o DELETE do tenant falhar com violação de FK, é sinal de que a 0075 não
+    foi aplicada — e é assim que este teste também vigia a migration.
+    """
+    async with _sm(engine)() as s:
+        for stmt in (
+            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
+            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
+            "DELETE FROM utils.grupo WHERE tenant_id=:t",
+            "DELETE FROM utils.usuario WHERE tenant_id=:t",
+            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
+            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
+            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
+            "DELETE FROM aprimora_py.tenant WHERE id=:t",
+        ):
+            await s.execute(text(stmt), {"t": tenant_id})
+        await s.commit()
 
 
 @pytest.mark.asyncio
 async def test_default_contrata_todos_os_contrataveis(admin_session, two_tenants):
-    """Mudar esse default silenciosamente quebraria quem já usa o comando."""
-    from app.cli.tenant import contratar_modulos_iniciais
-
+    """Default é 'tudo'. Mudá-lo em silêncio quebraria quem já provisiona."""
     tid, _ = two_tenants
     await contratar_modulos_iniciais(admin_session, tid, None)
     await admin_session.flush()
-    assert await slugs_contratados(admin_session, tid) == {
-        "protocolo", "pagamentos", "frota", "transporte", "administracao", "comum"
-    }
+    assert await slugs_contratados(admin_session, tid) == CONTRATAVEIS | {"comum"}
     await admin_session.rollback()
 
 
 @pytest.mark.asyncio
 async def test_lista_explicita_limita(admin_session, two_tenants):
-    from app.cli.tenant import contratar_modulos_iniciais
-
     tid, _ = two_tenants
-    await contratar_modulos_iniciais(admin_session, tid, "frota,transporte")
+    await contratar_modulos_iniciais(admin_session, tid, ["frota", "transporte"])
     await admin_session.flush()
     assert await slugs_contratados(admin_session, tid) == {"frota", "transporte", "comum"}
     await admin_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_provisionamento_real_contrata(admin_engine):
+    """O caminho que importa de verdade: `provisionar_tenant` contrata sozinho.
+
+    Sem este teste a task passaria com a função certa e o wiring errado — que
+    foi exatamente o defeito da versão anterior deste plano, onde a contratação
+    ficava na CLI e nenhum dos chamadores reais passava por lá.
+    """
+    slug = f"mod9-{uuid.uuid4().hex[:8]}"
+    async with _sm(admin_engine)() as s:
+        tenant, _senha = await provisionar_tenant(
+            s,
+            slug=slug,
+            nome="Pref Módulos",
+            admin_email=f"{slug}@modulos.test",
+            admin_nome="Adm",
+            admin_cpf=uuid.uuid4().hex[:11],
+        )
+    try:
+        async with _sm(admin_engine)() as s:
+            assert await slugs_contratados(s, tenant.id) == CONTRATAVEIS | {"comum"}
+    finally:
+        await _cleanup_tenant(admin_engine, tenant.id)
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [ ] **Step 4: Rodar e ver falhar**
 
 ```bash
 docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest tests/test_modulos_provisionamento.py -v
@@ -1893,88 +2052,141 @@ docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest tests/test_modulos_p
 
 Esperado: FAIL com `ImportError: cannot import name 'contratar_modulos_iniciais'`.
 
-- [ ] **Step 3: Implementar em `cli/tenant.py`**
+- [ ] **Step 5: Implementar nos três arquivos**
+
+Em `backend/app/services/modulos.py`, ao lado de `contratar()`:
 
 ```python
 async def contratar_modulos_iniciais(
-    db: AsyncSession, tenant_id: int, modulos: str | None
+    db: AsyncSession, tenant_id: int, slugs: list[str] | None
 ) -> list[str]:
-    """Contrata os módulos iniciais do tenant.
+    """Contrata os módulos iniciais de um tenant recém-provisionado.
 
-    `modulos` é a lista separada por vírgula vinda de `--modulos`. `None`
-    significa "todos os contratáveis" — default deliberado: o comportamento
-    histórico do comando é liberar tudo, e mudá-lo em silêncio quebraria quem
-    já o usa.
+    `None` significa "todos os contratáveis e ativos" — default deliberado: o
+    comportamento histórico de `provisionar_tenant` é entregar o sistema
+    inteiro, e mudá-lo em silêncio quebraria quem já provisiona.
+
+    O default filtra `ativo` porque `contratar()` recusa módulo inativo: sem o
+    filtro, desativar um módulo no catálogo passaria a derrubar todo
+    provisionamento novo.
     """
-    from ..models import Modulo
-    from ..services.modulos import contratar
-
-    if modulos is None:
+    if slugs is None:
         slugs = list((await db.execute(
-            select(Modulo.slug).where(Modulo.contratavel.is_(True))
+            select(Modulo.slug).where(
+                Modulo.contratavel.is_(True), Modulo.ativo.is_(True)
+            )
         )).scalars().all())
-    else:
-        slugs = [s.strip() for s in modulos.split(",") if s.strip()]
-
     await contratar(db, tenant_id, slugs)
     return slugs
 ```
 
-Acrescentar o argumento no `argparse` do comando, junto dos outros:
+Em `backend/app/services/provisioning_tenant.py`, acrescentar o kwarg na assinatura de
+`provisionar_tenant` (é keyword-only, como os demais):
 
 ```python
-    parser.add_argument(
+    modulos: list[str] | None = None,
+```
+
+e, **depois de o tenant já ter `id`** (ou seja, depois do flush que o materializa) e **antes do
+commit final**, chamar:
+
+```python
+    await contratar_modulos_iniciais(db, tenant.id, modulos)
+```
+
+Import no topo do arquivo: `from .modulos import contratar_modulos_iniciais`. Não há ciclo —
+`services/modulos.py` importa só de `..models`.
+
+Em `backend/app/cli/tenant.py`, o argumento novo junto dos outros de `p_create`:
+
+```python
+    p_create.add_argument(
         "--modulos",
         default=None,
         help="Lista separada por vírgula (ex.: protocolo,frota). Default: todos.",
     )
 ```
 
-E chamar `await contratar_modulos_iniciais(db, tenant.id, args.modulos)` no fluxo de
-provisionamento, depois de o tenant existir e antes do commit.
+e a passagem na chamada dentro de `_create` — a CLI só faz parsing, a regra é do service:
 
-- [ ] **Step 4: Rodar os testes**
+```python
+                modulos=(
+                    [s.strip() for s in args.modulos.split(",") if s.strip()]
+                    if args.modulos is not None
+                    else None
+                ),
+```
+
+- [ ] **Step 6: Rodar os testes**
 
 ```bash
 docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest tests/test_modulos_provisionamento.py -v
 ```
 
-Esperado: 2 passed.
+Esperado: 3 passed.
 
-- [ ] **Step 5: Rodar a suíte completa**
+- [ ] **Step 7: Rodar a suíte completa — o critério de aceite da fatia**
 
 ```bash
 docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest -q
 ```
 
-Esperado: tudo verde, ~8 min. Este é o critério de aceite da fatia F1.
+A suíte **não estava verde antes desta branch**. O estado antes desta task era
+**10 failed / 843 passed**. Esperado agora: **exatamente 2 failed**, e têm de ser estas duas,
+confirmadas por `git stash` como anteriores à branch:
 
-- [ ] **Step 6: Conferir que o deploy é mesmo invisível**
+- `tests/test_jwt_compat.py::test_emitted_token_has_required_claims`
+- `tests/test_pr5a_dashboard_servicos.py::test_http_dashboard_com_perm_acessa` (explicada pela deriva
+  de `APP_NAME` — item 1.0 de `docs/BACKLOG-PENDENCIAS.md`)
+
+Estas 8, que esta task existe para consertar, **têm de desaparecer**:
+
+- `tests/test_pr4d_http_gates.py::test_http_servidor_su_solicita_complementacao_201`
+- `tests/test_sec1_followup_put_usuario_senha.py` — as 6 dela
+- `tests/test_sec1_marcar_flag_must_change_password.py::test_post_usuarios_cria_com_flag_true`
+
+Qualquer falha além das 2 nominadas é coisa nossa e entra no ciclo de correção. Reportar a lista
+exata das que sobraram, não só a contagem.
+
+- [ ] **Step 8: Reversibilidade e head único**
 
 ```bash
 docker exec aprimora-py-backend alembic heads
-curl -s -H "Host: sobral.aprimora.local" http://localhost:8090/api/v2/modulos/me -H "Authorization: Bearer $TOKEN" | head -20
+docker exec aprimora-py-backend alembic downgrade -1
+docker exec aprimora-py-backend alembic upgrade head
 ```
 
-Esperado: head único `0073`; `/modulos/me` devolve os 5 módulos. Nenhuma tela do sistema mudou.
+Esperado: head único `0075`; downgrade e upgrade rodam limpos. **Não** rodar `docker compose build`
+de nada — o antivírus da máquina intercepta HTTPS e nenhuma imagem rebuilda aqui (ver ledger). O
+backend é bind-mount, então não precisa: `docker exec` já vê o código da branch.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add backend/app/cli/tenant.py backend/tests/test_modulos_provisionamento.py
-git commit -m "feat(modulos): provisionar_tenant aceita --modulos"
+git add backend/alembic/versions/0075_tenant_modulo_cascade.py \
+        backend/app/services/modulos.py \
+        backend/app/services/provisioning_tenant.py \
+        backend/app/cli/tenant.py \
+        backend/tests/test_modulos_provisionamento.py
+git commit -m "feat(modulos): provisionamento contrata modulos; --modulos na CLI"
 ```
 
 ---
 
 ## Critério de aceite da fatia F1
 
-- `alembic heads` → head único em `0073`; `downgrade -1` seguido de `upgrade head` roda limpo
-- Suíte completa verde (`pytest -q`)
+- `alembic heads` → head único em `0075`; `downgrade -1` seguido de `upgrade head` roda limpo
+- Suíte em **exatamente as 2 falhas pré-existentes** nominadas na Task 9, Step 7 — não "verde":
+  ela já não estava verde quando a branch nasceu
 - `npx tsc --noEmit` → 0 erros
 - `seed_bootstrap` roda duas vezes seguidas sem duplicar vínculo
 - **Nada muda visualmente para o usuário** — nenhuma rota, menu ou tela foi tocada
 - As duas guardas da Task 8 passam com allowlist preenchida por decisão, não por conveniência
+- **O deploy exige subir as duas pontas juntas.** A Task 6 mudou o contrato de `/modulos/me`
+  (`items` → `itens`). Backend novo com frontend velho estoura a home com
+  `Cannot read properties of undefined (reading 'length')` — aconteceu no ambiente local em
+  2026-07-30, porque o backend é bind-mount e o frontend é build assado na imagem. Rebuild do
+  frontend não é opcional neste deploy.
 
 ## Fora do escopo desta fatia
 
