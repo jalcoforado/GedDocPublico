@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.password import hash_password
 from ..config import get_settings
 from .audit import log as audit_log
+from .modulos import contratar_modulos_iniciais
 from ..models import (
     Grupo,
     Nivel,
@@ -83,6 +84,7 @@ async def provisionar_tenant(
     limite_armazenamento_mb: int | None = None,
     senha: str | None = None,
     ator_usuario_id: int | None = None,
+    modulos: list[str] | None = None,
 ) -> tuple[Tenant, str]:
     """Cria tenant + bootstrap mínimo. Retorna (tenant, senha_temporaria).
     Transacional: comita no fim; exceção → caller faz rollback."""
@@ -193,6 +195,8 @@ async def provisionar_tenant(
             app=app_name,
         )
     )
+
+    await contratar_modulos_iniciais(db, tenant.id, modulos)
 
     await audit_log(
         db,

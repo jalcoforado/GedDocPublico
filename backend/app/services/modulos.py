@@ -152,3 +152,26 @@ async def contratar(db: AsyncSession, tenant_id: int, slugs: list[str]) -> None:
         else:
             vinculo.excluido = not quer
             vinculo.ativo = quer
+
+
+async def contratar_modulos_iniciais(
+    db: AsyncSession, tenant_id: int, slugs: list[str] | None
+) -> list[str]:
+    """Contrata os módulos iniciais de um tenant recém-provisionado.
+
+    `None` significa "todos os contratáveis e ativos" — default deliberado: o
+    comportamento histórico de `provisionar_tenant` é entregar o sistema
+    inteiro, e mudá-lo em silêncio quebraria quem já provisiona.
+
+    O default filtra `ativo` porque `contratar()` recusa módulo inativo: sem o
+    filtro, desativar um módulo no catálogo passaria a derrubar todo
+    provisionamento novo.
+    """
+    if slugs is None:
+        slugs = list((await db.execute(
+            select(Modulo.slug).where(
+                Modulo.contratavel.is_(True), Modulo.ativo.is_(True)
+            )
+        )).scalars().all())
+    await contratar(db, tenant_id, slugs)
+    return slugs
