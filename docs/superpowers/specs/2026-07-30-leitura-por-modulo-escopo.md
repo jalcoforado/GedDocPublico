@@ -106,15 +106,32 @@ transversal, não features de um módulo.**
 Unidade de trabalho e usuário são o organograma e as pessoas: todo módulo os referencia. Gatear com
 `administracao` daria 403 em frota e protocolo de qualquer tenant que não contratasse administração.
 
-### Classificação proposta dos 76
+### Classificação proposta dos 76 (revista no review final — ver nota abaixo)
 
 | | Quantos | Quais |
 |---|---|---|
 | **Gatear `protocolo`** | 58 | processos e artefatos, anexos, assinaturas, relatórios, catálogo documental, assunto, manifestante, localização, workflow — **mais** `/catalogo/prioridades`, que sai de administração |
-| **Gatear `administracao`** | 12 | `/grupos` (3), `/organograma`, `/catalogo/niveis`, `/sistemas`, `/transacoes`, `/tipos-unidade`, **`/jobs` (4)** |
-| **NÃO gatear — transversal** | 6 | `/usuarios`, `/usuarios/{id}`, `/unidades-trabalho`, `/unidades-trabalho/{id}` (consumo cruzado comprovado), **`/busca`**, **`/audit`** (decisão do Jorge) |
+| **Gatear `administracao`** | 11 | `/grupos` (3), `/catalogo/niveis`, `/sistemas`, `/transacoes`, `/tipos-unidade`, **`/jobs` (4)** |
+| **NÃO gatear — transversal** | 7 | `/usuarios`, `/usuarios/{id}`, `/unidades-trabalho`, `/unidades-trabalho/{id}` (consumo cruzado comprovado), **`/busca`**, **`/audit`** (decisão do Jorge), **`/organograma`** (reclassificada no review final) |
 
-Total: 58 + 12 + 6 = 76.
+Total: 58 + 11 + 7 = 76.
+
+**Nota do review final (2026-07-30) — `/organograma` reclassificada.** A triagem original desta
+tabela agrupou `/organograma` sob "administração" pelo mesmo raciocínio de `/catalogo/tipos-unidade`
+(tela do organograma). Era engano: o consumidor real de `GET /api/v2/organograma` é
+`organogramaApi.tree()` (`frontend/lib/api.ts`), chamado pelo `UnidadePicker`
+(`frontend/components/UnidadePicker.tsx`) — que aparece em telas de **protocolo**: abertura de
+processo (`app/(app)/processos/novo/page.tsx`, campo obrigatório "Unidade proprietária"), balcão
+(`app/(app)/protocolo/balcao/page.tsx`), editor de workflow (`components/workflow/WorkflowEditPanel.tsx`),
+dashboard (`app/(app)/dashboard/page.tsx`) e unidades-trabalho (`app/(app)/unidades-trabalho/page.tsx`).
+A triagem errou porque `organogramaApi` é um export de **topo** de `api.ts` (não `api.organograma`,
+a forma que os parsers e as buscas por símbolo desta fatia seguiam) — o mesmo tipo de falso-negativo
+que a seção "O método" já registra para `grep` de nome curto. Consequência antes do conserto: um
+tenant que contratou `protocolo` e não `administracao` recebia 403 no `UnidadePicker`, o campo
+obrigatório ficava impreenchível e **o tenant não conseguia abrir processo**. Reclassificada para
+transversal (mesma razão de `/unidades-trabalho`: é a árvore do mesmo `unidade_trabalho`, servida ao
+mesmo picker, nas mesmas telas). Tabela e allowlist em `test_guarda_modularizacao.py` corrigidas no
+mesmo commit desta nota.
 
 Verificações que sustentam o bloco "protocolo": `api.manifestantes`, `api.assuntos`,
 `api.tiposProcesso`, `api.tiposAnexo`, `api.cidades`, `api.bairros`, `api.enderecos`, `api.estados`

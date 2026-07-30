@@ -39,8 +39,10 @@ ROTAS_PROTOCOLO = [
     "/api/v2/catalogo/prioridades",
 ]
 
-# Task 3: representativos das 12 rotas de administracao (o mapa completo é
-# ROTAS_POR_MODULO em test_guarda_modularizacao.py).
+# Task 3: representativos das 11 rotas de administracao (o mapa completo é
+# ROTAS_POR_MODULO em test_guarda_modularizacao.py). `/organograma` saiu deste
+# grupo no review final (2026-07-30) — voltou a transversal, ver
+# test_guarda_modularizacao.py::ENDPOINTS_LEITURA_SEM_GATE.
 ROTAS_ADMINISTRACAO = [
     "/api/v2/grupos",
     "/api/v2/catalogo/niveis",

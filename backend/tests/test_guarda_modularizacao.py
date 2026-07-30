@@ -186,7 +186,14 @@ ENDPOINTS_LEITURA_SEM_GATE: set[tuple[str, str]] = {
     # mesmo commit que as gateou (o destino de cada uma está em
     # ROTAS_POR_MODULO, mais abaixo).
     #
-    # Sobram estas 6, e elas NÃO vão ganhar gate — não é trabalho que falta
+    # No review final da fatia, `/organograma` voltou desta tabela para cá:
+    # a Task 3 tinha gateado com `administracao`, mas quem consome
+    # `organogramaApi.tree()` no frontend é o `UnidadePicker`, usado em telas
+    # de PROTOCOLO (abertura de processo, balcão, editor de workflow,
+    # dashboard, unidades-trabalho) — ver a entrada dela, logo abaixo. Ficam
+    # 69 gateadas (58 protocolo + 11 administracao) e 7 aqui.
+    #
+    # Sobram estas 7, e elas NÃO vão ganhar gate — não é trabalho que falta
     # terminar. É a conclusão de que cada uma delas não pertence a um módulo
     # só: ou o consumo real é cruzado (gatear com o slug de um quebraria os
     # outros que a consomem), ou é decisão humana de que o recurso é do
@@ -221,12 +228,32 @@ ENDPOINTS_LEITURA_SEM_GATE: set[tuple[str, str]] = {
     # legal não pode perder a leitura da própria trilha de auditoria por não
     # ter contratado o módulo administração.
     ("GET", "/api/v2/audit"),
+
+    # Transversal: reclassificada no review final (2026-07-30). A Task 3
+    # tinha gateado com `administracao` seguindo o agrupamento da tela
+    # "organograma", mas quem de fato consome a árvore é `organogramaApi.tree()`
+    # (`frontend/lib/api.ts`) — export de topo, não `api.organograma`, o que
+    # fez os parsers automáticos da triagem original errarem a checagem de
+    # consumo real. `organogramaApi.tree()` é chamado pelo `UnidadePicker`
+    # (`frontend/components/UnidadePicker.tsx`), usado em telas de
+    # PROTOCOLO: abertura de processo (campo obrigatório "Unidade
+    # proprietária", `app/(app)/processos/novo/page.tsx`), balcão
+    # (`app/(app)/protocolo/balcao/page.tsx`), editor de workflow
+    # (`components/workflow/WorkflowEditPanel.tsx`), dashboard
+    # (`app/(app)/dashboard/page.tsx`) e unidades-trabalho
+    # (`app/(app)/unidades-trabalho/page.tsx`). Gatear com `administracao`
+    # dava 403 no picker de um tenant com `protocolo` e sem `administracao`
+    # e IMPEDIA A ABERTURA DE PROCESSO. É a mesma árvore de `unidade_trabalho`
+    # que já é transversal (ver `/unidades-trabalho`, acima), servida ao
+    # mesmo picker, nas mesmas telas.
+    ("GET", "/api/v2/organograma"),
 }
 
 
-# Snapshot exato da decisão da Task 4 (2026-07-30) — não é uma contagem, é a
-# lista completa. Ver test_endpoints_leitura_sem_gate_nao_cresce_sem_decisao,
-# logo abaixo, para o porquê de comparar o conjunto inteiro em vez de só o
+# Snapshot exato da decisão da Task 4 (2026-07-30, com o ajuste do review
+# final que devolveu `/organograma`) — não é uma contagem, é a lista
+# completa. Ver test_endpoints_leitura_sem_gate_nao_cresce_sem_decisao, logo
+# abaixo, para o porquê de comparar o conjunto inteiro em vez de só o
 # tamanho.
 ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/v2/busca"),
@@ -235,6 +262,7 @@ ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/v2/unidades-trabalho"),
     ("GET", "/api/v2/unidades-trabalho/{unidade_id}"),
     ("GET", "/api/v2/audit"),
+    ("GET", "/api/v2/organograma"),
 })
 
 
@@ -309,9 +337,11 @@ GATES_DE_MODULO: set[tuple[str, str]] = {
 # copy-paste que só esta tabela pega.
 #
 # As 58 são as gateadas por `require_modulo("protocolo")` na Task 2
-# (2026-07-30); as 12 seguintes são as gateadas por `require_modulo("administracao")`
-# na Task 3 (mesmo dia). `test_rotas_por_modulo_bate_com_a_implementacao`, logo
-# abaixo, lê `modulo_slug` de cada dependência real e reprova nos dois
+# (2026-07-30); as 11 seguintes são as gateadas por `require_modulo("administracao")`
+# na Task 3 (mesmo dia). `/organograma` saiu deste segundo grupo no review
+# final (2026-07-30): ver a razão completa junto da entrada dela em
+# ENDPOINTS_LEITURA_SEM_GATE. `test_rotas_por_modulo_bate_com_a_implementacao`,
+# logo abaixo, lê `modulo_slug` de cada dependência real e reprova nos dois
 # sentidos: rota gateada fora daqui, e rota daqui com slug diferente do que a
 # rota realmente exige.
 ROTAS_POR_MODULO: dict[tuple[str, str], str] = {
@@ -374,7 +404,9 @@ ROTAS_POR_MODULO: dict[tuple[str, str], str] = {
     ("GET", "/api/v2/workflow-instances"): "protocolo",
     ("GET", "/api/v2/workflow-instances/{instance_id}"): "protocolo",
 
-    # Task 3 (2026-07-30) — as 12 de administracao.
+    # Task 3 (2026-07-30) — as 12 de administracao originais. `/organograma`
+    # saiu deste grupo no review final e voltou para ENDPOINTS_LEITURA_SEM_GATE
+    # (transversal); ficam 11.
     ("GET", "/api/v2/catalogo/niveis"): "administracao",
     ("GET", "/api/v2/catalogo/sistemas"): "administracao",
     ("GET", "/api/v2/catalogo/tipos-unidade"): "administracao",
@@ -386,7 +418,6 @@ ROTAS_POR_MODULO: dict[tuple[str, str], str] = {
     ("GET", "/api/v2/jobs/agenda"): "administracao",
     ("GET", "/api/v2/jobs/{job_id}"): "administracao",
     ("GET", "/api/v2/jobs/{job_id}/resultado"): "administracao",
-    ("GET", "/api/v2/organograma"): "administracao",
 }
 
 
