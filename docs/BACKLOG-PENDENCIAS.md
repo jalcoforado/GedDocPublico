@@ -128,6 +128,33 @@ ao módulo errado.)*
   `backend/tests/test_guarda_modularizacao.py` — ou seja, a guarda **não** vai reclamar dele. A
   vigilância é este item, não o teste.
 
+### 1.0.7 As 9 transações da 0074 não estão concedidas a nenhum grupo
+
+*(Levantado em 2026-07-30 pelo review final da F1. Decisão: **fica documentado, não automatizado** —
+ver abaixo por que uma migration de concessão não é escrevível sem definir política de acesso.)*
+
+A migration `0074` criou 9 transações (`processo`, `usuario`, `catalogo`, `assunto`, `manifestante`,
+`cidade`, `endereco`, `workflow`, `unidadeTrabalho`) e a Task 8 gateou 13 endpoints sobre `processo`
+e `workflow` — entre eles `routers/workflow.py:479` (transicionar, usado pelo
+`ProcessoWorkflowPanel.tsx`) e os 4 disparos de job em `routers/jobs.py`. Nenhuma dessas transações
+tem linha em `utils.grupo_transacao`.
+
+- **Não afeta ninguém hoje**, e não por sorte: `is_super_usuario` é `nivel.valor == 0`
+  (`services/permissoes.py:92`), o ramo de SU lê `utils.sistema_transacao` e **não**
+  `grupo_transacao`, e no banco existem **zero** grupos com `nivel.valor <> 0` (verificado por
+  query). Todo grupo do sistema é super-usuário.
+- **Aparece no dia em que o primeiro grupo "Operacional" (nível 1) for criado.** Nesse momento, quem
+  cria o grupo escolhe as transações dele — é o passo já documentado em `RUNBOOK.md`.
+- **Por que não virou migration:** concessão em bloco **abriria** acesso em vez de preservar. As 9
+  transações são novas, então nenhum grupo as tinha; endpoints antigos gateados em `processo,excluir`
+  já eram 403 para não-SU antes da branch. Conceder tudo daria a um Operacional o poder de excluir
+  processo, que ele nunca teve. Escrever a migration correta exige decidir, código por código e ação
+  por ação, quem passa a poder o quê — isso é política de acesso, decisão do dono do produto.
+- **A verificar antes de criar grupo não-SU na VPS:** a apuração acima é do banco **local**. Rodar lá
+  `SELECT count(*) FROM utils.grupo g JOIN utils.nivel n ON n.id=g.id_nivel WHERE n.valor <> 0` — se
+  houver grupo não-SU, existe usuário real perdendo acesso nesses 13 endpoints, e aí a concessão
+  deixa de ser hipótese.
+
 ### 1.1.5 Suíte não estava verde antes do F1
 
 Duas falhas confirmadas como anteriores à branch `feat/modularizacao-f1` (verificado por
