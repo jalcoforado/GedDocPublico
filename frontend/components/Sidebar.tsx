@@ -1,40 +1,11 @@
 "use client";
 
 import {
-  BarChart3,
-  Banknote,
-  BookOpen,
-  Building2,
-  Bus,
-  CalendarClock,
   ChevronDown,
   ChevronRight,
-  ClipboardList,
   ChevronsLeft,
   ChevronsRight,
-  Cog,
-  FileText,
-  FolderTree,
-  GitBranch,
-  Home,
-  IdCard,
-  Inbox,
-  Landmark,
-  Layers,
-  ListChecks,
-  Map,
-  MapPin,
-  Car,
-  Paperclip,
-  PenSquare,
-  Settings,
   Shield,
-  ShieldCheck,
-  Tag,
-  Truck,
-  UserCircle,
-  Users,
-  Wallet,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -45,172 +16,15 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
+import { MENUS, type NavGroup, type NavItem } from "@/lib/menus";
 import { cn } from "@/lib/utils";
 import { DensityToggle } from "./DensityToggle";
 import { ThemeToggle } from "./ThemeToggle";
 
-interface NavItem {
-  label: string;
-  href: string;
-  icon: React.ComponentType<{ className?: string }>;
-  perm?: string;
-  anyOf?: string[];
-  /** Subitens — vira um subgrupo colapsável (chevron) dentro do grupo pai. */
-  children?: NavItem[];
-}
-
-interface NavGroup {
-  title: string;
-  items: NavItem[];
-  /** Estado inicial do grupo (antes da hidratação do localStorage). */
-  defaultOpen?: boolean;
-}
-
-const NAV: NavGroup[] = [
-  {
-    title: "Geral",
-    defaultOpen: true,
-    items: [
-      { label: "Início", href: "/home", icon: Home },
-      { label: "Dashboard", href: "/dashboard", icon: BarChart3 },
-      { label: "Organograma", href: "/organograma", icon: Building2 },
-    ],
-  },
-  {
-    title: "Processos",
-    defaultOpen: true,
-    items: [
-      { label: "Processos", href: "/processos", icon: FileText, perm: "processo" },
-      { label: "Para assinar", href: "/para-assinar", icon: PenSquare },
-      { label: "Workflows", href: "/workflow", icon: GitBranch },
-      { label: "Relatórios", href: "/relatorios", icon: BarChart3, perm: "processo" },
-    ],
-  },
-  {
-    title: "Protocolo",
-    defaultOpen: true,
-    items: [
-      { label: "Balcão", href: "/protocolo/balcao", icon: Inbox, perm: "processo" },
-      {
-        label: "Vencendo prazo",
-        href: "/protocolo/vencendo-prazo",
-        icon: CalendarClock,
-        perm: "processo",
-      },
-      {
-        label: "CCD (Classificação)",
-        href: "/protocolo/ccd",
-        icon: FolderTree,
-        perm: "catalogo",
-      },
-      {
-        label: "TTD (Temporalidade)",
-        href: "/protocolo/ttd",
-        icon: CalendarClock,
-        perm: "catalogo",
-      },
-    ],
-  },
-  {
-    title: "Cadastros",
-    defaultOpen: false,
-    items: [
-      { label: "Manifestantes", href: "/manifestantes", icon: UserCircle, perm: "manifestante" },
-      { label: "Tipos de Manifestante", href: "/tipos-manifestante", icon: Tag, perm: "manifestante" },
-      { label: "Tipos de Processo", href: "/tipos-processo", icon: Layers, perm: "catalogo" },
-      { label: "Assuntos", href: "/assuntos", icon: BookOpen, perm: "assunto" },
-      { label: "Catálogo de Serviços", href: "/servicos", icon: ClipboardList, perm: "servico" },
-      { label: "Tipos de Anexo", href: "/tipos-anexo", icon: Paperclip, perm: "catalogo" },
-      { label: "Templates de documento", href: "/templates-documento", icon: FileText, perm: "minuta_template" },
-      { label: "Cidades", href: "/cidades", icon: MapPin, perm: "cidade" },
-      { label: "Bairros", href: "/bairros", icon: Map, perm: "endereco" },
-      { label: "Endereços", href: "/enderecos", icon: MapPin, perm: "endereco" },
-    ],
-  },
-  {
-    title: "Frota",
-    defaultOpen: false,
-    items: [
-      { label: "Frota Pública", href: "/frotas", icon: Truck, perm: "frota" },
-      { label: "Veículos", href: "/frotas/veiculos", icon: Car, perm: "frota" },
-      { label: "Motoristas", href: "/frotas/motoristas", icon: IdCard, perm: "frota" },
-      { label: "Solicitações", href: "/frotas/solicitacoes", icon: ClipboardList, perm: "frota" },
-    ],
-  },
-  {
-    title: "Transporte Regulado",
-    defaultOpen: false,
-    items: [
-      { label: "Transporte Regulado", href: "/transporte-regulado", icon: Bus, perm: "transporte_regulado" },
-      {
-        label: "Permissionários",
-        href: "/transporte-regulado/permissionarios",
-        icon: IdCard,
-        perm: "transporte_regulado",
-      },
-      {
-        label: "Empresas",
-        href: "/transporte-regulado/empresas",
-        icon: Building2,
-        perm: "transporte_regulado",
-      },
-      {
-        label: "Veículos",
-        href: "/transporte-regulado/veiculos",
-        icon: Car,
-        perm: "transporte_regulado",
-      },
-    ],
-  },
-  {
-    title: "Pagamentos",
-    defaultOpen: false,
-    items: [
-      { label: "Visão geral", href: "/pagamentos", icon: Inbox,
-        anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"] },
-      { label: "Dashboard", href: "/pagamentos/dashboard", icon: BarChart3,
-        anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"] },
-      { label: "Contas a pagar", href: "/pagamentos/contas-a-pagar", icon: ClipboardList,
-        anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar"] },
-      { label: "Autorizações", href: "/pagamentos/autorizacao", icon: ShieldCheck,
-        anyOf: ["pagamento_autorizar"] },
-      { label: "Tesouraria", href: "/pagamentos/tesouraria", icon: Banknote,
-        perm: "pagamento_pagar" },
-      { label: "Caixa", href: "/pagamentos/caixa", icon: Wallet, perm: "pagamento_cadastro" },
-      // Leitura espelha o `_LEITURA` do router de conciliação; a escrita
-      // (importar/baixar/conciliar) exige `pagamento_pagar`.
-      { label: "Conciliação", href: "/pagamentos/conciliacao", icon: Landmark,
-        anyOf: ["pagamento_pagar", "pagamento_autorizar", "pagamento_auditar", "pagamento_cadastro"] },
-      {
-        label: "Cadastros",
-        href: "/pagamentos/cadastros/fornecedores",
-        icon: FolderTree,
-        perm: "pagamento_cadastro",
-        children: [
-          { label: "Fornecedores", href: "/pagamentos/cadastros/fornecedores", icon: UserCircle, perm: "pagamento_cadastro" },
-          { label: "Naturezas", href: "/pagamentos/cadastros/naturezas", icon: Layers, perm: "pagamento_cadastro" },
-          { label: "Fontes de recursos", href: "/pagamentos/cadastros/fontes", icon: BookOpen, perm: "pagamento_cadastro" },
-          { label: "Contas bancárias", href: "/pagamentos/cadastros/contas", icon: Building2, perm: "pagamento_cadastro" },
-          { label: "Contratos", href: "/pagamentos/cadastros/contratos", icon: FileText, perm: "pagamento_cadastro" },
-          { label: "Alçadas", href: "/pagamentos/cadastros/alcadas", icon: Shield, perm: "pagamento_cadastro" },
-          { label: "Checklist documental", href: "/pagamentos/cadastros/checklist", icon: ListChecks, perm: "pagamento_cadastro" },
-        ],
-      },
-    ],
-  },
-  {
-    title: "Administração",
-    defaultOpen: false,
-    items: [
-      { label: "Usuários", href: "/usuarios", icon: Users, perm: "usuario" },
-      { label: "Unidades", href: "/unidades-trabalho", icon: Building2, perm: "unidadeTrabalho" },
-      { label: "Grupos & Permissões", href: "/grupos", icon: Shield },
-      { label: "Configurações", href: "/configuracoes", icon: Settings, perm: "usuario" },
-      { label: "Auditoria", href: "/auditoria", icon: Shield },
-      { label: "Jobs em background", href: "/jobs", icon: Cog },
-    ],
-  },
-];
+// Ponte temporária da Task 1 (split do menu): junta todos os grupos de todos
+// os módulos, reproduzindo o NAV monolítico de antes. Sai na Task 3, quando a
+// Sidebar passa a receber `modulo` e renderizar só o menu ativo + comum.
+const NAV: NavGroup[] = Object.values(MENUS).flatMap((m) => m.grupos);
 
 function canSeeItem(item: NavItem, can: (perm: string) => boolean): boolean {
   return (
