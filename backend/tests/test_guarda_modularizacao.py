@@ -61,15 +61,18 @@ async def test_toda_transacao_do_sistema_tem_modulo(admin_session):
 
 
 # ---------------------------------------------------------------------------
-# Guarda 2 — endpoint sem require_permission
+# Guarda 2 — endpoint sem gate reconhecido
 #
-# `require_permission` é o único ponto onde o enforcement de módulo acontece
-# (Task 5: o gate roda antes até do bypass de super-usuário). Endpoint sem essa
-# dependência escapa do enforcement, e o esquecimento é silencioso.
+# `require_permission` é o ponto onde o enforcement de módulo por PERMISSÃO
+# acontece (Task 5: o gate roda antes até do bypass de super-usuário).
+# `require_modulo` (auth/modulos.py) é o gate por CONTRATAÇÃO, que não olha
+# usuário — só aceito em leitura (ver `endpoints_sem_gate`). Endpoint sem
+# nenhum dos dois escapa do enforcement, e o esquecimento é silencioso.
 #
-# A varredura devolve todos os endpoints `/api/v2` sem o gate. Cada um foi
-# julgado individualmente e caiu num destes dois conjuntos. Os dois juntos
-# formam a allowlist; qualquer endpoint fora deles reprova o PR.
+# A varredura devolve todos os endpoints `/api/v2` sem gate aceito para o
+# método. Cada um foi julgado individualmente e caiu num destes dois
+# conjuntos. Os dois juntos formam a allowlist; qualquer endpoint fora deles
+# reprova o PR.
 #
 # Os conjuntos são DOIS de propósito. Chamar de "transversal" um endpoint de
 # módulo que só não tem gate por herança histórica seria maquiar a dívida:
@@ -308,8 +311,16 @@ GATES_DE_PERMISSAO: set[tuple[str, str]] = {
 }
 
 
-def endpoints_sem_permissao() -> set[tuple[str, str]]:
-    """Varre o app e devolve (método, caminho) sem gate de permissão.
+# Gate de CONTRATAÇÃO de módulo (auth/modulos.py). NÃO é gate de permissão: não
+# olha usuário, grupo nem transação. Fica em conjunto separado de propósito —
+# ver `endpoints_sem_gate()`, que só o aceita em leitura.
+GATES_DE_MODULO: set[tuple[str, str]] = {
+    ("app.auth.modulos", "require_modulo.<locals>._check_modulo"),
+}
+
+
+def endpoints_sem_gate() -> set[tuple[str, str]]:
+    """Varre o app e devolve (método, caminho) sem gate reconhecido.
 
     `dependant.dependencies` cobre tanto `dependencies=[...]` da rota/router
     quanto os `Depends()` da assinatura do endpoint, que é onde a maioria dos
@@ -327,43 +338,63 @@ def endpoints_sem_permissao() -> set[tuple[str, str]]:
             for d in getattr(getattr(rota, "dependant", None), "dependencies", [])
             if getattr(d, "call", None) is not None
         }
-        if not (origens & GATES_DE_PERMISSAO):
-            for metodo in getattr(rota, "methods", set()):
+        for metodo in getattr(rota, "methods", set()):
+            # Leitura pode ser protegida só pela contratação do módulo (esta fatia).
+            # Escrita, não: afrouxar aqui deixaria um POST com require_modulo e sem
+            # require_permission passar no CI, que é justamente o falso-negativo que
+            # a nota de GATES_DE_PERMISSAO descreve.
+            aceitos = (
+                GATES_DE_PERMISSAO | GATES_DE_MODULO
+                if metodo == "GET"
+                else GATES_DE_PERMISSAO
+            )
+            if not (origens & aceitos):
                 desprotegidos.add((metodo, caminho))
     return desprotegidos
 
 
 def test_gates_de_permissao_batem_com_a_implementacao():
-    """Se `perms.py` renomear a closure, a varredura silencia — trava isso.
+    """Se `perms.py`/`modulos.py` renomear a closure, a varredura silencia — trava isso.
 
-    Sem este teste, `GATES_DE_PERMISSAO` desatualizado faria
-    `endpoints_sem_permissao()` considerar TODOS os endpoints desprotegidos
+    Sem este teste, `GATES_DE_PERMISSAO`/`GATES_DE_MODULO` desatualizados fariam
+    `endpoints_sem_gate()` considerar TODOS os endpoints desprotegidos
     (falso-positivo ruidoso) ou — pior, se alguém "consertasse" relaxando o
-    critério — nenhum. O casamento exato só é seguro se for verificado.
+    critério — nenhum. O casamento exato só é seguro se for verificado. Cobre
+    também `auth/modulos.py`: um rename silencioso de `_check_modulo`
+    desligaria o reconhecimento do gate de leitura sem ninguém notar.
     """
+    from app.auth.modulos import require_modulo
     from app.auth.perms import require_any_permission, require_permission
 
-    reais = {
+    reais_permissao = {
         (fabrica("x").__module__, fabrica("x").__qualname__)
         for fabrica in (require_permission, require_any_permission)
     }
-    assert reais == GATES_DE_PERMISSAO, (
-        f"As closures de perms.py mudaram: {sorted(reais)} != "
+    assert reais_permissao == GATES_DE_PERMISSAO, (
+        f"As closures de perms.py mudaram: {sorted(reais_permissao)} != "
         f"{sorted(GATES_DE_PERMISSAO)}. Atualize GATES_DE_PERMISSAO."
+    )
+
+    reais_modulo = {
+        (require_modulo("x").__module__, require_modulo("x").__qualname__)
+    }
+    assert reais_modulo == GATES_DE_MODULO, (
+        f"A closure de modulos.py mudou: {sorted(reais_modulo)} != "
+        f"{sorted(GATES_DE_MODULO)}. Atualize GATES_DE_MODULO."
     )
 
 
 def test_nenhum_endpoint_novo_sem_permissao():
-    """Endpoint sem require_permission escapa do enforcement de módulo.
+    """Endpoint sem gate reconhecido escapa do enforcement de módulo.
 
     As duas allowlists acima são a decisão humana registrada. Endpoint novo que
-    caia fora delas reprova o PR — ou ganha require_permission, ou entra na
-    lista com justificativa.
+    caia fora delas reprova o PR — ou ganha require_permission (ou, em
+    leitura, require_modulo), ou entra na lista com justificativa.
     """
     allowlist = ENDPOINTS_TRANSVERSAIS | ENDPOINTS_LEITURA_SEM_GATE
-    novos = endpoints_sem_permissao() - allowlist
+    novos = endpoints_sem_gate() - allowlist
     assert not novos, (
-        f"Endpoints sem require_permission fora da allowlist: {sorted(novos)}. "
+        f"Endpoints sem gate fora da allowlist: {sorted(novos)}. "
         "Acrescente a dependência ou registre em ENDPOINTS_TRANSVERSAIS / "
         "ENDPOINTS_LEITURA_SEM_GATE com justificativa."
     )
@@ -377,8 +408,53 @@ def test_allowlist_nao_tem_entrada_obsoleta():
     para sempre, mesmo depois de paga.
     """
     allowlist = ENDPOINTS_TRANSVERSAIS | ENDPOINTS_LEITURA_SEM_GATE
-    obsoletos = allowlist - endpoints_sem_permissao()
+    obsoletos = allowlist - endpoints_sem_gate()
     assert not obsoletos, (
         f"Entradas obsoletas na allowlist: {sorted(obsoletos)}. "
         "O endpoint ganhou require_permission ou deixou de existir — remova a linha."
+    )
+
+
+def test_escrita_so_com_require_modulo_continua_desprotegida():
+    """Trava a assimetria: `require_modulo` sozinho NUNCA basta para escrita.
+
+    Constrói uma app FastAPI isolada com uma rota POST protegida só por
+    `require_modulo` (sem `require_permission`) e confirma que
+    `endpoints_sem_gate` a reporta como desprotegida. Sem este teste, alguém
+    "simplifica" a varredura de volta para um único conjunto aceito em
+    qualquer método, e o afrouxamento de escrita volta sem aviso — é
+    exatamente o falso-negativo que a nota de `GATES_DE_PERMISSAO` descreve.
+    """
+    from fastapi import Depends, FastAPI
+
+    from app.auth.modulos import require_modulo
+
+    app_fake = FastAPI()
+
+    @app_fake.post("/api/v2/_fake/so-modulo", dependencies=[Depends(require_modulo("frota"))])
+    async def _rota_fake():
+        return None
+
+    desprotegidos: set[tuple[str, str]] = set()
+    for rota in app_fake.routes:
+        caminho = getattr(rota, "path", "")
+        if not caminho.startswith("/api/v2"):
+            continue
+        origens = {
+            (getattr(d.call, "__module__", ""), getattr(d.call, "__qualname__", ""))
+            for d in getattr(getattr(rota, "dependant", None), "dependencies", [])
+            if getattr(d, "call", None) is not None
+        }
+        for metodo in getattr(rota, "methods", set()):
+            aceitos = (
+                GATES_DE_PERMISSAO | GATES_DE_MODULO
+                if metodo == "GET"
+                else GATES_DE_PERMISSAO
+            )
+            if not (origens & aceitos):
+                desprotegidos.add((metodo, caminho))
+
+    assert ("POST", "/api/v2/_fake/so-modulo") in desprotegidos, (
+        "Uma rota POST protegida só por require_modulo deveria continuar "
+        "desprotegida — a varredura não pode aceitar GATES_DE_MODULO fora de GET."
     )

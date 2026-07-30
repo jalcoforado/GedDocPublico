@@ -1,0 +1,43 @@
+"""Gate de CONTRATAÇÃO de módulo, sem olhar o usuário.
+
+Diferença para `require_permission` (auth/perms.py): aquele responde "este
+usuário pode fazer isto?"; este responde "este tenant contratou este módulo?".
+São perguntas diferentes e esta fatia responde só a segunda — por decisão
+registrada em docs/superpowers/specs/2026-07-30-leitura-por-modulo-escopo.md.
+
+Consequência deliberada: um usuário sem permissão nenhuma continua lendo o que
+lê hoje, desde que o tenant tenha o módulo. Fechar isso é mudança de política
+de acesso e tem item próprio no backlog.
+"""
+from fastapi import Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..database import get_db
+from ..services.modulos import slugs_contratados
+from .deps import require_tenant_id
+
+
+def require_modulo(slug: str):
+    """Cria uma dependency que exige o módulo `slug` contratado pelo tenant."""
+
+    async def _check_modulo(
+        tenant_id: int = Depends(require_tenant_id),
+        db: AsyncSession = Depends(get_db),
+    ) -> None:
+        disponiveis = await slugs_contratados(db, tenant_id)
+        if not disponiveis:
+            # Mesma guarda de services/modulos.codigos_bloqueados: catálogo
+            # corrompido (nem os não-contratáveis existem) tem de gritar, não
+            # bloquear todo mundo em silêncio.
+            raise RuntimeError(
+                f"Nenhum módulo disponível para o tenant {tenant_id} — nem os "
+                "não-contratáveis. Catálogo corrompido; verifique se 'comum' "
+                "existe e está ativo."
+            )
+        if slug not in disponiveis:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Módulo '{slug}' não contratado para este tenant",
+            )
+
+    return _check_modulo
