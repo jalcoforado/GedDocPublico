@@ -48,7 +48,13 @@ export function TenantModulosTab({ tenantId }: { tenantId: number }) {
       if (proximo.has(modulo.slug)) {
         proximo.delete(modulo.slug); // descontratar: sempre permitido, mesmo inativo
       } else {
-        if (!modulo.ativo) return atual; // contratar módulo inativo: recusado (services/modulos.py::contratar)
+        // Contratar módulo inativo é recusado (services/modulos.py::contratar).
+        // Hoje inalcançável — o `disabled` do Checkbox já bloqueia o clique —
+        // mas se essa condição um dia sair, `return atual` (mesma referência)
+        // faria o React pular o re-render: o checkbox nativo ficaria marcado
+        // visualmente sem o estado ter mudado, mentindo pro usuário. Um Set
+        // novo, mesmo com o mesmo conteúdo, garante o re-render correto.
+        if (!modulo.ativo) return new Set(atual);
         proximo.add(modulo.slug);
       }
       return proximo;
