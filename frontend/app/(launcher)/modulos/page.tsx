@@ -1,9 +1,9 @@
 "use client";
 
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -11,10 +11,14 @@ import { MENUS } from "@/lib/menus";
 import { iconeDoModulo } from "@/lib/modulos";
 
 /**
- * Corpo do launcher. Fica num componente separado do `export default` porque
- * precisa do próprio QueryClient (ver comentário em `Launcher`, abaixo).
+ * Tela de seleção de módulos (`/modulos`). Herda o `QueryClient` do
+ * `Providers` em `app/(launcher)/layout.tsx` — mesma configuração
+ * (`staleTime`, `retry`, `refetchOnWindowFocus`) do resto do app. Isso
+ * importa porque a Task 6 (switcher no Header) consome a mesma queryKey
+ * `modulos-me`: um client local aqui criaria um segundo cache para o mesmo
+ * dado, com expiração dessincronizada do switcher.
  */
-function LauncherContent() {
+export default function Launcher() {
   const router = useRouter();
   const { user } = useAuth();
   const {
@@ -107,23 +111,5 @@ function LauncherContent() {
         })}
       </div>
     </div>
-  );
-}
-
-/**
- * `export default` da rota `/modulos`. Cria seu próprio QueryClient em vez de
- * depender do `Providers` do layout: assim o componente é testável isolado
- * (`render(<Launcher />)`, sem precisar montar layout + providers) e, dentro
- * da app real, o client do layout segue existindo por fora sem conflito —
- * este aqui só é usado pela subárvore do launcher.
- */
-export default function Launcher() {
-  const [client] = useState(
-    () => new QueryClient({ defaultOptions: { queries: { retry: false } } }),
-  );
-  return (
-    <QueryClientProvider client={client}>
-      <LauncherContent />
-    </QueryClientProvider>
   );
 }

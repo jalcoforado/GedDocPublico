@@ -43,8 +43,15 @@ sem pedir.
 
 - **pt-BR** em tudo: código, comentários, textos de interface, mensagens de commit.
 - **Nenhuma URL muda nesta fatia.** Não mover arquivo de rota, não criar redirect, não tocar
-  `nginx/default.conf`, não tocar `frontend/middleware.ts`. Isso é F3. Um diff que mexa nesses
-  arquivos está fora de escopo por construção.
+  `frontend/middleware.ts`. Isso é F3. Um diff que mexa nesse arquivo está fora de escopo por
+  construção.
+  - **Correção (2026-07-30, pós-revisão da Task 4):** a restrição acima NÃO cobre
+    `nginx/default.conf`. O proibido é o roteamento `/m/<slug>` e os redirects 308 (isso sim é F3).
+    Registrar rota de topo nova na regex de páginas migradas (`location ~ ^/(...)`) é obrigação de
+    qualquer fatia que crie rota nova — está no `CLAUDE.md`, "Adicionando um módulo", item 3. A
+    Task 4 foi instruída a não tocar o nginx e isso quase deixou `/modulos` invisível atrás do
+    `:8090`; corrigido acrescentando `modulos` à regex na mesma leva. Fatias futuras que criem rota
+    de topo devem editar essa regex como parte normal do trabalho, não como exceção.
 - `cd frontend && npx tsc --noEmit` → **0 erros**, obrigatório antes de cada commit.
 - Testes: `cd frontend && npx vitest run <arquivo>` (vitest roda no host; a imagem `runner` é
   standalone e não tem devDeps).

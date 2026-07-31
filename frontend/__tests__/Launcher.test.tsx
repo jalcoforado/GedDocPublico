@@ -4,6 +4,7 @@
  * passava com lista vazia. Aqui, lista vazia tem de aparecer como mensagem
  * explícita, não como página muda.
  */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -16,6 +17,18 @@ vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: { nome: "Teste" }, loadin
 
 import Launcher from "@/app/(launcher)/modulos/page";
 
+// A página passa a herdar o QueryClient do layout (`Providers`) em vez de
+// criar o próprio — aqui o teste é quem monta o provider, com `retry: false`
+// para não mascarar erro de API atrás de retentativas.
+function renderLauncher() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <Launcher />
+    </QueryClientProvider>,
+  );
+}
+
 const TRES = {
   itens: [
     { slug: "protocolo", nome: "Protocolo", icone: "FileText", ordem: 1 },
@@ -27,7 +40,7 @@ const TRES = {
 describe("launcher", () => {
   it("mostra um card por módulo, na ordem do catálogo", async () => {
     modulos.mockResolvedValue(TRES);
-    render(<Launcher />);
+    renderLauncher();
     await waitFor(() => expect(screen.getByText("Protocolo")).toBeTruthy());
     const nomes = screen.getAllByRole("link").map((a) => a.textContent);
     expect(nomes[0]).toContain("Protocolo");
@@ -37,7 +50,7 @@ describe("launcher", () => {
 
   it("cada card aponta para a raiz do módulo", async () => {
     modulos.mockResolvedValue(TRES);
-    render(<Launcher />);
+    renderLauncher();
     await waitFor(() => expect(screen.getByText("Frota")).toBeTruthy());
     const frota = screen.getAllByRole("link").find((a) => a.textContent?.includes("Frota"));
     expect(frota?.getAttribute("href")).toBe("/frotas");
@@ -45,19 +58,19 @@ describe("launcher", () => {
 
   it("com um módulo só, entra direto — o launcher é porta, não pedágio", async () => {
     modulos.mockResolvedValue({ itens: [TRES.itens[1]] });
-    render(<Launcher />);
+    renderLauncher();
     await waitFor(() => expect(push).toHaveBeenCalledWith("/frotas"));
   });
 
   it("lista vazia mostra mensagem explícita, não tela muda", async () => {
     modulos.mockResolvedValue({ itens: [] });
-    render(<Launcher />);
+    renderLauncher();
     await waitFor(() => expect(screen.getByText(/nenhum módulo/i)).toBeTruthy());
   });
 
   it("erro de API mostra mensagem, não tela muda", async () => {
     modulos.mockRejectedValue(new Error("falhou"));
-    render(<Launcher />);
+    renderLauncher();
     await waitFor(() => expect(screen.getByText(/não foi possível/i)).toBeTruthy());
   });
 });
