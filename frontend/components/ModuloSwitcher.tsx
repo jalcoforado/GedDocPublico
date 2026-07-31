@@ -1,0 +1,166 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { ChevronDown } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+
+import { api, type ModuloOut } from "@/lib/api";
+import { MENUS } from "@/lib/menus";
+import { iconeDoModulo, moduloDoPathname } from "@/lib/modulos";
+import { cn } from "@/lib/utils";
+
+/**
+ * Switcher de módulo no Header. Consome a MESMA queryKey `modulos-me` do
+ * launcher (`app/(launcher)/modulos/page.tsx`) — mesmo dado, mesmo cache,
+ * herdado do `QueryClient` do `Providers` da árvore. Não cria QueryClient
+ * próprio nem chave nova (ver comentário no launcher: já foi bug nesta fatia).
+ *
+ * Propriedade de desenho: trocar de módulo vai direto para a raiz dele
+ * (`router.push`), sem passar pela tela `/modulos` — o launcher é porta de
+ * entrada, não pedágio.
+ */
+export function ModuloSwitcher() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["modulos-me"],
+    queryFn: api.modulos,
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (!containerRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const itens = data?.itens ?? [];
+  const ordenados = [...itens].sort((a, b) => a.ordem - b.ordem);
+
+  // Com 0 ou 1 módulo não há para onde trocar — e "voltar ao launcher" seria
+  // um clique que bate e volta na hora, porque o launcher com módulo único
+  // faz auto-redirect (requisito de produto, não mexido aqui). Um switcher
+  // sem destino útil não ajuda; melhor não aparecer.
+  if (isLoading || isError || ordenados.length <= 1) return null;
+
+  const sluqAtual = moduloDoPathname(pathname);
+  const atual = ordenados.find((m) => m.slug === sluqAtual) ?? null;
+  // Rota transversal (ex.: /home) ou módulo que a API não devolveu: não pode
+  // parecer que o usuário está num módulo em que não está — rótulo genérico.
+  const IconeAtual = iconeDoModulo(atual?.icone);
+  const rotuloAtual = atual?.nome ?? "Módulos";
+
+  function irPara(slug: string) {
+    setOpen(false);
+    router.push(MENUS[slug]?.raiz ?? "/home");
+  }
+
+  function irParaLauncher() {
+    setOpen(false);
+    router.push("/modulos");
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={cn(
+          "inline-flex h-10 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-foreground",
+          "transition-colors duration-fast hover:bg-muted",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+      >
+        <IconeAtual className="h-4 w-4 text-foreground-muted" aria-hidden="true" />
+        <span className="hidden sm:inline">{rotuloAtual}</span>
+        <ChevronDown
+          className={cn(
+            "h-3.5 w-3.5 text-foreground-muted transition-transform duration-fast",
+            open && "rotate-180",
+          )}
+          aria-hidden="true"
+        />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          aria-label="Trocar de módulo"
+          className="
+            absolute left-0 top-[calc(100%+6px)] z-50 w-64
+            overflow-hidden rounded-lg border border-border bg-card shadow-xl
+            animate-scale-in origin-top-left
+          "
+        >
+          <div className="py-1">
+            {ordenados.map((m) => (
+              <ItemModulo
+                key={m.slug}
+                modulo={m}
+                ativo={m.slug === atual?.slug}
+                onClick={() => irPara(m.slug)}
+              />
+            ))}
+          </div>
+          <div className="border-t border-border py-1">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={irParaLauncher}
+              className="
+                flex w-full items-center px-3 py-2 text-sm text-foreground-muted
+                transition-colors duration-fast hover:bg-muted hover:text-foreground
+              "
+            >
+              Todos os módulos
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ItemModulo({
+  modulo,
+  ativo,
+  onClick,
+}: {
+  modulo: ModuloOut;
+  ativo: boolean;
+  onClick: () => void;
+}) {
+  const Icone = iconeDoModulo(modulo.icone);
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      aria-current={ativo || undefined}
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors duration-fast",
+        ativo
+          ? "bg-primary/5 font-medium text-foreground"
+          : "text-foreground hover:bg-muted",
+      )}
+    >
+      <Icone className="h-4 w-4 text-foreground-muted" aria-hidden="true" />
+      {modulo.nome}
+    </button>
+  );
+}

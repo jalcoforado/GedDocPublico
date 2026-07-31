@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { AvatarDropdown } from "@/components/AvatarDropdown";
 import { BuscaGlobal } from "@/components/BuscaGlobal";
+import { ModuloSwitcher } from "@/components/ModuloSwitcher";
 import { NotificacoesBell } from "@/components/NotificacoesBell";
 import { useBranding } from "@/lib/branding";
 
@@ -54,6 +55,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
 
       {/* Right cluster */}
       <div className="flex items-center gap-1.5">
+        <ModuloSwitcher />
         <NotificacoesBell />
         <AvatarDropdown />
       </div>
