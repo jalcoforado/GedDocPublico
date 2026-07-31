@@ -80,6 +80,36 @@ describe("switcher de módulo", () => {
     expect(screen.getByText("Módulos")).toBeTruthy();
   });
 
+  it("com um único módulo, em rota transversal, ainda oferece caminho clicável de volta a ele", async () => {
+    // Cenário do achado CRITICAL do review final: tenant com um módulo só,
+    // usuário em /home (transversal) — sem isto não há NENHUM caminho na
+    // interface de volta ao módulo (a Sidebar em /home mostra só "Geral", e
+    // o link para /modulos vive só dentro deste switcher).
+    modulosMock.mockResolvedValue({
+      itens: [{ slug: "frota", nome: "Frota", icone: "Truck", ordem: 1 }],
+    });
+    usePathnameMock.mockReturnValue("/home");
+    renderSwitcher();
+
+    const botao = await waitFor(() =>
+      screen.getByRole("button", { name: /selecionar módulo/i }),
+    );
+    fireEvent.click(botao);
+    fireEvent.click(screen.getByText("Frota"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/frotas"));
+  });
+
+  it("com um único módulo, o item 'Todos os módulos' não aparece (bateria e voltaria na hora)", async () => {
+    modulosMock.mockResolvedValue({
+      itens: [{ slug: "frota", nome: "Frota", icone: "Truck", ordem: 1 }],
+    });
+    renderSwitcher();
+
+    const botao = await waitFor(() => screen.getByRole("button", { name: /frota/i }));
+    fireEvent.click(botao);
+    expect(screen.queryByText(/todos os módulos/i)).toBeNull();
+  });
+
   it("erro ao carregar fica visível e recuperável, sem exigir reload", async () => {
     modulosMock.mockReset();
     modulosMock.mockRejectedValue(new Error("falhou"));

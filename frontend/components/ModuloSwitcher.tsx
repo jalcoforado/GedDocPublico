@@ -82,11 +82,11 @@ export function ModuloSwitcher() {
   const itens = data?.itens ?? [];
   const ordenados = [...itens].sort((a, b) => a.ordem - b.ordem);
 
-  // Com 0 ou 1 módulo não há para onde trocar — e "voltar ao launcher" seria
-  // um clique que bate e volta na hora, porque o launcher com módulo único
-  // faz auto-redirect (requisito de produto, não mexido aqui). Um switcher
-  // sem destino útil não ajuda; melhor não aparecer.
-  if (ordenados.length <= 1) return null;
+  // Com 0 módulos não há nada para mostrar nem para onde trocar — some. Com 1
+  // módulo o switcher continua útil: é o único caminho de volta a ele a
+  // partir de uma rota transversal (ex.: /home), já que não há entrada
+  // equivalente na Sidebar nem no AvatarDropdown.
+  if (ordenados.length === 0) return null;
 
   const slugAtual = moduloDoPathname(pathname);
   const atual = ordenados.find((m) => m.slug === slugAtual) ?? null;
@@ -153,19 +153,25 @@ export function ModuloSwitcher() {
               />
             ))}
           </div>
-          <div className="border-t border-border py-1">
-            <button
-              type="button"
-              role="menuitem"
-              onClick={irParaLauncher}
-              className="
-                flex w-full items-center px-3 py-2 text-sm text-foreground-muted
-                transition-colors duration-fast hover:bg-muted hover:text-foreground
-              "
-            >
-              Todos os módulos
-            </button>
-          </div>
+          {/* Com 1 módulo só, "Todos os módulos" bateria e voltaria na hora:
+              o launcher com módulo único faz auto-redirect de volta para cá
+              (requisito de produto, não mexido aqui). Item some para não
+              prometer uma navegação que não acontece. */}
+          {ordenados.length > 1 && (
+            <div className="border-t border-border py-1">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={irParaLauncher}
+                className="
+                  flex w-full items-center px-3 py-2 text-sm text-foreground-muted
+                  transition-colors duration-fast hover:bg-muted hover:text-foreground
+                "
+              >
+                Todos os módulos
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
