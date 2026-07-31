@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { MENUS, ORDEM_GRUPOS_ORIGINAL, menuDoModulo } from "@/lib/menus";
+import { MENUS, menuDoModulo } from "@/lib/menus";
 import type { NavItem } from "@/lib/menus/tipos";
 import { moduloDoPathname } from "@/lib/modulos";
 
@@ -137,23 +137,29 @@ describe("split dos menus", () => {
     expect(menuDoModulo("nao-existe")).toBeNull();
   });
 
-  it("a ponte temporária (ORDEM_GRUPOS_ORIGINAL) reproduz a ordem original do NAV", () => {
-    // A Sidebar monta NAV com `ORDEM_GRUPOS_ORIGINAL.flatMap((slug) => MENUS[slug].grupos)`.
-    // Esta é a mesma composição — se a ordem regredir (ex.: "Geral" deixar de
-    // vir primeiro), o usuário vê o menu reorganizado sem que ninguém pediu.
-    const titulosReconstruidos = ORDEM_GRUPOS_ORIGINAL.flatMap((slug) =>
-      MENUS[slug].grupos.map((g) => g.title),
-    );
-    expect(titulosReconstruidos).toEqual([
-      "Geral",
-      "Processos",
-      "Protocolo",
-      "Cadastros",
-      "Frota",
-      "Transporte Regulado",
-      "Pagamentos",
-      "Administração",
-    ]);
+  // O teste antigo aqui ("a ponte temporária reproduz a ordem original do NAV")
+  // reconstruía a ordem a partir de `ORDEM_GRUPOS_ORIGINAL` e comparava contra
+  // 8 títulos fixos — mas nunca olhava a `Sidebar`. Ele passou verde enquanto
+  // a Task 3 montava o `NAV` na ordem oposta (módulo antes de comum), porque
+  // não exercitava o componente que decide a ordem de verdade. Removido junto
+  // com `ORDEM_GRUPOS_ORIGINAL` (ficou sem uso depois da Task 3). O teste que
+  // MORDE essa regressão — renderiza a Sidebar de verdade e afirma que
+  // "comum" vem antes do módulo — está em `Sidebar.modulo.test.tsx`, perto da
+  // infraestrutura de mocks (QueryClient/ThemeProvider) que a Sidebar exige.
+  // O que sobra como invariante de DADO (independe de a Sidebar existir) é a
+  // ordem dos grupos DENTRO de cada módulo — é o que este teste afirma agora.
+  it("a ordem dos grupos dentro de cada módulo é a do NAV original", () => {
+    const ORDEM_ESPERADA: Record<string, string[]> = {
+      comum: ["Geral"],
+      protocolo: ["Processos", "Protocolo", "Cadastros"],
+      frota: ["Frota"],
+      transporte: ["Transporte Regulado"],
+      pagamentos: ["Pagamentos"],
+      administracao: ["Administração"],
+    };
+    for (const [slug, menu] of Object.entries(MENUS)) {
+      expect(menu.grupos.map((g) => g.title), slug).toEqual(ORDEM_ESPERADA[slug]);
+    }
   });
 
   it("perm/anyOf de cada item bate com a tabela original — não só o href", () => {

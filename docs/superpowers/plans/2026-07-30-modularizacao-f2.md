@@ -554,14 +554,23 @@ por:
 ```tsx
   const menu = menuDoModulo(modulo);
   const NAV: NavGroup[] = [
-    ...(menu && menu.slug !== "comum" ? menu.grupos : []),
     ...MENUS.comum.grupos,
+    ...(menu && menu.slug !== "comum" ? menu.grupos : []),
   ];
 ```
 
-Os transversais entram **sempre**, no fim — são o caminho de volta para `/home` e `/dashboard`. Todo
-o resto do componente (poda por `perm`/`anyOf`, `localStorage` de grupos abertos, auto-expand,
-colapso) fica **inalterado**: ele já opera sobre `NAV`.
+> **Correção de 2026-07-30 (decisão do Jorge).** A primeira redação deste passo prescrevia os
+> transversais **no fim** (`[...modulo, ...comum]`). Estava errada — quem escreveu foi o autor deste
+> plano, não uma leitura equivocada de quem implementou. No `NAV` original o grupo "Geral"
+> (Início/Dashboard/Para assinar) vinha **primeiro**; pôr os transversais no fim reordenava o menu
+> sem que ninguém tivesse pedido — o mesmo tipo de regressão que a rodada de revisão da Task 1 já
+> tinha corrigido uma vez (ver `ORDEM_GRUPOS_ORIGINAL` e o histórico de `menus.test.tsx`), agora
+> reintroduzida por outro caminho. A ordem certa, corrigida em revisão da Task 3, é **comum primeiro,
+> módulo depois** — o snippet acima já reflete a versão corrigida.
+
+Os transversais entram **sempre**, agora **primeiro** — são o caminho de volta para `/home` e
+`/dashboard`. Todo o resto do componente (poda por `perm`/`anyOf`, `localStorage` de grupos abertos,
+auto-expand, colapso) fica **inalterado**: ele já opera sobre `NAV`.
 
 Em `app/(app)/layout.tsx`, dentro de `Shell`, derivar e repassar:
 

@@ -70,4 +70,16 @@ describe("Sidebar por módulo", () => {
     expect(screen.getByText("Início")).toBeTruthy();
     expect(screen.queryByText("Veículos")).toBeNull();
   });
+
+  it("o grupo comum (transversais) vem antes do grupo do módulo ativo", () => {
+    // Guarda viva da ordem: "Geral" era o primeiro grupo no NAV original.
+    // Precisa renderizar a Sidebar de verdade — um teste que só olhasse dados
+    // (MENUS/ORDEM_GRUPOS_ORIGINAL) já passou verde uma vez com a Sidebar
+    // montando a ordem oposta, porque nunca exercitava o componente.
+    renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
+    const geral = screen.getByText("Geral");
+    const frota = screen.getByText("Frota");
+    const posicao = geral.compareDocumentPosition(frota);
+    expect(posicao & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

@@ -53,15 +53,17 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { can } = useAuth();
   const branding = useBranding();
-  // Menu do módulo ativo + transversais (comum), sempre por último — é o
-  // caminho de volta para /home e /dashboard quando o usuário está dentro de
-  // um módulo. "comum" nunca duplica: menuDoModulo(null) devolve null, e o
-  // guard `menu.slug !== "comum"` evita repetir o grupo se algum dia o slug
-  // do pathname vier como "comum" por engano.
+  // Transversais (comum) sempre primeiro — é a ordem do NAV original ("Geral"
+  // abria a lista) e continua sendo o caminho de volta para /home e
+  // /dashboard, agora no topo em vez do fim. Depois vêm os grupos do módulo
+  // ativo. "comum" nunca duplica: menuDoModulo(null) devolve null, e o guard
+  // `menu.slug !== "comum"` evita repetir o grupo se algum dia o slug do
+  // pathname vier como "comum" por engano (hoje nenhuma entrada de
+  // ROTA_MODULO mapeia para "comum" — é defesa, não caminho alcançável).
   const menu = menuDoModulo(modulo);
   const NAV: NavGroup[] = [
-    ...(menu && menu.slug !== "comum" ? menu.grupos : []),
     ...MENUS.comum.grupos,
+    ...(menu && menu.slug !== "comum" ? menu.grupos : []),
   ];
   // PR3a — link de plataforma só aparece para admin de plataforma (allowlist).
   const adminMeQ = useQuery({
