@@ -16,18 +16,11 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
-import { MENUS, menuDoModulo, type NavGroup, type NavItem } from "@/lib/menus";
+import { canSeeItem, MENUS, menuDoModulo, type NavGroup, type NavItem } from "@/lib/menus";
 import { cn } from "@/lib/utils";
 import { DensityToggle } from "./DensityToggle";
+import { SidebarModuloHeader } from "./SidebarModuloHeader";
 import { ThemeToggle } from "./ThemeToggle";
-
-function canSeeItem(item: NavItem, can: (perm: string) => boolean): boolean {
-  return (
-    (!item.perm && !item.anyOf) ||
-    (!!item.perm && can(item.perm)) ||
-    (!!item.anyOf && item.anyOf.some((p) => can(p)))
-  );
-}
 
 function isPathActive(href: string, pathname: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
@@ -221,6 +214,10 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
+
+        {/* Cabeçalho de módulo — onde o usuário está e o caminho de volta a
+            /modulos. Acima de todos os grupos, de propósito (ver componente). */}
+        <SidebarModuloHeader modulo={modulo} collapsed={collapsed} />
 
         {/* Items */}
         <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 py-2">

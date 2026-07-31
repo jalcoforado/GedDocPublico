@@ -6,8 +6,8 @@
 import type { ComponentProps } from "react";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/frotas/veiculos",
@@ -23,8 +23,30 @@ vi.mock("@/lib/auth", () => ({
   }),
 }));
 
+// admin.me alimenta o link de plataforma (não testado aqui); modulos alimenta
+// o SidebarModuloHeader — mesma queryKey `modulos-me` do ModuloSwitcher.
+const modulosMock = vi.fn();
+vi.mock("@/lib/api", () => ({
+  api: {
+    admin: { me: () => Promise.resolve({ is_platform_admin: false }) },
+    modulos: () => modulosMock(),
+  },
+}));
+
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeProvider } from "@/lib/theme";
+
+const DOIS_MODULOS = {
+  itens: [
+    { slug: "frota", nome: "Frota", icone: "Truck", ordem: 1 },
+    { slug: "pagamentos", nome: "Pagamentos", icone: "Wallet", ordem: 2 },
+  ],
+};
+
+beforeEach(() => {
+  modulosMock.mockReset();
+  modulosMock.mockResolvedValue(DOIS_MODULOS);
+});
 
 // jsdom não implementa matchMedia; o ThemeProvider consulta a preferência do
 // SO ao montar. Sem isso a montagem quebra antes de qualquer asserção.
@@ -78,8 +100,52 @@ describe("Sidebar por módulo", () => {
     // montando a ordem oposta, porque nunca exercitava o componente.
     renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
     const geral = screen.getByText("Geral");
-    const frota = screen.getByText("Frota");
+    // Botão do GRUPO "Frota" (role button, aria-expanded) — não o texto do
+    // cabeçalho de módulo (role link), que também pode conter "Frota".
+    const frota = screen.getByRole("button", { name: "Frota" });
     const posicao = geral.compareDocumentPosition(frota);
     expect(posicao & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("cabeçalho de módulo (topo da Sidebar)", () => {
+  it("dentro de um módulo, com mais de um módulo disponível, mostra seta + nome do módulo e linka para /modulos", async () => {
+    renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
+    const header = await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
+    expect(header.tagName).toBe("A");
+    expect(header).toHaveAttribute("href", "/modulos");
+    expect(header.textContent).toContain("Frota");
+  });
+
+  it("em rota transversal, mostra rótulo neutro (não aparenta estar em nenhum módulo específico) e linka para /modulos", async () => {
+    renderSidebar({ modulo: null, open: true, onClose: () => {} });
+    const header = await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
+    expect(header.tagName).toBe("A");
+    expect(header).toHaveAttribute("href", "/modulos");
+    expect(header.textContent).toBe("Módulos");
+    expect(header.textContent).not.toMatch(/frota|pagamentos/i);
+  });
+
+  it("com um único módulo disponível, mostra só o nome do módulo — sem link, sem seta, sem ação", async () => {
+    // O launcher faz auto-redirect quando há um módulo só: um link aqui
+    // bateria e voltaria na hora. Vale tanto dentro do módulo quanto numa
+    // rota transversal — o que importa é ter um módulo só, não a rota atual.
+    modulosMock.mockResolvedValue({
+      itens: [{ slug: "frota", nome: "Frota", icone: "Truck", ordem: 1 }],
+    });
+    renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
+    const header = await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
+    expect(header.tagName).toBe("DIV");
+    expect(header).not.toHaveAttribute("href");
+    expect(header.textContent).toBe("Frota");
+  });
+
+  it("erro ao carregar módulos fica visível e recuperável — não pode ser confundido com módulo único", async () => {
+    modulosMock.mockReset();
+    modulosMock.mockRejectedValue(new Error("falhou"));
+    renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
+    const header = await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
+    expect(header.tagName).toBe("BUTTON");
+    expect(header.textContent).toMatch(/indisponíveis/i);
   });
 });
