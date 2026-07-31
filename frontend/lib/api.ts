@@ -1462,6 +1462,20 @@ export interface AdminTenantUpdateInput {
   limite_usuarios?: number | null;
   limite_armazenamento_mb?: number | null;
 }
+// F2 Task 7 — aba Módulos do admin de tenant. Espelha `ModuloAdminOut`
+// (backend/app/schemas/modulo.py): catálogo contratável com `contratado`
+// (o tenant tem vínculo vivo) e `ativo` (o módulo existe na plataforma) —
+// um módulo pode estar contratado e inativo ao mesmo tempo, e é esse caso
+// que a interface tem que deixar descontratar mas não recontratar.
+export interface AdminTenantModulo {
+  id: number;
+  slug: string;
+  nome: string;
+  icone: string | null;
+  ordem: number;
+  contratado: boolean;
+  ativo: boolean;
+}
 export interface AdminTenantCreated {
   tenant: AdminTenant;
   admin_email: string;
@@ -2210,6 +2224,16 @@ export const api = {
         request<AdminTenant>(`/admin/tenants/${id}/desativar`, { method: "POST" }),
     },
   },
+  // F2 Task 7 — GET devolve o catálogo contratável com o estado do tenant;
+  // PUT RECONCILIA (envia a lista completa do estado final, não um delta —
+  // o que não vier na lista é descontratado). Ver services/modulos.py::contratar.
+  adminTenantModulos: (id: number) =>
+    request<AdminTenantModulo[]>(`/admin/tenants/${id}/modulos`),
+  adminTenantContratarModulos: (id: number, slugs: string[]) =>
+    request<AdminTenantModulo[]>(`/admin/tenants/${id}/modulos`, {
+      method: "PUT",
+      body: JSON.stringify({ slugs }),
+    }),
 
   usuarios: {
     list: (params?: { page?: number; page_size?: number; q?: string }) =>
