@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown } from "lucide-react";
+import { AlertTriangle, ChevronDown } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -26,7 +26,7 @@ export function ModuloSwitcher() {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch, isRefetching } = useQuery({
     queryKey: ["modulos-me"],
     queryFn: api.modulos,
   });
@@ -47,6 +47,38 @@ export function ModuloSwitcher() {
     };
   }, [open]);
 
+  // Carregando: estado transitório e curto (dado cacheado sob a mesma
+  // queryKey do launcher) — não vale a pena um esqueleto só para isso.
+  if (isLoading) return null;
+
+  // Erro fica À MOSTRA e recuperável, diferente de "só tem um módulo": sem
+  // isso, o switcher some tanto por falha de rede quanto por não ter para
+  // onde trocar, e o usuário não consegue diferenciar os dois estados nem
+  // sair do primeiro sem recarregar a página (retry:1 e sem refetch
+  // automático no `Providers`). O launcher trata o mesmo dado com tela de
+  // erro + "Tentar novamente"; aqui é a versão compacta da mesma ideia.
+  if (isError) {
+    return (
+      <button
+        type="button"
+        onClick={() => refetch()}
+        disabled={isRefetching}
+        aria-label="Não foi possível carregar os módulos. Tentar novamente."
+        title="Não foi possível carregar os módulos. Tentar novamente."
+        className={cn(
+          "inline-flex h-10 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-danger",
+          "transition-colors duration-fast hover:bg-danger-soft disabled:opacity-60",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+      >
+        <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+        <span className="hidden sm:inline">
+          {isRefetching ? "Tentando novamente…" : "Módulos indisponíveis"}
+        </span>
+      </button>
+    );
+  }
+
   const itens = data?.itens ?? [];
   const ordenados = [...itens].sort((a, b) => a.ordem - b.ordem);
 
@@ -54,14 +86,17 @@ export function ModuloSwitcher() {
   // um clique que bate e volta na hora, porque o launcher com módulo único
   // faz auto-redirect (requisito de produto, não mexido aqui). Um switcher
   // sem destino útil não ajuda; melhor não aparecer.
-  if (isLoading || isError || ordenados.length <= 1) return null;
+  if (ordenados.length <= 1) return null;
 
-  const sluqAtual = moduloDoPathname(pathname);
-  const atual = ordenados.find((m) => m.slug === sluqAtual) ?? null;
+  const slugAtual = moduloDoPathname(pathname);
+  const atual = ordenados.find((m) => m.slug === slugAtual) ?? null;
   // Rota transversal (ex.: /home) ou módulo que a API não devolveu: não pode
   // parecer que o usuário está num módulo em que não está — rótulo genérico.
   const IconeAtual = iconeDoModulo(atual?.icone);
   const rotuloAtual = atual?.nome ?? "Módulos";
+  const rotuloAcessivel = atual
+    ? `Módulo atual: ${atual.nome}. Trocar de módulo.`
+    : "Selecionar módulo.";
 
   function irPara(slug: string) {
     setOpen(false);
@@ -80,6 +115,7 @@ export function ModuloSwitcher() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={rotuloAcessivel}
         className={cn(
           "inline-flex h-10 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-foreground",
           "transition-colors duration-fast hover:bg-muted",
