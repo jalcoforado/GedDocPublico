@@ -12,9 +12,14 @@ import { cn } from "@/lib/utils";
 
 /**
  * Switcher de módulo no Header. Consome a MESMA queryKey `modulos-me` do
- * launcher (`app/(launcher)/modulos/page.tsx`) — mesmo dado, mesmo cache,
- * herdado do `QueryClient` do `Providers` da árvore. Não cria QueryClient
- * próprio nem chave nova (ver comentário no launcher: já foi bug nesta fatia).
+ * launcher (`app/(launcher)/modulos/page.tsx`) e herda o `QueryClient` do
+ * `Providers` da árvore em vez de criar um próprio (já foi bug nesta
+ * fatia) — mas isso NÃO significa cache compartilhado com o launcher: os
+ * dois vivem em grupos de rota irmãos (`(app)` e `(launcher)`), cada um com
+ * seu próprio `<Providers>`/`QueryClient`, então trocar entre eles sempre
+ * desmonta um e monta o outro (ver comentário completo no launcher). Herdar
+ * do layout continua certo pela consistência de config (`staleTime`,
+ * `retry`), só não elimina o refetch ao cruzar de um grupo para o outro.
  *
  * Propriedade de desenho: trocar de módulo vai direto para a raiz dele
  * (`router.push`), sem passar pela tela `/modulos` — o launcher é porta de

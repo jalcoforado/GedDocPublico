@@ -12,11 +12,18 @@ import { iconeDoModulo } from "@/lib/modulos";
 
 /**
  * Tela de seleção de módulos (`/modulos`). Herda o `QueryClient` do
- * `Providers` em `app/(launcher)/layout.tsx` — mesma configuração
- * (`staleTime`, `retry`, `refetchOnWindowFocus`) do resto do app. Isso
- * importa porque a Task 6 (switcher no Header) consome a mesma queryKey
- * `modulos-me`: um client local aqui criaria um segundo cache para o mesmo
- * dado, com expiração dessincronizada do switcher.
+ * `Providers` em `app/(launcher)/layout.tsx` em vez de criar um próprio —
+ * mesma configuração (`staleTime`, `retry`, `refetchOnWindowFocus`) do resto
+ * do app.
+ *
+ * O que isso NÃO dá: cache compartilhado com o switcher do Header
+ * (`ModuloSwitcher`, em `components/ModuloSwitcher.tsx`). `(app)` e
+ * `(launcher)` são grupos de rota IRMÃOS, cada um monta o próprio
+ * `<Providers>`, e `Providers` cria o `QueryClient` num `useState` — ir de
+ * `/frotas` para `/modulos` desmonta um layout e monta o outro, então o
+ * client (e o cache de `modulos-me`) é sempre novo. Herdar do layout
+ * continua certo pela consistência de config, só não pela consistência de
+ * cache entre os dois grupos.
  */
 export default function Launcher() {
   const router = useRouter();
