@@ -1,3 +1,6 @@
+import { Bus, FileText, LayoutGrid, Settings, Truck, Wallet } from "lucide-react";
+import type React from "react";
+
 /**
  * Mapa rota → módulo, derivado do apêndice §12 do spec de modularização.
  *
@@ -46,4 +49,25 @@ export function moduloDoPathname(path: string): string | null {
     if (limpo === prefixo || limpo.startsWith(`${prefixo}/`)) return slug;
   }
   return null;
+}
+
+/**
+ * Ícones que o catálogo pode nomear (`aprimora_py.modulo.icone`). Mapa
+ * explícito de propósito: import dinâmico por nome arbitrário não sobrevive
+ * ao bundler, e um nome inválido vindo do banco não pode virar erro de
+ * runtime — cai no ícone genérico via `iconeDoModulo`.
+ */
+export const ICONES_MODULO: Record<string, React.ComponentType<{ className?: string }>> = {
+  FileText,
+  Wallet,
+  Truck,
+  Bus,
+  Settings,
+};
+
+/** Resolve o ícone do módulo pelo nome vindo do backend. Nome desconhecido ou nulo → genérico. */
+export function iconeDoModulo(
+  nome: string | null | undefined,
+): React.ComponentType<{ className?: string }> {
+  return (nome && ICONES_MODULO[nome]) || LayoutGrid;
 }
