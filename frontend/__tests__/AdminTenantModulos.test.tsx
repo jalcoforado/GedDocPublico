@@ -2,8 +2,19 @@
  * A aba de contratação. Duas propriedades do backend que a interface tem de
  * respeitar, senão ela produz 400 ou engana o administrador:
  *  1. o PUT RECONCILIA — manda a lista completa do estado final, não um delta;
- *  2. módulo inativo não pode ser CONTRATADO, mas pode ser DESCONTRATADO
- *     (services/modulos.py::contratar recusa o primeiro e permite o segundo).
+ *  2. módulo inativo só não pode entrar como VÍNCULO NOVO. Um módulo que o
+ *     tenant já tem contratado e que está inativo pode continuar no payload
+ *     (mantido) ou sair dele (descontratado) — só não pode ser marcado de
+ *     novo depois de desmarcado (services/modulos.py::contratar).
+ *
+ * `@/lib/api` está mockado aqui: estes testes provam o que a UI ENVIA, não o
+ * que o backend ACEITA. Antes do conserto do achado #3 do review final, o
+ * primeiro teste abaixo congelava como "correto" um payload
+ * (`["protocolo", "frota", "transporte"]`, com `transporte` contratado E
+ * inativo) que a `contratar()` real REJEITAVA com 400 — o mock escondia
+ * isso. O mesmo payload, agora com transporte como vínculo já existente
+ * (não novo), é aceito de ponta a ponta: ver
+ * `backend/tests/test_modulos_service.py::test_contratar_mantem_modulo_ja_contratado_e_inativo`.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -53,10 +64,15 @@ function renderTab() {
 }
 
 describe("aba Módulos do tenant", () => {
-  it("contratar um módulo manda a lista completa, não o delta", async () => {
+  it("contratar um módulo manda a lista completa, não o delta — inclusive o vínculo já existente e inativo", async () => {
     renderTab();
     fireEvent.click(await waitFor(() => screen.getByLabelText("Frota")));
     fireEvent.click(screen.getByRole("button", { name: /salvar/i }));
+    // "transporte" não foi tocado: continua no payload porque já era um
+    // vínculo vivo (contratado: true), mesmo estando inativo — a UI não
+    // filtra por `ativo` ao montar a lista final, só por "está marcado".
+    // Ver o comentário no topo do arquivo: este payload específico é o que
+    // o achado #3 do review final corrigiu no backend.
     await waitFor(() =>
       expect(salvar).toHaveBeenCalledWith(7, ["protocolo", "frota", "transporte"]),
     );
