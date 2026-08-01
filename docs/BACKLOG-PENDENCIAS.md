@@ -313,6 +313,28 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 - **P7** — Ocorrências regulatórias
 - **P8** — Workflows avançados
 
+> **Atualizado em 2026-08-01, pela fatia de costura de navegação** (spec e plano em
+> `docs/superpowers/`). "Entregues e no ar" era verdade só para o backend. Três coisas mudaram, e a
+> terceira segue aberta:
+>
+> - **A navegação até Alvarás e Relatórios não existia.** As telas estavam prontas desde P2/P4, mas
+>   nenhum `href` no frontend apontava para elas: nem o hub, nem o menu, nem o Ctrl+K. Só se chegava
+>   digitando a URL. A fatia ligou as duas e removeu do hub os cards de Documentos e Vistorias, que
+>   não são destinos — existem só dentro do detalhe do veículo.
+> - **Três rotas estavam inalcançáveis** (`vistorias/vencidas`, `alvaras/vencidos`,
+>   `alvaras/relatorio`): declaradas depois da paramétrica irmã, o FastAPI casava a paramétrica
+>   primeiro e devolvia 422. Consertadas, e agora travadas por
+>   `tests/test_guarda_ordem_rotas.py`, que varre a aplicação inteira. Na primeira execução a guarda
+>   acusou **zero** rotas sombreadas fora do transporte — a dívida estava contida aqui.
+> - **ABERTO — teto de 50 registros nas telas do transporte.** O commit `628ca34` (2026-07-20) passou
+>   13 endpoints a devolver `Paginated`, e o `lib/api.ts` seguiu declarando array por onze dias. Como
+>   `request<T>()` faz cast sem validar, o `tsc` ficava verde e o navegador estourava com
+>   `TypeError: ….map is not a function` — e, onde o código fazia `data?.length`, a tela dizia
+>   "nenhum registro" com registros no banco. Os 12 métodos agora declaram `Paginated<T>` e as telas
+>   consomem `.items`. **Consequência que não foi resolvida:** essas telas não têm UI de paginação e o
+>   `page_size` padrão é 50, então exibem no máximo 50 registros. Não é regressão (antes exibiam zero
+>   ou estouravam), mas é teto real. Resolver exige decidir UI de paginação — decisão de produto.
+
 ### 2.3 Frota — backlog de telemetria
 
 Frota-1..6 + a fatia Operacional (manutenção, abastecimento, vistoria, ocorrências, visão
