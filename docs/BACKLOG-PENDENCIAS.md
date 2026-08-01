@@ -334,6 +334,26 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   consomem `.items`. **Consequência que não foi resolvida:** essas telas não têm UI de paginação e o
 >   `page_size` padrão é 50, então exibem no máximo 50 registros. Não é regressão (antes exibiam zero
 >   ou estouravam), mas é teto real. Resolver exige decidir UI de paginação — decisão de produto.
+> - **ABERTO — mais grave que o teto acima: a busca de alvarás é client-side sobre a lista já
+>   truncada.** Em `frontend/app/(app)/transporte-regulado/alvaras/page.tsx` (perto da linha 433) o
+>   filtro por número de alvará roda sobre o array que já veio limitado aos 50 registros da página
+>   atual — não sobre o total do tenant. O usuário digita um número de alvará que existe no banco e a
+>   tela diz que não achou nada, porque o registro correspondente nunca chegou ao array filtrado.
+>   Diferente do teto de exibição (que é "não vejo tudo"), este é "procurei e a tela mentiu que não
+>   existe". Resolver exige busca server-side (parâmetro de filtro na rota `GET
+>   /transporte-regulado/alvaras`, hoje sem suporte a busca por número).
+> - **ABERTO — falta guarda para a classe de defeito do contrato de paginação.** A ordem de rotas
+>   ganhou `tests/test_guarda_ordem_rotas.py`, que varre a aplicação inteira e travou a classe de
+>   defeito das 422 por sombreamento de rota. O contrato `Paginated` (item acima, teto de 50) não
+>   ganhou guarda equivalente: nada reprova hoje o próximo `response_model=Paginated[...]` no backend
+>   cuja contraparte em `frontend/lib/api.ts` declare array simples em vez de `Paginated<...>` — e foi
+>   exatamente essa classe de defeito que produziu `TypeError: ….map is not a function` no navegador
+>   por onze dias, com o `tsc` verde o tempo todo. Duas formas possíveis de guarda, nenhuma construída
+>   ainda: (1) um teste/script que compara os `response_model=Paginated[` do backend com os
+>   `request<Paginated<` do `api.ts` e reprova divergência; (2) validar o envelope `{items, total,
+>   page, page_size}` dentro do `request<T>()` genérico, em vez de confiar no cast estático. Fora do
+>   escopo da leva que registrou este item — decisão de fazer fica para quando alguém for mexer de
+>   novo em paginação.
 
 ### 2.3 Frota — backlog de telemetria
 

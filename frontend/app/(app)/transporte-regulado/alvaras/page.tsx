@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, Inbox, Plus } from "lucide-react";
+import { Inbox, Plus, ScrollText } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -444,7 +444,7 @@ export default function AlvarasPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        icon={FileText}
+        icon={ScrollText}
         title="Alvarás"
         description="Autorizações e permissões de operação para permissionários e empresas."
         breadcrumbs={[

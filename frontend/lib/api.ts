@@ -2776,18 +2776,21 @@ export const api = {
         id_permissionario?: number;
         status?: "ativo" | "vencido" | "a_renovar_30d" | "indefinido";
       }) => {
-        const url = new URL(
-          `${baseUrl()}/transporte-regulado/alvaras/relatorio/export/csv`,
-        );
+        // Sem `new URL()`: com base relativa (`/api/v2`, atrás do nginx em
+        // produção) `new URL()` sem `base` lança `TypeError: Invalid URL`.
+        // Mesma técnica de interpolação de template + query manual das
+        // demais URLs de download deste arquivo (anexoDownloadUrl etc.).
+        const partes: string[] = [];
         if (params) {
           Object.entries(params).forEach(([k, v]) => {
             if (v !== undefined && v !== null) {
-              url.searchParams.append(k, String(v));
+              partes.push(`${k}=${encodeURIComponent(String(v))}`);
             }
           });
         }
+        const query = partes.length ? `?${partes.join("&")}` : "";
         // Retorna a URL para download direto
-        return url.toString();
+        return `${baseUrl()}/transporte-regulado/alvaras/relatorio/export/csv${query}`;
       },
     },
     auditoria: {

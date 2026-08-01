@@ -552,14 +552,15 @@ import { CARDS } from "@/lib/transporte-hub";
 agora vivem em `lib/transporte-hub.ts`. O corpo do componente (`export default function
 TransporteReguladoHubPage`) **não muda em nada** — continua mapeando `CARDS`.
 
-- [ ] **Step 6: Type-check — é ele que pega ícone órfão**
+- [ ] **Step 6: Type-check**
 
 ```bash
 cd frontend && npx tsc --noEmit
 ```
 
-Esperado: sem saída. Se acusar `'FileText' is declared but its value is never read` ou similar,
-sobrou ícone no import da página — remova.
+Esperado: sem saída. **Não conte com o `tsc` para pegar ícone órfão** — `frontend/tsconfig.json`
+não tem `noUnusedLocals`/`noUnusedParameters`, então import não usado não é erro de type-check.
+Revise o import da página manualmente e remova o que sobrou.
 
 - [ ] **Step 7: Rodar a suíte de frontend inteira**
 
