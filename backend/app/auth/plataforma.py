@@ -52,8 +52,10 @@ logger = logging.getLogger("plataforma")
 TOLERANCIA_RELOGIO_S = 60
 # Teto do cache de JWKS (ADR §2.1 e runbook §6), mesmo que o IdP mande mais.
 TETO_CACHE_JWKS_S = 24 * 3600
-# Piso quando o IdP não manda `Cache-Control`.
+# TTL quando o IdP não manda `Cache-Control`.
 CACHE_JWKS_PADRAO_S = 600
+# Piso do TTL, aplicado inclusive contra um `max-age` menor. Ver `_max_age`.
+PISO_CACHE_JWKS_S = 60
 # Rate limit do refresh disparado por `kid` desconhecido (runbook §6): sem ele,
 # um atacante mandando `kid` aleatório transforma nossa fronteira em
 # amplificador de tráfego contra o IdP.
@@ -100,14 +102,23 @@ def limpar_cache_jwks() -> None:
 
 
 def _max_age(cache_control: str) -> int:
-    """Segundos de `max-age` no `Cache-Control`, limitados pelo teto de 24 h."""
+    """Segundos de `max-age` no `Cache-Control`, entre o piso e o teto de 24 h.
+
+    O **piso** não é arredondamento: `max-age=0` — que um proxy ou um IdP em
+    modo de manutenção emite — faria o cache nascer vencido, e cada requisição
+    voltaria a buscar o JWKS. Combinado com o rate limit, o efeito é uma
+    fronteira que alterna entre uma busca boa e 30 s de `503` auto-infligido.
+    Respeitar `max-age=0` literalmente é obedecer o IdP até o ponto de nos
+    derrubarmos sozinhos.
+    """
     for parte in cache_control.split(","):
         parte = parte.strip().lower()
         if parte.startswith("max-age="):
             try:
-                return max(0, min(int(parte.split("=", 1)[1]), TETO_CACHE_JWKS_S))
+                bruto = int(parte.split("=", 1)[1])
             except ValueError:
                 return CACHE_JWKS_PADRAO_S
+            return max(PISO_CACHE_JWKS_S, min(bruto, TETO_CACHE_JWKS_S))
     return CACHE_JWKS_PADRAO_S
 
 
@@ -135,21 +146,34 @@ async def obter_chave_publica(kid: str, url: str) -> dict[str, Any]:
     if estado is not None and cache_valido and kid in estado.chaves:
         return estado.chaves[kid]
 
-    if estado is not None and (agora - estado.ultimo_refresh) < INTERVALO_MINIMO_REFRESH_S:
-        # Rate limit: não refazemos a busca agora.
-        if cache_valido:
-            raise _nega(status.HTTP_401_UNAUTHORIZED, "kid desconhecido no JWKS", kid=kid)
-        raise _nega(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "JWKS indisponível e cache expirado",
-            kid=kid,
-        )
+    # Rate limit — SÓ no caminho de `kid` desconhecido com cache VÁLIDO, que é
+    # o único que o runbook §6 descreve ("`kid` desconhecido dispara UMA
+    # tentativa de refresh, com rate limit"). Aplicá-lo também com cache
+    # vencido produzia 503 auto-infligido: bastava o TTL vencer para a
+    # fronteira ficar 30 s recusando sem sequer tentar buscar.
+    if (
+        estado is not None
+        and cache_valido
+        and (agora - estado.ultimo_refresh) < INTERVALO_MINIMO_REFRESH_S
+    ):
+        raise _nega(status.HTTP_401_UNAUTHORIZED, "kid desconhecido no JWKS", kid=kid)
+
+    # Este caminho é alcançável SEM autenticação: basta um JWT sintaticamente
+    # válido com `alg: RS256` e um `kid` qualquer, porque a assinatura ainda não
+    # foi verificada. Por isso a marca de tentativa é gravada ANTES da busca e
+    # sobrevive à falha — se só o sucesso marcasse, o IdP fora do ar (ou o cache
+    # frio) faria cada requisição disparar uma busca nova, e nós viraríamos o
+    # amplificador de tráfego contra o IdP exatamente quando ele está em apuros.
+    if estado is not None:
+        estado.ultimo_refresh = agora
+    else:
+        _jwks[url] = estado = _EstadoJwks(chaves={}, expira_em=0.0, ultimo_refresh=agora)
 
     try:
         jwks, ttl = await _buscar_jwks(url)
     except Exception as exc:  # noqa: BLE001 — qualquer falha de rede/formato
         logger.error("plataforma_jwks_indisponivel", extra={"url": url, "erro": str(exc)})
-        if estado is not None and cache_valido and kid in estado.chaves:
+        if cache_valido and kid in estado.chaves:
             return estado.chaves[kid]
         raise _nega(
             status.HTTP_503_SERVICE_UNAVAILABLE, "JWKS indisponível e cache expirado", kid=kid
@@ -220,6 +244,17 @@ async def validar_token_plataforma(token: str) -> dict[str, Any]:
                 # `iat` é validado à mão logo abaixo: o python-jose só confere o
                 # formato, e o cenário 10 exige recusar token emitido no futuro.
                 "verify_iat": False,
+                # NÃO REMOVER. Na python-jose 3.3.0 estes dois têm default
+                # `False`, e `_validate_aud`/`_validate_exp` começam com
+                # `if "aud"/"exp" not in claims: return` — ou seja, **claim
+                # ausente passa**. Sem eles, um token SEM `exp` nunca expira
+                # (e a revogação do principal deixa de ser defesa em
+                # profundidade para virar defesa única) e um token SEM `aud`
+                # atravessa homologação e produção indistintamente, já que a
+                # audience é o único discriminante de ambiente. A matriz §1
+                # marca os dois como obrigatórios com deny 401.
+                "require_aud": True,
+                "require_exp": True,
             },
         )
     except Exception as exc:  # noqa: BLE001 — JWTError e subclasses

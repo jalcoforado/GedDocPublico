@@ -344,6 +344,38 @@ async def test_tolerancia_de_relogio_de_60s_e_aceita(principal_ativo, plataforma
     assert (await _get(token)).status_code == 200
 
 
+async def test_token_sem_exp_e_401(principal_ativo, plataforma_configurada):
+    """`exp` é obrigatório (matriz §1) — e não era exigido.
+
+    A python-jose 3.3.0 tem `require_exp` com default `False`, e
+    `_validate_exp` começa com `if "exp" not in claims: return`. O token sem
+    `exp` passava por toda a cadeia. O dano não é teórico: um token que **nunca
+    expira** rebaixa a revogação do principal de defesa em profundidade a defesa
+    única — some a camada que faz o acesso morrer sozinho em 15 minutos.
+
+    O Google sempre emite `exp`, então isto não era explorável contra ele. Mas
+    `PLATFORM_OIDC_ISSUER` é configurável para qualquer IdP, e o módulo afirma
+    fail-closed em tudo.
+    """
+    subject, _ = principal_ativo
+    token = plataforma_configurada.token(subject=subject, omitir=("exp",))
+    assert (await _get(token)).status_code == 401
+
+
+async def test_token_sem_aud_e_401(principal_ativo, plataforma_configurada):
+    """`aud` é obrigatório (matriz §1) — mesma armadilha do `require_exp`.
+
+    É o outro lado do cenário 24: lá se prova que **sem audience configurada**
+    a fronteira nega; aqui, que um token **sem o claim** também nega. Faltando
+    este, a audience deixa de discriminar ambiente — um token de homologação
+    sem `aud` seria aceito em produção, que é exatamente o que o cenário 6
+    existe para impedir.
+    """
+    subject, _ = principal_ativo
+    token = plataforma_configurada.token(subject=subject, omitir=("aud",))
+    assert (await _get(token)).status_code == 401
+
+
 async def test_cenario_11_kid_desconhecido_e_401(principal_ativo, plataforma_configurada):
     subject, _ = principal_ativo
     token = plataforma_configurada.token(subject=subject, kid="kid-que-nao-esta-no-jwks")
