@@ -640,6 +640,30 @@ async def create_vistoria(
     return VeiculoVistoriaOut.model_validate(v)
 
 
+# ORDEM IMPORTA: precisa vir antes de `/{vistoria_id}`. O FastAPI casa rotas na
+# ordem de declaração, e `/{vistoria_id}: int` engole "vencidas" e devolve 422.
+# Travado por test_http_vencidas_nao_e_engolida_por_vistoria_id.
+@vistorias_router.get("/vencidas", response_model=Paginated[VeiculoVistoriaOut])
+async def list_vistorias_vencidas(
+    veiculo_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Paginated[VeiculoVistoriaOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_vistorias_vencidas(
+        db, tenant_id=tenant_id, veiculo_id=veiculo_id, limit=page_size, offset=offset
+    )
+    return Paginated(
+        items=[VeiculoVistoriaOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
 @vistorias_router.get("/{vistoria_id}", response_model=VeiculoVistoriaOut)
 async def get_vistoria(
     veiculo_id: int,
@@ -676,27 +700,6 @@ async def delete_vistoria(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await tr_svc.excluir_vistoria(db, tenant_id=tenant_id, vistoria_id=vistoria_id)
-
-
-@vistorias_router.get("/vencidas", response_model=Paginated[VeiculoVistoriaOut])
-async def list_vistorias_vencidas(
-    veiculo_id: int,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
-    _: Usuario = Depends(require_permission("transporte_regulado")),
-    tenant_id: int = Depends(require_tenant_id),
-    db: AsyncSession = Depends(get_db),
-) -> Paginated[VeiculoVistoriaOut]:
-    offset = (page - 1) * page_size
-    rows, total = await tr_svc.listar_vistorias_vencidas(
-        db, tenant_id=tenant_id, veiculo_id=veiculo_id, limit=page_size, offset=offset
-    )
-    return Paginated(
-        items=[VeiculoVistoriaOut.model_validate(r) for r in rows],
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
 
 
 @vistorias_router.post(
