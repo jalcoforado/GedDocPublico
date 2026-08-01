@@ -50,8 +50,37 @@ o módulo?" — não fecha "este usuário pode ler isto?". `/usuarios`, `/grupos
 seguem legíveis por **qualquer** autenticado do tenant. Detalhes e decisão em
 `docs/BACKLOG-PENDENCIAS.md`, item 1.0.8.
 
-O launcher (tela de seleção de módulos), os menus particionados e o prefixo `/m/<slug>` na URL são
-as fatias F2/F3, **não implementadas**. Spec e planos em `docs/superpowers/`.
+### A interface (fatia F2, PR #17, em `main` desde 2026-07-31)
+
+Até aqui a modularização era invisível: a Sidebar mostrava o menu inteiro e o usuário só descobria
+que não tinha o módulo ao clicar e tomar 403. A F2 é a fatia que o **usuário vê**.
+
+- **`frontend/lib/menus/`** — o `NAV` monolítico da Sidebar virou seis arquivos, um por módulo
+  (`protocolo`, `pagamentos`, `frota`, `transporte`, `administracao`, `comum`). É a **fonte única**
+  de navegação: a Sidebar e o Ctrl+K (`CommandPalette`) consomem daqui, e `canSeeItem`
+  (`lib/menus/permissoes.ts`) é compartilhado pelos dois — duas cópias divergiriam, e o sintoma
+  seria item aparecendo num lugar e não no outro.
+- **`frontend/lib/modulos.ts`** — `moduloDoPathname(path)` resolve o módulo ativo a partir da URL.
+  É o que a F3 vai reaproveitar para gerar os redirects 308.
+- **`/modulos`** — o launcher, em `app/(launcher)/`, layout próprio sem Sidebar. Com **um módulo
+  só ele redireciona direto** ("porta, não pedágio").
+- O login aterrissa no launcher; `must_change_password` (SEC-1) **tem precedência** e continua indo
+  para `/alterar-senha-obrigatoria`.
+- **Aba Módulos** no admin de tenant contrata e descontrata por tenant.
+
+Dois filtros independentes governam o menu, e **nenhum substitui o outro**: o módulo escolhe *qual
+conjunto* de itens é candidato; a permissão (`perm`/`anyOf`) decide *quais daquele conjunto*
+aparecem. Um `perm` perdido não quebra tela — vira item visível para quem não deveria vê-lo. Há
+teste que trava isso (`__tests__/menus.test.tsx`, tabela `PERMISSOES_ESPERADAS`).
+
+**O guard de módulo no frontend é UX, não segurança.** A barreira real é o gate de contratação no
+backend. Nenhum teste do frontend deve afirmar que ele protege dado.
+
+**Rota de topo nova precisa entrar na regex do `nginx/default.conf`** — sem isso a tela cai no
+fallback legado e "não existe" no `:8090`, mesmo funcionando em dev. Quase aconteceu com `/modulos`.
+
+O prefixo `/m/<slug>` na URL e os redirects 308 são a **F3, não planejada**. Spec e planos em
+`docs/superpowers/`.
 
 O nginx nasceu como *Strangler Fig* na frente de um monolito PHP legado. Hoje a versão Python é tratada como **independente** — não portar comportamento do PHP nem consultá-lo como fonte de verdade. O que sobra dessa herança e continua valendo: o schema Postgres é compartilhado com o legado (`utils.*`, `protocolos.*` são tabelas legadas; `aprimora_py.*` e `frota.*` são nossos), e o nginx tem uma regex de rotas migradas (ver "Adicionando um módulo").
 

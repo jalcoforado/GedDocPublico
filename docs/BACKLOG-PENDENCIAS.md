@@ -23,15 +23,27 @@
   e `feat/transporte-p4-alvaras-complementacoes` (registros anteriores davam essas duas como
   "aguardando decisão de merge" — está desatualizado).
 
-**Estado em 2026-07-30:**
+**Estado em 2026-07-31:**
 
-- `main` em `eea6876`. A **fatia F1 da modularização** foi mergeada (`c4dcb53`) e deployada na VPS
-  com sucesso. Migrations até **0075** (head único): 0073 catálogo+contratação, 0074 as 9 transações
-  que faltavam, 0075 FK de `tenant_modulo` com `ON DELETE CASCADE`.
-- **O CI de backend em `main` NÃO está confirmado verde** — ver item 1.0.65, o mais urgente desta
-  seção. E2E, Frontend e Deploy passaram.
-- Existe a branch `feat/modularizacao-f2`, contendo **apenas o plano** da fatia F2
-  (`docs/superpowers/plans/2026-07-30-modularizacao-f2.md`). Nenhum código. Não iniciada.
+- `main` em `c19f359`. **A modularização está completa até a interface**, em três fatias, todas
+  mergeadas com CI verde e deployadas na VPS:
+  - **F1** (`c4dcb53`) — catálogo, contratação por tenant, bloqueio de **escrita**. Migrations até
+    **0075** (head único): 0073 catálogo+contratação, 0074 as 9 transações que faltavam, 0075 FK de
+    `tenant_modulo` com `ON DELETE CASCADE`.
+  - **Leitura por módulo** (`a7867c9`, item 1.0.5) — `require_modulo(slug)` em 69 GETs; 7
+    transversais permanecem sem gate, com a razão registrada na guarda.
+  - **F2** (PR #17, `c19f359`) — a interface: menus por módulo, launcher `/modulos`, login
+    aterrissando nele, switcher no Header, cabeçalho de módulo na Sidebar, aba Módulos no admin,
+    Ctrl+K ciente de módulo e permissão.
+- **F3 (prefixo `/m/<slug>` + redirects 308) não está planejada.** O mapa `pathname → módulo` que a
+  F2 criou (`frontend/lib/modulos.ts`) é o que vai gerar os redirects.
+- **Cuidado ao validar módulos na homologação:** o seed contrata os **cinco** módulos no tenant
+  `sobral`. O caso de "tenant com um módulo só" — onde estava o defeito crítico da F2 — **não é
+  exercitado** por navegação normal. Use a aba Módulos do admin de plataforma para descontratar.
+- **Ambiente local do Jorge:** o antivírus AVG intercepta HTTPS e **nenhuma imagem docker rebuilda
+  nessa máquina** (npm e PyPI falham com erro de certificado). O frontend local roda por um contorno
+  — build no host copiado para dentro do container — que morre se o container for **recriado**
+  (`docker compose up -d`), não sobrevive a isso. CI e VPS não são afetados.
 - **Ambiente local do Jorge:** o antivírus AVG intercepta HTTPS e **nenhuma imagem docker rebuilda
   nessa máquina** (npm e PyPI falham com erro de certificado). O frontend local roda por um contorno
   — build no host copiado para dentro do container — que morre se o container for **recriado**
@@ -236,6 +248,28 @@ de escopo") como item de backlog próprio; criado agora no review final.)*
   precisam andar juntos, e o gatilho para priorizar é a criação do primeiro grupo não-SU (ver
   "a verificar" no item 1.0.7).
 - Sem prazo.
+
+### 1.0.9 Resíduos da F2 — navegação e admin (todos Minor, nenhum bloqueante)
+
+*(Levantados pelo review final da fatia F2 (2026-07-31, PR #17) e deixados de fora por decisão, não
+por esquecimento. Agrupados aqui para não se perderem.)*
+
+- **Deep link não volta depois do login.** `frontend/middleware.ts` clona a URL e troca o pathname
+  por `/login`, **perdendo o destino original** — nunca houve `next=`. Quem tenta abrir
+  `/frotas/veiculos` sem sessão vai parar no launcher. **Não é regressão** (antes ia parar em
+  `/home`), mas incomoda mais agora que a porta de entrada é a tela de escolha.
+- **`api.adminTenantModulos` / `api.adminTenantContratarModulos` ficaram na raiz** do objeto `api`,
+  em vez de `api.admin.tenants.modulos` / `.definirModulos`, onde já vivem `detalhe`/`editar`/
+  `ativar`/`desativar` do mesmo recurso.
+- **Abas do admin de tenant sem semântica completa:** `role="tablist"`/`role="tab"` sem
+  `aria-controls`, sem `role="tabpanel"` no conteúdo, sem navegação por setas nem roving tabindex.
+  Leitor de tela anuncia "aba" e não encontra painel associado.
+- **O card do launcher aponta para a `raiz` fixa do módulo**, que pode ser uma tela fora do menu
+  daquele usuário — `administracao` leva a `/usuarios` (`perm: usuario`), `protocolo` a `/processos`
+  (`perm: processo`). Não dá 403 (leitura não é gateada por permissão — ver 1.0.8), mas é incoerente.
+  Alternativa: `raiz` = primeiro item visível do menu daquele módulo para aquele usuário.
+- **Fixtures duplicadas nos testes de backend:** `tests/test_leitura_por_modulo.py` é a quarta cópia
+  do padrão de provisionamento+token+cleanup do diretório. Pede um `conftest`.
 
 ### 1.1.5 Suíte não estava verde antes do F1
 
