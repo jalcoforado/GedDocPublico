@@ -619,3 +619,322 @@ container — não sobrevive à recriação do container, e o container do front
 2026-07-31. Ver o resultado no `:8090` vai exigir refazê-lo. Pelo Bash o MSYS converte a variável em
 `C:/Program Files/Git/api/v2` e o bundle sai quebrado — tem de ser PowerShell. `tsc` e o vitest rodam
 no host e não dependem de nada disso.
+
+---
+
+# Adendo de 2026-08-01 — Tasks 4 e 5
+
+Dois defeitos pré-existentes em `main`, achados durante a execução e autorizados a entrar nesta
+fatia. Ver o adendo do spec para a investigação completa. **Nenhum dos dois foi causado pelas
+Tasks 1–3.**
+
+---
+
+## Task 4: Backend — as duas rotas de alvará engolidas, e uma guarda contra a terceira vez
+
+**Files:**
+- Modify: `backend/app/routers/transporte_regulado.py` (ordem de declaração, rotas de alvará)
+- Create: `backend/tests/test_guarda_ordem_rotas.py`
+
+**Interfaces:**
+- Consumes: nada das Tasks 1–3. A Task 1 consertou a mesma classe de defeito em outro sub-router; o
+  padrão do comentário de guarda que ela deixou deve ser repetido aqui.
+- Produces: nada que a Task 5 use. As duas tarefas são independentes.
+
+**Contexto.** O FastAPI casa rotas na **ordem de declaração**. Em `alvaras_router`, `/{alvara_id}` é
+declarada na linha 763, e depois dela vêm `/vencidos` (809) e `/relatorio` (842). Ambas têm um
+segmento só, então `/{alvara_id}` as engole e a requisição morre em 422. Verificado na aplicação
+real:
+
+```
+ENGOLIDA -> /alvaras/vencidos  => /alvaras/{alvara_id}
+ENGOLIDA -> /alvaras/relatorio => /alvaras/{alvara_id}
+OK          /alvaras/relatorio/kpis
+OK          /alvaras/relatorio/export/csv
+```
+
+As duas de `/relatorio/...` sobrevivem porque têm dois segmentos e `{alvara_id}` casa um só.
+
+- [ ] **Step 1: Escrever a guarda estrutural — ela deve falhar acusando as duas rotas**
+
+Crie `backend/tests/test_guarda_ordem_rotas.py`:
+
+```python
+"""Guarda de ordem de declaração de rotas.
+
+O FastAPI casa rotas na ordem em que foram declaradas. Uma rota de segmento
+literal (`/vencidos`) declarada DEPOIS de uma paramétrica irmã (`/{alvara_id}`)
+fica inalcançável: a paramétrica casa primeiro, a validação do tipo falha e a
+resposta é 422 — sem nunca chegar no handler.
+
+Esse defeito não aparece em teste de service, não aparece no type-check e não
+aparece na leitura do arquivo: só aparece se alguém pedir a URL. Ele já ocorreu
+TRÊS vezes neste repositório (vistorias/vencidas, alvaras/vencidos,
+alvaras/relatorio). Esta guarda é a resposta a isso.
+"""
+from __future__ import annotations
+
+import re
+
+from app.main import app
+
+# Rotas que sabidamente ficam à sombra de outra e cuja correção NÃO pertence a
+# esta fatia. Entrada aqui é dívida registrada, não permissão: cada uma precisa
+# de uma razão escrita ao lado. Lista vazia é o estado desejado.
+SOMBREADAS_CONHECIDAS: set[tuple[str, str]] = set()
+
+
+def _concretiza(caminho: str) -> str:
+    """Troca cada `{param}` por `1` para obter uma URL concreta que a rota atende."""
+    return re.sub(r"\{[^}]+\}", "1", caminho)
+
+
+def rotas_sombreadas() -> set[tuple[str, str]]:
+    """(método, caminho) de toda rota que outra, declarada antes, engole."""
+    rotas = [
+        r for r in app.routes
+        if getattr(r, "path_regex", None) is not None
+        and getattr(r, "path", "").startswith("/api/v2")
+    ]
+    sombreadas: set[tuple[str, str]] = set()
+    for rota in rotas:
+        alvo = _concretiza(rota.path)
+        for metodo in getattr(rota, "methods", set()):
+            primeira = next(
+                (
+                    outra for outra in rotas
+                    if metodo in getattr(outra, "methods", set())
+                    and outra.path_regex.match(alvo)
+                ),
+                None,
+            )
+            if primeira is not None and primeira.path != rota.path:
+                sombreadas.add((metodo, rota.path))
+    return sombreadas
+
+
+def test_nenhuma_rota_fica_a_sombra_de_outra():
+    """Rota inalcançável é código morto que o CI reprova, não que produção descobre."""
+    novas = rotas_sombreadas() - SOMBREADAS_CONHECIDAS
+    assert not novas, (
+        "Rotas inalcançáveis — outra declarada ANTES casa a mesma URL: "
+        f"{sorted(novas)}. Mova a declaração de segmento literal para antes da "
+        "paramétrica irmã, ou registre em SOMBREADAS_CONHECIDAS com a razão."
+    )
+
+
+def test_allowlist_nao_tem_entrada_obsoleta():
+    """Allowlist que apodrece deixa de ser dívida registrada e vira ruído."""
+    obsoletas = SOMBREADAS_CONHECIDAS - rotas_sombreadas()
+    assert not obsoletas, (
+        f"Entradas obsoletas em SOMBREADAS_CONHECIDAS: {sorted(obsoletas)}. "
+        "A rota foi consertada ou removida — tire-a da lista."
+    )
+```
+
+- [ ] **Step 2: Rodar e ler o que ela acusa — este passo é de investigação, não de conserto**
+
+```
+docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest tests/test_guarda_ordem_rotas.py -q
+```
+
+Esperado: **FAIL**, listando pelo menos
+`('GET', '/api/v2/transporte-regulado/alvaras/vencidos')` e
+`('GET', '/api/v2/transporte-regulado/alvaras/relatorio')`.
+
+**Anote a lista completa que ela imprimir.** Se aparecerem rotas de **outros** módulos (pagamentos,
+protocolo, frota…), elas são dívida pré-existente e **não** são desta fatia: não as conserte.
+Registre cada uma em `SOMBREADAS_CONHECIDAS` com um comentário de uma linha dizendo qual é e que a
+correção está fora do escopo desta fatia, e **reporte a lista** no seu relatório — ela precisa ir
+para o backlog.
+
+- [ ] **Step 3: Mover as duas declarações de alvará**
+
+Em `backend/app/routers/transporte_regulado.py`, recorte os blocos inteiros de
+`@alvaras_router.get("/vencidos", ...)` (hoje na linha 809) e de
+`@alvaras_router.get("/relatorio", ...)` (hoje na 842) — cada um do decorador até o fim do corpo da
+função — e cole-os **imediatamente antes** de `@alvaras_router.get("/{alvara_id}", ...)`, hoje na
+linha 763. Os corpos não mudam em nada.
+
+Acrescente, acima do primeiro dos dois blocos movidos, o comentário de guarda:
+
+```python
+# ORDEM IMPORTA: estas rotas de segmento literal precisam vir antes de
+# `/{alvara_id}`. O FastAPI casa na ordem de declaração, e a paramétrica engole
+# "vencidos" e "relatorio", devolvendo 422 sem chegar no handler.
+# Travado por tests/test_guarda_ordem_rotas.py.
+```
+
+Não mexa em `/relatorio/kpis` nem em `/relatorio/export/csv`: têm dois segmentos, nunca foram
+engolidas, e movê-las é risco sem ganho.
+
+- [ ] **Step 4: Rodar a guarda de novo**
+
+```
+docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest tests/test_guarda_ordem_rotas.py -q
+```
+
+Esperado: **2 passed**.
+
+- [ ] **Step 5: Confirmar as quatro rotas na aplicação real**
+
+```
+docker exec aprimora-py-backend python -c "
+from app.main import app
+for p in ['/api/v2/transporte-regulado/alvaras/vencidos',
+          '/api/v2/transporte-regulado/alvaras/relatorio',
+          '/api/v2/transporte-regulado/alvaras/relatorio/kpis',
+          '/api/v2/transporte-regulado/alvaras/relatorio/export/csv']:
+    for r in app.routes:
+        if getattr(r,'path_regex',None) and r.path_regex.match(p) and 'GET' in getattr(r,'methods',set()):
+            print(p, '=>', r.path); break
+"
+```
+
+Esperado: cada caminho casando com **ele mesmo**, nenhum com `{alvara_id}`.
+
+- [ ] **Step 6: Rodar os testes de alvará que já existem, para garantir que mover não quebrou vizinha**
+
+```
+docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest tests/test_transporte_regulado_alvara.py tests/test_transporte_p4_relatorio.py -q
+```
+
+Esperado: todos verdes.
+
+- [ ] **Step 7: Commit**
+
+```
+git add backend/app/routers/transporte_regulado.py backend/tests/test_guarda_ordem_rotas.py
+git commit -m "fix(transporte): alvaras/vencidos e alvaras/relatorio saem da sombra de /{alvara_id}"
+```
+
+---
+
+## Task 5: Frontend — o contrato de paginação para de mentir
+
+**Files:**
+- Modify: `frontend/lib/api.ts` (12 métodos)
+- Modify: as telas que consomem esses métodos (o `tsc` dirá exatamente quais)
+
+**Interfaces:**
+- Consumes: nada das Tasks 1–4.
+- Produces: os 12 métodos passam a devolver `Paginated<T>` em vez de `T[]`.
+
+**Contexto.** O commit `628ca34` passou 13 endpoints do transporte a devolver `Paginated`
+(`{items, total, page, page_size}`), e o `api.ts` continuou declarando array. Como `request<T>()`
+faz cast sem validar, o `tsc` fica verde e o navegador estoura com
+`TypeError: ….map is not a function`. Já está em `main` desde 2026-07-20.
+
+O tipo `Paginated<T>` **já existe** em `frontend/lib/api.ts` e já é usado corretamente por
+`/usuarios`, `/unidades-trabalho` e `/processos`; as telas desses módulos consomem `data?.items.map`.
+Siga esse precedente — não invente forma nova, e **não** desembrulhe dentro do `api.ts`: manter o
+tipo honesto é o que faz o `tsc` virar a guarda contra a próxima ocorrência.
+
+**Teto assumido, e que você deve deixar escrito no relatório:** estas telas não têm UI de paginação
+e o backend usa `page_size` padrão 50. Depois do conserto elas exibem **até 50 registros**. Não é
+regressão — hoje exibem zero ou estouram — mas é teto real. Não construa paginação: está fora do
+escopo.
+
+- [ ] **Step 1: Trocar os 12 tipos em `frontend/lib/api.ts`**
+
+Em cada método, troque `request<X[]>` por `request<Paginated<X>>`, sem mudar caminho nem parâmetros:
+
+| Linha | Método | De | Para |
+|---|---|---|---|
+| 2538 | `permissionarios.list` | `Permissionario[]` | `Paginated<Permissionario>` |
+| 2570 | `empresas.list` | `Empresa[]` | `Paginated<Empresa>` |
+| 2606 | `veiculosRegulados.list` | `VeiculoRegulado[]` | `Paginated<VeiculoRegulado>` |
+| 2636 | `veiculosRegulados.documentos.list` | `VeiculoDocumentoTR[]` | `Paginated<VeiculoDocumentoTR>` |
+| 2656 | `veiculosRegulados.avaliacoes.list` | `VeiculoAvaliacao[]` | `Paginated<VeiculoAvaliacao>` |
+| 2676 | `veiculosRegulados.vistorias.list` | `VeiculoVistoriaTR[]` | `Paginated<VeiculoVistoriaTR>` |
+| 2694 | `veiculosRegulados.vistorias.listarVencidas` | `VeiculoVistoriaTR[]` | `Paginated<VeiculoVistoriaTR>` |
+| 2704 | `alvaras.list` | `Alvara[]` | `Paginated<Alvara>` |
+| 2720 | `alvaras.listVencidos` | `Alvara[]` | `Paginated<Alvara>` |
+| 2728 | `alvaras.documentos.list` | `AlvaraDocumento[]` | `Paginated<AlvaraDocumento>` |
+| 2748 | `alvaras.responsaveis.list` | `AlvaraResponsavel[]` | `Paginated<AlvaraResponsavel>` |
+| 2801 | `alvaras.veiculos.list` | `AlvaraVeiculo[]` | `Paginated<AlvaraVeiculo>` |
+
+**Confira contra o backend antes de aceitar a tabela como completa.** O router declara
+`response_model=Paginated[...]` em **13** endpoints:
+
+```
+grep -n "response_model=Paginated\[" backend/app/routers/transporte_regulado.py
+```
+
+Se sobrar endpoint `Paginated` do backend cujo método no `api.ts` ainda declare array, conserte-o
+também e diga no relatório. Se algum dos 13 não tiver método no `api.ts`, também diga — não crie
+método novo.
+
+- [ ] **Step 2: Rodar o type-check e deixar que ele liste os consumidores quebrados**
+
+```
+cd frontend && npx tsc --noEmit
+```
+
+Esperado: **muitos erros**, do tipo "Property 'map' does not exist on type 'Paginated<X>'" ou
+"Property 'length' does not exist…". **Essa lista é a sua lista de trabalho** — é exatamente o
+conjunto de lugares onde o código estava errado em silêncio. Copie-a para o relatório antes de
+consertar: é a evidência do alcance do defeito.
+
+- [ ] **Step 3: Consertar cada consumidor que o `tsc` apontou**
+
+A transformação é mecânica e segue o precedente de `app/(app)/usuarios/page.tsx:196`:
+
+- `q.data?.map(...)` → `q.data?.items.map(...)`
+- `q.data?.find(...)` → `q.data?.items.find(...)`
+- `(q.data?.length ?? 0)` → `(q.data?.items.length ?? 0)`
+- `q.data?.filter(...)` → `q.data?.items.filter(...)`
+
+Os arquivos que a investigação já identificou como consumidores — a lista do `tsc` é que manda, esta
+serve só para você conferir se não sobrou nada:
+
+- `frontend/app/(app)/transporte-regulado/veiculos/page.tsx`
+- `frontend/app/(app)/transporte-regulado/veiculos/[id]/page.tsx`
+- `frontend/app/(app)/transporte-regulado/permissionarios/page.tsx`
+- `frontend/app/(app)/transporte-regulado/empresas/page.tsx`
+- `frontend/app/(app)/transporte-regulado/alvaras/page.tsx`
+- `frontend/app/(app)/transporte-regulado/alvaras/[id]/page.tsx`
+- `frontend/components/transporte-regulado/alvara-veiculos-modal.tsx`
+
+**Não** aproveite a passagem para refatorar, renomear ou "melhorar" essas telas. A mudança é só
+`data` → `data.items`.
+
+**Atenção ao sintoma silencioso:** onde havia `(q.data?.length ?? 0) === 0` decidindo mostrar estado
+vazio, o `?.` mascarava o defeito — a tela dizia "nenhum registro" com registros no banco. Depois da
+troca para `.items.length` isso passa a funcionar. Confira que cada estado vazio que você tocar
+continua fazendo sentido.
+
+- [ ] **Step 4: Type-check limpo**
+
+```
+cd frontend && npx tsc --noEmit
+```
+
+Esperado: **sem saída nenhuma**.
+
+- [ ] **Step 5: Suíte de frontend inteira**
+
+```
+cd frontend && npm test
+```
+
+Esperado: todos verdes, incluindo os testes das Tasks 2 e 3.
+
+- [ ] **Step 6: Commit**
+
+```
+git add frontend/lib/api.ts frontend/app frontend/components
+git commit -m "fix(transporte): api.ts para de declarar array onde o backend devolve Paginated"
+```
+
+---
+
+## Verificação final revisada (substitui a seção anterior)
+
+- [ ] Suíte de backend completa: `docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest -q`
+      → `2 failed, N passed`, e as duas são as pré-existentes conhecidas.
+- [ ] `cd frontend && npm test && npx tsc --noEmit`
+- [ ] `docs/BACKLOG-PENDENCIAS.md`: registrar na seção 2.2 (a) que a navegação até Alvarás e
+      Relatórios só passou a existir nesta fatia; (b) o teto de 50 registros das telas do transporte,
+      que segue aberto e depende de decisão de UI de paginação; (c) as rotas sombreadas de outros
+      módulos que a guarda da Task 4 tiver encontrado, se houver.
