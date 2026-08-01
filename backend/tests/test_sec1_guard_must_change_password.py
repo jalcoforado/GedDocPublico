@@ -317,11 +317,29 @@ async def test_regressao_401_sem_token(client):
 async def test_regressao_header_ausente_em_outros_403(
     admin_engine, sec1_setup, client
 ):
-    """403 por outro motivo (sem permissão de plataforma) NÃO deve incluir
-    X-Must-Change-Password — garante que o header só é set pelo gate."""
+    """403 por outro motivo (sem permissão RBAC) NÃO deve incluir
+    X-Must-Change-Password — garante que o header só é set pelo gate.
+
+    Antes de `SEC-01A` o 403 vinha de `GET /admin/tenants`, negado pela
+    allowlist de e-mail de plataforma. Aquela rota deixou de servir aqui: sem
+    token administrativo ela responde **401**, não 403, e o teste passaria a
+    afirmar a ausência do header numa resposta que nunca o teria. O 403 usado
+    agora é o de RBAC — `require_permission` sobre um usuário sem grupo —, que
+    é o mesmo tipo de negativa que o teste sempre quis distinguir do gate.
+    """
     s = sec1_setup
-    # Usuário normal (não-flagged) sem allowlist de plataforma:
+    # Usuário normal (não-flagged), criado por SQL direto e portanto sem
+    # nenhum grupo/permissão: `require_permission` nega com 403 limpo.
     _as_usuario(admin_engine, s["normal_id"], s["tenant_id"], s["tenant_slug"])()
-    r = await client.get("/api/v2/admin/tenants")
+    r = await client.post(
+        "/api/v2/usuarios",
+        json={
+            "nome": "X",
+            "email": "x@x.local",
+            "cpf": "12345678901",
+            "senha": "x-pass-1",
+            "id_unidade_trabalho": 1,
+        },
+    )
     assert r.status_code == 403, r.text
     assert r.headers.get("X-Must-Change-Password") != "true"

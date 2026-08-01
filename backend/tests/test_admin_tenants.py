@@ -1,22 +1,22 @@
-"""Admin SaaS / Gestão de Tenants (PR3a).
+"""Admin SaaS / Gestão de Tenants (PR3a, revisado em SEC-01A).
 
 Cobre o serviço único de provisionamento (incl. **sob a role RLS de produção**
-`aprimora_app`), a allowlist de admin de plataforma (403), atomicidade, slug
-imutável/validação, limites/plano armazenados, módulos derivados do plano e
-bloqueio por desativação.
+`aprimora_app`), atomicidade, slug imutável/validação, limites/plano
+armazenados, módulos derivados do plano e bloqueio por desativação.
+
+A allowlist de e-mail que antes era testada aqui foi removida em SEC-01A — ver
+`test_gate_de_plataforma_nao_aceita_identidade_municipal`, mais abaixo, e a
+matriz completa em `test_platform_token_validator.py`.
 """
 from __future__ import annotations
 
 import uuid
-from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.deps import require_platform_admin
-from app.config import get_settings, modulos_do_plano
+from app.config import modulos_do_plano
 from app.schemas.admin_tenant import AdminTenantOut, AdminTenantUpdate
 from app.services.provisioning_tenant import (
     ProvisioningError,
@@ -152,21 +152,35 @@ async def test_bootstrap_transacional_rollback(admin_engine, monkeypatch):
     assert existe is None  # rollback total — sem tenant órfão
 
 
-# ---- allowlist de admin de plataforma (403) ----
-async def test_require_platform_admin_allowlist(monkeypatch):
-    get_settings.cache_clear()
-    monkeypatch.setenv("PLATFORM_ADMIN_EMAILS", "ops@aprimora.app, boss@x.com")
-    try:
-        allow = SimpleNamespace(email="OPS@aprimora.app")  # case-insensitive
-        assert (await require_platform_admin(current=allow)) is allow
-        # super-usuário de tenant comum NÃO é admin de plataforma
-        with pytest.raises(HTTPException) as ei:
-            await require_platform_admin(current=SimpleNamespace(email="su@prefeitura.gov.br"))
-        assert ei.value.status_code == 403
-        with pytest.raises(HTTPException):
-            await require_platform_admin(current=SimpleNamespace(email=""))
-    finally:
-        get_settings.cache_clear()
+# ---- gate de plataforma: o e-mail saiu do caminho de decisão (SEC-01A) ----
+async def test_gate_de_plataforma_nao_aceita_identidade_municipal():
+    """Substitui `test_require_platform_admin_allowlist`, removido em SEC-01A.
+
+    O teste antigo montava um `SimpleNamespace(email=...)` e afirmava que o
+    e-mail certo passava — ou seja, **testava a vulnerabilidade F-01 como se
+    fosse contrato**. Não dá para adaptá-lo: o comportamento que ele travava é
+    exatamente o que este PR remove.
+
+    O que sobra de afirmável aqui é a forma da dependência nova: ela não recebe
+    `Usuario` nenhum. Não há por onde uma credencial municipal entrar — nem por
+    engano, nem por `dependency_overrides`. A verificação de comportamento (os
+    24 cenários da matriz) está em `test_platform_token_validator.py`.
+    """
+    import inspect
+
+    from app.auth.plataforma import require_platform_admin
+
+    parametros = inspect.signature(require_platform_admin).parameters
+    assert set(parametros) == {"request", "db"}, (
+        f"assinatura inesperada do gate de plataforma: {list(parametros)}. "
+        "Qualquer parâmetro que traga identidade municipal (`Usuario`, e-mail, "
+        "`get_current_user`) recria o achado F-01."
+    )
+    fonte = inspect.getsource(require_platform_admin)
+    assert "email" not in fonte.lower(), (
+        "o gate de plataforma voltou a mencionar e-mail. Ele é `display_label` "
+        "do principal e não decide nada (ADR-016 §2.1)."
+    )
 
 
 # ---- desativação bloqueia resolução por subdomínio ----

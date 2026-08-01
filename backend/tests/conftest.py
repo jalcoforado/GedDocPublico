@@ -85,6 +85,115 @@ async def platform_session() -> AsyncIterator[AsyncSession]:
     await engine.dispose()
 
 
+# ---------------------------------------------------------------------------
+# SEC-01A — arreio da fronteira de plataforma
+#
+# Um teste da fronteira precisa de quatro coisas ao mesmo tempo: identificadores
+# de realm configurados, um JWKS que resolva sem rede, uma conexão pelo papel
+# `aprimora_platform` e um principal no banco. Montar isso em cada arquivo
+# produziria quatro cópias divergentes — e a que esquecesse o
+# `get_settings.cache_clear()` viraria falso verde silencioso, porque o
+# `lru_cache` devolveria a configuração de antes do `monkeypatch`.
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture(scope="function")
+async def emissor_operador():
+    """`OperatorTokenFactory` com par RSA efêmero (fixtures de SEC-00)."""
+    from tests.fixtures.platform_operator_tokens import OperatorTokenFactory
+
+    return OperatorTokenFactory()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def plataforma_configurada(monkeypatch, emissor_operador):
+    """Configura a fronteira de plataforma e serve o JWKS em memória.
+
+    O JWKS é injetado substituindo `app.auth.plataforma._buscar_jwks`: teste que
+    fosse buscar o JWKS de verdade dependeria de rede e do IdP estar de pé.
+
+    Devolve o emissor de tokens já casado com a configuração aplicada.
+    """
+    from tests.fixtures.platform_operator_tokens import (
+        TEST_AUDIENCE,
+        TEST_HOSTED_DOMAIN,
+        TEST_ISSUER,
+    )
+
+    from app import database_plataforma
+    from app.auth import plataforma as validador
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("PLATFORM_OIDC_ISSUER", TEST_ISSUER)
+    monkeypatch.setenv("PLATFORM_OIDC_AUDIENCE", TEST_AUDIENCE)
+    monkeypatch.setenv("PLATFORM_OIDC_JWKS_URL", "https://operator.test.local/jwks")
+    monkeypatch.setenv("PLATFORM_OIDC_HOSTED_DOMAIN", TEST_HOSTED_DOMAIN)
+    monkeypatch.setenv("PLATFORM_DB_URL", PLATFORM_URL)
+    get_settings.cache_clear()
+
+    async def _jwks_em_memoria(url: str):
+        return emissor_operador.keys.jwks, 600
+
+    monkeypatch.setattr(validador, "_buscar_jwks", _jwks_em_memoria)
+    validador.limpar_cache_jwks()
+
+    yield emissor_operador
+
+    validador.limpar_cache_jwks()
+    await database_plataforma.descartar_engines_plataforma()
+    get_settings.cache_clear()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def principal_ativo(admin_engine, plataforma_configurada):
+    """Cria um `platform_principal` ativo e devolve `(subject, id)`.
+
+    Setup/teardown por `ged_user` (o padrão de `admin_session`): o que se testa
+    aqui é a fronteira HTTP, não o grant — esse já tem teste próprio em
+    `test_platform_admin_identity.py`.
+    """
+    from tests.fixtures.platform_operator_tokens import TEST_ISSUER
+
+    subject = f"sec01a-operador-{uuid.uuid4().hex[:8]}"
+    Session = async_sessionmaker(admin_engine, expire_on_commit=False, class_=AsyncSession)
+    async with Session() as s:
+        principal_id = int(
+            (
+                await s.execute(
+                    text(
+                        """
+                        INSERT INTO aprimora_py.platform_principal
+                            (issuer, subject, display_label, ativo,
+                             concedido_por, motivo_concessao)
+                        VALUES (:iss, :sub, :label, true, 'teste', 'arreio de teste')
+                        RETURNING id
+                        """
+                    ),
+                    {
+                        "iss": TEST_ISSUER,
+                        "sub": subject,
+                        "label": "operador@test.local",
+                    },
+                )
+            ).scalar_one()
+        )
+        await s.commit()
+
+    yield subject, principal_id
+
+    async with Session() as s:
+        await s.execute(
+            text("DELETE FROM aprimora_py.platform_audit_log WHERE platform_principal_id = :p"),
+            {"p": principal_id},
+        )
+        await s.execute(
+            text("DELETE FROM aprimora_py.platform_principal WHERE id = :p"),
+            {"p": principal_id},
+        )
+        await s.commit()
+
+
 @pytest_asyncio.fixture(scope="function")
 async def two_tenants(admin_engine) -> AsyncIterator[tuple[int, int]]:
     """Cria 2 tenants temporários, retorna ``(id_a, id_b)``, limpa no teardown.

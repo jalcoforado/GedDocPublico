@@ -1,11 +1,14 @@
-"""SEC-01A — identidade do operador de plataforma (parte 1: esquema e grants).
+"""SEC-01A — identidade do operador de plataforma: esquema, grants e F-01.
 
 Este arquivo cobre três coisas, nesta ordem de importância:
 
 1. **Cenário 21 da matriz de claims** — a regressão do achado **F-01**: um
    usuário *municipal* criado em outro tenant, com e-mail idêntico ao de um
-   operador de plataforma, alcança operação cross-tenant. É o teste vermelho que
-   abre o PR (ver `docs/architecture/security/platform-operator-claims-matrix.md`).
+   operador de plataforma, alcançava operação cross-tenant. Foi o teste vermelho
+   que abriu o PR, marcado `xfail(strict=True)` enquanto a parte 1 entregava só
+   esquema e grants; o marcador saiu com o validador de token da parte 2 (ver
+   `docs/architecture/security/platform-operator-claims-matrix.md`).
+   Os demais 23 cenários da matriz estão em `test_platform_token_validator.py`.
 2. **Higiene de grants** — `aprimora_app` (o papel do runtime municipal) não
    escreve nas tabelas de plataforma. Sem este teste, a garantia é revogada em
    silêncio na próxima vez que alguém mexer no bootstrap do CI (foi exatamente o
@@ -44,40 +47,44 @@ def _sm(engine):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "SEC-01A parte 1 entrega esquema e grants; o gate ainda é a allowlist de "
-        "e-mail (`require_platform_admin` em auth/deps.py). A PARTE 2 — validador "
-        "de token administrativo + consulta ao principal — é o que torna este "
-        "teste verde. Ao implementá-la, REMOVA este marcador: com `strict=True` o "
-        "teste reprova se passar, então ele não pode ser esquecido aqui."
-    ),
-)
 async def test_cenario_21_usuario_municipal_com_email_de_operador_e_negado(
-    admin_engine, monkeypatch
+    admin_engine, plataforma_configurada
 ) -> None:
     """Matriz de claims, cenário 21 — regressão de **F-01**.
 
     O índice de unicidade de e-mail é `UNIQUE (tenant_id, email) WHERE excluido
-    IS FALSE`: o mesmo e-mail existe em quantos tenants quiser. Como a
-    autorização de plataforma compara **a string do e-mail**, qualquer tenant
-    capaz de criar um usuário com o e-mail certo produz um administrador de
+    IS FALSE`: o mesmo e-mail existe em quantos tenants quiser. Enquanto a
+    autorização de plataforma comparava **a string do e-mail**, qualquer tenant
+    capaz de criar um usuário com o e-mail certo produzia um administrador de
     plataforma.
 
-    O teste **liga a vulnerabilidade de propósito** (`PLATFORM_ADMIN_EMAILS`
-    está vazia neste ambiente, o que hoje nega todo mundo por acidente de
-    configuração, não por desenho — ADR-016 §1.8). Sem ligar, o 403 viria da
-    variável vazia e o teste passaria sem provar nada. Ligada a allowlist, o
-    único jeito de negar é o e-mail **não participar** da decisão.
+    Este teste nasceu **vermelho** na parte 1 do PR, marcado `xfail(strict=True)`.
+    O marcador saiu na parte 2, junto com a allowlist — e é essa remoção que
+    prova que a entrega aconteceu, porque com `strict=True` o teste reprovaria
+    caso passasse com o marcador ainda no lugar.
 
-    Sobe pela borda HTTP real, com token municipal de verdade e `Host` do tenant
-    invasor: o defeito está na cadeia `require_platform_admin` → `get_current_user`,
-    e um teste de unidade sobre a dependência não a exercita.
+    O arranjo é o pior caso possível, de propósito:
+
+    - a fronteira de plataforma está **inteiramente configurada e viva**
+      (`plataforma_configurada`) — se o 401 viesse de configuração ausente, o
+      teste não provaria nada, e foi essa a armadilha da versão anterior, que
+      precisava LIGAR a allowlist para não passar por acidente;
+    - existe um operador de plataforma **de verdade**, ativo, cujo
+      `display_label` é exatamente este e-mail;
+    - o invasor apresenta um token municipal **válido**, do seu próprio tenant,
+      com o `Host` do seu próprio tenant.
+
+    A única coisa que ele não tem é um principal em `platform_principal` — e é
+    só isso que decide. O e-mail deixou de participar.
+
+    Sobe pela borda HTTP real: o defeito vivia na cadeia de dependências
+    (`require_platform_admin` → `get_current_user` → `Usuario.email`), e um
+    teste de unidade sobre a dependência não a exercita.
     """
     suffix = uuid.uuid4().hex[:8]
     slug = f"sec01a-{suffix}"
     tenant_id: int | None = None
+    principal_id: int | None = None
 
     Session = _sm(admin_engine)
     async with Session() as s:
@@ -113,6 +120,25 @@ async def test_cenario_21_usuario_municipal_com_email_de_operador_e_negado(
                 )
             ).scalar_one()
         )
+        # O operador de plataforma REAL, com este mesmo e-mail como rótulo. É o
+        # que torna a colisão concreta: não é "ninguém tem esse e-mail", é "o
+        # e-mail é de um operador ativo e ainda assim não vale nada aqui".
+        principal_id = int(
+            (
+                await s.execute(
+                    _SQL_INSERE_PRINCIPAL,
+                    dict(
+                        _PRINCIPAL_TESTE,
+                        subject=f"sec01a-colisao-{suffix}",
+                        display_label=EMAIL_OPERADOR,
+                    ),
+                )
+            ).scalar_one()
+        )
+        await s.execute(
+            text("UPDATE aprimora_py.platform_principal SET ativo = true WHERE id = :p"),
+            {"p": principal_id},
+        )
         segredo = await get_jwt_secret(s)
         await s.commit()
 
@@ -120,8 +146,6 @@ async def test_cenario_21_usuario_municipal_com_email_de_operador_e_negado(
         build_payload(usuario_id, EMAIL_OPERADOR, tenant_id), segredo
     )
 
-    get_settings.cache_clear()
-    monkeypatch.setenv("PLATFORM_ADMIN_EMAILS", EMAIL_OPERADOR)
     try:
         host = f"{slug}.{get_settings().base_domain}"
         transport = ASGITransport(app=app)
@@ -138,7 +162,6 @@ async def test_cenario_21_usuario_municipal_com_email_de_operador_e_negado(
             "globalmente. O e-mail não pode participar da decisão."
         )
     finally:
-        get_settings.cache_clear()
         from app.database import engine as app_engine
 
         await app_engine.dispose()
@@ -148,6 +171,10 @@ async def test_cenario_21_usuario_municipal_com_email_de_operador_e_negado(
             )
             await s.execute(
                 text("DELETE FROM aprimora_py.tenant WHERE id = :t"), {"t": tenant_id}
+            )
+            await s.execute(
+                text("DELETE FROM aprimora_py.platform_principal WHERE id = :p"),
+                {"p": principal_id},
             )
             await s.commit()
 
