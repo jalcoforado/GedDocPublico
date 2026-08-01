@@ -34,18 +34,39 @@ TABELA_ALVO = "protocolos.tipo_anexo"
 
 # Schemas cobertos pela guarda estrutural. São os schemas cujas tabelas são
 # criadas pelas nossas migrations com o boilerplate de RLS descrito no CLAUDE.md.
-SCHEMAS_COM_BOILERPLATE_RLS = ("aprimora_py", "frota")
+# `transporte_regulado` está aqui de propósito: cobrir só os schemas já limpos
+# faria uma guarda que não pode ficar vermelha, e o achado do inventário viraria
+# prosa. Com o schema incluído + allowlist, a lista abaixo tem de ENCOLHER
+# conforme o SEC-RLS-00B corrige — e o check de allowlist obsoleta reprova quem
+# corrigir a tabela e esquecer de tirá-la daqui.
+SCHEMAS_COM_BOILERPLATE_RLS = ("aprimora_py", "frota", "transporte_regulado")
 
-# Tabelas que TÊM coluna `tenant_id` nesses schemas e ainda assim NÃO têm RLS,
-# por decisão registrada. Cada entrada precisa da razão escrita — sem razão, a
+# Tabelas que TÊM coluna `tenant_id` nesses schemas e ainda assim NÃO têm RLS
+# habilitada **e** forçada. Cada entrada precisa da razão escrita — sem razão, a
 # entrada não entra aqui e a guarda reprova.
-ALLOWLIST_SEM_RLS: dict[str, str] = {
+_RAZAO_TRANSPORTE_SEM_FORCE = (
+    "RLS habilitada, mas SEM `FORCE`: o dono da tabela (`ged_user`, hoje também "
+    "o papel do runtime) continua contornando as policies. Divergência medida em "
+    "docs/architecture/security/rls-bypass-inventory.md §2.1; correção é o item 2 "
+    "do resumo para o SEC-RLS-00B. Remover desta lista quando o `FORCE` for aplicado."
+)
+
+ALLOWLIST_SEM_RLS_FORCADA: dict[str, str] = {
     "aprimora_py.tenant_modulo": (
         "Tabela de PLATAFORMA, não de negócio. A contratação de módulo é escrita "
         "pelo platform admin operando sobre OUTROS tenants — uma policy de "
         "`app.tenant_id` barraria justamente o caso de uso. Decisão registrada no "
-        "CLAUDE.md (seção 'Modularização') e na migration 0073."
+        "CLAUDE.md (seção 'Modularização') e na migration 0073. Esta é a única "
+        "entrada DELIBERADA da lista; as demais são dívida a pagar."
     ),
+    "transporte_regulado.alvara": _RAZAO_TRANSPORTE_SEM_FORCE,
+    "transporte_regulado.alvara_auditoria": _RAZAO_TRANSPORTE_SEM_FORCE,
+    "transporte_regulado.alvara_documento": _RAZAO_TRANSPORTE_SEM_FORCE,
+    "transporte_regulado.alvara_responsavel": _RAZAO_TRANSPORTE_SEM_FORCE,
+    "transporte_regulado.alvara_veiculo": _RAZAO_TRANSPORTE_SEM_FORCE,
+    "transporte_regulado.veiculo_avaliacao": _RAZAO_TRANSPORTE_SEM_FORCE,
+    "transporte_regulado.veiculo_documento": _RAZAO_TRANSPORTE_SEM_FORCE,
+    "transporte_regulado.veiculo_vistoria": _RAZAO_TRANSPORTE_SEM_FORCE,
 }
 
 
@@ -111,10 +132,13 @@ async def test_leitura_ged_user_ve_linha_de_outro_tenant_e_aprimora_app_nao(
     await app_session.rollback()
 
     assert id_b in vistos_por_ged_user, (
-        "F-12 parece ter sido corrigido: com `SET LOCAL app.tenant_id` do tenant A, "
-        f"`ged_user` NÃO enxergou a linha do tenant B em {TABELA_ALVO}. "
-        "Se o runtime deixou de ter BYPASSRLS, atualize este arquivo junto com "
-        "docs/architecture/security/rls-bypass-inventory.md."
+        "com `SET LOCAL app.tenant_id` do tenant A, `ged_user` NÃO enxergou a "
+        f"linha do tenant B em {TABELA_ALVO} — ou seja, `ged_user` deixou de "
+        "contornar a RLS. Isto NÃO é a correção de F-12: `admin_session` está "
+        "amarrada à ADMIN_URL do conftest (sempre `ged_user`), independentemente "
+        "do DATABASE_URL do runtime. O que mudou foi o provisionamento do papel "
+        "`ged_user` (perdeu SUPERUSER/BYPASSRLS) ou a policy da tabela. "
+        "Confirme em pg_roles antes de mexer neste arquivo."
     )
     assert id_b not in vistos_por_aprimora_app, (
         "A RLS não está isolando nem sob `aprimora_app` — a policy de "
@@ -145,6 +169,14 @@ async def test_escrita_ged_user_grava_em_tenant_alheio_e_aprimora_app_e_barrado(
 
     `ged_user` consegue (o `WITH CHECK` não é avaliado); `aprimora_app` leva
     erro de policy. É o mesmo bypass, no caminho de escrita.
+
+    O lado de `aprimora_app` precisa de **controle positivo**, e não só do erro
+    esperado: `new row violates row-level security policy` é a mesma mensagem
+    que sai quando a GUC não foi instalada, quando o `WITH CHECK` é `false` e
+    quando a policy sumiu. Sem provar antes que a escrita LEGÍTIMA passa, o
+    teste aceitaria "está tudo quebrado" como se fosse "está isolado" — e o
+    `SEC-RLS-00B`, que vai reescrever exatamente essas policies e grants,
+    passaria verde ao quebrar a tabela.
     """
     tid_a, tid_b = two_tenants
 
@@ -162,9 +194,25 @@ async def test_escrita_ged_user_grava_em_tenant_alheio_e_aprimora_app_e_barrado(
         )
     ).scalar_one()
     assert int(dono) == tid_b, (
-        "F-12 parece ter sido corrigido: `ged_user` não conseguiu gravar linha "
-        "de tenant alheio. Atualize este arquivo e o inventário."
+        "`ged_user` não conseguiu gravar linha de tenant alheio. Isto NÃO é a "
+        "correção de F-12 — `admin_session` usa a ADMIN_URL do conftest, sempre "
+        "`ged_user`, seja qual for o DATABASE_URL do runtime. O que mudou foi o "
+        "papel `ged_user` (perdeu SUPERUSER/BYPASSRLS) ou o `WITH CHECK` da "
+        f"policy de {TABELA_ALVO}."
     )
+
+    # --- CONTROLE POSITIVO: sob `aprimora_app`, a escrita do PRÓPRIO tenant
+    #     tem de passar. Se este INSERT falhar, o erro do INSERT cross-tenant
+    #     logo abaixo não prova isolamento nenhum.
+    await _set_tenant(app_session, tid_a)
+    id_legitimo = await _insere_tipo_anexo(
+        app_session, tenant_id=tid_a, nome="f12-controle-positivo"
+    )
+    assert id_legitimo > 0, (
+        "controle positivo falhou sem levantar: `aprimora_app` não gravou a "
+        "linha do PRÓPRIO tenant."
+    )
+    await app_session.rollback()
 
     # --- papel sujeito a RLS: a mesma escrita é barrada ---
     await _set_tenant(app_session, tid_a)
@@ -286,21 +334,22 @@ async def test_tabelas_tenanted_tem_rls_habilitada_e_forcada(
     faltando = [
         tabela
         for tabela, rls, forcada in rows
-        if not (rls and forcada) and tabela not in ALLOWLIST_SEM_RLS
+        if not (rls and forcada) and tabela not in ALLOWLIST_SEM_RLS_FORCADA
     ]
     assert not faltando, (
         "tabelas com coluna `tenant_id` sem RLS habilitada E forçada: "
         f"{faltando}. Ou adicione o boilerplate de RLS na migration, ou "
-        "declare a tabela em ALLOWLIST_SEM_RLS com a razão escrita."
+        "declare a tabela em ALLOWLIST_SEM_RLS_FORCADA com a razão escrita."
     )
 
     # A allowlist não pode envelhecer sem que ninguém perceba: se a tabela ganhou
-    # RLS, a entrada tem de sair daqui.
+    # RLS habilitada e forçada, a entrada tem de sair daqui. É o que faz a dívida
+    # de `transporte_regulado` encolher de forma verificável durante o SEC-RLS-00B.
     estado = {tabela: (rls, forcada) for tabela, rls, forcada in rows}
     obsoletas = [
-        t for t in ALLOWLIST_SEM_RLS if estado.get(t) == (True, True)
+        t for t in ALLOWLIST_SEM_RLS_FORCADA if estado.get(t) == (True, True)
     ]
     assert not obsoletas, (
         f"entradas da allowlist já têm RLS habilitada e forçada: {obsoletas}. "
-        "Remova-as da ALLOWLIST_SEM_RLS."
+        "Remova-as da ALLOWLIST_SEM_RLS_FORCADA."
     )
