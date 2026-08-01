@@ -310,7 +310,7 @@ export default function EmpresasPage() {
         </div>
       </div>
 
-      {!listaQ.isLoading && (listaQ.data?.length ?? 0) === 0 ? (
+      {!listaQ.isLoading && (listaQ.data?.items.length ?? 0) === 0 ? (
         <EmptyState
           icon={Inbox}
           title="Nenhuma empresa"
@@ -344,7 +344,7 @@ export default function EmpresasPage() {
                 </TD>
               </TR>
             )}
-            {listaQ.data?.map((e) => (
+            {listaQ.data?.items.map((e) => (
               <TR key={e.id}>
                 <TD>
                   <div className="font-medium">{e.razao_social}</div>
@@ -539,7 +539,7 @@ export default function EmpresasPage() {
               onChange={(e) => set("id_representante_permissionario", e.target.value)}
             >
               <option value="">— Nenhum —</option>
-              {permsQ.data?.map((p) => (
+              {permsQ.data?.items.map((p) => (
                 <option key={p.id} value={String(p.id)}>
                   {p.nome} ({p.cpf})
                 </option>

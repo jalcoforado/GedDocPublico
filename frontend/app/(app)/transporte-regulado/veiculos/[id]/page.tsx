@@ -465,7 +465,7 @@ export default function VeiculoDetailPage() {
 
           {docsQ.isLoading ? (
             <div>Carregando...</div>
-          ) : docsQ.data && docsQ.data.length > 0 ? (
+          ) : docsQ.data && docsQ.data.items.length > 0 ? (
             <Table>
               <THead>
                 <TR>
@@ -478,7 +478,7 @@ export default function VeiculoDetailPage() {
                 </TR>
               </THead>
               <TBody>
-                {docsQ.data.map((doc) => (
+                {docsQ.data.items.map((doc) => (
                   <TR key={doc.id}>
                     <TD>{TIPO_LABEL[doc.tipo_documento]}</TD>
                     <TD>{doc.numero_documento}</TD>
@@ -616,7 +616,7 @@ export default function VeiculoDetailPage() {
 
           {avalsQ.isLoading ? (
             <div>Carregando...</div>
-          ) : avalsQ.data && avalsQ.data.length > 0 ? (
+          ) : avalsQ.data && avalsQ.data.items.length > 0 ? (
             <Table>
               <THead>
                 <TR>
@@ -627,7 +627,7 @@ export default function VeiculoDetailPage() {
                 </TR>
               </THead>
               <TBody>
-                {avalsQ.data.map((aval) => (
+                {avalsQ.data.items.map((aval) => (
                   <TR key={aval.id}>
                     <TD>
                       <Badge intent={RESULTADO_INTENT[aval.resultado] || "neutral"}>
@@ -753,7 +753,7 @@ export default function VeiculoDetailPage() {
 
           {vistQ.isLoading ? (
             <div>Carregando...</div>
-          ) : vistQ.data && vistQ.data.length > 0 ? (
+          ) : vistQ.data && vistQ.data.items.length > 0 ? (
             <Table>
               <THead>
                 <TR>
@@ -764,7 +764,7 @@ export default function VeiculoDetailPage() {
                 </TR>
               </THead>
               <TBody>
-                {vistQ.data.map((vist) => {
+                {vistQ.data.items.map((vist) => {
                   const isVencida = vist.data_validade && new Date(vist.data_validade) <= new Date();
                   return (
                     <TR key={vist.id}>

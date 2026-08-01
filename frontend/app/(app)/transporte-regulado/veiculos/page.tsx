@@ -164,13 +164,13 @@ export default function VeiculosReguladosPage() {
     queryFn: () => api.empresas.list(),
   });
   const semVinculos =
-    (permsQ.data?.length ?? 0) === 0 && (empresasQ.data?.length ?? 0) === 0 &&
+    (permsQ.data?.items.length ?? 0) === 0 && (empresasQ.data?.items.length ?? 0) === 0 &&
     !permsQ.isLoading && !empresasQ.isLoading;
 
   const permLabel = (id: number | null) =>
-    id == null ? null : permsQ.data?.find((p) => p.id === id)?.nome ?? `#${id}`;
+    id == null ? null : permsQ.data?.items.find((p) => p.id === id)?.nome ?? `#${id}`;
   const empLabel = (id: number | null) =>
-    id == null ? null : empresasQ.data?.find((e) => e.id === id)?.razao_social ?? `#${id}`;
+    id == null ? null : empresasQ.data?.items.find((e) => e.id === id)?.razao_social ?? `#${id}`;
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["tr-veiculos"] });
 
@@ -348,7 +348,7 @@ export default function VeiculosReguladosPage() {
         </div>
       </div>
 
-      {!listaQ.isLoading && (listaQ.data?.length ?? 0) === 0 ? (
+      {!listaQ.isLoading && (listaQ.data?.items.length ?? 0) === 0 ? (
         <EmptyState
           icon={Inbox}
           title="Nenhum veículo regulado"
@@ -383,7 +383,7 @@ export default function VeiculosReguladosPage() {
                 </TD>
               </TR>
             )}
-            {listaQ.data?.map((v) => (
+            {listaQ.data?.items.map((v) => (
               <TR key={v.id}>
                 <TD className="font-mono">
                   <Link href={`/transporte-regulado/veiculos/${v.id}`} className="text-blue-600 hover:underline">
@@ -496,7 +496,7 @@ export default function VeiculosReguladosPage() {
               onChange={(e) => set("id_permissionario", e.target.value)}
             >
               <option value="">— Nenhum —</option>
-              {permsQ.data?.map((p) => (
+              {permsQ.data?.items.map((p) => (
                 <option key={p.id} value={String(p.id)}>
                   {p.nome} ({p.cpf})
                 </option>
@@ -507,7 +507,7 @@ export default function VeiculosReguladosPage() {
             <Label htmlFor="emp">Empresa (vínculo)</Label>
             <Select id="emp" value={form.id_empresa} onChange={(e) => set("id_empresa", e.target.value)}>
               <option value="">— Nenhuma —</option>
-              {empresasQ.data?.map((e) => (
+              {empresasQ.data?.items.map((e) => (
                 <option key={e.id} value={String(e.id)}>
                   {e.razao_social}
                 </option>

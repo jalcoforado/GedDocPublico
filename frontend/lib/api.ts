@@ -2535,7 +2535,7 @@ export const api = {
   },
   permissionarios: {
     list: (params?: { situacao?: string; tipo_servico?: string }) =>
-      request<Permissionario[]>(`/transporte-regulado/permissionarios${qs(params ?? {})}`),
+      request<Paginated<Permissionario>>(`/transporte-regulado/permissionarios${qs(params ?? {})}`),
     get: (id: number) =>
       request<Permissionario>(`/transporte-regulado/permissionarios/${id}`),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2567,7 +2567,7 @@ export const api = {
   },
   empresas: {
     list: (params?: { situacao?: string; tipo_servico?: string; q?: string }) =>
-      request<Empresa[]>(`/transporte-regulado/empresas${qs(params ?? {})}`),
+      request<Paginated<Empresa>>(`/transporte-regulado/empresas${qs(params ?? {})}`),
     get: (id: number) => request<Empresa>(`/transporte-regulado/empresas/${id}`),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     create: (data: any) =>
@@ -2603,7 +2603,7 @@ export const api = {
       id_permissionario?: number;
       id_empresa?: number;
       q?: string;
-    }) => request<VeiculoRegulado[]>(`/transporte-regulado/veiculos${qs(params ?? {})}`),
+    }) => request<Paginated<VeiculoRegulado>>(`/transporte-regulado/veiculos${qs(params ?? {})}`),
     get: (id: number) => request<VeiculoRegulado>(`/transporte-regulado/veiculos/${id}`),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     create: (data: any) =>
@@ -2633,7 +2633,7 @@ export const api = {
       request<void>(`/transporte-regulado/veiculos/${id}`, { method: "DELETE" }),
     documentos: {
       list: (veiculoId: number) =>
-        request<VeiculoDocumentoTR[]>(`/transporte-regulado/veiculos/${veiculoId}/documentos`),
+        request<Paginated<VeiculoDocumentoTR>>(`/transporte-regulado/veiculos/${veiculoId}/documentos`),
       get: (veiculoId: number, documentoId: number) =>
         request<VeiculoDocumentoTR>(`/transporte-regulado/veiculos/${veiculoId}/documentos/${documentoId}`),
       create: (veiculoId: number, data: VeiculoDocumentoInputTR) =>
@@ -2653,7 +2653,7 @@ export const api = {
     },
     avaliacoes: {
       list: (veiculoId: number) =>
-        request<VeiculoAvaliacao[]>(`/transporte-regulado/veiculos/${veiculoId}/avaliacoes`),
+        request<Paginated<VeiculoAvaliacao>>(`/transporte-regulado/veiculos/${veiculoId}/avaliacoes`),
       get: (veiculoId: number, avaliacaoId: number) =>
         request<VeiculoAvaliacao>(`/transporte-regulado/veiculos/${veiculoId}/avaliacoes/${avaliacaoId}`),
       create: (veiculoId: number, data: VeiculoAvaliacaoInput) =>
@@ -2673,7 +2673,7 @@ export const api = {
     },
     vistorias: {
       list: (veiculoId: number) =>
-        request<VeiculoVistoriaTR[]>(`/transporte-regulado/veiculos/${veiculoId}/vistorias`),
+        request<Paginated<VeiculoVistoriaTR>>(`/transporte-regulado/veiculos/${veiculoId}/vistorias`),
       get: (veiculoId: number, vistoriaId: number) =>
         request<VeiculoVistoriaTR>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}`),
       create: (veiculoId: number, data: VeiculoVistoriaInputTR) =>
@@ -2691,7 +2691,7 @@ export const api = {
           method: "DELETE",
         }),
       listarVencidas: (veiculoId: number) =>
-        request<VeiculoVistoriaTR[]>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/vencidas`),
+        request<Paginated<VeiculoVistoriaTR>>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/vencidas`),
       renovar: (veiculoId: number, vistoriaId: number, data: VeiculoVistoriaRenovarInput) =>
         request<VeiculoVistoriaTR>(`/transporte-regulado/veiculos/${veiculoId}/vistorias/${vistoriaId}/renovar`, {
           method: "POST",
@@ -2701,7 +2701,7 @@ export const api = {
   },
   alvaras: {
     list: (params?: { empresa_id?: number; permissionario_id?: number }) =>
-      request<Alvara[]>(`/transporte-regulado/alvaras${qs(params ?? {})}`),
+      request<Paginated<Alvara>>(`/transporte-regulado/alvaras${qs(params ?? {})}`),
     get: (id: number) =>
       request<Alvara>(`/transporte-regulado/alvaras/${id}`),
     create: (data: AlvaraInput) =>
@@ -2717,7 +2717,7 @@ export const api = {
     remove: (id: number) =>
       request<void>(`/transporte-regulado/alvaras/${id}`, { method: "DELETE" }),
     listarVencidos: () =>
-      request<Alvara[]>("/transporte-regulado/alvaras/vencidos"),
+      request<Paginated<Alvara>>("/transporte-regulado/alvaras/vencidos"),
     renovar: (id: number, data: AlvaraRenovarInput) =>
       request<Alvara>(`/transporte-regulado/alvaras/${id}/renovar`, {
         method: "POST",
@@ -2725,7 +2725,7 @@ export const api = {
       }),
     documentos: {
       list: (alvaraId: number) =>
-        request<AlvaraDocumento[]>(`/transporte-regulado/alvaras/${alvaraId}/documentos`),
+        request<Paginated<AlvaraDocumento>>(`/transporte-regulado/alvaras/${alvaraId}/documentos`),
       get: (alvaraId: number, docId: number) =>
         request<AlvaraDocumento>(`/transporte-regulado/alvaras/${alvaraId}/documentos/${docId}`),
       create: (alvaraId: number, data: AlvaraDocumentoInput) =>
@@ -2745,7 +2745,7 @@ export const api = {
     },
     responsaveis: {
       list: (alvaraId: number) =>
-        request<AlvaraResponsavel[]>(`/transporte-regulado/alvaras/${alvaraId}/responsaveis`),
+        request<Paginated<AlvaraResponsavel>>(`/transporte-regulado/alvaras/${alvaraId}/responsaveis`),
       get: (alvaraId: number, respId: number) =>
         request<AlvaraResponsavel>(`/transporte-regulado/alvaras/${alvaraId}/responsaveis/${respId}`),
       add: (alvaraId: number, data: AlvaraResponsavelInput) =>
@@ -2798,7 +2798,7 @@ export const api = {
     },
     veiculos: {
       list: (alvaraId: number) =>
-        request<AlvaraVeiculo[]>(
+        request<Paginated<AlvaraVeiculo>>(
           `/transporte-regulado/alvaras/${alvaraId}/veiculos`,
         ),
       add: (alvaraId: number, data: AlvaraVeiculoCreate) =>
