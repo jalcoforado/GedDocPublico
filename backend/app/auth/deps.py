@@ -2,7 +2,6 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import is_platform_admin
 from ..database import get_db
 from ..models import Tenant, Usuario, UsuarioExterno
 from .jwt import decode_token, get_jwt_secret
@@ -168,19 +167,18 @@ async def get_current_user_no_password_gate(
     return user
 
 
-async def require_platform_admin(
-    current: Usuario = Depends(get_current_user),
-) -> Usuario:
-    """Admin SaaS (PR3a) — autentica via JWT (get_current_user) e exige que o
-    e-mail esteja na allowlist `PLATFORM_ADMIN_EMAILS`. NÃO usa require_tenant_id
-    nem require_permission: é permissão de **plataforma**, não de tenant —
-    super-usuário de prefeitura NÃO passa. 403 caso fora da allowlist."""
-    if not is_platform_admin(current.email):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso restrito a administradores da plataforma",
-        )
-    return current
+# `require_platform_admin` NÃO MORA MAIS AQUI (SEC-01A / ADR-016).
+#
+# Ele comparava `current.email` contra a allowlist `PLATFORM_ADMIN_EMAILS` — e,
+# por depender de `get_current_user`, exigia que o operador de plataforma
+# existisse como `utils.usuario` no tenant do `Host`. Como o e-mail é único
+# apenas por tenant, qualquer prefeitura capaz de criar um usuário com o e-mail
+# certo virava administradora da plataforma (achado **F-01**).
+#
+# O gate agora vive em `app/auth/plataforma.py`: token administrativo RS256 do
+# IdP dedicado + principal ativo em `aprimora_py.platform_principal`, sobre uma
+# conexão e um papel de banco próprios. Nada em `deps.py` — que é a cadeia de
+# identidade MUNICIPAL — participa daquela decisão, e é assim que tem de ficar.
 
 
 async def get_current_cidadao(

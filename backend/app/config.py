@@ -58,18 +58,50 @@ class Settings(BaseSettings):
     # Em prod (HTTPS público) defina explicitamente, ex.: https://sobral.aprimora.app
     public_base_url: str = ""
 
-    # Admin SaaS (PR3a) — allowlist de e-mails com acesso ao painel de plataforma
-    # (criar/listar/editar/ativar/desativar tenants). Separado por vírgula.
-    # NÃO é permissão de tenant: super-usuário de prefeitura NÃO entra aqui.
-    platform_admin_emails: str = ""
+    # ------------------------------------------------------------------
+    # Fronteira de plataforma (SEC-01A / ADR-016).
+    #
+    # `PLATFORM_ADMIN_EMAILS` FOI REMOVIDA. Era o achado F-01: a autorização
+    # cross-tenant era uma comparação de string sobre um e-mail, e o e-mail é
+    # único apenas POR TENANT (`UNIQUE (tenant_id, email)`), de modo que
+    # qualquer tenant capaz de criar um usuário com o e-mail certo produzia um
+    # administrador de plataforma. Não reintroduzir — nem "temporariamente".
+    #
+    # NENHUM destes campos tem default útil, e isso é deliberado (ADR §2.6,
+    # D-2): configuração ausente tem de NEGAR, nunca liberar. Um default
+    # embutido converteria esquecimento de configuração em porta aberta, que é
+    # exatamente o modo de falha que estamos fechando.
+    # ------------------------------------------------------------------
+    # Issuer do IdP administrativo. Em produção, `https://accounts.google.com`.
+    platform_oidc_issuer: str = ""
+    # Client ID do OAuth client DEDICADO ao console, um por ambiente — é o que
+    # distingue um token de homologação de um de produção (cenário 24).
+    platform_oidc_audience: str = ""
+    # JWKS do IdP. Em produção, `https://www.googleapis.com/oauth2/v3/certs`.
+    platform_oidc_jwks_url: str = ""
+    # Domínio corporativo aceito no claim `hd`. SEM DEFAULT (D-2).
+    platform_oidc_hosted_domain: str = ""
+    # Conexão da fronteira de plataforma: papel `aprimora_platform`
+    # (NOBYPASSRLS, grants cross-tenant enumerados). NUNCA o pool municipal.
+    platform_db_url: str = ""
 
     @property
-    def platform_admin_email_set(self) -> set[str]:
-        return {
-            e.strip().lower()
-            for e in self.platform_admin_emails.split(",")
-            if e.strip()
-        }
+    def plataforma_configurada(self) -> bool:
+        """True só quando os quatro identificadores de ambiente existem.
+
+        Não inclui `platform_db_url` de propósito: a falta dele é erro de
+        infraestrutura (matriz §3, "Papel de banco" ⇒ 500), enquanto a falta
+        dos identificadores de realm é erro de configuração do IdP (cenários
+        23 e 24 ⇒ deny).
+        """
+        return all(
+            (
+                self.platform_oidc_issuer.strip(),
+                self.platform_oidc_audience.strip(),
+                self.platform_oidc_jwks_url.strip(),
+                self.platform_oidc_hosted_domain.strip(),
+            )
+        )
 
     # Observabilidade (Fase 33). Vazio = desabilitado.
     sentry_dsn: str = ""
@@ -119,11 +151,12 @@ def get_settings() -> Settings:
     return Settings()
 
 
-def is_platform_admin(email: str | None) -> bool:
-    """True se o e-mail está na allowlist de admin de plataforma (PR3a)."""
-    if not email:
-        return False
-    return email.strip().lower() in get_settings().platform_admin_email_set
+# `is_platform_admin(email)` FOI REMOVIDA em SEC-01A. Era o caminho de decisão
+# do achado F-01. Quem autoriza a fronteira de plataforma hoje é
+# `app.auth.plataforma.require_platform_admin`, que exige token administrativo
+# RS256 do IdP dedicado + principal ativo em `aprimora_py.platform_principal`.
+# O e-mail sobrevive apenas como `display_label` do principal, e não decide
+# nada (ADR-016 §2.1).
 
 
 # PR3a — módulos derivados do plano (apenas exibição; sem enforcement neste PR).
