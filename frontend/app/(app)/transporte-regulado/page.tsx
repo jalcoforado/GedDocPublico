@@ -1,61 +1,10 @@
 "use client";
 
-import {
-  Bus,
-  Building2,
-  Car,
-  CalendarClock,
-  ClipboardCheck,
-  FileText,
-  IdCard,
-  Map,
-  RefreshCw,
-  Route,
-  ScrollText,
-  AlertOctagon,
-} from "lucide-react";
+import { Bus } from "lucide-react";
 import Link from "next/link";
 
 import { PageHeader } from "@/components/ui/page-header";
-
-interface HubCard {
-  href?: string;
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  desc: string;
-  ready?: boolean;
-}
-
-const CARDS: HubCard[] = [
-  {
-    href: "/transporte-regulado/permissionarios",
-    icon: IdCard,
-    title: "Permissionários",
-    desc: "Cadastro de permissionários: dados pessoais, CNH, tipo de serviço, permissão e situação.",
-    ready: true,
-  },
-  {
-    href: "/transporte-regulado/empresas",
-    icon: Building2,
-    title: "Empresas",
-    desc: "Empresas e operadoras reguladas: dados cadastrais, endereço, autorização e situação.",
-    ready: true,
-  },
-  {
-    href: "/transporte-regulado/veiculos",
-    icon: Car,
-    title: "Veículos",
-    desc: "Veículos regulados vinculados a permissionários ou empresas autorizadas.",
-    ready: true,
-  },
-  { icon: FileText, title: "Documentos", desc: "Documentos exigidos e avaliação documental." },
-  { icon: ClipboardCheck, title: "Vistorias", desc: "Vistorias regulatórias dos veículos." },
-  { icon: ScrollText, title: "Alvarás", desc: "Alvarás e autorizações de operação." },
-  { icon: RefreshCw, title: "Recadastramento", desc: "Campanhas e ciclos de recadastramento." },
-  { icon: Route, title: "Rotas e Linhas", desc: "Rotas, linhas e localidades atendidas." },
-  { icon: AlertOctagon, title: "Ocorrências", desc: "Ocorrências regulatórias e fiscalização." },
-  { icon: Map, title: "Relatórios", desc: "Relatórios e impressões do transporte regulado." },
-];
+import { CARDS } from "@/lib/transporte-hub";
 
 export default function TransporteReguladoHubPage() {
   return (
