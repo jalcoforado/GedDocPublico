@@ -130,3 +130,67 @@ Duas fontes discordavam sobre o que são P5–P8. A canônica é o `docs/BACKLOG
 A numeração antiga que circulava em anotações de sessão (P4 = CRUD frontend, P5 = histórico,
 P6 = relatórios, P7 = documentos genéricos, P8 = workflows) descreve trabalho **já entregue** em
 P1–P4 e não deve ser usada.
+
+---
+
+# Adendo de 2026-08-01 — dois defeitos achados durante a execução
+
+Jorge reportou `TypeError: D.map is not a function` no navegador. A investigação levou a dois
+defeitos **pré-existentes em `main`**, nenhum causado por esta fatia. Ambos autorizados a entrar
+nela em 2026-08-01, porque a fatia acabou de dar visibilidade a telas que estão quebradas — costurar
+o menu para uma tela que estoura é pior que deixá-la escondida.
+
+## Defeito 1 — o contrato de paginação quebrou e o TypeScript não viu
+
+O commit `628ca34` (2026-07-20, "P3 — Paginação — 13 endpoints") passou 13 endpoints do transporte
+a devolver `Paginated` — `{items, total, page, page_size}`. O `frontend/lib/api.ts` nunca foi
+atualizado: **12 métodos continuam declarando array**.
+
+O `tsc` não pega porque `request<T>()` faz cast do JSON sem validar — o tipo é uma afirmação sobre a
+resposta, não uma verificação dela. Verde no type-check, `TypeError` no navegador.
+
+Confirmado na aplicação real, contra o banco real:
+
+```
+/api/v2/transporte-regulado/veiculos -> 200 | dict chaves=['items','total','page','page_size']
+```
+
+Dois sintomas, e o silencioso é o pior:
+
+- **Estoura:** `veiculos/page.tsx:499` faz `permsQ.data?.map(...)`. O `?.` protege contra `null`, não
+  contra objeto. Roda mesmo com o diálogo fechado, porque os `children` são construídos pelo
+  componente pai a cada render — o `Dialog` só decide depois se mostra.
+- **Mente:** `veiculos/page.tsx:351` faz `(listaQ.data?.length ?? 0) === 0`. Objeto não tem
+  `.length` → `undefined` → `0` → a tela anuncia "Nenhum veículo regulado" com veículos cadastrados.
+
+**Conserto:** seguir o precedente que já existe no próprio `api.ts` — `Paginated<T>` (usado
+corretamente em `/usuarios`, `/unidades-trabalho` e `/processos`) e telas consumindo `data?.items`.
+
+**Por que essa forma e não desembrulhar dentro do `api.ts`:** desembrulhar (`.then(r => r.items)`)
+seria uma linha por método e não mudaria tela nenhuma — mas manteria o tipo mentindo sobre a
+resposta, que é exatamente a causa raiz. Com `Paginated<T>` o `tsc` passa a ser a guarda: qualquer
+tela futura que faça `.map` direto no retorno **não compila**. A proteção é estrutural, não um teste
+que alguém pode esquecer de escrever.
+
+**Consequência assumida, e não silenciada:** as telas do transporte não têm UI de paginação e o
+backend usa `page_size` padrão de 50. Depois do conserto elas exibem **até 50 registros**. Isso não
+é regressão — hoje exibem zero ou estouram —, mas é um teto real. Fica registrado como pendência de
+follow-up no backlog; resolver exige decidir UI de paginação, que é decisão de produto.
+
+## Defeito 2 — mais duas rotas engolidas, a mesma classe da Task 1
+
+```
+ENGOLIDA -> /alvaras/vencidos  => /alvaras/{alvara_id}
+ENGOLIDA -> /alvaras/relatorio => /alvaras/{alvara_id}
+OK          /alvaras/relatorio/kpis
+OK          /alvaras/relatorio/export/csv
+```
+
+Verificado na aplicação real; `/alvaras/relatorio` responde **422**. As duas de `/relatorio/...`
+sobrevivem só porque têm dois segmentos, e `{alvara_id}` casa um segmento só.
+
+Efeito visível: na tela de Relatórios os KPIs carregam e a lista não.
+
+**Conserto:** mover as duas declarações para antes de `/{alvara_id}`, com teste HTTP — igual à
+Task 1. Que o mesmo defeito tenha aparecido duas vezes no mesmo arquivo diz que a ordem das rotas
+precisa de guarda, não de vigilância.
