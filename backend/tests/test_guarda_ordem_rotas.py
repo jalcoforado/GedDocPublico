@@ -28,7 +28,14 @@ def _concretiza(caminho: str) -> str:
 
 
 def rotas_sombreadas() -> set[tuple[str, str]]:
-    """(método, caminho) de toda rota que outra, declarada antes, engole."""
+    """(método, caminho) de toda rota que outra, declarada antes, engole.
+
+    `path_regex` é atributo interno do Starlette (não é API pública) — é o que
+    permite testar "esta URL concreta casa com esta rota?" sem duplicar a
+    lógica de matching do roteador. Se uma atualização do Starlette mudar essa
+    semântica, é aqui que a guarda vai quebrar; quem depurar precisa saber que
+    o apoio é num detalhe interno, não num contrato documentado.
+    """
     rotas = [
         r for r in app.routes
         if getattr(r, "path_regex", None) is not None
@@ -46,7 +53,15 @@ def rotas_sombreadas() -> set[tuple[str, str]]:
                 ),
                 None,
             )
-            if primeira is not None and primeira.path != rota.path:
+            # Identidade, não igualdade de `.path`: duas rotas DISTINTAS podem
+            # ter o mesmo path literal e o mesmo método (ex.: decorador
+            # duplicado por engano). Nesse caso `primeira.path == rota.path`
+            # seria verdadeiro mesmo a segunda sendo outro objeto e genuinamente
+            # inalcançável — comparar string mascararia exatamente o defeito que
+            # esta guarda existe para achar. `primeira` vem de `next(...)` sobre
+            # a mesma lista `rotas`, então é o mesmo objeto quando a rota casa
+            # consigo própria; `is not` captura isso sem esse ponto cego.
+            if primeira is not None and primeira is not rota:
                 sombreadas.add((metodo, rota.path))
     return sombreadas
 
@@ -62,7 +77,13 @@ def test_nenhuma_rota_fica_a_sombra_de_outra():
 
 
 def test_allowlist_nao_tem_entrada_obsoleta():
-    """Allowlist que apodrece deixa de ser dívida registrada e vira ruído."""
+    """Allowlist que apodrece deixa de ser dívida registrada e vira ruído.
+
+    Com `SOMBREADAS_CONHECIDAS` vazia este teste passa trivialmente — não há
+    nada para comparar, então "passou" não significa "verificou alguma coisa".
+    Ele só ganha poder de detecção real a partir do dia em que a allowlist
+    tiver ao menos uma entrada.
+    """
     obsoletas = SOMBREADAS_CONHECIDAS - rotas_sombreadas()
     assert not obsoletas, (
         f"Entradas obsoletas em SOMBREADAS_CONHECIDAS: {sorted(obsoletas)}. "
