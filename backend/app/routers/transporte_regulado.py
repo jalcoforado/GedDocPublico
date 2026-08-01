@@ -790,7 +790,7 @@ async def listar_relatorio(
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
-    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> AlvaraRelatorioListResponse:
@@ -869,7 +869,7 @@ async def delete_alvara(
 
 @alvaras_router.get("/relatorio/kpis", response_model=AlvaraKPIsResponse)
 async def obter_kpis_relatorio(
-    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> AlvaraKPIsResponse:
@@ -883,7 +883,7 @@ async def exportar_relatorio_csv(
     tipo_servico: str | None = None,
     id_permissionario: int | None = None,
     status: str | None = None,
-    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -945,7 +945,7 @@ async def list_alvara_documentos(
     alvara_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
-    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> Paginated[AlvaraDocumentoOut]:
@@ -982,7 +982,7 @@ async def create_alvara_documento(
 async def get_alvara_documento(
     alvara_id: int,
     documento_id: int,
-    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> AlvaraDocumentoOut:
@@ -1025,7 +1025,7 @@ async def list_alvara_responsaveis(
     alvara_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
-    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> Paginated[AlvaraResponsavelOut]:
@@ -1062,7 +1062,7 @@ async def add_alvara_responsavel(
 async def get_alvara_responsavel(
     alvara_id: int,
     responsavel_id: int,
-    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> AlvaraResponsavelOut:
@@ -1117,7 +1117,7 @@ async def listar_veiculos_alvara(
     alvara_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
-    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> Paginated[AlvaraVeiculoOut]:
@@ -1137,7 +1137,7 @@ async def listar_alvaras_veiculo(
     veiculo_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
-    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> Paginated[AlvaraVeiculoOut]:
@@ -1158,7 +1158,7 @@ async def listar_auditoria_alvara(
     alvara_id: int,
     limit: int = 50,
     offset: int = 0,
-    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> AlvaraAuditoriaListResponse:
