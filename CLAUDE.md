@@ -238,10 +238,32 @@ O agente `migrations-checker` (`.claude/agents/`) roda esse checklist; `frota-re
 3. **Adicionar a rota de topo à regex de `location ~ ^/(...)` em `nginx/default.conf`** — sem isso a página cai no fallback legado e "some" no `:8090`, mesmo funcionando em `:3000`.
 4. Migration com o boilerplate de RLS acima.
 5. Testes `backend/tests/test_<modulo>_*.py`.
+6. **Rota de segmento literal (`/vencidos`, `/relatorio`) tem de ser declarada ANTES da paramétrica
+   irmã (`/{id}`)** — o FastAPI casa na ordem de declaração, então a paramétrica engole a literal e
+   a requisição morre em **422** sem chegar no handler. Esse defeito ocorreu **três vezes** no
+   `transporte_regulado.py` e nenhuma foi pega por teste de service, que não passa por roteamento.
+   Hoje `tests/test_guarda_ordem_rotas.py` varre a aplicação inteira e reprova o caso.
+7. **O tipo em `api.ts` tem de casar com o `response_model` do endpoint.** `request<T>()` faz cast do
+   JSON **sem validar**: o tipo é uma afirmação sobre a resposta, não uma verificação dela. Declarar
+   `X[]` onde o backend devolve `Paginated[X]` deixa o `tsc` verde e estoura no navegador com
+   `TypeError: ….map is not a function` — e, onde o código faz `data?.length`, a tela diz "nenhum
+   registro" com registros no banco, sem erro nenhum no console. Aconteceu por 11 dias no transporte.
+   Endpoint paginado → `request<Paginated<X>>` e tela consumindo `.items`. **Não** desembrulhe dentro
+   do `api.ts`: o tipo honesto é o que faz o `tsc` reprovar a próxima ocorrência.
 
 ## Testes — convenções
 
 `backend/tests/conftest.py` expõe dois engines por um motivo: `admin_session` usa `ged_user` (SUPERUSER, **BYPASSRLS**) só para setup/teardown; `app_session` usa `aprimora_app` (**NOBYPASSRLS**) e é o único jeito de validar RLS de verdade — teste de isolamento escrito com `admin_session` passa por engano. Com `app_session`, o teste é responsável por `SET LOCAL app.tenant_id` em cada transação. A fixture `two_tenants` cria/limpa dois tenants com slug aleatório.
+
+**A suíte inteira exercitava super-usuário, e isso escondeu um 500 em produção.** Em `auth/perms.py`
+o bypass de SU **retorna antes** do `getattr(item, action)`, então defeito que só aparece para
+usuário comum passa por toda a bateria sem ser visto — foi assim que 10 rotas do transporte com um
+`action` inexistente (`"visualizar"`, que não está no `Literal` de `Action` nem em `PermItem`)
+ficaram devolvendo `AttributeError` → HTTP 500 para qualquer operador não-SU. Ao gatear endpoint
+novo, escreva **pelo menos um teste HTTP com usuário comum**; o padrão de montar esse usuário está
+em `test_permissoes_modulo.py::_cria_usuario_comum` e em
+`test_transporte_p4_relatorio.py::test_http_usuario_comum_acessa_relatorio_kpis`. Lembre que o
+tenant precisa contratar o módulo, senão o gate barra antes com 403 e o teste não chega onde importa.
 
 Dados de teste: e-mails no domínio reservado `.test` (`@e2e.test`, `@ux1smoke.test`), slugs com prefixo identificável (`e2e-`, `sec1-`, `ux1-smoke-`) + sufixo `uuid4().hex[:8]`, cleanup obrigatório no teardown. Testes **não devem assumir banco vazio** — evite contagens globais; ancore em `admin@local.test` no tenant default ou num tenant isolado da fixture.
 
