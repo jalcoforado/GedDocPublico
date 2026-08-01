@@ -127,6 +127,12 @@ Nenhuma outra tabela do banco tem coluna `tenant_id` sem RLS habilitada e força
 `ged_user` e o runtime é `ged_user`. No dia em que `SEC-RLS-00B` fizer o runtime ser um papel
 não-dono, elas passam a ser filtradas — e nesse instante o problema da seção 3.1 estoura.
 
+As nove linhas desta tabela são exatamente a `ALLOWLIST_SEM_RLS_FORCADA` de
+`backend/tests/test_rls_bypass_caracterizacao.py`, e a guarda estrutural cobre os três schemas
+(`aprimora_py`, `frota`, `transporte_regulado`). Conforme o `SEC-RLS-00B` aplicar `FORCE`, a
+allowlist **tem** de encolher: o teste reprova entrada que já ganhou RLS habilitada e forçada. Só
+`aprimora_py.tenant_modulo` é permanente.
+
 ## 3. Policies (`pg_policies`)
 
 182 policies em 87 tabelas. **Nenhuma tabela tem RLS habilitada sem policy** (verificado — o caso
@@ -223,8 +229,8 @@ SELECT nome,
 | `transporte_regulado.alvara_documento` | **f** | f | f | f | Divergência |
 | `transporte_regulado.alvara_responsavel` | **f** | f | f | f | Divergência |
 
-Todas as demais 229 tabelas desses seis schemas têm `SELECT, INSERT, UPDATE, DELETE` para
-`aprimora_app`.
+Os seis schemas somam **229** tabelas; com as 6 divergências acima, as demais **223** têm
+`SELECT, INSERT, UPDATE, DELETE` para `aprimora_app`.
 
 Reprodução:
 
@@ -346,7 +352,7 @@ mesma credencial.
 
 | Consumidor | Tabelas | Observação |
 |---|---|---|
-| `app/routers/admin_tenants.py` (11 rotas, `require_platform_admin`) | `aprimora_py.tenant`, `modulo`, `tenant_modulo` — e `audit_log` | As três primeiras não têm RLS; `audit_log` **tem**, e é escrita com o `tenant_id` do tenant ALVO sob a sessão do tenant operante. **Depende de bypass** — ver 8.7 |
+| `app/routers/admin_tenants.py` (8 rotas com `require_platform_admin`: linhas 89, 108, 138, 148, 182, 191, 200, 211) | `aprimora_py.tenant`, `modulo`, `tenant_modulo` — e `audit_log` | As três primeiras não têm RLS; `audit_log` **tem**, e é escrita com o `tenant_id` do tenant ALVO sob a sessão do tenant operante. **Depende de bypass** — ver 8.7 |
 | `app/services/provisioning_tenant.py:117` | insere em `tenant` (sem RLS) e depois faz `SET LOCAL app.tenant_id` para o tenant recém-criado | Não depende de bypass |
 | `app/cli/tenant.py` | delega ao serviço acima | Não depende de bypass |
 | `app/cli/seed_bootstrap.py` | `SET LOCAL` correto (`:53`), mas **escreve** em `aprimora_py.modulo` e `modulo_transacao` | Depende de grant que `aprimora_app` não tem |
@@ -456,8 +462,44 @@ fica com o `app.tenant_id` do tenant default (`sobral`, resolvido pelo `TenantMi
 de `http://test`) enquanto os dados vivem no tenant temporário da fixture. Sob bypass ninguém nota;
 sob RLS, tudo retorna vazio.
 
-Padrão em `tests/test_pr4d_http_gates.py:234`, `tests/test_pr5a_dashboard_servicos.py:776`,
-`tests/test_transporte_p4_relatorio.py:353`, `tests/test_transporte_regulado_vistoria.py:125`.
+**A lista abaixo é "quem tem o padrão", não "quem falhou".** A distinção importa: só
+`test_pr4d_http_gates.py` falhou *por causa* do arreio na seção 9, porque é o único que assevera
+**leitura tenant-scoped**. Os outros asseveram status de gate (403/200) ou identidade, e por isso
+passaram — não porque o arreio esteja correto neles. Corrigir só os que falharam deixaria os
+demais aparecendo depois como se fossem regressão causada pelas mudanças de policy do
+`SEC-RLS-00B`, que é exatamente o ruído que este PR existe para eliminar.
+
+```bash
+grep -rn "dependency_overrides\[require_tenant_id\]" backend/tests/
+```
+
+**14 ocorrências em 12 arquivos:**
+
+| Arquivo (`backend/tests/`) | Linha(s) | Também sobrepõe `get_db`? | Falhou na §9? |
+|---|---|---|---|
+| `test_auth_routers.py` | 144, 188 | não | não |
+| `test_leitura_por_modulo.py` | 153 | não | não |
+| `test_modulos_me.py` | 46 | não | não |
+| `test_permissoes_modulo.py` | 278 | não | não |
+| `test_pr4d_http_gates.py` | 234, 252 | não | **sim (4 testes)** |
+| `test_pr5a_dashboard_servicos.py` | 776 | não | falha pré-existente, nas duas execuções |
+| `test_sec1_followup_put_usuario_senha.py` | 169 | **sim** | não |
+| `test_sec1_guard_must_change_password.py` | 147 | não | não |
+| `test_sec1_login_me_flag.py` | 166 | **sim** | não |
+| `test_sec1_marcar_flag_must_change_password.py` | 322 | **sim** | não |
+| `test_transporte_p4_relatorio.py` | 353 | não | sim, mas por grant (§9.3), não pelo arreio |
+| `test_transporte_regulado_vistoria.py` | 125 | não | sim, mas pela GUC (§9.3), não pelo arreio |
+
+Os três que sobrepõem `get_db` por uma sessão de `admin_engine` têm um segundo problema, e maior:
+a sessão é de `ged_user` **independentemente** do `DATABASE_URL`, então esses testes nunca
+exercitam RLS — nem hoje, nem depois do `SEC-RLS-00B`.
+
+Contraexemplo bem-feito, para copiar: `tests/test_sec1_login_me_flag.py:144-148`
+(`_login_host_header`) manda o header `Host` e deixa o `TenantMiddleware` resolver, com o motivo
+documentado no próprio docstring — "o que também ativa RLS corretamente na session do `get_db`
+real". Os únicos três arquivos que hoje mandam `Host` são `test_auth_routers.py`,
+`test_sec1_followup_put_usuario_senha.py` e `test_sec1_login_me_flag.py`.
+
 Não é defeito de produção — mas **é** dependência do bypass, e precisa ser corrigida **antes** de
 `SEC-RLS-00B`, senão a suíte não consegue medir o que ele muda.
 
@@ -497,6 +539,12 @@ Baseline, para separar falha pré-existente de falha causada pela troca de papel
 ```bash
 docker exec -e PYTEST_DB_HOST=db aprimora-py-backend pytest -q -p no:randomly
 ```
+
+> **`-p no:randomly` é no-op neste container.** `pytest-randomly` não está instalado
+> (`importlib.util.find_spec('pytest_randomly') is None`), então a flag não desliga nada — a ordem
+> já era a de coleta, e as duas execuções são comparáveis por isso, não pela flag. Registrado para
+> que quem reproduzir a medição não suponha que a ordem foi fixada por ela. O CI também não passa
+> a flag.
 
 | Execução | Papel do app | Resultado | Duração |
 |---|---|---|---|
@@ -583,7 +631,7 @@ porque `load_permissions` faz o `SET LOCAL` por conta própria.
 | 7 | `alembic` roda no `entrypoint.sh` com credencial da API | papel + deploy | `backend/entrypoint.sh`, `alembic/env.py` |
 | 8 | Escrita em `aprimora_py.modulo`/`modulo_transacao` | grant + atribuição de papel | `app/cli/seed_bootstrap.py` |
 | 9 | `audit_log` de rota de plataforma grava com o `tenant_id` do tenant ALVO | papel/policy de plataforma | `app/routers/admin_tenants.py`, `app/services/audit.py` |
-| 10 | Arreio de teste HTTP sobrepõe `require_tenant_id` mas não `request.state.tenant_id` | teste — **pré-requisito** de 00B | 4 arquivos em `backend/tests/` |
+| 10 | Arreio de teste HTTP sobrepõe `require_tenant_id` mas não `request.state.tenant_id` | teste — **pré-requisito** de 00B | **14 ocorrências em 12 arquivos** de `backend/tests/` (lista nominal em 8.8); só 1 falhou na §9 |
 
 Nenhuma função `SECURITY DEFINER` existe, e nenhuma policy está amarrada a papel nominal — os dois
 fatos simplificam a introdução de papéis novos.
