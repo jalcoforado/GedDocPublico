@@ -58,6 +58,8 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/transporte-regulado/permissionarios": { perm: "transporte_regulado" },
   "/transporte-regulado/empresas": { perm: "transporte_regulado" },
   "/transporte-regulado/veiculos": { perm: "transporte_regulado" },
+  "/transporte-regulado/alvaras": { perm: "transporte_regulado" },
+  "/transporte-regulado/relatorio": { perm: "transporte_regulado" },
   "/pagamentos": {
     anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"],
   },
@@ -188,5 +190,16 @@ describe("split dos menus", () => {
       }
     }
     expect(divergencias).toEqual([]);
+  });
+
+  it("o menu do transporte alcança alvarás e relatórios", () => {
+    // P1–P4 entregaram estas duas telas e ninguém as ligou à navegação: por
+    // meses só se chegava nelas digitando a URL. Este teste é o que impede
+    // que uma tela entregue volte a ficar invisível.
+    const menu = menuDoModulo("transporte");
+    expect(menu).not.toBeNull();
+    const doTransporte = hrefs(menu!.grupos.flatMap((g) => g.items));
+    expect(doTransporte).toContain("/transporte-regulado/alvaras");
+    expect(doTransporte).toContain("/transporte-regulado/relatorio");
   });
 });
