@@ -375,7 +375,76 @@ sem `href`. Alvarás e Relatórios têm tela pronta; Documentos e Vistorias **n�
 backend só existem aninhados sob um veículo, sem listagem transversal, e no frontend são seções de
 `veiculos/[id]/page.tsx`. Por isso os dois cards saem em vez de ganharem link.
 
-- [ ] **Step 1: Criar o módulo de dados dos cards**
+- [ ] **Step 1: Escrever os testes primeiro — eles devem falhar por módulo inexistente**
+
+Crie `frontend/__tests__/transporte-hub.test.tsx`:
+
+```tsx
+/**
+ * O hub é a porta do módulo. Card entregue e não ligado — ou ligado e marcado
+ * como não-pronto — é exatamente como Alvarás e Relatórios ficaram invisíveis
+ * por quatro fases, com backend, tela e testes todos verdes.
+ */
+import { describe, expect, it } from "vitest";
+
+import { menuDoModulo } from "@/lib/menus";
+import type { NavItem } from "@/lib/menus/tipos";
+import { moduloDoPathname } from "@/lib/modulos";
+import { CARDS } from "@/lib/transporte-hub";
+
+function hrefs(items: NavItem[]): string[] {
+  return items.flatMap((i) => [i.href, ...(i.children ? hrefs(i.children) : [])]);
+}
+
+describe("hub do transporte regulado", () => {
+  it("todo card pronto tem href", () => {
+    expect(CARDS.filter((c) => c.ready && !c.href).map((c) => c.title)).toEqual([]);
+  });
+
+  it("nenhum card com href fica escondido como não-pronto", () => {
+    expect(CARDS.filter((c) => c.href && !c.ready).map((c) => c.title)).toEqual([]);
+  });
+
+  it("todo card pronto aponta para rota do próprio módulo", () => {
+    const fora = CARDS.filter((c) => c.ready && c.href)
+      .filter((c) => moduloDoPathname(c.href!) !== "transporte")
+      .map((c) => c.title);
+    expect(fora).toEqual([]);
+  });
+
+  it("todo card pronto está no menu do módulo", () => {
+    // Hub e menu são duas listas da mesma navegação. Divergir significa que a
+    // tela existe num lugar e some no outro — o sintoma é o usuário achar por
+    // um caminho e não achar pelo outro.
+    const menu = menuDoModulo("transporte");
+    expect(menu).not.toBeNull();
+    const doMenu = new Set(hrefs(menu!.grupos.flatMap((g) => g.items)));
+    const foraDoMenu = CARDS.filter((c) => c.ready && c.href)
+      .filter((c) => !doMenu.has(c.href!))
+      .map((c) => c.title);
+    expect(foraDoMenu).toEqual([]);
+  });
+
+  it("os três cards não entregues seguem sem href", () => {
+    // Recadastramento (P5), Rotas e Linhas (P6) e Ocorrências (P7) ainda não
+    // existem. Card tracejado é honesto; card tracejado sobre tela pronta, não.
+    const semHref = CARDS.filter((c) => !c.ready).map((c) => c.title);
+    expect(semHref).toEqual(["Recadastramento", "Rotas e Linhas", "Ocorrências"]);
+  });
+});
+```
+
+- [ ] **Step 2: Rodar e confirmar que falham pelo motivo certo**
+
+```bash
+cd frontend && npx vitest run __tests__/transporte-hub.test.tsx
+```
+
+Esperado: **FAIL** na resolução do import — `Failed to resolve import "@/lib/transporte-hub"` ou
+equivalente. O módulo ainda não existe; é essa a falha que se espera. Se falhar por outro motivo,
+pare e investigue antes de criar o módulo.
+
+- [ ] **Step 3: Criar o módulo de dados dos cards**
 
 Crie `frontend/lib/transporte-hub.ts` com exatamente:
 
@@ -456,75 +525,15 @@ export const CARDS: HubCard[] = [
 A descrição de Veículos muda de propósito: agora que os cards de Documentos e Vistorias saíram, é
 esse card que precisa dizer onde eles foram parar.
 
-- [ ] **Step 2: Escrever os testes que falham**
-
-Crie `frontend/__tests__/transporte-hub.test.tsx`:
-
-```tsx
-/**
- * O hub é a porta do módulo. Card entregue e não ligado — ou ligado e marcado
- * como não-pronto — é exatamente como Alvarás e Relatórios ficaram invisíveis
- * por quatro fases, com backend, tela e testes todos verdes.
- */
-import { describe, expect, it } from "vitest";
-
-import { menuDoModulo } from "@/lib/menus";
-import type { NavItem } from "@/lib/menus/tipos";
-import { moduloDoPathname } from "@/lib/modulos";
-import { CARDS } from "@/lib/transporte-hub";
-
-function hrefs(items: NavItem[]): string[] {
-  return items.flatMap((i) => [i.href, ...(i.children ? hrefs(i.children) : [])]);
-}
-
-describe("hub do transporte regulado", () => {
-  it("todo card pronto tem href", () => {
-    expect(CARDS.filter((c) => c.ready && !c.href).map((c) => c.title)).toEqual([]);
-  });
-
-  it("nenhum card com href fica escondido como não-pronto", () => {
-    expect(CARDS.filter((c) => c.href && !c.ready).map((c) => c.title)).toEqual([]);
-  });
-
-  it("todo card pronto aponta para rota do próprio módulo", () => {
-    const fora = CARDS.filter((c) => c.ready && c.href)
-      .filter((c) => moduloDoPathname(c.href!) !== "transporte")
-      .map((c) => c.title);
-    expect(fora).toEqual([]);
-  });
-
-  it("todo card pronto está no menu do módulo", () => {
-    // Hub e menu são duas listas da mesma navegação. Divergir significa que a
-    // tela existe num lugar e some no outro — o sintoma é o usuário achar por
-    // um caminho e não achar pelo outro.
-    const menu = menuDoModulo("transporte");
-    expect(menu).not.toBeNull();
-    const doMenu = new Set(hrefs(menu!.grupos.flatMap((g) => g.items)));
-    const foraDoMenu = CARDS.filter((c) => c.ready && c.href)
-      .filter((c) => !doMenu.has(c.href!))
-      .map((c) => c.title);
-    expect(foraDoMenu).toEqual([]);
-  });
-
-  it("os três cards não entregues seguem sem href", () => {
-    // Recadastramento (P5), Rotas e Linhas (P6) e Ocorrências (P7) ainda não
-    // existem. Card tracejado é honesto; card tracejado sobre tela pronta, não.
-    const semHref = CARDS.filter((c) => !c.ready).map((c) => c.title);
-    expect(semHref).toEqual(["Recadastramento", "Rotas e Linhas", "Ocorrências"]);
-  });
-});
-```
-
-- [ ] **Step 3: Rodar e confirmar que passam**
+- [ ] **Step 4: Rodar e confirmar que agora passam**
 
 ```bash
 cd frontend && npx vitest run __tests__/transporte-hub.test.tsx
 ```
 
-Esperado: **todos PASS** — os cards do Step 1 já satisfazem as invariantes, e os testes existem para
-travá-las daqui pra frente. Se "todo card pronto está no menu" falhar, a Task 2 não foi feita.
+Esperado: **todos PASS**. Se `todo card pronto esta no menu` falhar, a Task 2 nao foi feita.
 
-- [ ] **Step 4: Fazer a página consumir os cards de `lib/`**
+- [ ] **Step 5: Fazer a página consumir os cards de `lib/`**
 
 Em `frontend/app/(app)/transporte-regulado/page.tsx`, remova a `interface HubCard` (linhas 21–27) e a
 const `CARDS` (linhas 29–58), e ajuste os imports do topo. O arquivo passa a começar assim:
@@ -543,7 +552,7 @@ import { CARDS } from "@/lib/transporte-hub";
 agora vivem em `lib/transporte-hub.ts`. O corpo do componente (`export default function
 TransporteReguladoHubPage`) **não muda em nada** — continua mapeando `CARDS`.
 
-- [ ] **Step 5: Type-check — é ele que pega ícone órfão**
+- [ ] **Step 6: Type-check — é ele que pega ícone órfão**
 
 ```bash
 cd frontend && npx tsc --noEmit
@@ -552,7 +561,7 @@ cd frontend && npx tsc --noEmit
 Esperado: sem saída. Se acusar `'FileText' is declared but its value is never read` ou similar,
 sobrou ícone no import da página — remova.
 
-- [ ] **Step 6: Rodar a suíte de frontend inteira**
+- [ ] **Step 7: Rodar a suíte de frontend inteira**
 
 ```bash
 cd frontend && npm test
@@ -560,7 +569,7 @@ cd frontend && npm test
 
 Esperado: todos verdes, incluindo `menus.test.tsx` da Task 2.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add frontend/lib/transporte-hub.ts frontend/__tests__/transporte-hub.test.tsx frontend/app/\(app\)/transporte-regulado/page.tsx
