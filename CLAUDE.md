@@ -10,6 +10,78 @@ Plataforma SaaS multi-tenant de GED/protocolo para prefeituras (piloto: Sobral).
 
 Módulos de negócio já entregues: protocolo/processos, anexos, assinatura eletrônica v2, workflow BPM, notificações, auditoria, portal do cidadão, serviços, frota, transporte regulado, pagamentos, minutas (com integração Google Docs), admin de plataforma/tenants.
 
+### Modularização — o sistema é contratável por módulo
+
+Desde 2026-07-30 (fatia F1, `c4dcb53`) o sistema é dividido em **cinco módulos contratáveis** —
+`protocolo`, `pagamentos`, `frota`, `transporte`, `administracao` — mais `comum`, que não é
+contratável e nunca é bloqueado. O catálogo é global (`aprimora_py.modulo`, `modulo_transacao`); a
+contratação é por tenant (`aprimora_py.tenant_modulo`, **sem RLS** por decisão: é tabela de
+plataforma, escrita pelo platform admin operando sobre outros tenants).
+
+Cada módulo declara os códigos de `utils.transacao` que lhe pertencem (o mapa vive em
+`app/cli/seed_bootstrap.py::MODULO_TRANSACOES`). Transação de módulo não contratado entra no
+conjunto de bloqueados e o gate nega — em `auth/perms.py`, **antes** do bypass de super-usuário. Um
+SU de tenant sem o módulo leva 403 igual a qualquer um; isso é deliberado e tem teste.
+
+Três coisas a não quebrar ao mexer nisso:
+
+- **Fail-open é intencional.** Transação **sem** vínculo de módulo NÃO é bloqueada. O esquecimento
+  aparece como teste vermelho (`tests/test_guarda_modularizacao.py`, `tests/test_transacoes_rbac.py`)
+  e não como tela sumida em produção. Não "conserte" isso para fail-closed.
+- **Transação nova precisa de módulo.** Criou código em `utils.transacao`? Declare-o em
+  `MODULO_TRANSACOES`, senão a guarda reprova o PR.
+- **Contratação em banco limpo vem do seed.** O backfill da 0073 só alcança tenants que já existiam;
+  em banco novo quem contrata é `seed_bootstrap` (e `ci/seed-e2e.sql`, porque o
+  `e2e-assinatura.yml` **não** roda o seed_bootstrap). Sem isso o tenant sobe com zero módulos e o
+  sistema inteiro dá 403.
+
+Desde 2026-07-30 (fatia `leitura-por-modulo`, `5c47729`) a leitura também é gateada por
+contratação: `require_modulo(slug)` (`auth/modulos.py`) barra 69 GETs (58 `protocolo`, 11
+`administracao`; 7 permanecem transversais, sem gate, com a razão registrada em
+`tests/test_guarda_modularizacao.py::ENDPOINTS_LEITURA_SEM_GATE`). Diferença essencial para
+`require_permission`: **`require_modulo` não olha o usuário** — não consulta grupo, transação nem
+nível. Um usuário sem nenhuma permissão continua lendo o que lê hoje, desde que o tenant tenha o
+módulo contratado. Não "melhore" essa dependência para também checar permissão sem falar com o
+Jorge antes — mudaria política de acesso, e há teste (`test_usuario_sem_permissao_continua_lendo`)
+que trava essa propriedade.
+
+Lacuna que **continua** aberta, e é outro problema: a contratação fecha só a metade de "tenant tem
+o módulo?" — não fecha "este usuário pode ler isto?". `/usuarios`, `/grupos`, `/audit` e outros
+seguem legíveis por **qualquer** autenticado do tenant. Detalhes e decisão em
+`docs/BACKLOG-PENDENCIAS.md`, item 1.0.8.
+
+### A interface (fatia F2, PR #17, em `main` desde 2026-07-31)
+
+Até aqui a modularização era invisível: a Sidebar mostrava o menu inteiro e o usuário só descobria
+que não tinha o módulo ao clicar e tomar 403. A F2 é a fatia que o **usuário vê**.
+
+- **`frontend/lib/menus/`** — o `NAV` monolítico da Sidebar virou seis arquivos, um por módulo
+  (`protocolo`, `pagamentos`, `frota`, `transporte`, `administracao`, `comum`). É a **fonte única**
+  de navegação: a Sidebar e o Ctrl+K (`CommandPalette`) consomem daqui, e `canSeeItem`
+  (`lib/menus/permissoes.ts`) é compartilhado pelos dois — duas cópias divergiriam, e o sintoma
+  seria item aparecendo num lugar e não no outro.
+- **`frontend/lib/modulos.ts`** — `moduloDoPathname(path)` resolve o módulo ativo a partir da URL.
+  É o que a F3 vai reaproveitar para gerar os redirects 308.
+- **`/modulos`** — o launcher, em `app/(launcher)/`, layout próprio sem Sidebar. Com **um módulo
+  só ele redireciona direto** ("porta, não pedágio").
+- O login aterrissa no launcher; `must_change_password` (SEC-1) **tem precedência** e continua indo
+  para `/alterar-senha-obrigatoria`.
+- **Aba Módulos** no admin de tenant contrata e descontrata por tenant.
+
+Dois filtros independentes governam o menu, e **nenhum substitui o outro**: o módulo escolhe *qual
+conjunto* de itens é candidato; a permissão (`perm`/`anyOf`) decide *quais daquele conjunto*
+aparecem. Um `perm` perdido não quebra tela — vira item visível para quem não deveria vê-lo. Há
+teste que trava isso (`__tests__/menus.test.tsx`, tabela `PERMISSOES_ESPERADAS`).
+
+**O guard de módulo no frontend é UX, não segurança.** A barreira real é o gate de contratação no
+backend. Nenhum teste do frontend deve afirmar que ele protege dado.
+
+**Rota de topo nova precisa entrar na regex do `nginx/default.conf`** — sem isso a tela cai no
+fallback legado e "não existe" no `:8090`, mesmo funcionando em dev. Quase aconteceu com `/modulos`.
+
+O prefixo `/m/<slug>` na URL e os redirects 308 são a **F3, não planejada**. Spec e planos em
+`docs/superpowers/`.
+
 O nginx nasceu como *Strangler Fig* na frente de um monolito PHP legado. Hoje a versão Python é tratada como **independente** — não portar comportamento do PHP nem consultá-lo como fonte de verdade. O que sobra dessa herança e continua valendo: o schema Postgres é compartilhado com o legado (`utils.*`, `protocolos.*` são tabelas legadas; `aprimora_py.*` e `frota.*` são nossos), e o nginx tem uma regex de rotas migradas (ver "Adicionando um módulo").
 
 ## Comandos
@@ -27,7 +99,12 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 docker compose --profile init up bootstrap
 ```
 
-Containers: `aprimora-py-backend` (:8000), `-frontend` (:3100), `-worker`, `-beat`, `-redis`, `-nginx` (:8090), `-db` (:5432). Entrar sempre por `http://localhost:8090` (nginx) — é lá que o roteamento e o header `Host` (resolução de tenant) funcionam.
+Containers: `aprimora-py-backend` (publicado em **:8001**, interno :8000), `-frontend` (:3100), `-worker`, `-beat`, `-redis`, `-nginx` (:8090), `-db` (:5432). Entrar sempre por `http://localhost:8090` (nginx) — é lá que o roteamento e o header `Host` (resolução de tenant) funcionam.
+
+**O `:3100` direto não funciona na stack de produção-like.** O `docker-compose.yml` assa
+`NEXT_PUBLIC_API_URL=/api/v2` no bundle — base relativa, que só resolve atrás do nginx. Servido pelo
+`:3100`, o próprio Next recebe `/api/v2/...` e devolve 404 no login. Para iterar em `:3100` use o
+overlay `docker-compose.dev.yml`, que usa base absoluta.
 
 ### Seeds
 
@@ -37,7 +114,9 @@ São **três**, com papéis distintos:
 # 1. Pré-requisitos globais — roda a cada deploy, idempotente. Garante
 #    utils.sistema/nivel, o tenant+admin padrão, o segredo JWT e o catálogo
 #    protocolos.acao (ABERTURA/ENCAMINHAMENTO/RECEBIMENTO). Sem as ações não
-#    se abre nem tramita processo.
+#    se abre nem tramita processo. Garante também o catálogo de módulos e a
+#    CONTRATAÇÃO INICIAL do tenant — só quando ele não tem nenhuma linha em
+#    tenant_modulo, para não ressuscitar descontratação deliberada do admin.
 docker exec aprimora-py-backend python -m app.cli.seed_bootstrap
 
 # 2. Protocolo: 12 processos, 15 anexos, 6 serviços, manifestantes, servidores

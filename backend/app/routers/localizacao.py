@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Bairro, Cidade, Endereco, Estado, Usuario
@@ -23,9 +24,21 @@ from ._crud import get_or_404, paginated_list
 
 router = APIRouter(tags=["localizacao"])
 
+# Efeito colateral aceito (achado na revisão da Task 2, 2026-07-30): `/estados`,
+# `/cidades` e `/bairros` não declaravam `require_tenant_id` (catálogo GLOBAL,
+# não filtra por tenant) — `require_modulo("protocolo")` injeta essa
+# dependência por baixo. Fora do nginx, com `STRICT_TENANT_RESOLUTION=true` e
+# Host sem subdomínio resolvível, essas 3 rotas passam a poder responder 400
+# onde antes davam 200. Aceito por ora; atrás do nginx (produção) o tenant
+# sempre resolve, então não há regressão observável ali.
+
 
 # --- Estado (read only, catálogo GLOBAL) -------------------------------------
-@router.get("/estados", response_model=list[EstadoOut])
+@router.get(
+    "/estados",
+    response_model=list[EstadoOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_estados(
     _: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -35,7 +48,11 @@ async def list_estados(
 
 
 # --- Cidade (catálogo GLOBAL — IBGE) -----------------------------------------
-@router.get("/cidades", response_model=Paginated[CidadeOut])
+@router.get(
+    "/cidades",
+    response_model=Paginated[CidadeOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_cidades(
     _: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -99,7 +116,11 @@ async def delete_cidade(
 
 
 # --- Bairro (catálogo GLOBAL) ------------------------------------------------
-@router.get("/bairros", response_model=Paginated[BairroOut])
+@router.get(
+    "/bairros",
+    response_model=Paginated[BairroOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_bairros(
     _: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -163,7 +184,11 @@ async def delete_bairro(
 
 
 # --- Endereco (TENANTED) -----------------------------------------------------
-@router.get("/enderecos", response_model=Paginated[EnderecoOut])
+@router.get(
+    "/enderecos",
+    response_model=Paginated[EnderecoOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_enderecos(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),

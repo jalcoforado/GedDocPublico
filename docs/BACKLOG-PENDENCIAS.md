@@ -12,6 +12,9 @@
 
 ## Estado de referência
 
+> **Atualizado em 2026-07-30.** O bloco abaixo descrevia o estado de 28/07; o que mudou está logo
+> em seguida.
+
 - `main` em `eb93bd1`, CI verde nos três workflows, VPS de homologação no ar e populada nos
   quatro módulos (protocolo, pagamentos, frota, transporte regulado).
 - Migrations até **0072** (head único).
@@ -19,6 +22,32 @@
   branches de feature antigas já estão dentro de `main`, incluindo `feat/frota-operacional-completo`
   e `feat/transporte-p4-alvaras-complementacoes` (registros anteriores davam essas duas como
   "aguardando decisão de merge" — está desatualizado).
+
+**Estado em 2026-07-31:**
+
+- `main` em `c19f359`. **A modularização está completa até a interface**, em três fatias, todas
+  mergeadas com CI verde e deployadas na VPS:
+  - **F1** (`c4dcb53`) — catálogo, contratação por tenant, bloqueio de **escrita**. Migrations até
+    **0075** (head único): 0073 catálogo+contratação, 0074 as 9 transações que faltavam, 0075 FK de
+    `tenant_modulo` com `ON DELETE CASCADE`.
+  - **Leitura por módulo** (`a7867c9`, item 1.0.5) — `require_modulo(slug)` em 69 GETs; 7
+    transversais permanecem sem gate, com a razão registrada na guarda.
+  - **F2** (PR #17, `c19f359`) — a interface: menus por módulo, launcher `/modulos`, login
+    aterrissando nele, switcher no Header, cabeçalho de módulo na Sidebar, aba Módulos no admin,
+    Ctrl+K ciente de módulo e permissão.
+- **F3 (prefixo `/m/<slug>` + redirects 308) não está planejada.** O mapa `pathname → módulo` que a
+  F2 criou (`frontend/lib/modulos.ts`) é o que vai gerar os redirects.
+- **Cuidado ao validar módulos na homologação:** o seed contrata os **cinco** módulos no tenant
+  `sobral`. O caso de "tenant com um módulo só" — onde estava o defeito crítico da F2 — **não é
+  exercitado** por navegação normal. Use a aba Módulos do admin de plataforma para descontratar.
+- **Ambiente local do Jorge:** o antivírus AVG intercepta HTTPS e **nenhuma imagem docker rebuilda
+  nessa máquina** (npm e PyPI falham com erro de certificado). O frontend local roda por um contorno
+  — build no host copiado para dentro do container — que morre se o container for **recriado**
+  (`docker compose up -d`), não sobrevive a isso. CI e VPS não são afetados.
+- **Ambiente local do Jorge:** o antivírus AVG intercepta HTTPS e **nenhuma imagem docker rebuilda
+  nessa máquina** (npm e PyPI falham com erro de certificado). O frontend local roda por um contorno
+  — build no host copiado para dentro do container — que morre se o container for **recriado**
+  (`docker compose up -d`), não sobrevive a isso. CI e VPS não são afetados.
 
 > **Atualizado em 2026-07-28 (quatro itens fechados, removidos conforme a seção 4):**
 >
@@ -74,32 +103,31 @@
   conserto** — se produção estiver sob `sistemas`, o errado é só o container local; se estiver sob
   `aprimora`, a correção envolve migrar dados.
 
-### 1.0.5 Leitura de módulo sem gate de permissão — a contratação é meia barreira
+### 1.0.5 Leitura de módulo sem gate de permissão — FECHADO (contratação; autorização segue item 1.0.8)
 
-*(Descoberto em 2026-07-29, pela varredura de endpoints da fatia F1 da modularização. Jorge decidiu
-tratar em **fatia própria depois do F1**.)*
+*(Descoberto em 2026-07-29, pela varredura de endpoints da fatia F1 da modularização. Fechado em
+2026-07-30 pela fatia `feat/leitura-por-modulo`, escopo em
+`docs/superpowers/specs/2026-07-30-leitura-por-modulo-escopo.md`.)*
 
-- A varredura cobriu **136 endpoints** sob `/api/v2`. Destes, **76 GETs pertencem a um módulo e não
-  têm gate de permissão nenhum** — só `get_current_user`.
-- **Não é esquecimento pontual, é convenção sistemática:** os routers da geração protocolo seguem
-  *escrita gateada, leitura liberada a qualquer autenticado do tenant*. Pagamentos, frota e
-  transporte gateiam as duas pontas e não têm o problema (só o `minha-fila`, já corrigido na F1).
-- **Consequência para a modularização:** um tenant que **não contratou** um módulo continua
-  conseguindo **ler** os dados dele pela API. A escrita está barrada pelo gate da F1; a leitura, não.
-  A contratação, portanto, é meia barreira até isso fechar.
-- A lista está viva e vigiada em `backend/tests/test_guarda_modularizacao.py`, no conjunto
-  `ENDPOINTS_LEITURA_SEM_GATE`, **com o código de permissão que cada endpoint deveria receber**. Há
-  um teste (`test_allowlist_nao_tem_entrada_obsoleta`) que reprova o PR se a lista apodrecer — então
-  a dívida não cresce em silêncio nem parece do mesmo tamanho depois de paga.
-- **Estimativa a confirmar:** ~55 expõem dado de negócio; ~21 são catálogos de lookup (estados,
-  cidades, tipos) onde fechar é discutível.
-- **Por que não foi feito na F1:** fechar tira leitura de quem tem hoje — usuário sem a transação
-  concedida passa a levar 403. É mudança de política de acesso para usuário real, não refactor. E
-  fazer isso enquanto a suíte tinha 8 regressões conhecidas impediria distinguir quebra nova de
-  herdada.
-- **Ao retomar:** auditar os 76 por sensibilidade do dado exposto antes de fechar qualquer um. O
-  `ENDPOINTS_LEITURA_SEM_GATE` já traz o código sugerido por endpoint — é o ponto de partida, não a
-  decisão.
+- A varredura original cobriu **136 endpoints** sob `/api/v2`. Destes, **76 GETs pertenciam a um
+  módulo e não tinham gate nenhum** — só `get_current_user`. Não era esquecimento pontual: os
+  routers da geração protocolo seguiam *escrita gateada, leitura liberada a qualquer autenticado do
+  tenant*.
+- **O que a fatia fechou:** nasceu `require_modulo(slug)` (`backend/app/auth/modulos.py`), que
+  resolve `tenant_id` do caller e barra com 403 se o módulo não estiver contratado — **sem olhar o
+  usuário** (não consulta grupo, transação nem nível; propriedade central, com teste que trava:
+  `test_usuario_sem_permissao_continua_lendo`). Aplicada a **69** dos 76 (58 `protocolo`, 11
+  `administracao`); os 7 restantes ficaram transversais, sem gate, com a razão registrada em
+  `backend/tests/test_guarda_modularizacao.py::ENDPOINTS_LEITURA_SEM_GATE` (`/busca`, `/usuarios`,
+  `/usuarios/{id}`, `/unidades-trabalho`, `/unidades-trabalho/{id}`, `/audit`, `/organograma` — os
+  quatro últimos por consumo cruzado comprovado entre módulos, os dois primeiros por decisão humana
+  de que o recurso é do sistema).
+- A tabela `ROTAS_POR_MODULO` (mesmo arquivo) é a fonte versionada de qual módulo cada rota exige,
+  checada contra a implementação real por introspecção no CI — substitui a lista solta que este item
+  citava antes.
+- **O que NÃO fechou, e não é a mesma coisa:** a contratação responde "o tenant tem o módulo?", não
+  "este usuário pode ler isto?". Todo autenticado do tenant continua lendo `/usuarios`, `/grupos`,
+  `/audit` etc. — isso é o item **1.0.8**, aberto de propósito por esta fatia.
 
 ### 1.0.6 `/notificacoes/whatsapp-test` sem autorização — qualquer autenticado do tenant dispara
 
@@ -128,6 +156,44 @@ ao módulo errado.)*
   `backend/tests/test_guarda_modularizacao.py` — ou seja, a guarda **não** vai reclamar dele. A
   vigilância é este item, não o teste.
 
+### 1.0.65 Falha da F1 que só aparece em banco limpo — ainda NÃO diagnosticada
+
+*(Aberto em 2026-07-30, depois do merge da F1. **É o item mais urgente desta seção.**)*
+
+O job `Backend tests` do CI não conseguiu reportar em nenhuma das duas primeiras tentativas depois do
+merge: morreu por timeout em 15 min e depois em 30 min. A causa do travamento foi corrigida em
+`eea6876` (ver adiante), e o log parcial mostrou o ponto onde estava:
+
+```
+tests/test_permissoes_matriz.py ..........   [ 47%]
+tests/test_permissoes_modulo.py ...F
+##[error]Process completed with exit code 143
+```
+
+- **Há um `F`** — falha real — em `tests/test_permissoes_modulo.py`, arquivo criado pela própria F1.
+  O pytest foi morto (SIGTERM) antes de imprimir a asserção, então **a mensagem é desconhecida**.
+- **Passa localmente**: a suíte aqui fecha em `2 failed / 863 passed`, e as duas são as
+  pré-existentes do item 1.1.5. Logo, é falha que só o banco limpo do CI expõe — mesma classe do
+  Critical que o review final pegou (contratação ausente em banco limpo).
+- **Hipótese descartada:** deriva de `APP_NAME`. O `backend-tests.yml` **não** seta a variável, então
+  o CI roda consistente com o default (`sistemas`) e o `ci/seed-e2e.sql` cria a linha
+  `utils.sistema` correspondente. Testar com `APP_NAME=sistemas` no container local só quebra a
+  consistência local e produz uma falha diferente — não reproduz o CI.
+- **Como retomar:** rodar `gh run list --workflow="Backend tests" --branch main` e ler o run mais
+  recente. Com o travamento corrigido, o pytest agora **imprime** a falha em vez de ser morto. Se o
+  run mais recente ainda não existir, `gh workflow run backend-tests.yml`.
+- Reproduzir localmente exigiria montar um banco do zero pelo caminho do CI (dump de
+  `ci/legacy-schema.sql` → `alembic stamp 0020` → `upgrade head` → `ci/seed-e2e.sql` →
+  `seed_bootstrap`) e apontar **as duas** conexões (`PYTEST_DB_HOST` e `DATABASE_URL`) para ele —
+  ver a armadilha das duas conexões no `CLAUDE.md`.
+
+### 1.0.66 A suíte de backend cresceu para além do teto do CI
+
+O job levava 13–14 min contra um teto de 15; os ~40 testes da F1 empurraram por cima e o teto subiu
+para 30 (`c51e8a4`). **Subir de novo não é o conserto** — está escrito no próprio workflow. A suíte é
+serial de propósito: compartilha um único Postgres e os testes de RLS dependem disso. Paralelizar
+exige um banco por worker (`pytest-xdist` + schema/database por processo), ou fatiar o job.
+
 ### 1.0.7 As 9 transações da 0074 não estão concedidas a nenhum grupo
 
 *(Levantado em 2026-07-30 pelo review final da F1. Decisão: **fica documentado, não automatizado** —
@@ -155,6 +221,56 @@ tem linha em `utils.grupo_transacao`.
   houver grupo não-SU, existe usuário real perdendo acesso nesses 13 endpoints, e aí a concessão
   deixa de ser hipótese.
 
+### 1.0.8 O buraco de autorização — leitura de módulo segue aberta a qualquer autenticado do tenant
+
+*(Aberto de propósito pela fatia `feat/leitura-por-modulo` (2026-07-30), que fechou o item 1.0.5.
+Prometido duas vezes no escopo aprovado
+(`docs/superpowers/specs/2026-07-30-leitura-por-modulo-escopo.md`, seção "A decisão" e seção "Fora
+de escopo") como item de backlog próprio; criado agora no review final.)*
+
+- "Fechar a leitura" eram **dois** problemas distintos: o buraco da **modularização** (tenant sem o
+  módulo contratado lê os dados dele) e o buraco de **autorização** (qualquer autenticado do tenant
+  lê `/usuarios`, `/grupos`, `/audit` e os demais, independente de ter a transação concedida). A
+  fatia de 2026-07-30 fechou só o primeiro, com `require_modulo` — que **deliberadamente não olha o
+  usuário**.
+- **Por que ficou de fora, e não é omissão:** fechar o segundo exigiria trocar (ou somar)
+  `require_permission("<transacao>")` nos GETs, o que muda política de acesso — cada usuário passaria
+  a precisar da transação concedida ao grupo dele. Hoje isso seria **inócuo**: todo grupo do sistema é
+  super-usuário (`nivel.valor = 0`, verificado por query, item 1.0.7), então ninguém perderia acesso
+  na prática. Mas no dia em que o primeiro grupo "Operacional" (nível 1) for criado, os GETs hoje
+  liberados virariam 403 em massa para esse grupo até alguém conceder as transações — evento
+  disruptivo se acontecer sem aviso.
+- **Essa concessão é decisão do dono do produto**, já registrada como item 1.0.7 (as 9 transações da
+  0074 sem linha em `utils.grupo_transacao`) justamente por essa razão: é política de acesso, não
+  refactor.
+- **Ao retomar:** não é "aplicar `require_permission` nos GETs" isoladamente — isso pressupõe que as
+  transações certas já estão concedidas aos grupos certos, que é o próprio item 1.0.7. Os dois
+  precisam andar juntos, e o gatilho para priorizar é a criação do primeiro grupo não-SU (ver
+  "a verificar" no item 1.0.7).
+- Sem prazo.
+
+### 1.0.9 Resíduos da F2 — navegação e admin (todos Minor, nenhum bloqueante)
+
+*(Levantados pelo review final da fatia F2 (2026-07-31, PR #17) e deixados de fora por decisão, não
+por esquecimento. Agrupados aqui para não se perderem.)*
+
+- **Deep link não volta depois do login.** `frontend/middleware.ts` clona a URL e troca o pathname
+  por `/login`, **perdendo o destino original** — nunca houve `next=`. Quem tenta abrir
+  `/frotas/veiculos` sem sessão vai parar no launcher. **Não é regressão** (antes ia parar em
+  `/home`), mas incomoda mais agora que a porta de entrada é a tela de escolha.
+- **`api.adminTenantModulos` / `api.adminTenantContratarModulos` ficaram na raiz** do objeto `api`,
+  em vez de `api.admin.tenants.modulos` / `.definirModulos`, onde já vivem `detalhe`/`editar`/
+  `ativar`/`desativar` do mesmo recurso.
+- **Abas do admin de tenant sem semântica completa:** `role="tablist"`/`role="tab"` sem
+  `aria-controls`, sem `role="tabpanel"` no conteúdo, sem navegação por setas nem roving tabindex.
+  Leitor de tela anuncia "aba" e não encontra painel associado.
+- **O card do launcher aponta para a `raiz` fixa do módulo**, que pode ser uma tela fora do menu
+  daquele usuário — `administracao` leva a `/usuarios` (`perm: usuario`), `protocolo` a `/processos`
+  (`perm: processo`). Não dá 403 (leitura não é gateada por permissão — ver 1.0.8), mas é incoerente.
+  Alternativa: `raiz` = primeiro item visível do menu daquele módulo para aquele usuário.
+- **Fixtures duplicadas nos testes de backend:** `tests/test_leitura_por_modulo.py` é a quarta cópia
+  do padrão de provisionamento+token+cleanup do diretório. Pede um `conftest`.
+
 ### 1.1.5 Suíte não estava verde antes do F1
 
 Duas falhas confirmadas como anteriores à branch `feat/modularizacao-f1` (verificado por
@@ -163,7 +279,14 @@ Duas falhas confirmadas como anteriores à branch `feat/modularizacao-f1` (verif
 item 1.0 acima). O CI em `main` reporta verde, então a divergência é entre ambiente local e CI —
 provavelmente a mesma deriva de env.
 
-Nenhum. Os quatro itens desta seção foram fechados em 2026-07-28 (ver nota acima).
+> **Correção de 2026-07-30:** "o CI em `main` reporta verde" era verdade quando isto foi escrito, mas
+> deixou de ser depois do merge da F1 — ver item 1.0.65. Não tratar mais essas duas falhas como "o
+> CI está verde, é só ambiente local" sem antes conferir o run mais recente.
+
+> **Nota histórica.** Até 2026-07-29 esta seção terminava com a linha "Nenhum — os quatro itens
+> desta seção foram fechados em 2026-07-28". A execução da fatia F1 da modularização abriu os sete
+> itens acima e a linha virou o oposto do que o arquivo mostra, então foi substituída por esta nota.
+> Os quatro itens fechados em 28/07 continuam descritos na nota do topo do arquivo.
 
 ---
 

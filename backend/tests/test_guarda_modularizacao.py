@@ -61,15 +61,18 @@ async def test_toda_transacao_do_sistema_tem_modulo(admin_session):
 
 
 # ---------------------------------------------------------------------------
-# Guarda 2 — endpoint sem require_permission
+# Guarda 2 — endpoint sem gate reconhecido
 #
-# `require_permission` é o único ponto onde o enforcement de módulo acontece
-# (Task 5: o gate roda antes até do bypass de super-usuário). Endpoint sem essa
-# dependência escapa do enforcement, e o esquecimento é silencioso.
+# `require_permission` é o ponto onde o enforcement de módulo por PERMISSÃO
+# acontece (Task 5: o gate roda antes até do bypass de super-usuário).
+# `require_modulo` (auth/modulos.py) é o gate por CONTRATAÇÃO, que não olha
+# usuário — só aceito em leitura (ver `endpoints_sem_gate`). Endpoint sem
+# nenhum dos dois escapa do enforcement, e o esquecimento é silencioso.
 #
-# A varredura devolve todos os endpoints `/api/v2` sem o gate. Cada um foi
-# julgado individualmente e caiu num destes dois conjuntos. Os dois juntos
-# formam a allowlist; qualquer endpoint fora deles reprova o PR.
+# A varredura devolve todos os endpoints `/api/v2` sem gate aceito para o
+# método. Cada um foi julgado individualmente e caiu num destes dois
+# conjuntos. Os dois juntos formam a allowlist; qualquer endpoint fora deles
+# reprova o PR.
 #
 # Os conjuntos são DOIS de propósito. Chamar de "transversal" um endpoint de
 # módulo que só não tem gate por herança histórica seria maquiar a dívida:
@@ -173,123 +176,129 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
 
 
 ENDPOINTS_LEITURA_SEM_GATE: set[tuple[str, str]] = {
-    # DÍVIDA REGISTRADA, não absolvição. Estes endpoints PERTENCEM a um módulo
-    # e hoje não têm gate porque os routers da geração protocolo seguem uma
-    # convenção anterior à modularização: *escrita gateada, leitura liberada a
-    # qualquer usuário autenticado do tenant*. Verificado router a router —
-    # todo POST/PUT/DELETE vizinho exige `require_permission` com o código do
-    # módulo, e nenhum GET exige. Os módulos novos (pagamentos, frota,
-    # transporte) já gateiam leitura também: nenhum deles aparece aqui.
+    # DECISÕES REGISTRADAS, não dívida. Até 2026-07-30 esta lista tinha 76
+    # entradas: GETs que pertenciam a um módulo e não tinham gate porque os
+    # routers da geração protocolo seguem uma convenção anterior à
+    # modularização — *escrita gateada, leitura liberada a qualquer usuário
+    # autenticado do tenant*. Nesta fatia (2026-07-30-leitura-por-modulo), a
+    # Task 2 deu `require_modulo("protocolo")` a 58 delas e a Task 3 deu
+    # `require_modulo("administracao")` a outras 12; as 70 saíram daqui no
+    # mesmo commit que as gateou (o destino de cada uma está em
+    # ROTAS_POR_MODULO, mais abaixo).
     #
-    # Consequência real do que está registrado abaixo: tenant sem o módulo
-    # contratado continua LENDO os dados do módulo. Fechar isso é mudança de
-    # política de produto — tira leitura de quem tem hoje — e por isso ficou
-    # fora da Task 8, que entrega as guardas.
+    # No review final da fatia, `/organograma` voltou desta tabela para cá:
+    # a Task 3 tinha gateado com `administracao`, mas quem consome
+    # `organogramaApi.tree()` no frontend é o `UnidadePicker`, usado em telas
+    # de PROTOCOLO (abertura de processo, balcão, editor de workflow,
+    # dashboard, unidades-trabalho) — ver a entrada dela, logo abaixo. Ficam
+    # 69 gateadas (58 protocolo + 11 administracao) e 7 aqui.
     #
-    # O código anotado em cada grupo é o que o endpoint deve receber quando a
-    # dívida for paga. Ao gatear um item, REMOVA-O daqui: a guarda de higiene
-    # abaixo reprova entrada obsoleta.
+    # Sobram estas 7, e elas NÃO vão ganhar gate — não é trabalho que falta
+    # terminar. É a conclusão de que cada uma delas não pertence a um módulo
+    # só: ou o consumo real é cruzado (gatear com o slug de um quebraria os
+    # outros que a consomem), ou é decisão humana de que o recurso é do
+    # sistema, não do módulo. `test_endpoints_leitura_sem_gate_nao_cresce_sem_decisao`,
+    # mais abaixo, trava o tamanho e o conteúdo exatos desta lista — leia o
+    # docstring dele antes de acrescentar ou remover uma entrada.
 
-    # protocolo / código `processo` — leitura de processo e seus artefatos
-    ("GET", "/api/v2/processos"),
-    ("GET", "/api/v2/processos/{processo_id}"),
-    ("GET", "/api/v2/processos/{processo_id}/capa.pdf"),
-    ("GET", "/api/v2/processos/{processo_id}/completo.pdf"),
-    ("GET", "/api/v2/processos/{processo_id}/etiqueta-dupla.pdf"),
-    ("GET", "/api/v2/processos/{processo_id}/etiqueta-unica.pdf"),
-    ("GET", "/api/v2/processos/{processo_id}/trail"),
-    ("GET", "/api/v2/processos/{processo_id}/volumes"),
-    ("GET", "/api/v2/processos/{processo_id}/apensados"),
-    ("GET", "/api/v2/processos/{processo_id}/apensamentos"),
-    ("GET", "/api/v2/processos/{processo_id}/complementacoes"),
-    ("GET", "/api/v2/processos/{processo_id}/checklist-documentos"),
-    ("GET", "/api/v2/processos/{processo_id}/temporalidade"),
-    ("GET", "/api/v2/processos/{processo_id}/workflow"),
-    ("GET", "/api/v2/processos/{processo_id}/solicitacoes-assinatura"),
-    ("GET", "/api/v2/processos/apensamentos/{apensamento_id}/termo.pdf"),
-    ("GET", "/api/v2/processos/encaminhamentos/{encaminhamento_id}/comprovante.pdf"),
-    ("GET", "/api/v2/processos/{processo_id}/anexos/{anexo_processo_id}/termo-desentranhamento.pdf"),
-    ("GET", "/api/v2/protocolo/{processo_id}/comprovante.pdf"),
-    ("GET", "/api/v2/protocolo/{processo_id}/etiqueta.pdf"),
-    ("GET", "/api/v2/protocolo/vencendo-prazo"),
-    ("GET", "/api/v2/anexos/{anexo_id}/download"),
-    ("GET", "/api/v2/anexos/{anexo_id}/carimbado.pdf"),
-    ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/validar"),
-    ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/evidencias"),
-    ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/comprovante.pdf"),
+    # Recurso do sistema, não de módulo (decisão humana, 2026-07-30). Hoje
+    # varre só processos, mas o índice vai crescer para outros módulos; um
+    # gate de `protocolo` já nasceria errado para a próxima fatia que o
+    # ampliar.
     ("GET", "/api/v2/busca"),
-    # Relatórios são recorte de processo/assinatura/tramitação — mesmo código.
-    ("GET", "/api/v2/relatorios/processos.csv"),
-    ("GET", "/api/v2/relatorios/processos.json"),
-    ("GET", "/api/v2/relatorios/processos.pdf"),
-    ("GET", "/api/v2/relatorios/tramitacao.csv"),
-    ("GET", "/api/v2/relatorios/tramitacao.json"),
-    ("GET", "/api/v2/relatorios/tramitacao.pdf"),
-    ("GET", "/api/v2/relatorios/assinaturas.csv"),
-    ("GET", "/api/v2/relatorios/assinaturas.json"),
-    ("GET", "/api/v2/relatorios/assinaturas.pdf"),
-    # Jobs assíncronos: os artefatos são todos de protocolo. Os POST que
-    # disparam esses jobs passaram a exigir `processo` na Task 8; a listagem e
-    # o download do resultado ficaram como leitura.
-    ("GET", "/api/v2/jobs"),
-    ("GET", "/api/v2/jobs/agenda"),
-    ("GET", "/api/v2/jobs/{job_id}"),
-    ("GET", "/api/v2/jobs/{job_id}/resultado"),
 
-    # protocolo / código `catalogo` — tipos e classificação documental
-    ("GET", "/api/v2/tipos-processo"),
-    ("GET", "/api/v2/tipos-anexo"),
-    ("GET", "/api/v2/protocolo/ccd-classes"),
-    ("GET", "/api/v2/protocolo/ccd-classes/tree"),
-    ("GET", "/api/v2/protocolo/especies-documentais"),
-    ("GET", "/api/v2/protocolo/ttd-regras"),
-    ("GET", "/api/v2/protocolo/sugerir-ccd"),
-
-    # protocolo / código `assunto`
-    ("GET", "/api/v2/assuntos"),
-    ("GET", "/api/v2/assunto-tipo-anexo"),
-
-    # protocolo / código `manifestante`
-    ("GET", "/api/v2/manifestantes"),
-    ("GET", "/api/v2/tipos-manifestante"),
-
-    # protocolo / códigos `cidade` e `endereco`
-    ("GET", "/api/v2/estados"),
-    ("GET", "/api/v2/cidades"),
-    ("GET", "/api/v2/bairros"),
-    ("GET", "/api/v2/enderecos"),
-
-    # protocolo / código `workflow` — leitura do desenho e das instâncias
-    ("GET", "/api/v2/workflow-definitions"),
-    ("GET", "/api/v2/workflow-definitions/{wf_id}"),
-    ("GET", "/api/v2/workflow-definitions/{wf_id}/versoes"),
-    ("GET", "/api/v2/workflow-instances"),
-    ("GET", "/api/v2/workflow-instances/{instance_id}"),
-    ("GET", "/api/v2/workflow-alertas"),
-    ("GET", "/api/v2/tipo-processo-workflow"),
-
-    # administracao / código `usuario`
+    # Transversal: consumo cruzado comprovado por 3 módulos — protocolo
+    # (relatório de assinaturas, `AssinaturasProcesso`), transporte (alvarás)
+    # e administração. Usuário é gente; todo módulo referencia gente para
+    # exibir quem fez o quê. Gatear com `administracao` daria 403 em
+    # protocolo e transporte, que não têm esse módulo contratado.
     ("GET", "/api/v2/usuarios"),
     ("GET", "/api/v2/usuarios/{usuario_id}"),
-    ("GET", "/api/v2/grupos"),
-    ("GET", "/api/v2/grupos/{grupo_id}"),
-    ("GET", "/api/v2/grupos/{grupo_id}/transacoes"),
 
-    # administracao / código `unidadeTrabalho`
+    # Transversal: consumo cruzado comprovado por 4 módulos — administração,
+    # frota (motoristas, solicitações, veículos) e protocolo (processos,
+    # relatórios, tramitação, serviços, `AcoesProcesso`). Unidade de trabalho
+    # é o organograma da prefeitura: mesmo raciocínio de `/usuarios`, mesmo
+    # risco de quebrar frota e protocolo se gateada com `administracao`.
     ("GET", "/api/v2/unidades-trabalho"),
     ("GET", "/api/v2/unidades-trabalho/{unidade_id}"),
-    ("GET", "/api/v2/organograma"),
 
-    # administracao / código `configuracao` — catálogos de apoio do cadastro de
-    # usuário/grupo/unidade (níveis, sistemas, transações, tipos de unidade) e
-    # a trilha de auditoria.
-    ("GET", "/api/v2/catalogo/niveis"),
-    ("GET", "/api/v2/catalogo/sistemas"),
-    ("GET", "/api/v2/catalogo/transacoes"),
-    ("GET", "/api/v2/catalogo/tipos-unidade"),
-    ("GET", "/api/v2/catalogo/prioridades"),
+    # Transversal por decisão humana (2026-07-30): compliance registra ações
+    # de TODOS os módulos, não só administracao. Uma prefeitura sob guarda
+    # legal não pode perder a leitura da própria trilha de auditoria por não
+    # ter contratado o módulo administração.
     ("GET", "/api/v2/audit"),
+
+    # Transversal: reclassificada no review final (2026-07-30). A Task 3
+    # tinha gateado com `administracao` seguindo o agrupamento da tela
+    # "organograma", mas quem de fato consome a árvore é `organogramaApi.tree()`
+    # (`frontend/lib/api.ts`) — export de topo, não `api.organograma`, o que
+    # fez os parsers automáticos da triagem original errarem a checagem de
+    # consumo real. `organogramaApi.tree()` é chamado pelo `UnidadePicker`
+    # (`frontend/components/UnidadePicker.tsx`), usado em telas de
+    # PROTOCOLO: abertura de processo (campo obrigatório "Unidade
+    # proprietária", `app/(app)/processos/novo/page.tsx`), balcão
+    # (`app/(app)/protocolo/balcao/page.tsx`), editor de workflow
+    # (`components/workflow/WorkflowEditPanel.tsx`), dashboard
+    # (`app/(app)/dashboard/page.tsx`) e unidades-trabalho
+    # (`app/(app)/unidades-trabalho/page.tsx`). Gatear com `administracao`
+    # dava 403 no picker de um tenant com `protocolo` e sem `administracao`
+    # e IMPEDIA A ABERTURA DE PROCESSO. É a mesma árvore de `unidade_trabalho`
+    # que já é transversal (ver `/unidades-trabalho`, acima), servida ao
+    # mesmo picker, nas mesmas telas.
+    ("GET", "/api/v2/organograma"),
 }
+
+
+# Snapshot exato da decisão da Task 4 (2026-07-30, com o ajuste do review
+# final que devolveu `/organograma`) — não é uma contagem, é a lista
+# completa. Ver test_endpoints_leitura_sem_gate_nao_cresce_sem_decisao, logo
+# abaixo, para o porquê de comparar o conjunto inteiro em vez de só o
+# tamanho.
+ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS: frozenset[tuple[str, str]] = frozenset({
+    ("GET", "/api/v2/busca"),
+    ("GET", "/api/v2/usuarios"),
+    ("GET", "/api/v2/usuarios/{usuario_id}"),
+    ("GET", "/api/v2/unidades-trabalho"),
+    ("GET", "/api/v2/unidades-trabalho/{unidade_id}"),
+    ("GET", "/api/v2/audit"),
+    ("GET", "/api/v2/organograma"),
+})
+
+
+def test_endpoints_leitura_sem_gate_nao_cresce_sem_decisao():
+    """ENDPOINTS_LEITURA_SEM_GATE só muda junto com ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS.
+
+    Diferente de `test_allowlist_nao_tem_entrada_obsoleta` (que pega entrada
+    que já ganhou gate e devia ter saído), este teste pega o caso oposto:
+    entrada NOVA aparecendo aqui sem que ninguém tenha registrado por que ela
+    é transversal permanente, e não só mais um GET que ainda não foi gateado.
+
+    Se este teste falhar porque você ACRESCENTOU uma entrada: pare antes de
+    "corrigir" o teste. Volte ao escopo aprovado
+    (docs/superpowers/specs/2026-07-30-leitura-por-modulo-escopo.md) e decida,
+    com o dono do produto, se o endpoint tem consumo cruzado comprovado por
+    módulo ou é decisão humana explícita de recurso do sistema. Se sim,
+    escreva a razão como comentário ao lado da entrada, ali em cima, E
+    acrescente a mesma entrada em ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS — as
+    duas mudam no mesmo commit. Se não for nenhum dos dois casos, o endpoint
+    não pertence a esta lista: ele precisa de `require_modulo`.
+
+    Se este teste falhar porque você REMOVEU uma entrada (por exemplo: ela
+    ganhou `require_modulo` porque deixou de ser transversal): isso é
+    esperado e correto, não um obstáculo. Tire a entrada também de
+    ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS aqui embaixo. O teste não protege a
+    lista contra encolher — só exige que crescer ou encolher seja visível e
+    deliberado no diff do PR, nunca um efeito colateral silencioso.
+    """
+    assert ENDPOINTS_LEITURA_SEM_GATE == ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS, (
+        "ENDPOINTS_LEITURA_SEM_GATE divergiu do snapshot decidido na Task 4. "
+        f"Adicionadas sem decisão registrada: "
+        f"{sorted(ENDPOINTS_LEITURA_SEM_GATE - ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS)}. "
+        f"Removidas do snapshot mas ainda na lista: "
+        f"{sorted(ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS - ENDPOINTS_LEITURA_SEM_GATE)}. "
+        "Leia o docstring deste teste antes de editar qualquer um dos dois conjuntos."
+    )
 
 
 # Origem exata das closures que fazem o enforcement. `require_permission` e
@@ -308,14 +317,176 @@ GATES_DE_PERMISSAO: set[tuple[str, str]] = {
 }
 
 
-def endpoints_sem_permissao() -> set[tuple[str, str]]:
-    """Varre o app e devolve (método, caminho) sem gate de permissão.
+# Gate de CONTRATAÇÃO de módulo (auth/modulos.py). NÃO é gate de permissão: não
+# olha usuário, grupo nem transação. Fica em conjunto separado de propósito —
+# ver `endpoints_sem_gate()`, que só o aceita em leitura.
+GATES_DE_MODULO: set[tuple[str, str]] = {
+    ("app.auth.modulos", "require_modulo.<locals>._check_modulo"),
+}
+
+
+# Qual módulo cada rota de leitura gateada exige. `GATES_DE_MODULO` só
+# consegue dizer "tem gate de módulo" — o par (módulo, qualname) da closure é
+# IGUAL para qualquer slug (`require_modulo("frota")` e
+# `require_modulo("protocolo")` produzem a mesma `_check_modulo`). Sem esta
+# tabela, `require_modulo("frota")` colado por engano numa rota de protocolo
+# passaria batido em `test_nenhum_endpoint_novo_sem_permissao`,
+# `test_allowlist_nao_tem_entrada_obsoleta` e nos testes HTTP (que amostram só
+# 6 das 58). O risco é concreto: a Task 3 gateia `administracao` nos MESMOS
+# arquivos (`catalogo.py` já mistura os dois módulos) — é o cenário exato de
+# copy-paste que só esta tabela pega.
+#
+# As 58 são as gateadas por `require_modulo("protocolo")` na Task 2
+# (2026-07-30); as 11 seguintes são as gateadas por `require_modulo("administracao")`
+# na Task 3 (mesmo dia). `/organograma` saiu deste segundo grupo no review
+# final (2026-07-30): ver a razão completa junto da entrada dela em
+# ENDPOINTS_LEITURA_SEM_GATE. `test_rotas_por_modulo_bate_com_a_implementacao`,
+# logo abaixo, lê `modulo_slug` de cada dependência real e reprova nos dois
+# sentidos: rota gateada fora daqui, e rota daqui com slug diferente do que a
+# rota realmente exige.
+ROTAS_POR_MODULO: dict[tuple[str, str], str] = {
+    ("GET", "/api/v2/anexos/{anexo_id}/carimbado.pdf"): "protocolo",
+    ("GET", "/api/v2/anexos/{anexo_id}/download"): "protocolo",
+    ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/comprovante.pdf"): "protocolo",
+    ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/evidencias"): "protocolo",
+    ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/validar"): "protocolo",
+    ("GET", "/api/v2/assunto-tipo-anexo"): "protocolo",
+    ("GET", "/api/v2/assuntos"): "protocolo",
+    ("GET", "/api/v2/bairros"): "protocolo",
+    ("GET", "/api/v2/catalogo/prioridades"): "protocolo",
+    ("GET", "/api/v2/cidades"): "protocolo",
+    ("GET", "/api/v2/enderecos"): "protocolo",
+    ("GET", "/api/v2/estados"): "protocolo",
+    ("GET", "/api/v2/manifestantes"): "protocolo",
+    ("GET", "/api/v2/processos"): "protocolo",
+    ("GET", "/api/v2/processos/apensamentos/{apensamento_id}/termo.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/encaminhamentos/{encaminhamento_id}/comprovante.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/anexos/{anexo_processo_id}/termo-desentranhamento.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/apensados"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/apensamentos"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/capa.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/checklist-documentos"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/complementacoes"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/completo.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/etiqueta-dupla.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/etiqueta-unica.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/solicitacoes-assinatura"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/temporalidade"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/trail"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/volumes"): "protocolo",
+    ("GET", "/api/v2/processos/{processo_id}/workflow"): "protocolo",
+    ("GET", "/api/v2/protocolo/ccd-classes"): "protocolo",
+    ("GET", "/api/v2/protocolo/ccd-classes/tree"): "protocolo",
+    ("GET", "/api/v2/protocolo/especies-documentais"): "protocolo",
+    ("GET", "/api/v2/protocolo/sugerir-ccd"): "protocolo",
+    ("GET", "/api/v2/protocolo/ttd-regras"): "protocolo",
+    ("GET", "/api/v2/protocolo/vencendo-prazo"): "protocolo",
+    ("GET", "/api/v2/protocolo/{processo_id}/comprovante.pdf"): "protocolo",
+    ("GET", "/api/v2/protocolo/{processo_id}/etiqueta.pdf"): "protocolo",
+    ("GET", "/api/v2/relatorios/assinaturas.csv"): "protocolo",
+    ("GET", "/api/v2/relatorios/assinaturas.json"): "protocolo",
+    ("GET", "/api/v2/relatorios/assinaturas.pdf"): "protocolo",
+    ("GET", "/api/v2/relatorios/processos.csv"): "protocolo",
+    ("GET", "/api/v2/relatorios/processos.json"): "protocolo",
+    ("GET", "/api/v2/relatorios/processos.pdf"): "protocolo",
+    ("GET", "/api/v2/relatorios/tramitacao.csv"): "protocolo",
+    ("GET", "/api/v2/relatorios/tramitacao.json"): "protocolo",
+    ("GET", "/api/v2/relatorios/tramitacao.pdf"): "protocolo",
+    ("GET", "/api/v2/tipo-processo-workflow"): "protocolo",
+    ("GET", "/api/v2/tipos-anexo"): "protocolo",
+    ("GET", "/api/v2/tipos-manifestante"): "protocolo",
+    ("GET", "/api/v2/tipos-processo"): "protocolo",
+    ("GET", "/api/v2/workflow-alertas"): "protocolo",
+    ("GET", "/api/v2/workflow-definitions"): "protocolo",
+    ("GET", "/api/v2/workflow-definitions/{wf_id}"): "protocolo",
+    ("GET", "/api/v2/workflow-definitions/{wf_id}/versoes"): "protocolo",
+    ("GET", "/api/v2/workflow-instances"): "protocolo",
+    ("GET", "/api/v2/workflow-instances/{instance_id}"): "protocolo",
+
+    # Task 3 (2026-07-30) — as 12 de administracao originais. `/organograma`
+    # saiu deste grupo no review final e voltou para ENDPOINTS_LEITURA_SEM_GATE
+    # (transversal); ficam 11.
+    ("GET", "/api/v2/catalogo/niveis"): "administracao",
+    ("GET", "/api/v2/catalogo/sistemas"): "administracao",
+    ("GET", "/api/v2/catalogo/tipos-unidade"): "administracao",
+    ("GET", "/api/v2/catalogo/transacoes"): "administracao",
+    ("GET", "/api/v2/grupos"): "administracao",
+    ("GET", "/api/v2/grupos/{grupo_id}"): "administracao",
+    ("GET", "/api/v2/grupos/{grupo_id}/transacoes"): "administracao",
+    ("GET", "/api/v2/jobs"): "administracao",
+    ("GET", "/api/v2/jobs/agenda"): "administracao",
+    ("GET", "/api/v2/jobs/{job_id}"): "administracao",
+    ("GET", "/api/v2/jobs/{job_id}/resultado"): "administracao",
+}
+
+
+def slugs_de_modulo_por_rota(app=None) -> dict[tuple[str, str], str]:
+    """Para cada rota GET com gate de módulo, devolve o slug que ela exige.
+
+    Lê `modulo_slug`, atributo exposto por `require_modulo` na própria
+    closure (`app/auth/modulos.py`) — é o único jeito de diferenciar
+    `require_modulo("protocolo")` de `require_modulo("frota")` de fora, já
+    que ambos compilam para o mesmo `(__module__, __qualname__)`.
+    """
+    if app is None:
+        from app.main import app
+
+    resultado: dict[tuple[str, str], str] = {}
+    for rota in app.routes:
+        caminho = getattr(rota, "path", "")
+        if not caminho.startswith("/api/v2"):
+            continue
+        deps = getattr(getattr(rota, "dependant", None), "dependencies", [])
+        for metodo in getattr(rota, "methods", set()):
+            if metodo != "GET":
+                continue
+            for d in deps:
+                slug = getattr(getattr(d, "call", None), "modulo_slug", None)
+                if slug is not None:
+                    resultado[(metodo, caminho)] = slug
+    return resultado
+
+
+def test_rotas_por_modulo_bate_com_a_implementacao():
+    """ROTAS_POR_MODULO é a decisão humana de QUAL módulo — não só QUE há gate.
+
+    Reprova nos dois sentidos: rota com gate de módulo fora da tabela (nova e
+    não registrada), e rota da tabela com slug diferente do que a rota
+    realmente exige (copy-paste do slug errado).
+    """
+    reais = slugs_de_modulo_por_rota()
+
+    fora_da_tabela = set(reais) - set(ROTAS_POR_MODULO)
+    assert not fora_da_tabela, (
+        f"Rotas com gate de módulo sem entrada em ROTAS_POR_MODULO: "
+        f"{sorted(fora_da_tabela)}. Registre qual módulo cada uma exige."
+    )
+
+    divergentes = {
+        rota: {"esperado": esperado, "real": reais.get(rota)}
+        for rota, esperado in ROTAS_POR_MODULO.items()
+        if reais.get(rota) != esperado
+    }
+    assert not divergentes, (
+        f"Rotas com slug diferente do declarado em ROTAS_POR_MODULO: {divergentes}"
+    )
+
+
+def endpoints_sem_gate(app=None) -> set[tuple[str, str]]:
+    """Varre `app` e devolve (método, caminho) sem gate reconhecido.
+
+    `app=None` (default) resolve `app.main.app` — a aplicação real. Parâmetro
+    existe para o teste de assimetria poder passar uma app fake e exercitar
+    esta função de verdade, em vez de reimplementar o laço por conta própria
+    (reimplementação que não pega regressão nesta função).
 
     `dependant.dependencies` cobre tanto `dependencies=[...]` da rota/router
     quanto os `Depends()` da assinatura do endpoint, que é onde a maioria dos
     routers deste repo põe o gate.
     """
-    from app.main import app
+    if app is None:
+        from app.main import app
 
     desprotegidos: set[tuple[str, str]] = set()
     for rota in app.routes:
@@ -327,43 +498,63 @@ def endpoints_sem_permissao() -> set[tuple[str, str]]:
             for d in getattr(getattr(rota, "dependant", None), "dependencies", [])
             if getattr(d, "call", None) is not None
         }
-        if not (origens & GATES_DE_PERMISSAO):
-            for metodo in getattr(rota, "methods", set()):
+        for metodo in getattr(rota, "methods", set()):
+            # Leitura pode ser protegida só pela contratação do módulo (esta fatia).
+            # Escrita, não: afrouxar aqui deixaria um POST com require_modulo e sem
+            # require_permission passar no CI, que é justamente o falso-negativo que
+            # a nota de GATES_DE_PERMISSAO descreve.
+            aceitos = (
+                GATES_DE_PERMISSAO | GATES_DE_MODULO
+                if metodo == "GET"
+                else GATES_DE_PERMISSAO
+            )
+            if not (origens & aceitos):
                 desprotegidos.add((metodo, caminho))
     return desprotegidos
 
 
 def test_gates_de_permissao_batem_com_a_implementacao():
-    """Se `perms.py` renomear a closure, a varredura silencia — trava isso.
+    """Se `perms.py`/`modulos.py` renomear a closure, a varredura silencia — trava isso.
 
-    Sem este teste, `GATES_DE_PERMISSAO` desatualizado faria
-    `endpoints_sem_permissao()` considerar TODOS os endpoints desprotegidos
+    Sem este teste, `GATES_DE_PERMISSAO`/`GATES_DE_MODULO` desatualizados fariam
+    `endpoints_sem_gate()` considerar TODOS os endpoints desprotegidos
     (falso-positivo ruidoso) ou — pior, se alguém "consertasse" relaxando o
-    critério — nenhum. O casamento exato só é seguro se for verificado.
+    critério — nenhum. O casamento exato só é seguro se for verificado. Cobre
+    também `auth/modulos.py`: um rename silencioso de `_check_modulo`
+    desligaria o reconhecimento do gate de leitura sem ninguém notar.
     """
+    from app.auth.modulos import require_modulo
     from app.auth.perms import require_any_permission, require_permission
 
-    reais = {
+    reais_permissao = {
         (fabrica("x").__module__, fabrica("x").__qualname__)
         for fabrica in (require_permission, require_any_permission)
     }
-    assert reais == GATES_DE_PERMISSAO, (
-        f"As closures de perms.py mudaram: {sorted(reais)} != "
+    assert reais_permissao == GATES_DE_PERMISSAO, (
+        f"As closures de perms.py mudaram: {sorted(reais_permissao)} != "
         f"{sorted(GATES_DE_PERMISSAO)}. Atualize GATES_DE_PERMISSAO."
+    )
+
+    reais_modulo = {
+        (require_modulo("x").__module__, require_modulo("x").__qualname__)
+    }
+    assert reais_modulo == GATES_DE_MODULO, (
+        f"A closure de modulos.py mudou: {sorted(reais_modulo)} != "
+        f"{sorted(GATES_DE_MODULO)}. Atualize GATES_DE_MODULO."
     )
 
 
 def test_nenhum_endpoint_novo_sem_permissao():
-    """Endpoint sem require_permission escapa do enforcement de módulo.
+    """Endpoint sem gate reconhecido escapa do enforcement de módulo.
 
     As duas allowlists acima são a decisão humana registrada. Endpoint novo que
-    caia fora delas reprova o PR — ou ganha require_permission, ou entra na
-    lista com justificativa.
+    caia fora delas reprova o PR — ou ganha require_permission (ou, em
+    leitura, require_modulo), ou entra na lista com justificativa.
     """
     allowlist = ENDPOINTS_TRANSVERSAIS | ENDPOINTS_LEITURA_SEM_GATE
-    novos = endpoints_sem_permissao() - allowlist
+    novos = endpoints_sem_gate() - allowlist
     assert not novos, (
-        f"Endpoints sem require_permission fora da allowlist: {sorted(novos)}. "
+        f"Endpoints sem gate fora da allowlist: {sorted(novos)}. "
         "Acrescente a dependência ou registre em ENDPOINTS_TRANSVERSAIS / "
         "ENDPOINTS_LEITURA_SEM_GATE com justificativa."
     )
@@ -377,8 +568,64 @@ def test_allowlist_nao_tem_entrada_obsoleta():
     para sempre, mesmo depois de paga.
     """
     allowlist = ENDPOINTS_TRANSVERSAIS | ENDPOINTS_LEITURA_SEM_GATE
-    obsoletos = allowlist - endpoints_sem_permissao()
+    obsoletos = allowlist - endpoints_sem_gate()
     assert not obsoletos, (
         f"Entradas obsoletas na allowlist: {sorted(obsoletos)}. "
         "O endpoint ganhou require_permission ou deixou de existir — remova a linha."
+    )
+
+
+def test_escrita_so_com_require_modulo_continua_desprotegida():
+    """Trava a assimetria: `require_modulo` sozinho NUNCA basta para escrita.
+
+    Constrói uma app FastAPI isolada com uma rota POST protegida só por
+    `require_modulo` (sem `require_permission`) e chama `endpoints_sem_gate`
+    de VERDADE sobre ela (via o parâmetro `app`) — não uma cópia do laço.
+    Uma cópia local não pegaria regressão na função de produção; é ela que
+    tem de continuar reportando a rota como desprotegida. Sem este teste,
+    alguém "simplifica" `endpoints_sem_gate` de volta para um único conjunto
+    aceito em qualquer método, e o afrouxamento de escrita volta sem aviso —
+    é exatamente o falso-negativo que a nota de `GATES_DE_PERMISSAO` descreve.
+    """
+    from fastapi import Depends, FastAPI
+
+    from app.auth.modulos import require_modulo
+
+    app_fake = FastAPI()
+
+    @app_fake.post("/api/v2/_fake/so-modulo", dependencies=[Depends(require_modulo("frota"))])
+    async def _rota_fake():
+        return None
+
+    desprotegidos = endpoints_sem_gate(app=app_fake)
+
+    assert ("POST", "/api/v2/_fake/so-modulo") in desprotegidos, (
+        "Uma rota POST protegida só por require_modulo deveria continuar "
+        "desprotegida — a varredura não pode aceitar GATES_DE_MODULO fora de GET."
+    )
+
+
+def test_leitura_so_com_require_modulo_nao_fica_desprotegida():
+    """Metade complementar da assimetria: em GET, `require_modulo` sozinho BASTA.
+
+    É exatamente o mecanismo que a Task 2 usa nas 58 rotas de leitura de
+    `protocolo` — sem este teste, só a metade POST da assimetria estaria
+    coberta e uma regressão que removesse GATES_DE_MODULO do lado GET (ou
+    que trocasse `if metodo == "GET"` por outra condição) passaria batida.
+    """
+    from fastapi import Depends, FastAPI
+
+    from app.auth.modulos import require_modulo
+
+    app_fake = FastAPI()
+
+    @app_fake.get("/api/v2/_fake/leitura-so-modulo", dependencies=[Depends(require_modulo("frota"))])
+    async def _rota_fake():
+        return None
+
+    desprotegidos = endpoints_sem_gate(app=app_fake)
+
+    assert ("GET", "/api/v2/_fake/leitura-so-modulo") not in desprotegidos, (
+        "Uma rota GET protegida só por require_modulo NÃO pode aparecer como "
+        "desprotegida — GATES_DE_MODULO existe justamente para isso."
     )

@@ -1,9 +1,11 @@
 /**
  * SEC-1 Commit 6 — login redireciona conforme must_change_password.
  *
- * Cobre apenas a otimização adicionada no Commit 6: pular o passo extra
- * por /home quando o backend já sinaliza a flag direto no LoginResponse.
- * O guard do AuthProvider (Commit 5) continua como defesa em profundidade.
+ * Cobre a otimização do Commit 6 (pular o passo extra por /modulos quando o
+ * backend já sinaliza a flag direto no LoginResponse) e, desde a F2 Task 5,
+ * o novo destino do login bem-sucedido: o launcher de módulos, não mais o
+ * dashboard fixo /home. O guard do AuthProvider (Commit 5) continua como
+ * defesa em profundidade.
  *
  * Os campos visuais/hero do LoginPage não são testados aqui — fora do
  * escopo desta unidade.
@@ -50,14 +52,14 @@ function loginResponse(opts: { flag: boolean }) {
 }
 
 describe("LoginPage SEC-1 redirect", () => {
-  it("usuário NÃO flagged → router.push('/home')", async () => {
+  it("usuário NÃO flagged → router.push('/modulos')", async () => {
     apiLogin.mockResolvedValue(loginResponse({ flag: false }));
     const u = userEvent.setup();
     render(<LoginPage />);
     // Em dev as credenciais vêm pré-preenchidas; só submetemos.
     await u.click(screen.getByRole("button", { name: /entrar/i }));
     await waitFor(() => expect(apiLogin).toHaveBeenCalled());
-    await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/home"));
+    await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/modulos"));
   });
 
   it("usuário FLAGGED → router.push('/alterar-senha-obrigatoria')", async () => {

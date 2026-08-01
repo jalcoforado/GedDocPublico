@@ -33,6 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db, tenant_filter
 from ..models import (
@@ -78,7 +79,11 @@ router = APIRouter(prefix="/protocolo", tags=["protocolo"])
 
 
 # --- Espécies documentais (catálogo) -----------------------------------------
-@router.get("/especies-documentais", response_model=list[EspecieDocumentalOut])
+@router.get(
+    "/especies-documentais",
+    response_model=list[EspecieDocumentalOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_especies(
     incluir_inativas: bool = False,
     _: Usuario = Depends(get_current_user),
@@ -290,7 +295,10 @@ async def _load_processo_protocolo(
     return processo, especie_nome, manifestante_nome, assunto_nome, unidade_nome
 
 
-@router.get("/{processo_id}/etiqueta.pdf")
+@router.get(
+    "/{processo_id}/etiqueta.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def etiqueta_pdf(
     processo_id: int,
     _: Usuario = Depends(get_current_user),
@@ -316,7 +324,10 @@ async def etiqueta_pdf(
     )
 
 
-@router.get("/{processo_id}/comprovante.pdf")
+@router.get(
+    "/{processo_id}/comprovante.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def comprovante_pdf(
     processo_id: int,
     current: Usuario = Depends(get_current_user),
@@ -349,7 +360,11 @@ async def comprovante_pdf(
 #  P4 — CCD (Código de Classificação de Documentos)
 # =============================================================================
 
-@router.get("/ccd-classes", response_model=list[CcdClasseOut])
+@router.get(
+    "/ccd-classes",
+    response_model=list[CcdClasseOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_ccd_classes(
     incluir_inativas: bool = False,
     _: Usuario = Depends(get_current_user),
@@ -364,7 +379,11 @@ async def list_ccd_classes(
     return [CcdClasseOut.model_validate(r) for r in rows]
 
 
-@router.get("/ccd-classes/tree", response_model=list[CcdClasseTreeNode])
+@router.get(
+    "/ccd-classes/tree",
+    response_model=list[CcdClasseTreeNode],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def tree_ccd_classes(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -545,7 +564,11 @@ async def delete_ccd_classe(
 #  P4 — TTD (Tabela de Temporalidade Documental)
 # =============================================================================
 
-@router.get("/ttd-regras", response_model=list[TtdRegraDetail])
+@router.get(
+    "/ttd-regras",
+    response_model=list[TtdRegraDetail],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def list_ttd_regras(
     id_ccd_classe: int | None = None,
     _: Usuario = Depends(get_current_user),
@@ -705,7 +728,11 @@ async def delete_ttd_regra(
 #  P4 — Sugestão de CCD + Temporalidade do processo + Relatório vencimento
 # =============================================================================
 
-@router.get("/sugerir-ccd", response_model=list[SugestaoCcdOut])
+@router.get(
+    "/sugerir-ccd",
+    response_model=list[SugestaoCcdOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def sugerir_ccd(
     id_assunto: int | None = None,
     texto: str | None = Query(default=None, max_length=500),
@@ -729,7 +756,11 @@ async def sugerir_ccd(
     )
 
 
-@router.get("/vencendo-prazo", response_model=list[TemporalidadeOut])
+@router.get(
+    "/vencendo-prazo",
+    response_model=list[TemporalidadeOut],
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def relatorio_vencendo_prazo(
     dias: int = Query(default=180, ge=1, le=3650, description="Janela em dias"),
     incluir_permanentes: bool = False,

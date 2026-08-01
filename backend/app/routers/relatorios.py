@@ -16,6 +16,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.modulos import require_modulo
 from ..database import get_db
 from ..models import Usuario
 from ..schemas.relatorio import RelatorioFiltro, RelatorioResposta
@@ -53,7 +54,11 @@ def _filtro(
     )
 
 
-@router.get("/processos.json", response_model=RelatorioResposta)
+@router.get(
+    "/processos.json",
+    response_model=RelatorioResposta,
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def relatorio_json(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -70,7 +75,10 @@ async def relatorio_json(
     return await gerar_relatorio(db, f, tenant_id=tenant_id, max_rows=max_rows)
 
 
-@router.get("/processos.csv")
+@router.get(
+    "/processos.csv",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def relatorio_csv(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -128,7 +136,10 @@ async def relatorio_csv(
     )
 
 
-@router.get("/processos.pdf")
+@router.get(
+    "/processos.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def relatorio_pdf(
     inline: bool = Query(True),
     _: Usuario = Depends(get_current_user),
@@ -157,7 +168,11 @@ async def relatorio_pdf(
 # ---------- Tramitação ----------
 
 
-@router.get("/tramitacao.json", response_model=RelatorioTramitacaoResposta)
+@router.get(
+    "/tramitacao.json",
+    response_model=RelatorioTramitacaoResposta,
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def tramitacao_json(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -174,7 +189,10 @@ async def tramitacao_json(
     return await gerar_tramitacao(db, f, tenant_id=tenant_id, max_processos=max_processos)
 
 
-@router.get("/tramitacao.csv")
+@router.get(
+    "/tramitacao.csv",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def tramitacao_csv(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -270,7 +288,10 @@ async def tramitacao_csv(
     )
 
 
-@router.get("/tramitacao.pdf")
+@router.get(
+    "/tramitacao.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def tramitacao_pdf(
     inline: bool = Query(True),
     _: Usuario = Depends(get_current_user),
@@ -315,7 +336,11 @@ def _filtro_assinaturas(
     )
 
 
-@router.get("/assinaturas.json", response_model=RelatorioAssinaturasResposta)
+@router.get(
+    "/assinaturas.json",
+    response_model=RelatorioAssinaturasResposta,
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def assinaturas_json(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -331,7 +356,10 @@ async def assinaturas_json(
     return await gerar_assinaturas(db, f, tenant_id=tenant_id, max_rows=max_rows)
 
 
-@router.get("/assinaturas.csv")
+@router.get(
+    "/assinaturas.csv",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def assinaturas_csv(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -392,7 +420,10 @@ async def assinaturas_csv(
     )
 
 
-@router.get("/assinaturas.pdf")
+@router.get(
+    "/assinaturas.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def assinaturas_pdf(
     inline: bool = Query(True),
     _: Usuario = Depends(get_current_user),

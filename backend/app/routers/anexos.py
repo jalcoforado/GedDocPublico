@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
+from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import AnexoProcesso, Processo, Usuario
@@ -62,7 +63,10 @@ async def upload_endpoint(
     )
 
 
-@router.get("/anexos/{anexo_id}/download")
+@router.get(
+    "/anexos/{anexo_id}/download",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def download_endpoint(
     anexo_id: int,
     inline: bool = Query(False, description="Quando true, serve o arquivo inline (para iframe/visualizador)"),
@@ -111,7 +115,10 @@ async def delete_endpoint(
     invalidate_cache(anexo_id, tenant_slug=tenant_slug)
 
 
-@router.get("/anexos/{anexo_id}/carimbado.pdf")
+@router.get(
+    "/anexos/{anexo_id}/carimbado.pdf",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
 async def carimbado_endpoint(
     anexo_id: int,
     inline: bool = Query(True),
