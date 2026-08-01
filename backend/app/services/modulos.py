@@ -132,16 +132,30 @@ async def contratar(db: AsyncSession, tenant_id: int, slugs: list[str]) -> None:
     if desconhecidos:
         raise ValueError(f"Módulo inexistente ou não contratável: {sorted(desconhecidos)}")
 
-    inativos = {s for s in alvo if not catalogo[s].ativo}
-    if inativos:
-        raise ValueError(f"Módulo inativo não pode ser contratado: {sorted(inativos)}")
-
     vinculos = {
         v.id_modulo: v
         for v in (await db.execute(
             select(TenantModulo).where(TenantModulo.tenant_id == tenant_id)
         )).scalars().all()
     }
+    ja_contratados = {
+        slug
+        for slug, modulo in catalogo.items()
+        if (v := vinculos.get(modulo.id)) is not None and not v.excluido
+    }
+
+    # Só recusa módulo inativo em VÍNCULO NOVO (contratação). O admin pode
+    # continuar reenviando, no mesmo payload, um módulo que o tenant já tem
+    # contratado e que virou inativo depois — é exatamente o caso que a aba
+    # de módulos do admin suporta (checkbox desabilitado, mas ainda marcado,
+    # para permitir descontratar sem obrigar a mexer em mais nada). Recusar
+    # esse caso tornaria impossível salvar QUALQUER alteração enquanto um
+    # módulo inativo-e-contratado estivesse na lista.
+    inativos_novos = {
+        s for s in alvo if not catalogo[s].ativo and s not in ja_contratados
+    }
+    if inativos_novos:
+        raise ValueError(f"Módulo inativo não pode ser contratado: {sorted(inativos_novos)}")
 
     for slug, modulo in catalogo.items():
         vinculo = vinculos.get(modulo.id)

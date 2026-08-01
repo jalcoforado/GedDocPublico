@@ -137,6 +137,51 @@ async def test_contratar_recusa_modulo_inativo(admin_session, two_tenants):
 
 
 @pytest.mark.asyncio
+async def test_contratar_recusa_vinculo_novo_de_modulo_inativo(admin_session, two_tenants):
+    """`inativos_novos`: contratar do zero um módulo que NUNCA foi contratado
+    e está inativo continua recusado — só o "já tenho, mexi em outra coisa"
+    passa a ser permitido."""
+    tid, _ = two_tenants
+    await admin_session.execute(text(
+        "UPDATE aprimora_py.modulo SET ativo = false WHERE slug = 'administracao'"
+    ))
+    await admin_session.flush()
+    with pytest.raises(ValueError):
+        await contratar(admin_session, tid, ["administracao"])
+    await admin_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_contratar_mantem_modulo_ja_contratado_e_inativo(admin_session, two_tenants):
+    """Achado do review final F2: a aba de módulos reenvia TODOS os slugs
+    marcados, incluindo os já contratados que estão inativos (checkbox
+    desabilitado, mas continua marcado para permitir descontratar). Isso não
+    pode virar 400 só porque o admin também mudou outro módulo no mesmo
+    payload."""
+    tid, _ = two_tenants
+    await contratar(admin_session, tid, ["transporte"])
+    await admin_session.flush()
+    await admin_session.execute(text(
+        "UPDATE aprimora_py.modulo SET ativo = false WHERE slug = 'transporte'"
+    ))
+    await admin_session.flush()
+
+    # Reenvia 'transporte' (já contratado, agora inativo) JUNTO com uma
+    # contratação nova de 'frota' — não pode levantar ValueError.
+    await contratar(admin_session, tid, ["transporte", "frota"])
+    await admin_session.flush()
+
+    itens = await modulos_do_tenant(admin_session, tid)
+    por_slug = {m["slug"]: m for m in itens}
+    assert por_slug["transporte"]["contratado"] is True, (
+        "módulo já contratado e inativo não pode ser descontratado só por "
+        "estar na mesma reconciliação de outro módulo"
+    )
+    assert por_slug["frota"]["contratado"] is True, "contratação nova junto no mesmo payload falhou"
+    await admin_session.rollback()
+
+
+@pytest.mark.asyncio
 async def test_contratar_permite_descontratar_modulo_inativo(admin_session, two_tenants):
     tid, _ = two_tenants
     await contratar(admin_session, tid, ["transporte"])

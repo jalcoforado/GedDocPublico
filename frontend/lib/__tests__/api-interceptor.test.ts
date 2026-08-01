@@ -103,10 +103,16 @@ describe("interceptor 403 X-Must-Change-Password", () => {
     expect(window.location.assign).not.toHaveBeenCalled();
   });
 
-  it("regressão: 401 não dispara o interceptor (só 403)", async () => {
+  it("regressão: 401 não dispara o interceptor de must-change-password (só 403) — dispara o de sessão expirada", async () => {
     setLocation("/home");
     mockFetchOnce(401, { "x-must-change-password": "true" });
     await expect(api.me()).rejects.toThrow();
-    expect(window.location.assign).not.toHaveBeenCalled();
+    // Não é o interceptor de troca de senha (isso é 403). É o de sessão
+    // expirada (ver api-interceptor-sessao.test.ts) — o mesmo `assign` é
+    // usado pelos dois, então aqui só garantimos que o destino não é o de
+    // troca de senha.
+    expect(window.location.assign).not.toHaveBeenCalledWith(
+      "/alterar-senha-obrigatoria",
+    );
   });
 });

@@ -2,37 +2,73 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArrowRight,
-  BarChart3,
   Bell,
-  Building2,
   ChevronRight,
-  Cog,
   FileText,
-  GitBranch,
-  Home,
   KeyboardIcon,
   LogOut,
   Maximize2,
   Minimize2,
   Monitor,
   Moon,
-  Network,
   Plus,
   Search,
-  Shield,
   Sun,
   User,
   UserCircle,
-  Users,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { buscaApi } from "@/lib/api";
+import { api, buscaApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { canSeeItem, itensNavegaveis, type NavItem } from "@/lib/menus";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+
+/**
+ * Itens que a paleta oferecia SEM ter item correspondente em `lib/menus` —
+ * telas de perfil (não pertencem a nenhum módulo, sempre visíveis) e atalhos
+ * de criação (mesmo módulo/permissão da tela de listagem equivalente). Não
+ * vêm de `itensNavegaveis()` porque não há link para eles na Sidebar.
+ * `moduloSlug: "comum"` marca "nunca bloqueado por módulo", igual ao grupo
+ * transversal de `lib/menus/comum.ts`.
+ */
+const ITENS_EXTRA: ReadonlyArray<{ item: NavItem; moduloSlug: string; group: "navegar" | "criar" }> = [
+  { moduloSlug: "comum", group: "navegar", item: { label: "Meu perfil", href: "/perfil", icon: User } },
+  {
+    moduloSlug: "comum",
+    group: "navegar",
+    item: { label: "Preferências de notificações", href: "/perfil/notificacoes", icon: Bell },
+  },
+  {
+    moduloSlug: "protocolo",
+    group: "criar",
+    item: { label: "Novo processo", href: "/processos/novo", icon: Plus, perm: "processo" },
+  },
+  {
+    moduloSlug: "protocolo",
+    group: "criar",
+    item: { label: "Novo workflow", href: "/workflow/novo", icon: Plus },
+  },
+];
+
+/**
+ * Keywords que os itens estáticos antigos tinham e `lib/menus` não guarda
+ * (o menu não precisa de sinônimo de busca, a paleta precisa). Perder essas
+ * palavras-chave não quebraria teste nenhum — só pioraria o fuzzy match
+ * silenciosamente, então ficam preservadas aqui em vez de descartadas.
+ */
+const KEYWORDS_POR_HREF: Record<string, string[]> = {
+  "/home": ["dashboard", "início"],
+  "/dashboard": ["kpi", "métricas", "bi"],
+  "/workflow": ["bpm", "fluxo"],
+  "/organograma": ["unidades", "hierarquia"],
+  "/auditoria": ["log", "histórico"],
+  "/jobs": ["celery", "tarefas"],
+  "/manifestantes": ["cidadão", "requerente"],
+  "/perfil/notificacoes": ["email", "whatsapp"],
+};
 
 /* ---------- Tipos ---------- */
 
@@ -59,7 +95,7 @@ interface Props {
 
 export function CommandPalette({ open, onOpenChange }: Props) {
   const router = useRouter();
-  const { logout } = useAuth();
+  const { logout, can } = useAuth();
   const { setPreference, setDensity } = useTheme();
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
@@ -90,27 +126,55 @@ export function CommandPalette({ open, onOpenChange }: Props) {
     enabled: open && debouncedQ.length >= 2,
   });
 
-  /* ---- Ações estáticas ---- */
-  const staticActions: CommandAction[] = useMemo(
-    () => [
-      // Navegar
-      { id: "nav-home", type: "navigate", title: "Início", icon: Home, href: "/home", group: "navegar", keywords: ["dashboard", "início"] },
-      { id: "nav-dash", type: "navigate", title: "Dashboard executivo", icon: BarChart3, href: "/dashboard", group: "navegar", keywords: ["kpi", "métricas", "bi"] },
-      { id: "nav-processos", type: "navigate", title: "Processos", icon: FileText, href: "/processos", group: "navegar" },
-      { id: "nav-workflow", type: "navigate", title: "Workflows", icon: GitBranch, href: "/workflow", group: "navegar", keywords: ["bpm", "fluxo"] },
-      { id: "nav-org", type: "navigate", title: "Organograma", icon: Network, href: "/organograma", group: "navegar", keywords: ["unidades", "hierarquia"] },
-      { id: "nav-audit", type: "navigate", title: "Auditoria", icon: Shield, href: "/auditoria", group: "navegar", keywords: ["log", "histórico"] },
-      { id: "nav-usuarios", type: "navigate", title: "Usuários", icon: Users, href: "/usuarios", group: "navegar" },
-      { id: "nav-unidades", type: "navigate", title: "Unidades", icon: Building2, href: "/unidades-trabalho", group: "navegar" },
-      { id: "nav-manif", type: "navigate", title: "Manifestantes", icon: UserCircle, href: "/manifestantes", group: "navegar", keywords: ["cidadão", "requerente"] },
-      { id: "nav-relat", type: "navigate", title: "Relatórios", icon: BarChart3, href: "/relatorios", group: "navegar" },
-      { id: "nav-jobs", type: "navigate", title: "Jobs em background", icon: Cog, href: "/jobs", group: "navegar", keywords: ["celery", "tarefas"] },
-      { id: "nav-perfil", type: "navigate", title: "Meu perfil", icon: User, href: "/perfil", group: "navegar" },
-      { id: "nav-notif-prefs", type: "navigate", title: "Preferências de notificações", icon: Bell, href: "/perfil/notificacoes", group: "navegar", keywords: ["email", "whatsapp"] },
+  // Módulos contratados do tenant — MESMA queryKey que ModuloSwitcher e o
+  // launcher usam (não inventa chave nova). Herda o cache: a paleta abre por
+  // cima de uma página já montada dentro de `(app)`, então o dado costuma já
+  // estar quente quando o usuário aperta Ctrl+K.
+  const modulosQuery = useQuery({ queryKey: ["modulos-me"], queryFn: api.modulos });
+  const modulosContratados = useMemo(
+    () => new Set((modulosQuery.data?.itens ?? []).map((m) => m.slug)),
+    [modulosQuery.data],
+  );
+  // "comum" nunca é bloqueado — mesma regra do backend e da Sidebar. Enquanto
+  // o dado não chegou (loading/erro), itens de módulo ficam de fora: mais
+  // seguro esconder um item por um instante do que oferecer um que 403.
+  const moduloLiberado = (slug: string) => slug === "comum" || modulosContratados.has(slug);
 
-      // Criar
-      { id: "act-novo-processo", type: "navigate", title: "Novo processo", icon: Plus, href: "/processos/novo", group: "criar" },
-      { id: "act-novo-workflow", type: "navigate", title: "Novo workflow", icon: Plus, href: "/workflow/novo", group: "criar" },
+  /* ---- Ações estáticas ---- */
+  const staticActions: CommandAction[] = useMemo(() => {
+    // Fonte única: os itens de navegação vêm de `lib/menus`, os mesmos que a
+    // Sidebar mostra — filtrados por módulo contratado e, com a MESMA
+    // `canSeeItem` da Sidebar, por permissão. Duas cópias da poda divergem;
+    // esta paleta era a segunda cópia até esta mudança.
+    const doMenu: CommandAction[] = itensNavegaveis()
+      .filter(({ moduloSlug, item }) => moduloLiberado(moduloSlug) && canSeeItem(item, can))
+      .map(({ item }) => ({
+        id: `nav-${item.href}`,
+        type: "navigate" as const,
+        title: item.label,
+        icon: item.icon,
+        href: item.href,
+        group: "navegar" as const,
+        keywords: KEYWORDS_POR_HREF[item.href],
+      }));
+
+    // Telas/atalhos sem item de menu equivalente — não vêm de `lib/menus`,
+    // mas passam pelo mesmo filtro de módulo/permissão.
+    const extras: CommandAction[] = ITENS_EXTRA.filter(
+      ({ moduloSlug, item }) => moduloLiberado(moduloSlug) && canSeeItem(item, can),
+    ).map(({ item, group }) => ({
+      id: `extra-${item.href}`,
+      type: "navigate" as const,
+      title: item.label,
+      icon: item.icon,
+      href: item.href,
+      group,
+      keywords: KEYWORDS_POR_HREF[item.href],
+    }));
+
+    return [
+      ...doMenu,
+      ...extras,
 
       // Preferências (tema + densidade)
       { id: "pref-theme-system", type: "action", title: "Tema: seguir sistema", icon: Monitor, onSelect: () => setPreference("system"), group: "preferencias", keywords: ["theme", "auto", "modo"] },
@@ -121,9 +185,8 @@ export function CommandPalette({ open, onOpenChange }: Props) {
 
       // Conta
       { id: "act-logout", type: "action", title: "Sair", icon: LogOut, onSelect: logout, group: "conta", keywords: ["logout", "sign out"] },
-    ],
-    [logout, setPreference, setDensity],
-  );
+    ];
+  }, [can, modulosContratados, logout, setPreference, setDensity]);
 
   /* ---- Resultados de busca como ações ---- */
   const searchResults: CommandAction[] = useMemo(() => {
