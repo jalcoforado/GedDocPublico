@@ -4,26 +4,55 @@ Procedimentos para operações de produção. Tudo executável como `docker exec
 
 ---
 
-## Painel admin de plataforma (PR3a)
+## Painel admin de plataforma
 
 Onboarding e gestão de tenants pela interface, sem mexer no banco.
 
-**`PLATFORM_ADMIN_EMAILS` é obrigatório** para operar o painel. É a allowlist
-(separada por vírgula) de e-mails de usuários com acesso à administração da
-plataforma. **Vazio = ninguém acessa** (bloqueio seguro por padrão). NÃO é
-permissão de tenant: super-usuário de prefeitura **não** entra.
+> **`PLATFORM_ADMIN_EMAILS` foi REMOVIDA em `SEC-01A`.** Ela era o achado
+> **F-01**: a autorização cross-tenant era uma comparação de string sobre um
+> e-mail, e o e-mail é único apenas **por tenant** — qualquer prefeitura capaz
+> de criar um usuário com o e-mail certo virava administradora da plataforma.
+> Se a variável ainda existir em algum host, **remova-a**; enquanto existir num
+> ambiente é um caminho ativo (T-1 do threat model), mesmo que o código já a
+> ignore. A verificação que conta as entradas **sem revelá-las** está em
+> `docs/runbooks/platform-operator-bootstrap.md` §1.1.
+
+O acesso hoje exige **duas** coisas, e nenhuma é um e-mail:
+
+1. um **token administrativo RS256** do IdP dedicado (Google Workspace do
+   domínio corporativo), com `iss`/`aud` próprios — token municipal não serve;
+2. um **principal ativo** em `aprimora_py.platform_principal`, cadastrado pela
+   CLI no host.
+
+Configuração por ambiente (nenhuma tem default — ausente ⇒ nega tudo):
 
 ```bash
-# .env do backend (produção)
-PLATFORM_ADMIN_EMAILS=ops@aprimora.app,gestor@aprimora.app
+# .env do backend, por ambiente. Nada disso vai para o repositório.
+PLATFORM_OIDC_ISSUER=https://accounts.google.com
+PLATFORM_OIDC_AUDIENCE=<client id do ambiente>
+PLATFORM_OIDC_JWKS_URL=https://www.googleapis.com/oauth2/v3/certs
+PLATFORM_OIDC_HOSTED_DOMAIN=<dominio corporativo>
+PLATFORM_DB_URL=postgresql+asyncpg://aprimora_platform:<cofre>@<host>/<db>
 ```
+
+Cadastro, revogação e break-glass: **`docs/runbooks/platform-operator-bootstrap.md`**
+— é o contrato operacional, e a CLI `python -m app.cli.platform_principal`
+cumpre os comandos de lá.
 
 - Painel: `/admin/tenants` (criar/listar/editar/ativar/desativar).
 - Criar uma prefeitura gera uma **senha temporária exibida UMA ÚNICA VEZ** na
   resposta; repasse pelo canal acordado (NUNCA email texto-puro) e oriente a
   troca após o 1º acesso. Só o hash bcrypt é persistido.
 - API: `POST /api/v2/admin/tenants` (e `GET/PUT/.../ativar/desativar`),
-  protegida pela allowlist (`require_platform_admin`).
+  protegida por `require_platform_admin` (`app/auth/plataforma.py`), sobre a
+  conexão dedicada do papel `aprimora_platform`.
+
+**Lacuna conhecida entre `SEC-01A` e `SEC-01B`:** `GET /admin/me` devolve
+`is_platform_admin: false` de forma constante — depois de `SEC-01A` é literalmente
+verdade que nenhuma sessão municipal é identidade de plataforma. Como o frontend
+municipal decide por esse campo, **o link do painel some para todo mundo** e o
+console fica inalcançável pela UI até o console próprio de `SEC-01B`. É
+fail-closed e esperado; não contornar reativando allowlist.
 
 ## Onboarding de um novo tenant (CLI)
 

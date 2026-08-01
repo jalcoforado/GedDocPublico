@@ -3,7 +3,9 @@
 **Status:** aprovado em `SEC-00` (2026-08-01), executável a partir de `SEC-01A` · **Data:** 2026-08-01
 **Autoridade:** [ADR-016](../architecture/adr/ADR-016-platform-operator-identity.md) — status **Aceito**
 
-> **Nenhum procedimento deste runbook é executável hoje.** `platform_principal`, o validador de token administrativo e a CLI citada nascem em `SEC-01A`. O documento existe para ser revisado junto com o ADR — se um procedimento aqui for impraticável, a decisão arquitetural precisa mudar antes de virar código.
+> **Executável a partir de `SEC-01A`** (2026-08-01). `aprimora_py.platform_principal`, o papel `aprimora_platform`, o validador de token administrativo e a CLI `app.cli.platform_principal` existem e têm teste. As linhas de comando das seções 2, 4 e 5 são verificadas literalmente por `backend/tests/test_platform_principal_cli.py` — se um flag mudar aqui sem mudar lá, o teste reprova.
+>
+> **O que ainda NÃO existe:** o console de operador (`SEC-01B`). Entre `SEC-01A` e `SEC-01B` não há login administrativo pelo navegador — o passo 1 da seção 2 ("a pessoa faz login no console") pressupõe o console e só é executável depois. Até lá, o par `(iss, sub)` vem de uma chamada direta à API com o token do IdP, e o registro da tentativa negada é lido em `aprimora_py.platform_audit_log` (`acao = 'plataforma.acesso_negado'`) ou no log estruturado.
 
 **Regra que atravessa tudo:** nenhum segredo, chave privada, client secret ou lista real de operadores entra no repositório. O que é identificador de ambiente vai para variável de ambiente; o que é segredo vai para o cofre.
 
@@ -37,7 +39,7 @@ PLATFORM_DB_URL=postgresql+asyncpg://aprimora_platform:<cofre>@<host>/<db>
 
 Os segredos ficam, por ora, em **variáveis de ambiente protegidas no host** (Q-4). Cofre de segredos é migração futura registrada na seção 10 — não bloqueia `SEC-01A`.
 
-`PLATFORM_ADMIN_EMAILS` é **removida** em `SEC-01A`. Enquanto existir, é caminho de autorização ativo — ver T-1 do threat model.
+`PLATFORM_ADMIN_EMAILS` **foi removida** em `SEC-01A`: o campo saiu de `Settings`, a função `is_platform_admin` saiu de `config.py` e o gate saiu de `auth/deps.py`. Há teste travando as três ausências (`test_allowlist_de_email_saiu_do_caminho_de_decisao`). A variável ainda pode existir **no host**, e enquanto existir num ambiente é um caminho ativo (T-1 do threat model) — o código a ignora, mas apagá-la do `.env` continua sendo tarefa de operação. Usar a verificação da seção 1.1.
 
 ### 1.1 Verificar `PLATFORM_ADMIN_EMAILS` sem expor os e-mails
 
@@ -204,7 +206,8 @@ Registrar data, quem revisou e divergências encontradas.
 
 ## 10. Pendências deste runbook
 
-- A CLI `app.cli.platform_principal` **não existe**; nasce em `SEC-01A`. Os comandos aqui são o contrato que ela deve cumprir. **Nenhum operador real vai para código ou seed** (Q-2): a lista de principals é construída por esta CLI, ambiente a ambiente, e o grupo autorizado é configuração.
+- A CLI `app.cli.platform_principal` **existe desde `SEC-01A`** e cumpre os comandos deste runbook (`criar`, `revogar`, `break-glass [encerrar]`, mais `listar`). Flags em inglês porque são termos do OIDC e deste contrato; mensagens em pt-BR. **Nenhum operador real vai para código ou seed** (Q-2): a lista de principals é construída por esta CLI, ambiente a ambiente, e o grupo autorizado é configuração.
+- **O console de operador (`SEC-01B`) ainda não existe**, e por isso `GET /admin/me` devolve `is_platform_admin: false` constante — depois de `SEC-01A` é literalmente verdade que nenhuma sessão municipal é identidade de plataforma. O frontend municipal esconde o link do painel, que é o comportamento correto e fail-closed. Consequência aceita: o painel fica inalcançável pela UI nesse intervalo. **Não contornar** reativando allowlist ou apontando a rota de plataforma para o pool municipal.
 - **Migração para cofre de segredos** (Q-4): decidido usar variável de ambiente protegida no host por ora. Fica registrada como trabalho futuro e **não bloqueia** `SEC-01A`. Ao adotar cofre, o único procedimento que muda é o da seção 6.
 - O host definitivo do console (Q-3) ainda não foi escolhido, mas a decisão de **ter origem própria** está tomada: `PLATFORM_CONSOLE_ORIGIN` é o ponto único de configuração de cookie scope, CORS, CSP e nginx. Nada de domínio fixo no código.
 - `PLATFORM_ADMIN_EMAILS` em homologação continua **não verificada** (Q-1). Usar a verificação da seção 1.1 — a que conta sem revelar — assim que houver acesso ao host, e registrar apenas a contagem.
