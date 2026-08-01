@@ -30,6 +30,9 @@ DB_PASS = os.environ.get("PYTEST_DB_PASS", "ged_password_secure_local")
 
 ADMIN_URL = f"postgresql+asyncpg://ged_user:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 APP_URL = f"postgresql+asyncpg://aprimora_app:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# SEC-01A — papel da fronteira de plataforma (migration 0076). NOBYPASSRLS,
+# grants cross-tenant explícitos e enumerados (ADR-016 §2.3).
+PLATFORM_URL = f"postgresql+asyncpg://aprimora_platform:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -57,6 +60,25 @@ async def app_session() -> AsyncIterator[AsyncSession]:
     e nenhuma linha é visível/inserível.
     """
     engine = create_async_engine(APP_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with Session() as session:
+        yield session
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def platform_session() -> AsyncIterator[AsyncSession]:
+    """Session como ``aprimora_platform`` (SEC-01A, migration 0076).
+
+    É o papel da fronteira de plataforma: ``NOBYPASSRLS``, com grants
+    cross-tenant **explícitos e enumerados** (ADR-016 §2.3) — entitlement e
+    identidade de plataforma, nada de tabela de negócio de tenant.
+
+    Serve de **controle positivo** para os testes de grant: sem provar que este
+    papel escreve em ``platform_principal``, o "permission denied" de
+    ``aprimora_app`` provaria apenas que a tabela está quebrada.
+    """
+    engine = create_async_engine(PLATFORM_URL)
     Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with Session() as session:
         yield session
