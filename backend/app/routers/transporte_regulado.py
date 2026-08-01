@@ -760,6 +760,64 @@ async def list_alvaras(
     )
 
 
+# ORDEM IMPORTA: estas rotas de segmento literal precisam vir antes de
+# `/{alvara_id}`. O FastAPI casa na ordem de declaração, e a paramétrica engole
+# "vencidos" e "relatorio", devolvendo 422 sem chegar no handler.
+# Travado por tests/test_guarda_ordem_rotas.py.
+@alvaras_router.get("/vencidos", response_model=Paginated[AlvaraOut])
+async def list_alvaras_vencidos(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Paginated[AlvaraOut]:
+    """Lista alvarás vencidos (data_validade <= hoje) do tenant."""
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_alvaras_vencidos(db, tenant_id=tenant_id, limit=page_size, offset=offset)
+    return Paginated(
+        items=[AlvaraOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@alvaras_router.get("/relatorio", response_model=AlvaraRelatorioListResponse)
+async def listar_relatorio(
+    tipo_servico: str | None = None,
+    id_permissionario: int | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraRelatorioListResponse:
+    """Lista alvarás com KPIs para relatório.
+
+    Filtros opcionais:
+    - tipo_servico: filtrar por tipo de serviço
+    - id_permissionario: filtrar por permissionário
+    - status: filtrar por status (ativo, vencido, a_renovar_30d, indefinido)
+    """
+    alvaras, total = await tr_svc.listar_relatorio_alvaras(
+        db,
+        tenant_id=tenant_id,
+        tipo_servico=tipo_servico,
+        id_permissionario=id_permissionario,
+        status_filtro=status,
+        limit=limit,
+        offset=offset,
+    )
+    return AlvaraRelatorioListResponse(
+        alvaras=[AlvaraRelatorioItem.model_validate(a) for a in alvaras],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @alvaras_router.get("/{alvara_id}", response_model=AlvaraOut)
 async def get_alvara(
     alvara_id: int,
@@ -806,25 +864,6 @@ async def delete_alvara(
     await tr_svc.excluir_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
 
 
-@alvaras_router.get("/vencidos", response_model=Paginated[AlvaraOut])
-async def list_alvaras_vencidos(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
-    _: Usuario = Depends(require_permission("transporte_regulado")),
-    tenant_id: int = Depends(require_tenant_id),
-    db: AsyncSession = Depends(get_db),
-) -> Paginated[AlvaraOut]:
-    """Lista alvarás vencidos (data_validade <= hoje) do tenant."""
-    offset = (page - 1) * page_size
-    rows, total = await tr_svc.listar_alvaras_vencidos(db, tenant_id=tenant_id, limit=page_size, offset=offset)
-    return Paginated(
-        items=[AlvaraOut.model_validate(r) for r in rows],
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
-
-
 # ============================ Relatório (P4.3) ================================
 
 
@@ -837,41 +876,6 @@ async def obter_kpis_relatorio(
     """Retorna KPIs agregados de alvarás (total, ativos, vencidos, a_renovar_30d, indefinidos)."""
     kpis = await tr_svc.obter_kpis_agregados(db, tenant_id=tenant_id)
     return AlvaraKPIsResponse(**kpis)
-
-
-@alvaras_router.get("/relatorio", response_model=AlvaraRelatorioListResponse)
-async def listar_relatorio(
-    tipo_servico: str | None = None,
-    id_permissionario: int | None = None,
-    status: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-    _: Usuario = Depends(require_permission("transporte_regulado", "visualizar")),
-    tenant_id: int = Depends(require_tenant_id),
-    db: AsyncSession = Depends(get_db),
-) -> AlvaraRelatorioListResponse:
-    """Lista alvarás com KPIs para relatório.
-
-    Filtros opcionais:
-    - tipo_servico: filtrar por tipo de serviço
-    - id_permissionario: filtrar por permissionário
-    - status: filtrar por status (ativo, vencido, a_renovar_30d, indefinido)
-    """
-    alvaras, total = await tr_svc.listar_relatorio_alvaras(
-        db,
-        tenant_id=tenant_id,
-        tipo_servico=tipo_servico,
-        id_permissionario=id_permissionario,
-        status_filtro=status,
-        limit=limit,
-        offset=offset,
-    )
-    return AlvaraRelatorioListResponse(
-        alvaras=[AlvaraRelatorioItem.model_validate(a) for a in alvaras],
-        total=total,
-        limit=limit,
-        offset=offset,
-    )
 
 
 @alvaras_router.get("/relatorio/export/csv")
