@@ -53,6 +53,7 @@ from .modulo import (
     TenantModulo,
 )
 from .notificacao import Notificacao, NotificacaoPreferencia
+from .plataforma import PlatformAuditLog, PlatformPrincipal
 from .pagamentos import (
     Alcada,
     BloqueioSaldo,
@@ -167,6 +168,8 @@ __all__ = [
     "OrdemPagamentoDebito",
     "Parcela",
     "Permissionario",
+    "PlatformAuditLog",
+    "PlatformPrincipal",
     "NotificacaoPreferencia",
     "Servico",
     "Sistema",
