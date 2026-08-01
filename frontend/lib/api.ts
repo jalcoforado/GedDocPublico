@@ -726,6 +726,50 @@ function _interceptaMustChangePassword(res: Response): void {
   window.location.assign("/alterar-senha-obrigatoria");
 }
 
+/** Sessão expirada — interceptor de 401 em `request()` (escopo admin/servidor;
+ * o portal do cidadão usa `requestCidadao`, que não passa por aqui e por isso
+ * nunca dispara este redirect pro login do admin).
+ *
+ * Guard de disparo único: o sino de notificações faz poll e, quando o token
+ * expira em pleno uso, várias chamadas tomam 401 quase ao mesmo tempo. Sem o
+ * guard, cada uma chamaria `window.location.assign` — mesmo destino, mas
+ * ruído. `_redirecionandoSessaoExpirada` garante um redirect só; a navegação
+ * real destrói o módulo (e o estado junto), então não precisa ser resetado
+ * em produção — só em teste, via `_resetGuardSessaoExpiradaParaTeste`. */
+let _redirecionandoSessaoExpirada = false;
+
+/** Rotas/paths onde um 401 NÃO deve virar redirect pro login do admin. */
+function _suprimeRedirectSessaoExpirada(pathname: string, path: string): boolean {
+  // A própria requisição de login: 401 aqui é credencial errada, não sessão
+  // expirada. Precisa aparecer na tela (mensagem "e-mail ou senha inválidos"),
+  // não virar redirect — senão a tela de login vira um loop.
+  if (path === "/auth/login") return true;
+  // Já na tela de login: redirecionar de /login pra /login é ruído e pode
+  // laçar com o middleware.
+  if (pathname === "/login") return true;
+  // Portal do cidadão: cookie e login próprios (aprimora_cidadao_token,
+  // /cidadao/login). Defensivo — `request()` não é usada pelo cidadão hoje,
+  // mas um 401 vindo de uma página `/cidadao/*` não pode mandar pro login
+  // do admin.
+  if (pathname.startsWith("/cidadao")) return true;
+  return false;
+}
+
+function _interceptaSessaoExpirada(res: Response, path: string): void {
+  if (typeof window === "undefined") return;
+  if (res.status !== 401) return;
+  const pathname = window.location.pathname;
+  if (_suprimeRedirectSessaoExpirada(pathname, path)) return;
+  if (_redirecionandoSessaoExpirada) return;
+  _redirecionandoSessaoExpirada = true;
+  window.location.assign("/login");
+}
+
+/** Exportado só para teste: reseta o guard de disparo único entre casos. */
+export function _resetGuardSessaoExpiradaParaTeste(): void {
+  _redirecionandoSessaoExpirada = false;
+}
+
 async function request<T>(
   path: string,
   init: RequestInit = {},
@@ -752,6 +796,10 @@ async function request<T>(
   // que pode estar em meio a uma mutation (vai cair em catch sem efeito,
   // pois o navegador já está navegando).
   _interceptaMustChangePassword(res);
+  // Sessão expirada — mesma lógica: dispara o redirect antes de tentar
+  // interpretar o corpo. path === "/auth/login" é a exceção que evita o
+  // loop na tela de login (ver `_suprimeRedirectSessaoExpirada`).
+  _interceptaSessaoExpirada(res, path);
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
