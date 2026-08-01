@@ -82,9 +82,9 @@ Severidade considera o estado **atual** do código, não o estado após `SEC-01A
 
 **Como funciona.** As onze rotas usam `get_db`, que instala o `tenant_id` do middleware. Não há transação, papel nem conexão separados. Um bug numa rota de plataforma opera com os mesmos privilégios do runtime municipal — e vice-versa.
 
-**Agrava (achado 1.7 do ADR).** O runtime conecta como `ged_user`, **SUPERUSER e BYPASSRLS**, verificado na sessão real. A RLS descrita como última barreira de isolamento está inerte. Um bug de filtro aplicacional vaza cross-tenant sem que a RLS impeça.
+**Agrava — achado F-12 (seção 1.7 do ADR).** O runtime conecta como `ged_user`, **SUPERUSER e BYPASSRLS**, verificado na sessão real. A RLS descrita como última barreira de isolamento está inerte. Um bug de filtro aplicacional vaza cross-tenant sem que a RLS impeça — e o `SUPERUSER` significa que qualquer execução de SQL arbitrário alcança o cluster inteiro, não só o dado do tenant.
 
-**Mitigação.** Papel `aprimora_platform` dedicado e tenant alvo explícito. O `ged_user` é **decisão D-6**, fora de `SEC-00`.
+**Mitigação.** Papel `aprimora_platform` dedicado e tenant alvo explícito, em `SEC-01A`. **F-12 tem contenção própria e prioritária:** `SEC-RLS-00A` (caracterizar e inventariar, sem mexer no runtime) → `SEC-RLS-00B` (papéis mínimos, nenhum de runtime `SUPERUSER`) → `SEC-RLS-ROLLOUT` (promoção por ambiente). Concluída a família, o invariante 10 volta a ser controle vigente; até lá, não contar com ele em análise de risco.
 
 ---
 
@@ -125,14 +125,14 @@ Severidade considera o estado **atual** do código, não o estado após `SEC-01A
 ## 5. O que continua aberto depois de `SEC-01A/B`
 
 1. **Realm municipal** — HS256, segredo compartilhado com o PHP, `iss`/`aud` iguais aos do cidadão (T-3).
-2. **`ged_user` como runtime** — RLS inerte (D-6).
+2. **`ged_user` como runtime** — RLS inerte (**F-12**). Fecha na família `SEC-RLS-*`, que é **anterior** a `RBAC-01`; até `SEC-RLS-ROLLOUT` concluir, segue aberto.
 3. **Autorização fina dentro da plataforma** — todo principal ativo tem as mesmas onze rotas.
 4. **Rate limiting e detecção de anomalia** no console.
 5. **Autoelevação dentro do tenant** — só fecha em `SEC-02` (T-6).
 
 ## 6. Como validar que o modelo se sustenta
 
-`SEC-01A` só é aceito com os 22 cenários da matriz verdes, e em particular:
+`SEC-01A` só é aceito com os 24 cenários da matriz verdes, e em particular:
 
 - cenário **21** (colisão de e-mail) escrito **antes** da implementação, falhando;
 - cenário **12** (JWKS indisponível) provando `503` e não `allow`;

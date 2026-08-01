@@ -19,7 +19,7 @@ Esta matriz é o contrato de validação. `SEC-01A` implementa exatamente estas 
 | `iat` | sim | `iat <= agora + 60 s`; rejeitar token emitido no futuro | **deny** `401` |
 | `nbf` | quando presente | `agora >= nbf - 60 s` | **deny** `401` |
 | `sub` | sim | string não vazia; usado com `iss` como chave natural do principal | **deny** `401` |
-| `hd` | sim | igual ao domínio corporativo aprovado (**D-2**) | **deny** `403` |
+| `hd` | sim | igual a `PLATFORM_OIDC_HOSTED_DOMAIN`, obrigatória por ambiente (**D-2**). Configuração ausente ⇒ **deny**, nunca allow | **deny** `403` |
 | `email_verified` | sim | precisa ser `true` | **deny** `403` |
 | `email` | não | aceito **somente** como rótulo de exibição e para auditoria | nunca decide |
 | `amr` / `acr` | ver ADR §2.5 | quando o IdP emitir de forma confiável, exigir fator forte | **deny** `403` |
@@ -84,6 +84,10 @@ Cada linha é um teste em `SEC-01A`.
 | 20 | Principal em período de break-glass **expirado** | deny `403` |
 | 21 | Usuário municipal com e-mail **idêntico** ao do operador, em qualquer tenant | deny — o e-mail não participa da decisão |
 | 22 | Principal criado por endpoint municipal | impossível por construção; teste arquitetural falha o PR |
+| 23 | `PLATFORM_OIDC_HOSTED_DOMAIN` **ausente ou vazia** fora de ambiente de teste | deny em toda rota de plataforma + erro de configuração na inicialização. **Nunca** aceitar qualquer `hd` |
+| 24 | `PLATFORM_OIDC_AUDIENCE` ausente | deny; sem audience configurada não há como distinguir ambiente |
+
+Os cenários **23** e **24** existem porque configuração faltante é o modo de falha que já temos: `PLATFORM_ADMIN_EMAILS` vazia hoje nega todo mundo por acidente, não por desenho. Aqui a negação é o desenho.
 
 O cenário **21** é a regressão do achado F-01 e é o teste vermelho que abre `SEC-01A`.
 

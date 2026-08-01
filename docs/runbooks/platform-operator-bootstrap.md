@@ -1,7 +1,7 @@
 # Runbook — bootstrap e operação do operador de plataforma
 
-**Status:** proposto em `SEC-00`, executável a partir de `SEC-01A` · **Data:** 2026-08-01
-**Autoridade:** [ADR-016](../architecture/adr/ADR-016-platform-operator-identity.md)
+**Status:** aprovado em `SEC-00` (2026-08-01), executável a partir de `SEC-01A` · **Data:** 2026-08-01
+**Autoridade:** [ADR-016](../architecture/adr/ADR-016-platform-operator-identity.md) — status **Aceito**
 
 > **Nenhum procedimento deste runbook é executável hoje.** `platform_principal`, o validador de token administrativo e a CLI citada nascem em `SEC-01A`. O documento existe para ser revisado junto com o ADR — se um procedimento aqui for impraticável, a decisão arquitetural precisa mudar antes de virar código.
 
@@ -26,11 +26,28 @@
 PLATFORM_OIDC_ISSUER=https://accounts.google.com
 PLATFORM_OIDC_AUDIENCE=<client id do ambiente>
 PLATFORM_OIDC_JWKS_URL=https://www.googleapis.com/oauth2/v3/certs
-PLATFORM_OIDC_HOSTED_DOMAIN=<dominio corporativo aprovado — D-2>
+PLATFORM_OIDC_HOSTED_DOMAIN=<dominio corporativo — obrigatorio, nunca no codigo>
+PLATFORM_CONSOLE_ORIGIN=<origem do console — obrigatorio, define cookie/CORS/CSP>
 PLATFORM_DB_URL=postgresql+asyncpg://aprimora_platform:<cofre>@<host>/<db>
 ```
 
+`PLATFORM_OIDC_HOSTED_DOMAIN` **não tem default** (D-2). Ausente ou vazia em ambiente que não seja de teste, a fronteira de plataforma nega tudo e a inicialização registra erro de configuração. Um default embutido converteria esquecimento em porta aberta — que é exatamente o modo de falha de `PLATFORM_ADMIN_EMAILS`.
+
+`PLATFORM_CONSOLE_ORIGIN` existe porque o console vai para **origem própria** (Q-3). O domínio definitivo é configuração; nada de host fixo no código, no nginx versionado ou no bundle.
+
+Os segredos ficam, por ora, em **variáveis de ambiente protegidas no host** (Q-4). Cofre de segredos é migração futura registrada na seção 10 — não bloqueia `SEC-01A`.
+
 `PLATFORM_ADMIN_EMAILS` é **removida** em `SEC-01A`. Enquanto existir, é caminho de autorização ativo — ver T-1 do threat model.
+
+### 1.1 Verificar `PLATFORM_ADMIN_EMAILS` sem expor os e-mails
+
+O valor em homologação é desconhecido (Q-1) e precisa ser tratado como **potencialmente preenchido**. A verificação diz **se existe** e **quantos** — nunca quais. Colocar a lista num log é criar uma segunda cópia do alvo de F-01:
+
+```bash
+docker exec aprimora-py-backend python -c "import os,sys; v=os.getenv('PLATFORM_ADMIN_EMAILS','').strip(); n=len([e for e in v.split(',') if e.strip()]); print(f'PLATFORM_ADMIN_EMAILS: {\"presente\" if n else \"vazia\"} ({n} entradas)'); sys.exit(1 if n else 0)"
+```
+
+Saída `presente (N entradas)` significa que o caminho de F-01 está **ativo naquele ambiente**: qualquer tenant capaz de criar usuário com um desses e-mails alcança operação cross-tenant. Registrar a contagem e a data no controle de mudanças, tratar como incidente aberto até `SEC-01A` chegar ao ambiente, e **não** copiar o valor para ticket, chat ou este runbook.
 
 ---
 
@@ -187,7 +204,7 @@ Registrar data, quem revisou e divergências encontradas.
 
 ## 10. Pendências deste runbook
 
-- A CLI `app.cli.platform_principal` **não existe**; nasce em `SEC-01A`. Os comandos aqui são o contrato que ela deve cumprir.
-- O cofre de segredos não está definido (**Q-4** do ADR). Enquanto não estiver, o secret fica em variável de ambiente no host — aceitável, não ótimo.
-- O host do console de operador não está decidido (**Q-3**), o que afeta cookie scope, CORS, CSP e nginx.
-- O valor de `PLATFORM_ADMIN_EMAILS` em homologação **não foi verificado** (**Q-1**). Se estiver preenchido, T-1 está ativo hoje.
+- A CLI `app.cli.platform_principal` **não existe**; nasce em `SEC-01A`. Os comandos aqui são o contrato que ela deve cumprir. **Nenhum operador real vai para código ou seed** (Q-2): a lista de principals é construída por esta CLI, ambiente a ambiente, e o grupo autorizado é configuração.
+- **Migração para cofre de segredos** (Q-4): decidido usar variável de ambiente protegida no host por ora. Fica registrada como trabalho futuro e **não bloqueia** `SEC-01A`. Ao adotar cofre, o único procedimento que muda é o da seção 6.
+- O host definitivo do console (Q-3) ainda não foi escolhido, mas a decisão de **ter origem própria** está tomada: `PLATFORM_CONSOLE_ORIGIN` é o ponto único de configuração de cookie scope, CORS, CSP e nginx. Nada de domínio fixo no código.
+- `PLATFORM_ADMIN_EMAILS` em homologação continua **não verificada** (Q-1). Usar a verificação da seção 1.1 — a que conta sem revelar — assim que houver acesso ao host, e registrar apenas a contagem.

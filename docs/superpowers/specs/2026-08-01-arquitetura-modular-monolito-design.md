@@ -81,6 +81,11 @@ Esses controles serão reaproveitados. A proposta não recomeça o sistema do ze
 | F-09 | Média | Alta | Confirmado | A organização física é acoplada: `backend/app/main.py:9` e `:79` importam/registram routers manualmente; `frontend/lib/api.ts` concentra todos os domínios e possui mais de uma centena de consumidores de produção. Mover arquivos diretamente quebraria imports e workers. |
 | F-10 | Média | Alta | Confirmado | Jobs possuem autorização inconsistente: uma pessoa pode criar um job pelo Protocolo e não conseguir ler o resultado porque a leitura depende de Administração (`backend/app/routers/jobs.py:191`). |
 | F-11 | Média | Alta | Confirmado | `AuditLog` não identifica o módulo de origem, enquanto Transporte mantém trilha própria. A investigação cross-module fica fragmentada. |
+| F-12 | Crítica | Alta | Confirmado | A aplicação conecta no Postgres como `ged_user`, que é `SUPERUSER` e `BYPASSRLS` (`docker-compose.yml:4`; verificado na sessão real do container: `current_user = ged_user \| superuser = on`). O papel `aprimora_app` (`NOBYPASSRLS`) existe mas é usado apenas pelos testes. **A RLS descrita no invariante 10 como última barreira de isolamento está inerte no runtime**: o isolamento hoje depende inteiramente do filtro aplicacional. Descoberto na inspeção de `SEC-00` e registrado em [ADR-016 §1.7 e §9.1](../../architecture/adr/ADR-016-platform-operator-identity.md). |
+
+**F-12 é anterior ao RBAC v2.** Endereçado pela família `SEC-RLS-00A` (caracterização e inventário, sem mudar runtime) → `SEC-RLS-00B` (papéis mínimos e compatibilidade) → `SEC-RLS-ROLLOUT` (gate operacional). Enquanto F-12 estiver aberto, o invariante 10 é aspiracional e não deve ser citado como controle vigente em nenhuma análise de risco. `RBAC-01` e qualquer rollout de módulo dependem da conclusão da família.
+
+**A contenção de F-12 não começa trocando a credencial.** O runtime opera com bypass há tempo suficiente para que caminhos hoje funcionais dependam dele sem registro. Trocar a URL de conexão antes do inventário converte um achado de segurança conhecido em incidente de disponibilidade desconhecido. Corrigir policy ou grant que falhar é a única resposta aceita; restaurar `BYPASSRLS` como atalho é proibido.
 
 ### 4.3 Limitações desta avaliação
 
@@ -114,7 +119,7 @@ Esses controles serão reaproveitados. A proposta não recomeça o sistema do ze
 7. Administrar identidades não concede automaticamente leitura de dados de negócio.
 8. Administrador de módulo não é administrador do tenant e nunca é administrador da plataforma.
 9. Escopo é aplicado na construção da consulta; não basta filtrar o resultado depois.
-10. RLS continua sendo a última barreira de isolamento de tenant. O scope complementa, não substitui, a RLS.
+10. RLS continua sendo a última barreira de isolamento de tenant. O scope complementa, não substitui, a RLS. **Hoje este invariante não vigora** — ver **F-12**: o runtime conecta com `BYPASSRLS`. Ele só volta a ser um controle real ao fim de `SEC-RLS-ROLLOUT`.
 11. O backend é autoridade de acesso. O frontend usa o mesmo vocabulário para UX.
 12. Descontratação não remove dados automaticamente.
 13. Plataforma não importa modelos concretos de módulos comerciais.

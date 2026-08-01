@@ -104,7 +104,8 @@ O executor deve pausar o respectivo cutover se faltar:
 - política de leitura histórica/suspensão do módulo em `ENT-02` e antes de cada cutover;
 - divergência zero dos cenários críticos no shadow mode em `RBAC-02`;
 - inventário completo de endpoints, tasks, CLI, uploads, exports, portal e integrações do módulo;
-- autorização explícita para executar `URL-01`.
+- autorização explícita para executar `URL-01`;
+- `SEC-RLS-ROLLOUT`: cada promoção de ambiente (teste/dev → homologação → produção) é gate humano próprio. Produção exige paridade demonstrada, observabilidade e rollback ensaiado.
 
 ### 1.6 Verificação obrigatória de migrations
 
@@ -131,6 +132,9 @@ Colunas usadas por runtime seguem `nullable/compatível → backfill observável
 | S0 | `SEC-00` | IdP/realm administrativo decidido | — |
 | S1 | `SEC-01A/B` | principal e UI SaaS separados de identidades/sessões municipais | `SEC-00` aprovado |
 | S2 | `SEC-02` | bloqueio de autoelevação e grants fora da autoridade | `SEC-01A` |
+| S3 | `SEC-RLS-00A` | prova de que o runtime ignora RLS (**F-12**) e inventário do que depende do bypass | nenhuma — pode correr em paralelo a `SEC-01A`, não muda runtime |
+| S4 | `SEC-RLS-00B` | papéis mínimos por função, nenhum de runtime `SUPERUSER` | `SEC-RLS-00A`; papéis coordenados com `SEC-01A` |
+| gate | `SEC-RLS-ROLLOUT` | trocar o papel do runtime por ambiente, com rollback comprovado | `SEC-RLS-00B` |
 | A1 | `ARC-01` | inventário executável e guardas | pode ocorrer em paralelo à contenção, sem runtime |
 | A2 | `ARC-02` | composition, manifestos lazy e contrato gerado | `ARC-01` |
 | E1 | `ENT-01A/B` | expand compatível e cutover HTTP | `ARC-02`, deploys em ordem |
@@ -139,7 +143,7 @@ Colunas usadas por runtime seguem `nullable/compatível → backfill observável
 | E2 | `ENT-02` | lifecycle em portal/tasks/CLI/uploads/exports | `ENT-01C`, `CORE-01` |
 | gate | `ENT-ROLLOUT` | liberar operações administrativas de lifecycle | `ENT-02` em API, worker e beat + playbooks aprovados |
 | C2 | `CORE-02A..B` | schema transversal e providers backend | `ARC-02`, `ENT-02` |
-| R1 | `RBAC-01` | schema v2/RLS/templates/estado de cutover | `SEC-02`, `CORE-01`, `ENT-02` |
+| R1 | `RBAC-01` | schema v2/RLS/templates/estado de cutover | `SEC-02`, `CORE-01`, `ENT-02`, **`SEC-RLS-ROLLOUT` concluído** |
 | T1 | `TRN-01` | matriz/templates Transporte | `RBAC-01` |
 | R2 | `RBAC-02` | motor shadow e AccessSnapshot | `TRN-01`, `ENT-02` |
 | F1 | `FE-01` | staff provider, route gates e registry frontend | `RBAC-02` |
@@ -328,6 +332,108 @@ Colunas usadas por runtime seguem `nullable/compatível → backfill observável
 **Commit sugerido:** `fix(security): enforce delegated role grant policy`
 
 **Não incluir:** tabelas completas de RBAC v2, mudança de menus ou papéis de Transporte.
+
+### PR `SEC-RLS-00A` — caracterizar F-12 e inventariar o que depende do bypass
+
+**Dependência:** nenhuma. Pode correr em paralelo a `SEC-01A`. Não altera runtime.
+
+**Contexto:** a aplicação conecta como `ged_user`, `SUPERUSER` e `BYPASSRLS` (achado **F-12** da especificação). A RLS que o invariante 10 chama de última barreira está inerte. Este PR **não conserta** — ele mede. A ordem é deliberada: o runtime opera com bypass há tempo suficiente para que caminhos hoje funcionais dependam dele sem registro, e trocar a credencial antes do inventário converte um achado conhecido em incidente desconhecido.
+
+**Arquivos a inspecionar:**
+
+- `docker-compose.yml`, `docker-compose.dev.yml`, `backend/.env.example`, `scripts/deploy.sh`
+- `backend/app/database.py` (engine, `get_db`, listener `after_begin`, `tenant_filter`)
+- `backend/tests/conftest.py` (`admin_engine` × `app_session`)
+- todas as migrations com `POLICY`, `ROW LEVEL SECURITY`, `GRANT` ou `SECURITY DEFINER`
+- `backend/app/tasks/` e `backend/app/cli/` — como abrem sessão e se definem `app.tenant_id`
+
+**Novos arquivos alvo:**
+
+- `backend/tests/test_rls_bypass_caracterizacao.py`
+- `docs/architecture/security/rls-bypass-inventory.md`
+
+**Implementação:**
+
+1. Escrever teste que **prova** o bypass por inversão, não por afirmação: com `ged_user` e `app.tenant_id` de um tenant A, um `SELECT` na tabela de negócio **retorna** linhas do tenant B; o mesmo `SELECT` com `aprimora_app` **não** retorna. Um teste que só afirmasse `rolbypassrls = true` no catálogo provaria configuração, não consequência.
+2. Inventariar, com consulta ao catálogo e não de memória: papéis existentes e seus atributos (`pg_roles`), tabelas com `relrowsecurity`/`relforcerowsecurity` e as que **não** têm (`pg_class`), policies (`pg_policies`), grants por papel (`information_schema.role_table_grants`), sequences (`role_usage_grants`) e funções `SECURITY DEFINER` (`pg_proc.prosecdef`).
+3. Registrar cada divergência: tabela tenanted **sem** RLS, tabela com RLS **sem** grant para `aprimora_app`, sequence sem `USAGE`, policy que referencia `current_setting` sem o `true` de tolerância.
+4. Rodar a suíte completa com `aprimora_app` como papel da aplicação — **sem** commitar a troca. Registrar cada falha com comando, teste e erro exato. Uma falha aqui é dado do inventário, não bug a corrigir neste PR.
+5. Classificar cada consumidor de banco em quatro categorias, com o papel alvo de cada um: **API municipal** (sujeito a RLS), **worker Celery** (grants mínimos), **migrations/DDL** (dono do schema, fora do runtime) e **plataforma** (cross-tenant por grant explícito).
+6. Fechar o inventário com a lista nominal do que **hoje depende** do bypass e por quê — é esse conjunto que `SEC-RLS-00B` tem de resolver com policy ou grant.
+
+**Testes mínimos:**
+
+- bypass demonstrado por diferença de resultado entre os dois papéis;
+- `aprimora_app` de fato não tem `BYPASSRLS` nem `SUPERUSER` (guarda contra regressão de provisionamento);
+- guarda estrutural: toda tabela em `aprimora_py.*` e `frota.*` com coluna `tenant_id` tem RLS habilitada **e** forçada, ou consta de uma allowlist com razão escrita.
+
+**Aceite:** o inventário lista todo consumidor de banco com seu papel alvo, e a execução da suíte com `aprimora_app` está registrada com o resultado real — inclusive as falhas.
+
+**Rollback:** não aplicável. Nenhuma mudança de runtime, nenhum papel criado.
+
+**Commit sugerido:** `test(security): caracteriza bypass de RLS no runtime (F-12)`
+
+**Não incluir:** criar papel, alterar `DATABASE_URL`, corrigir policy ou grant. Corrigir aqui destruiria a medição.
+
+### PR `SEC-RLS-00B` — papéis mínimos por função e compatibilidade
+
+**Dependência:** `SEC-RLS-00A` concluído. Papéis coordenados com `SEC-01A`.
+
+**Objetivo:** dar a cada consumidor de banco o menor papel que o faz funcionar, sem nenhum papel de runtime `SUPERUSER`.
+
+**Divisão de autoridade sobre papéis — não violar:**
+
+| Papel | Criado por | Observação |
+|---|---|---|
+| `aprimora_platform` | `SEC-01A` | `SEC-RLS-00B` **verifica**, não redefine |
+| `aprimora_app` | já existe | ajustar grants |
+| `aprimora_worker` | `SEC-RLS-00B` | grants mínimos por task |
+| `aprimora_migrator` | `SEC-RLS-00B` | DDL; nunca usado por runtime |
+
+Duas migrations que criem o mesmo papel colidem no `CREATE ROLE`. Se a ordem de merge for incerta, usar `DO $$ ... IF NOT EXISTS`, e ainda assim manter a autoridade acima.
+
+**Novos arquivos alvo:**
+
+- `backend/alembic/versions/<next>_papeis_minimos_runtime.py`
+- `backend/tests/test_rls_papeis_minimos.py`
+
+**Implementação:**
+
+1. Criar `aprimora_worker` e `aprimora_migrator` com grants enumerados. Nenhum recebe `SUPERUSER`; nenhum recebe `BYPASSRLS`.
+2. Ajustar os grants de `aprimora_app` para cobrir o que o inventário de `00A` mostrou faltando — tabela a tabela, sequence a sequence.
+3. Resolver cada dependência de bypass listada em `00A` **na policy ou no grant**. Restaurar `BYPASSRLS` é proibido, inclusive "temporariamente".
+4. Tornar o papel do runtime **configurável**: a troca é seleção de `DATABASE_URL` por ambiente, e a variável antiga continua válida. É esse mecanismo que dá rollback sem redeploy de código durante `SEC-RLS-ROLLOUT`.
+5. Não trocar o valor efetivo em nenhum ambiente neste PR. A troca é `SEC-RLS-ROLLOUT`.
+
+**Testes mínimos:**
+
+- nenhum papel de runtime é `SUPERUSER` ou tem `BYPASSRLS` — teste que varre `pg_roles`;
+- com `aprimora_app`, um usuário do tenant A não alcança dado do tenant B em nenhuma tabela de negócio;
+- a suíte completa passa com `aprimora_app` como papel da aplicação;
+- pelo menos um teste HTTP com **usuário comum não-SU** por módulo contratado, porque a suíte só com superusuário não exercita o caminho real;
+- worker executa suas tasks com `aprimora_worker`;
+- `aprimora_migrator` aplica `upgrade head` em banco limpo; `aprimora_app` **não** consegue DDL.
+
+**Aceite:** todas as suítes verdes com papéis sujeitos a RLS, e a lista de dependências de bypass de `00A` zerada ou com razão registrada por item remanescente.
+
+**Rollback:** apontar `DATABASE_URL` de volta ao papel anterior. Os papéis e grants criados permanecem — são aditivos.
+
+**Commit sugerido:** `feat(security): papeis minimos de runtime sujeitos a RLS`
+
+**Não incluir:** trocar o papel efetivo em homologação ou produção; mudar RBAC de negócio.
+
+### Gate operacional `SEC-RLS-ROLLOUT` — trocar o papel do runtime por ambiente
+
+**Dependência:** `SEC-RLS-00B` em `main`.
+
+Não é PR de código. É a sequência de promoção, um gate humano por degrau:
+
+1. **Teste e desenvolvimento.** Trocar, rodar a suíte completa, o e2e e a navegação manual dos cinco módulos.
+2. **Homologação.** Trocar e validar **todos** os módulos, jobs, uploads, exports e tasks Celery — incluindo os agendados pelo beat, que só aparecem no horário. Exercitar isolamento com usuário comum não-SU em cada módulo contratado.
+3. **Produção.** Somente após paridade demonstrada, observabilidade instalada (erro de permissão de banco precisa ser distinguível de erro de negócio no log) e rollback ensaiado de verdade, não descrito.
+
+**Critério de parada:** qualquer erro de permissão em caminho não previsto pelo inventário volta para `SEC-RLS-00B` como correção de policy ou grant. Voltar o papel é rollback aceitável; reativar `BYPASSRLS` não é.
+
 
 ---
 

@@ -1,6 +1,6 @@
 # ADR-016 — Identidade do operador de plataforma
 
-**Status:** proposto — aguardando aprovação do responsável técnico/operacional
+**Status:** **Aceito** em 2026-08-01 por Jorge Alcoforado
 **Data:** 2026-08-01
 **PR:** `SEC-00`
 **Base inspecionada:** `main` @ `6e368d1`
@@ -8,7 +8,8 @@
 **Documentos irmãos:** [matriz de claims](../security/platform-operator-claims-matrix.md) · [threat model](../security/threat-model-platform-operator.md) · [runbook de bootstrap](../../runbooks/platform-operator-bootstrap.md)
 
 > Este ADR é **decisão**, não implementação. Nenhuma linha de runtime muda em `SEC-00`.
-> Sem a aprovação registrada na seção 9, `SEC-01A` e `SEC-01B` não começam.
+> As decisões **D-1** a **D-6** e as perguntas **Q-1** a **Q-5** foram resolvidas — ver seções 9, 10 e 11.
+> `SEC-01A` e `SEC-01B` estão liberados. `D-6` gerou a família `SEC-RLS-*`, descrita na seção 9.1.
 
 ---
 
@@ -80,13 +81,13 @@ A identidade do operador de plataforma passa a viver em um **namespace de segura
 | **Identidade persistida** | `(issuer, subject)` em `platform_principal`. O e-mail é gravado **apenas como rótulo de exibição** e nunca participa da decisão |
 | **Algoritmo** | `RS256`, chaves públicas do JWKS do Google. `HS256` é **proibido** nesta fronteira |
 | **JWKS** | `https://www.googleapis.com/oauth2/v3/certs`, cache respeitando `Cache-Control`, teto de 24 h, refresh sob `kid` desconhecido com rate limit |
-| **Restrição de domínio** | `hd == <dominio corporativo>` é obrigatório, **e** o `(issuer, sub)` precisa existir e estar ativo em `platform_principal`. O domínio sozinho nunca basta |
+| **Restrição de domínio** | `hd` precisa ser igual ao domínio configurado em `PLATFORM_OIDC_HOSTED_DOMAIN`, **e** o `(issuer, sub)` precisa existir e estar ativo em `platform_principal`. O domínio sozinho nunca basta |
 
-**Esta é a decisão que mais depende da sua aprovação.** Ver alternativas na seção 5 e a pergunta **D-1** na seção 9.
+**O domínio corporativo é configuração, nunca literal no código** (D-2). `PLATFORM_OIDC_HOSTED_DOMAIN` é obrigatória em qualquer ambiente que não seja de teste: **ausente ou vazia ⇒ fail-closed** — a fronteira de plataforma nega tudo e registra erro de configuração na inicialização. Um default embutido transformaria esquecimento de configuração em porta aberta, que é exatamente o modo de falha de `PLATFORM_ADMIN_EMAILS`.
 
 ### 2.2 Separação estrutural
 
-1. **Namespace de identidade.** `platform_principal` é identificado por `(issuer, subject)`. É **proibido** por constraint e por revisão vincular a linha a `utils.usuario.id`, a e-mail municipal ou a qualquer cadastro de tenant.
+1. **Namespace de identidade.** `platform_principal` tem **`id` interno como chave primária** e **`UNIQUE (issuer, subject)` como chave natural** (Q-5). Auditoria, break-glass e concessões referenciam o `id`; a troca futura de IdP muda a chave natural sem reescrever a trilha. É **proibido** por constraint e por revisão vincular a linha a `utils.usuario.id`, a e-mail municipal ou a qualquer cadastro de tenant.
 2. **Validação de token.** As rotas de plataforma validam `iss`, `aud`, `exp`, `nbf`, `iat`, assinatura RS256 contra o JWKS e a presença do principal ativo. Um token municipal **falha por `iss`/`aud` antes de qualquer consulta ao banco**.
 3. **Nenhum caminho municipal cria plataforma.** Nenhum endpoint sob autenticação municipal cria, altera, ativa ou concede `platform_principal`. A verificação é estrutural (teste arquitetural), não só revisão.
 4. **Sessão de UI separada.** O console de operador tem árvore React, provider, cookie/armazenamento, cliente HTTP e query cache próprios. Cookie de operador nunca é enviado a APIs municipais/cidadão, e vice-versa.
@@ -98,9 +99,14 @@ A identidade do operador de plataforma passa a viver em um **namespace de segura
 |---|---|---|
 | `aprimora_platform` (**novo**) | exclusivo das rotas de plataforma autenticadas | DML em `aprimora_py.tenant`, `tenant_modulo`, `modulo`, `platform_principal` e auditoria de plataforma. `NOBYPASSRLS`. Sem DML nas tabelas de negócio dos tenants |
 | `aprimora_app` | runtime municipal | `NOBYPASSRLS`, sujeito à RLS. **Sem** DML de entitlement |
-| `aprimora_worker` (**futuro**, `ENT-02`) | Celery | grants mínimos por task |
+| `aprimora_worker` (**futuro**, `SEC-RLS-00B`) | Celery | grants mínimos por task |
+| `aprimora_migrator` (**futuro**, `SEC-RLS-00B`) | Alembic/DDL | dono do schema; nunca usado por runtime |
 
 A conexão de plataforma é aberta **somente após** a validação do token administrativo. Nunca é o pool padrão da aplicação.
+
+**Nenhum papel de runtime pode ser `SUPERUSER`, e `BYPASSRLS` não é solução genérica** (D-5). Os grants de `aprimora_platform` são cross-tenant **explícitos e enumerados**, tabela a tabela — cross-tenant por grant declarado, não por contorno de RLS. Quando uma policy ou grant faltar, a correção é a policy, nunca restaurar o bypass.
+
+**Coordenação de migrations:** `aprimora_platform` é criado pela migration de `SEC-01A`. Os papéis municipais, de worker e de DDL são criados por `SEC-RLS-00B`. As duas famílias **não** podem definir o mesmo papel — ver seção 9.1.
 
 ### 2.4 Ciclo de vida do token
 
@@ -216,42 +222,56 @@ O primeiro commit de `SEC-01A` reproduz a colisão de identidade como teste verm
 
 ---
 
-## 9. Decisões que exigem sua aprovação
+## 9. Decisões — resolvidas em 2026-08-01
 
-| ID | Decisão | Recomendação | Impacto se mudar |
-|---|---|---|---|
-| **D-1** | IdP administrativo | Google Workspace OIDC, client dedicado por ambiente | Alto — muda issuer, JWKS, runbook e todo o `SEC-01A` |
-| **D-2** | Domínio corporativo aceito em `hd` | O domínio de e-mail corporativo da equipe | Baixo — configuração |
-| **D-3** | TTL de 15 min e sessão máxima de 8 h | Manter | Baixo |
-| **D-4** | Break-glass com dupla aprovação e 60 min | Manter | Médio — afeta o runbook |
-| **D-5** | Papel de banco `aprimora_platform` novo | Criar em `SEC-01A` | Médio — exige migration de grants |
-| **D-6** | **A aplicação roda como `ged_user` (SUPERUSER, BYPASSRLS)** | Tratar como incidente de configuração e abrir item próprio: passar o runtime para `aprimora_app` | **Alto** — hoje a RLS está inerte em produção; mexer nisso pode quebrar caminhos que dependem do bypass sem saber |
+| ID | Decisão | Resolução |
+|---|---|---|
+| **D-1** | IdP administrativo | **Aprovado.** Google Workspace OIDC, OAuth client dedicado e configuração separada por ambiente |
+| **D-2** | Domínio corporativo aceito em `hd` | **Aprovado como configuração.** `PLATFORM_OIDC_HOSTED_DOMAIN`, obrigatória por ambiente. **Domínio real nunca no código.** Ausente em ambiente não-teste ⇒ fail-closed |
+| **D-3** | TTL e sessão | **Aprovado.** Access token de 15 min, sessão máxima de 8 h |
+| **D-4** | Break-glass | **Aprovado.** Dupla aprovação, justificativa obrigatória, auditoria e expiração automática em 60 min |
+| **D-5** | Papel `aprimora_platform` | **Aprovado.** Criado com privilégios explicitamente enumerados. Não pode ser `SUPERUSER` e não recebe `BYPASSRLS` como solução genérica |
+| **D-6** | Runtime como `ged_user` (SUPERUSER, BYPASSRLS) | **Aprovado para contenção prioritária.** Registrado como achado **F-12** no spec e endereçado pela família `SEC-RLS-*` — ver 9.1 |
 
-**D-6 não é escopo de `SEC-00`** e eu não vou tocar nele sem sua decisão. Mas ele contradiz a invariante 10 do spec, e seria desonesto entregar este ADR sem dizer isso.
+### 9.1 F-12 e a família `SEC-RLS-*`
+
+O achado da seção 1.7 passa a se chamar **F-12** e entra na tabela 4.2 da especificação com severidade **Crítica**.
+
+**Não trocar a credencial do `docker-compose.yml` sem caracterização.** O runtime roda com bypass há tempo suficiente para que caminhos hoje funcionais dependam dele sem que ninguém saiba quais. Trocar a URL de conexão como primeira ação transforma um achado de segurança conhecido em incidente de disponibilidade desconhecido. A ordem é caracterizar, depois conter.
+
+Três PRs, nesta ordem, **antes** de `RBAC-01` e de qualquer rollout de módulo:
+
+| PR | Entrega | Muda runtime? |
+|---|---|---|
+| `SEC-RLS-00A` | Prova em teste que `ged_user` ignora RLS; roda as suítes com `aprimora_app`; inventaria grants, policies, funções `SECURITY DEFINER` e consultas que dependem do bypass; classifica API municipal, worker, migrations e plataforma | **Não** |
+| `SEC-RLS-00B` | Papéis mínimos: runtime municipal sujeito a RLS, papel separado para DDL, worker com grants mínimos, `aprimora_platform` com grants cross-tenant explícitos. Nenhum papel de runtime `SUPERUSER`. Rollback por configuração durante o rollout | Sim, atrás de configuração |
+| `SEC-RLS-ROLLOUT` | Gate operacional: teste/dev → homologação → produção, com paridade, observabilidade e rollback comprovados | Gate, não código |
+
+**Regra que atravessa a família:** policy ou grant que falhar é **corrigido**; restaurar `BYPASSRLS` como atalho é proibido. Em `SEC-RLS-ROLLOUT`, produção só depois de validar todos os módulos, jobs, uploads, exports e tasks Celery, e de testar isolamento com **usuário comum não-SU** — a suíte só com superusuário já escondeu um 500 em produção neste repositório.
+
+**Coordenação com `SEC-01A`:** as duas famílias tocam papéis de banco. A divisão é fixa — `SEC-01A` cria **apenas** `aprimora_platform`; `SEC-RLS-00B` cria os papéis municipal, de worker e de DDL, e **não redefine** `aprimora_platform`, apenas verifica que ele já atende às regras. `SEC-RLS-00A` não cria papel nenhum.
 
 ---
 
-## 10. Perguntas em aberto
+## 10. Perguntas — respondidas em 2026-08-01
 
-| ID | Pergunta | Por que importa |
+| ID | Pergunta | Resposta |
 |---|---|---|
-| **Q-1** | Qual o valor de `PLATFORM_ADMIN_EMAILS` na VPS de homologação? Localmente está vazio | Se estiver preenchido lá, o caminho de F-01 está ativo hoje e a prioridade de `SEC-01A` muda |
-| **Q-2** | Quem compõe o grupo de operadores de plataforma? | Define o grupo no Workspace, a lista inicial de principals e as duplas de break-glass |
-| **Q-3** | O console de operador ficará em domínio/host próprio? | Muda cookie scope, CORS, CSP e a configuração do nginx |
-| **Q-4** | Existe cofre de segredos definido (ou será variável de ambiente no host)? | O runbook descreve o procedimento; hoje assume variável de ambiente no host, o que é aceitável mas não ótimo |
-| **Q-5** | O `sub` do Google é aceitável como identidade permanente, ou precisa de identificador interno adicional? | Recomendo `platform_principal.id` interno como PK e `(issuer, sub)` como chave natural única — resolve troca futura de IdP sem reescrever auditoria |
+| **Q-1** | Valor de `PLATFORM_ADMIN_EMAILS` na VPS | **Desconhecido.** Tratar como **potencialmente preenchido**: `SEC-01A` permanece **P0**. Não bloqueia a implementação local. O runbook ganha uma verificação de **presença e quantidade** que **não expõe os e-mails em log** |
+| **Q-2** | Quem compõe o grupo de operadores | **Nenhum operador real vai para código ou seed.** A entrega é uma **CLI de bootstrap**; o grupo autorizado é configuração por ambiente |
+| **Q-3** | Host próprio para o console | **Sim, preparar para origem/host próprio configurável**, com cookies, CORS, CSP, sessão e cache separados. **Domínio definitivo não é hardcoded** |
+| **Q-4** | Cofre de segredos | **Variáveis de ambiente protegidas no host**, por ora. Migração para cofre fica registrada como trabalho futuro e **não bloqueia** `SEC-01A` |
+| **Q-5** | `sub` como identidade permanente | **Aprovado** o desenho recomendado: `platform_principal.id` como PK interna, `UNIQUE (issuer, subject)` como chave natural |
 
 ---
 
 ## 11. Registro de aprovação
 
-Preencher antes de iniciar `SEC-01A`:
-
-- [ ] **D-1** IdP aprovado: ______________________
-- [ ] **D-2** Domínio `hd`: ______________________
-- [ ] **D-3** TTL/sessão aprovados
-- [ ] **D-4** Break-glass aprovado
-- [ ] **D-5** Papel `aprimora_platform` aprovado
-- [ ] **D-6** Encaminhamento decidido (não bloqueia `SEC-01A`)
-- [ ] **Q-1** a **Q-5** respondidas
-- [ ] Aprovado por: ______________________ em ____ / ____ / ______
+- [x] **D-1** IdP aprovado: **Google Workspace OIDC**, client dedicado e configuração por ambiente
+- [x] **D-2** Domínio `hd`: **variável obrigatória por ambiente**, fail-closed se ausente; domínio real fora do código
+- [x] **D-3** TTL de 15 min e sessão máxima de 8 h aprovados
+- [x] **D-4** Break-glass aprovado: dupla aprovação, justificativa, auditoria, expiração em 60 min
+- [x] **D-5** Papel `aprimora_platform` aprovado, com grants explícitos, sem `SUPERUSER` e sem `BYPASSRLS` genérico
+- [x] **D-6** Encaminhado como **F-12** e família `SEC-RLS-00A/00B/ROLLOUT`, anterior a `RBAC-01`
+- [x] **Q-1** a **Q-5** respondidas — seção 10
+- [x] Aprovado por: **Jorge Alcoforado** em **01 / 08 / 2026**
