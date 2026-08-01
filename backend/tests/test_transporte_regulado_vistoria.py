@@ -1053,8 +1053,18 @@ async def test_http_vencidas_nao_e_engolida_por_vistoria_id(admin_engine):
             )
 
         async with _sm(admin_engine)() as s:
+            # ORDER BY id ASC é obrigatório aqui, não estético: o tenant tem
+            # duas linhas em utils.usuario neste ponto — o admin/SU criado por
+            # `provisionar_tenant` e o auditor criado acima por `_usuario`.
+            # Sem ordenação, `LIMIT 1` devolve uma linha arbitrária do seq
+            # scan; se pegar o auditor (sem grupo/SU), `require_permission`
+            # barra com 403 antes de a rota /vencidas sequer ser resolvida.
+            # O admin é sempre inserido primeiro, então id ASC garante ele.
             su_id = int((await s.execute(
-                text("SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"),
+                text(
+                    "SELECT id FROM utils.usuario WHERE tenant_id=:t "
+                    "ORDER BY id ASC LIMIT 1"
+                ),
                 {"t": tenant.id},
             )).scalar_one())
 
