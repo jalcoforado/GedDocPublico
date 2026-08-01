@@ -405,6 +405,14 @@ Duas migrations que criem o mesmo papel colidem no `CREATE ROLE`. Se a ordem de 
 4. Tornar o papel do runtime **configurável**: a troca é seleção de `DATABASE_URL` por ambiente, e a variável antiga continua válida. É esse mecanismo que dá rollback sem redeploy de código durante `SEC-RLS-ROLLOUT`.
 5. Não trocar o valor efetivo em nenhum ambiente neste PR. A troca é `SEC-RLS-ROLLOUT`.
 
+**Requisitos que vieram da medição de `SEC-RLS-00A`** — decididos em 2026-08-01, com o inventário na mão:
+
+6. **`transporte_regulado` é o maior item.** 20 policies em 5 tabelas referenciam `current_setting('app.current_tenant_id')`, GUC que a aplicação **nunca** seta — ela seta `app.tenant_id` (`backend/app/database.py`). E estão **sem** o segundo argumento `true`, então a policy não nega: derruba a consulta com `unrecognized configuration parameter`. Somam-se 4 tabelas e 6 sequences sem grant para `aprimora_app` e 8 tabelas com `ENABLE` sem `FORCE`. A migration 0061 corrigiu só `alvara`. Sem isto, o módulo inteiro para no instante em que o bypass sair.
+7. **Falhas silenciosas antes das ruidosas.** `limpar_jobs_antigos` no modo beat (`tenant_id=None`) e `cli/backup.py` leem tabelas com RLS sem `app.tenant_id` e recebem **zero linhas sem erro**. O backup produz arquivo sintaticamente válido e vazio, e o sintoma só aparece no restore — longe da causa. Além do contexto de tenant explícito, o backup passa a **falhar alto** quando resultar em zero linhas para um tenant que tem dados. Erro barulhento é requisito, não refinamento.
+8. **`services/audit.py` para de engolir a exceção do flush.** Hoje o `except` converte "operação falha" em "operação sem trilha", com erro só no log. Sem bypass, esse vira o modo de falha padrão das rotas que auditam. A mudança é **aqui e não antes**: só faz sentido falhar alto depois que todos os caminhos de auditoria estiverem provadamente corretos, senão um defeito latente vira 500 imediato.
+9. **Consertar o arreio de teste é pré-requisito, não consequência.** Os arquivos que sobrepõem `require_tenant_id` sem também definir `request.state.tenant_id` — de onde `get_db` tira o `SET LOCAL` — falham por defeito do teste, não do código. Corrija-os **antes** de mexer em policy, senão as falhas restantes se confundem com regressão causada por este PR. A lista está na §8.8 do inventário; `test_sec1_login_me_flag.py` tem o padrão correto, com header `Host`.
+10. **Duas falhas pré-existentes** (`test_jwt_compat::test_emitted_token_has_required_claims`, por `APP_NAME` local valer `aprimora` e o teste esperar `sistemas`; e `test_pr5a_dashboard_servicos::test_http_dashboard_com_perm_acessa`) não têm relação com F-12, falham igual nos dois papéis e **não** são escopo deste PR. Não as conserte junto; não as use como sinal de regressão.
+
 **Testes mínimos:**
 
 - nenhum papel de runtime é `SUPERUSER` ou tem `BYPASSRLS` — teste que varre `pg_roles`;

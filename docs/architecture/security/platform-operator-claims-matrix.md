@@ -93,6 +93,6 @@ O cenário **21** é a regressão do achado F-01 e é o teste vermelho que abre 
 
 ## 5. O que a matriz deliberadamente não cobre
 
-- **Autorização fina dentro da plataforma** (quem pode cancelar tenant vs. só listar). Hoje todo principal ativo tem as mesmas onze rotas. Segregar é trabalho posterior e deve virar item próprio.
+- **Autorização fina dentro da plataforma** (quem pode cancelar tenant vs. só listar). Hoje todo principal ativo tem as mesmas oito rotas. Segregar é trabalho posterior e deve virar item próprio.
 - **Rate limiting e detecção de anomalia** no console. Recomendado, fora de `SEC-00`.
 - **O realm municipal**, que continua com HS256, segredo compartilhado com o PHP e `iss`/`aud` iguais aos do cidadão. Ver Consequências no ADR-016.

@@ -21,7 +21,7 @@ Inspeção estática e dinâmica de `backend/app/auth/`, `backend/app/config.py`
 
 `require_platform_admin` (`backend/app/auth/deps.py:171-183`) faz exatamente duas coisas: resolve o usuário **municipal** por `get_current_user` e compara `current.email` contra uma allowlist de ambiente (`backend/app/config.py:64-72`, `:122-126`). Não há principal dedicado, namespace separado, issuer próprio nem audience própria.
 
-Onze rotas dependem disso, todas em `backend/app/routers/admin_tenants.py` — criar, listar, editar, ativar, desativar tenants e contratar/descontratar módulos.
+**Oito** rotas dependem disso, todas em `backend/app/routers/admin_tenants.py` (linhas 89, 108, 138, 148, 182, 191, 200 e 211) — criar, listar, editar, ativar, desativar tenants e contratar/descontratar módulos. `GET /admin/me` **não** tem o gate: usa `get_current_user_no_password_gate` e expõe o booleano `is_platform_admin`, que o frontend consome. Corrigido em 2026-08-01 — a primeira redação deste ADR dizia "onze", contagem errada apurada no reconhecimento de `SEC-01A`.
 
 ### 1.2 O e-mail não é único globalmente
 
@@ -45,7 +45,7 @@ Verificado no banco. O mesmo e-mail pode existir em **quantos tenants quiser**. 
 
 ### 1.6 As rotas de plataforma usam a sessão e o papel de banco municipais
 
-As onze rotas recebem `db: AsyncSession = Depends(get_db)`. `get_db` (`backend/app/database.py:49-54`) instala o `tenant_id` do middleware na sessão. Não existe conexão, papel nem transação separados para a fronteira cross-tenant. `aprimora_py.tenant`, `tenant_modulo` e `modulo` **não têm RLS** (verificado em `pg_class`), o que é coerente com serem tabelas de plataforma — mas significa que a única proteção é o código.
+As oito rotas recebem `db: AsyncSession = Depends(get_db)`. `get_db` (`backend/app/database.py:49-54`) instala o `tenant_id` do middleware na sessão. Não existe conexão, papel nem transação separados para a fronteira cross-tenant. `aprimora_py.tenant`, `tenant_modulo` e `modulo` **não têm RLS** (verificado em `pg_class`), o que é coerente com serem tabelas de plataforma — mas significa que a única proteção é o código.
 
 ### 1.7 Achado adicional, fora da lista F-01..F-11 do spec
 

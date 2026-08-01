@@ -80,7 +80,7 @@ Severidade considera o estado **atual** do código, não o estado após `SEC-01A
 
 ### T-5 · Sessão e papel de banco municipais na fronteira cross-tenant — **Alta**
 
-**Como funciona.** As onze rotas usam `get_db`, que instala o `tenant_id` do middleware. Não há transação, papel nem conexão separados. Um bug numa rota de plataforma opera com os mesmos privilégios do runtime municipal — e vice-versa.
+**Como funciona.** As oito rotas usam `get_db`, que instala o `tenant_id` do middleware. Não há transação, papel nem conexão separados. Um bug numa rota de plataforma opera com os mesmos privilégios do runtime municipal — e vice-versa.
 
 **Agrava — achado F-12 (seção 1.7 do ADR).** O runtime conecta como `ged_user`, **SUPERUSER e BYPASSRLS**, verificado na sessão real. A RLS descrita como última barreira de isolamento está inerte. Um bug de filtro aplicacional vaza cross-tenant sem que a RLS impeça — e o `SUPERUSER` significa que qualquer execução de SQL arbitrário alcança o cluster inteiro, não só o dado do tenant.
 
@@ -126,7 +126,7 @@ Severidade considera o estado **atual** do código, não o estado após `SEC-01A
 
 1. **Realm municipal** — HS256, segredo compartilhado com o PHP, `iss`/`aud` iguais aos do cidadão (T-3).
 2. **`ged_user` como runtime** — RLS inerte (**F-12**). Fecha na família `SEC-RLS-*`, que é **anterior** a `RBAC-01`; até `SEC-RLS-ROLLOUT` concluir, segue aberto.
-3. **Autorização fina dentro da plataforma** — todo principal ativo tem as mesmas onze rotas.
+3. **Autorização fina dentro da plataforma** — todo principal ativo tem as mesmas oito rotas.
 4. **Rate limiting e detecção de anomalia** no console.
 5. **Autoelevação dentro do tenant** — só fecha em `SEC-02` (T-6).
 
