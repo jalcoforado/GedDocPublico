@@ -233,9 +233,21 @@ ambiente — **vazia por padrão, caindo em `DATABASE_URL`**:
 | `aprimora_platform` | `PLATFORM_DB_URL` | fronteira de plataforma (`app/database_plataforma.py`) |
 
 Trocar o valor efetivo é o gate **`SEC-RLS-ROLLOUT`**, um degrau por vez, e o rollback é apagar a
-variável. **Nunca "conserte" uma falha de permissão dando `BYPASSRLS` ou `SUPERUSER` a um desses
-papéis** — é proibido pelo ADR e há teste que reprova (`tests/test_rls_papeis_minimos.py`). Policy
-ou grant que falhar é corrigido.
+variável. Ordem: **worker, depois app**. **`MIGRATOR_DATABASE_URL` está BLOQUEADA** — não definir
+em nenhum ambiente: `aprimora_migrator` tem `CREATE` mas **não é dono** das tabelas legadas, e como
+o `entrypoint.sh` roda `alembic upgrade head` com `set -e`, a primeira migration com `ALTER TABLE`
+em tabela pré-existente derruba o start do backend com `must be owner of table`. Ela serve hoje só
+para invocar CLI de seed/backup à mão. Desbloqueia quando a posse dos schemas for resolvida no
+bootstrap.
+
+**Nunca "conserte" uma falha de permissão dando `BYPASSRLS` ou `SUPERUSER` a um desses papéis** —
+é proibido pelo ADR e há teste que reprova (`tests/test_rls_papeis_minimos.py`). Policy ou grant que
+falhar é corrigido.
+
+**Tabela de plataforma (`aprimora_py.platform_*`) não entra em `GRANT ... ON ALL TABLES`.** Elas não
+têm RLS: grant é a única barreira. Migration com grant-cobertor em `aprimora_py` precisa do `REVOKE`
+correspondente, como a 0078 faz — `test_tabelas_de_plataforma_so_do_papel_de_plataforma` reprova
+quem esquecer.
 
 Consequência prática para quem escreve código: **CLI administrativa (seed, backup, provisionamento
 em lote) não usa `SessionLocal`** — usa `AdminSessionLocal` de `app/database_admin.py`. O papel da

@@ -664,15 +664,39 @@ existe para onde ir, e a ida é configuração — `APP_DATABASE_URL`, `WORKER_D
 
 ### 11.1 O que continua aberto, com a razão
 
-- **`aprimora_migrator` não é dono das tabelas legadas.** Ele tem `CREATE` nos schemas e DML
-  completo, mas `ALTER TABLE` em tabela pré-existente (por exemplo `ENABLE ROW LEVEL SECURITY`)
-  exige posse, e o dump de `scripts/bootstrap-db.sh` é carregado por `ged_user`. Migration que
-  altere tabela antiga continua precisando de `ged_user`. Transferir a posse de 234 tabelas é
+- **`aprimora_migrator` não é dono das tabelas legadas — e por isso `MIGRATOR_DATABASE_URL` é um
+  BLOQUEIO do `SEC-RLS-ROLLOUT`, não um degrau.** Ele tem `CREATE` nos schemas e DML completo, mas
+  `ALTER TABLE` em tabela pré-existente (por exemplo `ENABLE ROW LEVEL SECURITY`) exige posse, e o
+  dump de `scripts/bootstrap-db.sh` é carregado por `ged_user`. A própria 0078 não rodaria sob o
+  papel que ela cria. Como `sync_database_url` deriva dessa variável e o `entrypoint.sh` roda
+  `alembic upgrade head` com `set -e`, defini-la em homologação e depois mergear uma migration com
+  `ADD COLUMN` faria o backend **morrer no start** com `must be owner of table` — indisponibilidade,
+  não erro de permissão previsto. A ordem do rollout é, portanto, **worker → app**, com o migrator
+  fora até que a posse dos schemas seja resolvida no bootstrap. Transferir a posse de 234 tabelas é
   mudança de bootstrap, com blast radius maior que este PR inteiro.
 - **`provisionar_tenant` continua monolítico** (§10 item 10 do plano). Criar a linha em `tenant` e a
   contratação inicial é ato de plataforma; povoar o tenant é ato municipal. Enquanto a partição não
   existe, `aprimora_app` mantém `INSERT` em `tenant`, `tenant_modulo` e `audit_log`, e os `REVOKE`
   correspondentes seguem comentados em `_REVOGACOES` na 0076. O buraco de entitlement que isso
   deixa está descrito no plano, logo abaixo do item 10.
+- **`audit_log_migrator_delete` é mais ampla do que "apagar dado de demonstração".** A policy
+  autoriza `aprimora_migrator` a apagar **qualquer** linha de `aprimora_py.audit_log` do tenant que
+  a sessão declarou, exceto `entidade = 'tenant'` (a trilha das operações de plataforma, que nenhum
+  seed cria e nenhum reset precisa apagar). Não dá para estreitar mais sem quebrar o caso de uso:
+  `seed_demo._reset` apaga por `entidade='processo' AND id_entidade IN (...)` **e também** por
+  `id_usuario IN (...)`, ao remover os servidores extras — e precisa fazê-lo, porque
+  `audit_log.id_usuario` tem FK para `utils.usuario`. Restringir a policy a `entidade = 'processo'`
+  faria o segundo `DELETE` devolver zero linhas em silêncio e o `DELETE` do usuário estourar por FK.
+  Quem executa `seed_demo reset --tenant sobral --allow-non-demo` (comando que o RUNBOOK ensina)
+  está, na prática, autorizando isso. **Decisão pendente de Jorge:** registrar formalmente no
+  ADR-016 ou restringir o `reset` a tenants `demo*`.
+- **A fronteira de plataforma quase caiu por um grant-cobertor.** O
+  `GRANT ... ON ALL TABLES IN SCHEMA aprimora_py TO aprimora_migrator` da 0078 alcançava
+  `platform_principal` e `platform_audit_log`, que **não têm RLS** — grant é a única barreira.
+  Corrigido com `REVOKE` explícito, e travado por
+  `test_rls_papeis_minimos.py::test_tabelas_de_plataforma_so_do_papel_de_plataforma`, que varre
+  `information_schema.table_privileges` com allowlist de grantee. A guarda existe porque as
+  `ALTER DEFAULT PRIVILEGES` da mesma migration alcançariam qualquer tabela de plataforma futura
+  sem que a migration que a criasse precisasse decidir nada.
 - **F-12 em si.** O papel do runtime não mudou em ambiente nenhum. Isso é o gate
   `SEC-RLS-ROLLOUT`, por decisão.
