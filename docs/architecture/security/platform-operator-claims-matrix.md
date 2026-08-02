@@ -76,11 +76,11 @@ Cada linha é um teste em `SEC-01A`.
 | 12 | JWKS indisponível e cache expirado | deny `503`, **nunca** allow |
 | 13 | `hd` de outro domínio, principal existente | deny `403` |
 | 14 | `email_verified: false` | deny `403` |
-| 15 | Mesmo `sub`, **issuer diferente** | deny `403` — não é a mesma identidade |
+| 15 | Mesmo `sub`, **issuer diferente** | deny **`401`** — não é a mesma identidade. *Ajustado em `SEC-01A`: a fronteira aceita um issuer só (`PLATFORM_OIDC_ISSUER`), então o token é recusado na validação, antes de qualquer consulta ao principal. O `403` previsto seria alcançável apenas num desenho com múltiplos issuers configurados. O `401` é mais forte — recusa mais cedo e por motivo mais básico.* |
 | 16 | Token de plataforma apresentado a uma **rota municipal** | deny `401` pelo validador municipal |
 | 17 | Cookie de operador enviado a API municipal | deny e não vaza sessão |
 | 18 | Cookie municipal enviado ao console de operador | deny, árvore de operador não monta |
-| 19 | Token válido, mas operação sem tenant alvo explícito | deny `400` |
+| 19 | Token válido, mas operação sem tenant alvo explícito | deny `400` — **satisfeito estruturalmente** em `SEC-01A`: nas 8 rotas o alvo é *path param* obrigatório, então o estado "sem alvo" é inalcançável pela borda (o FastAPI recusa antes do handler). `exigir_tenant_alvo` fica como cinto e suspensório no chokepoint `_get_tenant`, para a rota futura que receba o alvo do corpo. Testes: o estrutural (toda rota com alvo o declara obrigatório), o de borda (alvo malformado ⇒ `422`, nunca `None` silencioso) e o do chokepoint |
 | 20 | Principal em período de break-glass **expirado** | deny `403` |
 | 21 | Usuário municipal com e-mail **idêntico** ao do operador, em qualquer tenant | deny — o e-mail não participa da decisão |
 | 22 | Principal criado por endpoint municipal | impossível por construção; teste arquitetural falha o PR |
@@ -88,6 +88,8 @@ Cada linha é um teste em `SEC-01A`.
 | 24 | `PLATFORM_OIDC_AUDIENCE` ausente | deny; sem audience configurada não há como distinguir ambiente |
 
 Os cenários **23** e **24** existem porque configuração faltante é o modo de falha que já temos: `PLATFORM_ADMIN_EMAILS` vazia hoje nega todo mundo por acidente, não por desenho. Aqui a negação é o desenho.
+
+**Claim ausente é tão normativo quanto claim errado.** Descoberto em revisão de `SEC-01A`: a `python-jose` 3.3.0 tem `require_aud`/`require_exp` com default `False`, e `_validate_aud`/`_validate_exp` começam com `if "aud"/"exp" not in claims: return`. Passar `audience=`/`issuer=` ao `decode` valida o **valor** quando o claim existe, mas não exige que exista — sondado na cadeia real, um token sem `exp` e sem `aud` era **aceito**. Token sem `exp` nunca expira, e a revogação do principal deixa de ser defesa em profundidade para virar defesa única; token sem `aud` atravessa ambientes, já que a audience é o único discriminante. A coluna "Obrigatório" da §1 exige, portanto, `require_aud`/`require_exp` explícitos — e cada um tem teste próprio, rodado antes contra o código sem a correção.
 
 O cenário **21** é a regressão do achado F-01 e é o teste vermelho que abre `SEC-01A`.
 

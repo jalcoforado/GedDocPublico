@@ -33,6 +33,44 @@ PLATFORM_CONSOLE_ORIGIN=<origem do console — obrigatorio, define cookie/CORS/C
 PLATFORM_DB_URL=postgresql+asyncpg://aprimora_platform:<cofre>@<host>/<db>
 ```
 
+### 1.2 Senha do papel `aprimora_platform` — passo obrigatório antes do `PLATFORM_DB_URL`
+
+A migration cria o papel com a senha de **desenvolvimento** (a mesma versionada
+para `aprimora_app`, por decisão registrada). Ela não serve fora de dev, e a
+senha que vai no `PLATFORM_DB_URL` precisa ser a que o papel de fato tem — do
+contrário a conexão falha com autenticação recusada e toda rota de plataforma
+responde `500`, o que se parece com bug e não com configuração faltando.
+
+Por ambiente, uma vez, depois de aplicar as migrations:
+
+```bash
+# senha nova gerada e guardada no cofre; nunca em ticket, chat ou neste arquivo
+docker exec -e PGPASSWORD=<senha do superusuario> aprimora-py-db \
+  psql -U ged_user -d ged_saas_db \
+  -c "ALTER ROLE aprimora_platform PASSWORD '<senha do cofre>'"
+```
+
+Só então preencha `PLATFORM_DB_URL` com **essa** senha. Rotacioná-la depois é o
+mesmo comando seguido de recarregar o serviço.
+
+### 1.3 `STRICT_TENANT_RESOLUTION` derruba o console de origem própria
+
+**Antes de ligar `STRICT_TENANT_RESOLUTION=true`, leia isto.** O
+`TenantMiddleware` roda na frente de `/api/v2/admin/*` e resolve o tenant pelo
+subdomínio do header `Host`. Com a resolução estrita, um `Host` que não seja
+subdomínio de tenant recebe **404 antes** do gate de plataforma. O console de
+operador vai para **origem própria** (Q-3), cujo `Host` nunca será slug de
+tenant: ligar a resolução estrita, hoje, tira `/api/v2/admin/*` do ar inteiro
+sem tocar em nada do gate, e o sintoma (404) não aponta para a causa.
+
+Hoje o default é `false`, então toda requisição de plataforma casa
+silenciosamente com o `default_tenant_slug`. A correção — bypass do middleware
+por prefixo de path — é trabalho de `SEC-01B`. Até lá, **não ligue a resolução
+estrita sem ter feito esse bypass**, ou aceite conscientemente que o console
+fica inacessível.
+
+### Variáveis, continuação
+
 `PLATFORM_OIDC_HOSTED_DOMAIN` **não tem default** (D-2). Ausente ou vazia em ambiente que não seja de teste, a fronteira de plataforma nega tudo e a inicialização registra erro de configuração. Um default embutido converteria esquecimento em porta aberta — que é exatamente o modo de falha de `PLATFORM_ADMIN_EMAILS`.
 
 `PLATFORM_CONSOLE_ORIGIN` existe porque o console vai para **origem própria** (Q-3). O domínio definitivo é configuração; nada de host fixo no código, no nginx versionado ou no bundle.
@@ -119,6 +157,30 @@ Inverter a ordem deixa uma janela de até 15 minutos com o access token ainda v�
 
 **Nunca:** por conveniência, pressa ou para contornar 403 que você não entendeu.
 
+### Pré-requisito, feito FORA do incidente
+
+O principal de emergência é **pré-cadastrado e nasce inativo** (ADR §2.8). Ele
+tem de existir antes de você precisar dele — criar um operador no meio de uma
+indisponibilidade do IdP é justamente o que este procedimento evita.
+
+Uma vez por ambiente, junto do bootstrap da seção 2:
+
+```bash
+docker exec aprimora-py-backend python -m app.cli.platform_principal criar \
+  --issuer "<iss>" --subject "<sub da conta de emergência>" \
+  --display-label "<rótulo, ex.: emergencia-operacao>" \
+  --reason "principal de break-glass — <ticket>" \
+  --approved-by "<quem aprovou o pré-cadastro>" \
+  --break-glass
+```
+
+A flag `--break-glass` é o que faz o principal nascer **inativo** e marcado como
+de emergência. Sem ela, você cria um operador comum e ativo — o oposto do que se
+quer: uma conta permanente esperando ser usada, sem dupla aprovação.
+
+Confira com `platform_principal listar` que a linha aparece com `Ativo = NÃO` e
+`BG = sim`.
+
 ### Procedimento
 
 1. **Dupla aprovação.** Duas pessoas distintas do grupo, nominalmente registradas. Quem executa não pode ser a única aprovadora.
@@ -191,9 +253,21 @@ Duas propriedades travadas por teste: token municipal é rejeitado pelo validado
 
 ## 9. Revisão trimestral
 
+A lista de principals sai da própria CLI — é o inventário a conferir contra o
+grupo do Workspace:
+
+```bash
+docker exec aprimora-py-backend python -m app.cli.platform_principal listar
+```
+
+Colunas: `ID`, `Ativo`, `BG` (break-glass), `Vigência até`, `Rótulo` e
+`Subject`. Quem autoriza é o par `(issuer, subject)`; o rótulo está ali só para
+você reconhecer a pessoa. Um principal com `BG = sim` e `Ativo = sim` fora de
+incidente é achado da revisão, não estado normal.
+
 | # | Item | Ação se divergir |
 |---|---|---|
-| 1 | Todo principal ativo corresponde a alguém ainda no grupo do Workspace | revogar o órfão |
+| 1 | Todo principal ativo (`platform_principal listar`) corresponde a alguém ainda no grupo do Workspace | revogar o órfão |
 | 2 | Todo membro do grupo que não opera mais foi removido | remover |
 | 3 | 2FA com fator forte ativa em todas as contas do grupo | corrigir ou remover do grupo |
 | 4 | Nenhum break-glass usado sem revisão registrada | revisar retroativamente e apurar |

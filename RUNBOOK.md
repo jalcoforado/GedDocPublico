@@ -35,7 +35,19 @@ PLATFORM_OIDC_HOSTED_DOMAIN=<dominio corporativo>
 PLATFORM_DB_URL=postgresql+asyncpg://aprimora_platform:<cofre>@<host>/<db>
 ```
 
-Cadastro, revogação e break-glass: **`docs/runbooks/platform-operator-bootstrap.md`**
+Dois passos que **não** são opcionais e vivem no runbook de operador:
+`ALTER ROLE aprimora_platform PASSWORD` (a migration cria o papel com a senha de
+dev — §1.2) e o **pré-cadastro do principal de emergência** com
+`criar --break-glass`, feito fora de incidente (§5).
+
+**Não ligue `STRICT_TENANT_RESOLUTION=true` sem ler §1.3 do runbook de
+operador.** O `TenantMiddleware` roda na frente de `/api/v2/admin/*`; com
+resolução estrita, um `Host` que não seja subdomínio de tenant leva 404 antes do
+gate — e o console de `SEC-01B`, em origem própria, cai inteiro. Correção é
+`SEC-01B`.
+
+Cadastro, revogação, break-glass e inventário
+(`platform_principal listar`): **`docs/runbooks/platform-operator-bootstrap.md`**
 — é o contrato operacional, e a CLI `python -m app.cli.platform_principal`
 cumpre os comandos de lá.
 
