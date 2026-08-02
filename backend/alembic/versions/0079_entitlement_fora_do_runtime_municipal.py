@@ -44,12 +44,26 @@ ter uso legítimo no papel municipal — e é o que esta migration tira.
 
 ## O que NÃO é revogado, e por quê — decidido caso a caso
 
-- **`UPDATE` em `aprimora_py.tenant` FICA.** Uso municipal legítimo e diário:
-  `services/tenant_config.atualizar_config_institucional` deixa o admin do
-  MUNICÍPIO editar sigla, endereço, telefone, texto do portal e unidade padrão
-  do próprio tenant. Não é entitlement — é cadastro institucional. A função
-  filtra `Tenant.id == tenant_id` explicitamente (a tabela não tem RLS), e essa
-  é a barreira que vale ali.
+- **`UPDATE` em `aprimora_py.tenant` FICA, e o alcance real é maior do que o uso
+  que o justifica.** O uso legítimo é diário e é cadastro institucional, não
+  entitlement: `services/tenant_config.atualizar_config_institucional` deixa o
+  admin do MUNICÍPIO editar sigla, endereço, telefone, texto do portal e unidade
+  padrão do próprio tenant, filtrando `Tenant.id == tenant_id` em código.
+
+  **Mas o grant é de tabela inteira.** `aprimora_py.tenant` não tem RLS, e
+  `information_schema.column_privileges` mostra `UPDATE` para `aprimora_app` nas
+  24 colunas — inclusive `ativo`, `plano`, `slug`, `limite_usuarios` e
+  `limite_armazenamento_mb`. É a MESMA estrutura de risco que este PR fecha no
+  `INSERT`, deixada aberta no `UPDATE`: um defeito de service no runtime
+  municipal poderia elevar o próprio plano, reativar-se depois de suspenso ou
+  **desativar outro município**. A whitelist de campos do service é barreira de
+  aplicação, não de banco.
+
+  Não é regressão — o grant é anterior a este PR e o comportamento não muda —,
+  mas a razão registrada tinha de dizer o que o grant concede, e não só o que o
+  código faz com ele. Fechar de verdade é `GRANT UPDATE (col, ...)` por coluna;
+  está em `docs/BACKLOG-PENDENCIAS.md` como **SEC-RLS-00D — grant por coluna em
+  `aprimora_py.tenant`**.
 - **`INSERT` em `aprimora_py.audit_log` FICA.** Não é entitlement de forma
   nenhuma: é a trilha que o próprio município grava a cada mutação, por
   `services/audit.py`, chamado de dezenas de rotas. E a tabela **tem** RLS FORCE

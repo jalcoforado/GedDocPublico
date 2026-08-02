@@ -21,6 +21,9 @@ plataforma, escrita pelo platform admin operando sobre outros tenants). Como nã
 (`aprimora_app`) tem **só `SELECT`** ali — quem contrata é o papel de plataforma. Por isso
 `provisionar_tenant` é **dois atos** com sessões distintas
 (`app/services/provisioning_tenant.py`): mexer nele sem ler aquele docstring quebra o onboarding.
+Esse `REVOKE` só passa a valer no dia em que `APP_DATABASE_URL` for definida — enquanto ela estiver
+vazia o runtime conecta como `ged_user` (`BYPASSRLS`) e nenhuma revogação da família `SEC-RLS-*`
+tem efeito. A troca é o gate humano `SEC-RLS-ROLLOUT`, não um passo de PR.
 
 Cada módulo declara os códigos de `utils.transacao` que lhe pertencem (o mapa vive em
 `app/cli/seed_bootstrap.py::MODULO_TRANSACOES`). Transação de módulo não contratado entra no

@@ -162,7 +162,11 @@ _REVOGACOES: list[tuple[str, str, str, str]] = [
 # - `UPDATE` em `tenant`: FICA. Uso municipal legítimo — a configuração
 #   institucional do próprio tenant
 #   (`services/tenant_config.atualizar_config_institucional`) é editada pelo
-#   admin do município, não pela plataforma.
+#   admin do município, não pela plataforma. **Atenção ao alcance:** a tabela
+#   não tem RLS e o grant é de TABELA INTEIRA, logo alcança também `ativo`,
+#   `plano`, `slug` e os limites — a whitelist de campos do service é barreira
+#   de aplicação, não de banco. Registrado como `SEC-RLS-00D` (grant por
+#   coluna) em `docs/BACKLOG-PENDENCIAS.md`; ver também a 0079.
 
 
 def upgrade() -> None:

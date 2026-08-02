@@ -116,9 +116,32 @@ docker exec aprimora-py-backend python -m app.cli.tenant retomar \
 ```
 
 Se o admin já existir, a senha dele é **preservada** (a saída avisa) — para
-trocá-la use o reset de senha do próprio tenant. O comando **recusa tenant já
-ativo**, de propósito: retomar um município em produção criaria nele um
-super-usuário novo.
+trocá-la use o reset de senha do próprio tenant.
+
+**O comando recusa tenant que já foi provisionado**, e a regra é "tem algum
+usuário", não "está inativo". Município **suspenso** de propósito
+(inadimplência, incidente, retenção legal) também aparece inativo, e retomar um
+deles criaria nele um super-usuário novo e desfaria a suspensão. Para reativar
+município suspenso o comando é outro, e ele não toca em usuário nenhum:
+
+```bash
+docker exec aprimora-py-backend python -m app.cli.tenant activate fortaleza
+```
+
+Isso vale inclusive quando o provisionamento tiver falhado **só na ativação**
+(ato 3): nesse caso o admin já existe, não há o que semear, e `activate` é
+exatamente o que falta.
+
+**Se a decisão for abandonar o tenant inerte em vez de concluí-lo**, saiba que
+ele não desaparece sozinho: o ato de plataforma já contratou os módulos, então
+sobram linhas em `aprimora_py.tenant_modulo` e o tenant continua aparecendo em
+`GET /api/v2/admin/tenants` e em `tenant list`, sempre com `Ativo = NÃO`. Não há
+limpeza automática — **nenhum papel de runtime tem `DELETE` em
+`aprimora_py.tenant`**, por decisão registrada na migration 0076 (apagar tenant
+não é operação de runtime). A remoção é manual, no banco, por quem tem a
+credencial administrativa, e o `DELETE` do tenant leva `tenant_modulo` junto
+pelo `ON DELETE CASCADE` da 0075. Deixá-lo inerte é seguro; o custo é ruído na
+listagem.
 
 Listar tenants existentes:
 

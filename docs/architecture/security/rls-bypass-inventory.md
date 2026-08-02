@@ -678,9 +678,14 @@ existe para onde ir, e a ida é configuração — `APP_DATABASE_URL`, `WORKER_D
   migration `0079`). O provisionamento virou dois atos com papéis distintos
   (`app/services/provisioning_tenant.py`): `criar_registro_de_tenant` sob `aprimora_platform`,
   `semear_tenant` sob o papel municipal. Com isso `aprimora_app` perdeu `INSERT` em `tenant` e em
-  `tenant_modulo` — o buraco de entitlement do plano (item 10) não existe mais. Ficaram, por decisão
+  `tenant_modulo`. **Com a ressalva de sempre nesta família:** o `REVOKE` só produz efeito quando
+  `APP_DATABASE_URL` estiver definida — hoje ela está vazia e o runtime conecta como `ged_user`,
+  `rolbypassrls = t`. O teste prova a propriedade **sob `aprimora_app`**, papel que produção ainda
+  não usa; revogar antes de trocar é a ordem certa (ver item 1.0.86 do backlog). Ficaram, por decisão
   caso a caso registrada na 0079: `UPDATE` em `tenant` (configuração institucional do próprio
-  município) e `INSERT` em `audit_log` (trilha do próprio município, com RLS FORCE por trás).
+  município — mas o grant é de TABELA INTEIRA, alcança `ativo`/`plano`/`slug`/limites, e fechar por
+  coluna é o item `SEC-RLS-00D` do backlog) e `INSERT` em `audit_log` (trilha do próprio município,
+  com RLS FORCE por trás — segunda barreira provada por teste).
   Guarda: `tests/test_entitlement_fronteira_sql.py`, com controle positivo em cada negativa.
   **Modo de falha novo, assumido por escrito:** os dois atos são transações separadas, então um
   provisionamento pode parar no meio. O tenant nasce `ativo = false` e só é ativado no fim, de modo

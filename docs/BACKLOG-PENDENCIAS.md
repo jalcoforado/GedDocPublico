@@ -249,6 +249,47 @@ de escopo") como item de backlog próprio; criado agora no review final.)*
   "a verificar" no item 1.0.7).
 - Sem prazo.
 
+### 1.0.85 SEC-RLS-00D — `UPDATE` em `aprimora_py.tenant` precisa ser grant POR COLUNA
+
+*(Levantado pela revisão de segurança de `SEC-RLS-00C` (2026-08-02). Não é regressão: o grant é
+anterior e o PR não o altera. O que o PR mudou foi a razão escrita, que descrevia o uso e não o
+alcance.)*
+
+- O `SEC-RLS-00C` tirou de `aprimora_app` o `INSERT` em `aprimora_py.tenant` e `tenant_modulo`
+  porque essas tabelas **não têm RLS** e ali o `GRANT` é a única barreira. O `UPDATE` em `tenant`
+  ficou, com uso legítimo e diário: `services/tenant_config.atualizar_config_institucional`, o admin
+  do município editando sigla, endereço, telefone, texto do portal e unidade padrão.
+- **O grant, porém, é de tabela inteira.** `information_schema.column_privileges` devolve `UPDATE`
+  para `aprimora_app` nas **24** colunas de `aprimora_py.tenant`, incluindo `ativo`, `plano`, `slug`,
+  `limite_usuarios` e `limite_armazenamento_mb`. É a mesma estrutura de risco do `INSERT`: um defeito
+  de service no runtime municipal poderia elevar o próprio plano, reativar-se depois de suspenso ou
+  **desativar outro município**. A whitelist de campos do service é barreira de aplicação, não de
+  banco.
+- **Ao retomar:** `REVOKE UPDATE ON aprimora_py.tenant FROM aprimora_app` seguido de
+  `GRANT UPDATE (<colunas institucionais>) ON aprimora_py.tenant TO aprimora_app`, com a lista de
+  colunas derivada de `_CAMPOS_INSTITUCIONAIS` em `services/tenant_config.py` — e uma guarda que
+  reprove divergência entre as duas listas, senão campo institucional novo passa a dar
+  `permission denied` em produção sem ninguém entender por quê.
+- Como todo o resto desta família, só tem efeito quando `APP_DATABASE_URL` estiver definida (ver
+  1.0.86).
+- Sem prazo. Depende do `SEC-RLS-ROLLOUT` para ter efeito prático.
+
+### 1.0.86 A família `SEC-RLS-*` só produz efeito quando `APP_DATABASE_URL` for definida
+
+*(Registrado em 2026-08-02, na revisão de `SEC-RLS-00C`, para que a narrativa dos PRs de segurança
+não seja lida como "está fechado em produção".)*
+
+- `printenv` no container do backend devolve apenas `DATABASE_URL=…ged_user…`. `APP_DATABASE_URL`
+  está **vazia**, então `runtime_database_url` cai em `DATABASE_URL` e a API conecta como `ged_user`,
+  que tem `rolbypassrls = t`. Nenhum `REVOKE` das migrations 0076/0078/0079 tem efeito nesse papel.
+- Isso é a **sequência correta** — revogar antes de trocar o papel, para que a troca não derrube
+  nada —, e é justamente o que o `SEC-RLS-ROLLOUT` promove, um degrau por vez (worker → app; o
+  migrator está bloqueado por posse de schema, ver o adendo §12.2 do ADR-016).
+- O que exige cuidado é a **redação**: os testes provam as propriedades **sob `aprimora_app`**, papel
+  que produção ainda não usa. Onde se escrever "a brecha fechou", leia-se "fecha quando
+  `APP_DATABASE_URL` for definida". O que já é verdade hoje, sem depender do rollout, é que o banco
+  está preparado e que a regressão tem guarda.
+
 ### 1.0.9 Resíduos da F2 — navegação e admin (todos Minor, nenhum bloqueante)
 
 *(Levantados pelo review final da fatia F2 (2026-07-31, PR #17) e deixados de fora por decisão, não
