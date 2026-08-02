@@ -4,7 +4,7 @@ padrão de `test_pagamentos_liberacao.py`; helpers duplicados para independênci
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 import uuid
 
@@ -20,6 +20,17 @@ from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_debitos as deb
 from app.services import pagamentos_filas as filas
 from app.services.provisioning_tenant import provisionar_tenant
+
+
+def _vence_em(dias: int) -> str:
+    """Vencimento relativo a hoje.
+
+    Datas absolutas apodrecem: este arquivo fixava `2026-08-01` e afirmava
+    `vencida is False`, então virou vermelho sozinho quando o calendário passou
+    dessa data — sem ninguém tocar em código de produção. O que o teste quer
+    dizer é "vence no futuro", e é isso que ele passa a dizer.
+    """
+    return (date.today() + timedelta(days=dias)).isoformat()
 
 
 def _sm(engine):
@@ -96,7 +107,7 @@ def _payload_debito(forn, nat, conta, *, valor="1000.00", competencia="2026-07",
         id_fonte_recursos=conta.id_fonte_recursos, id_conta=conta.id,
         valor_total=valor, competencia=competencia, urgente=urgente,
         descricao="Compra de material", numero_ne="NE-2026-0001",  # empenho p/ autorizar (RN-01)
-        parcelas=parcelas or [ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
+        parcelas=parcelas or [ParcelaCreate(numero=1, valor=valor, vencimento=_vence_em(30))],
     )
 
 
@@ -229,8 +240,8 @@ async def test_fila_liberacao_agrupa_por_conta_com_op_e_ordena_por_vencimento(ad
         autorizador = await _autorizador_com_alcada(admin_engine, t.id)
         d, _sol, _apr, _aut_id, op = await _debito_autorizado(
             admin_engine, t.id, base=base, valor="1000.00", parcelas=[
-                ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-10"),
-                ParcelaCreate(numero=2, valor="400.00", vencimento="2026-08-01"),
+                ParcelaCreate(numero=1, valor="600.00", vencimento=_vence_em(40)),
+                ParcelaCreate(numero=2, valor="400.00", vencimento=_vence_em(30)),
             ], autorizador=autorizador)
 
         async with _sm(admin_engine)() as s:
