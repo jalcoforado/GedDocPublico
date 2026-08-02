@@ -635,3 +635,44 @@ porque `load_permissions` faz o `SET LOCAL` por conta própria.
 
 Nenhuma função `SECURITY DEFINER` existe, e nenhuma policy está amarrada a papel nominal — os dois
 fatos simplificam a introdução de papéis novos.
+
+---
+
+## 11. Fechamento pelo `SEC-RLS-00B` — item a item
+
+Adicionado em 2026-08-02. **O documento acima continua sendo a medição de `SEC-RLS-00A`, tal como
+foi feita** — não foi reescrito. Esta seção diz o que aconteceu com cada item, para que ninguém
+leia as seções 8 e 10 como estado atual.
+
+O que `SEC-RLS-00B` **não** faz: trocar o papel efetivo de qualquer ambiente. `DATABASE_URL`
+continua apontando para `ged_user`, e F-12 continua ABERTO em produção. O que mudou é que agora
+existe para onde ir, e a ida é configuração — `APP_DATABASE_URL`, `WORKER_DATABASE_URL`,
+`MIGRATOR_DATABASE_URL`, todas vazias por padrão e caindo em `DATABASE_URL`.
+
+| # (§10) | Item | Estado | Onde |
+|---|---|---|---|
+| 1 | 20 policies com `app.current_tenant_id` sem `true` | **Fechado** | migration `0078`; guarda em `test_rls_papeis_minimos.py::test_toda_tabela_com_rls_responde_sob_aprimora_app` |
+| 2 | 8 tabelas sem `FORCE` | **Fechado** | `0078`; as 8 saíram da `ALLOWLIST_SEM_RLS_FORCADA` |
+| 3 | 4 tabelas sem grant | **Fechado** | `0078`. `alvara_auditoria` ficou em `SELECT, INSERT` — trilha append-only, mesma regra da 0076 para `audit_log` |
+| 4 | 6 sequences sem `USAGE` | **Fechado** | `0078` |
+| 5 | `limpar_jobs_antigos` cross-tenant no beat | **Fechado** | itera tenants ativos, uma sessão por tenant (padrão do `verificar_sla_workflows`) |
+| 6 | `cli/backup.py` sem `app.tenant_id` | **Fechado** | `_sessao_do_tenant` instala a GUC **e prova que instalou**; export com zero linhas aborta sem gravar arquivo (`--permitir-vazio` para o tenant genuinamente vazio). O `session_replication_role` do RESTORE continua exigindo SUPERUSER — decidido: restore é operação de DBA, registrado no docstring do módulo |
+| 7 | `alembic` com a credencial da API | **Parcial** | `sync_database_url` passou a derivar de `admin_database_url`, então definir `MIGRATOR_DATABASE_URL` já move o DDL para `aprimora_migrator`. O `alembic upgrade head` continua no `entrypoint.sh` da API — separar o passo é mudança de deploy (`scripts/deploy.sh`), não de código de aplicação |
+| 8 | Escrita em `modulo`/`modulo_transacao` pelo seed | **Fechado** | os CLIs (`seed_bootstrap`, `seed_demo`, `seed_demo_operacional`, `backup`) abrem sessão por `app/database_admin.py` |
+| 9 | `audit_log` de rota de plataforma | **Fechado** em `SEC-01A` (0077, `services/plataforma_auditoria.py`). O `services/audit.py` parou de engolir a exceção do flush — a propriedade agora é "ou a ação e a trilha acontecem, ou nenhuma das duas" |
+| 10 | Arreio de teste HTTP | **Fechado** | `tests/conftest.py::arreio_tenant_http`, aplicado nos 12 arquivos. Os três que trocavam `get_db` por sessão de `admin_engine` — e portanto nunca exercitavam RLS — passaram a usar o `SessionLocal` real |
+
+### 11.1 O que continua aberto, com a razão
+
+- **`aprimora_migrator` não é dono das tabelas legadas.** Ele tem `CREATE` nos schemas e DML
+  completo, mas `ALTER TABLE` em tabela pré-existente (por exemplo `ENABLE ROW LEVEL SECURITY`)
+  exige posse, e o dump de `scripts/bootstrap-db.sh` é carregado por `ged_user`. Migration que
+  altere tabela antiga continua precisando de `ged_user`. Transferir a posse de 234 tabelas é
+  mudança de bootstrap, com blast radius maior que este PR inteiro.
+- **`provisionar_tenant` continua monolítico** (§10 item 10 do plano). Criar a linha em `tenant` e a
+  contratação inicial é ato de plataforma; povoar o tenant é ato municipal. Enquanto a partição não
+  existe, `aprimora_app` mantém `INSERT` em `tenant`, `tenant_modulo` e `audit_log`, e os `REVOKE`
+  correspondentes seguem comentados em `_REVOGACOES` na 0076. O buraco de entitlement que isso
+  deixa está descrito no plano, logo abaixo do item 10.
+- **F-12 em si.** O papel do runtime não mudou em ambiente nenhum. Isso é o gate
+  `SEC-RLS-ROLLOUT`, por decisão.

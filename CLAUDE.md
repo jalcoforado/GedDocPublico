@@ -216,11 +216,53 @@ Isolamento tem **três camadas** e todas são obrigatórias:
 
 Outras convenções de domínio: exclusão é **soft-delete** (`excluido=True`, nunca DELETE físico); unicidade por tenant vira **índice único parcial** `WHERE excluido = false`; transição de estado ilegal é **409**; permissão negada é **403** via `require_permission("<codigo>", "inserir"|"atualizar"|"excluir")` (leitura sem action). Super-usuário faz bypass.
 
+#### Papéis de banco — a camada 1 hoje está INERTE no runtime (achado F-12)
+
+A aplicação conecta como `ged_user`, que é `SUPERUSER` e `BYPASSRLS`: **a RLS não filtra nada em
+produção**, e o isolamento depende inteiramente das camadas 2 e 3. Medição em
+`docs/architecture/security/rls-bypass-inventory.md`; decisão em `ADR-016 §9.1`.
+
+Quatro papéis existem no banco, todos `NOSUPERUSER`/`NOBYPASSRLS`, e cada um tem a sua variável de
+ambiente — **vazia por padrão, caindo em `DATABASE_URL`**:
+
+| Papel | Variável | Quem usa |
+|---|---|---|
+| `aprimora_app` | `APP_DATABASE_URL` | API municipal (`app/database.py`) |
+| `aprimora_worker` | `WORKER_DATABASE_URL` | tasks Celery (`app/tasks/_task_db.py`) |
+| `aprimora_migrator` | `MIGRATOR_DATABASE_URL` | Alembic + CLIs de seed/backup (`app/database_admin.py`) |
+| `aprimora_platform` | `PLATFORM_DB_URL` | fronteira de plataforma (`app/database_plataforma.py`) |
+
+Trocar o valor efetivo é o gate **`SEC-RLS-ROLLOUT`**, um degrau por vez, e o rollback é apagar a
+variável. **Nunca "conserte" uma falha de permissão dando `BYPASSRLS` ou `SUPERUSER` a um desses
+papéis** — é proibido pelo ADR e há teste que reprova (`tests/test_rls_papeis_minimos.py`). Policy
+ou grant que falhar é corrigido.
+
+Consequência prática para quem escreve código: **CLI administrativa (seed, backup, provisionamento
+em lote) não usa `SessionLocal`** — usa `AdminSessionLocal` de `app/database_admin.py`. O papel da
+API não tem `CREATE` em schema nenhum, não escreve no catálogo de módulos e não apaga linha de
+`audit_log`.
+
+Rodar a suíte com o papel alvo, que é como se verifica que nada depende do bypass:
+
+```bash
+docker exec -e PYTEST_DB_HOST=db \
+  -e DATABASE_URL=postgresql+asyncpg://aprimora_app:ged_password_secure_local@db:5432/ged_saas_db \
+  aprimora-py-backend pytest -q
+```
+
 ### Migrations (`backend/alembic/versions/`)
 
 `target_metadata = None` — **autogenerate está desligado de propósito**. Todas as migrations são escritas à mão; o ORM mapeia tabelas legadas e o autogenerate tentaria dropar colunas do PHP. Numeração sequencial `NNNN_descricao.py` (já em 0072+), `down_revision` no head anterior, **head sempre único**, `downgrade()` desfazendo o `upgrade()` na ordem inversa.
 
 Tabela nova exige o boilerplate completo: `tenant_id` NOT NULL → `aprimora_py.tenant(id)`, índices `(tenant_id, ...)`, `ENABLE + FORCE ROW LEVEL SECURITY`, as duas policies com `tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int`, `GRANT SELECT,INSERT,UPDATE,DELETE` na tabela e `GRANT USAGE, SELECT` na sequence para a role `aprimora_app`. `ADD COLUMN` em tabela existente herda RLS/grants — não repita.
+
+Os três detalhes do boilerplate que **já custaram um módulo inteiro** (`transporte_regulado`, 20
+policies quebradas por 7 meses, corrigidas na `0078`): o nome da GUC é `app.tenant_id` e não
+`app.current_tenant_id`; o segundo argumento `true` do `current_setting` não é opcional — sem ele
+a policy **derruba a consulta** em vez de negar; e `ENABLE` sem `FORCE` não protege nada enquanto
+o dono da tabela for também o papel do runtime. `tests/test_rls_papeis_minimos.py::test_toda_tabela_com_rls_responde_sob_aprimora_app`
+varre o banco inteiro e reprova os três. Grant para `aprimora_worker` só se alguma task escrever na
+tabela — o worker é enumerado de propósito; `aprimora_migrator` já é coberto por default privileges.
 
 O agente `migrations-checker` (`.claude/agents/`) roda esse checklist; `frota-reviewer` e `frota-test-runner` cobrem revisão e bateria de validação de PR.
 
