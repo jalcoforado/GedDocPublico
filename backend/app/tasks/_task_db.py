@@ -31,7 +31,10 @@ from ..config import get_settings
 
 
 def make_task_engine() -> AsyncEngine:
-    return create_async_engine(get_settings().database_url, poolclass=NullPool)
+    # `worker_db_url` (SEC-RLS-00B): `WORKER_DATABASE_URL` quando definida,
+    # `DATABASE_URL` caso contrário. O worker é promovido a `aprimora_worker`
+    # independentemente da API — se ele quebrar, a API não volta junto.
+    return create_async_engine(get_settings().worker_db_url, poolclass=NullPool)
 
 
 @asynccontextmanager

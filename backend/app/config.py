@@ -10,6 +10,52 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://ged_user:ged_password_secure_local@ged-saas-project-db-1:5432/ged_saas_db"
     database_url_sync: str | None = None
 
+    # ------------------------------------------------------------------
+    # SEC-RLS-00B — papel de banco POR CONSUMIDOR.
+    #
+    # Cada consumidor tem a sua variável; **todas caem em `DATABASE_URL`
+    # quando vazias**, de modo que este PR não muda o valor efetivo de
+    # ambiente nenhum. É esse fallback que dá o rollback do
+    # `SEC-RLS-ROLLOUT` sem redeploy de código: promover um degrau é definir
+    # a variável do consumidor; voltar atrás é apagá-la.
+    #
+    # Papéis alvo (ADR-016 §2.3, inventário §7):
+    #   APP_DATABASE_URL      → `aprimora_app`      (API municipal, sujeita a RLS)
+    #   WORKER_DATABASE_URL   → `aprimora_worker`   (Celery, grants mínimos)
+    #   MIGRATOR_DATABASE_URL → `aprimora_migrator` (Alembic, seeds, backup)
+    #   PLATFORM_DB_URL       → `aprimora_platform` (já existe, SEC-01A)
+    #
+    # Promover um consumidor de cada vez é o ponto: se o worker quebrar, a API
+    # não volta junto.
+    # ------------------------------------------------------------------
+    app_database_url: str = ""
+    worker_database_url: str = ""
+    migrator_database_url: str = ""
+
+    @property
+    def runtime_database_url(self) -> str:
+        """Conexão da API municipal. Sujeita a RLS quando o papel for trocado."""
+        return self.app_database_url.strip() or self.database_url
+
+    @property
+    def worker_db_url(self) -> str:
+        """Conexão das tasks Celery."""
+        return self.worker_database_url.strip() or self.database_url
+
+    @property
+    def admin_database_url(self) -> str:
+        """Conexão das operações ADMINISTRATIVAS: DDL do Alembic e os CLIs de
+        seed e backup.
+
+        Separada da conexão da API por dois motivos medidos no inventário:
+        `aprimora_app` não tem `CREATE` em schema nenhum (§4.1), então não roda
+        migration; e não tem escrita em `aprimora_py.modulo`/`modulo_transacao`
+        (§8.6) nem `DELETE` em `audit_log` (revogado pela 0076), de que os seeds
+        precisam. Rodar seed com a credencial da API é o que hoje só funciona
+        porque a credencial da API pode tudo.
+        """
+        return self.migrator_database_url.strip() or self.database_url
+
     jwt_secret_source: str = "db"
     jwt_secret_static: str | None = None
     jwt_ttl_seconds: int = 3600
@@ -141,9 +187,15 @@ class Settings(BaseSettings):
 
     @property
     def sync_database_url(self) -> str:
+        """URL síncrona do Alembic (`alembic/env.py`).
+
+        Deriva de `admin_database_url`, não de `database_url`: DDL é operação do
+        papel administrativo. Com `MIGRATOR_DATABASE_URL` vazia — o estado de
+        hoje — o valor efetivo é idêntico ao de antes.
+        """
         if self.database_url_sync:
             return self.database_url_sync
-        return self.database_url.replace("+asyncpg", "+psycopg2")
+        return self.admin_database_url.replace("+asyncpg", "+psycopg2")
 
 
 @lru_cache

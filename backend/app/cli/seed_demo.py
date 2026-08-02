@@ -43,7 +43,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.password import hash_password
 from ..config import get_settings
-from ..database import SessionLocal
+# SEC-RLS-00B: operação ADMINISTRATIVA, não de runtime. A conexão vem de
+# `MIGRATOR_DATABASE_URL` (papel `aprimora_migrator`) quando definida, e de
+# `DATABASE_URL` enquanto não estiver — ver `app/database_admin.py`.
+from ..database_admin import AdminSessionLocal as SessionLocal
 from ..models import (
     Acao,
     Anexo,

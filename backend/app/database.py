@@ -17,8 +17,12 @@ class Base(DeclarativeBase):
 
 _settings = get_settings()
 
+# `runtime_database_url` (SEC-RLS-00B): cai em `DATABASE_URL` enquanto
+# `APP_DATABASE_URL` estiver vazia, que é o estado de hoje em todos os
+# ambientes. A troca do papel da API é seleção de variável, não de código — é o
+# que dá rollback sem redeploy durante o `SEC-RLS-ROLLOUT`.
 engine = create_async_engine(
-    _settings.database_url,
+    _settings.runtime_database_url,
     pool_pre_ping=True,
     pool_size=20,
     max_overflow=30,
