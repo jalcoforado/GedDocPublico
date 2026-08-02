@@ -988,6 +988,12 @@ async def _get_or_create_tenant(
         return existente.id, False
 
     try:
+        # Sem `db_plataforma`: os três atos rodam nesta sessão, que é a
+        # ADMINISTRATIVA (`database_admin`, papel `aprimora_migrator` quando
+        # `MIGRATOR_DATABASE_URL` está definida). Isso é legítimo e não contorna
+        # a fronteira do SEC-RLS-00C — o migrator tem DML declarado em
+        # `aprimora_py`, e sob o papel da API (`aprimora_app`) o ato de
+        # plataforma falharia alto com `permission denied`, que é o que se quer.
         tenant, _ = await provisionar_tenant(
             db,
             slug=slug,

@@ -24,13 +24,14 @@ gate fosse tocado. A separação que este módulo descreve é verdadeira do gate
 para dentro; o middleware, na frente, ainda a contradiz. Correção é `SEC-01B`
 (bypass por prefixo de path); registrado também no runbook §1.
 
-Uma exceção, deliberada e delimitada: `POST /admin/tenants`. O provisionamento
-escreve nas tabelas de NEGÓCIO do tenant (`utils.usuario`, `utils.grupo`,
-`protocolos.tipo_manifestante`, ...), às quais o ADR §2.3 nega acesso ao papel
-de plataforma. Partir `provisionar_tenant` em "ato de plataforma" (criar a linha
-do tenant) e "ato municipal" (semear o cadastro) é item já decidido e registrado
-para `SEC-RLS-00B`; antecipá-lo aqui derrubaria o onboarding dentro de um PR de
-segurança. Até lá essa rota continua na sessão municipal, com o gate novo.
+`POST /admin/tenants` é a única rota com **duas** sessões, e desde
+`SEC-RLS-00C` isso é a fronteira funcionando, não uma exceção pendente: o
+provisionamento foi partido em ato de PLATAFORMA (criar o tenant e a contratação
+inicial — `db_plataforma`) e ato MUNICIPAL (semear `utils.*`/`protocolos.*` —
+`db_municipal`), porque o ADR §2.3 nega DML de entitlement ao papel municipal e
+DML de negócio ao papel de plataforma. Cada ato roda no seu papel; nenhum papel
+faz os dois. O modo de falha do provisionamento parcial está descrito em
+`services/provisioning_tenant.py`.
 """
 import logging
 from datetime import datetime
@@ -62,6 +63,7 @@ from ..services.plataforma_auditoria import (
     registrar_operacao,
 )
 from ..services.provisioning_tenant import (
+    ProvisionamentoIncompletoError,
     ProvisioningError,
     SlugIndisponivelError,
     provisionar_tenant,
@@ -234,16 +236,17 @@ async def criar_tenant(
     payload: AdminTenantCreate,
     request: Request,
     principal: PlatformPrincipal = Depends(require_platform_admin),
-    # SESSÃO MUNICIPAL, e a única rota de plataforma que a usa. Ver o cabeçalho
-    # do módulo: `provisionar_tenant` semeia o cadastro do tenant e o papel
-    # `aprimora_platform` não tem — nem deve ter — DML em `utils.*`. Partir o
-    # provisionamento é item de `SEC-RLS-00B`.
+    # DUAS sessões, uma por ato (SEC-RLS-00C). A municipal semeia `utils.*` e
+    # `protocolos.*`, onde `aprimora_platform` não tem — nem deve ter — DML; a
+    # de plataforma cria o tenant e a contratação, onde `aprimora_app` não tem
+    # mais INSERT (migration 0079). Ver o cabeçalho do módulo.
     db_municipal: AsyncSession = Depends(get_db),
     db_plataforma: AsyncSession = Depends(get_platform_db),
 ) -> AdminTenantCreated:
     try:
         tenant, senha = await provisionar_tenant(
             db_municipal,
+            db_plataforma=db_plataforma,
             slug=payload.slug,
             nome=payload.nome,
             admin_email=payload.admin_email,
@@ -263,6 +266,40 @@ async def criar_tenant(
         )
     except SlugIndisponivelError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except ProvisionamentoIncompletoError as e:
+        # ORDEM IMPORTA: esta cláusula tem de vir ANTES da de `ProvisioningError`,
+        # de quem herda — senão o `500` vira `400` e o operador conclui que
+        # mandou um payload ruim, quando o tenant já existe no banco.
+        #
+        # Não é 400: o pedido estava correto e o ato de plataforma já comitou. O
+        # tenant ficou INATIVO (não resolve por subdomínio, ninguém entra) e é
+        # retomável — a mensagem traz o comando. Nada é apagado aqui: apagar
+        # tenant não é operação de runtime nenhum.
+        logger.error(
+            "plataforma_provisionamento_incompleto",
+            extra={
+                "correlation_id": _correlacao(request),
+                "tenant_alvo_id": e.tenant_id,
+                "slug": e.slug,
+                "erro": str(e.causa),
+            },
+        )
+        # O ato 1 comitou nesta sessão; se a falha veio do ato 3, ela pode estar
+        # com transação suja. Rollback antes de gravar a trilha (no-op quando
+        # limpa) para que o registro do incidente não morra junto com ele.
+        await db_plataforma.rollback()
+        await registrar_operacao(
+            db_plataforma,
+            principal=principal,
+            acao="tenant.provisionamento_incompleto",
+            tenant_alvo_id=e.tenant_id,
+            detalhe={"slug": e.slug, "erro": str(e.causa)},
+            correlation_id=_correlacao(request),
+        )
+        await db_plataforma.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        ) from e
     except ProvisioningError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     await registrar_operacao(

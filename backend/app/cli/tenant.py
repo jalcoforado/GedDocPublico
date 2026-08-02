@@ -10,29 +10,79 @@ Uso:
     docker exec aprimora-py-backend python -m app.cli.tenant deactivate fortaleza
     docker exec aprimora-py-backend python -m app.cli.tenant activate fortaleza
 
+    # provisionamento que ficou pelo meio (tenant inerte) — ver `retomar`
+    docker exec aprimora-py-backend python -m app.cli.tenant retomar \\
+        --slug fortaleza --admin-email admin@fortaleza.gov.br --admin-cpf 12345678901
+
 Endpoint admin (`POST /api/v2/tenants`) fica para fase futura — onboarding hoje
 é manual via dev. Cria-se tenant + super-usuário admin do tenant + unidade
 proprietária default + tipos catálogo mínimos.
+
+Desde `SEC-RLS-00C` o provisionamento são **dois atos** com papéis de banco
+distintos (ver `services/provisioning_tenant.py`). Esta CLI abre a sessão de
+plataforma por `PLATFORM_DB_URL` quando ela existe; quando não existe, avisa e
+segue com a credencial administrativa desta CLI para os dois atos — o que só
+funciona porque essa credencial é administrativa. Sob `aprimora_app` o ato de
+plataforma falha alto com `permission denied`, e é assim que tem de ser.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..database import SessionLocal
+from ..database_plataforma import (
+    descartar_engines_plataforma,
+    sessao_plataforma,
+)
 from ..models import Tenant
-from ..services.provisioning_tenant import ProvisioningError, provisionar_tenant
+from ..services.provisioning_tenant import (
+    ProvisioningError,
+    provisionar_tenant,
+    retomar_provisionamento,
+)
+
+
+@asynccontextmanager
+async def _sessao_do_ato_de_plataforma() -> AsyncIterator[AsyncSession | None]:
+    """Sessão do papel `aprimora_platform`, ou `None` quando não configurada.
+
+    `None` faz o serviço rodar os três atos na mesma sessão. **Não é contorno
+    da fronteira**: a fronteira é o `GRANT`, e depois da 0079 `aprimora_app` não
+    tem `INSERT` em `tenant`/`tenant_modulo` — cair aqui com a credencial da API
+    dá `permission denied` na hora. O aviso existe para que a ausência da
+    configuração seja uma escolha visível, e não um silêncio.
+    """
+    if get_settings().platform_db_url.strip():
+        async with sessao_plataforma() as sessao:
+            try:
+                yield sessao
+            finally:
+                await descartar_engines_plataforma()
+        return
+    print(
+        "[aviso] PLATFORM_DB_URL não configurada: o ato de PLATAFORMA vai rodar "
+        "na mesma credencial administrativa desta CLI, e não em "
+        "`aprimora_platform`. Configure-a para separar os papéis "
+        "(docs/runbooks/platform-operator-bootstrap.md §1)."
+    )
+    yield None
 
 
 async def _create(args: argparse.Namespace) -> int:
-    async with SessionLocal() as db:
+    async with SessionLocal() as db, _sessao_do_ato_de_plataforma() as db_plat:
         try:
             tenant, senha_plain = await provisionar_tenant(
                 db,
+                db_plataforma=db_plat,
                 slug=args.slug,
                 nome=args.nome,
                 cnpj=args.cnpj,
@@ -66,6 +116,46 @@ async def _create(args: argparse.Namespace) -> int:
     print(f"  CNPJ:         {tenant.cnpj or '(não informado)'}")
     print(f"  Plano:        {tenant.plano}")
     print(f"  Cor:          {tenant.cor_primaria or '(default)'}")
+    print("=" * 60)
+    return 0
+
+
+async def _retomar(args: argparse.Namespace) -> int:
+    """Conclui um provisionamento que parou entre os dois atos.
+
+    Cenário: o ato de plataforma comitou (o tenant existe) e o ato municipal
+    falhou. O tenant ficou `ativo = false` — inerte, sem resolver por
+    subdomínio. Isto reexecuta o ato municipal, que é idempotente, e ativa.
+
+    Recusa tenant já ativo, no serviço — ver `retomar_provisionamento`.
+    """
+    async with SessionLocal() as db, _sessao_do_ato_de_plataforma() as db_plat:
+        try:
+            tenant, senha_plain = await retomar_provisionamento(
+                db,
+                db_plataforma=db_plat,
+                slug=args.slug,
+                admin_email=args.admin_email,
+                admin_nome=args.admin_nome,
+                admin_cpf=args.admin_cpf,
+                senha=args.senha,
+            )
+        except ProvisioningError as e:
+            print(f"[ERRO] {e}")
+            return 1
+
+    print()
+    print("=" * 60)
+    print("PROVISIONAMENTO RETOMADO")
+    print("=" * 60)
+    print(f"  ID:           {tenant.id}")
+    print(f"  Slug:         {tenant.slug}")
+    print(f"  Ativo:        {'sim' if tenant.ativo else 'NÃO'}")
+    print(f"  Admin email:  {args.admin_email}")
+    if senha_plain is None:
+        print("  Admin senha:  (o usuário já existia — senha PRESERVADA)")
+    else:
+        print(f"  Admin senha:  {senha_plain}   <-- exibida só agora")
     print("=" * 60)
     return 0
 
@@ -124,6 +214,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Lista separada por vírgula (ex.: protocolo,frota). Default: todos.",
     )
     p_create.set_defaults(fn=_create)
+
+    p_retomar = sub.add_parser(
+        "retomar",
+        help="Conclui provisionamento parado entre os dois atos (tenant inerte)",
+    )
+    p_retomar.add_argument("--slug", required=True, help="Slug do tenant inerte")
+    p_retomar.add_argument("--admin-nome", default="Administrador")
+    p_retomar.add_argument("--admin-email", required=True)
+    p_retomar.add_argument("--admin-cpf", required=True)
+    p_retomar.add_argument(
+        "--senha",
+        help="Senha do admin (gerada se omitido). Ignorada se o admin já existir.",
+    )
+    p_retomar.set_defaults(fn=_retomar)
 
     p_list = sub.add_parser("list", help="Lista tenants existentes")
     p_list.set_defaults(fn=_list)
