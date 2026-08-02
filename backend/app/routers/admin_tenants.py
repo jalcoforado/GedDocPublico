@@ -273,12 +273,21 @@ async def criar_tenant(
         #
         # Não é 400: o pedido estava correto e o ato de plataforma já comitou. O
         # tenant ficou INATIVO (não resolve por subdomínio, ninguém entra) e é
-        # retomável — a mensagem traz o comando. Nada é apagado aqui: apagar
-        # tenant não é operação de runtime nenhum.
+        # retomável. Nada é apagado aqui: apagar tenant não é operação de
+        # runtime nenhum.
+        #
+        # O CORPO da resposta é `mensagem_publica()`, não `str(e)`. O `str(e)`
+        # carrega o id interno de plataforma, a exceção crua do banco (nome de
+        # tabela, coluna, constraint, às vezes fragmento da linha) e a linha de
+        # comando de runbook da retomada — que viraria log de proxy, histórico
+        # de browser, ticket e print de tela. Tudo isso vai para o log e para a
+        # trilha, logo abaixo, que são canais do operador; a resposta leva só a
+        # mensagem estável e o `correlation_id` que liga uma coisa na outra.
+        correlacao = _correlacao(request)
         logger.error(
             "plataforma_provisionamento_incompleto",
             extra={
-                "correlation_id": _correlacao(request),
+                "correlation_id": correlacao,
                 "tenant_alvo_id": e.tenant_id,
                 "slug": e.slug,
                 "erro": str(e.causa),
@@ -294,11 +303,12 @@ async def criar_tenant(
             acao="tenant.provisionamento_incompleto",
             tenant_alvo_id=e.tenant_id,
             detalhe={"slug": e.slug, "erro": str(e.causa)},
-            correlation_id=_correlacao(request),
+            correlation_id=correlacao,
         )
         await db_plataforma.commit()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=e.mensagem_publica(correlacao),
         ) from e
     except ProvisioningError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
