@@ -36,37 +36,28 @@ TABELA_ALVO = "protocolos.tipo_anexo"
 # criadas pelas nossas migrations com o boilerplate de RLS descrito no CLAUDE.md.
 # `transporte_regulado` está aqui de propósito: cobrir só os schemas já limpos
 # faria uma guarda que não pode ficar vermelha, e o achado do inventário viraria
-# prosa. Com o schema incluído + allowlist, a lista abaixo tem de ENCOLHER
-# conforme o SEC-RLS-00B corrige — e o check de allowlist obsoleta reprova quem
-# corrigir a tabela e esquecer de tirá-la daqui.
+# prosa. Com o schema incluído + allowlist, a lista abaixo ENCOLHEU em
+# `SEC-RLS-00B` (migration 0078) — as 8 tabelas de transporte ganharam `FORCE` e
+# saíram daqui, e o check de allowlist obsoleta é o que impede que voltem a ficar
+# listadas depois de corrigidas.
 SCHEMAS_COM_BOILERPLATE_RLS = ("aprimora_py", "frota", "transporte_regulado")
 
 # Tabelas que TÊM coluna `tenant_id` nesses schemas e ainda assim NÃO têm RLS
 # habilitada **e** forçada. Cada entrada precisa da razão escrita — sem razão, a
 # entrada não entra aqui e a guarda reprova.
-_RAZAO_TRANSPORTE_SEM_FORCE = (
-    "RLS habilitada, mas SEM `FORCE`: o dono da tabela (`ged_user`, hoje também "
-    "o papel do runtime) continua contornando as policies. Divergência medida em "
-    "docs/architecture/security/rls-bypass-inventory.md §2.1; correção é o item 2 "
-    "do resumo para o SEC-RLS-00B. Remover desta lista quando o `FORCE` for aplicado."
-)
-
+#
+# As oito entradas de `transporte_regulado` SAÍRAM em `SEC-RLS-00B` (migration
+# 0078, que aplicou `FORCE` nas oito). Sobra a única entrada deliberada. Não
+# reabrir esta lista para "destravar" um teste: entrada nova aqui é dívida de
+# isolamento assumida por escrito, não atalho.
 ALLOWLIST_SEM_RLS_FORCADA: dict[str, str] = {
     "aprimora_py.tenant_modulo": (
         "Tabela de PLATAFORMA, não de negócio. A contratação de módulo é escrita "
         "pelo platform admin operando sobre OUTROS tenants — uma policy de "
         "`app.tenant_id` barraria justamente o caso de uso. Decisão registrada no "
         "CLAUDE.md (seção 'Modularização') e na migration 0073. Esta é a única "
-        "entrada DELIBERADA da lista; as demais são dívida a pagar."
+        "entrada DELIBERADA da lista."
     ),
-    "transporte_regulado.alvara": _RAZAO_TRANSPORTE_SEM_FORCE,
-    "transporte_regulado.alvara_auditoria": _RAZAO_TRANSPORTE_SEM_FORCE,
-    "transporte_regulado.alvara_documento": _RAZAO_TRANSPORTE_SEM_FORCE,
-    "transporte_regulado.alvara_responsavel": _RAZAO_TRANSPORTE_SEM_FORCE,
-    "transporte_regulado.alvara_veiculo": _RAZAO_TRANSPORTE_SEM_FORCE,
-    "transporte_regulado.veiculo_avaliacao": _RAZAO_TRANSPORTE_SEM_FORCE,
-    "transporte_regulado.veiculo_documento": _RAZAO_TRANSPORTE_SEM_FORCE,
-    "transporte_regulado.veiculo_vistoria": _RAZAO_TRANSPORTE_SEM_FORCE,
 }
 
 
@@ -258,18 +249,36 @@ async def test_aprimora_app_nao_tem_superuser_nem_bypassrls(
     )
 
 
-async def test_papel_do_runtime_hoje_tem_bypassrls(
+# O único papel para o qual F-12 continua ABERTO por decisão registrada: é o
+# `DATABASE_URL` versionado hoje, e sair dele é o gate `SEC-RLS-ROLLOUT`, não
+# este PR. Qualquer OUTRO papel com bypass é regressão.
+PAPEL_LEGADO_COM_BYPASS = "ged_user"
+
+
+async def test_papel_do_runtime_ou_e_o_legado_ou_esta_sujeito_a_rls(
     admin_session: AsyncSession,
 ) -> None:
     """Caracteriza F-12 na configuração efetiva desta execução.
 
-    Lê o papel de `app.database.engine` (isto é, o `DATABASE_URL` que o processo
-    de fato usa) e confirma no catálogo que ele tem `BYPASSRLS`.
+    Lê o papel de `app.database.engine` — o `DATABASE_URL` que o processo de
+    fato usa — e exige que ele esteja num de exatamente **dois** estados:
 
-    **Este teste é feito para falhar quando F-12 for corrigido.** Ele falha
-    também na execução deliberada da suíte com `DATABASE_URL` apontando para
-    `aprimora_app` — e essa falha é o resultado esperado da medição descrita no
-    inventário, não um defeito.
+    - `ged_user`: F-12 ABERTO, como registrado no inventário. É o valor
+      versionado em `docker-compose.yml`, e trocá-lo é o gate
+      `SEC-RLS-ROLLOUT`, não código.
+    - qualquer outro papel: tem de ser `NOSUPERUSER` **e** `NOBYPASSRLS`.
+
+    A redação anterior (`assert rolbypassrls is True`) foi escrita em
+    `SEC-RLS-00A` para falhar de propósito na execução da suíte com
+    `aprimora_app` — era medição, e cumpriu o papel. Mantê-la agora custaria
+    caro: `SEC-RLS-00B` tem como critério de aceite a suíte **verde** sob
+    `aprimora_app`, e um teste que falha por desenho nessa configuração
+    obrigaria a ler "1 failed" como sucesso para sempre. Um vermelho que se
+    aprende a ignorar deixa de ser sinal.
+
+    O que este teste ainda pega, e é o que importa daqui em diante: alguém
+    apontar o runtime para um papel novo que seja `SUPERUSER` ou tenha
+    `BYPASSRLS` — inclusive "só em dev".
     """
     from app.database import engine
 
@@ -286,10 +295,22 @@ async def test_papel_do_runtime_hoje_tem_bypassrls(
     ).one_or_none()
     assert linha is not None, f"papel `{papel}` do DATABASE_URL não existe no banco"
     rolsuper, rolbypassrls = linha
-    assert rolbypassrls is True, (
-        f"o runtime conecta como `{papel}`, que NÃO tem BYPASSRLS "
-        f"(rolsuper={rolsuper}). Se isso é a correção de F-12, remova este teste "
-        "de caracterização e feche o achado no inventário."
+
+    if papel == PAPEL_LEGADO_COM_BYPASS:
+        assert rolbypassrls is True, (
+            f"o runtime conecta como `{papel}`, que perdeu BYPASSRLS. Se isso é "
+            "a correção de F-12, atualize o inventário e este teste — mas note "
+            "que o resto da suíte assume `ged_user` com bypass em "
+            "`admin_session`, e vai começar a falhar de formas confusas."
+        )
+        return
+
+    assert rolsuper is False and rolbypassrls is False, (
+        f"o runtime conecta como `{papel}`, que tem rolsuper={rolsuper} / "
+        f"rolbypassrls={rolbypassrls}. Nenhum papel de runtime pode ser "
+        "SUPERUSER nem ter BYPASSRLS (ADR-016 §2.3/§9.1). O único papel com "
+        f"bypass tolerado é `{PAPEL_LEGADO_COM_BYPASS}`, e só enquanto o "
+        "`SEC-RLS-ROLLOUT` não acontece."
     )
 
 
