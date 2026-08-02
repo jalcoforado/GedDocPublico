@@ -127,7 +127,14 @@ async def _retomar(args: argparse.Namespace) -> int:
     falhou. O tenant ficou `ativo = false` — inerte, sem resolver por
     subdomínio. Isto reexecuta o ato municipal, que é idempotente, e ativa.
 
-    Recusa tenant já ativo, no serviço — ver `retomar_provisionamento`.
+    **Recusa tenant que já foi provisionado** — a guarda é "tem algum usuário",
+    não "está inativo", e a diferença é de segurança, não de estilo: município
+    SUSPENSO de propósito (por `deactivate`, logo abaixo neste mesmo parser)
+    também está inativo, e retomá-lo criaria nele um super-usuário novo e
+    desfaria a suspensão. Ver `_exigir_provisionamento_nunca_concluido`.
+
+    Para reativar município suspenso o comando é `activate`, que não toca em
+    usuário nenhum — vale também quando só a ativação tiver falhado.
     """
     async with SessionLocal() as db, _sessao_do_ato_de_plataforma() as db_plat:
         try:
