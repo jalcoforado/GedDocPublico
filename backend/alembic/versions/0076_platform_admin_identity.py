@@ -147,18 +147,22 @@ _REVOGACOES: list[tuple[str, str, str, str]] = [
 
 # O que NÃO é revogado, e por quê — a parte que uma revisão futura precisa ler:
 #
-# - `INSERT` em `tenant`, `tenant_modulo` e `audit_log`: `provisionar_tenant`
-#   grava nas três e HOJE roda no papel municipal. Há teste que trava isso
-#   (`test_admin_tenants.py::test_provisiona_sob_rls_producao`, sob
-#   `aprimora_app`/NOBYPASSRLS). Movê-lo para `aprimora_platform` exigiria
-#   conceder a esse papel DML nas tabelas de NEGÓCIO do tenant
-#   (`utils.usuario`, `utils.grupo`, `protocolos.tipo_manifestante`, ...), que
-#   é exatamente o que o ADR §2.3 lhe nega. É uma tensão real entre o ADR e o
-#   fluxo de provisionamento, e resolvê-la não cabe nesta migration:
-#   fica registrada para `SEC-01A` parte 2 / `SEC-RLS-00B`.
-# - `UPDATE` em `tenant`: uso municipal legítimo — a configuração institucional
-#   do próprio tenant (`services/tenant_config.atualizar_config_institucional`)
-#   é editada pelo admin do município, não pela plataforma.
+# - `INSERT` em `tenant` e `tenant_modulo`: **NÃO É MAIS ADIADO — a `0079`
+#   (`SEC-RLS-00C`) revogou os dois.** O que segurava a revogação aqui era que
+#   `provisionar_tenant` gravava nas tabelas de entitlement E nas tabelas de
+#   NEGÓCIO do tenant no mesmo bloco, sob o papel municipal; movê-lo inteiro
+#   para `aprimora_platform` daria a esse papel DML em `utils.*`, que é
+#   exatamente o que o ADR §2.3 lhe nega. A saída foi PARTIR o provisionamento
+#   em ato de plataforma e ato municipal (`services/provisioning_tenant.py`), e
+#   aí a revogação deixou de derrubar o onboarding. Ver a 0079 para as razões
+#   caso a caso e `tests/test_entitlement_fronteira_sql.py` para a guarda.
+# - `INSERT` em `audit_log`: FICA, e a 0079 confirmou a decisão. Não é
+#   entitlement — é a trilha que o próprio município grava a cada mutação, e a
+#   tabela tem RLS FORCE, então há segunda barreira.
+# - `UPDATE` em `tenant`: FICA. Uso municipal legítimo — a configuração
+#   institucional do próprio tenant
+#   (`services/tenant_config.atualizar_config_institucional`) é editada pelo
+#   admin do município, não pela plataforma.
 
 
 def upgrade() -> None:
