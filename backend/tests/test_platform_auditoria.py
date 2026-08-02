@@ -259,10 +259,19 @@ async def test_provisionamento_que_para_no_ato_municipal_devolve_500_e_deixa_ten
        herda de `ProvisioningError`, cujo `except` mapeia para 400; se alguém
        trocar a ordem das cláusulas, o operador recebe "payload inválido" para
        um pedido que estava correto e cujo tenant já existe no banco;
-    2. o tenant existe e está **inativo** — nada foi apagado por compensação, e
+    2. o **corpo não vaza**. Uma versão anterior deste teste exigia
+       `"retomar" in r.text` — isto é, o teste exigia o vazamento. O `str(exc)`
+       carrega o id interno de plataforma, a exceção crua do banco e a linha de
+       comando da retomada, que depois do achado da guarda é literalmente a
+       linha de comando de um ataque, indo para log de proxy, histórico de
+       browser, ticket e print de tela. O corpo agora é `mensagem_publica()`:
+       genérico, com o `correlation_id` e nada mais;
+    3. o tenant existe e está **inativo** — nada foi apagado por compensação, e
        o município não resolve por subdomínio;
-    3. a trilha AUTORITATIVA registra `tenant.provisionamento_incompleto`. Sem
-       isso, o único registro do incidente seria uma linha de log.
+    4. a trilha AUTORITATIVA registra `tenant.provisionamento_incompleto`, com o
+       MESMO `correlation_id` que foi para a resposta. É esse par que torna a
+       mensagem genérica utilizável: o operador leva o id e a plataforma acha o
+       incidente inteiro.
 
     A falha é injetada em `hash_password`, que roda no meio do ato municipal —
     depois do commit do ato de plataforma, antes do commit do municipal. É o
@@ -295,10 +304,6 @@ async def test_provisionamento_que_para_no_ato_municipal_devolve_500_e_deixa_ten
             f"esperava 500; recebi {r.status_code}: {r.text}. 400 aqui significa "
             "que o `except ProvisioningError` capturou antes do específico."
         )
-        assert "retomar" in r.text, (
-            "a resposta precisa dizer COMO concluir — o tenant já existe e o "
-            "operador fica sem instrução."
-        )
 
         async with _sm(admin_engine)() as s:
             linha = (
@@ -313,21 +318,40 @@ async def test_provisionamento_que_para_no_ato_municipal_devolve_500_e_deixa_ten
             tenant_id = linha.id
             assert linha.ativo is False, "o tenant incompleto ficou ATIVO"
 
-            acoes = [
-                a
-                for (a,) in (
-                    await s.execute(
-                        text(
-                            "SELECT acao FROM aprimora_py.platform_audit_log "
-                            " WHERE tenant_alvo_id = :t ORDER BY id"
-                        ),
-                        {"t": tenant_id},
-                    )
-                ).all()
-            ]
-            assert acoes == ["tenant.provisionamento_incompleto"], (
-                f"trilha de plataforma inesperada: {acoes}"
+            trilha = (
+                await s.execute(
+                    text(
+                        "SELECT acao, correlation_id "
+                        "  FROM aprimora_py.platform_audit_log "
+                        " WHERE tenant_alvo_id = :t ORDER BY id"
+                    ),
+                    {"t": tenant_id},
+                )
+            ).all()
+            assert [a for a, _c in trilha] == ["tenant.provisionamento_incompleto"], (
+                f"trilha de plataforma inesperada: {[a for a, _c in trilha]}"
             )
+            correlacao = trilha[0].correlation_id
+
+        # --- o corpo não vaza -------------------------------------------
+        corpo = r.text
+        for proibido, porque in (
+            ("retomar", "o comando de retomada é a linha de comando do ataque"),
+            ("python -m", "linha de comando de runbook não trafega em resposta"),
+            ("RuntimeError", "exceção crua expõe interno do banco e do código"),
+            (str(tenant_id), "id interno de plataforma"),
+            (slug, "o slug do tenant não precisa voltar na mensagem de erro"),
+        ):
+            assert proibido not in corpo, (
+                f"a resposta 500 contém {proibido!r} — {porque}. Corpo: {corpo}"
+            )
+        assert "INATIVO" in corpo and "nenhum acesso" in corpo, (
+            f"a resposta precisa dizer que ninguém tem acesso. Corpo: {corpo}"
+        )
+        assert correlacao and correlacao in corpo, (
+            "o corpo tem de trazer o `correlation_id` da trilha — é a única "
+            f"coisa que liga a resposta genérica ao incidente. Corpo: {corpo}"
+        )
     finally:
         if tenant_id is not None:
             async with _sm(admin_engine)() as s:

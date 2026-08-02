@@ -294,15 +294,12 @@ async def test_falha_no_ato_municipal_deixa_tenant_inerte_e_retomavel(
 
 
 async def test_retomar_recusa_tenant_ativo(admin_engine):
-    """Retomar um tenant ATIVO é escalada de privilégio, não recuperação.
+    """Segunda barreira: tenant ATIVO não está no meio de provisionamento nenhum.
 
-    Sem esta recusa, `app.cli.tenant retomar` seria um caminho de uma linha para
-    criar um super-usuário dentro de um município em produção — o ato municipal
-    cria justamente admin + grupo "Super Usuário" + vínculo.
-
-    Provado com um tenant de verdade, completo e ativo (não com um mock): o que
-    se quer travar é a condição `tenant.ativo`, e ela só existe depois que o
-    provisionamento inteiro deu certo.
+    Esta NÃO é a guarda principal — ver o teste seguinte, que cobre o caso que
+    de fato importa. Fica porque cobre a borda que a guarda principal deixaria
+    passar: tenant ativo e sem usuário, que existe em banco semeado por SQL cru
+    (`ci/seed-e2e.sql`).
     """
     import app.services.provisioning_tenant as ps
 
@@ -329,6 +326,139 @@ async def test_retomar_recusa_tenant_ativo(admin_engine):
             "a recusa não impediu a criação do usuário — o teste passaria pela "
             "exceção certa com o efeito colateral errado."
         )
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+async def test_retomar_recusa_municipio_suspenso_de_proposito(admin_engine):
+    """A guarda de verdade: município SUSPENSO não é provisionamento interrompido.
+
+    **O buraco que este teste fecha.** A primeira versão da guarda era
+    `if tenant.ativo: raise`, e `ativo = false` não distingue "parou no meio" de
+    "suspenso de propósito" — e suspender é operação suportada, por
+    `POST /admin/tenants/{id}/desativar` e por `python -m app.cli.tenant
+    deactivate`, que este PR deixou no mesmo parser do `retomar` novo. Duas
+    linhas bastavam:
+
+        python -m app.cli.tenant deactivate <slug>
+        python -m app.cli.tenant retomar --slug <slug> --admin-email eu@x --senha ...
+
+    E era a **idempotência** — a propriedade que torna a retomada segura no caso
+    legítimo — que fazia o ataque funcionar: unidade, tipo de unidade, tipo de
+    manifestante e o grupo `Super Usuário` seriam reaproveitados; o `Usuario`,
+    com e-mail novo, seria CRIADO; e o `UsuarioGrupo` ligaria o usuário novo ao
+    grupo SU já existente. Super-usuário pleno, com senha escolhida
+    (`must_change_password` não protege quem escolheu a senha), num município
+    povoado — e em seguida o ato 3 reativaria o tenant, apagando a suspensão da
+    listagem.
+
+    Isso derrubaria suspensão por inadimplência, por incidente e por retenção
+    legal.
+
+    **O teste antigo não pegava**, porque só exercitava o caso `ativo = true`; o
+    caso que importa — produção **suspensa** — não tinha teste, e a guarda
+    parecia provada.
+
+    **Prova por inversão, executada:** com a guarda antiga (`if tenant.ativo`)
+    este teste fica vermelho — `retomar_provisionamento` conclui, cria o segundo
+    usuário, liga-o ao grupo SU e REATIVA o tenant.
+
+    Simula o município de produção do jeito mais fiel que cabe num teste: tenant
+    provisionado por completo, com um servidor além do admin, e depois
+    desativado pelo caminho suportado.
+    """
+    import app.services.provisioning_tenant as ps
+
+    slug = _novo_slug("suspenso")
+    Session = _sessionmaker(admin_engine)
+    tenant, _ = await _provisionar(Session, slug)
+    try:
+        # --- o município em operação: mais um servidor além do admin -------
+        async with Session() as s:
+            await s.execute(
+                text(
+                    "INSERT INTO utils.usuario (tenant_id, nome, email, senha, cpf) "
+                    "VALUES (:t, 'Servidor', :e, '', :c)"
+                ),
+                {"t": tenant.id, "e": f"serv-{slug}@x.local", "c": uuid.uuid4().hex[:11]},
+            )
+            # --- suspensão deliberada, pelo caminho suportado --------------
+            await s.execute(
+                text("UPDATE aprimora_py.tenant SET ativo=false WHERE id=:t"),
+                {"t": tenant.id},
+            )
+            await s.commit()
+
+        async with Session() as s:
+            grupo_su_antes = (
+                await s.execute(
+                    text(
+                        "SELECT id FROM utils.grupo "
+                        " WHERE tenant_id=:t AND grupo='Super Usuário'"
+                    ),
+                    {"t": tenant.id},
+                )
+            ).scalar_one()
+
+        # --- o ataque -----------------------------------------------------
+        async with Session() as s:
+            with pytest.raises(ProvisioningError) as exc:
+                await ps.retomar_provisionamento(
+                    s,
+                    slug=slug,
+                    admin_email="invasor@x.local",
+                    admin_nome="Invasor",
+                    admin_cpf=uuid.uuid4().hex[:11],
+                    senha="SenhaEscolhidaPeloInvasor",
+                )
+        assert "nunca terminou" in str(exc.value), (
+            "a recusa tem de ser a da guarda de provisionamento concluído, não "
+            f"outra qualquer: {exc.value}"
+        )
+
+        # --- e o efeito colateral NÃO aconteceu ----------------------------
+        async with Session() as s:
+            usuarios = [
+                e
+                for (e,) in (
+                    await s.execute(
+                        text(
+                            "SELECT email FROM utils.usuario WHERE tenant_id=:t "
+                            " ORDER BY id"
+                        ),
+                        {"t": tenant.id},
+                    )
+                ).all()
+            ]
+            assert "invasor@x.local" not in usuarios, (
+                "USUÁRIO CRIADO apesar da recusa — a exceção certa com o efeito "
+                f"colateral errado. Usuários: {usuarios}"
+            )
+            assert len(usuarios) == 2, f"usuários inesperados: {usuarios}"
+
+            vinculos = (
+                await s.execute(
+                    text(
+                        "SELECT count(*) FROM utils.usuario_grupo "
+                        " WHERE tenant_id=:t AND id_grupo=:g"
+                    ),
+                    {"t": tenant.id, "g": grupo_su_antes},
+                )
+            ).scalar_one()
+            assert vinculos == 1, (
+                "alguém foi ligado ao grupo Super Usuário apesar da recusa"
+            )
+
+            ainda_suspenso = (
+                await s.execute(
+                    text("SELECT ativo FROM aprimora_py.tenant WHERE id=:t"),
+                    {"t": tenant.id},
+                )
+            ).scalar_one()
+            assert ainda_suspenso is False, (
+                "a suspensão deliberada foi DESFEITA — a retomada reativou um "
+                "município suspenso por inadimplência/incidente/retenção legal."
+            )
     finally:
         await _cleanup(admin_engine, tenant.id)
 

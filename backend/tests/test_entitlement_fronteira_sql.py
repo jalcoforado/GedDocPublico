@@ -27,6 +27,7 @@ permaneceu verde, como tem de ser: ele mede um grant que a 0079 não toca.
 """
 from __future__ import annotations
 
+import re
 import uuid
 
 import pytest
@@ -42,6 +43,20 @@ def _sessionmaker(url: str):
     return engine, async_sessionmaker(
         engine, expire_on_commit=False, class_=AsyncSession
     )
+
+
+def _negou_a_tabela(mensagem: str, tabela: str) -> bool:
+    """`permission denied for table <tabela>`, com fronteira de palavra no fim.
+
+    `in` seria frouxo justamente onde não pode ser: `"permission denied for
+    table tenant" in msg` casa também com `...table tenant_modulo`, então o
+    teste de `tenant` passaria verde apenas porque o de `tenant_modulo` está
+    revogado. `\\b` resolve: depois de `tenant`, o `_` de `tenant_modulo` é
+    caractere de palavra e a fronteira não casa.
+    """
+    return re.search(
+        rf"permission denied for table {re.escape(tabela)}\b", mensagem
+    ) is not None
 
 
 async def _um_modulo_contratavel(session: AsyncSession) -> int:
@@ -151,7 +166,7 @@ async def test_aprimora_app_nao_contrata_modulo(
         await admin_session.commit()
 
     msg = str(exc.value).lower()
-    assert "permission denied for table tenant_modulo" in msg, (
+    assert _negou_a_tabela(msg, "tenant_modulo"), (
         f"esperava `permission denied for table tenant_modulo`; recebi: {msg}\n\n"
         "A mensagem é conferida por extenso de propósito: qualquer outra exceção "
         "(FK, NOT NULL, conexão caída) daria o mesmo `pytest.raises` verde sem "
@@ -234,8 +249,9 @@ async def test_aprimora_app_nao_cria_tenant(
         await engine.dispose()
 
     msg = str(exc.value).lower()
-    assert "permission denied for table tenant" in msg, (
-        f"esperava `permission denied for table tenant`; recebi: {msg}"
+    assert _negou_a_tabela(msg, "tenant"), (
+        "esperava `permission denied for table tenant` — a tabela `tenant`, e "
+        f"não `tenant_modulo`; recebi: {msg}"
     )
 
     sobrou = (
@@ -367,9 +383,9 @@ async def test_provisionamento_na_sessao_municipal_falha_alto_e_nao_deixa_tenant
         )
     await app_session.rollback()
 
-    assert "permission denied for table tenant" in str(exc.value).lower(), (
-        "esperava o INSERT em `aprimora_py.tenant` ser negado ao papel "
-        f"municipal; recebi: {exc.value}"
+    assert _negou_a_tabela(str(exc.value).lower(), "tenant"), (
+        "esperava o INSERT em `aprimora_py.tenant` — a tabela `tenant`, e não "
+        f"`tenant_modulo` — ser negado ao papel municipal; recebi: {exc.value}"
     )
 
     sobrou = (
