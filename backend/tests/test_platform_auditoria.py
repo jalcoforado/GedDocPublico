@@ -246,6 +246,102 @@ async def test_provisionar_tenant_pela_borda_http_com_token_administrativo(
 
 
 @pytest.mark.asyncio
+async def test_provisionamento_que_para_no_ato_municipal_devolve_500_e_deixa_tenant_inerte(
+    monkeypatch, admin_engine, cliente_operador
+):
+    """O modo de falha da partição, pela borda HTTP (SEC-RLS-00C).
+
+    Os dois atos são transações separadas — o de plataforma comita antes de o
+    municipal começar —, então esta é a única rota do sistema que pode terminar
+    com "meio feito". O contrato, verificado aqui inteiro:
+
+    1. a resposta é **500**, não 201 e não 400. `ProvisionamentoIncompletoError`
+       herda de `ProvisioningError`, cujo `except` mapeia para 400; se alguém
+       trocar a ordem das cláusulas, o operador recebe "payload inválido" para
+       um pedido que estava correto e cujo tenant já existe no banco;
+    2. o tenant existe e está **inativo** — nada foi apagado por compensação, e
+       o município não resolve por subdomínio;
+    3. a trilha AUTORITATIVA registra `tenant.provisionamento_incompleto`. Sem
+       isso, o único registro do incidente seria uma linha de log.
+
+    A falha é injetada em `hash_password`, que roda no meio do ato municipal —
+    depois do commit do ato de plataforma, antes do commit do municipal. É o
+    ponto exato onde a partição dói.
+    """
+    import uuid
+
+    import app.services.provisioning_tenant as ps
+
+    def _boom(_):
+        raise RuntimeError("falha simulada no ato municipal")
+
+    monkeypatch.setattr(ps, "hash_password", _boom)
+
+    cliente, principal_id = cliente_operador
+    slug = f"sec00c-parcial-{uuid.uuid4().hex[:6]}"
+    tenant_id = None
+    try:
+        r = await cliente.post(
+            "/api/v2/admin/tenants",
+            json={
+                "slug": slug,
+                "nome": "Provisionamento que para no meio",
+                "admin_email": f"{slug}@teste.test",
+                "admin_nome": "Administrador",
+                "admin_cpf": uuid.uuid4().hex[:11],
+            },
+        )
+        assert r.status_code == 500, (
+            f"esperava 500; recebi {r.status_code}: {r.text}. 400 aqui significa "
+            "que o `except ProvisioningError` capturou antes do específico."
+        )
+        assert "retomar" in r.text, (
+            "a resposta precisa dizer COMO concluir — o tenant já existe e o "
+            "operador fica sem instrução."
+        )
+
+        async with _sm(admin_engine)() as s:
+            linha = (
+                await s.execute(
+                    text("SELECT id, ativo FROM aprimora_py.tenant WHERE slug = :s"),
+                    {"s": slug},
+                )
+            ).first()
+            assert linha is not None, (
+                "o tenant sumiu: alguém acrescentou compensação por DELETE."
+            )
+            tenant_id = linha.id
+            assert linha.ativo is False, "o tenant incompleto ficou ATIVO"
+
+            acoes = [
+                a
+                for (a,) in (
+                    await s.execute(
+                        text(
+                            "SELECT acao FROM aprimora_py.platform_audit_log "
+                            " WHERE tenant_alvo_id = :t ORDER BY id"
+                        ),
+                        {"t": tenant_id},
+                    )
+                ).all()
+            ]
+            assert acoes == ["tenant.provisionamento_incompleto"], (
+                f"trilha de plataforma inesperada: {acoes}"
+            )
+    finally:
+        if tenant_id is not None:
+            async with _sm(admin_engine)() as s:
+                for stmt in (
+                    "DELETE FROM aprimora_py.platform_audit_log WHERE tenant_alvo_id=:t",
+                    "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
+                    "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
+                    "DELETE FROM aprimora_py.tenant WHERE id=:t",
+                ):
+                    await s.execute(text(stmt), {"t": tenant_id})
+                await s.commit()
+
+
+@pytest.mark.asyncio
 async def test_falha_da_projecao_municipal_nao_vira_500_e_fica_auditada(
     monkeypatch, admin_engine, cliente_operador, tenants_limpos
 ):
