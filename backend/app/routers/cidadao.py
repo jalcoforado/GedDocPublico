@@ -297,8 +297,21 @@ async def upload_anexo_cidadao_endpoint(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     # PR 4c — audit minimizado: id_processo, id_anexo, key, canal. Sem dados
-    # pessoais. Falha de audit não derruba o upload (audit_log faz seu próprio
-    # try/except e a UI já recebeu o anexo criado).
+    # pessoais.
+    #
+    # SEC-RLS-00B: a frase que estava aqui — "falha de audit não derruba o
+    # upload, audit_log faz seu próprio try/except" — deixou de valer neste
+    # mesmo PR. `services/audit.py` parou de engolir a exceção do flush, porque
+    # trocar "operação falha" por "operação sem trilha" é o pior resultado
+    # possível para uma trilha.
+    #
+    # O que acontece agora, e é o comportamento desejado: se o audit levantar, o
+    # `db.commit()` abaixo não roda, o anexo NÃO é persistido e o cidadão recebe
+    # 500 em vez de um "enviado" sem registro. O arquivo já foi gravado no
+    # storage por `salvar_anexo_cidadao` e fica órfão — resíduo conhecido, não
+    # corrupção: nada no banco o referencia, e o cidadão reenvia. Trocar isso
+    # por uma limpeza de arquivo no caminho de erro exigiria transação sobre o
+    # filesystem, que este PR não tem escopo para introduzir.
     await audit_log(
         db,
         tenant_id=tenant_id,

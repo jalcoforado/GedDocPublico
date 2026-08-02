@@ -110,21 +110,26 @@ async def _limpar_tenant(
     return len(ids), pastas_removidas
 
 
-async def _tenants_ativos() -> list[tuple[int, str]]:
-    """Lista `(id, slug)` dos tenants ativos.
+async def _todos_os_tenants() -> list[tuple[int, str]]:
+    """Lista `(id, slug)` de **todos** os tenants — inclusive os inativos.
 
     Sessão SEM `app.tenant_id` de propósito: `aprimora_py.tenant` é catálogo de
-    plataforma e não tem RLS. Mesma justificativa (e mesmo código) de
-    `verificar_sla_workflows`.
+    plataforma e não tem RLS. A estrutura é a de `verificar_sla_workflows`, mas
+    o filtro **não**: aquela task decide regra de negócio (não faz sentido
+    alertar SLA de tenant desligado), esta é higiene de disco.
+
+    Copiar o `ativo.is_(True)` de lá seria trocar uma falha silenciosa por
+    outra: antes desta correção a varredura era global, e restringi-la a
+    tenants ativos faria os jobs e as pastas de resultado de todo tenant
+    desativado ficarem no disco **para sempre**, sem erro e sem log. Tenant
+    desativado é justamente o que mais tem lixo acumulado.
     """
     async with task_session_scope() as (_engine, Session):
         async with Session() as db:
             return [
                 (int(tid), slug)
                 for tid, slug in (
-                    await db.execute(
-                        select(Tenant.id, Tenant.slug).where(Tenant.ativo.is_(True))
-                    )
+                    await db.execute(select(Tenant.id, Tenant.slug))
                 ).all()
             ]
 
@@ -146,7 +151,7 @@ async def _run_async(
     # corrigido.
     # ------------------------------------------------------------------
     if tenant_id is None:
-        tenants = await _tenants_ativos()
+        tenants = await _todos_os_tenants()
         total_jobs = 0
         total_pastas = 0
         falhas: list[str] = []
@@ -171,7 +176,7 @@ async def _run_async(
         sumario = (
             f"Limpeza de jobs anteriores a {corte.strftime('%Y-%m-%d %H:%M UTC')}\n"
             f"Critério: mais de {dias} dia(s)\n"
-            f"Escopo: {len(tenants)} tenant(s) ativo(s)\n"
+            f"Escopo: {len(tenants)} tenant(s), ativos e inativos\n"
             f"Jobs removidos: {total_jobs}\n"
             f"Pastas de resultado removidas: {total_pastas}\n"
         )
