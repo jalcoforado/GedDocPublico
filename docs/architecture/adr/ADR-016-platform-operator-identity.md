@@ -275,3 +275,28 @@ Três PRs, nesta ordem, **antes** de `RBAC-01` e de qualquer rollout de módulo:
 - [x] **D-6** Encaminhado como **F-12** e família `SEC-RLS-00A/00B/ROLLOUT`, anterior a `RBAC-01`
 - [x] **Q-1** a **Q-5** respondidas — seção 10
 - [x] Aprovado por: **Jorge Alcoforado** em **01 / 08 / 2026**
+
+---
+
+## 12. Adendo — 2026-08-02, após a aceitação
+
+Adendo, não reescrita: o texto acima é o registro do que foi decidido em 01/08 e não muda. Isto acrescenta o que `SEC-RLS-00B` descobriu ao aplicar a decisão.
+
+### 12.1 Duas policies nominais, as primeiras do banco
+
+Até `SEC-RLS-00B` nenhuma policy do Postgres era amarrada a papel — todas eram `{public}`, e o inventário registrava isso como propriedade. Agora existem duas, ambas `FOR DELETE` e ambas exclusivas de `aprimora_migrator`:
+
+| Policy | Tabela | Por quê |
+|---|---|---|
+| `audit_log_migrator_delete` | `aprimora_py.audit_log` | `seed_demo reset` precisa apagar a trilha do tenant que está limpando; `audit_log.id_usuario` tem FK para `utils.usuario`, então sem o DELETE o usuário não sai e o reset falha por FK |
+| `alvara_auditoria_migrator_delete` | `transporte_regulado.alvara_auditoria` | mesma mecânica em `seed_demo_operacional reset`: sem o DELETE, o DELETE de `alvara` estoura por FK |
+
+**Alcance real, escrito para não virar surpresa:** com a credencial do migrator, `DELETE` alcança qualquer linha dessas tabelas **dentro do tenant da sessão**, não apenas as linhas de demonstração. A trilha de operações de plataforma está protegida (`AND entidade <> 'tenant'` na primeira), e `UPDATE` continua negado — as trilhas seguem não-reescrevíveis; o que se abriu foi apagar.
+
+**Por que não fechar restringindo `seed_demo reset` a tenants `demo*`:** quebraria o procedimento que o `RUNBOOK.md` ensina para a VPS (`--tenant sobral --allow-non-demo`), que existe porque o acesso à VPS é por IP e o `TenantMiddleware` resolve tudo para o tenant padrão. O risco marginal é baixo — quem tem a credencial do migrator já tem SSH no host — e o custo seria quebrar o caminho documentado de reposição de dados de demonstração. Registrado em vez de fechado, deliberadamente.
+
+**Se isto voltar à mesa**, a saída correta não é estreitar a policy: é o `reset` deixar de apagar trilha e passar a marcar o tenant de demonstração como descartável, recriando-o. Trabalho maior que o problema justifica hoje.
+
+### 12.2 O papel de DDL não é dono do schema
+
+`aprimora_migrator` tem `CREATE`, mas as tabelas legadas pertencem a `ged_user`, e `ALTER TABLE`/`CREATE POLICY` sobre tabela pré-existente exigem posse. **A própria migration `0078` não rodaria sob o papel que ela cria.** Consequência prática: `MIGRATOR_DATABASE_URL` é **bloqueio** do `SEC-RLS-ROLLOUT`, não um degrau dele — a ordem de promoção é `aprimora_worker` → `aprimora_app`, e o migrator fica de fora até a posse ser transferida. Com `set -e` no `entrypoint.sh`, promovê-lo antes disso apareceria como container morrendo no start com `must be owner of table`, ou seja, como indisponibilidade e não como erro de permissão previsto.
