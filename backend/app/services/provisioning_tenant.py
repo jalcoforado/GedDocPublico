@@ -28,7 +28,7 @@ Daí a partição:
 |---|---|---|---|
 | 1. plataforma | `criar_registro_de_tenant` | `aprimora_platform` (`database_plataforma`) | `tenant`, `tenant_modulo` |
 | 2. municipal  | `semear_tenant` | papel municipal, com `SET LOCAL app.tenant_id = <novo>` | `utils.*`, `protocolos.*`, `audit_log` |
-| 3. plataforma | `ativar_tenant_provisionado` | `aprimora_platform` | `tenant.ativo` |
+| 3. plataforma | `_concluir_ativacao` | `aprimora_platform` | `tenant.ativo` |
 
 ## O modo de falha, escrito — não implícito
 
