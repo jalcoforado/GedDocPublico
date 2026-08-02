@@ -682,16 +682,30 @@ existe para onde ir, e a ida é configuração — `APP_DATABASE_URL`, `WORKER_D
   `APP_DATABASE_URL` estiver definida — hoje ela está vazia e o runtime conecta como `ged_user`,
   `rolbypassrls = t`. O teste prova a propriedade **sob `aprimora_app`**, papel que produção ainda
   não usa; revogar antes de trocar é a ordem certa (ver item 1.0.86 do backlog). Ficaram, por decisão
-  caso a caso registrada na 0079: `UPDATE` em `tenant` (configuração institucional do próprio
-  município — mas o grant é de TABELA INTEIRA, alcança `ativo`/`plano`/`slug`/limites, e fechar por
-  coluna é o item `SEC-RLS-00D` do backlog) e `INSERT` em `audit_log` (trilha do próprio município,
-  com RLS FORCE por trás — segunda barreira provada por teste).
+  caso a caso registrada na 0079: `UPDATE` em `tenant` (configuração do próprio município) e
+  `INSERT` em `audit_log` (trilha do próprio município, com RLS FORCE por trás — segunda barreira
+  provada por teste).
   Guarda: `tests/test_entitlement_fronteira_sql.py`, com controle positivo em cada negativa.
   **Modo de falha novo, assumido por escrito:** os dois atos são transações separadas, então um
   provisionamento pode parar no meio. O tenant nasce `ativo = false` e só é ativado no fim, de modo
   que o estado incompleto é **inerte** (não resolve por subdomínio); a conclusão é
   `python -m app.cli.tenant retomar`, idempotente, que recusa tenant já ativo. Não há compensação
   por `DELETE`, e isso é deliberado — apagar tenant não é operação de runtime nenhum.
+- ~~**O `UPDATE` de `aprimora_app` em `tenant` é de TABELA INTEIRA**~~ — **FECHADO em
+  `SEC-RLS-00D`** (2026-08-02, migration `0080`). O grant alcançava as 24 colunas, inclusive `ativo`,
+  `plano`, `slug` e os limites: a whitelist de `services/tenant_config.py` era barreira de aplicação,
+  não de banco, e um defeito de service no runtime municipal podia elevar o próprio plano,
+  reativar-se depois de suspenso ou **desativar outro município**. Hoje é
+  `GRANT UPDATE (<13 colunas>)`, derivadas dos dois caminhos municipais reais — `PUT /tenants/me`
+  (11 campos institucionais) e `PUT /tenants/me/nup-config` (`codigo_orgao_nup`, `usar_nup_federal`,
+  que **não** passam pela whitelist). O terceiro caminho, `python -m app.cli.tenant
+  activate|deactivate`, gravava `ativo` pelo pool municipal e foi movido para a sessão de plataforma
+  no mesmo PR — ativar município é ato de plataforma, como o `POST /admin/tenants/{id}/ativar` já
+  era. Guarda: `tests/test_grant_por_coluna_tenant.py`, que compara em três pontas o catálogo do
+  banco, a constante `COLUNAS_MUNICIPAIS_DE_TENANT` e os schemas Pydantic dos dois endpoints — sem
+  ela, campo novo na whitelist viraria `permission denied for table tenant` em produção com o rastro
+  apontando para o service. Mesma ressalva de sempre: só produz efeito quando `APP_DATABASE_URL`
+  estiver definida (item 1.0.86 do backlog).
 - **`audit_log_migrator_delete` é mais ampla do que "apagar dado de demonstração".** A policy
   autoriza `aprimora_migrator` a apagar **qualquer** linha de `aprimora_py.audit_log` do tenant que
   a sessão declarou, exceto `entidade = 'tenant'` (a trilha das operações de plataforma, que nenhum

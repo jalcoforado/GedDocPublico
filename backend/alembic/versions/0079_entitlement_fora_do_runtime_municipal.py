@@ -45,10 +45,15 @@ ter uso legítimo no papel municipal — e é o que esta migration tira.
 ## O que NÃO é revogado, e por quê — decidido caso a caso
 
 - **`UPDATE` em `aprimora_py.tenant` FICA, e o alcance real é maior do que o uso
-  que o justifica.** O uso legítimo é diário e é cadastro institucional, não
+  que o justifica.** *(Corrigido pela `0080` — ver o adendo no fim deste item.)*
+  O uso legítimo é diário e é configuração do próprio município, não
   entitlement: `services/tenant_config.atualizar_config_institucional` deixa o
   admin do MUNICÍPIO editar sigla, endereço, telefone, texto do portal e unidade
-  padrão do próprio tenant, filtrando `Tenant.id == tenant_id` em código.
+  padrão do próprio tenant, filtrando `Tenant.id == tenant_id` em código. Há um
+  segundo caminho municipal que esta migration não mencionava e que também
+  escreve na tabela: `routers/tenant.py::update_nup_config`
+  (`PUT /tenants/me/nup-config`), com `codigo_orgao_nup` e `usar_nup_federal` —
+  ele **não** passa pela whitelist do service.
 
   **Mas o grant é de tabela inteira.** `aprimora_py.tenant` não tem RLS, e
   `information_schema.column_privileges` mostra `UPDATE` para `aprimora_app` nas
@@ -61,9 +66,16 @@ ter uso legítimo no papel municipal — e é o que esta migration tira.
 
   Não é regressão — o grant é anterior a este PR e o comportamento não muda —,
   mas a razão registrada tinha de dizer o que o grant concede, e não só o que o
-  código faz com ele. Fechar de verdade é `GRANT UPDATE (col, ...)` por coluna;
-  está em `docs/BACKLOG-PENDENCIAS.md` como **SEC-RLS-00D — grant por coluna em
-  `aprimora_py.tenant`**.
+  código faz com ele.
+
+  **Adendo (`SEC-RLS-00D`, migration `0080`): fechado.** O `UPDATE` de tabela
+  foi revogado e trocado por `GRANT UPDATE (<13 colunas>)`, derivadas dos dois
+  caminhos municipais acima. `ativo`, `plano`, `slug` e os limites saíram do
+  alcance do papel municipal; quem os edita é `aprimora_platform`. A guarda de
+  divergência entre a lista de colunas e o código está em
+  `tests/test_grant_por_coluna_tenant.py`. Vale aqui a ressalva de sempre desta
+  família: o `REVOKE` só produz efeito quando `APP_DATABASE_URL` estiver
+  definida (item 1.0.86 do backlog).
 - **`INSERT` em `aprimora_py.audit_log` FICA.** Não é entitlement de forma
   nenhuma: é a trilha que o próprio município grava a cada mutação, por
   `services/audit.py`, chamado de dezenas de rotas. E a tabela **tem** RLS FORCE
@@ -120,8 +132,9 @@ _REVOGACOES: list[tuple[str, str, str, str]] = [
         "",  # nenhuma migration concedeu INSERT em tenant a aprimora_app
         "criar município é ato de PLATAFORMA. Depois do SEC-RLS-00C quem insere "
         "é `criar_registro_de_tenant`, sob `aprimora_platform`. O papel "
-        "municipal continua com SELECT (resolução de tenant, branding) e UPDATE "
-        "(configuração institucional do próprio tenant).",
+        "municipal continua com SELECT (resolução de tenant, branding) e com "
+        "UPDATE — que a 0080 estreitou para as colunas de configuração do "
+        "próprio município, sem `ativo`/`plano`/`slug`/limites.",
     ),
     (
         f"{S}.tenant_modulo",

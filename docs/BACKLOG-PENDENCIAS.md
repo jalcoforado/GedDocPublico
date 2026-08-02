@@ -249,11 +249,41 @@ de escopo") como item de backlog próprio; criado agora no review final.)*
   "a verificar" no item 1.0.7).
 - Sem prazo.
 
-### 1.0.85 SEC-RLS-00D — `UPDATE` em `aprimora_py.tenant` precisa ser grant POR COLUNA
+### ~~1.0.85 SEC-RLS-00D — `UPDATE` em `aprimora_py.tenant` precisa ser grant POR COLUNA~~ — FEITO
 
-*(Levantado pela revisão de segurança de `SEC-RLS-00C` (2026-08-02). Não é regressão: o grant é
-anterior e o PR não o altera. O que o PR mudou foi a razão escrita, que descrevia o uso e não o
+*(Levantado pela revisão de segurança de `SEC-RLS-00C` (2026-08-02). Não era regressão: o grant era
+anterior e aquele PR não o alterou. O que ele mudou foi a razão escrita, que descrevia o uso e não o
 alcance.)*
+
+> **Fechado em 2026-08-02, migration `0080_grant_por_coluna_em_tenant.py`.**
+> `REVOKE UPDATE ON aprimora_py.tenant FROM aprimora_app` + `GRANT UPDATE (<13 colunas>)`. Conferido
+> no catálogo depois de aplicar: `role_table_grants` não mostra mais `UPDATE` de tabela para
+> `aprimora_app`, e `column_privileges` mostra 13 colunas onde mostrava 24.
+>
+> **A lista não é a whitelist do service copiada.** O levantamento de caminhos de escrita municipal
+> em `Tenant` achou três, e a whitelist só cobre o primeiro:
+> 1. `services/tenant_config.atualizar_config_institucional` (`PUT /tenants/me`) — os 11 campos de
+>    `_CAMPOS_INSTITUCIONAIS`;
+> 2. `routers/tenant.py::update_nup_config` (`PUT /tenants/me/nup-config`) — `codigo_orgao_nup` e
+>    `usar_nup_federal`, **mesmo papel de banco, fora da whitelist**. Derivar a lista só de
+>    `_CAMPOS_INSTITUCIONAIS` teria derrubado esse endpoint no dia do `SEC-RLS-ROLLOUT`;
+> 3. `cli/tenant.py::_set_active` (`tenant activate|deactivate`) — gravava `ativo` e `atualizado_em`
+>    por `database.SessionLocal`, o pool MUNICIPAL. **Não foi acomodado no grant**: ativar município
+>    é ato de plataforma (é o que `POST /admin/tenants/{id}/ativar` já faz). A CLI passou a abrir a
+>    sessão de plataforma, como `create`/`retomar` desde o `SEC-RLS-00C`.
+>
+> **A guarda é o que dá valor ao item**, e foi o que a revisão do `00C` pediu:
+> `tests/test_grant_por_coluna_tenant.py` compara em três pontas o catálogo do banco, a constante
+> `COLUNAS_MUNICIPAIS_DE_TENANT` (`services/tenant_config.py`) e os campos de
+> `TenantInstitucionalUpdate`/`TenantNupConfigUpdate`. Tem denylist explícita das colunas de
+> plataforma — sem ela a comparação de conjuntos seria satisfeita ampliando os dois lados — e
+> controle positivo em cada negativa, porque em Postgres a negativa por privilégio de coluna devolve
+> **a mesma frase** da negativa por privilégio de tabela (`permission denied for table tenant`).
+> Prova por inversão executada: contra o estado anterior, 8 vermelhos e 2 verdes (os 2 medem o que a
+> 0080 não tira).
+>
+> Continua valendo o item 1.0.86: só produz efeito quando `APP_DATABASE_URL` estiver definida.
+> O texto abaixo é o registro original do problema.
 
 - O `SEC-RLS-00C` tirou de `aprimora_app` o `INSERT` em `aprimora_py.tenant` e `tenant_modulo`
   porque essas tabelas **não têm RLS** e ali o `GRANT` é a única barreira. O `UPDATE` em `tenant`

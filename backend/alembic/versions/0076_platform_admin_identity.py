@@ -159,14 +159,17 @@ _REVOGACOES: list[tuple[str, str, str, str]] = [
 # - `INSERT` em `audit_log`: FICA, e a 0079 confirmou a decisão. Não é
 #   entitlement — é a trilha que o próprio município grava a cada mutação, e a
 #   tabela tem RLS FORCE, então há segunda barreira.
-# - `UPDATE` em `tenant`: FICA. Uso municipal legítimo — a configuração
-#   institucional do próprio tenant
-#   (`services/tenant_config.atualizar_config_institucional`) é editada pelo
-#   admin do município, não pela plataforma. **Atenção ao alcance:** a tabela
-#   não tem RLS e o grant é de TABELA INTEIRA, logo alcança também `ativo`,
-#   `plano`, `slug` e os limites — a whitelist de campos do service é barreira
-#   de aplicação, não de banco. Registrado como `SEC-RLS-00D` (grant por
-#   coluna) em `docs/BACKLOG-PENDENCIAS.md`; ver também a 0079.
+# - `UPDATE` em `tenant`: FICA aqui, e a `0080` (`SEC-RLS-00D`) o ESTREITOU.
+#   O uso municipal legítimo é a configuração institucional do próprio tenant
+#   (`services/tenant_config.atualizar_config_institucional`) mais a
+#   configuração de NUP federal (`routers/tenant.py::update_nup_config`),
+#   editadas pelo admin do município e não pela plataforma. **O que estava
+#   errado era o alcance, não a intenção:** a tabela não tem RLS e o grant era
+#   de TABELA INTEIRA, logo alcançava também `ativo`, `plano`, `slug` e os
+#   limites — a whitelist de campos do service é barreira de aplicação, não de
+#   banco. Desde a 0080 o grant é `UPDATE (<13 colunas>)`, e a divergência entre
+#   essa lista e o código tem guarda
+#   (`tests/test_grant_por_coluna_tenant.py`). Ver também a 0079.
 
 
 def upgrade() -> None:
