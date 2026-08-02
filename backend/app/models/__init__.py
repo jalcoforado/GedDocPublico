@@ -53,7 +53,6 @@ from .modulo import (
     TenantModulo,
 )
 from .notificacao import Notificacao, NotificacaoPreferencia
-from .plataforma import PlatformAuditLog, PlatformPrincipal
 from .pagamentos import (
     Alcada,
     BloqueioSaldo,
@@ -80,6 +79,7 @@ from .pagamentos import (
     SaldoHistorico,
     TagPrioridade,
 )
+from .plataforma import PlatformAuditLog, PlatformPrincipal
 from .nivel import Nivel
 from .servico import Servico
 from .sistema import Sistema
@@ -164,13 +164,13 @@ __all__ = [
     "NaturezaDespesa",
     "Nivel",
     "Notificacao",
+    "NotificacaoPreferencia",
     "OrdemPagamento",
     "OrdemPagamentoDebito",
     "Parcela",
     "Permissionario",
     "PlatformAuditLog",
     "PlatformPrincipal",
-    "NotificacaoPreferencia",
     "Servico",
     "Sistema",
     "SistemaTransacao",

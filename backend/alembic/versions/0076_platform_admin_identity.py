@@ -67,19 +67,56 @@ depends_on = None
 S = "aprimora_py"
 ROLE = "aprimora_platform"
 
+# RELÓGIO ÚNICO: **UTC ingênuo**, tanto no default do servidor quanto no código.
+#
+# As colunas são `TIMESTAMP WITHOUT TIME ZONE`, e o `NOW()` puro grava a hora
+# LOCAL do servidor. Como todo o código Python escreve `datetime.now(UTC)`, um
+# host com TZ à frente de UTC produziria relógios misturados na mesma coluna —
+# e o efeito não seria um erro, seria pior: uma linha criada por SQL cru
+# nasceria com `valid_from` no futuro, `vigente_em()` devolveria `False`, e o
+# resultado é **um principal cadastrado que simplesmente não opera**, sem
+# mensagem em lugar nenhum. Em dev o Postgres está em UTC e isso jamais
+# apareceria. Ver `app/utils/relogio.py`.
+_AGORA_UTC = sa.text("(NOW() AT TIME ZONE 'utc')")
 
-# Cada tupla é (objeto, privilégios, razão). A razão é obrigatória: sem ela,
-# ninguém consegue julgar depois se a revogação continua correta.
-_REVOGACOES: list[tuple[str, str, str]] = [
+
+# Cada tupla é (objeto, revogar, RESTAURAR_NO_DOWNGRADE, razão).
+#
+# `revogar` e `restaurar` são campos SEPARADOS, e a distinção é o ponto todo
+# desta lista. O que o `upgrade()` revoga é o que o **GRANT-cobertor** do
+# bootstrap (`GRANT ... ON ALL TABLES ... TO aprimora_app`) havia concedido por
+# ACIDENTE; o que o `downgrade()` pode devolver é apenas o que alguma migration
+# concedeu por DECLARAÇÃO. Os dois conjuntos quase nunca coincidem:
+#
+#   objeto            declarado por migration        revogado aqui
+#   audit_log         SELECT, INSERT (0014)          UPDATE, DELETE
+#   modulo            SELECT (0073)                  INSERT, UPDATE, DELETE
+#   modulo_transacao  SELECT (0073)                  INSERT, UPDATE, DELETE
+#   tenant            nada                           DELETE
+#   tenant_modulo     S,I,U,D (0073)                 UPDATE, DELETE
+#
+# Reusar `revogar` no `downgrade()` — como esta migration fazia — devolvia a
+# `aprimora_app` privilégios que NENHUMA migration jamais concedeu. Em banco
+# limpo, `alembic downgrade -1` terminava com o runtime municipal podendo dar
+# `UPDATE`/`DELETE` em `audit_log`: o rollback de um PR de segurança deixava a
+# trilha append-only mutável, estado que nunca existiu no repositório. Só
+# `tenant_modulo` tem algo legítimo a restaurar.
+#
+# A razão é obrigatória: sem ela ninguém consegue julgar depois se a revogação
+# continua correta.
+_REVOGACOES: list[tuple[str, str, str, str]] = [
     (
         f"{S}.tenant",
         "DELETE",
-        "apagar tenant não é operação de nenhum runtime; nem o painel de "
-        "plataforma faz isso (desativar é UPDATE ativo=false).",
+        "",  # nenhuma migration concedeu DELETE em tenant a aprimora_app
+        "apagar tenant não é operação de nenhum runtime — nem municipal, nem "
+        "de plataforma (desativar é UPDATE ativo=false). Por isso o papel de "
+        "plataforma também NÃO recebe DELETE aqui: a razão vale para os dois.",
     ),
     (
         f"{S}.tenant_modulo",
         "UPDATE, DELETE",
+        "UPDATE, DELETE",  # a 0073 concedeu os quatro; restaurar é honesto
         "contratar/descontratar é entitlement — operação de PLATAFORMA. "
         "Descontratar é soft-delete (UPDATE excluido=true), então tirar UPDATE "
         "e DELETE fecha o caminho de mutação de contratação pelo papel "
@@ -88,12 +125,14 @@ _REVOGACOES: list[tuple[str, str, str]] = [
     (
         f"{S}.audit_log",
         "UPDATE, DELETE",
+        "",  # a 0014 concedeu SELECT, INSERT — e só
         "trilha append-only: o runtime municipal grava e lê a própria "
         "auditoria, nunca altera nem apaga linha já gravada.",
     ),
     (
         f"{S}.modulo",
         "INSERT, UPDATE, DELETE",
+        "",  # a 0073 concedeu SELECT — e só
         "catálogo GLOBAL do produto. A 0073 concede só SELECT; o "
         "GRANT-cobertor do bootstrap devolvia DML. Aqui o estado fica "
         "determinístico.",
@@ -101,6 +140,7 @@ _REVOGACOES: list[tuple[str, str, str]] = [
     (
         f"{S}.modulo_transacao",
         "INSERT, UPDATE, DELETE",
+        "",
         "mesma razão de `modulo`.",
     ),
 ]
@@ -169,17 +209,17 @@ def upgrade() -> None:
         ),
         # Vigência — `valid_until` é o prazo do break-glass (60 min, ADR §2.8) e
         # é o que a matriz de claims §3 chama de "vigência".
-        sa.Column("valid_from", sa.DateTime(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("valid_from", sa.DateTime(), nullable=False, server_default=_AGORA_UTC),
         sa.Column("valid_until", sa.DateTime(), nullable=True),
         # Concessão: quem, quando, por quê (runbook §2 e §3).
-        sa.Column("concedido_em", sa.DateTime(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("concedido_em", sa.DateTime(), nullable=False, server_default=_AGORA_UTC),
         sa.Column("concedido_por", sa.String(255), nullable=False),
         sa.Column("motivo_concessao", sa.Text(), nullable=False),
         # Revogação: quem, quando, por quê (runbook §4).
         sa.Column("revogado_em", sa.DateTime(), nullable=True),
         sa.Column("revogado_por", sa.String(255), nullable=True),
         sa.Column("motivo_revogacao", sa.Text(), nullable=True),
-        sa.Column("criado_em", sa.DateTime(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("criado_em", sa.DateTime(), nullable=False, server_default=_AGORA_UTC),
         sa.Column("atualizado_em", sa.DateTime(), nullable=True),
         sa.UniqueConstraint("issuer", "subject", name="uq_platform_principal_iss_sub"),
         # O `issuer` é uma URL absoluta de IdP. O CHECK não é decoração: é o que
@@ -247,7 +287,7 @@ def upgrade() -> None:
         ),
         sa.Column("detalhe", postgresql.JSONB(), nullable=True),
         sa.Column("correlation_id", sa.String(64), nullable=True),
-        sa.Column("criado_em", sa.DateTime(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("criado_em", sa.DateTime(), nullable=False, server_default=_AGORA_UTC),
         schema=S,
     )
     op.create_index(
@@ -280,16 +320,37 @@ def upgrade() -> None:
     for tabela in ("platform_principal", "platform_audit_log"):
         op.execute(f"REVOKE ALL ON {S}.{tabela} FROM PUBLIC")
         op.execute(f"REVOKE ALL ON {S}.{tabela} FROM aprimora_app")
-        op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {S}.{tabela} TO {ROLE}")
     for seq in ("platform_principal_id_seq", "platform_audit_log_id_seq"):
         op.execute(f"REVOKE ALL ON SEQUENCE {S}.{seq} FROM PUBLIC")
         op.execute(f"REVOKE ALL ON SEQUENCE {S}.{seq} FROM aprimora_app")
         op.execute(f"GRANT USAGE, SELECT ON SEQUENCE {S}.{seq} TO {ROLE}")
 
+    # `platform_principal` — DML completo: a CLI concede, revoga (UPDATE) e o
+    # `DELETE` é a saída para um principal cadastrado por engano antes de
+    # qualquer uso. Mutação de identidade é o trabalho deste papel.
+    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {S}.platform_principal TO {ROLE}")
+
+    # `platform_audit_log` — APPEND-ONLY, e por isso só SELECT e INSERT.
+    # Este papel é o único que escreve na trilha AUTORITATIVA das operações de
+    # plataforma. Dar-lhe UPDATE/DELETE significaria que a credencial de
+    # `PLATFORM_DB_URL` comprometida — ou um bug numa rota futura — apaga
+    # exatamente o registro do que fez. E é dessa trilha que dependem a revisão
+    # trimestral (runbook §9) e o pós-uso de break-glass (§5.6): sem ela, as
+    # duas revisam o vazio. Mesmo princípio que a 0077 aplica à trilha
+    # municipal e que o `_REVOGACOES` aplica a `aprimora_app`.
+    op.execute(f"GRANT SELECT, INSERT ON {S}.platform_audit_log TO {ROLE}")
+
     # Grants cross-tenant EXPLÍCITOS e ENUMERADOS do papel de plataforma
     # (ADR §2.3): entitlement, e nada de tabela de negócio de tenant.
-    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {S}.tenant TO {ROLE}")
-    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {S}.tenant_modulo TO {ROLE}")
+    #
+    # SEM `DELETE` em `tenant` nem em `tenant_modulo`, e a razão é a mesma que
+    # o `_REVOGACOES` dá para tirá-lo de `aprimora_app`: apagar tenant não é
+    # operação de runtime nenhum, e descontratar é soft-delete
+    # (`UPDATE excluido = true`). Conceder aqui o que se revoga ali seria a
+    # justificativa contradizendo o grant, e contrariaria a regra do CLAUDE.md
+    # — exclusão é soft-delete, nunca DELETE físico.
+    op.execute(f"GRANT SELECT, INSERT, UPDATE ON {S}.tenant TO {ROLE}")
+    op.execute(f"GRANT SELECT, INSERT, UPDATE ON {S}.tenant_modulo TO {ROLE}")
     op.execute(f"GRANT SELECT ON {S}.modulo TO {ROLE}")
     op.execute(f"GRANT SELECT ON {S}.modulo_transacao TO {ROLE}")
     op.execute(f"GRANT USAGE, SELECT ON SEQUENCE {S}.tenant_id_seq TO {ROLE}")
@@ -298,16 +359,25 @@ def upgrade() -> None:
     # ------------------------------------------------------------------
     # 5. Higiene: o que aprimora_app tem indevidamente (ADR §2.3).
     # ------------------------------------------------------------------
-    for objeto, privilegios, _razao in _REVOGACOES:
-        op.execute(f"REVOKE {privilegios} ON {objeto} FROM aprimora_app")
+    for objeto, revogar, _restaurar, _razao in _REVOGACOES:
+        op.execute(f"REVOKE {revogar} ON {objeto} FROM aprimora_app")
 
 
 def downgrade() -> None:
     # Ordem inversa do upgrade.
 
-    # 5. Devolve a aprimora_app o que foi revogado.
-    for objeto, privilegios, _razao in reversed(_REVOGACOES):
-        op.execute(f"GRANT {privilegios} ON {objeto} TO aprimora_app")
+    # 5. Devolve a aprimora_app apenas o que ALGUMA MIGRATION concedeu —
+    #    campo `restaurar`, não `revogar`. Ver a tabela no bloco `_REVOGACOES`:
+    #    o que o upgrade revoga veio do GRANT-cobertor do bootstrap, por
+    #    acidente, e reconcedê-lo aqui deixaria o rollback de um PR de
+    #    segurança MAIS permissivo do que qualquer estado já declarado (o caso
+    #    grave era `UPDATE`/`DELETE` em `audit_log`, que a 0014 nunca deu).
+    #    Vazio ⇒ nada a restaurar, e o `GRANT` é pulado: `GRANT  ON x TO y` é
+    #    erro de sintaxe, e um `GRANT ALL` "por garantia" seria pior ainda.
+    for objeto, _revogar, restaurar, _razao in reversed(_REVOGACOES):
+        if not restaurar:
+            continue
+        op.execute(f"GRANT {restaurar} ON {objeto} TO aprimora_app")
 
     # 4. Grants do papel de plataforma sobre objetos que SOBREVIVEM ao
     #    downgrade (os das tabelas novas somem junto com as tabelas).

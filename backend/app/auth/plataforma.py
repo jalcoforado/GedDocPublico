@@ -32,7 +32,6 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 import httpx
@@ -44,7 +43,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..database_plataforma import PlataformaSemBancoError, get_platform_db
-from ..models import PlatformPrincipal
+from ..models.plataforma import PlatformPrincipal
+from ..utils.relogio import agora_utc
 
 logger = logging.getLogger("plataforma")
 
@@ -377,7 +377,7 @@ async def require_platform_admin(
             status.HTTP_503_SERVICE_UNAVAILABLE, "principal de plataforma ilegível"
         ) from exc
 
-    agora = datetime.utcnow()
+    agora = agora_utc()
     if principal is None or not principal.vigente_em(agora):
         motivo = (
             "principal inexistente" if principal is None else "principal inativo ou fora de vigência"

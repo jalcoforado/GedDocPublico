@@ -12,6 +12,18 @@ E elas **não usam `get_db`**: recebem `get_platform_db`, uma sessão do papel
 0076) que nunca herda `app.tenant_id` do `TenantMiddleware`. O tenant alvo vem
 do path da operação, sempre.
 
+**O `TenantMiddleware` ainda roda na frente destas rotas, e isso é uma bomba de
+efeito retardado para `SEC-01B`.** Hoje `STRICT_TENANT_RESOLUTION=false`, então
+todo `Host` que não seja subdomínio de tenant cai silenciosamente no
+`default_tenant_slug` e a requisição chega ao gate. Com a resolução estrita —
+que é a configuração pretendida para produção — esse mesmo `Host` recebe **404
+antes** de `require_platform_admin`. Como o console de operador vai para origem
+própria (Q-3), cujo `Host` nunca será slug de tenant, ligar
+`STRICT_TENANT_RESOLUTION` derrubaria `/api/v2/admin/*` inteiro sem que nada no
+gate fosse tocado. A separação que este módulo descreve é verdadeira do gate
+para dentro; o middleware, na frente, ainda a contradiz. Correção é `SEC-01B`
+(bypass por prefixo de path); registrado também no runbook §1.
+
 Uma exceção, deliberada e delimitada: `POST /admin/tenants`. O provisionamento
 escreve nas tabelas de NEGÓCIO do tenant (`utils.usuario`, `utils.grupo`,
 `protocolos.tipo_manifestante`, ...), às quais o ADR §2.3 nega acesso ao papel
@@ -20,6 +32,7 @@ do tenant) e "ato municipal" (semear o cadastro) é item já decidido e registra
 para `SEC-RLS-00B`; antecipá-lo aqui derrubaria o onboarding dentro de um PR de
 segurança. Até lá essa rota continua na sessão municipal, com o gate novo.
 """
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -27,11 +40,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user_no_password_gate
-from ..auth.plataforma import require_platform_admin
+from ..auth.plataforma import exigir_tenant_alvo, require_platform_admin
 from ..config import modulos_do_plano
 from ..database import get_db
 from ..database_plataforma import get_platform_db
-from ..models import PlatformPrincipal, Tenant, Usuario
+from ..models.plataforma import PlatformPrincipal
+from ..models.tenant import Tenant
+from ..models.usuario import Usuario
 from ..schemas.admin_tenant import (
     AdminMeOut,
     AdminTenantCreate,
@@ -41,12 +56,18 @@ from ..schemas.admin_tenant import (
 )
 from ..schemas.modulo import ContratacaoIn, ModuloAdminOut
 from ..services.modulos import contratar, modulos_do_tenant
-from ..services.plataforma_auditoria import registrar_no_tenant, registrar_operacao
+from ..services.plataforma_auditoria import (
+    registrar_falha_de_projecao,
+    registrar_no_tenant,
+    registrar_operacao,
+)
 from ..services.provisioning_tenant import (
     ProvisioningError,
     SlugIndisponivelError,
     provisionar_tenant,
 )
+
+logger = logging.getLogger("plataforma")
 
 router = APIRouter(tags=["admin-plataforma"])
 
@@ -72,7 +93,17 @@ def _to_out(t: Tenant) -> AdminTenantOut:
     )
 
 
-async def _get_tenant(db: AsyncSession, tenant_id: int) -> Tenant:
+async def _get_tenant(db: AsyncSession, tenant_id: int | None) -> Tenant:
+    """Carrega o tenant alvo. **Chokepoint** por onde passam todas as rotas com
+    alvo — é por isso que `exigir_tenant_alvo` mora aqui e não em cada rota.
+
+    Hoje as 8 rotas recebem `tenant_id` como path param obrigatório, então o
+    `None` é inalcançável pela borda HTTP e o cenário 19 da matriz está
+    satisfeito **estruturalmente**. A guarda é cinto e suspensório, e vale para
+    a rota futura que receba o alvo do corpo — onde `None` deixa de ser
+    impossível e vira o caso comum de payload malformado.
+    """
+    tenant_id = exigir_tenant_alvo(tenant_id)
     t = (
         await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     ).scalar_one_or_none()
@@ -100,6 +131,19 @@ async def _auditar(
     trilha junto). A visível ao município é gravada **depois** do commit, em
     transação própria com `SET LOCAL app.tenant_id = <alvo>` — gravá-la antes
     registraria no tenant uma mudança que ainda pode não acontecer.
+
+    E, depois do commit, a falha da projeção municipal **não vira 500**. A essa
+    altura a alteração já está aplicada: propagar a exceção não desfaz nada,
+    mente sobre o resultado e convida o operador a repetir a operação. A falha é
+    registrada — `logger.error` com o `correlation_id` e uma linha na trilha
+    autoritativa — e a resposta é o sucesso que de fato ocorreu.
+
+    Isto **não** é o `except Exception` de `services/audit.py` que este PR
+    critica. Lá a trilha engolida é a única, e a operação fica sem rastro
+    nenhum. Aqui a autoritativa já está gravada e íntegra; o que se perde é uma
+    projeção secundária, cuja perda é ela própria auditada. O critério é
+    estreito — depois do commit, e só havendo outra trilha dizendo o que
+    aconteceu. Não estender.
     """
     correlacao = _correlacao(request)
     await registrar_operacao(
@@ -111,14 +155,33 @@ async def _auditar(
         correlation_id=correlacao,
     )
     await db.commit()
-    await registrar_no_tenant(
-        tenant_alvo_id=tenant_alvo_id,
-        acao=acao,
-        entidade="tenant",
-        id_entidade=tenant_alvo_id,
-        payload=detalhe,
-        correlation_id=correlacao,
-    )
+    try:
+        await registrar_no_tenant(
+            tenant_alvo_id=tenant_alvo_id,
+            acao=acao,
+            entidade="tenant",
+            id_entidade=tenant_alvo_id,
+            payload=detalhe,
+            correlation_id=correlacao,
+        )
+    except Exception as exc:  # noqa: BLE001 — ver docstring: depois do commit
+        logger.error(
+            "plataforma_projecao_municipal_falhou",
+            extra={
+                "correlation_id": correlacao,
+                "tenant_alvo_id": tenant_alvo_id,
+                "acao": acao,
+                "erro": str(exc),
+            },
+        )
+        await registrar_falha_de_projecao(
+            db,
+            principal=principal,
+            tenant_alvo_id=tenant_alvo_id,
+            acao=acao,
+            erro=str(exc),
+            correlation_id=correlacao,
+        )
 
 
 @router.get("/admin/me", response_model=AdminMeOut)

@@ -40,13 +40,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy import select
 
 from ..config import get_settings
 from ..database_plataforma import descartar_engines_plataforma, sessao_plataforma
-from ..models import PlatformAuditLog, PlatformPrincipal
+from ..models.plataforma import PlatformPrincipal
+from ..services.plataforma_auditoria import registrar_operacao
+from ..utils.relogio import agora_utc
 
 # ADR §2.8: a janela de break-glass é de 60 minutos e não é renovável.
 MINUTOS_MAXIMOS_BREAK_GLASS = 60
@@ -55,29 +57,6 @@ MINUTOS_MAXIMOS_BREAK_GLASS = 60
 def _erro(mensagem: str) -> int:
     print(f"[ERRO] {mensagem}")
     return 1
-
-
-async def _trilha(
-    db,
-    *,
-    principal: PlatformPrincipal,
-    acao: str,
-    detalhe: dict,
-) -> None:
-    """Toda mutação feita por CLI entra na trilha autoritativa. Operação de
-    plataforma sem registro é pior do que operação recusada."""
-    db.add(
-        PlatformAuditLog(
-            platform_principal_id=principal.id,
-            issuer=principal.issuer,
-            subject=principal.subject,
-            acao=acao,
-            tenant_alvo_id=None,
-            detalhe=detalhe,
-            correlation_id=None,
-            criado_em=datetime.utcnow(),
-        )
-    )
 
 
 async def _por_chave_natural(db, issuer: str, subject: str) -> PlatformPrincipal | None:
@@ -92,7 +71,7 @@ async def _por_chave_natural(db, issuer: str, subject: str) -> PlatformPrincipal
 
 
 async def _criar(args: argparse.Namespace) -> int:
-    agora = datetime.utcnow()
+    agora = agora_utc()
     async with sessao_plataforma() as db:
         if await _por_chave_natural(db, args.issuer, args.subject) is not None:
             return _erro(
@@ -117,7 +96,7 @@ async def _criar(args: argparse.Namespace) -> int:
         )
         db.add(principal)
         await db.flush()
-        await _trilha(
+        await registrar_operacao(
             db,
             principal=principal,
             acao="principal.criado",
@@ -138,7 +117,7 @@ async def _criar(args: argparse.Namespace) -> int:
 
 
 async def _revogar(args: argparse.Namespace) -> int:
-    agora = datetime.utcnow()
+    agora = agora_utc()
     async with sessao_plataforma() as db:
         principal = await _por_chave_natural(db, args.issuer, args.subject)
         if principal is None:
@@ -153,7 +132,7 @@ async def _revogar(args: argparse.Namespace) -> int:
         principal.revogado_por = args.revoked_by
         principal.motivo_revogacao = args.reason
         principal.atualizado_em = agora
-        await _trilha(
+        await registrar_operacao(
             db,
             principal=principal,
             acao="principal.revogado",
@@ -167,7 +146,7 @@ async def _revogar(args: argparse.Namespace) -> int:
 
 
 async def _break_glass(args: argparse.Namespace) -> int:
-    agora = datetime.utcnow()
+    agora = agora_utc()
     async with sessao_plataforma() as db:
         principal = (
             await db.execute(
@@ -183,7 +162,7 @@ async def _break_glass(args: argparse.Namespace) -> int:
             principal.ativo = False
             principal.valid_until = agora
             principal.atualizado_em = agora
-            await _trilha(
+            await registrar_operacao(
                 db, principal=principal, acao="break_glass.encerrado", detalhe={}
             )
             await db.commit()
@@ -220,7 +199,7 @@ async def _break_glass(args: argparse.Namespace) -> int:
         principal.valid_from = agora
         principal.valid_until = agora + timedelta(minutes=args.minutes)
         principal.atualizado_em = agora
-        await _trilha(
+        await registrar_operacao(
             db,
             principal=principal,
             acao="break_glass.ativado",

@@ -273,6 +273,108 @@ async def test_aprimora_app_nao_escreve_em_platform_audit_log(
     )
 
 
+async def test_papel_de_plataforma_nao_altera_nem_apaga_a_propria_trilha(
+    platform_session: AsyncSession,
+) -> None:
+    """A trilha AUTORITATIVA é append-only até para quem a escreve.
+
+    O controle positivo já provou, acima, que `aprimora_platform` **insere** em
+    `platform_audit_log` — sem ele, este teste passaria num mundo em que a
+    tabela simplesmente não funciona. O que falta provar é o outro lado: que o
+    papel não consegue reescrever nem apagar o que gravou.
+
+    A garantia importa porque este é o único papel que escreve ali. Credencial
+    de `PLATFORM_DB_URL` comprometida, ou um bug numa rota futura, apagaria
+    exatamente o registro do que fez — e é dessa trilha que dependem a revisão
+    trimestral (runbook §9) e o pós-uso de break-glass (§5.6). Uma trilha que o
+    seu próprio escritor pode editar não é trilha, é rascunho.
+
+    `platform_principal` **mantém** UPDATE/DELETE de propósito: é lá que a CLI
+    revoga. Identidade muda; história, não.
+    """
+    for sql, operacao in (
+        ("UPDATE aprimora_py.platform_audit_log SET acao = 'forjada'", "UPDATE"),
+        ("DELETE FROM aprimora_py.platform_audit_log", "DELETE"),
+    ):
+        with pytest.raises(DBAPIError) as exc:
+            await platform_session.execute(text(sql))
+        await platform_session.rollback()
+        msg = str(exc.value).lower()
+        assert "permission denied" in msg or "permissão negada" in msg, (
+            f"esperava negativa de PRIVILÉGIO no {operacao} de platform_audit_log "
+            f"como `aprimora_platform`; recebi: {msg}"
+        )
+
+
+async def test_papel_de_plataforma_nao_apaga_tenant_nem_contratacao(
+    platform_session: AsyncSession,
+) -> None:
+    """`DELETE` físico não é operação de runtime nenhum — nem do de plataforma.
+
+    A razão está escrita no `_REVOGACOES` da 0076 para justificar tirar o
+    privilégio de `aprimora_app`; conceder ao papel de plataforma o que se
+    revoga do municipal faria a justificativa contradizer o grant. Descontratar
+    é soft-delete (`UPDATE excluido = true`) e desativar tenant é
+    `UPDATE ativo = false`, conforme a regra de soft-delete do `CLAUDE.md`.
+    """
+    for tabela in ("aprimora_py.tenant", "aprimora_py.tenant_modulo"):
+        with pytest.raises(DBAPIError) as exc:
+            await platform_session.execute(text(f"DELETE FROM {tabela} WHERE id = -1"))
+        await platform_session.rollback()
+        msg = str(exc.value).lower()
+        assert "permission denied" in msg or "permissão negada" in msg, (
+            f"`aprimora_platform` conseguiu DELETE em {tabela}; recebi: {msg}"
+        )
+
+
+async def test_colunas_de_vigencia_usam_relogio_utc(
+    platform_session: AsyncSession,
+) -> None:
+    """Relógio único: o default do servidor grava **UTC**, não hora local.
+
+    As colunas são `TIMESTAMP WITHOUT TIME ZONE`. Com `NOW()` puro, um host
+    cujo fuso esteja à frente de UTC gravaria `valid_from` no futuro em relação
+    ao `agora_utc()` do código — e `vigente_em()` devolveria `False`. O sintoma
+    seria um operador cadastrado que não opera, sem exceção e sem log.
+
+    Provado por comparação com o relógio da aplicação, não lendo o catálogo:
+    o que interessa é o instante que a linha recebe.
+    """
+    from app.utils.relogio import agora_utc
+
+    antes = agora_utc()
+    linha = (
+        await platform_session.execute(
+            text(
+                """
+                INSERT INTO aprimora_py.platform_principal
+                    (issuer, subject, display_label, concedido_por, motivo_concessao)
+                VALUES (:issuer, :subject, :display_label, :concedido_por, :motivo_concessao)
+                RETURNING valid_from, concedido_em, criado_em
+                """
+            ),
+            dict(_PRINCIPAL_TESTE, subject=f"sec01a-relogio-{uuid.uuid4().hex[:8]}"),
+        )
+    ).one()
+    depois = agora_utc()
+    await platform_session.rollback()
+
+    # Tolerância de 60 s cobre latência e drift entre container e banco, e é
+    # pequena o bastante para que QUALQUER fuso diferente de UTC (o menor
+    # deslocamento real em uso no mundo é de 15 min) reprove.
+    for nome in ("valid_from", "concedido_em", "criado_em"):
+        valor = getattr(linha, nome)
+        assert antes.tzinfo is None and valor.tzinfo is None
+        deriva = min(abs((valor - antes).total_seconds()), abs((valor - depois).total_seconds()))
+        assert deriva < 60, (
+            f"`{nome}` = {valor}, relógio da aplicação = {antes}..{depois} "
+            f"(deriva de {deriva:.0f}s). O default do servidor e o código estão "
+            "em relógios diferentes; num host fora de UTC isso faz `valid_from` "
+            "nascer no futuro e o principal não operar, sem erro nenhum. "
+            "Ver app/utils/relogio.py e o `_AGORA_UTC` da migration 0076."
+        )
+
+
 async def test_papel_de_plataforma_nao_e_superuser_nem_bypassrls(
     admin_session: AsyncSession,
 ) -> None:

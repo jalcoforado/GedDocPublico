@@ -22,14 +22,15 @@ teste provando que a linha foi gravada de verdade.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+import logging
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database_plataforma import sessao_no_tenant_alvo
-from ..models import PlatformAuditLog, PlatformPrincipal
+from ..models.plataforma import PlatformAuditLog, PlatformPrincipal
+from ..utils.relogio import agora_utc
 
 
 async def registrar_operacao(
@@ -55,7 +56,7 @@ async def registrar_operacao(
         tenant_alvo_id=tenant_alvo_id,
         detalhe=detalhe,
         correlation_id=correlation_id,
-        criado_em=datetime.utcnow(),
+        criado_em=agora_utc(),
     )
     db.add(linha)
     await db.flush()
@@ -87,7 +88,7 @@ async def registrar_tentativa_negada(
             tenant_alvo_id=None,
             detalhe={"motivo": motivo},
             correlation_id=correlation_id,
-            criado_em=datetime.utcnow(),
+            criado_em=agora_utc(),
         )
     )
     await db.commit()
@@ -110,10 +111,25 @@ async def registrar_no_tenant(
     operador de plataforma não é um `utils.usuario`, e a coluna é nullable
     exatamente para isso.
 
-    INSERT em SQL cru em vez do ORM `AuditLog`: aqui a sessão é de outro engine
-    e de outro papel, e o INSERT precisa acontecer sob o `SET LOCAL` desta
-    transação. Passar pelo ORM só acrescentaria identity map e autoflush a um
-    caminho que grava uma linha e fecha.
+    **Isto reimplementa `services/audit.py::log`, e a duplicação é consciente.**
+    O efeito colateral é real — `aprimora_py.audit_log` passa a ter dois
+    escritores independentes —, então o motivo tem de ser bom o bastante para
+    quem vier depois julgar se ainda vale:
+
+    1. `audit.py::log` **engole a exceção do flush** (`except Exception` nas
+       linhas ~68-70). Chamá-lo aqui importaria exatamente o silêncio que a
+       decisão D-a existe para evitar, e a falha de projeção deixaria de ser
+       detectável — ver `registrar_falha_de_projecao`.
+    2. Ele monta um `AuditLog` do ORM, cuja `Session` teria de ser esta, de
+       outro engine e outro papel. O objeto entraria no identity map e ficaria
+       sujeito a autoflush em qualquer `execute` posterior desta transação —
+       comportamento que não se quer num caminho que grava uma linha e fecha.
+
+    O que NÃO é motivo, embora pareça: "é outra sessão, outro papel". Isso
+    sozinho não impede reusar `log()`; ele recebe a sessão por parâmetro.
+
+    Se algum dia `audit.py::log` parar de engolir a exceção (item de
+    `SEC-RLS-00B`), reunificar os dois passa a ser a coisa certa.
     """
     async with sessao_no_tenant_alvo(tenant_alvo_id) as sessao:
         await sessao.execute(
@@ -134,7 +150,51 @@ async def registrar_no_tenant(
                 "id_entidade": id_entidade,
                 "payload": None if payload is None else json.dumps(payload),
                 "request_id": correlation_id,
-                "criado_em": datetime.utcnow(),
+                "criado_em": agora_utc(),
             },
         )
         await sessao.commit()
+
+
+async def registrar_falha_de_projecao(
+    db: AsyncSession,
+    *,
+    principal: PlatformPrincipal,
+    tenant_alvo_id: int,
+    acao: str,
+    erro: str,
+    correlation_id: str | None = None,
+) -> None:
+    """Grava, na trilha AUTORITATIVA, que a projeção municipal falhou.
+
+    Chamado quando `registrar_no_tenant` estoura **depois** de a operação já
+    ter comitado. Nesse ponto propagar a exceção não protege nada: a alteração
+    está feita, e um `500` sobre operação bem-sucedida mente sobre o resultado
+    e convida o operador a repetir.
+
+    A diferença para o `except Exception` de `services/audit.py`, que este PR
+    critica, é qual trilha se perde. Lá, a engolida é a **única** — a operação
+    fica sem rastro nenhum. Aqui a autoritativa já participou da transação e
+    está gravada; o que falhou é uma **projeção secundária**, e a própria falha
+    vira uma linha auditável, com o `correlation_id` que casa as duas pontas.
+    Silêncio seria engolir; isto é registrar.
+
+    **Não use isto como precedente para capturar o que não pode falhar.** O
+    critério é estreito: só vale depois do commit, e só quando existe outra
+    trilha, íntegra, dizendo o que aconteceu.
+
+    Comita em transação própria — a da operação já fechou.
+    """
+    db.add(
+        PlatformAuditLog(
+            platform_principal_id=principal.id,
+            issuer=principal.issuer,
+            subject=principal.subject,
+            acao="plataforma.projecao_municipal_falhou",
+            tenant_alvo_id=tenant_alvo_id,
+            detalhe={"acao_original": acao, "erro": erro},
+            correlation_id=correlation_id,
+            criado_em=agora_utc(),
+        )
+    )
+    await db.commit()
