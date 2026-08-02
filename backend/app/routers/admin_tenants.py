@@ -290,6 +290,13 @@ async def criar_tenant(
                 "correlation_id": correlacao,
                 "tenant_alvo_id": e.tenant_id,
                 "slug": e.slug,
+                # O TIPO vai separado do texto de propósito. Antes o operador o
+                # obtinha do corpo do 500 (`f"{type(causa).__name__}: {causa}"`),
+                # que parou de trafegar. Para erro de driver o tipo está embutido
+                # no `str`, mas exceção Python nua — `ValueError()`, `KeyError` —
+                # tem `str` vazio ou de uma letra, e o incidente perderia o
+                # classificador justamente no caso mais difícil de diagnosticar.
+                "excecao": type(e.causa).__name__,
                 "erro": str(e.causa),
             },
         )
@@ -302,7 +309,11 @@ async def criar_tenant(
             principal=principal,
             acao="tenant.provisionamento_incompleto",
             tenant_alvo_id=e.tenant_id,
-            detalhe={"slug": e.slug, "erro": str(e.causa)},
+            detalhe={
+                "slug": e.slug,
+                "excecao": type(e.causa).__name__,
+                "erro": str(e.causa),
+            },
             correlation_id=correlacao,
         )
         await db_plataforma.commit()
