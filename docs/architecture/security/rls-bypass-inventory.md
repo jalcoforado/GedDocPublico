@@ -107,7 +107,7 @@ SELECT n.nspname || '.' || c.relname AS tabela, c.relrowsecurity, c.relforcerows
 
 | tabela | rls | force | avaliação |
 |---|---|---|---|
-| `aprimora_py.tenant_modulo` | f | f | **Deliberado.** Tabela de plataforma, escrita pelo platform admin operando sobre outros tenants. Registrado no CLAUDE.md e na migration 0073. Está na allowlist do teste. |
+| `aprimora_py.tenant_modulo` | f | f | **Deliberado.** Tabela de plataforma, escrita pelo platform admin operando sobre outros tenants. Registrado no CLAUDE.md e na migration 0073. Está na allowlist do teste. Sem RLS, o `GRANT` é a única barreira — e desde a `0079` (`SEC-RLS-00C`) `aprimora_app` só tem `SELECT` aqui. |
 | `transporte_regulado.alvara` | t | **f** | Divergência |
 | `transporte_regulado.alvara_auditoria` | t | **f** | Divergência |
 | `transporte_regulado.alvara_documento` | t | **f** | Divergência |
@@ -674,11 +674,19 @@ existe para onde ir, e a ida é configuração — `APP_DATABASE_URL`, `WORKER_D
   não erro de permissão previsto. A ordem do rollout é, portanto, **worker → app**, com o migrator
   fora até que a posse dos schemas seja resolvida no bootstrap. Transferir a posse de 234 tabelas é
   mudança de bootstrap, com blast radius maior que este PR inteiro.
-- **`provisionar_tenant` continua monolítico** (§10 item 10 do plano). Criar a linha em `tenant` e a
-  contratação inicial é ato de plataforma; povoar o tenant é ato municipal. Enquanto a partição não
-  existe, `aprimora_app` mantém `INSERT` em `tenant`, `tenant_modulo` e `audit_log`, e os `REVOKE`
-  correspondentes seguem comentados em `_REVOGACOES` na 0076. O buraco de entitlement que isso
-  deixa está descrito no plano, logo abaixo do item 10.
+- ~~**`provisionar_tenant` continua monolítico**~~ — **FECHADO em `SEC-RLS-00C`** (2026-08-02,
+  migration `0079`). O provisionamento virou dois atos com papéis distintos
+  (`app/services/provisioning_tenant.py`): `criar_registro_de_tenant` sob `aprimora_platform`,
+  `semear_tenant` sob o papel municipal. Com isso `aprimora_app` perdeu `INSERT` em `tenant` e em
+  `tenant_modulo` — o buraco de entitlement do plano (item 10) não existe mais. Ficaram, por decisão
+  caso a caso registrada na 0079: `UPDATE` em `tenant` (configuração institucional do próprio
+  município) e `INSERT` em `audit_log` (trilha do próprio município, com RLS FORCE por trás).
+  Guarda: `tests/test_entitlement_fronteira_sql.py`, com controle positivo em cada negativa.
+  **Modo de falha novo, assumido por escrito:** os dois atos são transações separadas, então um
+  provisionamento pode parar no meio. O tenant nasce `ativo = false` e só é ativado no fim, de modo
+  que o estado incompleto é **inerte** (não resolve por subdomínio); a conclusão é
+  `python -m app.cli.tenant retomar`, idempotente, que recusa tenant já ativo. Não há compensação
+  por `DELETE`, e isso é deliberado — apagar tenant não é operação de runtime nenhum.
 - **`audit_log_migrator_delete` é mais ampla do que "apagar dado de demonstração".** A policy
   autoriza `aprimora_migrator` a apagar **qualquer** linha de `aprimora_py.audit_log` do tenant que
   a sessão declarou, exceto `entidade = 'tenant'` (a trilha das operações de plataforma, que nenhum

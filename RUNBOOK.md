@@ -91,6 +91,35 @@ Pós-criação:
 2. Compartilhar URL + credenciais com o cliente
 3. Acompanhar primeiros logins via `aprimora.access` logs (filtrar `tenant_slug=fortaleza`)
 
+### Provisionamento que parou no meio (tenant inerte)
+
+Desde `SEC-RLS-00C` o provisionamento são **dois atos**, em papéis de banco
+diferentes: o de **plataforma** cria o tenant e a contratação de módulos
+(`aprimora_platform`), o **municipal** cria admin, grupo SU, unidade e catálogos
+(papel da aplicação). São duas transações — logo, o ato 1 pode ter sucesso e o 2
+falhar.
+
+**Quando isso acontece, nada é apagado.** O tenant fica com `ativo = false`, ou
+seja **inerte**: não resolve por subdomínio, ninguém faz login, nada vaza. A
+mensagem de erro (na CLI ou no `500` de `POST /admin/tenants`) traz o slug, o id
+e o comando de conclusão. Sintoma correlato: `python -m app.cli.tenant list`
+mostra o tenant com `Ativo = NÃO` logo depois de um `create` que deu erro.
+
+Concluir — o ato municipal é idempotente, então repetir é seguro:
+
+```bash
+docker exec aprimora-py-backend python -m app.cli.tenant retomar \
+  --slug fortaleza \
+  --admin-email admin@fortaleza.gov.br \
+  --admin-cpf 12345678901 \
+  --admin-nome "Maria Silva"
+```
+
+Se o admin já existir, a senha dele é **preservada** (a saída avisa) — para
+trocá-la use o reset de senha do próprio tenant. O comando **recusa tenant já
+ativo**, de propósito: retomar um município em produção criaria nele um
+super-usuário novo.
+
 Listar tenants existentes:
 
 ```bash

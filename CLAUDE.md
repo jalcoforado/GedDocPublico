@@ -16,7 +16,11 @@ Desde 2026-07-30 (fatia F1, `c4dcb53`) o sistema é dividido em **cinco módulos
 `protocolo`, `pagamentos`, `frota`, `transporte`, `administracao` — mais `comum`, que não é
 contratável e nunca é bloqueado. O catálogo é global (`aprimora_py.modulo`, `modulo_transacao`); a
 contratação é por tenant (`aprimora_py.tenant_modulo`, **sem RLS** por decisão: é tabela de
-plataforma, escrita pelo platform admin operando sobre outros tenants).
+plataforma, escrita pelo platform admin operando sobre outros tenants). Como não há RLS, o `GRANT`
+é a única barreira, e desde a migration `0079` (`SEC-RLS-00C`) o papel do runtime municipal
+(`aprimora_app`) tem **só `SELECT`** ali — quem contrata é o papel de plataforma. Por isso
+`provisionar_tenant` é **dois atos** com sessões distintas
+(`app/services/provisioning_tenant.py`): mexer nele sem ler aquele docstring quebra o onboarding.
 
 Cada módulo declara os códigos de `utils.transacao` que lhe pertencem (o mapa vive em
 `app/cli/seed_bootstrap.py::MODULO_TRANSACOES`). Transação de módulo não contratado entra no
