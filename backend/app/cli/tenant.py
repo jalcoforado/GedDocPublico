@@ -184,19 +184,48 @@ async def _list(_: argparse.Namespace) -> int:
         return 0
 
 
+async def _aplicar_ativo(db: AsyncSession, slug: str, active: bool) -> int:
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.slug == slug))
+    ).scalar_one_or_none()
+    if tenant is None:
+        print(f"[ERRO] tenant '{slug}' não encontrado")
+        return 1
+    tenant.ativo = active
+    tenant.atualizado_em = datetime.utcnow()
+    await db.commit()
+    print(f"[ok] tenant {slug}: ativo={active}")
+    return 0
+
+
 async def _set_active(args: argparse.Namespace, active: bool) -> int:
+    """`activate` / `deactivate` — ato de PLATAFORMA, não do município.
+
+    Até o `SEC-RLS-00D` isto abria `SessionLocal()`, o pool MUNICIPAL
+    (`database.py`, `runtime_database_url`). Passava despercebido porque
+    `APP_DATABASE_URL` está vazia e o runtime ainda conecta como `ged_user`
+    (item 1.0.86 do backlog) — mas depois do `SEC-RLS-ROLLOUT` o papel seria
+    `aprimora_app`, que a migration 0080 deixa **sem** `UPDATE` em `ativo`. O
+    comando morreria com `permission denied for table tenant` no exato momento
+    em que alguém precisa suspender um município.
+
+    Conceder `ativo` ao papel municipal para "consertar" isto seria desfazer o
+    PR: é justamente a coluna com que um defeito de service reativa o próprio
+    tenant suspenso ou desativa outro. A correção é usar o papel certo — o
+    mesmo que `POST /api/v2/admin/tenants/{id}/ativar` já usa
+    (`get_platform_db`) e o mesmo que `create`/`retomar` usam para o ato de
+    plataforma desde o `SEC-RLS-00C`.
+
+    Sem `PLATFORM_DB_URL` configurada, cai na credencial desta CLI, com o aviso
+    que `_sessao_do_ato_de_plataforma` imprime. É o comportamento de hoje em
+    dev, preservado de propósito: quebrar o `deactivate` local não fecharia
+    brecha nenhuma.
+    """
+    async with _sessao_do_ato_de_plataforma() as db_plat:
+        if db_plat is not None:
+            return await _aplicar_ativo(db_plat, args.slug, active)
     async with SessionLocal() as db:
-        tenant = (
-            await db.execute(select(Tenant).where(Tenant.slug == args.slug))
-        ).scalar_one_or_none()
-        if tenant is None:
-            print(f"[ERRO] tenant '{args.slug}' não encontrado")
-            return 1
-        tenant.ativo = active
-        tenant.atualizado_em = datetime.utcnow()
-        await db.commit()
-        print(f"[ok] tenant {args.slug}: ativo={active}")
-        return 0
+        return await _aplicar_ativo(db, args.slug, active)
 
 
 def main(argv: list[str] | None = None) -> int:
