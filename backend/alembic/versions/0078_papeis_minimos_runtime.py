@@ -167,11 +167,6 @@ ESCRITA_WORKER: tuple[tuple[str, str, str], ...] = (
         "`limpar_jobs_antigos` APAGA job vencido — é o único DELETE do worker",
     ),
     (
-        "aprimora_py.audit_log",
-        "INSERT",
-        "trilha append-only: o worker grava, nunca altera nem apaga",
-    ),
-    (
         "aprimora_py.notificacao",
         "INSERT, UPDATE",
         "`verificar_sla_workflows` dispara notificação de SLA estourado",
@@ -193,22 +188,30 @@ ESCRITA_WORKER: tuple[tuple[str, str, str], ...] = (
         "`snapshot_saldos_pagamentos` grava o snapshot diário (upsert por "
         "`uq_saldohist_conta_data`)",
     ),
-    (
-        "protocolos.anexo",
-        "INSERT, UPDATE",
-        "`carimbar_anexos` grava o caminho do PDF carimbado",
-    ),
 )
 
-# Sequences correspondentes às tabelas em que o worker INSERE.
+# Dois grants foram REMOVIDOS depois de conferidos contra o código, e a razão
+# fica registrada para que ninguém os "restaure por segurança":
+#
+# - `protocolos.anexo → INSERT, UPDATE`: a justificativa era que
+#   `carimbar_anexos` grava o caminho do PDF carimbado. Não grava — a task lê
+#   `Anexo` num SELECT, escreve o PDF no filesystem e atualiza
+#   `job.resultado_path`. Nenhum `db.add`/`UPDATE` toca `anexo`.
+# - `aprimora_py.audit_log → INSERT`: `grep -rn audit app/tasks/` não retorna
+#   nada, e nenhum serviço chamado pelas tasks (`notificacoes`,
+#   `workflow_engine`, `pagamentos_caixa`) audita.
+#
+# "Grants mínimos por task" só significa alguma coisa se a lista for conferida
+# contra as tasks. Um grant justificado por uma task que não faz aquilo é a
+# mesma coisa que um grant sem justificativa, com aparência melhor.
+
+# Sequences correspondentes às tabelas em que o worker INSERE — nem uma a mais.
 SEQUENCES_WORKER = (
     "aprimora_py.job_id_seq",
-    "aprimora_py.audit_log_id_seq",
     "aprimora_py.notificacao_id_seq",
     "aprimora_py.notificacao_preferencia_id_seq",
     "aprimora_py.workflow_sla_alerta_id_seq",
     "pagamentos.saldo_historico_id_seq",
-    "protocolos.anexo_id_seq",
 )
 
 # Nome da policy que autoriza o papel administrativo a APAGAR linha da trilha
@@ -218,6 +221,45 @@ SEQUENCES_WORKER = (
 # tudo deixando a trilha para trás. Falha silenciosa é o modo de falha que este
 # PR existe para eliminar.
 POLICY_AUDIT_DELETE = "audit_log_migrator_delete"
+
+# Mesma exceção, mesma forma, para a trilha de alvará: `seed_demo_operacional
+# reset` apaga `transporte_regulado.alvara_auditoria` do tenant de demonstração,
+# e sem uma policy o DELETE devolveria zero linhas em silêncio — e logo em
+# seguida o DELETE do `alvara` estouraria por FK, longe da causa.
+POLICY_ALVARA_AUDIT_DELETE = "alvara_auditoria_migrator_delete"
+
+# `entidade <> 'tenant'`: as linhas de `entidade = 'tenant'` são a trilha das
+# operações de PLATAFORMA que o município enxerga (inventário §8.7) — criação,
+# ativação e contratação de módulo feitas por um operador sobre este tenant.
+# Nenhum seed as cria e nenhum reset precisa apagá-las, e são justamente as que
+# um operador teria motivo para querer sumidas. O resto do alcance continua
+# amplo, e isso está registrado: a policy autoriza apagar QUALQUER outra linha
+# do tenant da sessão, não só as de demonstração. Estreitar para
+# `entidade = 'processo'` seria errado — `seed_demo._reset` também apaga por
+# `id_usuario`, ao remover os servidores extras, e PRECISA fazê-lo porque
+# `audit_log.id_usuario` tem FK para `utils.usuario`.
+QUAL_AUDIT_DELETE = f"{{qual}} AND entidade <> 'tenant'"
+
+# As duas tabelas de PLATAFORMA criadas pela 0076. Não têm RLS (são tabelas de
+# plataforma, sem `tenant_id`), então não há policy no caminho: quem tem grant
+# alcança o banco inteiro. O `GRANT ... ON ALL TABLES IN SCHEMA aprimora_py`
+# abaixo é um cobertor e passaria por cima da enumeração cirúrgica que a 0076
+# fez — dando a `aprimora_migrator` poder de INSERIR em `platform_principal`
+# (isto é, de se inscrever como operador de plataforma: `auth/plataforma.py`
+# consulta essa tabela) e de APAGAR `platform_audit_log`, que é a única
+# evidência do que um operador fez. Nem `aprimora_platform` pode apagá-la — tem
+# só `INSERT, SELECT`, por decisão da 0076.
+#
+# O `REVOKE` logo após o cobertor é a correção. O que impede que a PRÓXIMA
+# migration com `GRANT ... ON ALL TABLES` reabra isto em silêncio é o teste
+# `test_rls_papeis_minimos.py::test_tabelas_de_plataforma_so_do_papel_de_plataforma`,
+# que varre `information_schema.table_privileges` — e o mesmo vale para tabela
+# de plataforma FUTURA, que as `ALTER DEFAULT PRIVILEGES` abaixo alcançariam
+# sem que ninguém decidisse nada.
+TABELAS_DE_PLATAFORMA = (
+    "aprimora_py.platform_principal",
+    "aprimora_py.platform_audit_log",
+)
 
 
 def _cria_papel(nome: str) -> None:
@@ -255,17 +297,30 @@ def _cria_papel(nome: str) -> None:
 
 
 def _remove_papel(nome: str) -> None:
+    """Remove o papel. **Falha alto se não conseguir.**
+
+    O `REVOKE CONNECT` é contido porque é idempotência: revogar o que já não
+    existe não é erro que interesse a ninguém.
+
+    O `DROP ROLE`, **não**. A 0076 o envolve em `EXCEPTION WHEN OTHERS THEN
+    NULL`, e num PR cujo tema é justamente trocar falha calada por falha
+    barulhenta isso não se sustenta: o downgrade reportaria sucesso deixando o
+    papel de pé, com login e com os privilégios que sobraram. `DROP ROLE` só
+    falha quando o papel ainda detém privilégio ou possui objeto — que é
+    exatamente a informação que quem roda o downgrade precisa receber, e não
+    engolir. Se acontecer, a saída é revogar o que ficou (tipicamente um
+    `GRANT` emitido por migration posterior a esta) e repetir.
+    """
     op.execute(
         f"""
         DO $$
         BEGIN
             BEGIN EXECUTE format('REVOKE CONNECT ON DATABASE %I FROM {nome}', current_database());
-            EXCEPTION WHEN OTHERS THEN NULL; END;
-            BEGIN EXECUTE 'DROP ROLE IF EXISTS {nome}';
-            EXCEPTION WHEN OTHERS THEN NULL; END;
+            EXCEPTION WHEN undefined_object THEN NULL; END;
         END $$;
         """
     )
+    op.execute(f"DROP ROLE IF EXISTS {nome}")
 
 
 def _recria_policies_tr(qual: str) -> None:
@@ -334,11 +389,19 @@ def upgrade() -> None:
     _recria_policies_tr(QUAL)
 
     # `alvara_auditoria` só tinha `tenant_isolation_select`. Sem uma policy de
-    # modificação, o `FORCE` logo abaixo deixaria a trilha não-inserível.
+    # inserção, o `FORCE` logo abaixo deixaria a trilha não-inserível e o módulo
+    # pararia de gravar auditoria de alvará.
+    #
+    # `FOR INSERT`, e não `FOR ALL`: a tabela é trilha. Antes, `UPDATE` e
+    # `DELETE` eram negados a TODOS por ausência de policy, e um `FOR ALL`
+    # transformaria a correção de um defeito em perda de imutabilidade. O único
+    # DELETE legítimo — o reset de demonstração — ganha policy NOMINAL logo
+    # abaixo, mesmo tratamento que `aprimora_py.audit_log`.
     op.execute(f"DROP POLICY IF EXISTS tenant_isolation_modify ON {TR}.alvara_auditoria")
+    op.execute(f"DROP POLICY IF EXISTS tenant_isolation_insert ON {TR}.alvara_auditoria")
     op.execute(
-        f"CREATE POLICY tenant_isolation_modify ON {TR}.alvara_auditoria "
-        f"FOR ALL USING ({QUAL}) WITH CHECK ({QUAL})"
+        f"CREATE POLICY tenant_isolation_insert ON {TR}.alvara_auditoria "
+        f"FOR INSERT WITH CHECK ({QUAL})"
     )
 
     for tabela in TABELAS_SEM_FORCE:
@@ -389,14 +452,49 @@ def upgrade() -> None:
             f"GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO {MIGRATOR}"
         )
 
+    # ------------------------------------------------------------------
+    # 3.1 O cobertor acima passou por cima da fronteira de PLATAFORMA.
+    #
+    # `platform_principal` e `platform_audit_log` foram criadas pela 0076 com
+    # grants enumerados um a um e `REVOKE ALL ... FROM PUBLIC, aprimora_app`
+    # explícito. Elas não têm RLS — são tabelas de plataforma, sem `tenant_id` —
+    # então grant é tudo o que existe entre um papel e a tabela inteira.
+    #
+    # Com o `GRANT ... ON ALL TABLES IN SCHEMA aprimora_py`, `aprimora_migrator`
+    # ganhou INSERT em `platform_principal`: bastaria uma linha `(iss, sub)`
+    # para que qualquer portador de token OIDC válido do domínio configurado
+    # virasse operador de plataforma. E ganhou DELETE em `platform_audit_log`,
+    # que apaga a evidência — privilégio que nem `aprimora_platform` tem, por
+    # decisão registrada. `aprimora_worker` ganhou SELECT, que também não lhe
+    # cabe.
+    #
+    # Este REVOKE é a correção. A guarda contra a reabertura silenciosa — pela
+    # próxima migration com cobertor, ou por uma tabela de plataforma futura
+    # alcançada pelas default privileges acima — é o teste
+    # `test_tabelas_de_plataforma_so_do_papel_de_plataforma`.
+    # ------------------------------------------------------------------
+    for tabela in TABELAS_DE_PLATAFORMA:
+        op.execute(f"REVOKE ALL ON {tabela} FROM {MIGRATOR}")
+        op.execute(f"REVOKE ALL ON {tabela} FROM {WORKER}")
+    for seq in ("platform_principal_id_seq", "platform_audit_log_id_seq"):
+        op.execute(f"REVOKE ALL ON SEQUENCE aprimora_py.{seq} FROM {MIGRATOR}")
+        op.execute(f"REVOKE ALL ON SEQUENCE aprimora_py.{seq} FROM {WORKER}")
+
     # A trilha municipal é append-only para todo mundo (a 0076 tirou
     # UPDATE/DELETE de `aprimora_app`), e não há policy de DELETE — logo,
     # nem o grant bastaria. Esta policy nominal abre a exceção mínima: só
-    # `aprimora_migrator`, só DELETE, e só dentro do tenant que a sessão
-    # declarou em `app.tenant_id`.
+    # `aprimora_migrator`, só DELETE, só dentro do tenant que a sessão declarou
+    # em `app.tenant_id`, e nunca sobre a trilha das operações de plataforma.
     op.execute(f"DROP POLICY IF EXISTS {POLICY_AUDIT_DELETE} ON aprimora_py.audit_log")
     op.execute(
         f"CREATE POLICY {POLICY_AUDIT_DELETE} ON aprimora_py.audit_log "
+        f"FOR DELETE TO {MIGRATOR} USING ({QUAL_AUDIT_DELETE.format(qual=QUAL)})"
+    )
+    op.execute(
+        f"DROP POLICY IF EXISTS {POLICY_ALVARA_AUDIT_DELETE} ON {TR}.alvara_auditoria"
+    )
+    op.execute(
+        f"CREATE POLICY {POLICY_ALVARA_AUDIT_DELETE} ON {TR}.alvara_auditoria "
         f"FOR DELETE TO {MIGRATOR} USING ({QUAL})"
     )
 
@@ -405,6 +503,9 @@ def downgrade() -> None:
     # Ordem inversa do upgrade.
 
     # 3. Papel administrativo.
+    op.execute(
+        f"DROP POLICY IF EXISTS {POLICY_ALVARA_AUDIT_DELETE} ON {TR}.alvara_auditoria"
+    )
     op.execute(f"DROP POLICY IF EXISTS {POLICY_AUDIT_DELETE} ON aprimora_py.audit_log")
     for schema in SCHEMAS_NEGOCIO + ("public",):
         op.execute(
@@ -423,11 +524,19 @@ def downgrade() -> None:
     _remove_papel(MIGRATOR)
 
     # 2. Worker.
-    for seq in SEQUENCES_WORKER:
-        op.execute(f"REVOKE ALL ON SEQUENCE {seq} FROM {WORKER}")
+    #
+    # `ON ALL SEQUENCES`, e não só a lista `SEQUENCES_WORKER`: o `DROP ROLE`
+    # agora falha alto, e falharia por qualquer privilégio residual. Revogar
+    # apenas o que a lista ATUAL enumera deixaria para trás o que uma versão
+    # anterior desta migration concedeu — foi assim que o primeiro
+    # `downgrade -1` depois de encolher a lista morreu em
+    # `role "aprimora_worker" cannot be dropped because some objects depend on
+    # it`. Varrer o schema é o único jeito de o rollback ser idempotente em
+    # relação ao histórico da própria migration.
     for objeto, _privilegios, _razao in ESCRITA_WORKER:
         op.execute(f"REVOKE ALL ON {objeto} FROM {WORKER}")
     for schema in SCHEMAS_NEGOCIO:
+        op.execute(f"REVOKE ALL ON ALL SEQUENCES IN SCHEMA {schema} FROM {WORKER}")
         op.execute(f"REVOKE ALL ON ALL TABLES IN SCHEMA {schema} FROM {WORKER}")
         op.execute(f"REVOKE ALL ON SCHEMA {schema} FROM {WORKER}")
     _remove_papel(WORKER)
@@ -447,7 +556,7 @@ def downgrade() -> None:
     for tabela in TABELAS_SEM_FORCE:
         op.execute(f"ALTER TABLE {TR}.{tabela} NO FORCE ROW LEVEL SECURITY")
 
-    op.execute(f"DROP POLICY IF EXISTS tenant_isolation_modify ON {TR}.alvara_auditoria")
+    op.execute(f"DROP POLICY IF EXISTS tenant_isolation_insert ON {TR}.alvara_auditoria")
     _recria_policies_tr(QUAL_ANTIGA)
 
     # 0. Nada a desfazer — a verificação de `aprimora_platform` não muda estado.
