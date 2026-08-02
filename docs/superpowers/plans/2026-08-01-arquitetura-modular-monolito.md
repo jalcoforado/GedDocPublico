@@ -444,6 +444,7 @@ Duas migrations que criem o mesmo papel colidem no `CREATE ROLE`. Se a ordem de 
 
 Não é PR de código. É a sequência de promoção, um gate humano por degrau:
 
+0. **`PLATFORM_DB_URL` — o degrau que ninguém percebeu que faltava.** Ela **não está definida em ambiente nenhum**: nem no `docker-compose.yml`, nem no `backend/.env`, nem no CI. Só o arreio de teste a define. Consequência: o papel `aprimora_platform`, criado pelo `SEC-01A` justamente para isolar a fronteira cross-tenant, **existe, tem grants, tem teste — e nada o usa em execução**. As rotas de plataforma caem na credencial administrativa. A separação de papel está provada nos testes e **não vigora no runtime**. Este é o primeiro degrau porque é o de menor risco: as rotas de plataforma já estão inalcançáveis hoje (sem OIDC configurado e com `is_platform_admin` constante `false`), então ligar a conexão dedicada não pode quebrar caminho em uso.
 1. **Teste e desenvolvimento.** Trocar, rodar a suíte completa, o e2e e a navegação manual dos cinco módulos.
 2. **Homologação.** Trocar e validar **todos** os módulos, jobs, uploads, exports e tasks Celery — incluindo os agendados pelo beat, que só aparecem no horário. Exercitar isolamento com usuário comum não-SU em cada módulo contratado.
 3. **Produção.** Somente após paridade demonstrada, observabilidade instalada (erro de permissão de banco precisa ser distinguível de erro de negócio no log) e rollback ensaiado de verdade, não descrito.
