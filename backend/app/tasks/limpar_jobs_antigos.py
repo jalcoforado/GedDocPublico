@@ -3,10 +3,27 @@
 Fase 14: limpeza varre `tenants_storage_root` por tenant (modo dispatch manual)
 ou globalmente (modo beat agendado). Mantém compat com legacy `jobs_results_dir`
 ao tentar remover pastas em ambos os roots.
+
+SEC-RLS-00B (inventário §8.1) — **por que o modo beat itera tenants**:
+
+Até aqui, `tenant_id=None` abria UMA sessão sem `app.tenant_id` e varria
+`aprimora_py.job` inteira, contando com o `BYPASSRLS` do papel do runtime.
+`aprimora_py.job` tem RLS habilitada e forçada; sob papel sujeito a RLS, a
+policy avalia `tenant_id = NULL` e devolve **zero linhas — sem erro**. A
+limpeza rodaria todo dia às 03:00, reportaria "0 jobs removidos" e ninguém
+notaria por meses; os arquivos ficariam no disco.
+
+Falha silenciosa é pior que falha ruidosa. A correção é dar contexto de tenant
+explícito: o modo beat lista os tenants ativos numa sessão sem tenant
+(`aprimora_py.tenant` não tem RLS, é catálogo de plataforma) e depois abre
+**uma sessão por tenant**, exatamente o desenho que `verificar_sla_workflows`
+já usa. Nenhuma leitura cross-tenant sobra, e a task deixa de depender do
+bypass.
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 import traceback
 from datetime import datetime, timedelta
@@ -20,6 +37,7 @@ from ._task_db import task_session_scope
 from .celery_app import celery_app
 
 settings = get_settings()
+logger = logging.getLogger("jobs.limpeza")
 
 
 @celery_app.task(name="app.tasks.limpar_jobs_antigos.run", bind=True)
@@ -38,6 +56,79 @@ def run(
     )
 
 
+async def _limpar_tenant(
+    Session,
+    *,
+    tenant_id: int,
+    tenant_slug: str | None,
+    corte: datetime,
+    job_id: int | None,
+) -> tuple[int, int]:
+    """Apaga jobs anteriores a `corte` de UM tenant. Devolve (jobs, pastas).
+
+    `Session` já vem com `app.tenant_id` instalado pelo caller — a policy de
+    `aprimora_py.job` é que garante o escopo, e o `WHERE tenant_id` abaixo é a
+    segunda camada (o filtro aplicacional do CLAUDE.md), não a única.
+    """
+    async with Session() as db:
+        stmt = select(Job).where(
+            Job.criado_em < corte,
+            Job.id != (job_id or -1),
+            Job.tenant_id == tenant_id,
+        )
+        antigos = (await db.execute(stmt)).scalars().all()
+        ids = [j.id for j in antigos]
+
+        slug = tenant_slug
+        if slug is None and ids:
+            slug = (
+                await db.execute(select(Tenant.slug).where(Tenant.id == tenant_id))
+            ).scalar_one_or_none()
+
+    pastas_removidas = 0
+    for jid in ids:
+        candidatos: list[Path] = []
+        if slug:
+            candidatos.append(tenant_jobs_dir(slug) / str(jid))
+        candidatos.append(Path(settings.jobs_results_dir) / str(jid))
+        for cand in candidatos:
+            if cand.exists() and cand.is_dir():
+                try:
+                    shutil.rmtree(cand)
+                    pastas_removidas += 1
+                except OSError:
+                    pass
+
+    if ids:
+        async with Session() as db:
+            for jid in ids:
+                j = await db.get(Job, jid)
+                if j is not None:
+                    await db.delete(j)
+            await db.commit()
+
+    return len(ids), pastas_removidas
+
+
+async def _tenants_ativos() -> list[tuple[int, str]]:
+    """Lista `(id, slug)` dos tenants ativos.
+
+    Sessão SEM `app.tenant_id` de propósito: `aprimora_py.tenant` é catálogo de
+    plataforma e não tem RLS. Mesma justificativa (e mesmo código) de
+    `verificar_sla_workflows`.
+    """
+    async with task_session_scope() as (_engine, Session):
+        async with Session() as db:
+            return [
+                (int(tid), slug)
+                for tid, slug in (
+                    await db.execute(
+                        select(Tenant.id, Tenant.slug).where(Tenant.ativo.is_(True))
+                    )
+                ).all()
+            ]
+
+
 async def _run_async(
     task,
     job_id: int | None,
@@ -45,6 +136,53 @@ async def _run_async(
     tenant_id: int | None,
     tenant_slug: str | None,
 ) -> str:
+    corte = datetime.utcnow() - timedelta(days=dias)
+
+    # ------------------------------------------------------------------
+    # Modo beat: sem tenant. Itera os tenants ativos, um contexto por vez.
+    # Falha num tenant não interrompe os demais — mesma política do
+    # `verificar_sla_workflows`. A diferença é que aqui a falha é LOGADA e vai
+    # para o sumário: limpeza que some sem dizer nada foi exatamente o defeito
+    # corrigido.
+    # ------------------------------------------------------------------
+    if tenant_id is None:
+        tenants = await _tenants_ativos()
+        total_jobs = 0
+        total_pastas = 0
+        falhas: list[str] = []
+        for tid, slug in tenants:
+            try:
+                async with task_session_scope(tenant_id=tid) as (_e, Session):
+                    n_jobs, n_pastas = await _limpar_tenant(
+                        Session,
+                        tenant_id=tid,
+                        tenant_slug=slug,
+                        corte=corte,
+                        job_id=None,
+                    )
+                total_jobs += n_jobs
+                total_pastas += n_pastas
+            except Exception as e:  # noqa: BLE001 — um tenant não derruba os outros
+                falhas.append(f"{slug}: {e}")
+                logger.exception(
+                    "limpeza_jobs_falhou_tenant", extra={"tenant_slug": slug}
+                )
+
+        sumario = (
+            f"Limpeza de jobs anteriores a {corte.strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"Critério: mais de {dias} dia(s)\n"
+            f"Escopo: {len(tenants)} tenant(s) ativo(s)\n"
+            f"Jobs removidos: {total_jobs}\n"
+            f"Pastas de resultado removidas: {total_pastas}\n"
+        )
+        if falhas:
+            sumario += "Tenants com falha: " + "; ".join(falhas) + "\n"
+        return sumario
+
+    # ------------------------------------------------------------------
+    # Modo dispatch manual: um tenant, possivelmente com um Job de
+    # acompanhamento na UI.
+    # ------------------------------------------------------------------
     async with task_session_scope(tenant_id=tenant_id) as (_engine, Session):
         if job_id is not None:
             async with Session() as db:
@@ -56,62 +194,20 @@ async def _run_async(
                     await db.commit()
 
         try:
-            corte = datetime.utcnow() - timedelta(days=dias)
-            async with Session() as db:
-                stmt = select(Job).where(
-                    Job.criado_em < corte,
-                    Job.id != (job_id or -1),
-                )
-                if tenant_id is not None:
-                    stmt = stmt.where(Job.tenant_id == tenant_id)
-                antigos = (await db.execute(stmt)).scalars().all()
-                # (job_id, tenant_id) — para resolver pasta correta no fs
-                ids_with_tid = [(j.id, j.tenant_id) for j in antigos]
-
-                # Lookup de slugs (cache local)
-                tenant_slugs: dict[int, str] = {}
-                if tenant_slug and tenant_id:
-                    tenant_slugs[tenant_id] = tenant_slug
-                tids_to_lookup = {tid for _, tid in ids_with_tid if tid not in tenant_slugs}
-                if tids_to_lookup:
-                    tslugs = (
-                        await db.execute(
-                            select(Tenant.id, Tenant.slug).where(
-                                Tenant.id.in_(tids_to_lookup)
-                            )
-                        )
-                    ).all()
-                    for tid, slug in tslugs:
-                        tenant_slugs[tid] = slug
-
-            arquivos_removidos = 0
-            for jid, tid in ids_with_tid:
-                slug = tenant_slugs.get(tid)
-                candidatos: list[Path] = []
-                if slug:
-                    candidatos.append(tenant_jobs_dir(slug) / str(jid))
-                candidatos.append(Path(settings.jobs_results_dir) / str(jid))
-                for cand in candidatos:
-                    if cand.exists() and cand.is_dir():
-                        try:
-                            shutil.rmtree(cand)
-                            arquivos_removidos += 1
-                        except OSError:
-                            pass
-
-            async with Session() as db:
-                for jid, _ in ids_with_tid:
-                    j = await db.get(Job, jid)
-                    if j is not None:
-                        await db.delete(j)
-                await db.commit()
+            n_jobs, n_pastas = await _limpar_tenant(
+                Session,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                corte=corte,
+                job_id=job_id,
+            )
 
             sumario = (
                 f"Limpeza de jobs anteriores a {corte.strftime('%Y-%m-%d %H:%M UTC')}\n"
                 f"Critério: mais de {dias} dia(s)\n"
-                f"Escopo: {'tenant_id=' + str(tenant_id) if tenant_id else 'todos os tenants'}\n"
-                f"Jobs removidos: {len(ids_with_tid)}\n"
-                f"Pastas de resultado removidas: {arquivos_removidos}\n"
+                f"Escopo: tenant_id={tenant_id}\n"
+                f"Jobs removidos: {n_jobs}\n"
+                f"Pastas de resultado removidas: {n_pastas}\n"
             )
 
             if job_id is not None and tenant_slug:
@@ -127,8 +223,8 @@ async def _run_async(
                         j.status = "concluido"
                         j.resultado_path = rel
                         j.descricao = (
-                            f"Limpeza: {len(ids_with_tid)} job(s) e "
-                            f"{arquivos_removidos} pasta(s) removidos"
+                            f"Limpeza: {n_jobs} job(s) e "
+                            f"{n_pastas} pasta(s) removidos"
                         )
                         j.concluido_em = datetime.utcnow()
                         await db.commit()
