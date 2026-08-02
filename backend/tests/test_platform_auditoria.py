@@ -246,6 +246,90 @@ async def test_provisionar_tenant_pela_borda_http_com_token_administrativo(
 
 
 @pytest.mark.asyncio
+async def test_falha_da_projecao_municipal_nao_vira_500_e_fica_auditada(
+    monkeypatch, admin_engine, cliente_operador, tenants_limpos
+):
+    """A projeção municipal falha **depois** do commit. A resposta é sucesso.
+
+    Nesse ponto a alteração já está aplicada: propagar a exceção devolveria 500
+    sobre uma operação bem-sucedida, o que mente sobre o resultado e convida o
+    operador a repetir — em `definir_modulos`, repetir é reescrever a
+    contratação.
+
+    Mas "não virar 500" não pode significar "sumir". As duas metades são
+    verificadas: a operação **de fato aconteceu** (a contratação está no banco)
+    e a falha **de fato foi registrada** na trilha autoritativa, com o mesmo
+    `correlation_id`. É essa segunda metade que separa isto do `except
+    Exception` de `services/audit.py`, que o próprio PR critica: lá a trilha
+    engolida é a única e não sobra rastro; aqui a autoritativa está íntegra e a
+    perda da projeção é ela mesma um evento auditável.
+    """
+    import app.routers.admin_tenants as router
+
+    cliente, principal_id = cliente_operador
+    tenant_id, _ = tenants_limpos
+
+    async def _projecao_quebrada(**kwargs):
+        raise RuntimeError("policy de RLS negou o INSERT na trilha do tenant")
+
+    monkeypatch.setattr(router, "registrar_no_tenant", _projecao_quebrada)
+
+    r = await cliente.put(
+        f"/api/v2/admin/tenants/{tenant_id}/modulos",
+        json={"slugs": ["protocolo"]},
+    )
+    assert r.status_code == 200, (
+        f"HTTP {r.status_code}: a falha da projeção municipal virou erro para o "
+        "cliente, sobre uma operação que JÁ foi comitada."
+    )
+
+    async with _sm(admin_engine)() as s:
+        contratado = (
+            await s.execute(
+                text(
+                    "SELECT count(*) FROM aprimora_py.tenant_modulo "
+                    " WHERE tenant_id = :t AND excluido = false"
+                ),
+                {"t": tenant_id},
+            )
+        ).scalar_one()
+        assert contratado >= 1, "a operação não foi aplicada — o 200 seria mentira"
+
+        falha = (
+            await s.execute(
+                text(
+                    "SELECT platform_principal_id, detalhe, correlation_id "
+                    "  FROM aprimora_py.platform_audit_log "
+                    " WHERE tenant_alvo_id = :t "
+                    "   AND acao = 'plataforma.projecao_municipal_falhou'"
+                ),
+                {"t": tenant_id},
+            )
+        ).one_or_none()
+        assert falha is not None, (
+            "a projeção municipal falhou em SILÊNCIO. Sem esta linha, a perda da "
+            "trilha do município é indetectável — que é exatamente o defeito de "
+            "`services/audit.py` que este PR se recusa a repetir."
+        )
+        assert falha.platform_principal_id == principal_id
+        assert falha.detalhe["acao_original"] == "tenant.modulos_definidos"
+
+        sucesso = (
+            await s.execute(
+                text(
+                    "SELECT correlation_id FROM aprimora_py.platform_audit_log "
+                    " WHERE tenant_alvo_id = :t AND acao = 'tenant.modulos_definidos'"
+                ),
+                {"t": tenant_id},
+            )
+        ).scalar_one()
+        assert falha.correlation_id == sucesso, (
+            "sem o mesmo correlation_id não dá para casar a falha com a operação "
+            "que a causou"
+        )
+
+
+@pytest.mark.asyncio
 async def test_falha_da_trilha_autoritativa_nao_e_engolida(admin_engine, principal_ativo):
     """O contraponto explícito a `services/audit.py`.
 

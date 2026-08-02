@@ -74,8 +74,18 @@ async def test_cenario_21_usuario_municipal_com_email_de_operador_e_negado(
     - o invasor apresenta um token municipal **válido**, do seu próprio tenant,
       com o `Host` do seu próprio tenant.
 
-    A única coisa que ele não tem é um principal em `platform_principal` — e é
-    só isso que decide. O e-mail deixou de participar.
+    **O que este teste prova, exatamente.** A recusa acontece no *algoritmo*:
+    `encode_token` emite HS256, e a fronteira recusa HS256 três checagens antes
+    de olhar o principal (verificado — o `detail` é "algoritmo HS256 proibido
+    nesta fronteira"). Ou seja: aqui se prova que **a credencial municipal
+    inteira**, do jeito que a aplicação a emite, não é aceita — o que é a
+    propriedade de F-01 na sua forma mais direta, e por isso o teste fica.
+
+    O que ele **não** prova é que o e-mail saiu do caminho de decisão: como o
+    token nem chega à consulta do principal, um fallback por `display_label`
+    reabriria F-01 e este teste continuaria verde. Essa metade está em
+    `test_email_de_operador_em_token_de_plataforma_valido_nao_autoriza`, logo
+    abaixo, que é o caso discriminante.
 
     Sobe pela borda HTTP real: o defeito vivia na cadeia de dependências
     (`require_platform_admin` → `get_current_user` → `Usuario.email`), e um
@@ -171,6 +181,89 @@ async def test_cenario_21_usuario_municipal_com_email_de_operador_e_negado(
             )
             await s.execute(
                 text("DELETE FROM aprimora_py.tenant WHERE id = :t"), {"t": tenant_id}
+            )
+            await s.execute(
+                text("DELETE FROM aprimora_py.platform_principal WHERE id = :p"),
+                {"p": principal_id},
+            )
+            await s.commit()
+
+
+async def test_email_de_operador_em_token_de_plataforma_valido_nao_autoriza(
+    admin_engine, plataforma_configurada
+) -> None:
+    """O caso **discriminante** de F-01 — a metade que o cenário 21 não alcança.
+
+    Aqui o token é impecável e chega até o fim da validação: RS256, assinado
+    pela chave do IdP de teste, `iss`/`aud`/`hd` corretos, `email_verified`
+    verdadeiro. Ele passa por todas as checagens de token e **chega na consulta
+    ao principal** — que é onde o cenário 21 nunca chega, porque morre antes, no
+    algoritmo.
+
+    O único desvio: o `sub` não tem principal, mas o `email` do token é
+    **idêntico** ao `display_label` de um principal ativo. É exatamente o
+    formato que F-01 teria se voltasse hoje: não mais uma allowlist de ambiente,
+    e sim um `carregar_principal` "tolerante" que caísse para o e-mail quando o
+    `sub` não batesse — algo que alguém escreveria de boa-fé para resolver
+    "operador trocou de conta no Workspace e perdeu o acesso".
+
+    Provado por inversão durante o desenvolvimento: com um fallback por
+    `display_label` acrescentado a `carregar_principal`, este teste devolve
+    **200** e o cenário 21 continua verde. É a demonstração de que os dois testes
+    cobrem coisas diferentes e de que este é o que trava a regressão.
+
+    `sub` é a chave, e o e-mail é rótulo (ADR-016 §2.1). Trocar de conta exige
+    `platform_principal criar` com o `sub` novo — que é o procedimento, não o
+    problema.
+    """
+    subject_orfao = f"sec01a-sem-principal-{uuid.uuid4().hex[:8]}"
+    principal_id: int | None = None
+
+    Session = _sm(admin_engine)
+    async with Session() as s:
+        principal_id = int(
+            (
+                await s.execute(
+                    _SQL_INSERE_PRINCIPAL,
+                    dict(
+                        _PRINCIPAL_TESTE,
+                        subject=f"sec01a-titular-{uuid.uuid4().hex[:8]}",
+                        display_label=EMAIL_OPERADOR,
+                    ),
+                )
+            ).scalar_one()
+        )
+        await s.execute(
+            text("UPDATE aprimora_py.platform_principal SET ativo = true WHERE id = :p"),
+            {"p": principal_id},
+        )
+        await s.commit()
+
+    token = plataforma_configurada.token(subject=subject_orfao, email=EMAIL_OPERADOR)
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                "/api/v2/admin/tenants", headers={"Authorization": f"Bearer {token}"}
+            )
+        assert r.status_code == 403, (
+            f"HTTP {r.status_code}: um token de plataforma perfeitamente válido, "
+            f"cujo `sub` NÃO tem principal, foi autorizado só por carregar o "
+            f"e-mail `{EMAIL_OPERADOR}` de um operador ativo. É F-01 de volta em "
+            "forma nova: o rótulo voltou a decidir. Quem autoriza é o par "
+            "(issuer, subject)."
+        )
+    finally:
+        from app.database import engine as app_engine
+
+        await app_engine.dispose()
+        async with Session() as s:
+            await s.execute(
+                text(
+                    "DELETE FROM aprimora_py.platform_audit_log "
+                    " WHERE subject IN (:orfao) OR platform_principal_id = :p"
+                ),
+                {"orfao": subject_orfao, "p": principal_id},
             )
             await s.execute(
                 text("DELETE FROM aprimora_py.platform_principal WHERE id = :p"),

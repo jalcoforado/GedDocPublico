@@ -153,7 +153,7 @@ async def test_bootstrap_transacional_rollback(admin_engine, monkeypatch):
 
 
 # ---- gate de plataforma: o e-mail saiu do caminho de decisão (SEC-01A) ----
-async def test_gate_de_plataforma_nao_aceita_identidade_municipal():
+async def test_assinatura_do_gate_de_plataforma_nao_recebe_identidade_municipal():
     """Substitui `test_require_platform_admin_allowlist`, removido em SEC-01A.
 
     O teste antigo montava um `SimpleNamespace(email=...)` e afirmava que o
@@ -161,10 +161,20 @@ async def test_gate_de_plataforma_nao_aceita_identidade_municipal():
     fosse contrato**. Não dá para adaptá-lo: o comportamento que ele travava é
     exatamente o que este PR remove.
 
-    O que sobra de afirmável aqui é a forma da dependência nova: ela não recebe
-    `Usuario` nenhum. Não há por onde uma credencial municipal entrar — nem por
-    engano, nem por `dependency_overrides`. A verificação de comportamento (os
-    24 cenários da matriz) está em `test_platform_token_validator.py`.
+    O que sobra de afirmável aqui é **só a forma** da dependência nova: ela não
+    recebe `Usuario` nenhum, então não há por onde uma credencial municipal
+    entrar — nem por engano, nem por `dependency_overrides`. O nome do teste diz
+    exatamente isso, e nada além.
+
+    Uma versão anterior deste teste também fazia `inspect.getsource(...)` e
+    exigia que a palavra "email" não aparecesse no corpo do gate. Foi removido
+    por ser frágil nos dois sentidos: um comentário contendo "e-mail" o
+    quebraria, e uma decisão baseada em `claims["email"]` tomada em **outra**
+    função passaria batido. Quem trava o comportamento é
+    `test_platform_admin_identity.py::
+    test_email_de_operador_em_token_de_plataforma_valido_nao_autoriza`, provado
+    por inversão. O resto dos 24 cenários está em
+    `test_platform_token_validator.py`.
     """
     import inspect
 
@@ -175,11 +185,6 @@ async def test_gate_de_plataforma_nao_aceita_identidade_municipal():
         f"assinatura inesperada do gate de plataforma: {list(parametros)}. "
         "Qualquer parâmetro que traga identidade municipal (`Usuario`, e-mail, "
         "`get_current_user`) recria o achado F-01."
-    )
-    fonte = inspect.getsource(require_platform_admin)
-    assert "email" not in fonte.lower(), (
-        "o gate de plataforma voltou a mencionar e-mail. Ele é `display_label` "
-        "do principal e não decide nada (ADR-016 §2.1)."
     )
 
 

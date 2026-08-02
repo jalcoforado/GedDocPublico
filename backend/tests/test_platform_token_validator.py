@@ -71,11 +71,17 @@ async def test_cenario_1_token_valido_e_principal_ativo_passa(principal_ativo, p
     assert isinstance(r.json(), list)
 
 
-async def test_gate_nao_olha_e_mail_nenhum(principal_ativo, plataforma_configurada):
-    """O contraponto direto de F-01: o mesmo principal passa com QUALQUER
-    rótulo de e-mail no token, inclusive nenhum. Se algum dia alguém
-    reintroduzir uma comparação de e-mail no caminho de decisão, este teste é o
-    que quebra primeiro."""
+async def test_gate_aceita_o_principal_com_qualquer_e_mail_no_token(
+    principal_ativo, plataforma_configurada
+):
+    """Contraponto direto de F-01: o e-mail do token é **irrelevante** para a
+    decisão — o principal passa com um rótulo diferente do que está gravado.
+
+    Deliberadamente **não** se testa aqui o token sem `email`: o fixture remove
+    junto o `email_verified`, que a matriz §1 exige verdadeiro, e o resultado
+    seria 403 por outro motivo. A ausência do claim tem teste próprio
+    (`test_cenario_14_email_nao_verificado_e_403` cobre o lado da flag).
+    """
     subject, _ = principal_ativo
     r = await _get(
         plataforma_configurada.token(subject=subject, email="qualquer-outro@test.local")
@@ -147,12 +153,20 @@ async def test_cenario_2_principal_inativo_e_403(admin_engine, principal_ativo, 
 
 async def test_cenario_15_mesmo_subject_outro_issuer_e_403(principal_ativo, plataforma_configurada):
     """Proibição 7 do ADR: o mesmo `sub` vindo de outro issuer **não** é a mesma
-    identidade. O token é assinado pela mesma chave, então o que nega é o par,
-    não a criptografia."""
+    identidade.
+
+    O que nega, concretamente, é o **`iss`**: a fronteira aceita um issuer só
+    (`PLATFORM_OIDC_ISSUER`), então um token de outro emissor é recusado na
+    validação, antes de qualquer consulta ao principal — daí `401`, e não o
+    `403` que a matriz previa. O 403 seria alcançável apenas num desenho com
+    múltiplos issuers configurados, em que o token é legítimo e o par
+    `(issuer, subject)` é que não existe. Com um issuer só, o 401 é o resultado
+    correto e mais forte: recusa mais cedo e por motivo mais básico.
+
+    A matriz foi ajustada para 401, com essa razão registrada.
+    """
     subject, _ = principal_ativo
     r = await _get(plataforma_configurada.token_de_outro_issuer(subject=subject))
-    # Recusado já na validação do token (`iss` diferente do configurado) — mais
-    # cedo do que o 403 que a matriz admite, e por motivo mais forte.
     assert r.status_code == 401, r.text
 
 
@@ -483,14 +497,72 @@ async def test_cenario_16_token_de_plataforma_em_rota_municipal_e_401(
 # ---------------------------------------------------------------------------
 
 
-def test_cenario_19_operacao_sem_tenant_alvo_explicito_e_400():
+def test_cenario_19_alvo_e_obrigatorio_por_construcao_em_toda_rota_de_plataforma():
+    """Cenário 19, a parte que de fato garante a propriedade: **estrutural**.
+
+    A matriz manda negar `400` quando a operação cross-tenant não traz tenant
+    alvo explícito. Nas 8 rotas de hoje esse estado é **inalcançável**, e é
+    melhor assim: o alvo é path param obrigatório, então o FastAPI recusa a
+    requisição antes do handler. O que dá para afirmar — e o que este teste
+    afirma — é que nenhuma rota de plataforma escapou dessa forma.
+
+    Verificar isto importa porque a garantia é frágil por adição: basta uma
+    rota nova receber o alvo do corpo, com default `None`, para o estado voltar
+    a existir. Aí o `exigir_tenant_alvo` no chokepoint é que responde.
+    """
+    from app.main import app as fastapi_app
+
+    rotas_de_plataforma = [
+        r
+        for r in fastapi_app.routes
+        if getattr(r, "path", "").startswith("/api/v2/admin/tenants/")
+    ]
+    assert rotas_de_plataforma, "nenhuma rota de plataforma com alvo encontrada"
+    for rota in rotas_de_plataforma:
+        assert "{tenant_id}" in rota.path, (
+            f"rota de plataforma `{rota.path}` não declara o tenant alvo no path. "
+            "Se o alvo passou a vir do corpo, confirme que `exigir_tenant_alvo` o "
+            "cobre e ajuste este teste — não o apague."
+        )
+        nomes = {p.name for p in getattr(rota, "dependant", None).path_params}
+        assert "tenant_id" in nomes, (
+            f"`{rota.path}` declara {{tenant_id}} no path mas não o recebe como "
+            "path param obrigatório"
+        )
+
+
+async def test_cenario_19_alvo_invalido_nao_vira_operacao_sem_alvo(
+    principal_ativo, plataforma_configurada
+):
+    """Pela borda: alvo malformado é recusado, nunca tratado como "sem alvo".
+
+    O modo de falha que interessa não é o 400 em si — é a operação seguir
+    adiante com `tenant_id` nulo e cair em algum default. Um alvo não-numérico
+    tem de morrer na validação (422), não virar `None` silencioso.
+    """
+    subject, _ = principal_ativo
+    token = plataforma_configurada.token(subject=subject)
+    r = await _get(token, rota="/api/v2/admin/tenants/nao-e-numero/modulos")
+    assert r.status_code == 422, r.text
+
+
+async def test_cenario_19_chokepoint_recusa_alvo_nulo(plataforma_configurada):
+    """Cinto e suspensório: `_get_tenant` é o ponto único por onde as rotas com
+    alvo passam, e recusa `None` com 400 antes de qualquer consulta.
+
+    Testado no chokepoint, e não na função solta: `exigir_tenant_alvo` sozinho
+    prova apenas que uma função privada levanta ao receber `None` — coisa que
+    ninguém consegue provocar. O que precisa ser verdade é que **o caminho real
+    das rotas** passa por ela.
+    """
     from fastapi import HTTPException
 
-    from app.auth.plataforma import exigir_tenant_alvo
+    from app.database_plataforma import sessao_plataforma
+    from app.routers.admin_tenants import _get_tenant
 
-    assert exigir_tenant_alvo(7) == 7
-    with pytest.raises(HTTPException) as ei:
-        exigir_tenant_alvo(None)
+    async with sessao_plataforma() as db:
+        with pytest.raises(HTTPException) as ei:
+            await _get_tenant(db, None)
     assert ei.value.status_code == 400
 
 
