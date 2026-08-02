@@ -8,6 +8,12 @@ Duas responsabilidades, ambas tenant-scoped:
   unidades **do próprio tenant** e **ativas** (não excluídas).
 - ``calcular_onboarding`` — checklist calculado a partir do estado real do
   tenant (contagens tenant-scoped). Nenhum dado sensível; tudo do tenant.
+
+Desde o ``SEC-RLS-00D`` (migration 0080) este módulo hospeda também
+``COLUNAS_MUNICIPAIS_DE_TENANT``, a fonte única das colunas de
+``aprimora_py.tenant`` graváveis pelo papel ``aprimora_app``. Ela é maior do que
+a whitelist deste serviço, porque existe um segundo caminho municipal de escrita
+(``routers/tenant.py::update_nup_config``) que não passa por aqui.
 """
 from __future__ import annotations
 
@@ -44,6 +50,24 @@ _CAMPOS_INSTITUCIONAIS = frozenset(
         "id_unidade_padrao",
     }
 )
+
+# Campos NUP federal (Fase P2). NÃO passam por este serviço — quem os grava é
+# `routers/tenant.py::update_nup_config`, por `PUT /tenants/me/nup-config`. Estão
+# aqui, e não lá, porque a constante abaixo precisa dos dois conjuntos no mesmo
+# lugar; o router é a única coisa que os escreve.
+_CAMPOS_NUP_FEDERAL = frozenset({"codigo_orgao_nup", "usar_nup_federal"})
+
+# SEC-RLS-00D — **fonte única** das colunas de `aprimora_py.tenant` que o papel
+# municipal (`aprimora_app`) pode gravar. A migration `0080` concede
+# `UPDATE (<estas colunas>)` e revoga o `UPDATE` de tabela inteira; a tabela não
+# tem RLS, então o grant é a única barreira de banco que existe ali.
+#
+# Isto não é documentação: `tests/test_grant_por_coluna_tenant.py` compara este
+# conjunto com o que o banco concede de fato e reprova a divergência. Campo novo
+# aqui **exige coluna nova no grant, por migration** — senão o endpoint passa a
+# devolver 500 com `permission denied for table tenant`, e o rastro aponta para
+# o service, não para o grant.
+COLUNAS_MUNICIPAIS_DE_TENANT = _CAMPOS_INSTITUCIONAIS | _CAMPOS_NUP_FEDERAL
 
 
 async def _validar_unidade_padrao(
