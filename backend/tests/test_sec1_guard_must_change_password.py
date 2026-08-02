@@ -35,14 +35,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.deps import (
-    _resolve_current_user,
-    require_tenant_id,
-    require_tenant_slug,
-)
+from app.auth.deps import _resolve_current_user
 from app.main import app
 from app.models import Usuario
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.conftest import arreio_tenant_http
 
 
 def _sm(engine):
@@ -133,8 +130,17 @@ async def sec1_setup(admin_engine):
 
 def _as_usuario(admin_engine, usuario_id: int, tenant_id: int, tenant_slug: str):
     """Override apenas _resolve_current_user: o gate em get_current_user
-    permanece efetivo. require_tenant_id / require_tenant_slug também são
-    override para evitar dependência do middleware de tenant."""
+    permanece efetivo.
+
+    O tenant vem de `arreio_tenant_http`, que instala `require_tenant_id`,
+    `require_tenant_slug` **e** a sessão do `get_db` com o mesmo `tenant_id` —
+    sem a terceira peça, a sessão sairia com o `app.tenant_id` do tenant
+    default e as rotas de negócio deste arquivo devolveriam vazio sob RLS
+    (inventário §8.8).
+
+    A identidade continua sendo carregada por `admin_engine`: aqui ela é só o
+    sujeito do gate, não o dado sob teste.
+    """
 
     async def _resolver():
         async with _sm(admin_engine)() as s:
@@ -143,9 +149,8 @@ def _as_usuario(admin_engine, usuario_id: int, tenant_id: int, tenant_slug: str)
             ).scalar_one()
 
     def _setup():
+        arreio_tenant_http(tenant_id, tenant_slug)
         app.dependency_overrides[_resolve_current_user] = _resolver
-        app.dependency_overrides[require_tenant_id] = lambda: tenant_id
-        app.dependency_overrides[require_tenant_slug] = lambda: tenant_slug
 
     return _setup
 

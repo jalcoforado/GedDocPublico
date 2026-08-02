@@ -28,16 +28,13 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.deps import (
-    _resolve_current_user,
-    require_tenant_id,
-    require_tenant_slug,
-)
+from app.auth.deps import _resolve_current_user
 from app.auth.password import hash_md5, hash_password, verify_password
 from app.database import get_db
 from app.main import app
 from app.models import Usuario
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.conftest import arreio_tenant_http
 
 
 def _sm(engine):
@@ -151,23 +148,23 @@ async def tenant_su_alvo(admin_engine):
         await _cleanup_tenant(admin_engine, tenant.id)
 
 
-def _override_as(admin_engine, *, usuario_id: int, tenant_id: int, tenant_slug: str):
+def _override_as(_admin_engine, *, usuario_id: int, tenant_id: int, tenant_slug: str):
     """Faz a chamada HTTP rodar como `usuario_id` no `tenant_id`/`tenant_slug`.
-    Reaproveita o padrão dos outros testes SEC-1 (BYPASSRLS via ged_user)."""
 
-    async def _db_admin():
-        async with _sm(admin_engine)() as s:
-            yield s
+    A sessão é a REAL (`SessionLocal`), instalada por `arreio_tenant_http` com
+    o `tenant_id` da fixture. Antes era uma sessão de `admin_engine`
+    (`ged_user`, BYPASSRLS): a RLS ficava desligada aqui seja qual for o
+    `DATABASE_URL`, e o cenário 6 ("cross-tenant continua 404") passava sem
+    exercitar barreira nenhuma no banco (inventário §8.8).
+    """
 
     async def _resolver(db: AsyncSession = Depends(get_db)):
         return (
             await db.execute(select(Usuario).where(Usuario.id == usuario_id))
         ).scalar_one()
 
-    app.dependency_overrides[get_db] = _db_admin
+    arreio_tenant_http(tenant_id, tenant_slug)
     app.dependency_overrides[_resolve_current_user] = _resolver
-    app.dependency_overrides[require_tenant_id] = lambda: tenant_id
-    app.dependency_overrides[require_tenant_slug] = lambda: tenant_slug
 
 
 @pytest_asyncio.fixture

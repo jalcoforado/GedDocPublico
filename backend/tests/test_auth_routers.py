@@ -18,12 +18,13 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.deps import get_current_user, require_tenant_id
+from app.auth.deps import get_current_user
 from app.auth.jwt import build_payload, encode_token, get_jwt_secret
 from app.main import app
 from app.models import Usuario
 from app.routers.auth import get_redis
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.conftest import arreio_tenant_http
 
 
 def _sm(engine):
@@ -141,7 +142,7 @@ async def test_initiate_google_oauth_redirect(
     s = auth_setup
 
     # Override dependencies
-    app.dependency_overrides[require_tenant_id] = lambda: s["tenant_id"]
+    arreio_tenant_http(s["tenant_id"], s["tenant_slug"])
     app.dependency_overrides[get_redis] = lambda: redis_client
 
     # Override get_current_user to bypass must_change_password gate in tests
@@ -184,8 +185,8 @@ async def test_get_google_credential_status_no_credentials(client, auth_setup, a
     """GET /users/me/google-credential with no credentials → 404."""
     s = auth_setup
 
-    # Override tenant_id dependency
-    app.dependency_overrides[require_tenant_id] = lambda: s["tenant_id"]
+    # Override tenant_id dependency (arreio SEC-RLS-00B: tenant tambem na session)
+    arreio_tenant_http(s["tenant_id"], s["tenant_slug"])
 
     response = await client.get(
         "/api/v2/users/me/google-credential",

@@ -17,6 +17,13 @@ from pathlib import Path
 from typing import AsyncIterator
 
 import pytest_asyncio
+# `Request` PRECISA estar no escopo de módulo: com `from __future__ import
+# annotations`, a anotação de `_get_db_do_tenant` vira a string "Request", e o
+# FastAPI a resolve contra `func.__globals__` — que é este módulo. Importado
+# dentro da função, o nome não é encontrado, a dependência deixa de ser
+# reconhecida como o `Request` do request e vira um parâmetro de QUERY
+# obrigatório: toda rota do arreio devolve 422.
+from fastapi import Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -33,6 +40,24 @@ APP_URL = f"postgresql+asyncpg://aprimora_app:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_
 # SEC-01A — papel da fronteira de plataforma (migration 0076). NOBYPASSRLS,
 # grants cross-tenant explícitos e enumerados (ADR-016 §2.3).
 PLATFORM_URL = f"postgresql+asyncpg://aprimora_platform:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# SEC-RLS-00B — papel administrativo (migration 0078): DDL, seeds e backup.
+MIGRATOR_URL = f"postgresql+asyncpg://aprimora_migrator:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+WORKER_URL = f"postgresql+asyncpg://aprimora_worker:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+# Os CLIs de seed e backup passam a abrir sessão por `admin_database_url`
+# (`app/database_admin.py`). Aqui o valor é fixado em `aprimora_migrator`, e a
+# escolha é deliberada: apontá-lo para `ged_user` faria os testes de seed
+# passarem por BYPASSRLS, e o maior item deste PR — os defeitos de policy e
+# grant de `transporte_regulado`, que aparecem justamente em
+# `test_demo_seed_operacional` — deixaria de ter teste capaz de reprová-lo.
+# `aprimora_migrator` é NOBYPASSRLS: continua sujeito às policies, e o que ele
+# ganha é grant, não isenção.
+#
+# `os.environ` e não `monkeypatch` porque isto precisa valer ANTES do primeiro
+# `get_settings()`, que é `lru_cache` e memoiza a configuração no primeiro
+# import de `app.database`. `setdefault` para que a linha de comando ainda
+# possa sobrepor.
+os.environ.setdefault("MIGRATOR_DATABASE_URL", MIGRATOR_URL)
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -192,6 +217,76 @@ async def principal_ativo(admin_engine, plataforma_configurada):
             {"p": principal_id},
         )
         await s.commit()
+
+
+# ---------------------------------------------------------------------------
+# SEC-RLS-00B — arreio HTTP tenant-scoped
+#
+# Problema que isto resolve (inventário §8.8): os testes HTTP sobrepõem
+# `require_tenant_id` para forçar o tenant temporário da fixture, mas `get_db`
+# NÃO lê essa dependência — lê `request.state.tenant_id`, que o
+# `TenantMiddleware` preencheu com o tenant DEFAULT (`sobral`, resolvido a
+# partir de `http://test`). A sessão sai, portanto, com
+# `SET LOCAL app.tenant_id = <sobral>` enquanto os dados estão no tenant da
+# fixture. Sob `ged_user`/BYPASSRLS ninguém percebe; sob um papel sujeito a RLS
+# o resultado é vazio, e o teste falha por defeito DO TESTE.
+#
+# Por que não dá para consertar só na sobreposição de `require_tenant_id`:
+# o FastAPI resolve as dependências na ordem em que aparecem na assinatura da
+# rota, e `db: AsyncSession = Depends(get_db)` costuma vir ANTES de
+# `tenant_id: int = Depends(require_tenant_id)`. Stampar `request.state` dentro
+# da sobreposição de `require_tenant_id` chegaria tarde na maioria das rotas —
+# e "na maioria" é justamente o tipo de arreio que passa verde por acidente.
+#
+# Por que a sobreposição de `get_db` aqui NÃO é a mesma coisa que a dos três
+# arquivos SEC-1 criticados no inventário: aqueles trocavam a sessão por uma de
+# `admin_engine`, isto é, `ged_user`/BYPASSRLS, **independentemente** do
+# `DATABASE_URL` — testes que nunca poderiam falhar por RLS. Este helper usa o
+# `SessionLocal` REAL da aplicação (mesmo engine, mesmo papel, mesmo listener
+# `after_begin`); a única coisa que ele muda é DE ONDE vem o `tenant_id`, que
+# passa a ser o mesmo valor que a rota recebe por `require_tenant_id`. Um
+# vazamento cross-tenant continua sendo detectável.
+# ---------------------------------------------------------------------------
+
+
+def arreio_tenant_http(tenant_id: int, tenant_slug: str | None = None) -> None:
+    """Faz o arreio HTTP falar o MESMO tenant nas duas pontas.
+
+    Instala, em `app.dependency_overrides`:
+
+    - `get_db` → sessão do `SessionLocal` real com
+      `session.info["tenant_id"] = tenant_id` (é daí que o listener
+      `after_begin` emite o `SET LOCAL app.tenant_id`);
+    - `require_tenant_id` → `tenant_id`;
+    - `require_tenant_slug` → `tenant_slug`, quando informado.
+
+    Também stampa `request.state.tenant_id`/`tenant_slug`, para que qualquer
+    código que leia o `state` diretamente (`get_current_tenant_id`) veja o
+    mesmo tenant.
+
+    Alternativa igualmente correta, quando o teste puder pagar por ela: mandar
+    o header `Host: <slug>.aprimora.local` e deixar o `TenantMiddleware`
+    resolver — é o que `test_sec1_login_me_flag.py::_login_host_header` faz nos
+    endpoints que leem `request.state` antes de qualquer `Depends`.
+    """
+    from app.auth.deps import require_tenant_id, require_tenant_slug
+    from app.database import SessionLocal, get_db
+    from app.main import app
+
+    tid = int(tenant_id)
+
+    async def _get_db_do_tenant(request: Request) -> AsyncIterator[AsyncSession]:
+        request.state.tenant_id = tid
+        if tenant_slug is not None:
+            request.state.tenant_slug = tenant_slug
+        async with SessionLocal() as session:
+            session.info["tenant_id"] = tid
+            yield session
+
+    app.dependency_overrides[get_db] = _get_db_do_tenant
+    app.dependency_overrides[require_tenant_id] = lambda: tid
+    if tenant_slug is not None:
+        app.dependency_overrides[require_tenant_slug] = lambda: tenant_slug
 
 
 @pytest_asyncio.fixture(scope="function")

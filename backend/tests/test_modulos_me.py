@@ -22,9 +22,10 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.deps import get_current_user, require_tenant_id
+from app.auth.deps import get_current_user
 from app.main import app
 from app.models import Usuario
+from tests.conftest import arreio_tenant_http
 
 
 def _sm(engine):
@@ -43,7 +44,7 @@ def _as_user(engine, usuario_id: int, tenant_id: int):
 
     def _setup():
         app.dependency_overrides[get_current_user] = _get_user
-        app.dependency_overrides[require_tenant_id] = lambda: tenant_id
+        arreio_tenant_http(tenant_id)
 
     return _setup
 
