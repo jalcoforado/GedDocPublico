@@ -35,6 +35,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -75,6 +76,25 @@ async def _sessao_do_ato_de_plataforma() -> AsyncIterator[AsyncSession | None]:
         "(docs/runbooks/platform-operator-bootstrap.md §1)."
     )
     yield None
+
+
+# A frase que o Postgres devolve — `permission denied for table tenant` — manda
+# o operador caçar defeito de grant. O defeito não existe: o grant por coluna da
+# 0080 está funcionando exatamente como projetado, e o que falta é configuração.
+_ERRO_ATO_DE_PLATAFORMA_SEM_PAPEL = (
+    "[ERRO] o banco recusou a gravação de `ativo` em `aprimora_py.tenant`:\n"
+    "    {erro}\n\n"
+    "`PLATFORM_DB_URL` não está configurada, então este comando caiu no pool "
+    "MUNICIPAL (`SessionLocal`, `app/database.py`) — e activate/deactivate é ato "
+    "de PLATAFORMA. Com `APP_DATABASE_URL` definida esse pool conecta como "
+    "`aprimora_app`, que a migration 0080 (SEC-RLS-00D) deixa **sem** `UPDATE` "
+    "na coluna `ativo`, de propósito.\n\n"
+    "NÃO é defeito de grant a caçar. Configure `PLATFORM_DB_URL` com o papel "
+    "`aprimora_platform` e repita o comando "
+    "(docs/runbooks/platform-operator-bootstrap.md §1). Conceder `ativo` ao "
+    "papel municipal para 'resolver' desfaz o SEC-RLS-00D e é reprovado por "
+    "`tests/test_grant_por_coluna_tenant.py`."
+)
 
 
 async def _create(args: argparse.Namespace) -> int:
@@ -216,16 +236,26 @@ async def _set_active(args: argparse.Namespace, active: bool) -> int:
     (`get_platform_db`) e o mesmo que `create`/`retomar` usam para o ato de
     plataforma desde o `SEC-RLS-00C`.
 
-    Sem `PLATFORM_DB_URL` configurada, cai na credencial desta CLI, com o aviso
-    que `_sessao_do_ato_de_plataforma` imprime. É o comportamento de hoje em
-    dev, preservado de propósito: quebrar o `deactivate` local não fecharia
-    brecha nenhuma.
+    Sem `PLATFORM_DB_URL` configurada, cai em `SessionLocal()` — o pool
+    MUNICIPAL, exatamente o papel que os dois parágrafos acima dizem que não
+    pode gravar `ativo`. Hoje isso funciona só por coincidência: `APP_DATABASE_URL`
+    está vazia e o pool municipal conecta como `ged_user`. O fallback é
+    preservado de propósito (é o que mantém a simetria com `_create`/`_retomar`,
+    e quebrar o `deactivate` em dev e no CI não fecharia brecha nenhuma), mas
+    depois do `SEC-RLS-ROLLOUT` ele passa a falhar — e falhar dizendo o que
+    fazer, ver `_ERRO_ATO_DE_PLATAFORMA_SEM_PAPEL`.
     """
     async with _sessao_do_ato_de_plataforma() as db_plat:
         if db_plat is not None:
             return await _aplicar_ativo(db_plat, args.slug, active)
     async with SessionLocal() as db:
-        return await _aplicar_ativo(db, args.slug, active)
+        try:
+            return await _aplicar_ativo(db, args.slug, active)
+        except DBAPIError as e:
+            # Sem isto o operador lê `permission denied for table tenant` e vai
+            # caçar defeito de grant — quando o que falta é configuração.
+            print(_ERRO_ATO_DE_PLATAFORMA_SEM_PAPEL.format(erro=e.orig or e))
+            return 1
 
 
 def main(argv: list[str] | None = None) -> int:

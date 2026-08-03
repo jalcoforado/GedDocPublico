@@ -17,6 +17,7 @@ matriz completa em `test_platform_token_validator.py`.
 """
 from __future__ import annotations
 
+import argparse
 import uuid
 
 import pytest
@@ -536,3 +537,90 @@ def test_admin_out_so_registro_de_tenant():
 def test_cli_usa_mesmo_servico():
     from app.cli import tenant as cli
     assert cli.provisionar_tenant is provisionar_tenant
+
+
+async def test_cli_set_active_sem_platform_db_url_acusa_configuracao(
+    admin_engine, monkeypatch, capsys
+):
+    """`activate`/`deactivate` sob `aprimora_app` tem de acusar a CONFIGURAÇÃO.
+
+    Sem `PLATFORM_DB_URL` o comando cai em `SessionLocal()` — o pool municipal.
+    Hoje isso passa despercebido porque `APP_DATABASE_URL` está vazia e o pool
+    conecta como `ged_user`; depois do `SEC-RLS-ROLLOUT` ele conecta como
+    `aprimora_app`, que a 0080 deixa sem `UPDATE` em `ativo`.
+
+    O que se mede aqui não é a negativa — essa já tem teste em
+    `test_grant_por_coluna_tenant.py` — é o que o OPERADOR lê. `permission denied
+    for table tenant` cru manda caçar defeito de grant que não existe, num
+    momento em que alguém precisa suspender um município.
+
+    Real de ponta a ponta: o `SessionLocal` do módulo é trocado por um
+    sessionmaker do papel `aprimora_app` de verdade, e quem recusa é o Postgres.
+    """
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.cli import tenant as cli
+    from app.config import get_settings
+    from tests.conftest import APP_URL
+
+    slug = _novo_slug("cli00d-")
+    Session = _sessionmaker(admin_engine)
+    async with Session() as s:
+        tid = int(
+            (
+                await s.execute(
+                    text(
+                        "INSERT INTO aprimora_py.tenant (slug, nome, ativo, plano, criado_em) "
+                        "VALUES (:s, 'CLI 00D', true, 'basico', now()) RETURNING id"
+                    ),
+                    {"s": slug},
+                )
+            ).scalar_one()
+        )
+        await s.commit()
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("PLATFORM_DB_URL", "")
+    get_settings.cache_clear()
+    engine = create_async_engine(APP_URL)
+    monkeypatch.setattr(cli, "SessionLocal", _sessionmaker(engine))
+    try:
+        rc = await cli._set_active(
+            argparse.Namespace(slug=slug), False  # deactivate
+        )
+    finally:
+        await engine.dispose()
+        get_settings.cache_clear()
+
+    saida = capsys.readouterr().out
+    assert rc == 1, (
+        "`deactivate` devolveu sucesso sob um papel que não pode gravar `ativo`. "
+        f"Saída:\n{saida}"
+    )
+    assert "permission denied for table tenant" in saida, (
+        "CONTROLE POSITIVO falhou: a negativa do banco não apareceu na saída, "
+        "então este teste não mediu o caminho que pensa ter medido. "
+        f"Saída:\n{saida}"
+    )
+    assert "PLATFORM_DB_URL" in saida, (
+        "o comando falhou mostrando só `permission denied for table tenant`. "
+        "Isso manda o operador caçar defeito de grant — e o grant está correto: "
+        "activate/deactivate é ato de PLATAFORMA e o que falta é "
+        "`PLATFORM_DB_URL`. Ver `_ERRO_ATO_DE_PLATAFORMA_SEM_PAPEL` em "
+        f"`app/cli/tenant.py`. Saída:\n{saida}"
+    )
+
+    try:
+        async with Session() as s:
+            ainda_ativo = (
+                await s.execute(
+                    text("SELECT ativo FROM aprimora_py.tenant WHERE id=:t"), {"t": tid}
+                )
+            ).scalar_one()
+        assert ainda_ativo is True, "o comando falhou MAS desativou o município."
+    finally:
+        async with Session() as s:
+            await s.execute(
+                text("DELETE FROM aprimora_py.tenant WHERE id=:t"), {"t": tid}
+            )
+            await s.commit()
