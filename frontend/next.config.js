@@ -21,6 +21,14 @@ const redirectsModulo = [
   { source: '/transporte-regulado/:path*', destination: '/m/transporte/:path*', permanent: true },
   { source: '/frotas/:path*', destination: '/m/frota/:path*', permanent: true },
   { source: '/pagamentos/:path*', destination: '/m/pagamentos/:path*', permanent: true },
+  // administracao: 7 diretorios de topo, uma regra cada.
+  { source: '/usuarios/:path*', destination: '/m/administracao/usuarios/:path*', permanent: true },
+  { source: '/grupos/:path*', destination: '/m/administracao/grupos/:path*', permanent: true },
+  { source: '/unidades-trabalho/:path*', destination: '/m/administracao/unidades-trabalho/:path*', permanent: true },
+  { source: '/organograma/:path*', destination: '/m/administracao/organograma/:path*', permanent: true },
+  { source: '/auditoria/:path*', destination: '/m/administracao/auditoria/:path*', permanent: true },
+  { source: '/configuracoes/:path*', destination: '/m/administracao/configuracoes/:path*', permanent: true },
+  { source: '/jobs/:path*', destination: '/m/administracao/jobs/:path*', permanent: true },
 ];
 
 const nextConfig = {

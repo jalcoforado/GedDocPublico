@@ -9,19 +9,19 @@ import type { MenuModulo } from "./tipos";
  */
 export const menuAdministracao: MenuModulo = {
   slug: "administracao",
-  raiz: "/usuarios",
+  raiz: "/m/administracao/usuarios",
   grupos: [
     {
       title: "Administração",
       defaultOpen: false,
       items: [
-        { label: "Usuários", href: "/usuarios", icon: Users, perm: "usuario" },
-        { label: "Unidades", href: "/unidades-trabalho", icon: Building2, perm: "unidadeTrabalho" },
-        { label: "Organograma", href: "/organograma", icon: Building2 },
-        { label: "Grupos & Permissões", href: "/grupos", icon: Shield },
-        { label: "Configurações", href: "/configuracoes", icon: Settings, perm: "usuario" },
-        { label: "Auditoria", href: "/auditoria", icon: Shield },
-        { label: "Jobs em background", href: "/jobs", icon: Cog },
+        { label: "Usuários", href: "/m/administracao/usuarios", icon: Users, perm: "usuario" },
+        { label: "Unidades", href: "/m/administracao/unidades-trabalho", icon: Building2, perm: "unidadeTrabalho" },
+        { label: "Organograma", href: "/m/administracao/organograma", icon: Building2 },
+        { label: "Grupos & Permissões", href: "/m/administracao/grupos", icon: Shield },
+        { label: "Configurações", href: "/m/administracao/configuracoes", icon: Settings, perm: "usuario" },
+        { label: "Auditoria", href: "/m/administracao/auditoria", icon: Shield },
+        { label: "Jobs em background", href: "/m/administracao/jobs", icon: Cog },
       ],
     },
   ],

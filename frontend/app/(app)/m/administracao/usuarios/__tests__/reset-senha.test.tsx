@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import UsuariosPage from "@/app/(app)/usuarios/page";
+import UsuariosPage from "@/app/(app)/m/administracao/usuarios/page";
 import { api } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({

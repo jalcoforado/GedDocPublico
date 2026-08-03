@@ -82,13 +82,13 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/pagamentos/cadastros/contratos": { perm: "pagamento_cadastro" },
   "/m/pagamentos/cadastros/alcadas": { perm: "pagamento_cadastro" },
   "/m/pagamentos/cadastros/checklist": { perm: "pagamento_cadastro" },
-  "/usuarios": { perm: "usuario" },
-  "/unidades-trabalho": { perm: "unidadeTrabalho" },
-  "/organograma": {},
-  "/grupos": {},
-  "/configuracoes": { perm: "usuario" },
-  "/auditoria": {},
-  "/jobs": {},
+  "/m/administracao/usuarios": { perm: "usuario" },
+  "/m/administracao/unidades-trabalho": { perm: "unidadeTrabalho" },
+  "/m/administracao/organograma": {},
+  "/m/administracao/grupos": {},
+  "/m/administracao/configuracoes": { perm: "usuario" },
+  "/m/administracao/auditoria": {},
+  "/m/administracao/jobs": {},
 };
 
 describe("split dos menus", () => {

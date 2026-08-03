@@ -32,10 +32,13 @@ import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 // Deep-links do checklist para áreas já existentes (só as que têm página).
+// NAO e um `href` por linha: e um MAPA. Varredura por linha contendo "href"
+// nao alcanca isto — foi assim que quase ficou apontando para a URL antiga
+// na F3. `assuntos` e `tipos_processo` pertencem ao protocolo.
 const CHECKLIST_HREF: Record<string, string> = {
-  unidades: "/unidades-trabalho",
-  usuarios: "/usuarios",
-  grupos: "/grupos",
+  unidades: "/m/administracao/unidades-trabalho",
+  usuarios: "/m/administracao/usuarios",
+  grupos: "/m/administracao/grupos",
   assuntos: "/assuntos",
   tipos_processo: "/tipos-processo",
 };

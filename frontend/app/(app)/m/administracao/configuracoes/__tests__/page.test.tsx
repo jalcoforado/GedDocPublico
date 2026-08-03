@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import ConfiguracoesPage from "@/app/(app)/configuracoes/page";
+import ConfiguracoesPage from "@/app/(app)/m/administracao/configuracoes/page";
 import { api, tenantsApi } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
@@ -94,6 +94,6 @@ describe("ConfiguracoesPage — PR 3b", () => {
     expect(await screen.findByText("Unidade de trabalho cadastrada")).toBeInTheDocument();
     expect(screen.getByText("Módulo de assinatura habilitado")).toBeInTheDocument();
     const link = screen.getByRole("link", { name: /Configurar/i });
-    expect(link).toHaveAttribute("href", "/unidades-trabalho");
+    expect(link).toHaveAttribute("href", "/m/administracao/unidades-trabalho");
   });
 });
