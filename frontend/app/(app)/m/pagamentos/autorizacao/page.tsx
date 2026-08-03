@@ -314,7 +314,7 @@ function TabDespesa() {
                         {d.nome_fornecedor}
                       </span>
                       <Link
-                        href={`/pagamentos/contas-a-pagar/${d.id}`}
+                        href={`/m/pagamentos/contas-a-pagar/${d.id}`}
                         aria-label={`Ver detalhe de ${d.nome_fornecedor}`}
                         className="shrink-0 text-muted-foreground hover:text-foreground"
                       >
@@ -526,7 +526,7 @@ function TabPagamento() {
                       {p.nome_fornecedor}
                     </span>
                     <Link
-                      href={`/pagamentos/contas-a-pagar/${p.id_debito}`}
+                      href={`/m/pagamentos/contas-a-pagar/${p.id_debito}`}
                       aria-label={`Ver detalhe de ${p.nome_fornecedor}`}
                       className="shrink-0 text-muted-foreground hover:text-foreground"
                     >

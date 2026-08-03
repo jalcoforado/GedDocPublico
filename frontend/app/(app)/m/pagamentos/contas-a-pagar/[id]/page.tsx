@@ -347,7 +347,7 @@ export default function DebitoDetalhePage() {
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <Link
-          href="/pagamentos/contas-a-pagar"
+          href="/m/pagamentos/contas-a-pagar"
           className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
           aria-label="Voltar"
         >

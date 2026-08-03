@@ -40,7 +40,7 @@ function DebitoLista({ itens }: { itens: Debito[] }) {
         {itens.slice(0, MAX_ITENS_CARD).map((d) => (
           <li key={d.id} className="flex items-center justify-between gap-2 text-sm">
             <Link
-              href={`/pagamentos/contas-a-pagar/${d.id}`}
+              href={`/m/pagamentos/contas-a-pagar/${d.id}`}
               className="min-w-0 flex-1 truncate text-primary hover:underline"
             >
               {d.nome_fornecedor} — {d.descricao}
@@ -49,7 +49,7 @@ function DebitoLista({ itens }: { itens: Debito[] }) {
           </li>
         ))}
       </ul>
-      <VerTodas total={itens.length} href="/pagamentos/contas-a-pagar" />
+      <VerTodas total={itens.length} href="/m/pagamentos/contas-a-pagar" />
     </>
   );
 }
@@ -110,7 +110,7 @@ function CardParcelas({
                 }
               >
                 <Link
-                  href={`/pagamentos/contas-a-pagar/${p.id_debito}`}
+                  href={`/m/pagamentos/contas-a-pagar/${p.id_debito}`}
                   className="min-w-0 flex-1 truncate hover:underline"
                   title={`${p.nome_fornecedor} — ${p.descricao_debito} (parcela ${p.numero})`}
                 >
@@ -123,7 +123,7 @@ function CardParcelas({
               </li>
             ))}
           </ul>
-          <VerTodas total={itens.length} href="/pagamentos/contas-a-pagar" />
+          <VerTodas total={itens.length} href="/m/pagamentos/contas-a-pagar" />
         </>
       )}
       <AbrirTela href={abrirHref} label={abrirLabel} />
@@ -162,37 +162,37 @@ export default function PagamentosHomePage() {
           <CardFila
             title="Meus rascunhos"
             itens={fila.solicitar}
-            abrirHref="/pagamentos/contas-a-pagar"
+            abrirHref="/m/pagamentos/contas-a-pagar"
             abrirLabel="abrir tela de contas a pagar"
           />
           <CardFila
             title="Aguardando minha validação"
             itens={fila.validar}
-            abrirHref="/pagamentos/contas-a-pagar"
+            abrirHref="/m/pagamentos/contas-a-pagar"
             abrirLabel="abrir tela de contas a pagar"
           />
           <CardFila
             title="Aguardando encaminhamento"
             itens={fila.encaminhar}
-            abrirHref="/pagamentos/contas-a-pagar"
+            abrirHref="/m/pagamentos/contas-a-pagar"
             abrirLabel="abrir tela de contas a pagar"
           />
           <CardFila
             title="Aguardando autorização"
             itens={fila.autorizar}
-            abrirHref="/pagamentos/autorizacao"
+            abrirHref="/m/pagamentos/autorizacao"
             abrirLabel="abrir tela de autorização"
           />
           <CardParcelas
             title="Pagamentos a liberar"
             itens={fila.liberar}
-            abrirHref="/pagamentos/autorizacao?tab=pagamento"
+            abrirHref="/m/pagamentos/autorizacao?tab=pagamento"
             abrirLabel="abrir tela de liberação"
           />
           <CardParcelas
             title="Tesouraria — a pagar"
             itens={fila.pagar}
-            abrirHref="/pagamentos/tesouraria"
+            abrirHref="/m/pagamentos/tesouraria"
             abrirLabel="abrir tesouraria"
           />
         </div>
@@ -201,7 +201,7 @@ export default function PagamentosHomePage() {
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">Caixa</h2>
-          <Link href="/pagamentos/caixa" className="text-sm text-primary hover:underline">
+          <Link href="/m/pagamentos/caixa" className="text-sm text-primary hover:underline">
             ver caixa
           </Link>
         </div>

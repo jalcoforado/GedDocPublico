@@ -60,28 +60,28 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/transporte/veiculos": { perm: "transporte_regulado" },
   "/m/transporte/alvaras": { perm: "transporte_regulado" },
   "/m/transporte/relatorio": { perm: "transporte_regulado" },
-  "/pagamentos": {
+  "/m/pagamentos": {
     anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"],
   },
-  "/pagamentos/dashboard": {
+  "/m/pagamentos/dashboard": {
     anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"],
   },
-  "/pagamentos/contas-a-pagar": {
+  "/m/pagamentos/contas-a-pagar": {
     anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar"],
   },
-  "/pagamentos/autorizacao": { anyOf: ["pagamento_autorizar"] },
-  "/pagamentos/tesouraria": { perm: "pagamento_pagar" },
-  "/pagamentos/caixa": { perm: "pagamento_cadastro" },
-  "/pagamentos/conciliacao": {
+  "/m/pagamentos/autorizacao": { anyOf: ["pagamento_autorizar"] },
+  "/m/pagamentos/tesouraria": { perm: "pagamento_pagar" },
+  "/m/pagamentos/caixa": { perm: "pagamento_cadastro" },
+  "/m/pagamentos/conciliacao": {
     anyOf: ["pagamento_pagar", "pagamento_autorizar", "pagamento_auditar", "pagamento_cadastro"],
   },
-  "/pagamentos/cadastros/fornecedores": { perm: "pagamento_cadastro" },
-  "/pagamentos/cadastros/naturezas": { perm: "pagamento_cadastro" },
-  "/pagamentos/cadastros/fontes": { perm: "pagamento_cadastro" },
-  "/pagamentos/cadastros/contas": { perm: "pagamento_cadastro" },
-  "/pagamentos/cadastros/contratos": { perm: "pagamento_cadastro" },
-  "/pagamentos/cadastros/alcadas": { perm: "pagamento_cadastro" },
-  "/pagamentos/cadastros/checklist": { perm: "pagamento_cadastro" },
+  "/m/pagamentos/cadastros/fornecedores": { perm: "pagamento_cadastro" },
+  "/m/pagamentos/cadastros/naturezas": { perm: "pagamento_cadastro" },
+  "/m/pagamentos/cadastros/fontes": { perm: "pagamento_cadastro" },
+  "/m/pagamentos/cadastros/contas": { perm: "pagamento_cadastro" },
+  "/m/pagamentos/cadastros/contratos": { perm: "pagamento_cadastro" },
+  "/m/pagamentos/cadastros/alcadas": { perm: "pagamento_cadastro" },
+  "/m/pagamentos/cadastros/checklist": { perm: "pagamento_cadastro" },
   "/usuarios": { perm: "usuario" },
   "/unidades-trabalho": { perm: "unidadeTrabalho" },
   "/organograma": {},

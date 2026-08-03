@@ -56,7 +56,7 @@ describe("switcher de módulo", () => {
     renderSwitcher();
     fireEvent.click(await waitFor(() => screen.getByRole("button", { name: /frota/i })));
     fireEvent.click(screen.getByText("Pagamentos"));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/pagamentos"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/m/pagamentos"));
     expect(push).not.toHaveBeenCalledWith("/modulos");
   });
 

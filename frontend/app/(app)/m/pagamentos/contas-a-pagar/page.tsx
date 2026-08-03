@@ -279,7 +279,7 @@ export default function ContasAPagarPage() {
           {debitos.map((d) => (
             <TR
               key={d.id}
-              onClickRow={() => router.push(`/pagamentos/contas-a-pagar/${d.id}`)}
+              onClickRow={() => router.push(`/m/pagamentos/contas-a-pagar/${d.id}`)}
             >
               <TD>
                 <StatusBadge status={d.status} />

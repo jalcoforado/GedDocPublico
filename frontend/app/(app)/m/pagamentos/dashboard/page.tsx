@@ -301,7 +301,7 @@ export default function PagamentosDashboardPage() {
           intent={kpis.vencidas_qtd > 0 ? "danger" : "default"}
         />
         <KpiCard label="Pago no mês" value={fmtBRL(kpis.pago_no_mes)} icon={Landmark} intent="success" />
-        <Link href="/pagamentos" className="block">
+        <Link href="/m/pagamentos" className="block">
           <KpiCard
             label="Aguardando aprovação"
             value={kpis.aguardando_aprovacao_qtd}
@@ -310,7 +310,7 @@ export default function PagamentosDashboardPage() {
             hint="ver fila →"
           />
         </Link>
-        <Link href="/pagamentos" className="block">
+        <Link href="/m/pagamentos" className="block">
           <KpiCard
             label="Aguardando autorização"
             value={kpis.aguardando_autorizacao_qtd}
@@ -388,12 +388,12 @@ export default function PagamentosDashboardPage() {
                     return (
                       <TR
                         key={deb.id}
-                        onClickRow={() => router.push(`/pagamentos/contas-a-pagar/${deb.id}`)}
+                        onClickRow={() => router.push(`/m/pagamentos/contas-a-pagar/${deb.id}`)}
                         className="cursor-pointer"
                       >
                         <TD className="max-w-[170px]">
                           <Link
-                            href={`/pagamentos/contas-a-pagar/${deb.id}`}
+                            href={`/m/pagamentos/contas-a-pagar/${deb.id}`}
                             className="block truncate whitespace-nowrap text-primary hover:underline"
                             title={deb.nome_fornecedor}
                             onClick={(e) => e.stopPropagation()}
@@ -440,7 +440,7 @@ export default function PagamentosDashboardPage() {
                     <AlertCircle className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
                     <span className="flex-1">
                       <Link
-                        href={`/pagamentos/contas-a-pagar/${p.id_debito}`}
+                        href={`/m/pagamentos/contas-a-pagar/${p.id_debito}`}
                         className="font-medium hover:underline"
                       >
                         {p.nome_fornecedor}
@@ -458,7 +458,7 @@ export default function PagamentosDashboardPage() {
                     <Clock className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
                     <span className="flex-1">
                       <Link
-                        href={`/pagamentos/contas-a-pagar/${p.id_debito}`}
+                        href={`/m/pagamentos/contas-a-pagar/${p.id_debito}`}
                         className="font-medium hover:underline"
                       >
                         {p.nome_fornecedor}

@@ -187,7 +187,7 @@ export default function ConciliacaoPage() {
     <div className="space-y-6">
       <PageHeader
         icon={Landmark}
-        breadcrumbs={[{ label: "Pagamentos", href: "/pagamentos" }, { label: "Conciliação" }]}
+        breadcrumbs={[{ label: "Pagamentos", href: "/m/pagamentos" }, { label: "Conciliação" }]}
         title="Conciliação bancária"
         description="Importe o extrato da conta e case cada lançamento com o pagamento correspondente. Quando todas as movimentações de um débito pago ficam conciliadas, ele passa a CONCILIADO automaticamente."
         actions={
