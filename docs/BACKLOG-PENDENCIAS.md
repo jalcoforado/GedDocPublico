@@ -129,32 +129,34 @@
   "este usuário pode ler isto?". Todo autenticado do tenant continua lendo `/usuarios`, `/grupos`,
   `/audit` etc. — isso é o item **1.0.8**, aberto de propósito por esta fatia.
 
-### 1.0.6 `/notificacoes/whatsapp-test` sem autorização — qualquer autenticado do tenant dispara
+### ~~1.0.6 `/notificacoes/whatsapp-test` sem autorização~~ — FECHADO em 2026-08-03
 
-*(Levantado em 2026-07-30 pelo review da fatia F1. **Não é regressão da F1**: `main` tem o mesmo
-`Depends(get_current_user)` e nada mais — verificado em `git show main:`. A F1 chegou a fechar de
-passagem e devolveu ao original, porque o único código de permissão disponível acoplava o endpoint
-ao módulo errado.)*
+*(Levantado em 2026-07-30 pelo review da fatia F1. Fechado por `fix/whatsapp-test-autolimitado`.)*
 
-- `POST /api/v2/notificacoes/whatsapp-test` (`backend/app/routers/notificacoes.py:164`) dispara envio
-  de WhatsApp para **telefone arbitrário do payload**, usando a credencial paga do tenant. Exige
-  apenas estar autenticado — o usuário de menor privilégio do tenant consegue. É vetor de custo e de
-  abuso, não só de vazamento.
-- **Por que a F1 não fechou:** o único código de transação vizinho é `configuracao`, que pertence ao
-  módulo `administracao`. Gatear com ele daria 403 no endpoint para tenant que tem `protocolo` e não
-  tem `administracao` — trocaria um defeito por outro. Não existe transação de notificação em
-  `utils.transacao` (verificado por query), e criar uma exige migration **mais** concessão aos grupos
-  existentes, senão o endpoint passa a dar 403 para todo mundo.
-- **O sujeito certo não existe ainda:** o correto seria "super-usuário **do tenant**".
-  `require_platform_admin` é sujeito errado (é da plataforma, opera sobre outros tenants) e
-  `require_permission` precisa de um código que ainda não há.
-- **Ao retomar:** decidir entre (a) criar a transação `notificacao` vinculada ao módulo `comum` e
-  conceder aos grupos administrativos na mesma migration, ou (b) introduzir a dependência de
-  super-usuário do tenant, que serve a outros endpoints de operação além deste. A (b) é mais
-  trabalho e resolve uma classe; a (a) fecha só este.
-- Enquanto aberto, o endpoint está listado em `ENDPOINTS_TRANSVERSAIS` em
-  `backend/tests/test_guarda_modularizacao.py` — ou seja, a guarda **não** vai reclamar dele. A
-  vigilância é este item, não o teste.
+- **O que era:** `POST /api/v2/notificacoes/whatsapp-test` disparava WhatsApp para **telefone
+  arbitrário do payload** com a credencial paga do tenant, exigindo só estar autenticado. Vetor de
+  custo e de assédio, não de vazamento.
+- **As duas saídas que este item propunha estavam ambas erradas**, e vale registrar por quê: elas
+  partiam de que o endpoint era administrativo ("validar config Zenvia em prod", como diz o
+  docstring). Não é. O **único chamador** é `frontend/app/(app)/perfil/notificacoes/page.tsx`, a
+  página de preferências do próprio usuário — qualquer pessoa salva o telefone e clica em testar.
+  Gatear com transação ou com super-usuário do tenant tiraria isso de todo usuário comum no dia em
+  que existir o primeiro grupo não-SU: trocaria um defeito de segurança por um de produto.
+- **O que se fez:** tirar o **destino** das mãos do chamador, não restringir quem chama.
+  `WhatsAppTestRequest.telefone` foi removido; o destino é sempre o telefone do perfil, resolvido no
+  servidor por `Destinatario(id_usuario=...)`. Mais limite de **3 por hora por usuário** — só tirar o
+  destino não bastava, porque `PUT /notificacoes/telefone` é livre e "troco meu número e testo de
+  novo" continuaria queimando credencial. O limite conta por **usuário**: por telefone seria
+  contornável pelo mesmo caminho, por tenant viraria negação de serviço entre colegas.
+- **Efeito colateral que quase passou:** trocar `telefone` por `id_usuario` fez o motor aplicar a
+  **preferência de canal**, que o caminho antigo pulava sem querer (o motor só consulta preferência
+  para destinatário com `id_usuario`). Como `DEFAULT_PREFS["whatsapp"]` é `False`, conferir o
+  telefone antes de ligar o canal — que é exatamente quando se testa — teria ficado impossível. Daí
+  o `enviar(..., ignorar_preferencias=True)`, que é **só** para envio que o próprio destinatário
+  pediu agora; envio automático continua respeitando o opt-out.
+- Guardas em `backend/tests/test_notificacoes_whatsapp_teste.py` (5 testes, prova por inversão feita:
+  5 vermelhos contra o comportamento antigo). O endpoint continua em `ENDPOINTS_TRANSVERSAIS` — não
+  ganhou gate de módulo nem de permissão, e isso é decisão, não esquecimento.
 
 ### 1.0.65 Falha da F1 que só aparece em banco limpo — ainda NÃO diagnosticada
 
