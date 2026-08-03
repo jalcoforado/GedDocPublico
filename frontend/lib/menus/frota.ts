@@ -5,16 +5,16 @@ import type { MenuModulo } from "./tipos";
 /** Menu do módulo frota, movido verbatim da Sidebar (linha 131). */
 export const menuFrota: MenuModulo = {
   slug: "frota",
-  raiz: "/frotas",
+  raiz: "/m/frota",
   grupos: [
     {
       title: "Frota",
       defaultOpen: false,
       items: [
-        { label: "Frota Pública", href: "/frotas", icon: Truck, perm: "frota" },
-        { label: "Veículos", href: "/frotas/veiculos", icon: Car, perm: "frota" },
-        { label: "Motoristas", href: "/frotas/motoristas", icon: IdCard, perm: "frota" },
-        { label: "Solicitações", href: "/frotas/solicitacoes", icon: ClipboardList, perm: "frota" },
+        { label: "Frota Pública", href: "/m/frota", icon: Truck, perm: "frota" },
+        { label: "Veículos", href: "/m/frota/veiculos", icon: Car, perm: "frota" },
+        { label: "Motoristas", href: "/m/frota/motoristas", icon: IdCard, perm: "frota" },
+        { label: "Solicitações", href: "/m/frota/solicitacoes", icon: ClipboardList, perm: "frota" },
       ],
     },
   ],

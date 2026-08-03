@@ -223,7 +223,7 @@ export default function ManutencoesPage() {
         icon={Wrench}
         title="Manutenções"
         description="Manutenções preventivas e corretivas da frota."
-        breadcrumbs={[{ label: "Frota Pública", href: "/frotas" }, { label: "Manutenções" }]}
+        breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Manutenções" }]}
         actions={
           canCreate ? (
             <Button onClick={openNew}>

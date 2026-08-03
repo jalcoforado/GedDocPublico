@@ -20,49 +20,49 @@ import { api } from "@/lib/api";
 
 const CARDS = [
   {
-    href: "/frotas/veiculos",
+    href: "/m/frota/veiculos",
     icon: Car,
     title: "Veículos",
     desc: "Cadastro da frota própria: placa, documentação, situação, posse e unidade responsável.",
   },
   {
-    href: "/frotas/motoristas",
+    href: "/m/frota/motoristas",
     icon: IdCard,
     title: "Motoristas",
     desc: "Cadastro de condutores: CPF, CNH (categoria e validade), lotação e situação.",
   },
   {
-    href: "/frotas/solicitacoes",
+    href: "/m/frota/solicitacoes",
     icon: ClipboardList,
     title: "Solicitações de Veículo",
     desc: "Pedidos de uso de veículo: finalidade, destino, datas previstas e fluxo de aprovação.",
   },
   {
-    href: "/frotas/manutencoes",
+    href: "/m/frota/manutencoes",
     icon: Wrench,
     title: "Manutenções",
     desc: "Manutenções preventivas e corretivas: abertura, andamento, conclusão e custos.",
   },
   {
-    href: "/frotas/abastecimentos",
+    href: "/m/frota/abastecimentos",
     icon: Fuel,
     title: "Abastecimentos",
     desc: "Registro de abastecimentos: litros, valor, quilometragem, posto e indicadores.",
   },
   {
-    href: "/frotas/vistorias",
+    href: "/m/frota/vistorias",
     icon: ClipboardCheck,
     title: "Vistorias",
     desc: "Checklist interno de vistoria: saída, retorno e periódica, com resultado e itens.",
   },
   {
-    href: "/frotas/ocorrencias",
+    href: "/m/frota/ocorrencias",
     icon: AlertOctagon,
     title: "Ocorrências",
     desc: "Avarias, multas, sinistros e uso indevido: gravidade, tratamento e resolução.",
   },
   {
-    href: "/frotas/relatorios",
+    href: "/m/frota/relatorios",
     icon: BarChart3,
     title: "Visão gerencial",
     desc: "Indicadores consolidados: veículos, solicitações, pendências e abastecimentos.",
@@ -88,7 +88,7 @@ export default function FrotaHubPage() {
 
       {temAlerta && (
         <Link
-          href="/frotas/veiculos"
+          href="/m/frota/veiculos"
           className="flex items-center gap-3 rounded-lg border border-warning-soft bg-warning-soft px-4 py-3 text-sm text-warning-soft-foreground transition-opacity hover:opacity-90"
         >
           <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden="true" />

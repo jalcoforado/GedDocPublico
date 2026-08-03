@@ -53,13 +53,13 @@ describe("launcher", () => {
     renderLauncher();
     await waitFor(() => expect(screen.getByText("Frota")).toBeTruthy());
     const frota = screen.getAllByRole("link").find((a) => a.textContent?.includes("Frota"));
-    expect(frota?.getAttribute("href")).toBe("/frotas");
+    expect(frota?.getAttribute("href")).toBe("/m/frota");
   });
 
   it("com um módulo só, entra direto — o launcher é porta, não pedágio", async () => {
     modulos.mockResolvedValue({ itens: [TRES.itens[1]] });
     renderLauncher();
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/frotas"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/m/frota"));
   });
 
   it("lista vazia mostra mensagem explícita, não tela muda", async () => {

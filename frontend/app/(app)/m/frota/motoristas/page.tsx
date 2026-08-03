@@ -194,7 +194,7 @@ export default function MotoristasPage() {
         icon={IdCard}
         title="Motoristas"
         description="Cadastro de condutores da frota municipal."
-        breadcrumbs={[{ label: "Frota Pública", href: "/frotas" }, { label: "Motoristas" }]}
+        breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Motoristas" }]}
         actions={
           canCreate ? (
             <Button onClick={openNew}>

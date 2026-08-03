@@ -19,6 +19,7 @@
  */
 const redirectsModulo = [
   { source: '/transporte-regulado/:path*', destination: '/m/transporte/:path*', permanent: true },
+  { source: '/frotas/:path*', destination: '/m/frota/:path*', permanent: true },
 ];
 
 const nextConfig = {

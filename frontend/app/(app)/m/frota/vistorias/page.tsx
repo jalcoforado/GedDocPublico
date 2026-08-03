@@ -196,7 +196,7 @@ export default function VistoriasPage() {
         icon={ClipboardCheck}
         title="Vistorias"
         description="Checklist interno de vistoria dos veículos da frota."
-        breadcrumbs={[{ label: "Frota Pública", href: "/frotas" }, { label: "Vistorias" }]}
+        breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Vistorias" }]}
         actions={
           canCreate ? (
             <Button onClick={openNew}>

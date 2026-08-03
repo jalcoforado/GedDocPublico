@@ -414,7 +414,7 @@ export default function SolicitacoesPage() {
         icon={ClipboardList}
         title="Solicitações de Veículo"
         description="Pedidos de uso de veículo da frota, com finalidade, destino e datas previstas."
-        breadcrumbs={[{ label: "Frota Pública", href: "/frotas" }, { label: "Solicitações" }]}
+        breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Solicitações" }]}
         actions={
           canCreate ? (
             <Button onClick={openNew}>

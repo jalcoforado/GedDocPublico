@@ -182,7 +182,7 @@ export default function AbastecimentosPage() {
         icon={Fuel}
         title="Abastecimentos"
         description="Registro de abastecimentos da frota."
-        breadcrumbs={[{ label: "Frota Pública", href: "/frotas" }, { label: "Abastecimentos" }]}
+        breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Abastecimentos" }]}
         actions={
           canCreate ? (
             <Button onClick={openNew}>

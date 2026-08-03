@@ -7,7 +7,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const push = vi.fn();
-const usePathnameMock = vi.fn(() => "/frotas/veiculos");
+const usePathnameMock = vi.fn(() => "/m/frota/veiculos");
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: push }),
   usePathname: () => usePathnameMock(),
@@ -41,7 +41,7 @@ const DOIS_MODULOS = {
 
 beforeEach(() => {
   push.mockClear();
-  usePathnameMock.mockReturnValue("/frotas/veiculos");
+  usePathnameMock.mockReturnValue("/m/frota/veiculos");
   modulosMock.mockReset();
   modulosMock.mockResolvedValue(DOIS_MODULOS);
 });
@@ -96,7 +96,7 @@ describe("switcher de módulo", () => {
     );
     fireEvent.click(botao);
     fireEvent.click(screen.getByText("Frota"));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/frotas"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/m/frota"));
   });
 
   it("com um único módulo, o item 'Todos os módulos' não aparece (bateria e voltaria na hora)", async () => {

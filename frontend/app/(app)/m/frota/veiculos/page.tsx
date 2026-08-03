@@ -205,7 +205,7 @@ export default function VeiculosPage() {
         icon={Car}
         title="Veículos"
         description="Cadastro da frota própria do município."
-        breadcrumbs={[{ label: "Frota Pública", href: "/frotas" }, { label: "Veículos" }]}
+        breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Veículos" }]}
         actions={
           canCreate ? (
             <Button onClick={openNew}>

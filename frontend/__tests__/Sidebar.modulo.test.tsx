@@ -1,6 +1,6 @@
 /**
  * A Sidebar passa a renderizar SÓ o módulo ativo, mais os transversais.
- * O que este teste protege: estar em /frotas não pode mostrar menu de
+ * O que este teste protege: estar em /m/frota não pode mostrar menu de
  * pagamentos — era exatamente o que a Sidebar de 637 linhas fazia.
  */
 import type { ComponentProps } from "react";
@@ -10,7 +10,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/frotas/veiculos",
+  usePathname: () => "/m/frota/veiculos",
   useRouter: () => ({ push: vi.fn() }),
 }));
 vi.mock("@/lib/auth", () => ({

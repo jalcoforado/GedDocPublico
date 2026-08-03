@@ -87,7 +87,7 @@ export default function RelatoriosFrotaPage() {
         icon={BarChart3}
         title="Visão gerencial"
         description="Indicadores operacionais consolidados da frota."
-        breadcrumbs={[{ label: "Frota Pública", href: "/frotas" }, { label: "Visão gerencial" }]}
+        breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Visão gerencial" }]}
       />
 
       <SectionCard icon={BarChart3} title="Veículos" description="Situação atual da frota.">

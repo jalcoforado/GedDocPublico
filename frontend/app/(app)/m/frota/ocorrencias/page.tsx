@@ -253,7 +253,7 @@ export default function OcorrenciasPage() {
         icon={AlertOctagon}
         title="Ocorrências"
         description="Ocorrências internas da frota: avaria, multa, sinistro e outras."
-        breadcrumbs={[{ label: "Frota Pública", href: "/frotas" }, { label: "Ocorrências" }]}
+        breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Ocorrências" }]}
         actions={
           canCreate ? (
             <Button onClick={openNew}>

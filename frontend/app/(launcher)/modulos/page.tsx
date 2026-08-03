@@ -20,7 +20,7 @@ import { iconeDoModulo } from "@/lib/modulos";
  * (`ModuloSwitcher`, em `components/ModuloSwitcher.tsx`). `(app)` e
  * `(launcher)` são grupos de rota IRMÃOS, cada um monta o próprio
  * `<Providers>`, e `Providers` cria o `QueryClient` num `useState` — ir de
- * `/frotas` para `/modulos` desmonta um layout e monta o outro, então o
+ * `/m/frota` para `/modulos` desmonta um layout e monta o outro, então o
  * client (e o cache de `modulos-me`) é sempre novo. Herdar do layout
  * continua certo pela consistência de config, só não pela consistência de
  * cache entre os dois grupos.
