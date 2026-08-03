@@ -26,6 +26,7 @@ from ..services import pagamentos_caixa as caixa
 from ..services import pagamentos_checklist as checklist
 from ..services import pagamentos_dashboard as dash
 from ..services import pagamentos_debitos as svc
+from ..services import pagamentos_excecoes as excecoes
 from ..services import pagamentos_export as export
 from ..services import pagamentos_filas as filas
 from ..services.html_pdf import html_to_pdf_bytes
@@ -294,6 +295,23 @@ async def autorizar(payload: AutorizarLoteIn, request: Request,
     ops = await aut.autorizar_lote(db, tenant_id=tenant_id, usuario_id=usuario.id,
                                    grupos=payload.grupos, ip=_ip(request))
     return await _op_out(db, tenant_id, ops)
+
+
+# Onda C (C1.2) — relatório de exceções. Leitura ampla de propósito: quem
+# audita não é necessariamente quem autoriza ou paga.
+@operacoes_router.get("/relatorios/excecoes")
+async def relatorio_excecoes(limite_por_regra: int = 50,
+                             _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                             tenant_id: int = Depends(require_tenant_id),
+                             db: AsyncSession = Depends(get_db)):
+    """Consolida os estados que merecem conferência humana.
+
+    Nenhuma regra nova: cada exceção corresponde a algo que o modelo já
+    registra. `limite_por_regra` corta a lista exibida, nunca o total — ver
+    "exibindo" vs "total" na resposta.
+    """
+    return await excecoes.relatorio_excecoes(
+        db, tenant_id=tenant_id, limite_por_regra=limite_por_regra)
 
 
 @operacoes_router.get("/ordens-pagamento", response_model=list[OrdemPagamentoOut])
