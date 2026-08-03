@@ -71,6 +71,13 @@ MIGRATION = "0080_grant_por_coluna_em_tenant.py"
 # municipal bastaria acrescentá-lo à constante do service e à migration, e o
 # teste de divergência ficaria verde enquanto a propriedade central do PR
 # morria em silêncio.
+#
+# `atualizado_em` fica FORA desta lista de propósito: não é decisão de
+# plataforma, é carimbo. Que ele esteja fora do grant é consequência de
+# `tenant_config` não o gravar (guardado por
+# `test_pr3b_config_inicial.py::test_config_institucional_grava_pelo_orm_sob_aprimora_app`),
+# não uma proibição — o dia em que um caminho municipal precisar carimbá-lo, a
+# saída é migration que o conceda, e não relaxar nada aqui.
 COLUNAS_DE_PLATAFORMA = frozenset(
     {
         "id",
@@ -82,6 +89,11 @@ COLUNAS_DE_PLATAFORMA = frozenset(
         "criado_em",
         "limite_usuarios",
         "limite_armazenamento_mb",
+        # Opt-in de soberania de dados da integração Google (`models/tenant.py`).
+        # Nenhum código Python o escreve hoje: quem habilita a saída de minutas
+        # para fora do município é a plataforma, por decisão contratual — não o
+        # admin municipal, por tela de configuração institucional.
+        "google_docs_habilitado",
     }
 )
 
