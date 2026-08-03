@@ -56,7 +56,17 @@ class TelefoneResponse(BaseModel):
 
 
 class WhatsAppTestRequest(BaseModel):
-    telefone: str  # destino livre, em E.164
+    """Corpo do teste de WhatsApp. **Não tem destino.**
+
+    O campo `telefone` foi REMOVIDO (backlog 1.0.6): ele era destino livre, e
+    qualquer autenticado do tenant mandava mensagem para número arbitrário
+    usando a credencial paga do tenant. O destino agora é sempre o telefone do
+    perfil de quem chama, resolvido no servidor.
+
+    Não reintroduza um campo de destino aqui sem antes decidir quem tem
+    autorização para mandar mensagem a terceiro — hoje ninguém tem.
+    """
+
     mensagem: str = "Teste de WhatsApp via Aprimora"
 
 

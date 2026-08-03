@@ -72,11 +72,21 @@ async def enviar(
     link_url: str | None = None,
     payload: dict[str, Any] | None = None,
     prioridade: str = "normal",
+    ignorar_preferencias: bool = False,
 ) -> list[Notificacao]:
     """Cria uma notificação por (destinatário × canal). Despacha externos.
 
     Retorna a lista das notificações criadas (já refreshed). Commit feito
     UMA vez no fim — caller pode confiar que ou tudo persistiu ou nada.
+
+    `ignorar_preferencias` existe para o envio que o PRÓPRIO destinatário pediu
+    agora — hoje só `POST /notificacoes/whatsapp-test`. Preferência é opt-out de
+    notificação automática; um teste que o usuário disparou no próprio perfil
+    não é isso, e respeitá-la tornaria impossível conferir o telefone antes de
+    ligar o canal (`DEFAULT_PREFS["whatsapp"]` é `False`).
+
+    **Não use em envio automático.** Notificação de processo, pagamento ou SLA
+    passa pela preferência; é ela que faz o opt-out valer alguma coisa.
     """
     for c in canais:
         if c not in CANAIS_VALIDOS:
@@ -126,7 +136,7 @@ async def enviar(
     def _canal_permitido(uid: int | None, canal: str) -> bool:
         """Email livre (sem uid) sempre permite todos os canais. Usuário
         interno consulta preferência (default se não tem row)."""
-        if uid is None:
+        if uid is None or ignorar_preferencias:
             return True
         pref = prefs_por_uid.get(uid)
         if pref is None:

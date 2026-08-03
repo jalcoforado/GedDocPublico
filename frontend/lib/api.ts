@@ -4449,7 +4449,12 @@ export const notificacoesApi = {
       method: "PUT",
       body: JSON.stringify({ telefone }),
     }),
-  whatsappTest: (telefone: string, mensagem: string) =>
+  // Sem destino de propósito (backlog 1.0.6): o servidor manda para o telefone
+  // do perfil de quem chama. Aceitar `telefone` aqui era mandar mensagem paga
+  // do tenant para número arbitrário com qualquer login. Salve o telefone com
+  // `setTelefone` antes; sem ele o backend devolve 400. Limite de 3 por hora,
+  // por usuário — estourou, vem 429.
+  whatsappTest: (mensagem: string) =>
     request<{
       id_notificacao: number;
       enviado_em: string | null;
@@ -4457,7 +4462,7 @@ export const notificacoesApi = {
       provider: string;
     }>(`/notificacoes/whatsapp-test`, {
       method: "POST",
-      body: JSON.stringify({ telefone, mensagem }),
+      body: JSON.stringify({ mensagem }),
     }),
 };
 
