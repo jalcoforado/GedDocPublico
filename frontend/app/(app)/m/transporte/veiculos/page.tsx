@@ -294,7 +294,7 @@ export default function VeiculosReguladosPage() {
         title="Veículos regulados"
         description="Veículos vinculados a permissionários ou empresas autorizadas (não confundir com a frota interna do município)."
         breadcrumbs={[
-          { label: "Transporte Regulado", href: "/transporte-regulado" },
+          { label: "Transporte Regulado", href: "/m/transporte" },
           { label: "Veículos regulados" },
         ]}
         actions={
@@ -386,7 +386,7 @@ export default function VeiculosReguladosPage() {
             {listaQ.data?.items.map((v) => (
               <TR key={v.id}>
                 <TD className="font-mono">
-                  <Link href={`/transporte-regulado/veiculos/${v.id}`} className="text-blue-600 hover:underline">
+                  <Link href={`/m/transporte/veiculos/${v.id}`} className="text-blue-600 hover:underline">
                     {v.placa}
                   </Link>
                 </TD>
@@ -408,7 +408,7 @@ export default function VeiculosReguladosPage() {
                 </TD>
                 <TD className="text-right">
                   <div className="inline-flex flex-wrap justify-end gap-2">
-                    <Link href={`/transporte-regulado/veiculos/${v.id}`}>
+                    <Link href={`/m/transporte/veiculos/${v.id}`}>
                       <Button variant="secondary" size="sm">
                         Detalhes
                       </Button>

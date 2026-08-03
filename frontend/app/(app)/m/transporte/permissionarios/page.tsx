@@ -225,7 +225,7 @@ export default function PermissionariosPage() {
         title="Permissionários"
         description="Cadastro de permissionários do transporte regulado."
         breadcrumbs={[
-          { label: "Transporte Regulado", href: "/transporte-regulado" },
+          { label: "Transporte Regulado", href: "/m/transporte" },
           { label: "Permissionários" },
         ]}
         actions={

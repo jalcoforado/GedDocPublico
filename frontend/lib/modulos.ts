@@ -38,13 +38,40 @@ export const ROTA_MODULO: ReadonlyArray<readonly [string, string]> = [
   ["/jobs", "administracao"],
 ];
 
+/** Prefixo canônico das rotas de módulo desde a F3. */
+export const PREFIXO_MODULO = "/m";
+
+/** Slugs válidos, derivados do próprio mapa — não uma segunda lista a manter. */
+export const SLUGS_MODULO: ReadonlySet<string> = new Set(
+  ROTA_MODULO.map(([, slug]) => slug),
+);
+
 /**
  * Slug do módulo dono da rota, ou `null` se a rota é transversal.
  *
- * Casa por SEGMENTO, não por substring: `/processosx` não é `/processos`.
+ * Reconhece as **duas** formas, e isso não é transitório:
+ *
+ * - **canônica** (F3): `/m/<slug>/…` — o slug está na própria URL;
+ * - **legada**: `/frotas`, `/processos`, … — continuam chegando aqui porque o
+ *   308 do `next.config.js` é resolvido pelo Next **antes** do render, mas
+ *   `notificacao.link_url` é registro histórico permanente e o mapa
+ *   `ROTA_MODULO` segue sendo a fonte desses redirects. Apagar a segunda forma
+ *   apagaria os redirects junto.
+ *
+ * Casa por SEGMENTO, não por substring: `/processosx` não é `/processos`, e
+ * `/mapa` não é `/m/apa`.
  */
 export function moduloDoPathname(path: string): string | null {
   const limpo = path.split("?")[0].split("#")[0].replace(/\/+$/, "") || "/";
+
+  if (limpo === PREFIXO_MODULO || limpo.startsWith(`${PREFIXO_MODULO}/`)) {
+    const slug = limpo.slice(PREFIXO_MODULO.length + 1).split("/")[0];
+    // Slug desconhecido devolve `null`, não o texto cru: quem consome isto
+    // renderiza menu e guard, e um slug inventado na URL não pode virar
+    // estado de aplicação.
+    return SLUGS_MODULO.has(slug) ? slug : null;
+  }
+
   for (const [prefixo, slug] of ROTA_MODULO) {
     if (limpo === prefixo || limpo.startsWith(`${prefixo}/`)) return slug;
   }

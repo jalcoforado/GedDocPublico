@@ -378,7 +378,7 @@ export default function VeiculoDetailPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Link href="/transporte-regulado/veiculos">
+        <Link href="/m/transporte/veiculos">
           <Button variant="ghost" size="sm">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Voltar

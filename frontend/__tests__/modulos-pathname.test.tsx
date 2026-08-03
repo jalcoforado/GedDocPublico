@@ -61,4 +61,41 @@ describe("moduloDoPathname", () => {
     expect(moduloDoPathname("/frotas/")).toBe("frota");
     expect(moduloDoPathname("/frotas?tab=ativos")).toBe("frota");
   });
+
+  // ---- F3: a forma canônica `/m/<slug>` ----
+  //
+  // As duas formas convivem por decisão, não por transição inacabada: o mapa
+  // legado é a fonte dos redirects 308, e `notificacao.link_url` é registro
+  // histórico permanente. Apagar a forma antiga apagaria os redirects junto.
+  describe("prefixo canônico /m/<slug> (F3)", () => {
+    it.each([
+      ["/m/transporte", "transporte"],
+      ["/m/transporte/alvaras/3", "transporte"],
+      ["/m/protocolo/processos/123", "protocolo"],
+      ["/m/pagamentos", "pagamentos"],
+      ["/m/frota/veiculos", "frota"],
+      ["/m/administracao/usuarios", "administracao"],
+    ])("%s → %s", (path, esperado) => {
+      expect(moduloDoPathname(path)).toBe(esperado);
+    });
+
+    it("slug desconhecido vira null, não o texto cru da URL", () => {
+      // Quem consome isto monta menu e guard. Devolver o texto deixaria um
+      // slug inventado na barra de endereços virar estado de aplicação.
+      expect(moduloDoPathname("/m/inexistente")).toBeNull();
+      expect(moduloDoPathname("/m/inexistente/foo")).toBeNull();
+      expect(moduloDoPathname("/m/comum")).toBeNull();
+    });
+
+    it("não confunde `/m` com rota que só começa com m", () => {
+      expect(moduloDoPathname("/m")).toBeNull();
+      expect(moduloDoPathname("/manifestantes")).toBe("protocolo");
+      expect(moduloDoPathname("/modulos")).toBeNull();
+    });
+
+    it("tolera querystring e barra final na forma nova", () => {
+      expect(moduloDoPathname("/m/frota/")).toBe("frota");
+      expect(moduloDoPathname("/m/frota?tab=ativos")).toBe("frota");
+    });
+  });
 });

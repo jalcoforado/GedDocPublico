@@ -263,7 +263,7 @@ export default function EmpresasPage() {
         title="Empresas"
         description="Cadastro de empresas e operadoras do transporte regulado."
         breadcrumbs={[
-          { label: "Transporte Regulado", href: "/transporte-regulado" },
+          { label: "Transporte Regulado", href: "/m/transporte" },
           { label: "Empresas" },
         ]}
         actions={

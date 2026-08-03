@@ -448,7 +448,7 @@ export default function AlvarasPage() {
         title="Alvarás"
         description="Autorizações e permissões de operação para permissionários e empresas."
         breadcrumbs={[
-          { label: "Transporte Regulado", href: "/transporte-regulado" },
+          { label: "Transporte Regulado", href: "/m/transporte" },
           { label: "Alvarás" },
         ]}
         actions={

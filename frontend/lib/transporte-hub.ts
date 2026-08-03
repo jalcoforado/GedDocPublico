@@ -31,35 +31,35 @@ export interface HubCard {
  */
 export const CARDS: HubCard[] = [
   {
-    href: "/transporte-regulado/permissionarios",
+    href: "/m/transporte/permissionarios",
     icon: IdCard,
     title: "Permissionários",
     desc: "Cadastro de permissionários: dados pessoais, CNH, tipo de serviço, permissão e situação.",
     ready: true,
   },
   {
-    href: "/transporte-regulado/empresas",
+    href: "/m/transporte/empresas",
     icon: Building2,
     title: "Empresas",
     desc: "Empresas e operadoras reguladas: dados cadastrais, endereço, autorização e situação.",
     ready: true,
   },
   {
-    href: "/transporte-regulado/veiculos",
+    href: "/m/transporte/veiculos",
     icon: Car,
     title: "Veículos",
     desc: "Veículos regulados, com documentos, avaliações e vistorias no detalhe de cada um.",
     ready: true,
   },
   {
-    href: "/transporte-regulado/alvaras",
+    href: "/m/transporte/alvaras",
     icon: ScrollText,
     title: "Alvarás",
     desc: "Alvarás e autorizações de operação, com documentos, responsáveis e renovação.",
     ready: true,
   },
   {
-    href: "/transporte-regulado/relatorio",
+    href: "/m/transporte/relatorio",
     icon: BarChart3,
     title: "Relatórios",
     desc: "KPIs e análise de alvarás regulados, com exportação.",

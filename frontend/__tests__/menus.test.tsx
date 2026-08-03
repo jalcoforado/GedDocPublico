@@ -54,12 +54,12 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/frotas/veiculos": { perm: "frota" },
   "/frotas/motoristas": { perm: "frota" },
   "/frotas/solicitacoes": { perm: "frota" },
-  "/transporte-regulado": { perm: "transporte_regulado" },
-  "/transporte-regulado/permissionarios": { perm: "transporte_regulado" },
-  "/transporte-regulado/empresas": { perm: "transporte_regulado" },
-  "/transporte-regulado/veiculos": { perm: "transporte_regulado" },
-  "/transporte-regulado/alvaras": { perm: "transporte_regulado" },
-  "/transporte-regulado/relatorio": { perm: "transporte_regulado" },
+  "/m/transporte": { perm: "transporte_regulado" },
+  "/m/transporte/permissionarios": { perm: "transporte_regulado" },
+  "/m/transporte/empresas": { perm: "transporte_regulado" },
+  "/m/transporte/veiculos": { perm: "transporte_regulado" },
+  "/m/transporte/alvaras": { perm: "transporte_regulado" },
+  "/m/transporte/relatorio": { perm: "transporte_regulado" },
   "/pagamentos": {
     anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"],
   },
@@ -199,7 +199,7 @@ describe("split dos menus", () => {
     const menu = menuDoModulo("transporte");
     expect(menu).not.toBeNull();
     const doTransporte = hrefs(menu!.grupos.flatMap((g) => g.items));
-    expect(doTransporte).toContain("/transporte-regulado/alvaras");
-    expect(doTransporte).toContain("/transporte-regulado/relatorio");
+    expect(doTransporte).toContain("/m/transporte/alvaras");
+    expect(doTransporte).toContain("/m/transporte/relatorio");
   });
 });
