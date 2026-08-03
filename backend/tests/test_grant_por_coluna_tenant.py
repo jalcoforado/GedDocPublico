@@ -35,6 +35,16 @@ desativado pela sessão do município A — e as três guardas de catálogo apon
 Os 2 verdes são exatamente os da seção 3, que medem o que a 0080 **não** tira
 (NUP federal no papel municipal, `UPDATE` de tabela no papel de plataforma).
 Verdes nos dois estados é o comportamento correto deles.
+
+## O que este arquivo NÃO alcança
+
+Tudo aqui é catálogo (`information_schema`) ou SQL cru, e as três pontas da
+guarda de divergência são indexadas por **campo de schema Pydantic**. Coluna que
+um caminho municipal suje FORA do payload — o `atualizado_em = utcnow()` depois
+do `setattr`, convenção do resto do repositório — é invisível às três, e o
+`UPDATE` do ORM (que é o que roda em produção) não é medido aqui.
+Essa metade está em `test_pr3b_config_inicial.py`, seção "SEC-RLS-00D": os dois
+caminhos municipais rodando pelo ORM sob a fixture `app_session`.
 """
 from __future__ import annotations
 

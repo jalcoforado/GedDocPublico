@@ -122,6 +122,12 @@ async def atualizar_config_institucional(
     for campo, valor in dados.items():
         setattr(tenant, campo, valor)
 
+    # NÃO acrescente aqui o `atualizado_em = datetime.utcnow()` que o resto do
+    # repositório usa depois do `setattr`: essa coluna está FORA do
+    # `GRANT UPDATE (...)` da 0080, e o ORM emite um `UPDATE` só com todas as
+    # colunas sujas — uma delas fora do grant derruba a instrução inteira.
+    # Guardado por `tests/test_pr3b_config_inicial.py`
+    # ::test_config_institucional_grava_pelo_orm_sob_aprimora_app.
     await db.commit()
     await db.refresh(tenant)
     return tenant

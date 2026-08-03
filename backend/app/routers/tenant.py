@@ -80,6 +80,10 @@ async def update_nup_config(
     if payload.usar_nup_federal is not None:
         tenant.usar_nup_federal = payload.usar_nup_federal
 
+    # Como em `services/tenant_config.py`: nada de `atualizado_em = utcnow()`
+    # aqui. A coluna está fora do `GRANT UPDATE (...)` da 0080 e o ORM emite um
+    # `UPDATE` só com todas as colunas sujas. Guardado por
+    # `tests/test_pr3b_config_inicial.py::test_nup_config_grava_pelo_orm_sob_aprimora_app`.
     await db.commit()
     await db.refresh(tenant)
     return tenant

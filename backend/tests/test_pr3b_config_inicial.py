@@ -9,6 +9,8 @@ Cobre:
 - `calcular_onboarding`: reflete o estado real (vazio → false; preenchido → true).
 - Gate `configuracao:atualizar`: SU bypassa; não-SU sem a transação → 403.
 - Schema `TenantInstitucionalUpdate` descarta extras (id/slug/plano/…).
+- SEC-RLS-00D: os dois caminhos municipais de escrita em `aprimora_py.tenant`
+  rodando **pelo ORM** sob o papel `aprimora_app` (ver a seção no fim).
 """
 from __future__ import annotations
 
@@ -19,12 +21,14 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth.password import verify_password
 from app.auth.perms import require_permission
 from app.models import Tenant, Usuario
-from app.schemas.tenant import TenantInstitucionalUpdate
+from app.routers.tenant import update_nup_config
+from app.schemas.tenant import TenantInstitucionalUpdate, TenantNupConfigUpdate
 from app.services.permissoes import UserPermissions
 from app.services.provisioning_tenant import provisionar_tenant
 from app.services.tenant_config import (
@@ -341,6 +345,164 @@ async def test_gate_configuracao_nao_su_sem_transacao_403(monkeypatch):
         await check(user=_fake_user(), tenant_id=1, db=MagicMock())
     assert exc.value.status_code == 403
     assert "configuracao" in exc.value.detail
+
+
+# ---------- SEC-RLS-00D: os dois caminhos, pelo ORM, sob `aprimora_app` ----------
+#
+# Por que aqui e não em `test_grant_por_coluna_tenant.py`: o que se exercita é o
+# caminho de escrita do PRODUTO (service e router, com tenant provisionado e
+# unidade de verdade), cenário que este arquivo já monta — o arquivo de guarda do
+# 00D mede catálogo e ACL com SQL cru, e é justamente por medir SQL cru que ele
+# não alcança o `UPDATE` que o ORM emite.
+#
+# A diferença importa: as três guardas de divergência do 00D são indexadas por
+# **campo de schema Pydantic**. Coluna que o service suje FORA do payload é
+# invisível às três, e a candidata óbvia é `atualizado_em` — o
+# `x.atualizado_em = datetime.utcnow()` depois do `setattr` é a convenção
+# uniforme do repositório (`frota.py`, `minutas.py`, `admin_tenants.py`,
+# `cli/tenant.py`), e `tenant_config` é a exceção. No dia em que alguém
+# "padronizar" este service, nada acima fica vermelho e
+# `PUT /api/v2/tenants/me` devolve 500 para todo município pós-SEC-RLS-ROLLOUT.
+#
+# Os demais testes deste arquivo usam `admin_engine` (`ged_user`, UPDATE de
+# tabela inteira): passariam iguais. Estes dois, e só estes, usam `app_session`.
+
+
+def _diagnostico_de_grant(caminho: str, erro: BaseException) -> str:
+    """Mensagem de falha que aponta para o grant, não para o service."""
+    return (
+        f"`{caminho}` foi RECUSADO pelo banco sob o papel `aprimora_app`:\n"
+        f"    {erro}\n\n"
+        "Isto NÃO é RLS e provavelmente NÃO é defeito do service: é o GRANT POR "
+        "COLUNA da migration `0080_grant_por_coluna_em_tenant.py` (SEC-RLS-00D). "
+        "`aprimora_py.tenant` não tem RLS; o papel municipal tem apenas "
+        "`UPDATE (<COLUNAS_MUNICIPAIS_DE_TENANT>)` e perdeu o `UPDATE` de tabela "
+        "inteira.\n"
+        "O `UPDATE` que o ORM emite carrega TODA coluna suja na instância — "
+        "inclusive as que não vieram do payload, como um "
+        "`tenant.atualizado_em = datetime.utcnow()` acrescentado depois do "
+        "`setattr`. Uma única coluna fora do grant derruba a instrução inteira "
+        "com `permission denied for table tenant`, e o endpoint municipal passa "
+        "a devolver 500 no dia do SEC-RLS-ROLLOUT.\n"
+        "CORREÇÃO: ou o caminho para de gravar a coluna, ou ela entra em "
+        "`COLUNAS_MUNICIPAIS_DE_TENANT` (`app/services/tenant_config.py`) **e** "
+        "no `GRANT UPDATE (...)`, por MIGRATION NOVA no modelo da 0080 — não "
+        "basta mexer no Python. Coluna de PLATAFORMA (`ativo`, `plano`, `slug`, "
+        "`limite_*`, `google_docs_habilitado`) NÃO entra: ver "
+        "`tests/test_grant_por_coluna_tenant.py`.\n"
+        "Se este banco não estiver em `head`, rode `alembic upgrade head` antes "
+        "de ler isto como defeito de código."
+    )
+
+
+async def test_config_institucional_grava_pelo_orm_sob_aprimora_app(
+    admin_engine, app_session
+):
+    """Os 11 campos institucionais, de uma vez, na sessão do papel municipal.
+
+    Todos de uma vez de propósito: o `UPDATE` do ORM é uma instrução só, e o
+    Postgres recusa a instrução inteira se UMA coluna estiver fora do grant.
+    Campo a campo mediria a mesma coisa 11 vezes e ainda assim não veria a
+    coluna suja fora do payload, que é o alvo real.
+    """
+    tenant = await _provisionar(admin_engine)
+    try:
+        uid = await _unidade_id(admin_engine, tenant.id)
+        payload = TenantInstitucionalUpdate(
+            nome="Prefeitura ORM",
+            sigla="PORM",
+            email_institucional="contato@porm.gov.br",
+            telefone_institucional="(88) 3611-0000",
+            endereco="Rua Um, 100 - Centro",
+            site_oficial="https://porm.gov.br",
+            horario_atendimento="08h às 14h",
+            texto_boas_vindas_portal="Bem-vindo ao portal.",
+            logo_url="https://porm.gov.br/logo.png",
+            cor_primaria="#0055aa",
+            id_unidade_padrao=uid,
+        )
+        enviados = set(payload.model_dump(exclude_unset=True))
+        assert enviados == set(TenantInstitucionalUpdate.model_fields), (
+            "este teste tem de enviar TODOS os campos de "
+            "`TenantInstitucionalUpdate` na MESMA instrução — campo não enviado "
+            "é campo cujo grant não foi medido pelo caminho ORM.\n"
+            f"  no schema e não no payload: "
+            f"{sorted(set(TenantInstitucionalUpdate.model_fields) - enviados)}"
+        )
+
+        # `app_session` exige o `SET LOCAL` de quem a usa: `aprimora_py.tenant`
+        # não tem RLS, mas a validação de `id_unidade_padrao` lê
+        # `utils.unidade_trabalho`, que tem.
+        await app_session.execute(text(f"SET LOCAL app.tenant_id = '{tenant.id}'"))
+        try:
+            await atualizar_config_institucional(
+                app_session, tenant_id=tenant.id, payload=payload
+            )
+        except DBAPIError as e:  # noqa: PERF203 - a mensagem É o teste
+            pytest.fail(
+                _diagnostico_de_grant(
+                    "services.tenant_config.atualizar_config_institucional "
+                    "(PUT /api/v2/tenants/me)",
+                    e.orig or e,
+                )
+            )
+
+        # Releitura por sessão administrativa: "não levantou" não é "gravou".
+        async with _sessionmaker(admin_engine)() as s:
+            t = (
+                await s.execute(select(Tenant).where(Tenant.id == tenant.id))
+            ).scalar_one()
+        assert (t.nome, t.sigla, t.cor_primaria, t.id_unidade_padrao) == (
+            "Prefeitura ORM",
+            "PORM",
+            "#0055aa",
+            uid,
+        ), "o UPDATE passou pelo grant mas os valores não chegaram à linha."
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+async def test_nup_config_grava_pelo_orm_sob_aprimora_app(admin_engine, app_session):
+    """`PUT /tenants/me/nup-config` é o SEGUNDO caminho municipal de escrita.
+
+    Ele não passa por `tenant_config` — grava direto na instância no router. O
+    teste chama a função do router, e não o service, porque é ali que os dois
+    `setattr` vivem: um `atualizado_em` acrescentado ao router seria invisível
+    para o teste de cima.
+    """
+    tenant = await _provisionar(admin_engine)
+    try:
+        payload = TenantNupConfigUpdate(codigo_orgao_nup="54321", usar_nup_federal=True)
+        enviados = set(payload.model_dump(exclude_unset=True))
+        assert enviados == set(TenantNupConfigUpdate.model_fields), (
+            "este teste tem de enviar TODOS os campos de `TenantNupConfigUpdate`:"
+            f" faltam {sorted(set(TenantNupConfigUpdate.model_fields) - enviados)}"
+        )
+
+        await app_session.execute(text(f"SET LOCAL app.tenant_id = '{tenant.id}'"))
+        alvo = (
+            await app_session.execute(select(Tenant).where(Tenant.id == tenant.id))
+        ).scalar_one()
+        try:
+            await update_nup_config(payload=payload, tenant=alvo, db=app_session)
+        except DBAPIError as e:
+            pytest.fail(
+                _diagnostico_de_grant(
+                    "routers.tenant.update_nup_config "
+                    "(PUT /api/v2/tenants/me/nup-config)",
+                    e.orig or e,
+                )
+            )
+
+        async with _sessionmaker(admin_engine)() as s:
+            t = (
+                await s.execute(select(Tenant).where(Tenant.id == tenant.id))
+            ).scalar_one()
+        assert (t.codigo_orgao_nup, t.usar_nup_federal) == ("54321", True), (
+            "o UPDATE de NUP passou pelo grant mas os valores não chegaram à linha."
+        )
+    finally:
+        await _cleanup(admin_engine, tenant.id)
 
 
 # ---------- schema: descarta extras ----------
