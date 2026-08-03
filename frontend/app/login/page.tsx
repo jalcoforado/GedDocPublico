@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { api } from "@/lib/api";
 import { useBranding } from "@/lib/branding";
+import { destinoDaQuery } from "@/lib/destino-login";
 
 const DEV = process.env.NODE_ENV !== "production";
 
@@ -33,8 +34,18 @@ export default function LoginPage() {
       // Sem must_change_password, o destino do login bem-sucedido é o
       // launcher de módulos (F2 Task 5) — não mais o dashboard fixo /home.
       const r = await api.login(email, senha);
+      // `must_change_password` tem PRECEDÊNCIA sobre o `next` (SEC-1). O
+      // destino guardado na URL é conveniência de navegação; a troca de senha
+      // obrigatória é decisão do backend, e deixá-la ser pulada por um
+      // parâmetro de URL seria contorná-la.
+      //
+      // O `next` é lido de `window.location.search`, e não por
+      // `useSearchParams()`, para não obrigar esta página a uma fronteira de
+      // Suspense — ela é client component e só precisa do valor no submit.
       router.push(
-        r.must_change_password ? "/alterar-senha-obrigatoria" : "/modulos",
+        r.must_change_password
+          ? "/alterar-senha-obrigatoria"
+          : destinoDaQuery(window.location.search),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao autenticar");
