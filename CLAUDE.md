@@ -86,8 +86,29 @@ backend. Nenhum teste do frontend deve afirmar que ele protege dado.
 **Rota de topo nova precisa entrar na regex do `nginx/default.conf`** — sem isso a tela cai no
 fallback legado e "não existe" no `:8090`, mesmo funcionando em dev. Quase aconteceu com `/modulos`.
 
-O prefixo `/m/<slug>` na URL e os redirects 308 são a **F3, não planejada**. Spec e planos em
-`docs/superpowers/`.
+### A F3 (`/m/<slug>`), em `main` desde 2026-08-03
+
+As telas de módulo moram em **`app/(app)/m/<slug>/`**. Na raiz de `app/(app)/` ficam só as
+transversais da D5 — `home`, `dashboard`, `perfil`, `para-assinar`. Tela nova de módulo nasce dentro
+de `m/<slug>/`; rota de topo fora de `m/` só se for transversal de verdade (agrega *através* dos
+módulos), e nesse caso entra em `TRANSVERSAIS` no `__tests__/rotas-modulo.test.ts`.
+
+Três coisas que **não** podem ser desfeitas:
+
+- **A regex do nginx só cresce.** Ela ganhou o token `m` e manteve todos os antigos. Remover
+  `processos`, `frotas`, `pagamentos`… faria a URL antiga cair no fallback legado **antes** de
+  chegar ao Next — ou seja, mataria o próprio 308 que a mantém viva. Como `notificacao.link_url` é
+  registro histórico permanente, os tokens antigos ficam para sempre.
+- **`permanent: true` (308) é cache de navegador.** Destino errado que chegue a produção não se
+  conserta com redeploy: cada usuário precisa limpar o cache. Confira com `curl -I` antes.
+- **Prefixo novo em `ROTA_MODULO` exige regra nova em `redirects()`**, e o `href` do menu tem de
+  apontar para `/m/<slug>/…`, não para o caminho antigo.
+
+`__tests__/rotas-modulo.test.ts` reprova as três, mais chave órfã em `KEYWORDS_POR_HREF`. Ele existe
+porque, durante a F3, a varredura manual por linha contendo `href` falhou **três vezes** — `abrirHref`
+(caixa alta), `CHECKLIST_HREF` (mapa, não linha) e `KEYWORDS_POR_HREF` (fora do diretório varrido) —
+e **nenhuma das três quebrou teste**. Link errado ainda funciona pelo 308, então o sintoma é salto
+extra e URL velha na barra; a chave órfã só piora o Ctrl+K em silêncio.
 
 O nginx nasceu como *Strangler Fig* na frente de um monolito PHP legado. Hoje a versão Python é tratada como **independente** — não portar comportamento do PHP nem consultá-lo como fonte de verdade. O que sobra dessa herança e continua valendo: o schema Postgres é compartilhado com o legado (`utils.*`, `protocolos.*` são tabelas legadas; `aprimora_py.*` e `frota.*` são nossos), e o nginx tem uma regex de rotas migradas (ver "Adicionando um módulo").
 

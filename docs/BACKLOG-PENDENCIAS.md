@@ -35,8 +35,13 @@
   - **F2** (PR #17, `c19f359`) — a interface: menus por módulo, launcher `/modulos`, login
     aterrissando nele, switcher no Header, cabeçalho de módulo na Sidebar, aba Módulos no admin,
     Ctrl+K ciente de módulo e permissão.
-- **F3 (prefixo `/m/<slug>` + redirects 308) não está planejada.** O mapa `pathname → módulo` que a
-  F2 criou (`frontend/lib/modulos.ts`) é o que vai gerar os redirects.
+  - **F3** (2026-08-03) — o prefixo `/m/<slug>` nas URLs, 24 redirects **308**, guard de módulo,
+    token `m` no nginx e o `?next=` no login. As telas de módulo saíram de `app/(app)/<rota>` para
+    `app/(app)/m/<slug>/`; na raiz ficaram só as transversais da D5. `ROTA_MODULO` continua vivo, e
+    não por inércia: é a fonte dos redirects, e `notificacao.link_url` é registro permanente.
+    Guardas em `frontend/__tests__/rotas-modulo.test.ts` (57 asserções, quatro provadas por
+    inversão). Falta a **F4**: `public.modulos`/`configuracoes_modulos` fora do ORM, `Sidebar.tsx`
+    antiga deletada, `link_url` nascendo já prefixado.
 - **Cuidado ao validar módulos na homologação:** o seed contrata os **cinco** módulos no tenant
   `sobral`. O caso de "tenant com um módulo só" — onde estava o defeito crítico da F2 — **não é
   exercitado** por navegação normal. Use a aba Módulos do admin de plataforma para descontratar.
@@ -327,9 +332,13 @@ não seja lida como "está fechado em produção".)*
 *(Levantados pelo review final da fatia F2 (2026-07-31, PR #17) e deixados de fora por decisão, não
 por esquecimento. Agrupados aqui para não se perderem.)*
 
-- **Deep link não volta depois do login.** `frontend/middleware.ts` clona a URL e troca o pathname
-  por `/login`, **perdendo o destino original** — nunca houve `next=`. Quem tenta abrir
-  `/frotas/veiculos` sem sessão vai parar no launcher. **Não é regressão** (antes ia parar em
+- ~~**Deep link não volta depois do login.**~~ **FECHADO na F3 (Tarefa 1, 2026-08-03.)** O
+  middleware grava `?next=` e o login restaura, com allowlist contra *open redirect* —
+  `//evil.example` começa com `/` e ainda assim sai do domínio, e é o único dos oito casos que
+  reprova uma implementação ingênua. `must_change_password` mantém precedência. Texto original:
+  `frontend/middleware.ts` clonava a URL e trocava o pathname
+  por `/login`, **perdendo o destino original** — nunca houve `next=`. Quem tentava abrir
+  `/frotas/veiculos` sem sessão ia parar no launcher. **Não era regressão** (antes ia parar em
   `/home`), mas incomoda mais agora que a porta de entrada é a tela de escolha.
 - **`api.adminTenantModulos` / `api.adminTenantContratarModulos` ficaram na raiz** do objeto `api`,
   em vez de `api.admin.tenants.modulos` / `.definirModulos`, onde já vivem `detalhe`/`editar`/

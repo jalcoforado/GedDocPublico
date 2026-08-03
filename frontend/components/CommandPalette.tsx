@@ -34,7 +34,7 @@ import { cn } from "@/lib/utils";
  * `moduloSlug: "comum"` marca "nunca bloqueado por módulo", igual ao grupo
  * transversal de `lib/menus/comum.ts`.
  */
-const ITENS_EXTRA: ReadonlyArray<{ item: NavItem; moduloSlug: string; group: "navegar" | "criar" }> = [
+export const ITENS_EXTRA: ReadonlyArray<{ item: NavItem; moduloSlug: string; group: "navegar" | "criar" }> = [
   { moduloSlug: "comum", group: "navegar", item: { label: "Meu perfil", href: "/perfil", icon: User } },
   {
     moduloSlug: "comum",
@@ -59,7 +59,7 @@ const ITENS_EXTRA: ReadonlyArray<{ item: NavItem; moduloSlug: string; group: "na
  * palavras-chave não quebraria teste nenhum — só pioraria o fuzzy match
  * silenciosamente, então ficam preservadas aqui em vez de descartadas.
  */
-const KEYWORDS_POR_HREF: Record<string, string[]> = {
+export const KEYWORDS_POR_HREF: Record<string, string[]> = {
   "/home": ["dashboard", "início"],
   "/dashboard": ["kpi", "métricas", "bi"],
   "/m/protocolo/workflow": ["bpm", "fluxo"],
