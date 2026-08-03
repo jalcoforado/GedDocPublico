@@ -108,7 +108,7 @@ export default function ParaAssinarPage() {
             <TR key={p.id_assinatura_anexo}>
               <TD>
                 <Link
-                  href={`/processos/${p.id_processo}`}
+                  href={`/m/protocolo/processos/${p.id_processo}`}
                   className="font-mono text-xs text-primary hover:underline"
                 >
                   {p.numero_processo}

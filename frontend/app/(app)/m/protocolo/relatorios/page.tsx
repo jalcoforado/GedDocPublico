@@ -281,7 +281,7 @@ export default function RelatoriosPage() {
                     <TR key={p.id}>
                       <TD>
                         <Link
-                          href={`/processos/${p.id}`}
+                          href={`/m/protocolo/processos/${p.id}`}
                           className="font-mono text-xs text-primary hover:underline"
                         >
                           {p.numero_processo}

@@ -191,9 +191,9 @@ export function WorkflowEditPage({
 
   const handleCancel = useCallback(() => {
     if (mode === "editar" && workflowId) {
-      router.push(`/workflow/${workflowId}`);
+      router.push(`/m/protocolo/workflow/${workflowId}`);
     } else {
-      router.push("/workflow");
+      router.push("/m/protocolo/workflow");
     }
   }, [mode, workflowId, router]);
 

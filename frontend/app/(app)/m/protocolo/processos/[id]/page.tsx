@@ -307,7 +307,7 @@ export default function ProcessoDetailPage() {
     return (
       <div className="space-y-4">
         <Link
-          href="/processos"
+          href="/m/protocolo/processos"
           className="
             inline-flex items-center gap-1 text-sm text-primary hover:underline
             focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded
@@ -325,7 +325,7 @@ export default function ProcessoDetailPage() {
           }
           action={
             <Button asChild size="sm">
-              <Link href="/processos">Voltar para lista</Link>
+              <Link href="/m/protocolo/processos">Voltar para lista</Link>
             </Button>
           }
         />
@@ -341,7 +341,7 @@ export default function ProcessoDetailPage() {
       <PageHeader
         icon={FileText}
         breadcrumbs={[
-          { label: "Processos", href: "/processos" },
+          { label: "Processos", href: "/m/protocolo/processos" },
           { label: p.numero_processo },
         ]}
         title={

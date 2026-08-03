@@ -146,7 +146,7 @@ export function ProcessoApensados({ processoId, numeroProcesso, idProcessoPai }:
             <div>
               Este processo está <strong>apensado</strong> ao processo{" "}
               <Link
-                href={`/processos/${idProcessoPai}`}
+                href={`/m/protocolo/processos/${idProcessoPai}`}
                 className="font-mono font-semibold underline-offset-2 hover:underline"
               >
                 #{idProcessoPai}
@@ -218,7 +218,7 @@ export function ProcessoApensados({ processoId, numeroProcesso, idProcessoPai }:
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <Link
-                          href={`/processos/${a.id_processo}`}
+                          href={`/m/protocolo/processos/${a.id_processo}`}
                           className="font-mono text-sm font-semibold text-primary hover:underline"
                         >
                           {a.nup ?? a.numero_processo}
@@ -321,7 +321,7 @@ function HistoricoItem({
       <div className="flex items-center gap-1 text-foreground-muted">
         <span>{rotulo}</span>
         <Link
-          href={`/processos/${outroId}`}
+          href={`/m/protocolo/processos/${outroId}`}
           className="font-mono text-primary hover:underline"
         >
           {outroNum ?? `#${outroId}`}

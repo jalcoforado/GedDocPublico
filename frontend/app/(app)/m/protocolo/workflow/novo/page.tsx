@@ -50,7 +50,7 @@ export default function NovoWorkflowPage() {
       workflowApi.createDefinition(data),
     onSuccess: (wf) => {
       toast.success(`Workflow "${wf.nome}" criado (v${wf.versao}).`);
-      router.push(`/workflow/${wf.id}`);
+      router.push(`/m/protocolo/workflow/${wf.id}`);
     },
     onError: (e: Error) => toast.error(e.message),
   });

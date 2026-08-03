@@ -337,7 +337,7 @@ function ProcessoTramitacaoCard({ p }: { p: TramitacaoProcesso }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={`/processos/${p.id}`}
+              href={`/m/protocolo/processos/${p.id}`}
               onClick={(e) => e.stopPropagation()}
               className="font-mono text-sm text-primary hover:underline"
             >

@@ -6,9 +6,9 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const TABS = [
-  { href: "/relatorios", label: "Processos" },
-  { href: "/relatorios/tramitacao", label: "Tramitação" },
-  { href: "/relatorios/assinaturas", label: "Assinaturas" },
+  { href: "/m/protocolo/relatorios", label: "Processos" },
+  { href: "/m/protocolo/relatorios/tramitacao", label: "Tramitação" },
+  { href: "/m/protocolo/relatorios/assinaturas", label: "Assinaturas" },
 ];
 
 export function RelatoriosNav() {

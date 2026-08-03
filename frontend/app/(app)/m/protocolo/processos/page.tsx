@@ -77,7 +77,7 @@ export default function ProcessosPage() {
         title="Processos"
         description="Liste, filtre e abra processos administrativos. Use a busca avançada nos filtros abaixo ou tecle / para busca global."
         actions={
-          <Link href="/processos/novo">
+          <Link href="/m/protocolo/processos/novo">
             <Button>
               <Plus className="h-4 w-4" aria-hidden="true" />
               Novo processo
@@ -260,7 +260,7 @@ export default function ProcessosPage() {
               </TD>
               <TD className="text-right">
                 <Link
-                  href={`/processos/${p.id}`}
+                  href={`/m/protocolo/processos/${p.id}`}
                   className="inline-flex h-9 items-center rounded-md border border-transparent px-3 text-xs font-medium text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   Abrir →

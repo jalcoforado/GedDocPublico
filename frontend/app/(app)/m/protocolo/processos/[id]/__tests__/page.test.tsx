@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import * as React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import ProcessoDetailPage from "@/app/(app)/processos/[id]/page";
+import ProcessoDetailPage from "@/app/(app)/m/protocolo/processos/[id]/page";
 import type { ProcessoDetail } from "@/lib/api";
 
 // =============================================================================

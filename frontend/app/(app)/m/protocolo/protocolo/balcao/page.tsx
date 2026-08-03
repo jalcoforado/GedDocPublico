@@ -375,7 +375,7 @@ export default function ProtocoloBalcaoPage() {
                     loading={manifestantesQ.isLoading}
                     footer={
                       <Link
-                        href="/manifestantes"
+                        href="/m/protocolo/manifestantes"
                         className="text-primary hover:underline"
                       >
                         + Cadastrar novo manifestante
@@ -584,7 +584,7 @@ export default function ProtocoloBalcaoPage() {
                       className="rounded-md border border-border bg-surface-1 px-2.5 py-1.5"
                     >
                       <Link
-                        href={`/processos/${r.id}`}
+                        href={`/m/protocolo/processos/${r.id}`}
                         className="flex items-center justify-between gap-2 text-xs"
                       >
                         <span className="min-w-0 flex-1 truncate">
@@ -701,7 +701,7 @@ function SuccessCard({
             Comprovante (2 vias)
           </Button>
         </a>
-        <Link href={`/processos/${protocolo.id}`}>
+        <Link href={`/m/protocolo/processos/${protocolo.id}`}>
           <Button variant="secondary">
             Ver processo
             <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />

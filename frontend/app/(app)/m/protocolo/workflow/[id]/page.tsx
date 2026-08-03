@@ -40,7 +40,7 @@ export default function WorkflowDetailPage() {
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <Link
-          href="/workflow"
+          href="/m/protocolo/workflow"
           className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
           aria-label="Voltar"
         >
@@ -61,7 +61,7 @@ export default function WorkflowDetailPage() {
             )}
           </p>
         </div>
-        <Link href={`/workflow/${wf.id}/editar`}>
+        <Link href={`/m/protocolo/workflow/${wf.id}/editar`}>
           <Button size="sm" variant="secondary">
             <Pencil className="mr-1 h-4 w-4" aria-hidden="true" />
             Editar (nova versão)

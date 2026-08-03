@@ -39,8 +39,8 @@ const CHECKLIST_HREF: Record<string, string> = {
   unidades: "/m/administracao/unidades-trabalho",
   usuarios: "/m/administracao/usuarios",
   grupos: "/m/administracao/grupos",
-  assuntos: "/assuntos",
-  tipos_processo: "/tipos-processo",
+  assuntos: "/m/protocolo/assuntos",
+  tipos_processo: "/m/protocolo/tipos-processo",
 };
 
 interface InstitucionalForm {

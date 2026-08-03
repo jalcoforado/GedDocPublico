@@ -124,7 +124,7 @@ export default function VencendoPrazoPage() {
                   <tr key={t.id_processo} className="hover:bg-surface-2">
                     <td className="px-3 py-2">
                       <Link
-                        href={`/processos/${t.id_processo}`}
+                        href={`/m/protocolo/processos/${t.id_processo}`}
                         className="font-mono font-semibold text-primary hover:underline"
                       >
                         {t.numero_processo}

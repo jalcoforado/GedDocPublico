@@ -29,6 +29,21 @@ const redirectsModulo = [
   { source: '/auditoria/:path*', destination: '/m/administracao/auditoria/:path*', permanent: true },
   { source: '/configuracoes/:path*', destination: '/m/administracao/configuracoes/:path*', permanent: true },
   { source: '/jobs/:path*', destination: '/m/administracao/jobs/:path*', permanent: true },
+  // protocolo: 14 diretorios de topo.
+  { source: '/processos/:path*', destination: '/m/protocolo/processos/:path*', permanent: true },
+  { source: '/protocolo/:path*', destination: '/m/protocolo/protocolo/:path*', permanent: true },
+  { source: '/workflow/:path*', destination: '/m/protocolo/workflow/:path*', permanent: true },
+  { source: '/relatorios/:path*', destination: '/m/protocolo/relatorios/:path*', permanent: true },
+  { source: '/servicos/:path*', destination: '/m/protocolo/servicos/:path*', permanent: true },
+  { source: '/manifestantes/:path*', destination: '/m/protocolo/manifestantes/:path*', permanent: true },
+  { source: '/tipos-manifestante/:path*', destination: '/m/protocolo/tipos-manifestante/:path*', permanent: true },
+  { source: '/tipos-processo/:path*', destination: '/m/protocolo/tipos-processo/:path*', permanent: true },
+  { source: '/tipos-anexo/:path*', destination: '/m/protocolo/tipos-anexo/:path*', permanent: true },
+  { source: '/assuntos/:path*', destination: '/m/protocolo/assuntos/:path*', permanent: true },
+  { source: '/templates-documento/:path*', destination: '/m/protocolo/templates-documento/:path*', permanent: true },
+  { source: '/cidades/:path*', destination: '/m/protocolo/cidades/:path*', permanent: true },
+  { source: '/bairros/:path*', destination: '/m/protocolo/bairros/:path*', permanent: true },
+  { source: '/enderecos/:path*', destination: '/m/protocolo/enderecos/:path*', permanent: true },
 ];
 
 const nextConfig = {

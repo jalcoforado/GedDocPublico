@@ -210,7 +210,7 @@ export default function NovoProcessoPage() {
         // ignore
       }
       toast.success(`Processo ${p.numero_processo} criado.`);
-      router.push(`/processos/${p.id}`);
+      router.push(`/m/protocolo/processos/${p.id}`);
     },
     onError: (e: Error) => {
       setErr(e.message);
@@ -274,7 +274,7 @@ export default function NovoProcessoPage() {
         variant="hero"
         icon={FilePlus2}
         breadcrumbs={[
-          { label: "Processos", href: "/processos" },
+          { label: "Processos", href: "/m/protocolo/processos" },
           { label: "Novo" },
         ]}
         title="Abrir novo processo"
@@ -495,7 +495,7 @@ export default function NovoProcessoPage() {
             )}
           </span>
           <div className="flex flex-wrap gap-2">
-            <Link href="/processos">
+            <Link href="/m/protocolo/processos">
               <Button variant="ghost" type="button">
                 Cancelar
               </Button>

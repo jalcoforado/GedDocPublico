@@ -350,7 +350,7 @@ export default function RelatorioAssinaturasPage() {
                     <TR key={s.id}>
                       <TD>
                         <Link
-                          href={`/processos/${s.id_processo}`}
+                          href={`/m/protocolo/processos/${s.id_processo}`}
                           className="font-mono text-xs text-primary hover:underline"
                         >
                           {s.numero_processo ?? `#${s.id_processo}`}

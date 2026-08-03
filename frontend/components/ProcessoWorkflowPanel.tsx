@@ -111,7 +111,7 @@ export function ProcessoWorkflowPanel({ processoId }: Props) {
           {defQ.data && (
             <div className="flex items-center gap-2">
               <Link
-                href={`/workflow/${defQ.data.id}`}
+                href={`/m/protocolo/workflow/${defQ.data.id}`}
                 className="text-xs text-muted-foreground hover:underline"
               >
                 {defQ.data.nome} (v{defQ.data.versao})
@@ -305,7 +305,7 @@ function IniciarManualmente({ processoId }: { processoId: number }) {
       {defs.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           Nenhum workflow ativo no tenant.{" "}
-          <Link href="/workflow/novo" className="text-primary hover:underline">
+          <Link href="/m/protocolo/workflow/novo" className="text-primary hover:underline">
             Criar um
           </Link>
           .
@@ -315,7 +315,7 @@ function IniciarManualmente({ processoId }: { processoId: number }) {
           <p className="text-xs text-muted-foreground">
             Você pode iniciar manualmente um workflow ativo para este processo. Pra
             isso virar automático para processos futuros do mesmo tipo, vincule em{" "}
-            <Link href="/workflow" className="text-primary hover:underline">
+            <Link href="/m/protocolo/workflow" className="text-primary hover:underline">
               Workflows
             </Link>{" "}
             (Tipos de processo vinculados).

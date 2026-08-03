@@ -78,7 +78,7 @@ export function WorkflowMapeamentoTipos({ wf }: { wf: WorkflowDefinition }) {
       {tipos.length === 0 && (
         <p className="text-xs text-muted-foreground">
           Nenhum tipo de processo cadastrado.{" "}
-          <a href="/tipos-processo" className="text-primary hover:underline">
+          <a href="/m/protocolo/tipos-processo" className="text-primary hover:underline">
             Cadastrar
           </a>
         </p>

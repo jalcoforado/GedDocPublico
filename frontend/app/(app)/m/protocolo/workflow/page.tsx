@@ -30,7 +30,7 @@ export default function WorkflowListPage() {
         title="Workflows"
         description="Defina fluxos BPM associados a tipos de processo. Estados, transições, SLA e auto-encaminhamento por unidade."
         actions={
-          <Link href="/workflow/novo">
+          <Link href="/m/protocolo/workflow/novo">
             <Button size="md">
               <Plus className="h-4 w-4" aria-hidden="true" />
               Novo workflow
@@ -70,7 +70,7 @@ export default function WorkflowListPage() {
           title="Nenhum workflow definido ainda"
           description="Crie seu primeiro fluxo BPM para automatizar transições, SLA e auto-encaminhamento entre unidades."
           action={
-            <Link href="/workflow/novo">
+            <Link href="/m/protocolo/workflow/novo">
               <Button>
                 <Plus className="h-4 w-4" aria-hidden="true" />
                 Criar primeiro workflow
@@ -98,7 +98,7 @@ export default function WorkflowListPage() {
               <TD className="font-mono text-xs tabular-nums">{w.id}</TD>
               <TD>
                 <Link
-                  href={`/workflow/${w.id}`}
+                  href={`/m/protocolo/workflow/${w.id}`}
                   className="inline-flex items-center gap-2 font-medium text-primary hover:underline"
                 >
                   <GitBranch className="h-3.5 w-3.5" aria-hidden="true" />

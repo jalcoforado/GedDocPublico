@@ -162,7 +162,7 @@ export default function HomePage() {
             loading={assinaturasQ.isLoading}
           />
           <ActionCard
-            href="/workflow"
+            href="/m/protocolo/workflow"
             label="Alertas SLA"
             count={alertasPendentes}
             hint={
@@ -175,7 +175,7 @@ export default function HomePage() {
             loading={alertasQ.isLoading}
           />
           <ActionCard
-            href="/protocolo/vencendo-prazo"
+            href="/m/protocolo/protocolo/vencendo-prazo"
             label="Vencendo guarda"
             count={vencendoPrazo}
             hint={
@@ -453,7 +453,7 @@ function UnidadeSection({
         </div>
         {idUnidade && (
           <Link
-            href={`/processos?id_unidade=${idUnidade}`}
+            href={`/m/protocolo/processos?id_unidade=${idUnidade}`}
             className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
           >
             ver todos {total > 0 && <span className="font-mono">({total})</span>}
@@ -483,7 +483,7 @@ function UnidadeSection({
             {processos.map((p) => (
               <li key={p.id}>
                 <Link
-                  href={`/processos/${p.id}`}
+                  href={`/m/protocolo/processos/${p.id}`}
                   className="group flex items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-surface-2"
                 >
                   <span className="text-[10px] font-mono text-foreground-subtle tabular-nums">
@@ -526,19 +526,19 @@ function UnidadeSection({
 
 const ATALHOS = [
   {
-    href: "/protocolo/balcao",
+    href: "/m/protocolo/protocolo/balcao",
     label: "Protocolar",
     sub: "Receber documento físico",
     icon: Inbox,
   },
   {
-    href: "/processos/novo",
+    href: "/m/protocolo/processos/novo",
     label: "Novo processo",
     sub: "Abrir processo interno",
     icon: PenSquare,
   },
   {
-    href: "/processos",
+    href: "/m/protocolo/processos",
     label: "Buscar processo",
     sub: "Listagem completa",
     icon: Search,

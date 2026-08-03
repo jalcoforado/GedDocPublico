@@ -24,7 +24,7 @@ export default function EditarWorkflowPage() {
       workflowApi.updateDefinition(id, data),
     onSuccess: (wf) => {
       toast.success(`Nova versão salva (v${wf.versao}).`);
-      router.push(`/workflow/${wf.id}`);
+      router.push(`/m/protocolo/workflow/${wf.id}`);
     },
     onError: (e: Error) => toast.error(e.message),
   });

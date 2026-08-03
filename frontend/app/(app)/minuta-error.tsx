@@ -37,7 +37,7 @@ export default function MinutaErrorPage() {
     }, 1000);
 
     const redirectTimer = setTimeout(() => {
-      router.push("/processos");
+      router.push("/m/protocolo/processos");
     }, 3000);
 
     return () => {
@@ -57,7 +57,7 @@ export default function MinutaErrorPage() {
           Redirecionando em {countdown} segundo{countdown !== 1 ? "s" : ""}…
         </p>
       </div>
-      <Button onClick={() => router.push("/processos")} size="md">
+      <Button onClick={() => router.push("/m/protocolo/processos")} size="md">
         Voltar aos processos
       </Button>
     </div>

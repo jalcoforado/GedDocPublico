@@ -44,12 +44,12 @@ const ITENS_EXTRA: ReadonlyArray<{ item: NavItem; moduloSlug: string; group: "na
   {
     moduloSlug: "protocolo",
     group: "criar",
-    item: { label: "Novo processo", href: "/processos/novo", icon: Plus, perm: "processo" },
+    item: { label: "Novo processo", href: "/m/protocolo/processos/novo", icon: Plus, perm: "processo" },
   },
   {
     moduloSlug: "protocolo",
     group: "criar",
-    item: { label: "Novo workflow", href: "/workflow/novo", icon: Plus },
+    item: { label: "Novo workflow", href: "/m/protocolo/workflow/novo", icon: Plus },
   },
 ];
 
@@ -62,11 +62,11 @@ const ITENS_EXTRA: ReadonlyArray<{ item: NavItem; moduloSlug: string; group: "na
 const KEYWORDS_POR_HREF: Record<string, string[]> = {
   "/home": ["dashboard", "início"],
   "/dashboard": ["kpi", "métricas", "bi"],
-  "/workflow": ["bpm", "fluxo"],
-  "/organograma": ["unidades", "hierarquia"],
-  "/auditoria": ["log", "histórico"],
-  "/jobs": ["celery", "tarefas"],
-  "/manifestantes": ["cidadão", "requerente"],
+  "/m/protocolo/workflow": ["bpm", "fluxo"],
+  "/m/administracao/organograma": ["unidades", "hierarquia"],
+  "/m/administracao/auditoria": ["log", "histórico"],
+  "/m/administracao/jobs": ["celery", "tarefas"],
+  "/m/protocolo/manifestantes": ["cidadão", "requerente"],
   "/perfil/notificacoes": ["email", "whatsapp"],
 };
 
@@ -198,7 +198,7 @@ export function CommandPalette({ open, onOpenChange }: Props) {
       title: p.numero,
       subtitle: "Processo",
       icon: FileText,
-      href: `/processos/${p.id}`,
+      href: `/m/protocolo/processos/${p.id}`,
       group: "resultados",
     }));
     const manifs: CommandAction[] = r.manifestantes.map((m) => ({
@@ -207,7 +207,7 @@ export function CommandPalette({ open, onOpenChange }: Props) {
       title: m.nome,
       subtitle: `Manifestante${m.cpf_cnpj ? ` · ${m.cpf_cnpj}` : ""}`,
       icon: UserCircle,
-      href: `/manifestantes`,
+      href: `/m/protocolo/manifestantes`,
       group: "resultados",
     }));
     const usrs: CommandAction[] = r.usuarios.map((u) => ({
