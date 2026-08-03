@@ -263,7 +263,7 @@ export default function PermissionariosPage() {
         </div>
       </div>
 
-      {!listaQ.isLoading && (listaQ.data?.length ?? 0) === 0 ? (
+      {!listaQ.isLoading && (listaQ.data?.items.length ?? 0) === 0 ? (
         <EmptyState
           icon={Inbox}
           title="Nenhum permissionário"
@@ -297,7 +297,7 @@ export default function PermissionariosPage() {
                 </TD>
               </TR>
             )}
-            {listaQ.data?.map((p) => (
+            {listaQ.data?.items.map((p) => (
               <TR key={p.id}>
                 <TD>{p.nome}</TD>
                 <TD className="font-mono">{p.cpf}</TD>

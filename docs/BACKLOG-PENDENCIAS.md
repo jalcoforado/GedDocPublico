@@ -129,32 +129,34 @@
   "este usuário pode ler isto?". Todo autenticado do tenant continua lendo `/usuarios`, `/grupos`,
   `/audit` etc. — isso é o item **1.0.8**, aberto de propósito por esta fatia.
 
-### 1.0.6 `/notificacoes/whatsapp-test` sem autorização — qualquer autenticado do tenant dispara
+### ~~1.0.6 `/notificacoes/whatsapp-test` sem autorização~~ — FECHADO em 2026-08-03
 
-*(Levantado em 2026-07-30 pelo review da fatia F1. **Não é regressão da F1**: `main` tem o mesmo
-`Depends(get_current_user)` e nada mais — verificado em `git show main:`. A F1 chegou a fechar de
-passagem e devolveu ao original, porque o único código de permissão disponível acoplava o endpoint
-ao módulo errado.)*
+*(Levantado em 2026-07-30 pelo review da fatia F1. Fechado por `fix/whatsapp-test-autolimitado`.)*
 
-- `POST /api/v2/notificacoes/whatsapp-test` (`backend/app/routers/notificacoes.py:164`) dispara envio
-  de WhatsApp para **telefone arbitrário do payload**, usando a credencial paga do tenant. Exige
-  apenas estar autenticado — o usuário de menor privilégio do tenant consegue. É vetor de custo e de
-  abuso, não só de vazamento.
-- **Por que a F1 não fechou:** o único código de transação vizinho é `configuracao`, que pertence ao
-  módulo `administracao`. Gatear com ele daria 403 no endpoint para tenant que tem `protocolo` e não
-  tem `administracao` — trocaria um defeito por outro. Não existe transação de notificação em
-  `utils.transacao` (verificado por query), e criar uma exige migration **mais** concessão aos grupos
-  existentes, senão o endpoint passa a dar 403 para todo mundo.
-- **O sujeito certo não existe ainda:** o correto seria "super-usuário **do tenant**".
-  `require_platform_admin` é sujeito errado (é da plataforma, opera sobre outros tenants) e
-  `require_permission` precisa de um código que ainda não há.
-- **Ao retomar:** decidir entre (a) criar a transação `notificacao` vinculada ao módulo `comum` e
-  conceder aos grupos administrativos na mesma migration, ou (b) introduzir a dependência de
-  super-usuário do tenant, que serve a outros endpoints de operação além deste. A (b) é mais
-  trabalho e resolve uma classe; a (a) fecha só este.
-- Enquanto aberto, o endpoint está listado em `ENDPOINTS_TRANSVERSAIS` em
-  `backend/tests/test_guarda_modularizacao.py` — ou seja, a guarda **não** vai reclamar dele. A
-  vigilância é este item, não o teste.
+- **O que era:** `POST /api/v2/notificacoes/whatsapp-test` disparava WhatsApp para **telefone
+  arbitrário do payload** com a credencial paga do tenant, exigindo só estar autenticado. Vetor de
+  custo e de assédio, não de vazamento.
+- **As duas saídas que este item propunha estavam ambas erradas**, e vale registrar por quê: elas
+  partiam de que o endpoint era administrativo ("validar config Zenvia em prod", como diz o
+  docstring). Não é. O **único chamador** é `frontend/app/(app)/perfil/notificacoes/page.tsx`, a
+  página de preferências do próprio usuário — qualquer pessoa salva o telefone e clica em testar.
+  Gatear com transação ou com super-usuário do tenant tiraria isso de todo usuário comum no dia em
+  que existir o primeiro grupo não-SU: trocaria um defeito de segurança por um de produto.
+- **O que se fez:** tirar o **destino** das mãos do chamador, não restringir quem chama.
+  `WhatsAppTestRequest.telefone` foi removido; o destino é sempre o telefone do perfil, resolvido no
+  servidor por `Destinatario(id_usuario=...)`. Mais limite de **3 por hora por usuário** — só tirar o
+  destino não bastava, porque `PUT /notificacoes/telefone` é livre e "troco meu número e testo de
+  novo" continuaria queimando credencial. O limite conta por **usuário**: por telefone seria
+  contornável pelo mesmo caminho, por tenant viraria negação de serviço entre colegas.
+- **Efeito colateral que quase passou:** trocar `telefone` por `id_usuario` fez o motor aplicar a
+  **preferência de canal**, que o caminho antigo pulava sem querer (o motor só consulta preferência
+  para destinatário com `id_usuario`). Como `DEFAULT_PREFS["whatsapp"]` é `False`, conferir o
+  telefone antes de ligar o canal — que é exatamente quando se testa — teria ficado impossível. Daí
+  o `enviar(..., ignorar_preferencias=True)`, que é **só** para envio que o próprio destinatário
+  pediu agora; envio automático continua respeitando o opt-out.
+- Guardas em `backend/tests/test_notificacoes_whatsapp_teste.py` (5 testes, prova por inversão feita:
+  5 vermelhos contra o comportamento antigo). O endpoint continua em `ENDPOINTS_TRANSVERSAIS` — não
+  ganhou gate de módulo nem de permissão, e isso é decisão, não esquecimento.
 
 ### 1.0.65 Falha da F1 que só aparece em banco limpo — ainda NÃO diagnosticada
 
@@ -249,6 +251,77 @@ de escopo") como item de backlog próprio; criado agora no review final.)*
   "a verificar" no item 1.0.7).
 - Sem prazo.
 
+### ~~1.0.85 SEC-RLS-00D — `UPDATE` em `aprimora_py.tenant` precisa ser grant POR COLUNA~~ — FEITO
+
+*(Levantado pela revisão de segurança de `SEC-RLS-00C` (2026-08-02). Não era regressão: o grant era
+anterior e aquele PR não o alterou. O que ele mudou foi a razão escrita, que descrevia o uso e não o
+alcance.)*
+
+> **Fechado em 2026-08-02, migration `0080_grant_por_coluna_em_tenant.py`.**
+> `REVOKE UPDATE ON aprimora_py.tenant FROM aprimora_app` + `GRANT UPDATE (<13 colunas>)`. Conferido
+> no catálogo depois de aplicar: `role_table_grants` não mostra mais `UPDATE` de tabela para
+> `aprimora_app`, e `column_privileges` mostra 13 colunas onde mostrava 24.
+>
+> **A lista não é a whitelist do service copiada.** O levantamento de caminhos de escrita municipal
+> em `Tenant` achou três, e a whitelist só cobre o primeiro:
+> 1. `services/tenant_config.atualizar_config_institucional` (`PUT /tenants/me`) — os 11 campos de
+>    `_CAMPOS_INSTITUCIONAIS`;
+> 2. `routers/tenant.py::update_nup_config` (`PUT /tenants/me/nup-config`) — `codigo_orgao_nup` e
+>    `usar_nup_federal`, **mesmo papel de banco, fora da whitelist**. Derivar a lista só de
+>    `_CAMPOS_INSTITUCIONAIS` teria derrubado esse endpoint no dia do `SEC-RLS-ROLLOUT`;
+> 3. `cli/tenant.py::_set_active` (`tenant activate|deactivate`) — gravava `ativo` e `atualizado_em`
+>    por `database.SessionLocal`, o pool MUNICIPAL. **Não foi acomodado no grant**: ativar município
+>    é ato de plataforma (é o que `POST /admin/tenants/{id}/ativar` já faz). A CLI passou a abrir a
+>    sessão de plataforma, como `create`/`retomar` desde o `SEC-RLS-00C`.
+>
+> **A guarda é o que dá valor ao item**, e foi o que a revisão do `00C` pediu:
+> `tests/test_grant_por_coluna_tenant.py` compara em três pontas o catálogo do banco, a constante
+> `COLUNAS_MUNICIPAIS_DE_TENANT` (`services/tenant_config.py`) e os campos de
+> `TenantInstitucionalUpdate`/`TenantNupConfigUpdate`. Tem denylist explícita das colunas de
+> plataforma — sem ela a comparação de conjuntos seria satisfeita ampliando os dois lados — e
+> controle positivo em cada negativa, porque em Postgres a negativa por privilégio de coluna devolve
+> **a mesma frase** da negativa por privilégio de tabela (`permission denied for table tenant`).
+> Prova por inversão executada: contra o estado anterior, 8 vermelhos e 2 verdes (os 2 medem o que a
+> 0080 não tira).
+>
+> Continua valendo o item 1.0.86: só produz efeito quando `APP_DATABASE_URL` estiver definida.
+> O texto abaixo é o registro original do problema.
+
+- O `SEC-RLS-00C` tirou de `aprimora_app` o `INSERT` em `aprimora_py.tenant` e `tenant_modulo`
+  porque essas tabelas **não têm RLS** e ali o `GRANT` é a única barreira. O `UPDATE` em `tenant`
+  ficou, com uso legítimo e diário: `services/tenant_config.atualizar_config_institucional`, o admin
+  do município editando sigla, endereço, telefone, texto do portal e unidade padrão.
+- **O grant, porém, é de tabela inteira.** `information_schema.column_privileges` devolve `UPDATE`
+  para `aprimora_app` nas **24** colunas de `aprimora_py.tenant`, incluindo `ativo`, `plano`, `slug`,
+  `limite_usuarios` e `limite_armazenamento_mb`. É a mesma estrutura de risco do `INSERT`: um defeito
+  de service no runtime municipal poderia elevar o próprio plano, reativar-se depois de suspenso ou
+  **desativar outro município**. A whitelist de campos do service é barreira de aplicação, não de
+  banco.
+- **Ao retomar:** `REVOKE UPDATE ON aprimora_py.tenant FROM aprimora_app` seguido de
+  `GRANT UPDATE (<colunas institucionais>) ON aprimora_py.tenant TO aprimora_app`, com a lista de
+  colunas derivada de `_CAMPOS_INSTITUCIONAIS` em `services/tenant_config.py` — e uma guarda que
+  reprove divergência entre as duas listas, senão campo institucional novo passa a dar
+  `permission denied` em produção sem ninguém entender por quê.
+- Como todo o resto desta família, só tem efeito quando `APP_DATABASE_URL` estiver definida (ver
+  1.0.86).
+- Sem prazo. Depende do `SEC-RLS-ROLLOUT` para ter efeito prático.
+
+### 1.0.86 A família `SEC-RLS-*` só produz efeito quando `APP_DATABASE_URL` for definida
+
+*(Registrado em 2026-08-02, na revisão de `SEC-RLS-00C`, para que a narrativa dos PRs de segurança
+não seja lida como "está fechado em produção".)*
+
+- `printenv` no container do backend devolve apenas `DATABASE_URL=…ged_user…`. `APP_DATABASE_URL`
+  está **vazia**, então `runtime_database_url` cai em `DATABASE_URL` e a API conecta como `ged_user`,
+  que tem `rolbypassrls = t`. Nenhum `REVOKE` das migrations 0076/0078/0079 tem efeito nesse papel.
+- Isso é a **sequência correta** — revogar antes de trocar o papel, para que a troca não derrube
+  nada —, e é justamente o que o `SEC-RLS-ROLLOUT` promove, um degrau por vez (worker → app; o
+  migrator está bloqueado por posse de schema, ver o adendo §12.2 do ADR-016).
+- O que exige cuidado é a **redação**: os testes provam as propriedades **sob `aprimora_app`**, papel
+  que produção ainda não usa. Onde se escrever "a brecha fechou", leia-se "fecha quando
+  `APP_DATABASE_URL` for definida". O que já é verdade hoje, sem depender do rollout, é que o banco
+  está preparado e que a regressão tem guarda.
+
 ### 1.0.9 Resíduos da F2 — navegação e admin (todos Minor, nenhum bloqueante)
 
 *(Levantados pelo review final da fatia F2 (2026-07-31, PR #17) e deixados de fora por decisão, não
@@ -312,6 +385,48 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 - **P6** — Rotas / linhas
 - **P7** — Ocorrências regulatórias
 - **P8** — Workflows avançados
+
+> **Atualizado em 2026-08-01, pela fatia de costura de navegação** (spec e plano em
+> `docs/superpowers/`). "Entregues e no ar" era verdade só para o backend. Três coisas mudaram, e a
+> terceira segue aberta:
+>
+> - **A navegação até Alvarás e Relatórios não existia.** As telas estavam prontas desde P2/P4, mas
+>   nenhum `href` no frontend apontava para elas: nem o hub, nem o menu, nem o Ctrl+K. Só se chegava
+>   digitando a URL. A fatia ligou as duas e removeu do hub os cards de Documentos e Vistorias, que
+>   não são destinos — existem só dentro do detalhe do veículo.
+> - **Três rotas estavam inalcançáveis** (`vistorias/vencidas`, `alvaras/vencidos`,
+>   `alvaras/relatorio`): declaradas depois da paramétrica irmã, o FastAPI casava a paramétrica
+>   primeiro e devolvia 422. Consertadas, e agora travadas por
+>   `tests/test_guarda_ordem_rotas.py`, que varre a aplicação inteira. Na primeira execução a guarda
+>   acusou **zero** rotas sombreadas fora do transporte — a dívida estava contida aqui.
+> - **ABERTO — teto de 50 registros nas telas do transporte.** O commit `628ca34` (2026-07-20) passou
+>   13 endpoints a devolver `Paginated`, e o `lib/api.ts` seguiu declarando array por onze dias. Como
+>   `request<T>()` faz cast sem validar, o `tsc` ficava verde e o navegador estourava com
+>   `TypeError: ….map is not a function` — e, onde o código fazia `data?.length`, a tela dizia
+>   "nenhum registro" com registros no banco. Os 12 métodos agora declaram `Paginated<T>` e as telas
+>   consomem `.items`. **Consequência que não foi resolvida:** essas telas não têm UI de paginação e o
+>   `page_size` padrão é 50, então exibem no máximo 50 registros. Não é regressão (antes exibiam zero
+>   ou estouravam), mas é teto real. Resolver exige decidir UI de paginação — decisão de produto.
+> - **ABERTO — mais grave que o teto acima: a busca de alvarás é client-side sobre a lista já
+>   truncada.** Em `frontend/app/(app)/transporte-regulado/alvaras/page.tsx` (perto da linha 433) o
+>   filtro por número de alvará roda sobre o array que já veio limitado aos 50 registros da página
+>   atual — não sobre o total do tenant. O usuário digita um número de alvará que existe no banco e a
+>   tela diz que não achou nada, porque o registro correspondente nunca chegou ao array filtrado.
+>   Diferente do teto de exibição (que é "não vejo tudo"), este é "procurei e a tela mentiu que não
+>   existe". Resolver exige busca server-side (parâmetro de filtro na rota `GET
+>   /transporte-regulado/alvaras`, hoje sem suporte a busca por número).
+> - **ABERTO — falta guarda para a classe de defeito do contrato de paginação.** A ordem de rotas
+>   ganhou `tests/test_guarda_ordem_rotas.py`, que varre a aplicação inteira e travou a classe de
+>   defeito das 422 por sombreamento de rota. O contrato `Paginated` (item acima, teto de 50) não
+>   ganhou guarda equivalente: nada reprova hoje o próximo `response_model=Paginated[...]` no backend
+>   cuja contraparte em `frontend/lib/api.ts` declare array simples em vez de `Paginated<...>` — e foi
+>   exatamente essa classe de defeito que produziu `TypeError: ….map is not a function` no navegador
+>   por onze dias, com o `tsc` verde o tempo todo. Duas formas possíveis de guarda, nenhuma construída
+>   ainda: (1) um teste/script que compara os `response_model=Paginated[` do backend com os
+>   `request<Paginated<` do `api.ts` e reprova divergência; (2) validar o envelope `{items, total,
+>   page, page_size}` dentro do `request<T>()` genérico, em vez de confiar no cast estático. Fora do
+>   escopo da leva que registrou este item — decisão de fazer fica para quando alguém for mexer de
+>   novo em paginação.
 
 ### 2.3 Frota — backlog de telemetria
 

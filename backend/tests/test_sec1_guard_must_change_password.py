@@ -35,14 +35,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.deps import (
-    _resolve_current_user,
-    require_tenant_id,
-    require_tenant_slug,
-)
+from app.auth.deps import _resolve_current_user
 from app.main import app
 from app.models import Usuario
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.conftest import arreio_tenant_http
 
 
 def _sm(engine):
@@ -133,8 +130,17 @@ async def sec1_setup(admin_engine):
 
 def _as_usuario(admin_engine, usuario_id: int, tenant_id: int, tenant_slug: str):
     """Override apenas _resolve_current_user: o gate em get_current_user
-    permanece efetivo. require_tenant_id / require_tenant_slug também são
-    override para evitar dependência do middleware de tenant."""
+    permanece efetivo.
+
+    O tenant vem de `arreio_tenant_http`, que instala `require_tenant_id`,
+    `require_tenant_slug` **e** a sessão do `get_db` com o mesmo `tenant_id` —
+    sem a terceira peça, a sessão sairia com o `app.tenant_id` do tenant
+    default e as rotas de negócio deste arquivo devolveriam vazio sob RLS
+    (inventário §8.8).
+
+    A identidade continua sendo carregada por `admin_engine`: aqui ela é só o
+    sujeito do gate, não o dado sob teste.
+    """
 
     async def _resolver():
         async with _sm(admin_engine)() as s:
@@ -143,9 +149,8 @@ def _as_usuario(admin_engine, usuario_id: int, tenant_id: int, tenant_slug: str)
             ).scalar_one()
 
     def _setup():
+        arreio_tenant_http(tenant_id, tenant_slug)
         app.dependency_overrides[_resolve_current_user] = _resolver
-        app.dependency_overrides[require_tenant_id] = lambda: tenant_id
-        app.dependency_overrides[require_tenant_slug] = lambda: tenant_slug
 
     return _setup
 
@@ -317,11 +322,29 @@ async def test_regressao_401_sem_token(client):
 async def test_regressao_header_ausente_em_outros_403(
     admin_engine, sec1_setup, client
 ):
-    """403 por outro motivo (sem permissão de plataforma) NÃO deve incluir
-    X-Must-Change-Password — garante que o header só é set pelo gate."""
+    """403 por outro motivo (sem permissão RBAC) NÃO deve incluir
+    X-Must-Change-Password — garante que o header só é set pelo gate.
+
+    Antes de `SEC-01A` o 403 vinha de `GET /admin/tenants`, negado pela
+    allowlist de e-mail de plataforma. Aquela rota deixou de servir aqui: sem
+    token administrativo ela responde **401**, não 403, e o teste passaria a
+    afirmar a ausência do header numa resposta que nunca o teria. O 403 usado
+    agora é o de RBAC — `require_permission` sobre um usuário sem grupo —, que
+    é o mesmo tipo de negativa que o teste sempre quis distinguir do gate.
+    """
     s = sec1_setup
-    # Usuário normal (não-flagged) sem allowlist de plataforma:
+    # Usuário normal (não-flagged), criado por SQL direto e portanto sem
+    # nenhum grupo/permissão: `require_permission` nega com 403 limpo.
     _as_usuario(admin_engine, s["normal_id"], s["tenant_id"], s["tenant_slug"])()
-    r = await client.get("/api/v2/admin/tenants")
+    r = await client.post(
+        "/api/v2/usuarios",
+        json={
+            "nome": "X",
+            "email": "x@x.local",
+            "cpf": "12345678901",
+            "senha": "x-pass-1",
+            "id_unidade_trabalho": 1,
+        },
+    )
     assert r.status_code == 403, r.text
     assert r.headers.get("X-Must-Change-Password") != "true"

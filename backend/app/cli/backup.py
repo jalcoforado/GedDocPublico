@@ -21,6 +21,12 @@ O export gera UM arquivo SQL standalone:
 Para restaurar em outro DB:
   psql -U ged_user -d destino -f backup_sobral_2026-05-23T17-30.sql
 
+**Papel do restore (SEC-RLS-00B, inventário §8.2):** o arquivo gerado emite
+`SET session_replication_role = 'replica'`, que **exige SUPERUSER**. O restore
+é, portanto, operação de DBA — não de `aprimora_migrator` e muito menos de
+`aprimora_app`. O EXPORT, esse sim, roda no papel administrativo, e é o que
+esta CLI faz.
+
 Tabelas: 26 tenanted (na ordem topológica das FKs) + a tabela `tenant` raiz.
 
 Catálogos globais (utils.estado, utils.cidade, etc) NÃO entram — o destino
@@ -31,6 +37,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -39,7 +47,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
-from ..database import SessionLocal
+# SEC-RLS-00B: operação ADMINISTRATIVA, não de runtime. A conexão vem de
+# `MIGRATOR_DATABASE_URL` (papel `aprimora_migrator`) quando definida, e de
+# `DATABASE_URL` enquanto não estiver — ver `app/database_admin.py`.
+from ..database_admin import AdminSessionLocal
 
 
 # Ordem topológica das tabelas tenanted — pais antes de filhos.
@@ -91,6 +102,36 @@ async def _resolve_tenant(db: AsyncSession, slug: str) -> tuple[int, str]:
     return row[0], row[1]
 
 
+@asynccontextmanager
+async def _sessao_do_tenant(tenant_id: int) -> AsyncIterator[AsyncSession]:
+    """Sessão com `app.tenant_id` instalado — e a PROVA de que foi instalado.
+
+    Era daqui que vinha o pior item do inventário (§8.2): `_stats` e `_export`
+    abriam `SessionLocal()` cru, sem contexto de tenant. Sob papel sujeito a
+    RLS, TODO `SELECT ... WHERE tenant_id = :t` devolve zero linhas **sem
+    erro** — o `stats` reporta o tenant vazio e o `export` grava um arquivo de
+    backup sintaticamente válido e sem dados. O sintoma só aparece no restore,
+    meses depois e longe da causa.
+
+    O `raise` abaixo é controle positivo, não paranoia: sem ele, este helper
+    "funcionaria" mesmo que alguém quebrasse o listener `after_begin` de
+    `app/database.py`, e voltaríamos exatamente ao arquivo vazio — agora com um
+    helper que parece resolver o problema.
+    """
+    async with AdminSessionLocal(tenant_id=tenant_id) as db:
+        guc = (
+            await db.execute(text("SELECT current_setting('app.tenant_id', true)"))
+        ).scalar()
+        if str(guc or "") != str(tenant_id):
+            raise SystemExit(
+                f"[ERRO] contexto de tenant NAO instalado na sessao: "
+                f"app.tenant_id={guc!r}, esperado {str(tenant_id)!r}. "
+                "Sob RLS isso produziria backup VAZIO sem erro nenhum — "
+                "abortando antes de gravar arquivo."
+            )
+        yield db
+
+
 async def _count_rows(db: AsyncSession, tenant_id: int) -> list[tuple[str, str, int]]:
     rows: list[tuple[str, str, int]] = []
     for schema, table in TENANTED_TABLES:
@@ -103,8 +144,12 @@ async def _count_rows(db: AsyncSession, tenant_id: int) -> list[tuple[str, str, 
 
 
 async def _stats(args: argparse.Namespace) -> int:
-    async with SessionLocal() as db:
+    # Duas sessões, e a ordem importa: `aprimora_py.tenant` NÃO tem RLS e é
+    # onde o slug vira id; só depois de saber o id dá para abrir a sessão COM
+    # contexto de tenant, que é a que enxerga as 26 tabelas tenanted.
+    async with AdminSessionLocal() as db:
         tid, nome = await _resolve_tenant(db, args.tenant)
+    async with _sessao_do_tenant(tid) as db:
         print(f"Tenant: id={tid}  slug={args.tenant}  nome={nome}")
         print(f"{'Schema.Tabela':50}  {'Linhas':>10}")
         print("-" * 65)
@@ -242,8 +287,9 @@ async def _dump_sequences(db: AsyncSession) -> list[str]:
 
 
 async def _export(args: argparse.Namespace) -> int:
-    async with SessionLocal() as db:
+    async with AdminSessionLocal() as db:
         tid, nome = await _resolve_tenant(db, args.tenant)
+    async with _sessao_do_tenant(tid) as db:
         ts = datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%SZ")
         settings = get_settings()
         out_dir = Path(args.out_dir or f"{settings.tenants_storage_root}/{args.tenant}/backups")
@@ -291,6 +337,21 @@ async def _export(args: argparse.Namespace) -> int:
             f"-- Total de linhas exportadas: {total_rows}",
         ]
 
+        # ERRO BARULHENTO É REQUISITO, não refinamento. Um backup de zero
+        # linhas é sintaticamente válido, passa no `dr-drill` e só se revela
+        # inútil no dia do restore. As duas causas plausíveis são contexto de
+        # tenant ausente (que o `_sessao_do_tenant` já barra) e grant faltando —
+        # e nenhuma das duas se anuncia sozinha. Gravar o arquivo antes de
+        # abortar seria pior: ele ficaria no disco parecendo um backup.
+        if total_rows == 0 and not getattr(args, "permitir_vazio", False):
+            raise SystemExit(
+                f"[ERRO] export do tenant '{args.tenant}' (id={tid}) resultou em "
+                "ZERO linhas nas tabelas tenanted, e NENHUM arquivo foi gravado. "
+                "Tenant recém-provisionado de fato pode estar vazio: nesse caso, "
+                "repita com --permitir-vazio. Caso contrário, suspeite de grant "
+                "faltando para o papel administrativo."
+            )
+
         out_file.write_text("\n".join(lines), encoding="utf-8")
         size_kb = out_file.stat().st_size / 1024
         print(f"[ok] backup gerado: {out_file}")
@@ -332,11 +393,21 @@ def main(argv: list[str] | None = None) -> int:
     p_exp = sub.add_parser("export", help="Gera SQL standalone com dados do tenant")
     p_exp.add_argument("--tenant", required=True, help="slug do tenant")
     p_exp.add_argument("--out-dir", help="Pasta de saída (default: tenants_storage_root/<slug>/backups)")
+    p_exp.add_argument(
+        "--permitir-vazio",
+        action="store_true",
+        help="Grava o arquivo mesmo com zero linhas (tenant recém-provisionado)",
+    )
     p_exp.set_defaults(fn=_export)
 
     p_drill = sub.add_parser("dr-drill", help="Export + parse-check (sanity)")
     p_drill.add_argument("--tenant", required=True, help="slug do tenant")
     p_drill.add_argument("--out-dir", help="Pasta de saída (default: tenants_storage_root/<slug>/backups)")
+    p_drill.add_argument(
+        "--permitir-vazio",
+        action="store_true",
+        help="Grava o arquivo mesmo com zero linhas (tenant recém-provisionado)",
+    )
     p_drill.set_defaults(fn=_dr_drill)
 
     args = parser.parse_args(argv)

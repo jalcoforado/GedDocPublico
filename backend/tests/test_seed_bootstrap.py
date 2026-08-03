@@ -2,7 +2,12 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from app.cli.seed_bootstrap import seed
-from app.database import SessionLocal
+# O seed é operação ADMINISTRATIVA: escreve em `aprimora_py.modulo` e
+# `modulo_transacao`, onde o papel da API só tem SELECT (inventário §8.6). O
+# teste abre a mesma conexão que o CLI abre — usar `app.database.SessionLocal`
+# aqui testaria um caminho que produção não percorre.
+from app.database_admin import AdminSessionLocal as SessionLocal
+from app.database_admin import descartar_engine_admin
 from app.services.permissoes import load_permissions
 import app.database as _db_module
 
@@ -14,11 +19,14 @@ async def dispose_engine():
     O engine global em app.database usa asyncpg, que vincula conexões ao
     event loop do momento da criação. Como pytest-asyncio cria um loop novo
     por função, sem dispose o segundo teste recebe conexões do loop anterior
-    e morre com "Future attached to a different loop".
+    e morre com "Future attached to a different loop". O engine administrativo
+    é memoizado em `database_admin` e tem o mesmo problema.
     """
     await _db_module.engine.dispose()
+    await descartar_engine_admin()
     yield
     await _db_module.engine.dispose()
+    await descartar_engine_admin()
 
 
 @pytest.mark.asyncio
@@ -85,11 +93,18 @@ async def test_seed_bootstrap_nao_duplica_acoes():
 @pytest.mark.asyncio
 async def test_seed_bootstrap_idempotente():
     async with SessionLocal() as db:
-        await seed(db); await db.commit()
+        res1 = await seed(db); await db.commit()
     async with SessionLocal() as db:
         res2 = await seed(db); await db.commit()  # 2a vez não duplica
-    async with SessionLocal() as db:
+    assert res2["tenant_id"] == res1["tenant_id"]
+    # A contagem PRECISA rodar numa sessão com `app.tenant_id` instalado:
+    # `utils.usuario` tem RLS, e uma `SessionLocal()` crua avalia a policy com
+    # `tenant_id = NULL` → zero linhas, **sem erro**. Sob BYPASSRLS isso passava
+    # despercebido; sob papel sujeito a RLS, o `assert 0 == 1` acusaria uma
+    # duplicação que não existe. É o defeito de arreio do inventário §9.5.
+    async with SessionLocal(tenant_id=res2["tenant_id"]) as db:
         n = (await db.execute(text(
-            "SELECT count(*) FROM utils.usuario WHERE email='admin@local.test'"
-        ))).scalar_one()
+            "SELECT count(*) FROM utils.usuario "
+            "WHERE tenant_id = :t AND email='admin@local.test'"
+        ), {"t": res2["tenant_id"]})).scalar_one()
     assert n == 1

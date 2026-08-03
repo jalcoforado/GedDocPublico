@@ -44,9 +44,29 @@ DO \$\$ BEGIN
 END \$\$;
 GRANT CONNECT ON DATABASE $PGDATABASE TO aprimora_app;
 GRANT USAGE ON SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
+SQL
+
+# GRANT-cobertor: só no bootstrap de banco NOVO, e sempre ANTES do `upgrade
+# head` (Passo 4) — SEC-01A. Numa RE-execução as tabelas já existem, e o
+# cobertor então DESFARIA os `REVOKE` feitos por migration: a 0076 tira de
+# `aprimora_app` a DML de entitlement (`tenant`, `tenant_modulo`, catálogo de
+# módulo) e a mutação da trilha de auditoria, e daria DML nas tabelas de
+# plataforma (`platform_principal`, `platform_audit_log`), que só
+# `aprimora_platform` pode escrever (ADR-016 §2.3).
+#
+# Consequência desejada: os GRANTs das migrations são os FINAIS. Tabela nova
+# sem `GRANT` explícito na própria migration deixa de ser coberta — disciplina
+# que o CLAUDE.md já exige. `tests/test_platform_admin_identity.py` reprova se
+# `aprimora_app` recuperar escrita nas tabelas de plataforma.
+if [ "$SCHEMA_LOADED" = "0" ]; then
+  log "Passo 3b: GRANT-cobertor do baseline (banco novo)"
+  psql_db -v ON_ERROR_STOP=1 <<SQL >/dev/null
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
 SQL
+else
+  log "Passo 3b: GRANT-cobertor pulado (banco já existente — grants vêm das migrations)"
+fi
 
 # Passo 4 — baseline + migrations
 log "Passo 4: baseline $BASELINE + alembic upgrade head"

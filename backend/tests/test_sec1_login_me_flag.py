@@ -17,8 +17,9 @@ Segurança:
   7. Respostas de /login e /auth/me não vazam senha/senha_bcrypt/hash bcrypt.
   8. Regressão: campos antigos seguem presentes + must_change_password adicional.
 
-Reaproveita a infra de override do Commit 3 (admin_engine bypassa RLS;
-resolver carrega da MESMA db; tenant_id forçado).
+Reaproveita a infra de override do Commit 3, com o arreio corrigido em
+`SEC-RLS-00B`: a sessão é a REAL (`SessionLocal`), com o `tenant_id` da
+fixture instalado por `arreio_tenant_http`; o resolver carrega da MESMA db.
 """
 from __future__ import annotations
 
@@ -30,16 +31,13 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.deps import (
-    _resolve_current_user,
-    require_tenant_id,
-    require_tenant_slug,
-)
+from app.auth.deps import _resolve_current_user
 from app.auth.password import hash_password
 from app.database import get_db
 from app.main import app
 from app.models import Usuario
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.conftest import arreio_tenant_http
 
 
 def _sm(engine):
@@ -148,12 +146,15 @@ def _login_host_header(tenant_slug: str) -> dict[str, str]:
     return {"Host": f"{tenant_slug}.aprimora.local"}
 
 
-def _setup_as_usuario(admin_engine, usuario_id: int, tenant_id: int, tenant_slug: str):
-    """Para /auth/me: override _resolve_current_user (idem testes Commit 3)."""
+def _setup_as_usuario(_admin_engine, usuario_id: int, tenant_id: int, tenant_slug: str):
+    """Para /auth/me: override _resolve_current_user (idem testes Commit 3).
 
-    async def _db_admin():
-        async with _sm(admin_engine)() as s:
-            yield s
+    A sessão vem de `arreio_tenant_http`, isto é, do `SessionLocal` REAL da
+    aplicação com o `tenant_id` da fixture. Antes vinha de `admin_engine`
+    (`ged_user`, BYPASSRLS): a RLS ficava desligada nestes testes
+    independentemente do `DATABASE_URL`, e um vazamento cross-tenant não teria
+    como aparecer aqui (inventário §8.8).
+    """
 
     async def _resolver(db: AsyncSession = Depends(get_db)):
         return (
@@ -161,10 +162,8 @@ def _setup_as_usuario(admin_engine, usuario_id: int, tenant_id: int, tenant_slug
         ).scalar_one()
 
     def _setup():
-        app.dependency_overrides[get_db] = _db_admin
+        arreio_tenant_http(tenant_id, tenant_slug)
         app.dependency_overrides[_resolve_current_user] = _resolver
-        app.dependency_overrides[require_tenant_id] = lambda: tenant_id
-        app.dependency_overrides[require_tenant_slug] = lambda: tenant_slug
 
     return _setup
 

@@ -16,7 +16,14 @@ Desde 2026-07-30 (fatia F1, `c4dcb53`) o sistema é dividido em **cinco módulos
 `protocolo`, `pagamentos`, `frota`, `transporte`, `administracao` — mais `comum`, que não é
 contratável e nunca é bloqueado. O catálogo é global (`aprimora_py.modulo`, `modulo_transacao`); a
 contratação é por tenant (`aprimora_py.tenant_modulo`, **sem RLS** por decisão: é tabela de
-plataforma, escrita pelo platform admin operando sobre outros tenants).
+plataforma, escrita pelo platform admin operando sobre outros tenants). Como não há RLS, o `GRANT`
+é a única barreira, e desde a migration `0079` (`SEC-RLS-00C`) o papel do runtime municipal
+(`aprimora_app`) tem **só `SELECT`** ali — quem contrata é o papel de plataforma. Por isso
+`provisionar_tenant` é **dois atos** com sessões distintas
+(`app/services/provisioning_tenant.py`): mexer nele sem ler aquele docstring quebra o onboarding.
+Esse `REVOKE` só passa a valer no dia em que `APP_DATABASE_URL` for definida — enquanto ela estiver
+vazia o runtime conecta como `ged_user` (`BYPASSRLS`) e nenhuma revogação da família `SEC-RLS-*`
+tem efeito. A troca é o gate humano `SEC-RLS-ROLLOUT`, não um passo de PR.
 
 Cada módulo declara os códigos de `utils.transacao` que lhe pertencem (o mapa vive em
 `app/cli/seed_bootstrap.py::MODULO_TRANSACOES`). Transação de módulo não contratado entra no
@@ -201,7 +208,8 @@ Merge em `main` dispara `deploy-vps.yml`, que roda `scripts/deploy.sh start` por
 - `services/<dominio>.py` — regra de negócio, máquinas de estado, unicidade, 404/409. É onde ficam as decisões; routers não decidem.
 - `schemas/` (Pydantic v2) — convenção `XCreate` / `XUpdate` / `XOut` / `XAcao` (ex.: `SolicitacaoVeiculoDesignar`).
 - `models/` — SQLAlchemy declarativo. `models/__init__.py` reexporta tudo; imports usam `from ..models import Veiculo`.
-- `auth/` — `deps.py` (`get_current_user`, `get_current_cidadao`, `require_tenant_id`, `require_platform_admin`), `perms.py` (`require_permission(codigo, action)`), `jwt.py` (HS256/RS256), `password.py` (md5 legado + bcrypt com rehash transparente no primeiro login).
+- `auth/` — `deps.py` (`get_current_user`, `get_current_cidadao`, `require_tenant_id`), `perms.py` (`require_permission(codigo, action)`), `jwt.py` (HS256/RS256), `password.py` (md5 legado + bcrypt com rehash transparente no primeiro login), `plataforma.py` (`require_platform_admin`, ver abaixo).
+- **A fronteira de plataforma é outro realm, e não se mistura com `deps.py`.** Desde `SEC-01A` (ADR-016) as 8 rotas de `routers/admin_tenants.py` exigem token administrativo **RS256** de um IdP dedicado (`iss`/`aud` próprios, `hd` do domínio corporativo) mais um principal ativo em `aprimora_py.platform_principal` — nunca e-mail, `usuario.id`, cookie ou token municipal. Elas usam `get_platform_db` (`database_plataforma.py`, papel `aprimora_platform`, `NOBYPASSRLS`), **não** `get_db`, e o tenant alvo vem sempre da operação. `PLATFORM_ADMIN_EMAILS` foi removida: era o achado F-01, autorização por uma string que só é única *por tenant*. Concessão e revogação são por CLI no host (`app.cli.platform_principal`), nunca por endpoint.
 - `tasks/` — Celery (`app.tasks.celery_app`). `cli/` — comandos administrativos (ex.: provisionar tenant). `middleware/`, `observability/`, `utils/`.
 - `routers/_crud.py` — `paginated_list` etc. para o CRUD repetitivo (soft-delete + busca + paginação + escopo de tenant).
 
@@ -215,11 +223,65 @@ Isolamento tem **três camadas** e todas são obrigatórias:
 
 Outras convenções de domínio: exclusão é **soft-delete** (`excluido=True`, nunca DELETE físico); unicidade por tenant vira **índice único parcial** `WHERE excluido = false`; transição de estado ilegal é **409**; permissão negada é **403** via `require_permission("<codigo>", "inserir"|"atualizar"|"excluir")` (leitura sem action). Super-usuário faz bypass.
 
+#### Papéis de banco — a camada 1 hoje está INERTE no runtime (achado F-12)
+
+A aplicação conecta como `ged_user`, que é `SUPERUSER` e `BYPASSRLS`: **a RLS não filtra nada em
+produção**, e o isolamento depende inteiramente das camadas 2 e 3. Medição em
+`docs/architecture/security/rls-bypass-inventory.md`; decisão em `ADR-016 §9.1`.
+
+Quatro papéis existem no banco, todos `NOSUPERUSER`/`NOBYPASSRLS`, e cada um tem a sua variável de
+ambiente — **vazia por padrão, caindo em `DATABASE_URL`**:
+
+| Papel | Variável | Quem usa |
+|---|---|---|
+| `aprimora_app` | `APP_DATABASE_URL` | API municipal (`app/database.py`) |
+| `aprimora_worker` | `WORKER_DATABASE_URL` | tasks Celery (`app/tasks/_task_db.py`) |
+| `aprimora_migrator` | `MIGRATOR_DATABASE_URL` | Alembic + CLIs de seed/backup (`app/database_admin.py`) |
+| `aprimora_platform` | `PLATFORM_DB_URL` | fronteira de plataforma (`app/database_plataforma.py`) |
+
+Trocar o valor efetivo é o gate **`SEC-RLS-ROLLOUT`**, um degrau por vez, e o rollback é apagar a
+variável. Ordem: **worker, depois app**. **`MIGRATOR_DATABASE_URL` está BLOQUEADA** — não definir
+em nenhum ambiente: `aprimora_migrator` tem `CREATE` mas **não é dono** das tabelas legadas, e como
+o `entrypoint.sh` roda `alembic upgrade head` com `set -e`, a primeira migration com `ALTER TABLE`
+em tabela pré-existente derruba o start do backend com `must be owner of table`. Ela serve hoje só
+para invocar CLI de seed/backup à mão. Desbloqueia quando a posse dos schemas for resolvida no
+bootstrap.
+
+**Nunca "conserte" uma falha de permissão dando `BYPASSRLS` ou `SUPERUSER` a um desses papéis** —
+é proibido pelo ADR e há teste que reprova (`tests/test_rls_papeis_minimos.py`). Policy ou grant que
+falhar é corrigido.
+
+**Tabela de plataforma (`aprimora_py.platform_*`) não entra em `GRANT ... ON ALL TABLES`.** Elas não
+têm RLS: grant é a única barreira. Migration com grant-cobertor em `aprimora_py` precisa do `REVOKE`
+correspondente, como a 0078 faz — `test_tabelas_de_plataforma_so_do_papel_de_plataforma` reprova
+quem esquecer.
+
+Consequência prática para quem escreve código: **CLI administrativa (seed, backup, provisionamento
+em lote) não usa `SessionLocal`** — usa `AdminSessionLocal` de `app/database_admin.py`. O papel da
+API não tem `CREATE` em schema nenhum, não escreve no catálogo de módulos e não apaga linha de
+`audit_log`.
+
+Rodar a suíte com o papel alvo, que é como se verifica que nada depende do bypass:
+
+```bash
+docker exec -e PYTEST_DB_HOST=db \
+  -e DATABASE_URL=postgresql+asyncpg://aprimora_app:ged_password_secure_local@db:5432/ged_saas_db \
+  aprimora-py-backend pytest -q
+```
+
 ### Migrations (`backend/alembic/versions/`)
 
 `target_metadata = None` — **autogenerate está desligado de propósito**. Todas as migrations são escritas à mão; o ORM mapeia tabelas legadas e o autogenerate tentaria dropar colunas do PHP. Numeração sequencial `NNNN_descricao.py` (já em 0072+), `down_revision` no head anterior, **head sempre único**, `downgrade()` desfazendo o `upgrade()` na ordem inversa.
 
-Tabela nova exige o boilerplate completo: `tenant_id` NOT NULL → `aprimora_py.tenant(id)`, índices `(tenant_id, ...)`, `ENABLE + FORCE ROW LEVEL SECURITY`, as duas policies com `tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int`, `GRANT SELECT,INSERT,UPDATE,DELETE` na tabela e `GRANT USAGE, SELECT` na sequence para a role `aprimora_app`. `ADD COLUMN` em tabela existente herda RLS/grants — não repita.
+Tabela nova exige o boilerplate completo: `tenant_id` NOT NULL → `aprimora_py.tenant(id)`, índices `(tenant_id, ...)`, `ENABLE + FORCE ROW LEVEL SECURITY`, as duas policies com `tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int`, `GRANT SELECT,INSERT,UPDATE,DELETE` na tabela e `GRANT USAGE, SELECT` na sequence para a role `aprimora_app`. `ADD COLUMN` em tabela existente herda RLS/grants — não repita. **Exceção: `aprimora_py.tenant`.** Desde a `0080` (`SEC-RLS-00D`) o `UPDATE` de `aprimora_app` ali é **por coluna**, então coluna nova nasce sem `UPDATE` para o runtime municipal, e o `ALTER DEFAULT PRIVILEGES` da `0006` não socorre (ele vale para tabela nova, não para coluna nova). Se um caminho municipal for gravá-la, a mesma migration tem de acrescentá-la ao `GRANT UPDATE (...)` e a `COLUNAS_MUNICIPAIS_DE_TENANT` (`services/tenant_config.py`).
+
+Os três detalhes do boilerplate que **já custaram um módulo inteiro** (`transporte_regulado`, 20
+policies quebradas por 7 meses, corrigidas na `0078`): o nome da GUC é `app.tenant_id` e não
+`app.current_tenant_id`; o segundo argumento `true` do `current_setting` não é opcional — sem ele
+a policy **derruba a consulta** em vez de negar; e `ENABLE` sem `FORCE` não protege nada enquanto
+o dono da tabela for também o papel do runtime. `tests/test_rls_papeis_minimos.py::test_toda_tabela_com_rls_responde_sob_aprimora_app`
+varre o banco inteiro e reprova os três. Grant para `aprimora_worker` só se alguma task escrever na
+tabela — o worker é enumerado de propósito; `aprimora_migrator` já é coberto por default privileges.
 
 O agente `migrations-checker` (`.claude/agents/`) roda esse checklist; `frota-reviewer` e `frota-test-runner` cobrem revisão e bateria de validação de PR.
 
@@ -238,10 +300,32 @@ O agente `migrations-checker` (`.claude/agents/`) roda esse checklist; `frota-re
 3. **Adicionar a rota de topo à regex de `location ~ ^/(...)` em `nginx/default.conf`** — sem isso a página cai no fallback legado e "some" no `:8090`, mesmo funcionando em `:3000`.
 4. Migration com o boilerplate de RLS acima.
 5. Testes `backend/tests/test_<modulo>_*.py`.
+6. **Rota de segmento literal (`/vencidos`, `/relatorio`) tem de ser declarada ANTES da paramétrica
+   irmã (`/{id}`)** — o FastAPI casa na ordem de declaração, então a paramétrica engole a literal e
+   a requisição morre em **422** sem chegar no handler. Esse defeito ocorreu **três vezes** no
+   `transporte_regulado.py` e nenhuma foi pega por teste de service, que não passa por roteamento.
+   Hoje `tests/test_guarda_ordem_rotas.py` varre a aplicação inteira e reprova o caso.
+7. **O tipo em `api.ts` tem de casar com o `response_model` do endpoint.** `request<T>()` faz cast do
+   JSON **sem validar**: o tipo é uma afirmação sobre a resposta, não uma verificação dela. Declarar
+   `X[]` onde o backend devolve `Paginated[X]` deixa o `tsc` verde e estoura no navegador com
+   `TypeError: ….map is not a function` — e, onde o código faz `data?.length`, a tela diz "nenhum
+   registro" com registros no banco, sem erro nenhum no console. Aconteceu por 11 dias no transporte.
+   Endpoint paginado → `request<Paginated<X>>` e tela consumindo `.items`. **Não** desembrulhe dentro
+   do `api.ts`: o tipo honesto é o que faz o `tsc` reprovar a próxima ocorrência.
 
 ## Testes — convenções
 
 `backend/tests/conftest.py` expõe dois engines por um motivo: `admin_session` usa `ged_user` (SUPERUSER, **BYPASSRLS**) só para setup/teardown; `app_session` usa `aprimora_app` (**NOBYPASSRLS**) e é o único jeito de validar RLS de verdade — teste de isolamento escrito com `admin_session` passa por engano. Com `app_session`, o teste é responsável por `SET LOCAL app.tenant_id` em cada transação. A fixture `two_tenants` cria/limpa dois tenants com slug aleatório.
+
+**A suíte inteira exercitava super-usuário, e isso escondeu um 500 em produção.** Em `auth/perms.py`
+o bypass de SU **retorna antes** do `getattr(item, action)`, então defeito que só aparece para
+usuário comum passa por toda a bateria sem ser visto — foi assim que 10 rotas do transporte com um
+`action` inexistente (`"visualizar"`, que não está no `Literal` de `Action` nem em `PermItem`)
+ficaram devolvendo `AttributeError` → HTTP 500 para qualquer operador não-SU. Ao gatear endpoint
+novo, escreva **pelo menos um teste HTTP com usuário comum**; o padrão de montar esse usuário está
+em `test_permissoes_modulo.py::_cria_usuario_comum` e em
+`test_transporte_p4_relatorio.py::test_http_usuario_comum_acessa_relatorio_kpis`. Lembre que o
+tenant precisa contratar o módulo, senão o gate barra antes com 403 e o teste não chega onde importa.
 
 Dados de teste: e-mails no domínio reservado `.test` (`@e2e.test`, `@ux1smoke.test`), slugs com prefixo identificável (`e2e-`, `sec1-`, `ux1-smoke-`) + sufixo `uuid4().hex[:8]`, cleanup obrigatório no teardown. Testes **não devem assumir banco vazio** — evite contagens globais; ancore em `admin@local.test` no tenant default ou num tenant isolado da fixture.
 

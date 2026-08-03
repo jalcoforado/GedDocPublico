@@ -43,7 +43,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.password import hash_password
 from ..config import get_settings
-from ..database import SessionLocal
+# SEC-RLS-00B: operação ADMINISTRATIVA, não de runtime. A conexão vem de
+# `MIGRATOR_DATABASE_URL` (papel `aprimora_migrator`) quando definida, e de
+# `DATABASE_URL` enquanto não estiver — ver `app/database_admin.py`.
+from ..database_admin import AdminSessionLocal as SessionLocal
 from ..models import (
     Acao,
     Anexo,
@@ -985,6 +988,12 @@ async def _get_or_create_tenant(
         return existente.id, False
 
     try:
+        # Sem `db_plataforma`: os três atos rodam nesta sessão, que é a
+        # ADMINISTRATIVA (`database_admin`, papel `aprimora_migrator` quando
+        # `MIGRATOR_DATABASE_URL` está definida). Isso é legítimo e não contorna
+        # a fronteira do SEC-RLS-00C — o migrator tem DML declarado em
+        # `aprimora_py`, e sob o papel da API (`aprimora_app`) o ato de
+        # plataforma falharia alto com `permission denied`, que é o que se quer.
         tenant, _ = await provisionar_tenant(
             db,
             slug=slug,

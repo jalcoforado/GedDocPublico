@@ -1,22 +1,30 @@
-"""Admin SaaS / Gestão de Tenants (PR3a).
+"""Admin SaaS / Gestão de Tenants (PR3a, revisado em SEC-01A e SEC-RLS-00C).
 
-Cobre o serviço único de provisionamento (incl. **sob a role RLS de produção**
-`aprimora_app`), a allowlist de admin de plataforma (403), atomicidade, slug
+Cobre o serviço único de provisionamento (incl. **sob os papéis RLS de
+produção**: ato de plataforma em `aprimora_platform`, ato municipal em
+`aprimora_app`), o modo de falha do provisionamento partido, slug
 imutável/validação, limites/plano armazenados, módulos derivados do plano e
 bloqueio por desativação.
+
+`provisionar_tenant` deixou de ser atômico em `SEC-RLS-00C` — são duas conexões
+e dois papéis, e nenhuma transação abarca as duas. A propriedade que substituiu
+a atomicidade ("ou completo e ativo, ou inerte e retomável") está em
+`test_falha_no_ato_municipal_deixa_tenant_inerte_e_retomavel`.
+
+A allowlist de e-mail que antes era testada aqui foi removida em SEC-01A — ver
+`test_gate_de_plataforma_nao_aceita_identidade_municipal`, mais abaixo, e a
+matriz completa em `test_platform_token_validator.py`.
 """
 from __future__ import annotations
 
+import argparse
 import uuid
-from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.deps import require_platform_admin
-from app.config import get_settings, modulos_do_plano
+from app.config import modulos_do_plano
 from app.schemas.admin_tenant import AdminTenantOut, AdminTenantUpdate
 from app.services.provisioning_tenant import (
     ProvisioningError,
@@ -93,13 +101,32 @@ async def test_provisiona_tenant_completo(admin_engine):
 
 
 # ---- CRÍTICO: provisionamento sob a role RLS de produção (aprimora_app) ----
-async def test_provisiona_sob_rls_producao(admin_engine, app_session):
-    """Roda o provisionamento como aprimora_app (NOBYPASSRLS). Se o
-    SET LOCAL app.tenant_id não fosse aplicado, os inserts tenant-scoped
-    falhariam na policy WITH CHECK. Sucesso = contexto setado corretamente."""
+async def test_provisiona_sob_rls_producao(admin_engine, app_session, platform_session):
+    """Cada ato no seu papel, os dois NOBYPASSRLS (SEC-RLS-00C).
+
+    **O que mudou, e por que a versão nova prova mais.** A versão anterior
+    rodava o provisionamento INTEIRO em `aprimora_app` e concluía "o contexto de
+    tenant está certo". Só que ela também dependia — sem dizer — de o papel
+    municipal poder inserir em `aprimora_py.tenant` e `tenant_modulo`, que é
+    exatamente o buraco de entitlement que este PR fecha. Verde ali significava
+    as duas coisas ao mesmo tempo, e a segunda era um defeito.
+
+    Agora são dois papéis, e as duas propriedades ficam separadas e afirmadas:
+
+    - o **ato de plataforma** roda em `aprimora_platform`, que tem os grants
+      cross-tenant enumerados da 0076;
+    - o **ato municipal** roda em `aprimora_app`, NOBYPASSRLS: sem o
+      `SET LOCAL app.tenant_id` do serviço, todo insert tenant-scoped morreria
+      na policy `WITH CHECK`. É a mesma coisa que a versão antiga media.
+
+    A metade que sumiu daqui — "o papel municipal NÃO cria tenant" — não se
+    perdeu: virou teste próprio, com controle positivo, em
+    `test_entitlement_fronteira_sql.py`.
+    """
     slug = _novo_slug("rls")
     tenant, senha = await provisionar_tenant(
-        app_session, slug=slug, nome="RLS Prod", admin_email=f"{slug}@t.local",
+        app_session, db_plataforma=platform_session,
+        slug=slug, nome="RLS Prod", admin_email=f"{slug}@t.local",
         admin_nome="Adm", admin_cpf=uuid.uuid4().hex[:11], plano="basico",
     )
     try:
@@ -108,6 +135,16 @@ async def test_provisiona_sob_rls_producao(admin_engine, app_session):
         async with _sessionmaker(admin_engine)() as s:
             n = (await s.execute(text("SELECT count(*) FROM utils.usuario WHERE tenant_id=:t"), {"t": tenant.id})).scalar_one()
             assert n == 1
+            # O ato 3 rodou: tenant completo é tenant ATIVO. Sem esta asserção o
+            # teste passaria com o tenant inerte, que é o estado de falha.
+            ativo = (await s.execute(text("SELECT ativo FROM aprimora_py.tenant WHERE id=:t"), {"t": tenant.id})).scalar_one()
+            assert ativo is True, (
+                "o tenant ficou inativo: o ato de ativação (3) não rodou, e o "
+                "município não resolveria por subdomínio."
+            )
+            # O ato 1 rodou pelo papel de plataforma: a contratação existe.
+            mods = (await s.execute(text("SELECT count(*) FROM aprimora_py.tenant_modulo WHERE tenant_id=:t"), {"t": tenant.id})).scalar_one()
+            assert mods > 0, "nenhum módulo contratado — o ato de plataforma não gravou"
     finally:
         await _cleanup(admin_engine, tenant.id)
 
@@ -131,42 +168,336 @@ def test_slug_validacao():
             validar_slug(ruim)
 
 
-# ---- atomicidade: falha no meio → rollback (sem tenant parcial) ----
-async def test_bootstrap_transacional_rollback(admin_engine, monkeypatch):
-    slug = _novo_slug("rollbk")
+# ---- o modo de falha do provisionamento partido (SEC-RLS-00C) ----
+async def test_falha_no_ato_municipal_deixa_tenant_inerte_e_retomavel(
+    admin_engine, monkeypatch
+):
+    """O teste que substitui `test_bootstrap_transacional_rollback`.
+
+    **O que o teste antigo afirmava e deixou de ser verdade.** Ele afirmava
+    "rollback total — sem tenant órfão": uma transação só, falha no meio, nada
+    fica. Depois de `SEC-RLS-00C` isso é impossível *por construção* — são duas
+    conexões e dois papéis de banco, e nenhuma transação abarca as duas. Manter
+    a asserção antiga exigiria desfazer a partição, ou compensar com um `DELETE`
+    em `aprimora_py.tenant` que nenhum papel tem nem deve ter.
+
+    **O que passa a valer, e é o que este teste trava:** ou o tenant está
+    completo e ativo, ou está **inerte e retomável**. As duas metades:
+
+    1. o tenant existe, mas com `ativo = false` — e a consulta do
+       `TenantMiddleware` (`slug = :s AND ativo = true`) NÃO o encontra, então
+       ninguém entra nele e nada vaza;
+    2. a retomada conclui o provisionamento, e o tenant fica utilizável.
+
+    A simulação é a mesma de antes (`hash_password` explode no meio do ato
+    municipal), o que mantém o teste ancorado num ponto real do caminho: depois
+    do commit do ato de plataforma, antes do commit do ato municipal.
+    """
+    slug = _novo_slug("inerte")
     import app.services.provisioning_tenant as ps
 
     def _boom(_):
-        raise RuntimeError("falha simulada após criar o tenant")
+        raise RuntimeError("falha simulada no meio do ato municipal")
 
     monkeypatch.setattr(ps, "hash_password", _boom)
     Session = _sessionmaker(admin_engine)
-    async with Session() as s:
-        with pytest.raises(RuntimeError):
-            await provisionar_tenant(
-                s, slug=slug, nome="X", admin_email="x@x.local",
-                admin_nome="X", admin_cpf=uuid.uuid4().hex[:11],
-            )
-    async with Session() as s:
-        existe = (await s.execute(text("SELECT id FROM aprimora_py.tenant WHERE slug=:s"), {"s": slug})).scalar_one_or_none()
-    assert existe is None  # rollback total — sem tenant órfão
-
-
-# ---- allowlist de admin de plataforma (403) ----
-async def test_require_platform_admin_allowlist(monkeypatch):
-    get_settings.cache_clear()
-    monkeypatch.setenv("PLATFORM_ADMIN_EMAILS", "ops@aprimora.app, boss@x.com")
+    tenant_id = None
     try:
-        allow = SimpleNamespace(email="OPS@aprimora.app")  # case-insensitive
-        assert (await require_platform_admin(current=allow)) is allow
-        # super-usuário de tenant comum NÃO é admin de plataforma
-        with pytest.raises(HTTPException) as ei:
-            await require_platform_admin(current=SimpleNamespace(email="su@prefeitura.gov.br"))
-        assert ei.value.status_code == 403
-        with pytest.raises(HTTPException):
-            await require_platform_admin(current=SimpleNamespace(email=""))
+        async with Session() as s:
+            with pytest.raises(ps.ProvisionamentoIncompletoError) as exc:
+                await provisionar_tenant(
+                    s, slug=slug, nome="X", admin_email="x@x.local",
+                    admin_nome="X", admin_cpf=uuid.uuid4().hex[:11],
+                )
+        tenant_id = exc.value.tenant_id
+        assert exc.value.slug == slug
+        assert "retomar" in str(exc.value), (
+            "a exceção do provisionamento parcial precisa dizer COMO concluir; "
+            "sem isso o operador fica com um tenant inerte e nenhuma instrução."
+        )
+
+        async with Session() as s:
+            # 1a. o tenant existe — não houve compensação por DELETE
+            linha = (
+                await s.execute(
+                    text("SELECT id, ativo FROM aprimora_py.tenant WHERE slug=:s"),
+                    {"s": slug},
+                )
+            ).first()
+            assert linha is not None, (
+                "o tenant sumiu: alguém acrescentou compensação por DELETE. "
+                "Apagar tenant não é operação de runtime nenhum (0076)."
+            )
+            assert linha.ativo is False, "o tenant incompleto ficou ATIVO"
+
+            # 1b. e é INERTE: a query do TenantMiddleware não o resolve
+            resolvido = (
+                await s.execute(
+                    text(
+                        "SELECT id FROM aprimora_py.tenant "
+                        " WHERE slug=:s AND ativo=true"
+                    ),
+                    {"s": slug},
+                )
+            ).scalar_one_or_none()
+            assert resolvido is None, (
+                "o tenant incompleto resolve por subdomínio — é a diferença "
+                "entre 'inerte' e 'meio aberto'."
+            )
+
+            # 1c. sem admin: o ato municipal não deixou usuário para trás
+            usuarios = (
+                await s.execute(
+                    text("SELECT count(*) FROM utils.usuario WHERE tenant_id=:t"),
+                    {"t": linha.id},
+                )
+            ).scalar_one()
+            assert usuarios == 0
+
+        # 2. a retomada conclui — com o defeito corrigido, como na vida real
+        monkeypatch.undo()
+        async with Session() as s:
+            tenant, senha = await ps.retomar_provisionamento(
+                s, slug=slug, admin_email="x@x.local", admin_nome="X",
+                admin_cpf=uuid.uuid4().hex[:11],
+            )
+        assert senha, "a retomada tinha de gerar a senha do admin que faltava"
+        assert tenant.ativo is True
+
+        async with Session() as s:
+            usuarios = (
+                await s.execute(
+                    text("SELECT count(*) FROM utils.usuario WHERE tenant_id=:t"),
+                    {"t": tenant.id},
+                )
+            ).scalar_one()
+            assert usuarios == 1
+            acoes = [
+                a
+                for (a,) in (
+                    await s.execute(
+                        text(
+                            "SELECT acao FROM aprimora_py.audit_log "
+                            " WHERE tenant_id=:t ORDER BY id"
+                        ),
+                        {"t": tenant.id},
+                    )
+                ).all()
+            ]
+            assert acoes == ["tenant.provisionamento_retomado"], (
+                f"trilha inesperada: {acoes}. A retomada tem de aparecer como "
+                "evento próprio — quem audita precisa saber que este tenant "
+                "não nasceu num ato só."
+            )
     finally:
-        get_settings.cache_clear()
+        if tenant_id is not None:
+            await _cleanup(admin_engine, tenant_id)
+
+
+async def test_retomar_recusa_tenant_ativo(admin_engine):
+    """Segunda barreira: tenant ATIVO não está no meio de provisionamento nenhum.
+
+    Esta NÃO é a guarda principal — ver o teste seguinte, que cobre o caso que
+    de fato importa. Fica porque cobre a borda que a guarda principal deixaria
+    passar: tenant ativo e sem usuário, que existe em banco semeado por SQL cru
+    (`ci/seed-e2e.sql`).
+    """
+    import app.services.provisioning_tenant as ps
+
+    slug = _novo_slug("ativo")
+    Session = _sessionmaker(admin_engine)
+    tenant, _ = await _provisionar(Session, slug)
+    try:
+        async with Session() as s:
+            with pytest.raises(ProvisioningError) as exc:
+                await ps.retomar_provisionamento(
+                    s, slug=slug, admin_email="invasor@x.local",
+                    admin_nome="Invasor", admin_cpf=uuid.uuid4().hex[:11],
+                )
+        assert "já está ativo" in str(exc.value).lower()
+
+        async with Session() as s:
+            n = (
+                await s.execute(
+                    text("SELECT count(*) FROM utils.usuario WHERE tenant_id=:t"),
+                    {"t": tenant.id},
+                )
+            ).scalar_one()
+        assert n == 1, (
+            "a recusa não impediu a criação do usuário — o teste passaria pela "
+            "exceção certa com o efeito colateral errado."
+        )
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+async def test_retomar_recusa_municipio_suspenso_de_proposito(admin_engine):
+    """A guarda de verdade: município SUSPENSO não é provisionamento interrompido.
+
+    **O buraco que este teste fecha.** A primeira versão da guarda era
+    `if tenant.ativo: raise`, e `ativo = false` não distingue "parou no meio" de
+    "suspenso de propósito" — e suspender é operação suportada, por
+    `POST /admin/tenants/{id}/desativar` e por `python -m app.cli.tenant
+    deactivate`, que este PR deixou no mesmo parser do `retomar` novo. Duas
+    linhas bastavam:
+
+        python -m app.cli.tenant deactivate <slug>
+        python -m app.cli.tenant retomar --slug <slug> --admin-email eu@x --senha ...
+
+    E era a **idempotência** — a propriedade que torna a retomada segura no caso
+    legítimo — que fazia o ataque funcionar: unidade, tipo de unidade, tipo de
+    manifestante e o grupo `Super Usuário` seriam reaproveitados; o `Usuario`,
+    com e-mail novo, seria CRIADO; e o `UsuarioGrupo` ligaria o usuário novo ao
+    grupo SU já existente. Super-usuário pleno, com senha escolhida
+    (`must_change_password` não protege quem escolheu a senha), num município
+    povoado — e em seguida o ato 3 reativaria o tenant, apagando a suspensão da
+    listagem.
+
+    Isso derrubaria suspensão por inadimplência, por incidente e por retenção
+    legal.
+
+    **O teste antigo não pegava**, porque só exercitava o caso `ativo = true`; o
+    caso que importa — produção **suspensa** — não tinha teste, e a guarda
+    parecia provada.
+
+    **Prova por inversão, executada:** com a guarda antiga (`if tenant.ativo`)
+    este teste fica vermelho — `retomar_provisionamento` conclui, cria o segundo
+    usuário, liga-o ao grupo SU e REATIVA o tenant.
+
+    Simula o município de produção do jeito mais fiel que cabe num teste: tenant
+    provisionado por completo, com um servidor além do admin, e depois
+    desativado pelo caminho suportado.
+    """
+    import app.services.provisioning_tenant as ps
+
+    slug = _novo_slug("suspenso")
+    Session = _sessionmaker(admin_engine)
+    tenant, _ = await _provisionar(Session, slug)
+    try:
+        # --- o município em operação: mais um servidor além do admin -------
+        async with Session() as s:
+            await s.execute(
+                text(
+                    "INSERT INTO utils.usuario (tenant_id, nome, email, senha, cpf) "
+                    "VALUES (:t, 'Servidor', :e, '', :c)"
+                ),
+                {"t": tenant.id, "e": f"serv-{slug}@x.local", "c": uuid.uuid4().hex[:11]},
+            )
+            # --- suspensão deliberada, pelo caminho suportado --------------
+            await s.execute(
+                text("UPDATE aprimora_py.tenant SET ativo=false WHERE id=:t"),
+                {"t": tenant.id},
+            )
+            await s.commit()
+
+        async with Session() as s:
+            grupo_su_antes = (
+                await s.execute(
+                    text(
+                        "SELECT id FROM utils.grupo "
+                        " WHERE tenant_id=:t AND grupo='Super Usuário'"
+                    ),
+                    {"t": tenant.id},
+                )
+            ).scalar_one()
+
+        # --- o ataque -----------------------------------------------------
+        async with Session() as s:
+            with pytest.raises(ProvisioningError) as exc:
+                await ps.retomar_provisionamento(
+                    s,
+                    slug=slug,
+                    admin_email="invasor@x.local",
+                    admin_nome="Invasor",
+                    admin_cpf=uuid.uuid4().hex[:11],
+                    senha="SenhaEscolhidaPeloInvasor",
+                )
+        assert "nunca terminou" in str(exc.value), (
+            "a recusa tem de ser a da guarda de provisionamento concluído, não "
+            f"outra qualquer: {exc.value}"
+        )
+
+        # --- e o efeito colateral NÃO aconteceu ----------------------------
+        async with Session() as s:
+            usuarios = [
+                e
+                for (e,) in (
+                    await s.execute(
+                        text(
+                            "SELECT email FROM utils.usuario WHERE tenant_id=:t "
+                            " ORDER BY id"
+                        ),
+                        {"t": tenant.id},
+                    )
+                ).all()
+            ]
+            assert "invasor@x.local" not in usuarios, (
+                "USUÁRIO CRIADO apesar da recusa — a exceção certa com o efeito "
+                f"colateral errado. Usuários: {usuarios}"
+            )
+            assert len(usuarios) == 2, f"usuários inesperados: {usuarios}"
+
+            vinculos = (
+                await s.execute(
+                    text(
+                        "SELECT count(*) FROM utils.usuario_grupo "
+                        " WHERE tenant_id=:t AND id_grupo=:g"
+                    ),
+                    {"t": tenant.id, "g": grupo_su_antes},
+                )
+            ).scalar_one()
+            assert vinculos == 1, (
+                "alguém foi ligado ao grupo Super Usuário apesar da recusa"
+            )
+
+            ainda_suspenso = (
+                await s.execute(
+                    text("SELECT ativo FROM aprimora_py.tenant WHERE id=:t"),
+                    {"t": tenant.id},
+                )
+            ).scalar_one()
+            assert ainda_suspenso is False, (
+                "a suspensão deliberada foi DESFEITA — a retomada reativou um "
+                "município suspenso por inadimplência/incidente/retenção legal."
+            )
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+# ---- gate de plataforma: o e-mail saiu do caminho de decisão (SEC-01A) ----
+async def test_assinatura_do_gate_de_plataforma_nao_recebe_identidade_municipal():
+    """Substitui `test_require_platform_admin_allowlist`, removido em SEC-01A.
+
+    O teste antigo montava um `SimpleNamespace(email=...)` e afirmava que o
+    e-mail certo passava — ou seja, **testava a vulnerabilidade F-01 como se
+    fosse contrato**. Não dá para adaptá-lo: o comportamento que ele travava é
+    exatamente o que este PR remove.
+
+    O que sobra de afirmável aqui é **só a forma** da dependência nova: ela não
+    recebe `Usuario` nenhum, então não há por onde uma credencial municipal
+    entrar — nem por engano, nem por `dependency_overrides`. O nome do teste diz
+    exatamente isso, e nada além.
+
+    Uma versão anterior deste teste também fazia `inspect.getsource(...)` e
+    exigia que a palavra "email" não aparecesse no corpo do gate. Foi removido
+    por ser frágil nos dois sentidos: um comentário contendo "e-mail" o
+    quebraria, e uma decisão baseada em `claims["email"]` tomada em **outra**
+    função passaria batido. Quem trava o comportamento é
+    `test_platform_admin_identity.py::
+    test_email_de_operador_em_token_de_plataforma_valido_nao_autoriza`, provado
+    por inversão. O resto dos 24 cenários está em
+    `test_platform_token_validator.py`.
+    """
+    import inspect
+
+    from app.auth.plataforma import require_platform_admin
+
+    parametros = inspect.signature(require_platform_admin).parameters
+    assert set(parametros) == {"request", "db"}, (
+        f"assinatura inesperada do gate de plataforma: {list(parametros)}. "
+        "Qualquer parâmetro que traga identidade municipal (`Usuario`, e-mail, "
+        "`get_current_user`) recria o achado F-01."
+    )
 
 
 # ---- desativação bloqueia resolução por subdomínio ----
@@ -206,3 +537,90 @@ def test_admin_out_so_registro_de_tenant():
 def test_cli_usa_mesmo_servico():
     from app.cli import tenant as cli
     assert cli.provisionar_tenant is provisionar_tenant
+
+
+async def test_cli_set_active_sem_platform_db_url_acusa_configuracao(
+    admin_engine, monkeypatch, capsys
+):
+    """`activate`/`deactivate` sob `aprimora_app` tem de acusar a CONFIGURAÇÃO.
+
+    Sem `PLATFORM_DB_URL` o comando cai em `SessionLocal()` — o pool municipal.
+    Hoje isso passa despercebido porque `APP_DATABASE_URL` está vazia e o pool
+    conecta como `ged_user`; depois do `SEC-RLS-ROLLOUT` ele conecta como
+    `aprimora_app`, que a 0080 deixa sem `UPDATE` em `ativo`.
+
+    O que se mede aqui não é a negativa — essa já tem teste em
+    `test_grant_por_coluna_tenant.py` — é o que o OPERADOR lê. `permission denied
+    for table tenant` cru manda caçar defeito de grant que não existe, num
+    momento em que alguém precisa suspender um município.
+
+    Real de ponta a ponta: o `SessionLocal` do módulo é trocado por um
+    sessionmaker do papel `aprimora_app` de verdade, e quem recusa é o Postgres.
+    """
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.cli import tenant as cli
+    from app.config import get_settings
+    from tests.conftest import APP_URL
+
+    slug = _novo_slug("cli00d-")
+    Session = _sessionmaker(admin_engine)
+    async with Session() as s:
+        tid = int(
+            (
+                await s.execute(
+                    text(
+                        "INSERT INTO aprimora_py.tenant (slug, nome, ativo, plano, criado_em) "
+                        "VALUES (:s, 'CLI 00D', true, 'basico', now()) RETURNING id"
+                    ),
+                    {"s": slug},
+                )
+            ).scalar_one()
+        )
+        await s.commit()
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("PLATFORM_DB_URL", "")
+    get_settings.cache_clear()
+    engine = create_async_engine(APP_URL)
+    monkeypatch.setattr(cli, "SessionLocal", _sessionmaker(engine))
+    try:
+        rc = await cli._set_active(
+            argparse.Namespace(slug=slug), False  # deactivate
+        )
+    finally:
+        await engine.dispose()
+        get_settings.cache_clear()
+
+    saida = capsys.readouterr().out
+    assert rc == 1, (
+        "`deactivate` devolveu sucesso sob um papel que não pode gravar `ativo`. "
+        f"Saída:\n{saida}"
+    )
+    assert "permission denied for table tenant" in saida, (
+        "CONTROLE POSITIVO falhou: a negativa do banco não apareceu na saída, "
+        "então este teste não mediu o caminho que pensa ter medido. "
+        f"Saída:\n{saida}"
+    )
+    assert "PLATFORM_DB_URL" in saida, (
+        "o comando falhou mostrando só `permission denied for table tenant`. "
+        "Isso manda o operador caçar defeito de grant — e o grant está correto: "
+        "activate/deactivate é ato de PLATAFORMA e o que falta é "
+        "`PLATFORM_DB_URL`. Ver `_ERRO_ATO_DE_PLATAFORMA_SEM_PAPEL` em "
+        f"`app/cli/tenant.py`. Saída:\n{saida}"
+    )
+
+    try:
+        async with Session() as s:
+            ainda_ativo = (
+                await s.execute(
+                    text("SELECT ativo FROM aprimora_py.tenant WHERE id=:t"), {"t": tid}
+                )
+            ).scalar_one()
+        assert ainda_ativo is True, "o comando falhou MAS desativou o município."
+    finally:
+        async with Session() as s:
+            await s.execute(
+                text("DELETE FROM aprimora_py.tenant WHERE id=:t"), {"t": tid}
+            )
+            await s.commit()

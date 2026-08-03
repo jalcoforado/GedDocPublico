@@ -15,6 +15,7 @@ import { useToast } from "@/components/ui/toast";
 import {
   api,
   type AlvaraVeiculo,
+  type Paginated,
   type VeiculoRegulado,
 } from "@/lib/api";
 
@@ -36,7 +37,7 @@ export function AlvaraVeiculosModal({
 
   // Veículos do alvará
   const { data: veiculosAlvara, isLoading: veiculosLoading } = useQuery<
-    AlvaraVeiculo[]
+    Paginated<AlvaraVeiculo>
   >({
     queryKey: [`/transporte-regulado/alvaras/${alvaraId}/veiculos`],
     queryFn: () => api.alvaras.veiculos.list(alvaraId),
@@ -44,7 +45,7 @@ export function AlvaraVeiculosModal({
   });
 
   // Lista de todos os veículos para vincular
-  const { data: todosVeiculos } = useQuery<VeiculoRegulado[]>({
+  const { data: todosVeiculos } = useQuery<Paginated<VeiculoRegulado>>({
     queryKey: ["/transporte-regulado/veiculos"],
     queryFn: () => api.veiculosRegulados.list(),
     enabled: open,
@@ -87,11 +88,11 @@ export function AlvaraVeiculosModal({
 
   // Veículos já vinculados
   const veiculosVinculadosIds = new Set(
-    veiculosAlvara?.map((v) => v.id_veiculo) || [],
+    veiculosAlvara?.items.map((v) => v.id_veiculo) || [],
   );
 
   // Veículos disponíveis para vincular
-  const veiculosDisponiveis = (todosVeiculos || []).filter(
+  const veiculosDisponiveis = (todosVeiculos?.items || []).filter(
     (v) => !veiculosVinculadosIds.has(v.id),
   );
 
@@ -151,7 +152,7 @@ export function AlvaraVeiculosModal({
           <h3 className="font-semibold">Veículos Vinculados</h3>
           {veiculosLoading ? (
             <div className="text-center text-gray-600">Carregando...</div>
-          ) : !veiculosAlvara || veiculosAlvara.length === 0 ? (
+          ) : !veiculosAlvara || veiculosAlvara.items.length === 0 ? (
             <EmptyState
               icon={Inbox}
               title="Nenhum veículo vinculado"
@@ -159,8 +160,8 @@ export function AlvaraVeiculosModal({
             />
           ) : (
             <div className="space-y-2">
-              {veiculosAlvara.map((av) => {
-                const veiculo = todosVeiculos?.find(
+              {veiculosAlvara.items.map((av) => {
+                const veiculo = todosVeiculos?.items.find(
                   (v) => v.id === av.id_veiculo,
                 );
                 return (

@@ -138,13 +138,34 @@ jobs:
           psql -h localhost -U ged_user -d ged_saas_db \
             -v ON_ERROR_STOP=1 -f ci/legacy-schema.sql
 
-      - name: Cria a role aprimora_app (ANTES das migrations)
+      - name: Cria a role aprimora_app + GRANTs do baseline (ANTES das migrations)
         env:
           PGPASSWORD: ged_password_secure_local
         # A migration 0006 (pulada via stamp) cria a role `aprimora_app`.
         # Precisa existir ANTES do `upgrade head`: migrations posteriores a 0020
         # fazem `GRANT ... TO aprimora_app` ao criar suas tabelas e falham com
         # `role "aprimora_app" does not exist` se a role vier depois.
+        #
+        # O GRANT-cobertor (`ON ALL TABLES`) roda AQUI, e não depois do
+        # `upgrade head`, por dois motivos — SEC-01A:
+        #
+        #  1. Rodando depois, ele DESFAZIA qualquer `REVOKE` feito por
+        #     migration. A 0076 revoga de `aprimora_app` a DML de entitlement
+        #     (`tenant`, `tenant_modulo`, catálogo de módulo) e a mutação da
+        #     trilha de auditoria — e o cobertor devolvia tudo em silêncio.
+        #  2. Rodando depois, ele dava DML nas tabelas de PLATAFORMA recém
+        #     criadas (`platform_principal`, `platform_audit_log`), que só
+        #     `aprimora_platform` pode escrever (ADR-016 §2.3).
+        #
+        # Consequência desejada: os GRANTs das migrations são os FINAIS, e o CI
+        # passa a ter o mesmo estado de privilégios que `scripts/bootstrap-db.sh`
+        # produz localmente (lá o cobertor já vinha antes do upgrade). Tabela
+        # nova sem `GRANT` explícito na própria migration deixa de ser coberta —
+        # que é a disciplina que o CLAUDE.md já exige.
+        #
+        # Só os schemas do baseline entram: `pagamentos`, `frota` e
+        # `transporte_regulado` nascem nas migrations e concedem os próprios
+        # grants (USAGE no schema incluído).
         run: |
           psql -h localhost -U ged_user -d ged_saas_db <<'SQL'
             DO $$ BEGIN
@@ -155,6 +176,8 @@ jobs:
             END $$;
             GRANT CONNECT ON DATABASE ged_saas_db TO aprimora_app;
             GRANT USAGE ON SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
           SQL
 
       - name: Stamp baseline do dump + roda migrations pendentes
@@ -168,18 +191,12 @@ jobs:
           alembic stamp 0020
           alembic upgrade head
 
-      - name: GRANTs finais para aprimora_app (DEPOIS das migrations)
-        env:
-          PGPASSWORD: ged_password_secure_local
-        # Roda após o `upgrade head` para cobrir também as tabelas criadas pelas
-        # migrations (schemas `pagamentos`/`frota` nascem depois do baseline 0020).
-        # As migrations já fazem GRANT explícito; isto é a rede de segurança.
-        run: |
-          psql -h localhost -U ged_user -d ged_saas_db <<'SQL'
-            GRANT USAGE ON SCHEMA protocolos, utils, aprimora_py, public, pagamentos, frota TO aprimora_app;
-            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA protocolos, utils, aprimora_py, public, pagamentos, frota TO aprimora_app;
-            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA protocolos, utils, aprimora_py, public, pagamentos, frota TO aprimora_app;
-          SQL
+      # NÃO reintroduza aqui um `GRANT ... ON ALL TABLES ... TO aprimora_app`.
+      # Ele existia neste ponto e foi movido para ANTES do `upgrade head` em
+      # SEC-01A (ver o comentário do passo "Cria a role aprimora_app"): rodando
+      # depois das migrations, desfazia os `REVOKE` da 0076 e dava DML nas
+      # tabelas de plataforma. `tests/test_platform_admin_identity.py` reprova o
+      # CI se isso voltar.
 
       - name: Seed dos catálogos globais
         env:

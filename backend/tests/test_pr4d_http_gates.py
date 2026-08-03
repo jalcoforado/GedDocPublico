@@ -16,12 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.deps import (
-    get_current_cidadao,
-    get_current_user,
-    require_tenant_id,
-    require_tenant_slug,
-)
+from app.auth.deps import get_current_cidadao, get_current_user
 from app.main import app
 from app.models import Servico, UsuarioExterno
 from app.schemas.cidadao import AbrirPorServicoRequest
@@ -30,6 +25,7 @@ from app.services import complementacao_documental as comp_svc
 from app.services import servico as servico_svc
 from app.services.cidadao_processos import abrir_processo_por_servico
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.conftest import arreio_tenant_http
 
 
 def _sm(engine):
@@ -231,8 +227,7 @@ def _as_servidor(admin_engine, usuario_id: int, tenant_id: int, tenant_slug: str
 
     def _setup():
         app.dependency_overrides[get_current_user] = _get_user
-        app.dependency_overrides[require_tenant_id] = lambda: tenant_id
-        app.dependency_overrides[require_tenant_slug] = lambda: tenant_slug
+        arreio_tenant_http(tenant_id, tenant_slug)
 
     return _setup
 
@@ -249,8 +244,7 @@ def _as_cidadao(admin_engine, cidadao_id: int, tenant_id: int, tenant_slug: str)
 
     def _setup():
         app.dependency_overrides[get_current_cidadao] = _get_cid
-        app.dependency_overrides[require_tenant_id] = lambda: tenant_id
-        app.dependency_overrides[require_tenant_slug] = lambda: tenant_slug
+        arreio_tenant_http(tenant_id, tenant_slug)
 
     return _setup
 

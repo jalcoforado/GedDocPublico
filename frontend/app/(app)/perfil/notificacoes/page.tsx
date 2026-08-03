@@ -83,9 +83,11 @@ export default function PreferenciasNotificacoesPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Sem destino: o servidor manda para o telefone salvo no perfil (1.0.6).
+  // O bloco do botão só aparece com `telSalvo`, então o 400 de "salve o
+  // telefone antes" não deve acontecer por aqui — mas o toast de erro cobre.
   const test = useMutation({
-    mutationFn: (t: string) =>
-      notificacoesApi.whatsappTest(t, "Teste de WhatsApp do Aprimora"),
+    mutationFn: () => notificacoesApi.whatsappTest("Teste de WhatsApp do Aprimora"),
     onSuccess: (data) => {
       if (data.erro) {
         toast.error(`Falhou: ${data.erro}`);
@@ -200,7 +202,7 @@ export default function PreferenciasNotificacoesPage() {
               size="sm"
               variant="secondary"
               disabled={test.isPending}
-              onClick={() => test.mutate(telSalvo)}
+              onClick={() => test.mutate()}
             >
               <FlaskConical className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
               {test.isPending ? "Enviando…" : "Enviar teste"}

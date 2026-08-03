@@ -79,6 +79,7 @@ from .pagamentos import (
     SaldoHistorico,
     TagPrioridade,
 )
+from .plataforma import PlatformAuditLog, PlatformPrincipal
 from .nivel import Nivel
 from .servico import Servico
 from .sistema import Sistema
@@ -163,11 +164,13 @@ __all__ = [
     "NaturezaDespesa",
     "Nivel",
     "Notificacao",
+    "NotificacaoPreferencia",
     "OrdemPagamento",
     "OrdemPagamentoDebito",
     "Parcela",
     "Permissionario",
-    "NotificacaoPreferencia",
+    "PlatformAuditLog",
+    "PlatformPrincipal",
     "Servico",
     "Sistema",
     "SistemaTransacao",

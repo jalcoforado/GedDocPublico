@@ -4,26 +4,67 @@ Procedimentos para operações de produção. Tudo executável como `docker exec
 
 ---
 
-## Painel admin de plataforma (PR3a)
+## Painel admin de plataforma
 
 Onboarding e gestão de tenants pela interface, sem mexer no banco.
 
-**`PLATFORM_ADMIN_EMAILS` é obrigatório** para operar o painel. É a allowlist
-(separada por vírgula) de e-mails de usuários com acesso à administração da
-plataforma. **Vazio = ninguém acessa** (bloqueio seguro por padrão). NÃO é
-permissão de tenant: super-usuário de prefeitura **não** entra.
+> **`PLATFORM_ADMIN_EMAILS` foi REMOVIDA em `SEC-01A`.** Ela era o achado
+> **F-01**: a autorização cross-tenant era uma comparação de string sobre um
+> e-mail, e o e-mail é único apenas **por tenant** — qualquer prefeitura capaz
+> de criar um usuário com o e-mail certo virava administradora da plataforma.
+> Se a variável ainda existir em algum host, **remova-a**; enquanto existir num
+> ambiente é um caminho ativo (T-1 do threat model), mesmo que o código já a
+> ignore. A verificação que conta as entradas **sem revelá-las** está em
+> `docs/runbooks/platform-operator-bootstrap.md` §1.1.
+
+O acesso hoje exige **duas** coisas, e nenhuma é um e-mail:
+
+1. um **token administrativo RS256** do IdP dedicado (Google Workspace do
+   domínio corporativo), com `iss`/`aud` próprios — token municipal não serve;
+2. um **principal ativo** em `aprimora_py.platform_principal`, cadastrado pela
+   CLI no host.
+
+Configuração por ambiente (nenhuma tem default — ausente ⇒ nega tudo):
 
 ```bash
-# .env do backend (produção)
-PLATFORM_ADMIN_EMAILS=ops@aprimora.app,gestor@aprimora.app
+# .env do backend, por ambiente. Nada disso vai para o repositório.
+PLATFORM_OIDC_ISSUER=https://accounts.google.com
+PLATFORM_OIDC_AUDIENCE=<client id do ambiente>
+PLATFORM_OIDC_JWKS_URL=https://www.googleapis.com/oauth2/v3/certs
+PLATFORM_OIDC_HOSTED_DOMAIN=<dominio corporativo>
+PLATFORM_DB_URL=postgresql+asyncpg://aprimora_platform:<cofre>@<host>/<db>
 ```
+
+Dois passos que **não** são opcionais e vivem no runbook de operador:
+`ALTER ROLE aprimora_platform PASSWORD` (a migration cria o papel com a senha de
+dev — §1.2) e o **pré-cadastro do principal de emergência** com
+`criar --break-glass`, feito fora de incidente (§5).
+
+**Não ligue `STRICT_TENANT_RESOLUTION=true` sem ler §1.3 do runbook de
+operador.** O `TenantMiddleware` roda na frente de `/api/v2/admin/*`; com
+resolução estrita, um `Host` que não seja subdomínio de tenant leva 404 antes do
+gate — e o console de `SEC-01B`, em origem própria, cai inteiro. Correção é
+`SEC-01B`.
+
+Cadastro, revogação, break-glass e inventário
+(`platform_principal listar`): **`docs/runbooks/platform-operator-bootstrap.md`**
+— é o contrato operacional, e a CLI `python -m app.cli.platform_principal`
+cumpre os comandos de lá.
 
 - Painel: `/admin/tenants` (criar/listar/editar/ativar/desativar).
 - Criar uma prefeitura gera uma **senha temporária exibida UMA ÚNICA VEZ** na
   resposta; repasse pelo canal acordado (NUNCA email texto-puro) e oriente a
   troca após o 1º acesso. Só o hash bcrypt é persistido.
 - API: `POST /api/v2/admin/tenants` (e `GET/PUT/.../ativar/desativar`),
-  protegida pela allowlist (`require_platform_admin`).
+  protegida por `require_platform_admin` (`app/auth/plataforma.py`), sobre a
+  conexão dedicada do papel `aprimora_platform`.
+
+**Lacuna conhecida entre `SEC-01A` e `SEC-01B`:** `GET /admin/me` devolve
+`is_platform_admin: false` de forma constante — depois de `SEC-01A` é literalmente
+verdade que nenhuma sessão municipal é identidade de plataforma. Como o frontend
+municipal decide por esse campo, **o link do painel some para todo mundo** e o
+console fica inalcançável pela UI até o console próprio de `SEC-01B`. É
+fail-closed e esperado; não contornar reativando allowlist.
 
 ## Onboarding de um novo tenant (CLI)
 
@@ -49,6 +90,58 @@ Pós-criação:
 1. Configurar DNS: `fortaleza.aprimora.app` → mesmo IP do produto
 2. Compartilhar URL + credenciais com o cliente
 3. Acompanhar primeiros logins via `aprimora.access` logs (filtrar `tenant_slug=fortaleza`)
+
+### Provisionamento que parou no meio (tenant inerte)
+
+Desde `SEC-RLS-00C` o provisionamento são **dois atos**, em papéis de banco
+diferentes: o de **plataforma** cria o tenant e a contratação de módulos
+(`aprimora_platform`), o **municipal** cria admin, grupo SU, unidade e catálogos
+(papel da aplicação). São duas transações — logo, o ato 1 pode ter sucesso e o 2
+falhar.
+
+**Quando isso acontece, nada é apagado.** O tenant fica com `ativo = false`, ou
+seja **inerte**: não resolve por subdomínio, ninguém faz login, nada vaza. A
+mensagem de erro (na CLI ou no `500` de `POST /admin/tenants`) traz o slug, o id
+e o comando de conclusão. Sintoma correlato: `python -m app.cli.tenant list`
+mostra o tenant com `Ativo = NÃO` logo depois de um `create` que deu erro.
+
+Concluir — o ato municipal é idempotente, então repetir é seguro:
+
+```bash
+docker exec aprimora-py-backend python -m app.cli.tenant retomar \
+  --slug fortaleza \
+  --admin-email admin@fortaleza.gov.br \
+  --admin-cpf 12345678901 \
+  --admin-nome "Maria Silva"
+```
+
+Se o admin já existir, a senha dele é **preservada** (a saída avisa) — para
+trocá-la use o reset de senha do próprio tenant.
+
+**O comando recusa tenant que já foi provisionado**, e a regra é "tem algum
+usuário", não "está inativo". Município **suspenso** de propósito
+(inadimplência, incidente, retenção legal) também aparece inativo, e retomar um
+deles criaria nele um super-usuário novo e desfaria a suspensão. Para reativar
+município suspenso o comando é outro, e ele não toca em usuário nenhum:
+
+```bash
+docker exec aprimora-py-backend python -m app.cli.tenant activate fortaleza
+```
+
+Isso vale inclusive quando o provisionamento tiver falhado **só na ativação**
+(ato 3): nesse caso o admin já existe, não há o que semear, e `activate` é
+exatamente o que falta.
+
+**Se a decisão for abandonar o tenant inerte em vez de concluí-lo**, saiba que
+ele não desaparece sozinho: o ato de plataforma já contratou os módulos, então
+sobram linhas em `aprimora_py.tenant_modulo` e o tenant continua aparecendo em
+`GET /api/v2/admin/tenants` e em `tenant list`, sempre com `Ativo = NÃO`. Não há
+limpeza automática — **nenhum papel de runtime tem `DELETE` em
+`aprimora_py.tenant`**, por decisão registrada na migration 0076 (apagar tenant
+não é operação de runtime). A remoção é manual, no banco, por quem tem a
+credencial administrativa, e o `DELETE` do tenant leva `tenant_modulo` junto
+pelo `ON DELETE CASCADE` da 0075. Deixá-lo inerte é seguro; o custo é ruído na
+listagem.
 
 Listar tenants existentes:
 

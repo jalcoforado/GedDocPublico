@@ -1,0 +1,613 @@
+"""SEC-01A — identidade do operador de plataforma: esquema, grants e F-01.
+
+Este arquivo cobre três coisas, nesta ordem de importância:
+
+1. **Cenário 21 da matriz de claims** — a regressão do achado **F-01**: um
+   usuário *municipal* criado em outro tenant, com e-mail idêntico ao de um
+   operador de plataforma, alcançava operação cross-tenant. Foi o teste vermelho
+   que abriu o PR, marcado `xfail(strict=True)` enquanto a parte 1 entregava só
+   esquema e grants; o marcador saiu com o validador de token da parte 2 (ver
+   `docs/architecture/security/platform-operator-claims-matrix.md`).
+   Os demais 23 cenários da matriz estão em `test_platform_token_validator.py`.
+2. **Higiene de grants** — `aprimora_app` (o papel do runtime municipal) não
+   escreve nas tabelas de plataforma. Sem este teste, a garantia é revogada em
+   silêncio na próxima vez que alguém mexer no bootstrap do CI (foi exatamente o
+   que o `GRANT ... ON ALL TABLES` pós-migration fazia).
+3. **Estrutura de `platform_principal`** — sem `tenant_id`, sem FK para
+   `utils.usuario`, chave natural `(issuer, subject)`. ADR-016 §2.2 proíbe o
+   vínculo "por constraint e por revisão"; aqui ele é proibido por teste.
+
+Autoridade: `docs/architecture/adr/ADR-016-platform-operator-identity.md`.
+"""
+from __future__ import annotations
+
+import uuid
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.auth.jwt import build_payload, encode_token, get_jwt_secret
+from app.config import get_settings
+from app.main import app
+
+# E-mail do "operador" — domínio reservado `.test`, nunca um operador real
+# (ADR-016 §10, Q-2: nenhum operador real vai para código ou seed).
+EMAIL_OPERADOR = "operador-plataforma@sec01a.test"
+
+
+def _sm(engine):
+    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+
+# ---------------------------------------------------------------------------
+# 1. Cenário 21 — a colisão de e-mail (F-01)
+# ---------------------------------------------------------------------------
+
+
+async def test_cenario_21_usuario_municipal_com_email_de_operador_e_negado(
+    admin_engine, plataforma_configurada
+) -> None:
+    """Matriz de claims, cenário 21 — regressão de **F-01**.
+
+    O índice de unicidade de e-mail é `UNIQUE (tenant_id, email) WHERE excluido
+    IS FALSE`: o mesmo e-mail existe em quantos tenants quiser. Enquanto a
+    autorização de plataforma comparava **a string do e-mail**, qualquer tenant
+    capaz de criar um usuário com o e-mail certo produzia um administrador de
+    plataforma.
+
+    Este teste nasceu **vermelho** na parte 1 do PR, marcado `xfail(strict=True)`.
+    O marcador saiu na parte 2, junto com a allowlist — e é essa remoção que
+    prova que a entrega aconteceu, porque com `strict=True` o teste reprovaria
+    caso passasse com o marcador ainda no lugar.
+
+    O arranjo é o pior caso possível, de propósito:
+
+    - a fronteira de plataforma está **inteiramente configurada e viva**
+      (`plataforma_configurada`) — se o 401 viesse de configuração ausente, o
+      teste não provaria nada, e foi essa a armadilha da versão anterior, que
+      precisava LIGAR a allowlist para não passar por acidente;
+    - existe um operador de plataforma **de verdade**, ativo, cujo
+      `display_label` é exatamente este e-mail;
+    - o invasor apresenta um token municipal **válido**, do seu próprio tenant,
+      com o `Host` do seu próprio tenant.
+
+    **O que este teste prova, exatamente.** A recusa acontece no *algoritmo*:
+    `encode_token` emite HS256, e a fronteira recusa HS256 três checagens antes
+    de olhar o principal (verificado — o `detail` é "algoritmo HS256 proibido
+    nesta fronteira"). Ou seja: aqui se prova que **a credencial municipal
+    inteira**, do jeito que a aplicação a emite, não é aceita — o que é a
+    propriedade de F-01 na sua forma mais direta, e por isso o teste fica.
+
+    O que ele **não** prova é que o e-mail saiu do caminho de decisão: como o
+    token nem chega à consulta do principal, um fallback por `display_label`
+    reabriria F-01 e este teste continuaria verde. Essa metade está em
+    `test_email_de_operador_em_token_de_plataforma_valido_nao_autoriza`, logo
+    abaixo, que é o caso discriminante.
+
+    Sobe pela borda HTTP real: o defeito vivia na cadeia de dependências
+    (`require_platform_admin` → `get_current_user` → `Usuario.email`), e um
+    teste de unidade sobre a dependência não a exercita.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    slug = f"sec01a-{suffix}"
+    tenant_id: int | None = None
+    principal_id: int | None = None
+
+    Session = _sm(admin_engine)
+    async with Session() as s:
+        tenant_id = int(
+            (
+                await s.execute(
+                    text(
+                        "INSERT INTO aprimora_py.tenant (slug, nome, ativo, plano, criado_em) "
+                        "VALUES (:slug, :nome, true, 'basico', NOW()) RETURNING id"
+                    ),
+                    {"slug": slug, "nome": f"Prefeitura Invasora {suffix}"},
+                )
+            ).scalar_one()
+        )
+        usuario_id = int(
+            (
+                await s.execute(
+                    text(
+                        """
+                        INSERT INTO utils.usuario (tenant_id, nome, email, senha, cpf,
+                                                   ativo, excluido, app, nivel_acesso_sigilo)
+                        VALUES (:t, 'Usuario Colidente', :email, '', :cpf,
+                                true, false, :app, 'interno')
+                        RETURNING id
+                        """
+                    ),
+                    {
+                        "t": tenant_id,
+                        "email": EMAIL_OPERADOR,
+                        "cpf": uuid.uuid4().hex[:11],
+                        "app": get_settings().app_name,
+                    },
+                )
+            ).scalar_one()
+        )
+        # O operador de plataforma REAL, com este mesmo e-mail como rótulo. É o
+        # que torna a colisão concreta: não é "ninguém tem esse e-mail", é "o
+        # e-mail é de um operador ativo e ainda assim não vale nada aqui".
+        principal_id = int(
+            (
+                await s.execute(
+                    _SQL_INSERE_PRINCIPAL,
+                    dict(
+                        _PRINCIPAL_TESTE,
+                        subject=f"sec01a-colisao-{suffix}",
+                        display_label=EMAIL_OPERADOR,
+                    ),
+                )
+            ).scalar_one()
+        )
+        await s.execute(
+            text("UPDATE aprimora_py.platform_principal SET ativo = true WHERE id = :p"),
+            {"p": principal_id},
+        )
+        segredo = await get_jwt_secret(s)
+        await s.commit()
+
+    token = encode_token(
+        build_payload(usuario_id, EMAIL_OPERADOR, tenant_id), segredo
+    )
+
+    try:
+        host = f"{slug}.{get_settings().base_domain}"
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                "/api/v2/admin/tenants",
+                headers={"Host": host, "Authorization": f"Bearer {token}"},
+            )
+        assert r.status_code in (401, 403), (
+            f"HTTP {r.status_code}: um usuário municipal do tenant `{slug}`, cuja "
+            f"única credencial é ter o e-mail `{EMAIL_OPERADOR}`, listou os "
+            "tenants da plataforma. É o achado F-01: a autorização cross-tenant "
+            "é uma comparação de string sobre um dado que não é único "
+            "globalmente. O e-mail não pode participar da decisão."
+        )
+    finally:
+        from app.database import engine as app_engine
+
+        await app_engine.dispose()
+        async with Session() as s:
+            await s.execute(
+                text("DELETE FROM utils.usuario WHERE tenant_id = :t"), {"t": tenant_id}
+            )
+            await s.execute(
+                text("DELETE FROM aprimora_py.tenant WHERE id = :t"), {"t": tenant_id}
+            )
+            await s.execute(
+                text("DELETE FROM aprimora_py.platform_principal WHERE id = :p"),
+                {"p": principal_id},
+            )
+            await s.commit()
+
+
+async def test_email_de_operador_em_token_de_plataforma_valido_nao_autoriza(
+    admin_engine, plataforma_configurada
+) -> None:
+    """O caso **discriminante** de F-01 — a metade que o cenário 21 não alcança.
+
+    Aqui o token é impecável e chega até o fim da validação: RS256, assinado
+    pela chave do IdP de teste, `iss`/`aud`/`hd` corretos, `email_verified`
+    verdadeiro. Ele passa por todas as checagens de token e **chega na consulta
+    ao principal** — que é onde o cenário 21 nunca chega, porque morre antes, no
+    algoritmo.
+
+    O único desvio: o `sub` não tem principal, mas o `email` do token é
+    **idêntico** ao `display_label` de um principal ativo. É exatamente o
+    formato que F-01 teria se voltasse hoje: não mais uma allowlist de ambiente,
+    e sim um `carregar_principal` "tolerante" que caísse para o e-mail quando o
+    `sub` não batesse — algo que alguém escreveria de boa-fé para resolver
+    "operador trocou de conta no Workspace e perdeu o acesso".
+
+    Provado por inversão durante o desenvolvimento: com um fallback por
+    `display_label` acrescentado a `carregar_principal`, este teste devolve
+    **200** e o cenário 21 continua verde. É a demonstração de que os dois testes
+    cobrem coisas diferentes e de que este é o que trava a regressão.
+
+    `sub` é a chave, e o e-mail é rótulo (ADR-016 §2.1). Trocar de conta exige
+    `platform_principal criar` com o `sub` novo — que é o procedimento, não o
+    problema.
+    """
+    subject_orfao = f"sec01a-sem-principal-{uuid.uuid4().hex[:8]}"
+    principal_id: int | None = None
+
+    Session = _sm(admin_engine)
+    async with Session() as s:
+        principal_id = int(
+            (
+                await s.execute(
+                    _SQL_INSERE_PRINCIPAL,
+                    dict(
+                        _PRINCIPAL_TESTE,
+                        subject=f"sec01a-titular-{uuid.uuid4().hex[:8]}",
+                        display_label=EMAIL_OPERADOR,
+                    ),
+                )
+            ).scalar_one()
+        )
+        await s.execute(
+            text("UPDATE aprimora_py.platform_principal SET ativo = true WHERE id = :p"),
+            {"p": principal_id},
+        )
+        await s.commit()
+
+    token = plataforma_configurada.token(subject=subject_orfao, email=EMAIL_OPERADOR)
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                "/api/v2/admin/tenants", headers={"Authorization": f"Bearer {token}"}
+            )
+        assert r.status_code == 403, (
+            f"HTTP {r.status_code}: um token de plataforma perfeitamente válido, "
+            f"cujo `sub` NÃO tem principal, foi autorizado só por carregar o "
+            f"e-mail `{EMAIL_OPERADOR}` de um operador ativo. É F-01 de volta em "
+            "forma nova: o rótulo voltou a decidir. Quem autoriza é o par "
+            "(issuer, subject)."
+        )
+    finally:
+        from app.database import engine as app_engine
+
+        await app_engine.dispose()
+        async with Session() as s:
+            await s.execute(
+                text(
+                    "DELETE FROM aprimora_py.platform_audit_log "
+                    " WHERE subject IN (:orfao) OR platform_principal_id = :p"
+                ),
+                {"orfao": subject_orfao, "p": principal_id},
+            )
+            await s.execute(
+                text("DELETE FROM aprimora_py.platform_principal WHERE id = :p"),
+                {"p": principal_id},
+            )
+            await s.commit()
+
+
+# ---------------------------------------------------------------------------
+# 2. Higiene de grants — o runtime municipal não escreve na plataforma
+# ---------------------------------------------------------------------------
+
+_PRINCIPAL_TESTE = {
+    "issuer": "https://operator.test.local",
+    "display_label": EMAIL_OPERADOR,
+    "concedido_por": "teste automatizado",
+    "motivo_concessao": "controle do teste de grants",
+}
+
+_SQL_INSERE_PRINCIPAL = text(
+    """
+    INSERT INTO aprimora_py.platform_principal
+        (issuer, subject, display_label, concedido_por, motivo_concessao)
+    VALUES (:issuer, :subject, :display_label, :concedido_por, :motivo_concessao)
+    RETURNING id
+    """
+)
+
+
+async def test_papel_de_plataforma_escreve_no_principal_controle_positivo(
+    platform_session: AsyncSession,
+) -> None:
+    """CONTROLE POSITIVO dos dois testes seguintes.
+
+    Sem ele, "permission denied" para `aprimora_app` provaria apenas que a
+    tabela está quebrada, ausente ou sem sequence — e o teste de negativa
+    ficaria verde num mundo em que a plataforma inteira não funciona.
+    """
+    params = dict(_PRINCIPAL_TESTE, subject=f"sec01a-controle-{uuid.uuid4().hex[:8]}")
+    principal_id = int(
+        (await platform_session.execute(_SQL_INSERE_PRINCIPAL, params)).scalar_one()
+    )
+    assert principal_id > 0
+
+    await platform_session.execute(
+        text(
+            "INSERT INTO aprimora_py.platform_audit_log "
+            "(platform_principal_id, issuer, subject, acao) "
+            "VALUES (:p, :issuer, :subject, 'teste.controle_positivo')"
+        ),
+        {"p": principal_id, "issuer": params["issuer"], "subject": params["subject"]},
+    )
+    # Rollback: o controle positivo não deixa lixo. Se a transação tivesse de
+    # ser comitada para provar algo, o teste teria de limpar por conta própria.
+    await platform_session.rollback()
+
+
+async def test_aprimora_app_nao_escreve_em_platform_principal(
+    app_session: AsyncSession,
+) -> None:
+    """A garantia central da higiene de grants (ADR §2.3).
+
+    O bootstrap do CI rodava `GRANT ... ON ALL TABLES IN SCHEMA aprimora_py TO
+    aprimora_app` **depois** das migrations — o que dava DML na tabela recém
+    criada e desfazia qualquer REVOKE. A ordem foi corrigida em
+    `.github/workflows/backend-tests.yml`; este teste é o que impede a
+    regressão de voltar em silêncio.
+    """
+    params = dict(_PRINCIPAL_TESTE, subject=f"sec01a-negado-{uuid.uuid4().hex[:8]}")
+    with pytest.raises(DBAPIError) as exc:
+        await app_session.execute(_SQL_INSERE_PRINCIPAL, params)
+    await app_session.rollback()
+    msg = str(exc.value).lower()
+    assert "permission denied" in msg or "permissão negada" in msg, (
+        "esperava negativa de PRIVILÉGIO ao inserir em platform_principal como "
+        f"`aprimora_app`; recebi: {msg}"
+    )
+
+
+async def test_aprimora_app_nao_escreve_em_platform_audit_log(
+    app_session: AsyncSession,
+) -> None:
+    """Mesma garantia para a trilha de plataforma (decisão D-a).
+
+    Uma trilha que o papel municipal pode escrever é uma trilha que ele pode
+    forjar.
+    """
+    with pytest.raises(DBAPIError) as exc:
+        await app_session.execute(
+            text(
+                "INSERT INTO aprimora_py.platform_audit_log (issuer, subject, acao) "
+                "VALUES ('https://operator.test.local', 'x', 'teste.forjado')"
+            )
+        )
+    await app_session.rollback()
+    msg = str(exc.value).lower()
+    assert "permission denied" in msg or "permissão negada" in msg, (
+        "esperava negativa de PRIVILÉGIO ao inserir em platform_audit_log como "
+        f"`aprimora_app`; recebi: {msg}"
+    )
+
+
+async def test_papel_de_plataforma_nao_altera_nem_apaga_a_propria_trilha(
+    platform_session: AsyncSession,
+) -> None:
+    """A trilha AUTORITATIVA é append-only até para quem a escreve.
+
+    O controle positivo já provou, acima, que `aprimora_platform` **insere** em
+    `platform_audit_log` — sem ele, este teste passaria num mundo em que a
+    tabela simplesmente não funciona. O que falta provar é o outro lado: que o
+    papel não consegue reescrever nem apagar o que gravou.
+
+    A garantia importa porque este é o único papel que escreve ali. Credencial
+    de `PLATFORM_DB_URL` comprometida, ou um bug numa rota futura, apagaria
+    exatamente o registro do que fez — e é dessa trilha que dependem a revisão
+    trimestral (runbook §9) e o pós-uso de break-glass (§5.6). Uma trilha que o
+    seu próprio escritor pode editar não é trilha, é rascunho.
+
+    `platform_principal` **mantém** UPDATE/DELETE de propósito: é lá que a CLI
+    revoga. Identidade muda; história, não.
+    """
+    for sql, operacao in (
+        ("UPDATE aprimora_py.platform_audit_log SET acao = 'forjada'", "UPDATE"),
+        ("DELETE FROM aprimora_py.platform_audit_log", "DELETE"),
+    ):
+        with pytest.raises(DBAPIError) as exc:
+            await platform_session.execute(text(sql))
+        await platform_session.rollback()
+        msg = str(exc.value).lower()
+        assert "permission denied" in msg or "permissão negada" in msg, (
+            f"esperava negativa de PRIVILÉGIO no {operacao} de platform_audit_log "
+            f"como `aprimora_platform`; recebi: {msg}"
+        )
+
+
+async def test_papel_de_plataforma_nao_apaga_tenant_nem_contratacao(
+    platform_session: AsyncSession,
+) -> None:
+    """`DELETE` físico não é operação de runtime nenhum — nem do de plataforma.
+
+    A razão está escrita no `_REVOGACOES` da 0076 para justificar tirar o
+    privilégio de `aprimora_app`; conceder ao papel de plataforma o que se
+    revoga do municipal faria a justificativa contradizer o grant. Descontratar
+    é soft-delete (`UPDATE excluido = true`) e desativar tenant é
+    `UPDATE ativo = false`, conforme a regra de soft-delete do `CLAUDE.md`.
+    """
+    for tabela in ("aprimora_py.tenant", "aprimora_py.tenant_modulo"):
+        with pytest.raises(DBAPIError) as exc:
+            await platform_session.execute(text(f"DELETE FROM {tabela} WHERE id = -1"))
+        await platform_session.rollback()
+        msg = str(exc.value).lower()
+        assert "permission denied" in msg or "permissão negada" in msg, (
+            f"`aprimora_platform` conseguiu DELETE em {tabela}; recebi: {msg}"
+        )
+
+
+async def test_colunas_de_vigencia_usam_relogio_utc(
+    platform_session: AsyncSession,
+) -> None:
+    """Relógio único: o default do servidor grava **UTC**, não hora local.
+
+    As colunas são `TIMESTAMP WITHOUT TIME ZONE`. Com `NOW()` puro, um host
+    cujo fuso esteja à frente de UTC gravaria `valid_from` no futuro em relação
+    ao `agora_utc()` do código — e `vigente_em()` devolveria `False`. O sintoma
+    seria um operador cadastrado que não opera, sem exceção e sem log.
+
+    Provado por comparação com o relógio da aplicação, não lendo o catálogo:
+    o que interessa é o instante que a linha recebe.
+    """
+    from app.utils.relogio import agora_utc
+
+    antes = agora_utc()
+    linha = (
+        await platform_session.execute(
+            text(
+                """
+                INSERT INTO aprimora_py.platform_principal
+                    (issuer, subject, display_label, concedido_por, motivo_concessao)
+                VALUES (:issuer, :subject, :display_label, :concedido_por, :motivo_concessao)
+                RETURNING valid_from, concedido_em, criado_em
+                """
+            ),
+            dict(_PRINCIPAL_TESTE, subject=f"sec01a-relogio-{uuid.uuid4().hex[:8]}"),
+        )
+    ).one()
+    depois = agora_utc()
+    await platform_session.rollback()
+
+    # Tolerância de 60 s cobre latência e drift entre container e banco, e é
+    # pequena o bastante para que QUALQUER fuso diferente de UTC (o menor
+    # deslocamento real em uso no mundo é de 15 min) reprove.
+    for nome in ("valid_from", "concedido_em", "criado_em"):
+        valor = getattr(linha, nome)
+        assert antes.tzinfo is None and valor.tzinfo is None
+        deriva = min(abs((valor - antes).total_seconds()), abs((valor - depois).total_seconds()))
+        assert deriva < 60, (
+            f"`{nome}` = {valor}, relógio da aplicação = {antes}..{depois} "
+            f"(deriva de {deriva:.0f}s). O default do servidor e o código estão "
+            "em relógios diferentes; num host fora de UTC isso faz `valid_from` "
+            "nascer no futuro e o principal não operar, sem erro nenhum. "
+            "Ver app/utils/relogio.py e o `_AGORA_UTC` da migration 0076."
+        )
+
+
+async def test_papel_de_plataforma_nao_e_superuser_nem_bypassrls(
+    admin_session: AsyncSession,
+) -> None:
+    """ADR §2.3/D-5: nenhum papel de runtime pode ser `SUPERUSER`, e
+    `BYPASSRLS` não é solução genérica. O papel existe para ter grants
+    cross-tenant **declarados**, não para contornar policy."""
+    linha = (
+        await admin_session.execute(
+            text(
+                "SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles "
+                "WHERE rolname = 'aprimora_platform'"
+            )
+        )
+    ).one_or_none()
+    assert linha is not None, (
+        "papel `aprimora_platform` não existe — a migration 0076 não foi "
+        "aplicada neste banco. No CI isso significa que o `GRANT ... TO "
+        "aprimora_platform` de qualquer migration futura vai falhar."
+    )
+    rolsuper, rolbypassrls, rolcanlogin = linha
+    assert rolsuper is False, "`aprimora_platform` não pode ser SUPERUSER"
+    assert rolbypassrls is False, "`aprimora_platform` não pode ter BYPASSRLS"
+    assert rolcanlogin is True, "o papel precisa de LOGIN — é usado por PLATFORM_DB_URL"
+
+
+# ---------------------------------------------------------------------------
+# 3. Estrutura — o vínculo proibido pelo ADR §2.2
+# ---------------------------------------------------------------------------
+
+
+async def test_platform_principal_nao_tem_tenant_id_nem_fk_para_usuario(
+    admin_session: AsyncSession,
+) -> None:
+    """ADR §2.2: é **proibido** vincular o principal a `utils.usuario.id`, a
+    e-mail municipal ou a qualquer cadastro de tenant.
+
+    Duas afirmações, uma consulta cada:
+
+    - nenhuma coluna `tenant_id` (que, além do vínculo proibido, faria a
+      tabela cair na guarda de RLS de `test_rls_bypass_caracterizacao.py`);
+    - nenhuma FK saindo da tabela para `utils.*` ou `protocolos.*`.
+    """
+    colunas = {
+        c
+        for (c,) in (
+            await admin_session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'aprimora_py' "
+                    "  AND table_name = 'platform_principal'"
+                )
+            )
+        ).all()
+    }
+    assert colunas, "tabela `aprimora_py.platform_principal` não existe"
+    assert "tenant_id" not in colunas, (
+        "`platform_principal` ganhou coluna `tenant_id`. O principal de "
+        "plataforma não pertence a tenant nenhum (ADR-016 §2.2) — e com a "
+        "coluna a tabela ainda passaria a reprovar a guarda de RLS."
+    )
+    assert not (colunas & {"id_usuario", "usuario_id", "email"}), (
+        "`platform_principal` ganhou coluna de identidade municipal: "
+        f"{sorted(colunas & {'id_usuario', 'usuario_id', 'email'})}. O e-mail "
+        "entra apenas como `display_label`, e não decide nada."
+    )
+
+    fks = (
+        await admin_session.execute(
+            text(
+                """
+                SELECT con.conname,
+                       nf.nspname || '.' || cf.relname AS referenciada
+                  FROM pg_constraint con
+                  JOIN pg_class c    ON c.oid  = con.conrelid
+                  JOIN pg_namespace n  ON n.oid  = c.relnamespace
+                  JOIN pg_class cf   ON cf.oid = con.confrelid
+                  JOIN pg_namespace nf ON nf.oid = cf.relnamespace
+                 WHERE con.contype = 'f'
+                   AND n.nspname = 'aprimora_py'
+                   AND c.relname = 'platform_principal'
+                """
+            )
+        )
+    ).all()
+    assert fks == [], (
+        f"`platform_principal` tem FK para {[r.referenciada for r in fks]}. "
+        "Qualquer vínculo com cadastro de tenant é proibido pelo ADR-016 §2.2 "
+        "— é exatamente o acoplamento que produziu o achado F-01."
+    )
+
+
+async def test_platform_principal_tem_chave_natural_issuer_subject(
+    platform_session: AsyncSession,
+) -> None:
+    """Q-5: `id` é a PK interna; `(issuer, subject)` é a chave natural única.
+
+    Provado por inversão — o segundo INSERT do mesmo par tem de estourar. Ler o
+    catálogo provaria a existência da constraint, não o seu efeito.
+
+    E o mesmo `subject` em **issuer diferente** é outra identidade (cenário 15
+    da matriz, proibição 7 do ADR): tem de ser aceito.
+    """
+    subject = f"sec01a-chave-{uuid.uuid4().hex[:8]}"
+    params = dict(_PRINCIPAL_TESTE, subject=subject)
+    await platform_session.execute(_SQL_INSERE_PRINCIPAL, params)
+
+    with pytest.raises(DBAPIError) as exc:
+        await platform_session.execute(_SQL_INSERE_PRINCIPAL, params)
+    await platform_session.rollback()
+    assert "uq_platform_principal_iss_sub" in str(exc.value), (
+        f"esperava violação da chave natural (issuer, subject); recebi: {exc.value}"
+    )
+
+    # Mesmo subject, outro issuer: identidades distintas, INSERT aceito.
+    await platform_session.execute(_SQL_INSERE_PRINCIPAL, params)
+    await platform_session.execute(
+        _SQL_INSERE_PRINCIPAL,
+        dict(params, issuer="https://outro-idp.test.local"),
+    )
+    await platform_session.rollback()
+
+
+async def test_platform_principal_recusa_issuer_que_nao_e_url(
+    platform_session: AsyncSession,
+) -> None:
+    """O `CHECK` de `issuer` é a parte "proibido por constraint" do ADR §2.2:
+    a coluna não aceita um id de usuário municipal nem um e-mail no lugar do
+    issuer OIDC."""
+    for issuer_invalido in ("42", EMAIL_OPERADOR, ""):
+        with pytest.raises(DBAPIError) as exc:
+            await platform_session.execute(
+                _SQL_INSERE_PRINCIPAL,
+                dict(
+                    _PRINCIPAL_TESTE,
+                    issuer=issuer_invalido,
+                    subject=f"sec01a-issuer-{uuid.uuid4().hex[:8]}",
+                ),
+            )
+        await platform_session.rollback()
+        assert "ck_platform_principal_issuer_url" in str(exc.value), (
+            f"issuer `{issuer_invalido}` foi aceito ou falhou por outro motivo: "
+            f"{exc.value}"
+        )

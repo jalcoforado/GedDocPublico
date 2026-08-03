@@ -2,6 +2,16 @@
 # Mudar o env aqui propaga pros 3 serviços.
 x-backend-env: &backend-env
   DATABASE_URL: postgresql+asyncpg://ged_user:ged_password_secure_local@db:5432/ged_saas_db
+  # Papel de banco POR CONSUMIDOR (SEC-RLS-00B). Vazio = cai em DATABASE_URL,
+  # que é o estado de hoje em TODOS os ambientes — este PR não troca o valor
+  # efetivo de nenhum. A troca é o gate `SEC-RLS-ROLLOUT`, e é feita
+  # definindo a variável no `.env` da raiz; o rollback é apagá-la.
+  #
+  # Os papéis existem no banco (`aprimora_app` desde a 0006, `aprimora_worker`
+  # e `aprimora_migrator` desde a 0078), todos NOSUPERUSER e NOBYPASSRLS.
+  APP_DATABASE_URL: ${APP_DATABASE_URL:-}
+  WORKER_DATABASE_URL: ${WORKER_DATABASE_URL:-}
+  MIGRATOR_DATABASE_URL: ${MIGRATOR_DATABASE_URL:-}
   APP_NAME: sistemas
   CIDADE_CONN: ged_saas_db
   ENVIRONMENT: desenvolvimento

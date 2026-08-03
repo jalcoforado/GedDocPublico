@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .auth.plataforma import verificar_configuracao_na_inicializacao
 from .config import get_settings
 from .middleware.request_logging import RequestLoggingMiddleware
 from .middleware.tenant import TenantMiddleware
@@ -52,6 +53,12 @@ configure_logging(settings.log_level)
 
 # Fase 33 — Sentry opcional (só ativa se SENTRY_DSN setado).
 init_sentry()
+
+# SEC-01A / ADR-016 §2.6, cenários 23 e 24 da matriz de claims: configuração de
+# plataforma ausente NEGA em runtime e **registra erro na inicialização**. Não
+# levanta — o console de operador desconfigurado não pode derrubar o app
+# municipal —, mas também não passa em silêncio.
+verificar_configuracao_na_inicializacao()
 
 app = FastAPI(
     title="Aprimora API",

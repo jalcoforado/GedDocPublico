@@ -1,15 +1,19 @@
 """Contratação de módulos pelo admin de plataforma — só platform admin, e não
 vaza entre tenants.
 
-`client_plataforma`, `client_admin` e `tenant_id_default` não existem em
-`conftest.py` (conferido) — definidas aqui no mesmo padrão de
-`test_modulos_me.py`/`test_permissoes_modulo.py`: `AsyncClient` sobre
-`ASGITransport` com `app.dependency_overrides[get_current_user]`.
-`require_platform_admin` depende de `get_current_user` (não é ele mesmo
-sobrescrito), então o override de `get_current_user` decide se o gate deixa
-passar — é o que dá o 403 real para `client_admin` (admin comum do tenant,
-e-mail fora da allowlist) e o 200 para `client_plataforma` (e-mail inserido
-na allowlist via `PLATFORM_ADMIN_EMAILS` monkeypatchada).
+**Reescrito em SEC-01A.** Antes, `client_plataforma` combinava
+`monkeypatch.setenv("PLATFORM_ADMIN_EMAILS", ...)` com
+`dependency_overrides[get_current_user]`, porque o gate era uma comparação de
+e-mail sobre a identidade municipal. Nenhuma dessas duas peças sobreviveu: o
+gate agora exige token administrativo RS256 do IdP dedicado e um principal em
+`aprimora_py.platform_principal`, sobre uma conexão própria. O cliente de
+plataforma passou a mandar um token **de verdade**, emitido pelos fixtures de
+SEC-00 e validado pela cadeia real — sem `dependency_overrides` sobre o gate,
+que faria o teste concordar consigo mesmo.
+
+`client_admin` continua sendo um servidor municipal comum, e continua tomando
+403 — só que agora por não ter token administrativo nenhum, e não por o e-mail
+dele estar fora de uma lista.
 
 `tenant_id_default` ancora no tenant `sobral`: é o único tenant com os 5
 módulos contratáveis contratados garantidos — pelo backfill da migration
@@ -24,16 +28,12 @@ escreve (`test_descontratar_e_recontratar`) roda em tenant isolado da
 fixture `two_tenants` de `conftest.py`, para não deixar `sobral` num estado
 quebrado para o resto da suíte se uma asserção falhar no meio do teste.
 """
-from types import SimpleNamespace
-
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.deps import get_current_user
-from app.config import get_settings
 from app.main import app
 from app.models import Usuario
 
@@ -51,57 +51,89 @@ async def tenant_id_default(admin_engine) -> int:
 
 
 @pytest_asyncio.fixture
-async def client_admin(admin_engine, tenant_id_default):
-    """Admin comum do tenant `sobral` (admin@local.test) — NÃO é platform admin."""
+async def token_admin_municipal(admin_engine, tenant_id_default) -> str:
+    """Token MUNICIPAL legítimo do super-usuário de `sobral` (admin@local.test).
+
+    Não é um token inventado: sai de `build_payload`/`encode_token`, a mesma
+    cadeia que emite a sessão de qualquer servidor de prefeitura, e é assinado
+    com o segredo real do ambiente. É a credencial mais forte que existe do lado
+    municipal — e é exatamente por isso que serve de teste: se ela abrisse a
+    fronteira de plataforma, a separação de realms não existiria.
+    """
+    from app.auth.jwt import build_payload, encode_token, get_jwt_secret
+
     async with _sm(admin_engine)() as s:
-        usuario_id = (await s.execute(
-            text(
-                "SELECT id FROM utils.usuario WHERE tenant_id = :t AND email = 'admin@local.test'"
-            ),
-            {"t": tenant_id_default},
-        )).scalar_one()
-
-    async def _get_user():
-        async with _sm(admin_engine)() as s:
-            return (
-                await s.execute(select(Usuario).where(Usuario.id == usuario_id))
-            ).scalar_one()
-
-    app.dependency_overrides[get_current_user] = _get_user
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
-    app.dependency_overrides.clear()
-    from app.database import engine as app_engine
-    await app_engine.dispose()
+        usuario = (
+            await s.execute(
+                select(Usuario).where(
+                    Usuario.tenant_id == tenant_id_default,
+                    Usuario.email == "admin@local.test",
+                )
+            )
+        ).scalar_one()
+        segredo = await get_jwt_secret(s)
+    return encode_token(
+        build_payload(usuario.id, usuario.email, tenant_id_default), segredo
+    )
 
 
 @pytest_asyncio.fixture
-async def client_plataforma(monkeypatch):
-    """Usuário com e-mail incluído em PLATFORM_ADMIN_EMAILS — passa o gate."""
-    get_settings.cache_clear()
-    monkeypatch.setenv("PLATFORM_ADMIN_EMAILS", "plataforma@aprimora.test")
+async def client_plataforma(principal_ativo, plataforma_configurada):
+    """Operador de plataforma **real**: token RS256 do IdP de teste + principal
+    ativo, validados pela cadeia de produção.
 
-    async def _get_user():
-        # id=None (não amarrado a nenhum utils.usuario real): id_usuario em
-        # audit_log é nullable exatamente para aceitar isso sem violar FK.
-        return SimpleNamespace(id=None, email="plataforma@aprimora.test", must_change_password=False)
-
-    app.dependency_overrides[get_current_user] = _get_user
+    O gate não é sobrescrito. Todo request deste cliente atravessa
+    `validar_token_plataforma` e a consulta ao principal, e roda na conexão do
+    papel `aprimora_platform` — que é onde um grant faltando apareceria.
+    """
+    subject, _ = principal_ativo
+    token = plataforma_configurada.token(subject=subject)
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {token}"},
+    ) as c:
         yield c
-    app.dependency_overrides.clear()
-    get_settings.cache_clear()
     from app.database import engine as app_engine
     await app_engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_listar_exige_platform_admin(client_admin, tenant_id_default):
-    """Admin comum do tenant NÃO é platform admin."""
-    r = await client_admin.get(f"/api/v2/admin/tenants/{tenant_id_default}/modulos")
-    assert r.status_code == 403
+async def test_su_de_prefeitura_nao_e_admin_de_plataforma(
+    token_admin_municipal, tenant_id_default, plataforma_configurada
+):
+    """Super-usuário de prefeitura NÃO opera a plataforma, e agora nem chega
+    perto: com a fronteira **inteiramente configurada e viva**, o token
+    municipal mais poderoso que existe é recusado como **401** — não
+    autenticado neste realm.
+
+    O código mudou de 403 para 401 de propósito, e a diferença importa: antes,
+    o usuário era autenticado pela cadeia municipal e depois reprovado numa
+    lista de e-mails (403 = "conheço você, não deixo"). Hoje a credencial
+    municipal não é sequer uma credencial aqui (401 = "isto não é um token meu").
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get(
+            f"/api/v2/admin/tenants/{tenant_id_default}/modulos",
+            headers={"Authorization": f"Bearer {token_admin_municipal}"},
+        )
+    assert r.status_code == 401, r.text
+    from app.database import engine as app_engine
+
+    await app_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sem_token_administrativo_e_401(tenant_id_default, plataforma_configurada):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get(f"/api/v2/admin/tenants/{tenant_id_default}/modulos")
+    assert r.status_code == 401
+    from app.database import engine as app_engine
+
+    await app_engine.dispose()
 
 
 @pytest.mark.asyncio

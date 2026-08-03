@@ -11,10 +11,14 @@ import uuid
 
 import pytest
 from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.auth.deps import get_current_user
+from app.main import app
+from app.models import Usuario
 from app.models import usuario as user_models
 from app.schemas.transporte_regulado import (
     PermissionarioCreate,
@@ -24,7 +28,9 @@ from app.schemas.transporte_regulado import (
     VeiculoVistoriaUpdate,
 )
 from app.services import transporte_regulado as tr_svc
+from app.services.modulos import contratar
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.conftest import arreio_tenant_http
 
 
 def _sm(engine):
@@ -100,6 +106,26 @@ async def _usuario(admin_engine, tenant_id, nome="Auditor", cpf=None):
             )
             usuario_id = result.scalar_one()
         return usuario_id
+
+
+def _as_user(engine, usuario_id: int, tenant_id: int, tenant_slug: str):
+    """Emula usuário autenticado por dependency_overrides.
+
+    Mesmo padrão de test_permissoes_modulo.py::_as_user. Existe porque este
+    arquivo era inteiramente de service e não tinha harness de HTTP.
+    """
+
+    async def _get_user():
+        async with _sm(engine)() as s:
+            return (
+                await s.execute(select(Usuario).where(Usuario.id == usuario_id))
+            ).scalar_one()
+
+    def _setup():
+        app.dependency_overrides[get_current_user] = _get_user
+        arreio_tenant_http(tenant_id, tenant_slug)
+
+    return _setup
 
 
 @pytest.mark.asyncio
@@ -994,3 +1020,64 @@ async def test_vistoria_renovacao_historico_chain(admin_engine):
         )
         assert vist3.renovada_de == vist2.id
         assert vist3.renovada_de != vist1.id
+
+
+@pytest.mark.asyncio
+async def test_http_vencidas_nao_e_engolida_por_vistoria_id(admin_engine):
+    """A rota /vencidas tem de ser alcançável por HTTP, não só pelo service.
+
+    O FastAPI casa rotas na ordem de declaração. Com `/{vistoria_id}: int`
+    declarada antes, esta requisição batia nela, falhava a validação do int e
+    voltava 422 sem nunca chegar no handler. Os dois testes de vencidas acima
+    chamam o service direto — endpoint morto, service verde.
+    """
+    tenant = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, tenant.id, ["transporte"])
+            await s.commit()
+
+        veiculo = await _veiculo(admin_engine, tenant.id)
+        auditor_id = await _usuario(admin_engine, tenant.id)
+
+        ontem = datetime.utcnow().date() - timedelta(days=1)
+        async with _sm(admin_engine)() as s:
+            vencida = await tr_svc.criar_vistoria(
+                s, tenant_id=tenant.id, veiculo_id=veiculo.id, auditor_id=auditor_id,
+                payload=VeiculoVistoriaCreate(
+                    resultado="aprovado",
+                    parecer="Vistoria que venceu ontem.",
+                    data_vistoria=datetime.combine(ontem, datetime.min.time()),
+                    data_validade=ontem,
+                ),
+            )
+
+        async with _sm(admin_engine)() as s:
+            # ORDER BY id ASC é obrigatório aqui, não estético: o tenant tem
+            # duas linhas em utils.usuario neste ponto — o admin/SU criado por
+            # `provisionar_tenant` e o auditor criado acima por `_usuario`.
+            # Sem ordenação, `LIMIT 1` devolve uma linha arbitrária do seq
+            # scan; se pegar o auditor (sem grupo/SU), `require_permission`
+            # barra com 403 antes de a rota /vencidas sequer ser resolvida.
+            # O admin é sempre inserido primeiro, então id ASC garante ele.
+            su_id = int((await s.execute(
+                text(
+                    "SELECT id FROM utils.usuario WHERE tenant_id=:t "
+                    "ORDER BY id ASC LIMIT 1"
+                ),
+                {"t": tenant.id},
+            )).scalar_one())
+
+        _as_user(admin_engine, su_id, tenant.id, tenant.slug)()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                f"/api/v2/transporte-regulado/veiculos/{veiculo.id}/vistorias/vencidas"
+            )
+
+        assert r.status_code == 200, r.text
+        assert [i["id"] for i in r.json()["items"]] == [vencida.id]
+    finally:
+        app.dependency_overrides.clear()
+        from app.database import engine as app_engine
+        await app_engine.dispose()

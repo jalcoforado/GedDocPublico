@@ -184,9 +184,17 @@ Migrations atuais:
 
 Gestão de tenants pela interface (`/admin/tenants`) e API (`/api/v2/admin/...`),
 além da CLI (`app.cli.tenant`, que reusa o mesmo serviço de provisionamento).
-Acesso controlado pela allowlist **`PLATFORM_ADMIN_EMAILS`** (env, separada por
-vírgula) — **obrigatória**; vazia = ninguém acessa. Não é permissão de tenant.
-Ver detalhes operacionais no [RUNBOOK](RUNBOOK.md).
+
+Acesso: desde `SEC-01A` ([ADR-016](docs/architecture/adr/ADR-016-platform-operator-identity.md))
+exige **token administrativo RS256** de um IdP dedicado — `iss`, `aud`, JWKS e
+`hd` próprios, configurados por `PLATFORM_OIDC_*` — **e** um principal ativo em
+`aprimora_py.platform_principal`, cadastrado pela CLI
+`app.cli.platform_principal` no host. A allowlist **`PLATFORM_ADMIN_EMAILS` foi
+removida**: era o achado F-01, autorização cross-tenant por um e-mail que é
+único apenas *por tenant*. Não é permissão de tenant — super-usuário de
+prefeitura não entra, e agora nem é uma credencial reconhecida aqui.
+Ver [RUNBOOK](RUNBOOK.md) e o
+[runbook de operador](docs/runbooks/platform-operator-bootstrap.md).
 
 ```bash
 # Estado atual

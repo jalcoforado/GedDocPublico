@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, Inbox, Plus } from "lucide-react";
+import { Inbox, Plus, ScrollText } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -160,14 +160,18 @@ export default function AlvarasPage() {
   const docsQ = useQuery({
     queryKey: ["tr-alvara-documentos", selectedAlvaraForDocs?.id],
     queryFn: () =>
-      selectedAlvaraForDocs ? api.alvaras.documentos.list(selectedAlvaraForDocs.id) : Promise.resolve([]),
+      selectedAlvaraForDocs
+        ? api.alvaras.documentos.list(selectedAlvaraForDocs.id)
+        : Promise.resolve({ items: [], total: 0, page: 1, page_size: 50 }),
     enabled: docsDialogOpen && selectedAlvaraForDocs !== null,
   });
 
   const respQ = useQuery({
     queryKey: ["tr-alvara-responsaveis", selectedAlvaraForResp?.id],
     queryFn: () =>
-      selectedAlvaraForResp ? api.alvaras.responsaveis.list(selectedAlvaraForResp.id) : Promise.resolve([]),
+      selectedAlvaraForResp
+        ? api.alvaras.responsaveis.list(selectedAlvaraForResp.id)
+        : Promise.resolve({ items: [], total: 0, page: 1, page_size: 50 }),
     enabled: respDialogOpen && selectedAlvaraForResp !== null,
   });
 
@@ -433,14 +437,14 @@ export default function AlvarasPage() {
     saveM.mutate(payload);
   }
 
-  const filteredData = listaQ.data?.filter((a) =>
+  const filteredData = listaQ.data?.items.filter((a) =>
     a.numero_alvara.toLowerCase().includes(busca.toLowerCase())
   ) ?? [];
 
   return (
     <div className="space-y-4">
       <PageHeader
-        icon={FileText}
+        icon={ScrollText}
         title="Alvarás"
         description="Autorizações e permissões de operação para permissionários e empresas."
         breadcrumbs={[
@@ -462,7 +466,7 @@ export default function AlvarasPage() {
           <Label htmlFor="f_emp">Empresa</Label>
           <Select id="f_emp" value={empresaFiltro} onChange={(e) => setEmpresaFiltro(e.target.value)}>
             <option value="">Todas</option>
-            {empresasQ.data?.map((e: Empresa) => (
+            {empresasQ.data?.items.map((e: Empresa) => (
               <option key={e.id} value={String(e.id)}>
                 {e.razao_social}
               </option>
@@ -473,7 +477,7 @@ export default function AlvarasPage() {
           <Label htmlFor="f_perm">Permissionário</Label>
           <Select id="f_perm" value={permFiltro} onChange={(e) => setPermFiltro(e.target.value)}>
             <option value="">Todos</option>
-            {permsQ.data?.map((p: Permissionario) => (
+            {permsQ.data?.items.map((p: Permissionario) => (
               <option key={p.id} value={String(p.id)}>
                 {p.nome}
               </option>
@@ -642,7 +646,7 @@ export default function AlvarasPage() {
               <Label htmlFor="emp">Empresa</Label>
               <Select value={form.id_empresa} onChange={(e) => set("id_empresa", e.target.value)}>
                 <option value="">Nenhuma</option>
-                {empresasQ.data?.map((e: Empresa) => (
+                {empresasQ.data?.items.map((e: Empresa) => (
                   <option key={e.id} value={String(e.id)}>
                     {e.razao_social}
                   </option>
@@ -653,7 +657,7 @@ export default function AlvarasPage() {
               <Label htmlFor="perm">Permissionário</Label>
               <Select value={form.id_permissionario} onChange={(e) => set("id_permissionario", e.target.value)}>
                 <option value="">Nenhum</option>
-                {permsQ.data?.map((p: Permissionario) => (
+                {permsQ.data?.items.map((p: Permissionario) => (
                   <option key={p.id} value={String(p.id)}>
                     {p.nome}
                   </option>
@@ -837,13 +841,13 @@ export default function AlvarasPage() {
 
           {docsQ.isLoading ? (
             <div className="text-center text-muted-foreground py-4">Carregando documentos...</div>
-          ) : (docsQ.data?.length ?? 0) === 0 ? (
+          ) : (docsQ.data?.items.length ?? 0) === 0 ? (
             <div className="text-center text-muted-foreground py-4">Nenhum documento anexado.</div>
           ) : (
             <div className="border-t pt-4">
               <h3 className="font-semibold mb-3">Documentos anexados</h3>
               <div className="space-y-2">
-                {docsQ.data?.map((doc) => (
+                {docsQ.data?.items.map((doc) => (
                   <div key={doc.id} className="rounded border p-3 flex items-start justify-between gap-3">
                     <div className="flex-1">
                       <div className="font-medium text-sm">{doc.tipo_documento}</div>
@@ -937,13 +941,13 @@ export default function AlvarasPage() {
 
           {respQ.isLoading ? (
             <div className="text-center text-muted-foreground py-4">Carregando responsáveis...</div>
-          ) : (respQ.data?.length ?? 0) === 0 ? (
+          ) : (respQ.data?.items.length ?? 0) === 0 ? (
             <div className="text-center text-muted-foreground py-4">Nenhum responsável vinculado.</div>
           ) : (
             <div className="border-t pt-4">
               <h3 className="font-semibold mb-3">Responsáveis vinculados</h3>
               <div className="space-y-2">
-                {respQ.data?.map((resp) => (
+                {respQ.data?.items.map((resp) => (
                   <div key={resp.id} className="rounded border p-3 flex items-start justify-between gap-3">
                     <div className="flex-1">
                       <div className="font-medium text-sm">ID Usuário: {resp.id_usuario}</div>

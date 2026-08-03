@@ -10,6 +10,52 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://ged_user:ged_password_secure_local@ged-saas-project-db-1:5432/ged_saas_db"
     database_url_sync: str | None = None
 
+    # ------------------------------------------------------------------
+    # SEC-RLS-00B — papel de banco POR CONSUMIDOR.
+    #
+    # Cada consumidor tem a sua variável; **todas caem em `DATABASE_URL`
+    # quando vazias**, de modo que este PR não muda o valor efetivo de
+    # ambiente nenhum. É esse fallback que dá o rollback do
+    # `SEC-RLS-ROLLOUT` sem redeploy de código: promover um degrau é definir
+    # a variável do consumidor; voltar atrás é apagá-la.
+    #
+    # Papéis alvo (ADR-016 §2.3, inventário §7):
+    #   APP_DATABASE_URL      → `aprimora_app`      (API municipal, sujeita a RLS)
+    #   WORKER_DATABASE_URL   → `aprimora_worker`   (Celery, grants mínimos)
+    #   MIGRATOR_DATABASE_URL → `aprimora_migrator` (Alembic, seeds, backup)
+    #   PLATFORM_DB_URL       → `aprimora_platform` (já existe, SEC-01A)
+    #
+    # Promover um consumidor de cada vez é o ponto: se o worker quebrar, a API
+    # não volta junto.
+    # ------------------------------------------------------------------
+    app_database_url: str = ""
+    worker_database_url: str = ""
+    migrator_database_url: str = ""
+
+    @property
+    def runtime_database_url(self) -> str:
+        """Conexão da API municipal. Sujeita a RLS quando o papel for trocado."""
+        return self.app_database_url.strip() or self.database_url
+
+    @property
+    def worker_db_url(self) -> str:
+        """Conexão das tasks Celery."""
+        return self.worker_database_url.strip() or self.database_url
+
+    @property
+    def admin_database_url(self) -> str:
+        """Conexão das operações ADMINISTRATIVAS: DDL do Alembic e os CLIs de
+        seed e backup.
+
+        Separada da conexão da API por dois motivos medidos no inventário:
+        `aprimora_app` não tem `CREATE` em schema nenhum (§4.1), então não roda
+        migration; e não tem escrita em `aprimora_py.modulo`/`modulo_transacao`
+        (§8.6) nem `DELETE` em `audit_log` (revogado pela 0076), de que os seeds
+        precisam. Rodar seed com a credencial da API é o que hoje só funciona
+        porque a credencial da API pode tudo.
+        """
+        return self.migrator_database_url.strip() or self.database_url
+
     jwt_secret_source: str = "db"
     jwt_secret_static: str | None = None
     jwt_ttl_seconds: int = 3600
@@ -58,18 +104,50 @@ class Settings(BaseSettings):
     # Em prod (HTTPS público) defina explicitamente, ex.: https://sobral.aprimora.app
     public_base_url: str = ""
 
-    # Admin SaaS (PR3a) — allowlist de e-mails com acesso ao painel de plataforma
-    # (criar/listar/editar/ativar/desativar tenants). Separado por vírgula.
-    # NÃO é permissão de tenant: super-usuário de prefeitura NÃO entra aqui.
-    platform_admin_emails: str = ""
+    # ------------------------------------------------------------------
+    # Fronteira de plataforma (SEC-01A / ADR-016).
+    #
+    # `PLATFORM_ADMIN_EMAILS` FOI REMOVIDA. Era o achado F-01: a autorização
+    # cross-tenant era uma comparação de string sobre um e-mail, e o e-mail é
+    # único apenas POR TENANT (`UNIQUE (tenant_id, email)`), de modo que
+    # qualquer tenant capaz de criar um usuário com o e-mail certo produzia um
+    # administrador de plataforma. Não reintroduzir — nem "temporariamente".
+    #
+    # NENHUM destes campos tem default útil, e isso é deliberado (ADR §2.6,
+    # D-2): configuração ausente tem de NEGAR, nunca liberar. Um default
+    # embutido converteria esquecimento de configuração em porta aberta, que é
+    # exatamente o modo de falha que estamos fechando.
+    # ------------------------------------------------------------------
+    # Issuer do IdP administrativo. Em produção, `https://accounts.google.com`.
+    platform_oidc_issuer: str = ""
+    # Client ID do OAuth client DEDICADO ao console, um por ambiente — é o que
+    # distingue um token de homologação de um de produção (cenário 24).
+    platform_oidc_audience: str = ""
+    # JWKS do IdP. Em produção, `https://www.googleapis.com/oauth2/v3/certs`.
+    platform_oidc_jwks_url: str = ""
+    # Domínio corporativo aceito no claim `hd`. SEM DEFAULT (D-2).
+    platform_oidc_hosted_domain: str = ""
+    # Conexão da fronteira de plataforma: papel `aprimora_platform`
+    # (NOBYPASSRLS, grants cross-tenant enumerados). NUNCA o pool municipal.
+    platform_db_url: str = ""
 
     @property
-    def platform_admin_email_set(self) -> set[str]:
-        return {
-            e.strip().lower()
-            for e in self.platform_admin_emails.split(",")
-            if e.strip()
-        }
+    def plataforma_configurada(self) -> bool:
+        """True só quando os quatro identificadores de ambiente existem.
+
+        Não inclui `platform_db_url` de propósito: a falta dele é erro de
+        infraestrutura (matriz §3, "Papel de banco" ⇒ 500), enquanto a falta
+        dos identificadores de realm é erro de configuração do IdP (cenários
+        23 e 24 ⇒ deny).
+        """
+        return all(
+            (
+                self.platform_oidc_issuer.strip(),
+                self.platform_oidc_audience.strip(),
+                self.platform_oidc_jwks_url.strip(),
+                self.platform_oidc_hosted_domain.strip(),
+            )
+        )
 
     # Observabilidade (Fase 33). Vazio = desabilitado.
     sentry_dsn: str = ""
@@ -109,9 +187,15 @@ class Settings(BaseSettings):
 
     @property
     def sync_database_url(self) -> str:
+        """URL síncrona do Alembic (`alembic/env.py`).
+
+        Deriva de `admin_database_url`, não de `database_url`: DDL é operação do
+        papel administrativo. Com `MIGRATOR_DATABASE_URL` vazia — o estado de
+        hoje — o valor efetivo é idêntico ao de antes.
+        """
         if self.database_url_sync:
             return self.database_url_sync
-        return self.database_url.replace("+asyncpg", "+psycopg2")
+        return self.admin_database_url.replace("+asyncpg", "+psycopg2")
 
 
 @lru_cache
@@ -119,11 +203,12 @@ def get_settings() -> Settings:
     return Settings()
 
 
-def is_platform_admin(email: str | None) -> bool:
-    """True se o e-mail está na allowlist de admin de plataforma (PR3a)."""
-    if not email:
-        return False
-    return email.strip().lower() in get_settings().platform_admin_email_set
+# `is_platform_admin(email)` FOI REMOVIDA em SEC-01A. Era o caminho de decisão
+# do achado F-01. Quem autoriza a fronteira de plataforma hoje é
+# `app.auth.plataforma.require_platform_admin`, que exige token administrativo
+# RS256 do IdP dedicado + principal ativo em `aprimora_py.platform_principal`.
+# O e-mail sobrevive apenas como `display_label` do principal, e não decide
+# nada (ADR-016 §2.1).
 
 
 # PR3a — módulos derivados do plano (apenas exibição; sem enforcement neste PR).

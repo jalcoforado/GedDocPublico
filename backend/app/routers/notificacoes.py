@@ -3,10 +3,10 @@
 Hoje cobrem só o canal in_app pro usuário logado. Marcar lida e contar
 não-lidas é a fonte do Bell icon no frontend.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
@@ -33,6 +33,12 @@ from ..services.notificacoes import (
 )
 
 router = APIRouter(prefix="/notificacoes", tags=["notificacoes"])
+
+# Limite do teste de WhatsApp (backlog 1.0.6). Números escolhidos para não
+# atrapalhar quem está de fato configurando o próprio telefone — erra o formato,
+# corrige, testa de novo — e ainda assim tornar caro o uso como disparador.
+WHATSAPP_TESTE_LIMITE = 3
+WHATSAPP_TESTE_JANELA = timedelta(hours=1)
 
 
 @router.get("/me", response_model=NotificacaoListResponse)
@@ -168,25 +174,76 @@ async def whatsapp_test(
     # (todo este router está em ENDPOINTS_TRANSVERSAIS — quem recebe notificação
     # de protocolo é o mesmo sujeito que recebe de pagamentos), e amarrar este
     # endpoint a `configuracao` faria um tenant sem `administracao` não conseguir
-    # validar a própria configuração de WhatsApp. Ver a nota no relatório da
-    # Task 8: o que sobra aqui é uma questão de autorização — qualquer usuário
-    # autenticado do tenant dispara um envio —, não de modularização.
-    _: Usuario = Depends(get_current_user),
+    # validar a própria configuração de WhatsApp.
+    #
+    # Sem gate de PERMISSÃO também, e isso é decisão registrada (backlog 1.0.6).
+    # O único chamador é `/perfil/notificacoes`, a página de preferências do
+    # próprio usuário: exigir transação aqui tiraria de todo usuário comum a
+    # capacidade de conferir o próprio telefone no dia em que existir o primeiro
+    # grupo não-SU. O abuso foi fechado tirando o DESTINO das mãos do chamador,
+    # não restringindo quem chama.
+    current: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Envia mensagem teste pelo driver WhatsApp atual. Útil pra validar
-    config Zenvia em prod. Ignora preferências do destinatário (canal único)."""
+    """Envia mensagem teste pelo driver WhatsApp atual, SEMPRE para o telefone
+    do perfil de quem chama. Útil pra validar config Zenvia em prod.
+    Ignora preferências do destinatário (canal único)."""
+    if not (current.telefone or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Salve o seu telefone antes de enviar o teste.",
+        )
+
+    # Limite de taxa. O destino ser o próprio perfil impede mirar terceiro numa
+    # chamada, mas `PUT /notificacoes/telefone` é livre: sem isto, "troco meu
+    # telefone e testo de novo" continuaria sendo um jeito barato de queimar a
+    # credencial paga do tenant. O limite é por USUÁRIO, não por telefone —
+    # contar por telefone seria contornável trocando o número.
+    desde = datetime.utcnow() - WHATSAPP_TESTE_JANELA
+    recentes = (
+        await db.execute(
+            select(func.count())
+            .select_from(Notificacao)
+            .where(
+                Notificacao.tenant_id == tenant_id,
+                Notificacao.id_usuario == current.id,
+                Notificacao.tipo == "teste_whatsapp",
+                Notificacao.criado_em >= desde,
+            )
+        )
+    ).scalar_one()
+    if recentes >= WHATSAPP_TESTE_LIMITE:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Limite de {WHATSAPP_TESTE_LIMITE} testes por "
+                f"{int(WHATSAPP_TESTE_JANELA.total_seconds() // 60)} minutos "
+                "atingido. Tente mais tarde."
+            ),
+        )
+
     settings = get_settings()
     criadas = await enviar_notif(
         db,
         tenant_id=tenant_id,
-        destinatarios=[Destinatario(telefone=payload.telefone)],
+        # `id_usuario` e não `telefone`: o motor resolve o número a partir do
+        # perfil (`services/notificacoes.py`, bloco `precisa_telefone`). É o que
+        # garante que o destino não venha do request — e é o que faz a
+        # notificação nascer com `id_usuario`, sem o qual o limite acima não
+        # conseguiria contar nada.
+        destinatarios=[Destinatario(id_usuario=current.id)],
         canais=["whatsapp"],
         tipo="teste_whatsapp",
         titulo="Teste de WhatsApp",
         mensagem=payload.mensagem,
         prioridade="baixa",
+        # O caminho antigo (`Destinatario(telefone=...)`) pulava a preferência
+        # sem querer, porque o motor só a consulta para destinatário com
+        # `id_usuario`. Passar a preferência a valer aqui impediria conferir o
+        # telefone antes de ligar o canal — `DEFAULT_PREFS["whatsapp"]` é
+        # `False` —, que é justamente quando se testa.
+        ignorar_preferencias=True,
     )
     if not criadas:
         raise HTTPException(

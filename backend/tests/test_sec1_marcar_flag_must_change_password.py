@@ -32,11 +32,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.deps import (
-    _resolve_current_user,
-    require_tenant_id,
-    require_tenant_slug,
-)
+from app.auth.deps import _resolve_current_user
 from app.auth.password import hash_md5, hash_password, verify_password
 from app.database import get_db
 from app.main import app
@@ -44,6 +40,7 @@ from app.models import Usuario
 from app.services.conta import ContaError, alterar_senha
 from app.services.provisioning_tenant import provisionar_tenant
 from app.services.usuario_senha import resetar_senha_usuario
+from tests.conftest import arreio_tenant_http
 
 
 def _sm(engine):
@@ -292,24 +289,23 @@ async def tenant_su_unidade(admin_engine):
         await _cleanup_tenant(admin_engine, tenant.id)
 
 
-def _as_usuario(admin_engine, usuario_id: int, tenant_id: int, tenant_slug: str):
+def _as_usuario(_admin_engine, usuario_id: int, tenant_id: int, tenant_slug: str):
     """Overrides para os testes HTTP:
 
-    - `get_db`: usa admin_engine (role ged_user, BYPASSRLS). O
-      TenantMiddleware no ambiente de teste cai no default 'sobral' e setaria
-      `session.info["tenant_id"]` errado para o tenant criado pelo
-      provisionamento. Com BYPASSRLS, RLS é ignorado — apropriado para o
-      foco deste teste (comportamento da flag e do guard).
+    - `arreio_tenant_http`: instala `get_db`/`require_tenant_id`/
+      `require_tenant_slug` falando o MESMO tenant. A sessão é a REAL
+      (`SessionLocal`), com `session.info["tenant_id"]` da fixture — antes
+      vinha de `admin_engine` (`ged_user`, BYPASSRLS), o que desligava a RLS
+      nestes testes independentemente do `DATABASE_URL` e os tornava incapazes
+      de falhar por isolamento (inventário §8.8). O motivo original da gambiarra
+      era real: sem o `tenant_id` correto na sessão, o `TenantMiddleware` cai no
+      default `sobral` e a RLS filtra tudo. A correção é dar o tenant certo, não
+      desligar a RLS.
     - `_resolve_current_user`: lê o usuário da MESMA `db` que o serviço
       vai usar, garantindo que o objeto esteja attached e que UPDATEs
       (ex: `alterar_senha` zerando a flag) persistam.
-    - `require_tenant_id` / `require_tenant_slug`: forçam o tenant correto.
     """
     from fastapi import Depends
-
-    async def _db_admin():
-        async with _sm(admin_engine)() as s:
-            yield s
 
     async def _resolver(db: AsyncSession = Depends(get_db)):
         return (
@@ -317,10 +313,8 @@ def _as_usuario(admin_engine, usuario_id: int, tenant_id: int, tenant_slug: str)
         ).scalar_one()
 
     def _setup():
-        app.dependency_overrides[get_db] = _db_admin
+        arreio_tenant_http(tenant_id, tenant_slug)
         app.dependency_overrides[_resolve_current_user] = _resolver
-        app.dependency_overrides[require_tenant_id] = lambda: tenant_id
-        app.dependency_overrides[require_tenant_slug] = lambda: tenant_slug
 
     return _setup
 
