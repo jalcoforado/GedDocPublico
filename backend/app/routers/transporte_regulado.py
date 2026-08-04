@@ -55,6 +55,13 @@ from ..schemas.transporte_regulado import (
     RecadastramentoCicloUpdate,
     RecadastramentoConvocacaoOut,
     RecadastramentoGeracaoOut,
+    RecadastramentoDecisaoInput,
+    RecadastramentoDecisaoOut,
+    RecadastramentoItemCreate,
+    RecadastramentoItemOut,
+    RecadastramentoItemUpdate,
+    RecadastramentoMarcarInput,
+    RecadastramentoSituacaoAtendimentoOut,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -1370,3 +1377,249 @@ async def ajustar_prazo_da_convocacao(
         situacao=conv.situacao,
         criado_em=conv.criado_em,
     )
+
+
+# =================== Recadastramento — atendimento (P5.2) ==================
+#
+# ORDEM IMPORTA: `/itens` e `/itens/{item_id}` são segmentos literais irmãos de
+# `/ciclos/{ciclo_id}`, e vêm declarados no mesmo router do recadastramento.
+# Não há colisão porque os prefixos diferem (`/itens` × `/ciclos`), mas a
+# vizinhança é a mesma que já engoliu três rotas neste arquivo — por isso os
+# literais vêm primeiro e `tests/test_guarda_ordem_rotas.py` varre a app.
+
+
+@recadastramento_router.get(
+    "/itens", response_model=Paginated[RecadastramentoItemOut]
+)
+async def list_itens_recadastramento(
+    apenas_ativos: bool = False,
+    aplica_a: str | None = Query(None, description="permissionario | empresa | ambos"),
+    q: str | None = Query(None, description="Busca por descrição (substring)"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Paginated[RecadastramentoItemOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_itens_recadastramento(
+        db,
+        tenant_id=tenant_id,
+        apenas_ativos=apenas_ativos,
+        aplica_a=aplica_a,
+        q=q,
+        limit=page_size,
+        offset=offset,
+    )
+    return Paginated(
+        items=[RecadastramentoItemOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@recadastramento_router.post(
+    "/itens",
+    response_model=RecadastramentoItemOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_item_recadastramento(
+    payload: RecadastramentoItemCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoItemOut:
+    item = await tr_svc.criar_item_recadastramento(
+        db, tenant_id=tenant_id, payload=payload
+    )
+    return RecadastramentoItemOut.model_validate(item)
+
+
+@recadastramento_router.get(
+    "/itens/{item_id}", response_model=RecadastramentoItemOut
+)
+async def get_item_recadastramento(
+    item_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoItemOut:
+    item = await tr_svc.obter_item_recadastramento(
+        db, tenant_id=tenant_id, item_id=item_id
+    )
+    return RecadastramentoItemOut.model_validate(item)
+
+
+@recadastramento_router.put(
+    "/itens/{item_id}", response_model=RecadastramentoItemOut
+)
+async def update_item_recadastramento(
+    item_id: int,
+    payload: RecadastramentoItemUpdate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoItemOut:
+    item = await tr_svc.atualizar_item_recadastramento(
+        db, tenant_id=tenant_id, item_id=item_id, payload=payload
+    )
+    return RecadastramentoItemOut.model_validate(item)
+
+
+@recadastramento_router.delete(
+    "/itens/{item_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_item_recadastramento(
+    item_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await tr_svc.excluir_item_recadastramento(
+        db, tenant_id=tenant_id, item_id=item_id
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@recadastramento_router.get(
+    "/convocacoes/{convocacao_id}/atendimento",
+    response_model=RecadastramentoSituacaoAtendimentoOut,
+)
+async def get_atendimento(
+    convocacao_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoSituacaoAtendimentoOut:
+    """A ficha inteira numa chamada: checklist, vistorias e o PORQUÊ de o botão
+    de deferir estar ou não habilitado. Um booleano solto viraria botão
+    desabilitado sem explicação."""
+    dados = await tr_svc.situacao_atendimento(
+        db, tenant_id=tenant_id, convocacao_id=convocacao_id
+    )
+    return RecadastramentoSituacaoAtendimentoOut(**dados)
+
+
+@recadastramento_router.post(
+    "/convocacoes/{convocacao_id}/itens/{item_id}/marcar",
+    response_model=RecadastramentoSituacaoAtendimentoOut,
+)
+async def marcar_item(
+    convocacao_id: int,
+    item_id: int,
+    payload: RecadastramentoMarcarInput,
+    usuario: Usuario = Depends(
+        require_permission("transporte_regulado", "atualizar")
+    ),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoSituacaoAtendimentoOut:
+    """Devolve a ficha inteira, não a marca criada: depois de marcar, o que a
+    tela precisa saber é se o botão de deferir mudou de estado."""
+    await tr_svc.marcar_item_recadastramento(
+        db,
+        tenant_id=tenant_id,
+        convocacao_id=convocacao_id,
+        item_id=item_id,
+        payload=payload,
+        usuario_id=usuario.id,
+    )
+    dados = await tr_svc.situacao_atendimento(
+        db, tenant_id=tenant_id, convocacao_id=convocacao_id
+    )
+    return RecadastramentoSituacaoAtendimentoOut(**dados)
+
+
+@recadastramento_router.get(
+    "/convocacoes/{convocacao_id}/decisoes",
+    response_model=list[RecadastramentoDecisaoOut],
+)
+async def list_decisoes(
+    convocacao_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[RecadastramentoDecisaoOut]:
+    """Lista curta e sem paginação de propósito: são poucas decisões por
+    convocação, e o histórico só faz sentido inteiro."""
+    linhas = await tr_svc.listar_decisoes(
+        db, tenant_id=tenant_id, convocacao_id=convocacao_id
+    )
+    return [RecadastramentoDecisaoOut.model_validate(d) for d in linhas]
+
+
+@recadastramento_router.post(
+    "/convocacoes/{convocacao_id}/deferir",
+    response_model=RecadastramentoDecisaoOut,
+)
+async def deferir_convocacao(
+    convocacao_id: int,
+    payload: RecadastramentoDecisaoInput,
+    usuario: Usuario = Depends(
+        require_permission("transporte_regulado", "atualizar")
+    ),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoDecisaoOut:
+    """409 se faltar item obrigatório ou vistoria. O autor vem do token."""
+    d = await tr_svc.decidir_recadastramento(
+        db,
+        tenant_id=tenant_id,
+        convocacao_id=convocacao_id,
+        tipo="deferimento",
+        payload=payload,
+        usuario_id=usuario.id,
+    )
+    return RecadastramentoDecisaoOut.model_validate(d)
+
+
+@recadastramento_router.post(
+    "/convocacoes/{convocacao_id}/indeferir",
+    response_model=RecadastramentoDecisaoOut,
+)
+async def indeferir_convocacao(
+    convocacao_id: int,
+    payload: RecadastramentoDecisaoInput,
+    usuario: Usuario = Depends(
+        require_permission("transporte_regulado", "atualizar")
+    ),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoDecisaoOut:
+    """**NÃO exige completude**, ao contrário do deferimento. Indeferir por
+    falta de documento é o caso real do balcão."""
+    d = await tr_svc.decidir_recadastramento(
+        db,
+        tenant_id=tenant_id,
+        convocacao_id=convocacao_id,
+        tipo="indeferimento",
+        payload=payload,
+        usuario_id=usuario.id,
+    )
+    return RecadastramentoDecisaoOut.model_validate(d)
+
+
+@recadastramento_router.post(
+    "/convocacoes/{convocacao_id}/reabrir",
+    response_model=RecadastramentoDecisaoOut,
+)
+async def reabrir_convocacao(
+    convocacao_id: int,
+    payload: RecadastramentoDecisaoInput,
+    usuario: Usuario = Depends(
+        require_permission("transporte_regulado", "atualizar")
+    ),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoDecisaoOut:
+    """Existe para que um deferimento errado não vire `UPDATE` manual em
+    produção."""
+    d = await tr_svc.reabrir_recadastramento(
+        db,
+        tenant_id=tenant_id,
+        convocacao_id=convocacao_id,
+        payload=payload,
+        usuario_id=usuario.id,
+    )
+    return RecadastramentoDecisaoOut.model_validate(d)

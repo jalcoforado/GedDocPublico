@@ -2109,6 +2109,93 @@ export interface RecadastramentoGeracao {
   ja_existentes: number;
 }
 
+export type AplicaA = "permissionario" | "empresa" | "ambos";
+
+export interface RecadastramentoItem {
+  id: number;
+  descricao: string;
+  aplica_a: string;
+  obrigatorio: boolean;
+  ordem: number;
+  ativo: boolean;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface RecadastramentoItemInput {
+  descricao: string;
+  aplica_a?: AplicaA;
+  obrigatorio?: boolean;
+  ordem?: number;
+  ativo?: boolean;
+}
+
+export interface RecadastramentoItemUpdateInput {
+  descricao?: string;
+  aplica_a?: AplicaA;
+  obrigatorio?: boolean;
+  ordem?: number;
+  ativo?: boolean;
+}
+
+export interface RecadastramentoChecklistItem {
+  id_item: number;
+  descricao: string;
+  aplica_a: string;
+  obrigatorio: boolean;
+  ordem: number;
+  /** `null` = ninguem olhou ainda. Diferente de `false`, que e a decisao
+   *  registrada de que o documento NAO esta em ordem. */
+  marcado: boolean | null;
+  observacao: string | null;
+  marcado_por: number | null;
+  marcado_em: string | null;
+}
+
+export interface RecadastramentoVeiculoPendente {
+  id_veiculo: number;
+  placa: string;
+  motivo: string;
+}
+
+export interface RecadastramentoVistorias {
+  satisfeita: boolean;
+  /** `satisfeita` com `total_veiculos_ativos === 0` e "nenhum veiculo
+   *  cadastrado", que NAO e a mesma coisa que "todos em dia". A tela precisa
+   *  distinguir os dois. */
+  total_veiculos_ativos: number;
+  pendentes: RecadastramentoVeiculoPendente[];
+}
+
+export interface RecadastramentoAtendimento {
+  id_convocacao: number;
+  situacao: string;
+  tipo_regulado: string;
+  nome_regulado: string;
+  itens: RecadastramentoChecklistItem[];
+  itens_obrigatorios_pendentes: string[];
+  vistorias: RecadastramentoVistorias;
+  pode_deferir: boolean;
+}
+
+export interface RecadastramentoMarcarInput {
+  marcado: boolean;
+  observacao?: string | null;
+}
+
+export interface RecadastramentoDecisao {
+  id: number;
+  id_convocacao: number;
+  tipo: string;
+  parecer: string;
+  id_usuario: number;
+  criado_em: string;
+}
+
+export interface RecadastramentoParecerInput {
+  parecer: string;
+}
+
 // ============================ Alvara ======================================
 export interface Alvara {
   id: number;
@@ -2924,6 +3011,72 @@ export const api = {
         request<RecadastramentoGeracao>(
           `/transporte-regulado/recadastramento/ciclos/${id}/gerar-convocacoes`,
           { method: "POST" },
+        ),
+    },
+    itens: {
+      list: (params?: {
+        apenas_ativos?: boolean;
+        aplica_a?: string;
+        q?: string;
+        page?: number;
+        page_size?: number;
+      }) =>
+        request<Paginated<RecadastramentoItem>>(
+          `/transporte-regulado/recadastramento/itens${qs(params ?? {})}`,
+        ),
+      get: (id: number) =>
+        request<RecadastramentoItem>(
+          `/transporte-regulado/recadastramento/itens/${id}`,
+        ),
+      create: (data: RecadastramentoItemInput) =>
+        request<RecadastramentoItem>(
+          "/transporte-regulado/recadastramento/itens",
+          { method: "POST", body: JSON.stringify(data) },
+        ),
+      update: (id: number, data: RecadastramentoItemUpdateInput) =>
+        request<RecadastramentoItem>(
+          `/transporte-regulado/recadastramento/itens/${id}`,
+          { method: "PUT", body: JSON.stringify(data) },
+        ),
+      remove: (id: number) =>
+        request<void>(`/transporte-regulado/recadastramento/itens/${id}`, {
+          method: "DELETE",
+        }),
+    },
+    atendimento: {
+      get: (convocacaoId: number) =>
+        request<RecadastramentoAtendimento>(
+          `/transporte-regulado/recadastramento/convocacoes/${convocacaoId}/atendimento`,
+        ),
+      // Devolve a ficha INTEIRA, nao a marca: depois de marcar, o que a tela
+      // precisa saber e se o botao de deferir mudou de estado.
+      marcar: (
+        convocacaoId: number,
+        itemId: number,
+        data: RecadastramentoMarcarInput,
+      ) =>
+        request<RecadastramentoAtendimento>(
+          `/transporte-regulado/recadastramento/convocacoes/${convocacaoId}/itens/${itemId}/marcar`,
+          { method: "POST", body: JSON.stringify(data) },
+        ),
+      decisoes: (convocacaoId: number) =>
+        request<RecadastramentoDecisao[]>(
+          `/transporte-regulado/recadastramento/convocacoes/${convocacaoId}/decisoes`,
+        ),
+      deferir: (convocacaoId: number, data: RecadastramentoParecerInput) =>
+        request<RecadastramentoDecisao>(
+          `/transporte-regulado/recadastramento/convocacoes/${convocacaoId}/deferir`,
+          { method: "POST", body: JSON.stringify(data) },
+        ),
+      indeferir: (convocacaoId: number, data: RecadastramentoParecerInput) =>
+        request<RecadastramentoDecisao>(
+          `/transporte-regulado/recadastramento/convocacoes/${convocacaoId}/indeferir`,
+          { method: "POST", body: JSON.stringify(data) },
+        ),
+      reabrir: (convocacaoId: number, data: RecadastramentoParecerInput) =>
+        request<RecadastramentoDecisao>(
+          `/transporte-regulado/recadastramento/convocacoes/${convocacaoId}/reabrir`,
+          { method: "POST", body: JSON.stringify(data) },
         ),
     },
     convocacoes: {
