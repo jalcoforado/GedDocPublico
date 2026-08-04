@@ -353,6 +353,31 @@ por esquecimento. Agrupados aqui para não se perderem.)*
 - **Fixtures duplicadas nos testes de backend:** `tests/test_leitura_por_modulo.py` é a quarta cópia
   do padrão de provisionamento+token+cleanup do diretório. Pede um `conftest`.
 
+### ~~1.0.95 `Deploy to VPS` corria em paralelo com os testes~~ — FECHADO em 2026-08-04
+
+Os quatro workflows disparavam juntos em `push` para `main`, então a VPS recebia código **mesmo
+quando a suíte reprovava**. Não era hipótese: aconteceu no push `a1a0c8e` (fatia P5.1) — `Backend
+tests` vermelho por um `usuario_id=1` cravado num teste, `Deploy to VPS` verde, código na VPS.
+
+O gatilho do deploy passou a ser `workflow_run` sobre o **`Backend tests`**, mais um job `gate` que
+confere por API se os outros dois workflows terminaram em `success` **no mesmo SHA**.
+
+Três decisões que não são óbvias ao ler o YAML:
+
+- **Um workflow só no gatilho, não os três.** `workflow_run` com vários workflows dispara uma vez
+  por workflow que termina, e não uma vez quando todos terminam — três gatilhos poderiam iniciar
+  dois deploys simultâneos. Pior: `concurrency: cancel-in-progress` interromperia um deploy no
+  meio. O `Backend tests` é o gatilho por ser o mais lento (~8 min contra ~1 min dos outros).
+- **O filtro `paths:` foi removido**, porque `workflow_run` não aceita filtro de caminho. A troca é
+  deliberada: o pior caso agora é um build de ~5 min desperdiçado num push só de documentação,
+  contra o antigo "meu código não está na VPS e não sei por quê", que é silencioso.
+- **`workflow_dispatch` passa direto pelo portão** — continua sendo o escape manual.
+
+**ABERTO, e é outro problema:** o `deploy.sh` faz `git reset --hard origin/main` na VPS, então o que
+sobe é o `main` **do momento do deploy**, não o SHA que foi testado. Commit novo que entre em `main`
+entre o fim dos testes e o deploy vai junto, sem ter passado pelo portão. Resolver exige o workflow
+passar o SHA e o `deploy.sh` fazer checkout dele.
+
 ### 1.1.5 Suíte não estava verde antes do F1
 
 Duas falhas confirmadas como anteriores à branch `feat/modularizacao-f1` (verificado por

@@ -1,15 +1,37 @@
 name: Deploy to VPS
 
+# O gatilho é `workflow_run` sobre o `Backend tests`, NÃO `push`.
+#
+# Até 2026-08-04 os quatro workflows disparavam juntos no push para `main`, o
+# que significa que a VPS recebia código mesmo quando a suíte reprovava. Não é
+# hipótese: aconteceu na fatia P5.1 (`a1a0c8e`) — `Backend tests` vermelho,
+# `Deploy to VPS` verde, código quebrado na VPS.
+#
+# Por que só o `Backend tests` no gatilho, e não os três: `workflow_run` com
+# vários workflows dispara UMA VEZ POR WORKFLOW que termina, não uma vez quando
+# todos terminam. Três gatilhos correndo juntos poderiam iniciar dois deploys
+# simultâneos — e `concurrency: cancel-in-progress` seria pior ainda, porque
+# interromperia um deploy no meio. Com um gatilho só há uma execução por push,
+# e o job `gate` confere os outros dois por API antes de liberar. O `Backend
+# tests` é o mais lento (~8 min contra ~1 min dos outros), então quando ele
+# termina os demais já terminaram.
+#
+# O filtro `paths:` FOI REMOVIDO junto com o gatilho de push — `workflow_run`
+# não aceita filtro de caminho. A troca é deliberada: o pior que acontece agora
+# é um build de ~5 min desperdiçado num push só de documentação, contra o
+# antigo "meu código não está na VPS e não sei por quê", que é silencioso.
+#
+# LIMITE CONHECIDO, não resolvido aqui: o `deploy.sh` faz `git reset --hard
+# origin/main` na VPS, então o que sobe é o `main` do momento do deploy, não
+# necessariamente o SHA que foi testado. Se um commit novo entrar em `main`
+# entre o fim dos testes e o deploy, é ele que vai. Resolver exige o deploy
+# passar a receber o SHA e o `deploy.sh` fazer checkout dele.
+
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'docker-compose.yml'
-      - 'docker-compose.override.yml'
-      - 'scripts/deploy.sh'
+  workflow_run:
+    workflows: ["Backend tests"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       deploy_type:
@@ -35,7 +57,87 @@ env:
   DEPLOY_PATH: /root/GedDocPublico
 
 jobs:
+  # Portão: só libera o deploy se os TRÊS workflows de teste passaram no MESMO
+  # commit. Um `workflow_dispatch` passa direto — é o escape manual de sempre.
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      liberado: ${{ steps.checa.outputs.liberado }}
+    steps:
+      - name: Conferir os três workflows de teste no mesmo SHA
+        id: checa
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENTO: ${{ github.event_name }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSAO_GATILHO: ${{ github.event.workflow_run.conclusion }}
+          EVENTO_ORIGEM: ${{ github.event.workflow_run.event }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENTO" = "workflow_dispatch" ]; then
+            echo "Disparo manual: o portão não se aplica."
+            echo "liberado=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # `Backend tests` também roda em pull_request. O `branches: [main]`
+          # do gatilho filtra quase tudo, mas um PR cuja head seja `main`
+          # passaria — deploy só a partir de push.
+          if [ "$EVENTO_ORIGEM" != "push" ]; then
+            echo "Execução de origem foi '$EVENTO_ORIGEM', não push. Deploy BARRADO."
+            echo "liberado=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # O próprio gatilho já traz a conclusão do Backend tests. Se ele não
+          # passou, nada mais precisa ser consultado.
+          if [ "$CONCLUSAO_GATILHO" != "success" ]; then
+            echo "Backend tests terminou como '$CONCLUSAO_GATILHO'. Deploy BARRADO."
+            echo "liberado=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Os outros dois, por API, no mesmo SHA. `last` porque um re-run cria
+          # execução nova com o mesmo `head_sha` — a que vale é a mais recente.
+          # O `tr` existe porque `gh api --jq` pode devolver a string entre
+          # aspas, e a comparação com `success` é literal.
+          conclusao_de() {
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${SHA}&per_page=100" \
+              --jq "[.workflow_runs[] | select(.name==\"$1\")]
+                    | sort_by(.run_started_at) | last | .conclusion // \"ausente\"" \
+              | tr -d '"'
+          }
+
+          liberado=true
+          for wf in "Frontend tests" "E2E assinatura"; do
+            # Espera curta: eles são bem mais rápidos que o Backend tests e a
+            # esta altura já terminaram. O laço existe para o caso de um deles
+            # ter enfileirado atrás de outro job do runner.
+            for _ in $(seq 1 20); do
+              c="$(conclusao_de "$wf")"
+              [ "$c" = "null" ] || [ "$c" = "ausente" ] || break
+              sleep 15
+            done
+            echo "$wf -> $c"
+            if [ "$c" != "success" ]; then
+              liberado=false
+            fi
+          done
+
+          if [ "$liberado" = "true" ]; then
+            echo "Os três verdes em ${SHA}. Deploy LIBERADO."
+          else
+            echo "Nem todos os testes passaram em ${SHA}. Deploy BARRADO."
+          fi
+          echo "liberado=$liberado" >> "$GITHUB_OUTPUT"
+
   deploy:
+    needs: gate
+    if: needs.gate.outputs.liberado == 'true'
     runs-on: ubuntu-latest
     environment: production
 
@@ -44,6 +146,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Em `workflow_run` o checkout default é o topo do branch default, não
+          # o commit que foi testado. Isto não muda o que a VPS baixa (ela faz
+          # `git reset --hard origin/main` por conta própria), mas mantém o log
+          # do job honesto sobre qual commit motivou o deploy.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - name: Deploy to VPS
         run: |
