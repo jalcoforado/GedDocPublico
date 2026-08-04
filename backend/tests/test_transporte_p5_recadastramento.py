@@ -1110,6 +1110,11 @@ async def test_http_usuario_comum_percorre_o_rito_inteiro(admin_engine):
             # O autor vem do TOKEN, nunca do payload.
             assert r.json()["ajustado_por"] == uid
             assert r.json()["ajustado"] is True
+            # E a resposta do ajuste tem a MESMA forma da listagem: nome
+            # resolvido, nao string vazia. Devolver "" num campo tipado como
+            # `str` obrigaria a tela a recarregar a lista so para exibir o nome.
+            assert r.json()["nome_regulado"] == corpo["items"][0]["nome_regulado"]
+            assert r.json()["nome_regulado"] != ""
     finally:
         await _encerrar_arreio(admin_engine, tenant.id)
 

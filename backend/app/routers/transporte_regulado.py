@@ -1358,9 +1358,9 @@ async def ajustar_prazo_da_convocacao(
         id_permissionario=conv.id_permissionario,
         id_empresa=conv.id_empresa,
         tipo_regulado="permissionario" if conv.id_permissionario else "empresa",
-        # O nome não é recarregado aqui: a tela que ajusta já o tem em mãos, e
-        # buscá-lo custaria uma consulta a mais em cada ajuste.
-        nome_regulado="",
+        nome_regulado=await tr_svc.nome_do_regulado(
+            db, tenant_id=tenant_id, conv=conv
+        ),
         prazo=conv.prazo,
         prazo_original=conv.prazo_original,
         ajustado=conv.ajustado_em is not None,

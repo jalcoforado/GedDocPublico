@@ -2235,6 +2235,37 @@ async def obter_convocacao(
     return conv
 
 
+async def nome_do_regulado(
+    db: AsyncSession, *, tenant_id: int, conv: RecadastramentoConvocacao
+) -> str:
+    """Nome do regulado de uma convocação — `permissionario.nome` ou
+    `empresa.razao_social`, conforme o vínculo.
+
+    Existe para que o ajuste de prazo devolva a mesma forma que a listagem.
+    Devolver `""` num campo tipado como `str` seria mentira barata: a tela
+    passaria a depender de recarregar a lista para exibir o nome.
+    """
+    if conv.id_permissionario:
+        nome = (
+            await db.execute(
+                select(Permissionario.nome).where(
+                    Permissionario.tenant_id == tenant_id,
+                    Permissionario.id == conv.id_permissionario,
+                )
+            )
+        ).scalar_one_or_none()
+    else:
+        nome = (
+            await db.execute(
+                select(Empresa.razao_social).where(
+                    Empresa.tenant_id == tenant_id,
+                    Empresa.id == conv.id_empresa,
+                )
+            )
+        ).scalar_one_or_none()
+    return nome or ""
+
+
 async def listar_convocacoes(
     db: AsyncSession,
     *,
