@@ -59,6 +59,7 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/transporte/empresas": { perm: "transporte_regulado" },
   "/m/transporte/veiculos": { perm: "transporte_regulado" },
   "/m/transporte/alvaras": { perm: "transporte_regulado" },
+  "/m/transporte/recadastramento": { perm: "transporte_regulado" },
   "/m/transporte/relatorio": { perm: "transporte_regulado" },
   "/m/pagamentos": {
     anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"],
@@ -201,5 +202,6 @@ describe("split dos menus", () => {
     const doTransporte = hrefs(menu!.grupos.flatMap((g) => g.items));
     expect(doTransporte).toContain("/m/transporte/alvaras");
     expect(doTransporte).toContain("/m/transporte/relatorio");
+    expect(doTransporte).toContain("/m/transporte/recadastramento");
   });
 });

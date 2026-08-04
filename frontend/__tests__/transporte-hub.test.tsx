@@ -43,10 +43,11 @@ describe("hub do transporte regulado", () => {
     expect(foraDoMenu).toEqual([]);
   });
 
-  it("os três cards não entregues seguem sem href", () => {
-    // Recadastramento (P5), Rotas e Linhas (P6) e Ocorrências (P7) ainda não
-    // existem. Card tracejado é honesto; card tracejado sobre tela pronta, não.
+  it("os dois cards não entregues seguem sem href", () => {
+    // Rotas e Linhas (P6) e Ocorrências (P7) ainda não existem. Card tracejado
+    // é honesto; card tracejado sobre tela pronta, não. Recadastramento saiu
+    // desta lista na P5.1, quando a tela passou a existir.
     const semHref = CARDS.filter((c) => !c.ready).map((c) => c.title);
-    expect(semHref).toEqual(["Recadastramento", "Rotas e Linhas", "Ocorrências"]);
+    expect(semHref).toEqual(["Rotas e Linhas", "Ocorrências"]);
   });
 });

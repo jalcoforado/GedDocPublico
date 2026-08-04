@@ -65,7 +65,13 @@ export const CARDS: HubCard[] = [
     desc: "KPIs e análise de alvarás regulados, com exportação.",
     ready: true,
   },
-  { icon: RefreshCw, title: "Recadastramento", desc: "Campanhas e ciclos de recadastramento." },
+  {
+    href: "/m/transporte/recadastramento",
+    icon: RefreshCw,
+    title: "Recadastramento",
+    desc: "Ciclos de recadastramento: convoca os regulados ativos e escalona o prazo de cada um.",
+    ready: true,
+  },
   { icon: Route, title: "Rotas e Linhas", desc: "Rotas, linhas e localidades atendidas." },
   { icon: AlertOctagon, title: "Ocorrências", desc: "Ocorrências regulatórias e fiscalização." },
 ];
