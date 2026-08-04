@@ -390,10 +390,36 @@ provavelmente a mesma deriva de env.
 P0–P4 entregues e no ar (permissionário, empresa, veículo, vistorias, alvarás com documentos,
 responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 
-- **P5** — Recadastramento
+- **P5** — Recadastramento. **P5.1 entregue em 2026-08-04**; P5.2 e P5.3 seguem abertas (detalhe
+  logo abaixo).
 - **P6** — Rotas / linhas
 - **P7** — Ocorrências regulatórias
 - **P8** — Workflows avançados
+
+> **P5.1 entregue em 2026-08-04** — ciclo, convocação, escalonamento e ajuste de prazo. Spec e
+> plano em `docs/superpowers/`. O município cria o ciclo, manda gerar, e vê **quem tem de vir e
+> quando**; a tela vive em `/m/transporte/recadastramento`.
+>
+> Três decisões que valem mais que o código:
+>
+> - **`Permissionario.situacao` usa masculino (`ativo`) e `Empresa.situacao`, feminino (`ativa`).**
+>   Filtrar `"ativo"` nos dois convoca **zero empresas sem erro nenhum**, e um teste que olhasse só
+>   o total passaria. O teste afirma sobre cada vínculo em separado; invertido, fica vermelho.
+> - **A idempotência da geração mora no banco**, em dois índices únicos parciais, não num
+>   `if not exists` — duas execuções concorrentes do endpoint passariam as duas pela checagem.
+>   Mesma lógica para o vínculo exclusivo (`CHECK`, não só validação de serviço).
+> - **Escalonamento pelo final do CPF/CNPJ**, nunca por `numero_permissao` ou `data_nascimento`:
+>   os dois são anuláveis, e empresa não tem nascimento. Documento sujo cai na faixa final em vez
+>   de derrubar a geração inteira.
+>
+> **Editar a janela de um ciclo já gerado NÃO remarca ninguém** — remarcar em massa prazo já
+> comunicado é decisão de produto, e a alternativa silenciosa seria pior. Fica registrado como
+> limite conhecido, não como defeito.
+>
+> **Aberto — P5.2** (checklist documental, parecer, amarra da vistoria, fechamento do
+> recadastramento) e **P5.3** (estado em atraso, relatório de faltosos, suspensão como ato humano,
+> notificação). `RecadastramentoConvocacao.situacao` só tem `convocado` nesta fatia, e é onde as
+> duas próximas encaixam.
 
 > **Atualizado em 2026-08-01, pela fatia de costura de navegação** (spec e plano em
 > `docs/superpowers/`). "Entregues e no ar" era verdade só para o backend. Três coisas mudaram, e a

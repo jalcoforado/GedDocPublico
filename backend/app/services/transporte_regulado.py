@@ -1898,6 +1898,14 @@ SITUACOES_CICLO = ("rascunho", "aberto", "encerrado")
 SITUACAO_PERMISSIONARIO_ATIVO = "ativo"
 SITUACAO_EMPRESA_ATIVA = "ativa"
 FAIXAS_ESCALONAMENTO = 10
+# Colunas NOT NULL do ciclo. `observacoes` NÃO entra: ali `null` é apagar.
+NAO_ANULAVEIS_DO_CICLO = (
+    "nome",
+    "data_inicio",
+    "data_fim",
+    "criterio_escalonamento",
+    "situacao",
+)
 
 
 async def obter_ciclo(
@@ -2006,6 +2014,15 @@ async def atualizar_ciclo(
     """
     ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=ciclo_id)
     dados = payload.model_dump(exclude_unset=True)
+
+    # `null` explícito nas colunas NOT NULL é descartado, não gravado. Todo
+    # campo do `Update` é opcional para permitir PATCH parcial, então nada
+    # impede o cliente de mandar `{"nome": null}` — e `setattr` fiel ao payload
+    # levaria a um IntegrityError, ou seja, HTTP 500 num erro de entrada.
+    # `observacoes` fica de fora da lista: ali o `null` é apagar de propósito.
+    for coluna in NAO_ANULAVEIS_DO_CICLO:
+        if coluna in dados and dados[coluna] is None:
+            del dados[coluna]
 
     if dados.get("nome") and dados["nome"] != ciclo.nome:
         await _validar_nome_ciclo_unico(

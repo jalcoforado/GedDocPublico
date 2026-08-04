@@ -1232,3 +1232,59 @@ async def test_http_ajuste_sem_justificativa_e_422_na_borda(admin_engine):
             assert r.status_code == 200, r.text
     finally:
         await _encerrar_arreio(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_http_null_explicito_nao_derruba_a_atualizacao(admin_engine):
+    """`{"nome": null}` num PUT e um `setattr` fiel ao payload gravariam NULL
+    numa coluna NOT NULL — IntegrityError, ou seja, 500 num erro de ENTRADA.
+
+    Todo campo do `Update` e opcional (para permitir PATCH parcial), entao nada
+    no schema impede o cliente de mandar isso. O controle positivo prova que a
+    atualizacao normal continua passando, e que `observacoes: null` — onde o
+    nulo e apagar de proposito — de fato apaga.
+    """
+    tenant = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, tenant.id, ["transporte"])
+            await s.commit()
+        async with _sm(admin_engine)() as db:
+            ciclo = await tr.criar_ciclo(
+                db,
+                tenant_id=tenant.id,
+                payload=RecadastramentoCicloCreate(
+                    nome="Ciclo com observacoes",
+                    data_inicio=INICIO,
+                    data_fim=FIM,
+                    observacoes="texto a apagar",
+                ),
+            )
+        uid = await _cria_usuario_comum_transporte(admin_engine, tenant.id)
+        _as_user(admin_engine, uid, tenant.id, tenant.slug)()
+
+        rota = (
+            f"/api/v2/transporte-regulado/recadastramento/ciclos/{ciclo.id}"
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.put(
+                rota, json={"nome": None, "data_inicio": None, "situacao": None}
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["nome"] == "Ciclo com observacoes"
+            assert r.json()["data_inicio"] == INICIO.isoformat()
+            assert r.json()["situacao"] == "rascunho"
+
+            # Controle 1: atualizacao normal continua funcionando.
+            r = await client.put(rota, json={"nome": "Nome novo"})
+            assert r.status_code == 200, r.text
+            assert r.json()["nome"] == "Nome novo"
+
+            # Controle 2: em `observacoes`, o nulo APAGA — nao e descartado.
+            r = await client.put(rota, json={"observacoes": None})
+            assert r.status_code == 200, r.text
+            assert r.json()["observacoes"] is None
+    finally:
+        await _encerrar_arreio(admin_engine, tenant.id)
