@@ -2398,3 +2398,546 @@ async def ajustar_prazo(
     await db.commit()
     await db.refresh(conv)
     return conv
+
+
+# ============ Recadastramento — atendimento e fechamento (P5.2) ============
+#
+# A P5.1 entregou "quem tem de vir e quando". Esta parte entrega "atender e
+# fechar": conferir documentos item a item, confrontar as vistorias dos
+# veículos, e deferir ou indeferir com parecer.
+#
+# Spec: docs/superpowers/specs/2026-08-04-transporte-p5-2-recadastramento-atendimento-design.md
+
+from ..models import (
+    RecadastramentoDecisao,
+    RecadastramentoItem,
+    RecadastramentoMarca,
+)
+from ..schemas.transporte_regulado import (
+    RecadastramentoDecisaoInput,
+    RecadastramentoItemCreate,
+    RecadastramentoItemUpdate,
+    RecadastramentoMarcarInput,
+)
+
+APLICA_A_VALIDOS = ("permissionario", "empresa", "ambos")
+TIPOS_DECISAO = ("deferimento", "indeferimento", "reabertura")
+# Colunas NOT NULL do item. Mesma razão de `NAO_ANULAVEIS_DO_CICLO`: todo campo
+# do `Update` é opcional, então `{"descricao": null}` chega, e gravá-lo seria
+# IntegrityError — HTTP 500 num erro de ENTRADA.
+NAO_ANULAVEIS_DO_ITEM = ("descricao", "aplica_a", "obrigatorio", "ordem", "ativo")
+# Situações da convocação em que ainda cabe mexer no checklist.
+SITUACOES_ABERTAS = ("convocado", "em_analise")
+# `condicional` NÃO entra. É o valor que parece aprovado e não é; aceitá-lo
+# seria decisão de produto, não detalhe de implementação.
+RESULTADO_VISTORIA_ACEITO = "aprovado"
+
+
+# ------------------------------------------------------------------ catálogo
+
+
+async def obter_item_recadastramento(
+    db: AsyncSession, *, tenant_id: int, item_id: int
+) -> RecadastramentoItem:
+    stmt = select(RecadastramentoItem).where(
+        RecadastramentoItem.tenant_id == tenant_id,
+        RecadastramentoItem.id == item_id,
+        RecadastramentoItem.excluido.is_(False),
+    )
+    item = (await db.execute(stmt)).scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item de recadastramento não encontrado")
+    return item
+
+
+async def listar_itens_recadastramento(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    apenas_ativos: bool = False,
+    aplica_a: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[RecadastramentoItem], int]:
+    """Catálogo do tenant, na ordem em que a tela deve exibir.
+
+    Condições montadas UMA vez para consulta e contagem — duplicar é como
+    `total` passa a divergir de `items`.
+    """
+    condicoes = [
+        RecadastramentoItem.tenant_id == tenant_id,
+        RecadastramentoItem.excluido.is_(False),
+    ]
+    if apenas_ativos:
+        condicoes.append(RecadastramentoItem.ativo.is_(True))
+    if aplica_a:
+        condicoes.append(RecadastramentoItem.aplica_a == aplica_a)
+    termo = (q or "").strip()
+    if termo:
+        condicoes.append(
+            func.lower(RecadastramentoItem.descricao).like(f"%{termo.lower()}%")
+        )
+
+    stmt = (
+        select(RecadastramentoItem)
+        .where(*condicoes)
+        .order_by(RecadastramentoItem.ordem.asc(), RecadastramentoItem.id.asc())
+    )
+    count_stmt = select(func.count(RecadastramentoItem.id)).where(*condicoes)
+
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+    itens = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
+    return itens, total
+
+
+async def _validar_descricao_item_unica(
+    db: AsyncSession, *, tenant_id: int, descricao: str, ignorar_id: int | None = None
+) -> None:
+    """O índice único parcial também barra; isto existe para a mensagem ser
+    legível em vez de um erro de integridade."""
+    stmt = select(RecadastramentoItem.id).where(
+        RecadastramentoItem.tenant_id == tenant_id,
+        RecadastramentoItem.descricao == descricao,
+        RecadastramentoItem.excluido.is_(False),
+    )
+    if ignorar_id is not None:
+        stmt = stmt.where(RecadastramentoItem.id != ignorar_id)
+    if (await db.execute(stmt)).scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=409, detail="Já existe um item com essa descrição neste tenant"
+        )
+
+
+async def criar_item_recadastramento(
+    db: AsyncSession, *, tenant_id: int, payload: RecadastramentoItemCreate
+) -> RecadastramentoItem:
+    await _validar_descricao_item_unica(
+        db, tenant_id=tenant_id, descricao=payload.descricao
+    )
+    item = RecadastramentoItem(
+        tenant_id=tenant_id, criado_em=datetime.utcnow(), **payload.model_dump()
+    )
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+async def atualizar_item_recadastramento(
+    db: AsyncSession, *, tenant_id: int, item_id: int, payload: RecadastramentoItemUpdate
+) -> RecadastramentoItem:
+    """Atualiza item do catálogo.
+
+    Editar a `descricao` muda o texto exibido também em fechamentos antigos —
+    limite conhecido, registrado na §8 da spec.
+    """
+    item = await obter_item_recadastramento(db, tenant_id=tenant_id, item_id=item_id)
+    dados = payload.model_dump(exclude_unset=True)
+
+    for coluna in NAO_ANULAVEIS_DO_ITEM:
+        if coluna in dados and dados[coluna] is None:
+            del dados[coluna]
+
+    if dados.get("descricao") and dados["descricao"] != item.descricao:
+        await _validar_descricao_item_unica(
+            db, tenant_id=tenant_id, descricao=dados["descricao"], ignorar_id=item_id
+        )
+
+    for chave, valor in dados.items():
+        setattr(item, chave, valor)
+    item.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+async def excluir_item_recadastramento(
+    db: AsyncSession, *, tenant_id: int, item_id: int
+) -> None:
+    """Soft-delete. As marcas continuam no banco: apagá-las reescreveria
+    fechamentos passados."""
+    item = await obter_item_recadastramento(db, tenant_id=tenant_id, item_id=item_id)
+    item.excluido = True
+    item.atualizado_em = datetime.utcnow()
+    await db.commit()
+
+
+def tipo_do_regulado(conv: RecadastramentoConvocacao) -> str:
+    """`permissionario` ou `empresa`, pelo vínculo. Função pura."""
+    return "permissionario" if conv.id_permissionario else "empresa"
+
+
+async def itens_aplicaveis(
+    db: AsyncSession, *, tenant_id: int, tipo_regulado: str
+) -> list[RecadastramentoItem]:
+    """Itens ativos que valem para aquele tipo de regulado.
+
+    `aplica_a IN (tipo, 'ambos')` — e não `== tipo`. Trocar por igualdade faz
+    todo item `ambos` sumir da ficha, o que é uma tela vazia sem erro nenhum.
+    """
+    stmt = (
+        select(RecadastramentoItem)
+        .where(
+            RecadastramentoItem.tenant_id == tenant_id,
+            RecadastramentoItem.excluido.is_(False),
+            RecadastramentoItem.ativo.is_(True),
+            RecadastramentoItem.aplica_a.in_([tipo_regulado, "ambos"]),
+        )
+        .order_by(RecadastramentoItem.ordem.asc(), RecadastramentoItem.id.asc())
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+# ------------------------------------------------------------------- marcas
+
+
+async def marcar_item_recadastramento(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    convocacao_id: int,
+    item_id: int,
+    payload: RecadastramentoMarcarInput,
+    usuario_id: int | None = None,
+) -> RecadastramentoMarca:
+    """Registra uma marcação. **Sempre INSERE**, nunca atualiza.
+
+    A tabela é um log: marcar, desmarcar e marcar de novo são três linhas, e o
+    estado corrente é a mais recente. Sobrescrever apagaria o rastro de quem
+    voltou atrás — que é exatamente o que se quer auditar num balcão.
+
+    Recusa (409) ciclo encerrado e convocação já decidida: mexer no checklist
+    depois do parecer mudaria a base da decisão sem mudar a decisão.
+    """
+    conv = await obter_convocacao(db, tenant_id=tenant_id, convocacao_id=convocacao_id)
+    ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=conv.id_ciclo)
+    if ciclo.situacao == "encerrado":
+        raise HTTPException(
+            status_code=409, detail="Ciclo encerrado não aceita marcação de checklist"
+        )
+    if conv.situacao not in SITUACOES_ABERTAS:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Convocação já decidida; reabra antes de alterar o checklist"
+            ),
+        )
+
+    item = await obter_item_recadastramento(db, tenant_id=tenant_id, item_id=item_id)
+    aplicaveis = {i.id for i in await itens_aplicaveis(
+        db, tenant_id=tenant_id, tipo_regulado=tipo_do_regulado(conv)
+    )}
+    if item.id not in aplicaveis:
+        raise HTTPException(
+            status_code=400,
+            detail="Item não se aplica a este regulado, ou está inativo",
+        )
+
+    marca = RecadastramentoMarca(
+        tenant_id=tenant_id,
+        id_convocacao=convocacao_id,
+        id_item=item_id,
+        marcado=payload.marcado,
+        observacao=payload.observacao,
+        id_usuario=usuario_id,
+        criado_em=datetime.utcnow(),
+    )
+    db.add(marca)
+
+    # A primeira marcação tira a convocação de `convocado`. Gravado, e não
+    # derivado: derivar exigiria subconsulta por linha na listagem, e a P5.3
+    # vai filtrar por este campo no relatório.
+    if conv.situacao == "convocado":
+        conv.situacao = "em_analise"
+        conv.atualizado_em = datetime.utcnow()
+
+    await db.commit()
+    await db.refresh(marca)
+    return marca
+
+
+async def estado_do_checklist(
+    db: AsyncSession, *, tenant_id: int, convocacao_id: int
+) -> list[dict]:
+    """Itens aplicáveis com o estado corrente resolvido.
+
+    O estado é a marca **mais recente** do par, e o desempate é por `id` além
+    de `criado_em`: duas marcações no mesmo segundo são perfeitamente possíveis
+    num balcão, e ordenar só por tempo devolveria qualquer uma das duas.
+
+    `marcado is None` significa item nunca tocado — diferente de `False`, que é
+    a decisão registrada de que o documento não está em ordem.
+    """
+    conv = await obter_convocacao(db, tenant_id=tenant_id, convocacao_id=convocacao_id)
+    itens = await itens_aplicaveis(
+        db, tenant_id=tenant_id, tipo_regulado=tipo_do_regulado(conv)
+    )
+    if not itens:
+        return []
+
+    marcas = (
+        await db.execute(
+            select(RecadastramentoMarca)
+            .where(
+                RecadastramentoMarca.tenant_id == tenant_id,
+                RecadastramentoMarca.id_convocacao == convocacao_id,
+            )
+            .order_by(
+                RecadastramentoMarca.criado_em.asc(), RecadastramentoMarca.id.asc()
+            )
+        )
+    ).scalars().all()
+    # Percorrer em ordem CRESCENTE e sobrescrever deixa a última — a mais
+    # recente — no dicionário. Menos sutil que confiar num `DISTINCT ON`.
+    ultima_por_item: dict[int, RecadastramentoMarca] = {}
+    for m in marcas:
+        ultima_por_item[m.id_item] = m
+
+    resultado: list[dict] = []
+    for item in itens:
+        m = ultima_por_item.get(item.id)
+        resultado.append(
+            {
+                "id_item": item.id,
+                "descricao": item.descricao,
+                "aplica_a": item.aplica_a,
+                "obrigatorio": item.obrigatorio,
+                "ordem": item.ordem,
+                "marcado": None if m is None else m.marcado,
+                "observacao": None if m is None else m.observacao,
+                "marcado_por": None if m is None else m.id_usuario,
+                "marcado_em": None if m is None else m.criado_em,
+            }
+        )
+    return resultado
+
+
+# ------------------------------------------------------- amarra da vistoria
+
+
+async def situacao_vistorias(
+    db: AsyncSession, *, tenant_id: int, conv: RecadastramentoConvocacao
+) -> dict:
+    """Situação das vistorias dos veículos do regulado.
+
+    Devolve TRÊS coisas, e não um booleano, porque a tela precisa distinguir
+    "todos em dia" de "nenhum veículo cadastrado" (assunção A1 da spec): as
+    duas satisfazem a regra e não significam a mesma coisa. Colapsá-las num
+    selo verde esconderia cadastro incompleto.
+
+    Vistoria conta se `resultado == "aprovado"`, não excluída, e `data_validade`
+    nula OU no futuro (assunção A2: cadastro herdado costuma não ter validade,
+    e bloquear por ausência de dado puniria o regulado por falha do município).
+
+    A referência é HOJE, não o prazo da convocação — quem decide é o servidor,
+    no dia em que decide.
+    """
+    condicoes_veiculo = [
+        VeiculoRegulado.tenant_id == tenant_id,
+        VeiculoRegulado.excluido.is_(False),
+        # Masculino: `VeiculoReguladoSituacao` usa `ativo`, como permissionário.
+        VeiculoRegulado.situacao == SITUACAO_PERMISSIONARIO_ATIVO,
+    ]
+    if conv.id_permissionario:
+        condicoes_veiculo.append(
+            VeiculoRegulado.id_permissionario == conv.id_permissionario
+        )
+    else:
+        condicoes_veiculo.append(VeiculoRegulado.id_empresa == conv.id_empresa)
+
+    veiculos = (
+        await db.execute(
+            select(VeiculoRegulado.id, VeiculoRegulado.placa).where(*condicoes_veiculo)
+        )
+    ).all()
+
+    hoje = date_class.today()
+    pendentes: list[dict] = []
+    for veiculo_id, placa in veiculos:
+        vistoria_ok = (
+            await db.execute(
+                select(VeiculoVistoria.id).where(
+                    VeiculoVistoria.tenant_id == tenant_id,
+                    VeiculoVistoria.id_veiculo == veiculo_id,
+                    VeiculoVistoria.excluido.is_(False),
+                    VeiculoVistoria.resultado == RESULTADO_VISTORIA_ACEITO,
+                    _or(
+                        VeiculoVistoria.data_validade.is_(None),
+                        VeiculoVistoria.data_validade >= hoje,
+                    ),
+                )
+            )
+        ).scalar_one_or_none()
+        if vistoria_ok is None:
+            pendentes.append(
+                {
+                    "id_veiculo": veiculo_id,
+                    "placa": placa,
+                    "motivo": "sem vistoria aprovada válida",
+                }
+            )
+
+    return {
+        # Zero veículos ativos satisfaz por vacuidade (A1) — e o chamador
+        # enxerga isso por `total_veiculos_ativos == 0`.
+        "satisfeita": not pendentes,
+        "total_veiculos_ativos": len(veiculos),
+        "pendentes": pendentes,
+    }
+
+
+# ------------------------------------------------------------------ decisão
+
+
+async def situacao_atendimento(
+    db: AsyncSession, *, tenant_id: int, convocacao_id: int
+) -> dict:
+    """Tudo que a tela precisa para desenhar a ficha e explicar o botão.
+
+    `pode_deferir` vem acompanhado do PORQUÊ (`itens_obrigatorios_pendentes` e
+    `vistorias`): um booleano sozinho vira botão desabilitado sem explicação, e
+    o servidor não descobre o que falta.
+    """
+    conv = await obter_convocacao(db, tenant_id=tenant_id, convocacao_id=convocacao_id)
+    itens = await estado_do_checklist(
+        db, tenant_id=tenant_id, convocacao_id=convocacao_id
+    )
+    vistorias = await situacao_vistorias(db, tenant_id=tenant_id, conv=conv)
+    pendentes = [
+        i["descricao"] for i in itens if i["obrigatorio"] and i["marcado"] is not True
+    ]
+    return {
+        "id_convocacao": conv.id,
+        "situacao": conv.situacao,
+        "tipo_regulado": tipo_do_regulado(conv),
+        "nome_regulado": await nome_do_regulado(db, tenant_id=tenant_id, conv=conv),
+        "itens": itens,
+        "itens_obrigatorios_pendentes": pendentes,
+        "vistorias": vistorias,
+        "pode_deferir": not pendentes and vistorias["satisfeita"],
+    }
+
+
+async def decidir_recadastramento(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    convocacao_id: int,
+    tipo: str,
+    payload: RecadastramentoDecisaoInput,
+    usuario_id: int,
+) -> RecadastramentoDecisao:
+    """Defere ou indefere uma convocação, com parecer.
+
+    **A assimetria central desta fatia: deferir exige completude; indeferir
+    não.** Indeferir por falta de documento é o caso real do balcão; um sistema
+    que exigisse completude para indeferir só saberia dizer sim.
+    """
+    if tipo not in ("deferimento", "indeferimento"):
+        raise HTTPException(status_code=400, detail="Tipo de decisão inválido")
+
+    conv = await obter_convocacao(db, tenant_id=tenant_id, convocacao_id=convocacao_id)
+    ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=conv.id_ciclo)
+    if ciclo.situacao == "encerrado":
+        raise HTTPException(
+            status_code=409, detail="Ciclo encerrado não aceita decisão"
+        )
+    if conv.situacao not in SITUACOES_ABERTAS:
+        raise HTTPException(
+            status_code=409, detail="Convocação já decidida; reabra antes de decidir"
+        )
+
+    parecer = (payload.parecer or "").strip()
+    if not parecer:
+        raise HTTPException(status_code=400, detail="Parecer é obrigatório")
+
+    if tipo == "deferimento":
+        situacao = await situacao_atendimento(
+            db, tenant_id=tenant_id, convocacao_id=convocacao_id
+        )
+        if not situacao["pode_deferir"]:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Deferimento exige checklist obrigatório completo e vistorias "
+                    "em dia"
+                ),
+            )
+
+    decisao = RecadastramentoDecisao(
+        tenant_id=tenant_id,
+        id_convocacao=convocacao_id,
+        tipo=tipo,
+        parecer=parecer,
+        id_usuario=usuario_id,
+        criado_em=datetime.utcnow(),
+    )
+    db.add(decisao)
+    conv.situacao = "deferido" if tipo == "deferimento" else "indeferido"
+    conv.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(decisao)
+    return decisao
+
+
+async def reabrir_recadastramento(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    convocacao_id: int,
+    payload: RecadastramentoDecisaoInput,
+    usuario_id: int,
+) -> RecadastramentoDecisao:
+    """Volta a convocação para `em_analise`, preservando as decisões anteriores.
+
+    Existe para que um deferimento errado não vire dívida de SQL: fechamento
+    sem desfazer, em sistema municipal, acaba em `UPDATE` manual no banco de
+    produção.
+    """
+    conv = await obter_convocacao(db, tenant_id=tenant_id, convocacao_id=convocacao_id)
+    ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=conv.id_ciclo)
+    if ciclo.situacao == "encerrado":
+        raise HTTPException(
+            status_code=409, detail="Ciclo encerrado não aceita reabertura"
+        )
+    if conv.situacao not in ("deferido", "indeferido"):
+        raise HTTPException(
+            status_code=409, detail="Só convocação decidida pode ser reaberta"
+        )
+
+    parecer = (payload.parecer or "").strip()
+    if not parecer:
+        raise HTTPException(status_code=400, detail="Parecer é obrigatório")
+
+    decisao = RecadastramentoDecisao(
+        tenant_id=tenant_id,
+        id_convocacao=convocacao_id,
+        tipo="reabertura",
+        parecer=parecer,
+        id_usuario=usuario_id,
+        criado_em=datetime.utcnow(),
+    )
+    db.add(decisao)
+    conv.situacao = "em_analise"
+    conv.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(decisao)
+    return decisao
+
+
+async def listar_decisoes(
+    db: AsyncSession, *, tenant_id: int, convocacao_id: int
+) -> list[RecadastramentoDecisao]:
+    """Histórico completo, mais antigo primeiro. É o que torna a reabertura
+    auditável: sem ele, reabrir pareceria não ter acontecido."""
+    await obter_convocacao(db, tenant_id=tenant_id, convocacao_id=convocacao_id)
+    stmt = (
+        select(RecadastramentoDecisao)
+        .where(
+            RecadastramentoDecisao.tenant_id == tenant_id,
+            RecadastramentoDecisao.id_convocacao == convocacao_id,
+        )
+        .order_by(RecadastramentoDecisao.criado_em.asc(), RecadastramentoDecisao.id.asc())
+    )
+    return list((await db.execute(stmt)).scalars().all())

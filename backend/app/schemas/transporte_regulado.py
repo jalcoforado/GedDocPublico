@@ -1049,3 +1049,130 @@ class RecadastramentoGeracaoOut(BaseModel):
 
     criadas: int
     ja_existentes: int
+
+
+# ================= Recadastramento — atendimento (P5.2) ====================
+AplicaA = Literal["permissionario", "empresa", "ambos"]
+TipoDecisao = Literal["deferimento", "indeferimento", "reabertura"]
+
+
+class RecadastramentoItemCreate(BaseModel):
+    """Item do catálogo de documentos exigidos."""
+
+    descricao: str = Field(min_length=1, max_length=200)
+    aplica_a: AplicaA = "ambos"
+    obrigatorio: bool = True
+    ordem: int = 0
+    ativo: bool = True
+
+
+class RecadastramentoItemUpdate(BaseModel):
+    """Atualização de item — todos os campos opcionais.
+
+    Todo campo opcional significa que `{"descricao": null}` CHEGA. Em coluna
+    NOT NULL isso vira `IntegrityError`, ou seja, HTTP 500 num erro de entrada.
+    O descarte do nulo explícito é do serviço (`NAO_ANULAVEIS_DO_ITEM`), como
+    em `atualizar_ciclo`.
+    """
+
+    descricao: str | None = Field(default=None, min_length=1, max_length=200)
+    aplica_a: AplicaA | None = None
+    obrigatorio: bool | None = None
+    ordem: int | None = None
+    ativo: bool | None = None
+
+
+class RecadastramentoItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    descricao: str
+    aplica_a: str
+    obrigatorio: bool
+    ordem: int
+    ativo: bool
+    criado_em: datetime
+    atualizado_em: datetime | None
+
+
+class RecadastramentoMarcarInput(BaseModel):
+    """Marcação de um item numa convocação. Sempre INSERE — nunca atualiza."""
+
+    marcado: bool
+    observacao: str | None = Field(default=None, max_length=255)
+
+
+class RecadastramentoChecklistItemOut(BaseModel):
+    """Item aplicável a uma convocação, com o estado corrente já resolvido.
+
+    `marcado` vem da marca MAIS RECENTE do par (convocação, item); `None`
+    significa que o item nunca foi tocado — diferente de marcado como `false`,
+    que é uma decisão registrada de que o documento não está em ordem.
+    """
+
+    id_item: int
+    descricao: str
+    aplica_a: str
+    obrigatorio: bool
+    ordem: int
+    marcado: bool | None
+    observacao: str | None
+    marcado_por: int | None
+    marcado_em: datetime | None
+
+
+class RecadastramentoVeiculoPendenteOut(BaseModel):
+    id_veiculo: int
+    placa: str
+    motivo: str
+
+
+class RecadastramentoVistoriasOut(BaseModel):
+    """Três campos, e não um booleano.
+
+    `satisfeita=true` com `total_veiculos_ativos=0` é a assunção A1 da spec:
+    regulado sem veículo passa por vacuidade. A tela precisa distinguir isso de
+    "todos em dia", senão cadastro incompleto vira selo verde.
+    """
+
+    satisfeita: bool
+    total_veiculos_ativos: int
+    pendentes: list[RecadastramentoVeiculoPendenteOut]
+
+
+class RecadastramentoSituacaoAtendimentoOut(BaseModel):
+    """O que a tela precisa para desenhar a ficha inteira e explicar o botão."""
+
+    id_convocacao: int
+    situacao: str
+    tipo_regulado: str
+    nome_regulado: str
+    itens: list[RecadastramentoChecklistItemOut]
+    itens_obrigatorios_pendentes: list[str]
+    vistorias: RecadastramentoVistoriasOut
+    pode_deferir: bool
+
+
+class RecadastramentoDecisaoInput(BaseModel):
+    """Parecer obrigatório. `min_length` no campo não basta: `"   "` tem três
+    caracteres e não é parecer nenhum."""
+
+    parecer: str = Field(min_length=5, max_length=5000)
+
+    @field_validator("parecer")
+    @classmethod
+    def _parecer_nao_vazio(cls, v: str) -> str:
+        if v.strip() == "":
+            raise ValueError("parecer não pode estar vazio.")
+        return v
+
+
+class RecadastramentoDecisaoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    id_convocacao: int
+    tipo: str
+    parecer: str
+    id_usuario: int
+    criado_em: datetime
