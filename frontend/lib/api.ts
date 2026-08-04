@@ -2047,6 +2047,68 @@ export interface VeiculoVistoriaRenovarInput {
   data_validade?: string | null;
 }
 
+// ==================== Recadastramento (Transporte P5.1) ====================
+// Recadastramento nao e renovacao de alvara: renovacao trata do documento de
+// operacao, recadastramento de o titular continuar elegivel.
+export type CriterioEscalonamento = "final_documento" | "sem_escalonamento";
+export type CicloSituacao = "rascunho" | "aberto" | "encerrado";
+
+export interface RecadastramentoCiclo {
+  id: number;
+  nome: string;
+  data_inicio: string;
+  data_fim: string;
+  criterio_escalonamento: string;
+  situacao: string;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface RecadastramentoCicloInput {
+  nome: string;
+  data_inicio: string;
+  data_fim: string;
+  criterio_escalonamento?: CriterioEscalonamento;
+  observacoes?: string | null;
+}
+
+export interface RecadastramentoCicloUpdateInput {
+  nome?: string;
+  data_inicio?: string;
+  data_fim?: string;
+  criterio_escalonamento?: CriterioEscalonamento;
+  situacao?: CicloSituacao;
+  observacoes?: string | null;
+}
+
+export interface RecadastramentoConvocacao {
+  id: number;
+  id_ciclo: number;
+  id_permissionario: number | null;
+  id_empresa: number | null;
+  tipo_regulado: "permissionario" | "empresa";
+  nome_regulado: string;
+  prazo: string;
+  prazo_original: string;
+  ajustado: boolean;
+  ajuste_justificativa: string | null;
+  ajustado_por: number | null;
+  ajustado_em: string | null;
+  situacao: string;
+  criado_em: string;
+}
+
+export interface RecadastramentoAjustePrazoInput {
+  prazo: string;
+  justificativa: string;
+}
+
+export interface RecadastramentoGeracao {
+  criadas: number;
+  ja_existentes: number;
+}
+
 // ============================ Alvara ======================================
 export interface Alvara {
   id: number;
@@ -2824,6 +2886,63 @@ export const api = {
         request<void>(
           `/transporte-regulado/alvaras/${alvaraId}/veiculos/${veiculoId}`,
           { method: "DELETE" },
+        ),
+    },
+  },
+  recadastramento: {
+    // Busca e paginacao NO SERVIDOR, nas duas listagens. Filtrar no cliente
+    // sobre pagina truncada faz a tela afirmar que um registro nao existe.
+    ciclos: {
+      list: (params?: {
+        situacao?: string;
+        q?: string;
+        page?: number;
+        page_size?: number;
+      }) =>
+        request<Paginated<RecadastramentoCiclo>>(
+          `/transporte-regulado/recadastramento/ciclos${qs(params ?? {})}`,
+        ),
+      get: (id: number) =>
+        request<RecadastramentoCiclo>(
+          `/transporte-regulado/recadastramento/ciclos/${id}`,
+        ),
+      create: (data: RecadastramentoCicloInput) =>
+        request<RecadastramentoCiclo>(
+          "/transporte-regulado/recadastramento/ciclos",
+          { method: "POST", body: JSON.stringify(data) },
+        ),
+      update: (id: number, data: RecadastramentoCicloUpdateInput) =>
+        request<RecadastramentoCiclo>(
+          `/transporte-regulado/recadastramento/ciclos/${id}`,
+          { method: "PUT", body: JSON.stringify(data) },
+        ),
+      remove: (id: number) =>
+        request<void>(`/transporte-regulado/recadastramento/ciclos/${id}`, {
+          method: "DELETE",
+        }),
+      gerarConvocacoes: (id: number) =>
+        request<RecadastramentoGeracao>(
+          `/transporte-regulado/recadastramento/ciclos/${id}/gerar-convocacoes`,
+          { method: "POST" },
+        ),
+    },
+    convocacoes: {
+      list: (
+        cicloId: number,
+        params?: {
+          tipo?: string;
+          q?: string;
+          page?: number;
+          page_size?: number;
+        },
+      ) =>
+        request<Paginated<RecadastramentoConvocacao>>(
+          `/transporte-regulado/recadastramento/ciclos/${cicloId}/convocacoes${qs(params ?? {})}`,
+        ),
+      ajustarPrazo: (id: number, data: RecadastramentoAjustePrazoInput) =>
+        request<RecadastramentoConvocacao>(
+          `/transporte-regulado/recadastramento/convocacoes/${id}/prazo`,
+          { method: "PUT", body: JSON.stringify(data) },
         ),
     },
   },

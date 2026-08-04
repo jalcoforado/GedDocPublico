@@ -1000,3 +1000,52 @@ class RecadastramentoAjustePrazo(BaseModel):
         if v.strip() == "":
             raise ValueError("justificativa não pode estar vazia.")
         return v
+
+
+class RecadastramentoCicloOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    nome: str
+    data_inicio: date
+    data_fim: date
+    criterio_escalonamento: str
+    situacao: str
+    observacoes: str | None
+    criado_em: datetime
+    atualizado_em: datetime | None
+
+
+class RecadastramentoConvocacaoOut(BaseModel):
+    """Convocado de um ciclo, com o nome do regulado já resolvido.
+
+    `nome_regulado` e `tipo_regulado` são derivados no serviço: o nome mora em
+    `permissionario.nome` ou em `empresa.razao_social` conforme o vínculo, e
+    resolver isso na tela custaria uma consulta por linha.
+    """
+
+    id: int
+    id_ciclo: int
+    id_permissionario: int | None
+    id_empresa: int | None
+    tipo_regulado: Literal["permissionario", "empresa"]
+    nome_regulado: str
+    prazo: date
+    prazo_original: date
+    ajustado: bool
+    ajuste_justificativa: str | None
+    ajustado_por: int | None
+    ajustado_em: datetime | None
+    situacao: str
+    criado_em: datetime
+
+
+class RecadastramentoGeracaoOut(BaseModel):
+    """Resultado da geração.
+
+    `0/0` diz ao operador que não há regulado ativo — informação diferente de
+    "funcionou", e por isso os dois números vão na resposta.
+    """
+
+    criadas: int
+    ja_existentes: int

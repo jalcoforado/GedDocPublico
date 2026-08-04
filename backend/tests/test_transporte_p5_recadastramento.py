@@ -33,8 +33,16 @@ from app.schemas.transporte_regulado import (
     RecadastramentoCicloCreate,
     RecadastramentoCicloUpdate,
 )
+from httpx import ASGITransport, AsyncClient
+
+from app.auth.deps import get_current_user
+from app.config import get_settings
+from app.main import app
+from app.models import Usuario
 from app.services import transporte_regulado as tr
+from app.services.modulos import contratar
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.conftest import arreio_tenant_http
 
 HOJE = date.today()
 INICIO = HOJE
@@ -893,3 +901,334 @@ async def test_ajuste_cross_tenant_e_404(admin_engine):
                 ),
             )
     assert exc.value.status_code == 404
+
+
+# ================================ HTTP =====================================
+#
+# Testes de service provam a CONSULTA; estes provam a FIAÇÃO. Um `q` declarado
+# no router e esquecido na chamada ao service passa em toda a bateria de
+# service e devolve, por HTTP, a lista inteira sem filtrar.
+#
+# E todos usam usuário COMUM, não super-usuário. `require_permission` faz
+# bypass de SU antes do `getattr(item, action)`; foi assim que dez rotas deste
+# mesmo arquivo ficaram devolvendo 500 para operador não-SU sem que a suíte
+# inteira reparasse.
+
+APP = get_settings().app_name
+
+
+async def _cria_usuario_comum_transporte(engine, tenant_id: int) -> int:
+    """Usuário não-SU (nível != 0) cujo grupo recebe a transação
+    `transporte_regulado`. Cópia deliberada de
+    `test_transporte_p4_relatorio.py::_cria_usuario_comum_transporte` — os dois
+    arquivos são independentes, e compartilhar o helper acoplaria a limpeza de
+    um à do outro."""
+    async with _sm(engine)() as session:
+        async with session.begin():
+            sistema_id = (
+                await session.execute(
+                    text(
+                        "SELECT id FROM utils.sistema WHERE app = :app "
+                        "AND excluido = false LIMIT 1"
+                    ),
+                    {"app": APP},
+                )
+            ).scalar_one()
+            nivel_id = (
+                await session.execute(
+                    text(
+                        "SELECT id FROM utils.nivel WHERE valor <> 0 "
+                        "AND excluido = false LIMIT 1"
+                    )
+                )
+            ).scalar_one_or_none()
+            if nivel_id is None:
+                nivel_id = (
+                    await session.execute(
+                        text(
+                            "INSERT INTO utils.nivel (nivel, valor, excluido) "
+                            "VALUES ('Operacional', 1, false) RETURNING id"
+                        )
+                    )
+                ).scalar_one()
+            transacao_id = (
+                await session.execute(
+                    text(
+                        "SELECT id FROM utils.transacao WHERE codigo = "
+                        "'transporte_regulado' AND excluido = false LIMIT 1"
+                    )
+                )
+            ).scalar_one()
+            uid = (
+                await session.execute(
+                    text(
+                        "INSERT INTO utils.usuario (tenant_id, nome, email, senha, "
+                        "cpf, ativo, excluido, app, nivel_acesso_sigilo) VALUES "
+                        "(:t, 'Comum Recad', :email, '', :cpf, true, false, :app, "
+                        "'interno') RETURNING id"
+                    ),
+                    {
+                        "t": tenant_id,
+                        "email": f"comum-recad-{uuid.uuid4().hex[:8]}@t.local",
+                        "cpf": uuid.uuid4().hex[:11],
+                        "app": APP,
+                    },
+                )
+            ).scalar_one()
+            gid = (
+                await session.execute(
+                    text(
+                        "INSERT INTO utils.grupo (tenant_id, id_nivel, id_sistema, "
+                        "grupo, excluido) VALUES (:t, :n, :s, 'Grupo Recad', false) "
+                        "RETURNING id"
+                    ),
+                    {"t": tenant_id, "n": nivel_id, "s": sistema_id},
+                )
+            ).scalar_one()
+            await session.execute(
+                text(
+                    "INSERT INTO utils.usuario_grupo (tenant_id, id_usuario, "
+                    "id_grupo, ativo, excluido, app) "
+                    "VALUES (:t, :u, :g, true, false, :app)"
+                ),
+                {"t": tenant_id, "u": uid, "g": gid, "app": APP},
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO utils.grupo_transacao (tenant_id, id_grupo, "
+                    "id_transacao, inserir, atualizar, excluir, excluido) "
+                    "VALUES (:t, :g, :tr, true, true, true, false)"
+                ),
+                {"t": tenant_id, "g": gid, "tr": transacao_id},
+            )
+        return uid
+
+
+def _as_user(engine, usuario_id: int, tenant_id: int, tenant_slug: str):
+    async def _get_user():
+        async with _sm(engine)() as s:
+            return (
+                await s.execute(select(Usuario).where(Usuario.id == usuario_id))
+            ).scalar_one()
+
+    def _setup():
+        app.dependency_overrides[get_current_user] = _get_user
+        arreio_tenant_http(tenant_id, tenant_slug)
+
+    return _setup
+
+
+async def _cleanup_tenant_http(engine, tenant_id: int) -> None:
+    async with _sm(engine)() as s:
+        for stmt in (
+            "DELETE FROM transporte_regulado.recadastramento_convocacao "
+            "WHERE tenant_id=:t",
+            "DELETE FROM transporte_regulado.recadastramento_ciclo WHERE tenant_id=:t",
+            "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
+            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
+            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
+            "DELETE FROM utils.grupo WHERE tenant_id=:t",
+            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
+            "DELETE FROM transporte_regulado.empresa WHERE tenant_id=:t",
+            "DELETE FROM transporte_regulado.permissionario WHERE tenant_id=:t",
+            "DELETE FROM utils.usuario WHERE tenant_id=:t",
+            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
+            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
+            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
+            "DELETE FROM aprimora_py.tenant WHERE id=:t",
+        ):
+            await s.execute(text(stmt), {"t": tenant_id})
+        await s.commit()
+
+
+async def _encerrar_arreio(engine, tenant_id: int) -> None:
+    app.dependency_overrides.clear()
+    from app.database import engine as app_engine
+
+    await app_engine.dispose()
+    await _cleanup_tenant_http(engine, tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_http_usuario_comum_percorre_o_rito_inteiro(admin_engine):
+    """Criar ciclo, gerar, listar e ajustar — tudo como operador NÃO-SU.
+
+    Se algum gate usasse um `action` inválido (o defeito histórico deste
+    arquivo foi `"visualizar"`), a resposta seria 500 e não 403: o
+    `AttributeError` sobe sem handler. Um SU passaria por tudo sem tocar na
+    linha quebrada.
+    """
+    tenant = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, tenant.id, ["transporte"])
+            await s.commit()
+        await _permissionario(admin_engine, tenant.id, nome="Joana Condutora")
+        await _empresa(admin_engine, tenant.id, razao="Viacao Central")
+        uid = await _cria_usuario_comum_transporte(admin_engine, tenant.id)
+        _as_user(admin_engine, uid, tenant.id, tenant.slug)()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            base = "/api/v2/transporte-regulado/recadastramento"
+            r = await client.post(
+                f"{base}/ciclos",
+                json={
+                    "nome": "Recadastramento HTTP",
+                    "data_inicio": INICIO.isoformat(),
+                    "data_fim": FIM.isoformat(),
+                    "criterio_escalonamento": "final_documento",
+                },
+            )
+            assert r.status_code == 201, r.text
+            ciclo_id = r.json()["id"]
+            assert r.json()["situacao"] == "rascunho"
+
+            r = await client.post(f"{base}/ciclos/{ciclo_id}/gerar-convocacoes")
+            assert r.status_code == 200, r.text
+            assert r.json() == {"criadas": 2, "ja_existentes": 0}
+
+            r = await client.get(f"{base}/ciclos/{ciclo_id}/convocacoes")
+            assert r.status_code == 200, r.text
+            corpo = r.json()
+            # Contrato paginado de verdade: `.items`, não lista nua. Declarar
+            # `X[]` onde o backend devolve `Paginated[X]` deixa o tsc verde e
+            # estoura no navegador com "…map is not a function".
+            assert corpo["total"] == 2
+            assert {i["nome_regulado"] for i in corpo["items"]} == {
+                "Joana Condutora",
+                "Viacao Central",
+            }
+
+            conv_id = corpo["items"][0]["id"]
+            r = await client.put(
+                f"{base}/convocacoes/{conv_id}/prazo",
+                json={"prazo": FIM.isoformat(), "justificativa": "Remarcado no balcao"},
+            )
+            assert r.status_code == 200, r.text
+            # O autor vem do TOKEN, nunca do payload.
+            assert r.json()["ajustado_por"] == uid
+            assert r.json()["ajustado"] is True
+    finally:
+        await _encerrar_arreio(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_http_busca_de_convocacao_atravessa_a_paginacao(admin_engine):
+    """`q` sai do HTTP e chega ao SQL — acha fora da página corrente.
+
+    `page_size=1` força o cenário: sem busca no servidor, o convocado procurado
+    não estaria na resposta, e a tela diria que ele não existe.
+    """
+    tenant = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, tenant.id, ["transporte"])
+            await s.commit()
+        for nome in ("Aaa Primeiro", "Bbb Segundo", "Zzz Procurado"):
+            await _permissionario(admin_engine, tenant.id, nome=nome)
+        ciclo = await _ciclo(admin_engine, tenant.id)
+        async with _sm(admin_engine)() as db:
+            await tr.gerar_convocacoes(db, tenant_id=tenant.id, ciclo_id=ciclo.id)
+        uid = await _cria_usuario_comum_transporte(admin_engine, tenant.id)
+        _as_user(admin_engine, uid, tenant.id, tenant.slug)()
+
+        rota = (
+            "/api/v2/transporte-regulado/recadastramento/ciclos/"
+            f"{ciclo.id}/convocacoes"
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.get(rota, params={"page_size": 1, "q": "procurado"})
+            assert r.status_code == 200, r.text
+            corpo = r.json()
+            assert corpo["total"] == 1
+            assert corpo["items"][0]["nome_regulado"] == "Zzz Procurado"
+
+            # Controle: sem `q`, `page_size=1` devolve outra pessoa e total 3.
+            r = await client.get(rota, params={"page_size": 1})
+            assert r.json()["total"] == 3
+    finally:
+        await _encerrar_arreio(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_http_sem_o_modulo_contratado_e_403(admin_engine):
+    """O gate de contratação nega antes de qualquer coisa — e nega para o
+    usuário comum COM a transação concedida, que é o caso que importa."""
+    tenant = await _provisionar(admin_engine)
+    try:
+        # `provisionar_tenant` já contrata os módulos iniciais; descontratar é
+        # o que monta o cenário. Confiar num tenant "recém-criado e portanto
+        # sem módulos" faria o teste passar pelo motivo errado — foi o que
+        # aconteceu na primeira escrita dele.
+        async with _sm(admin_engine)() as s:
+            await s.execute(
+                text(
+                    "DELETE FROM aprimora_py.tenant_modulo tm USING aprimora_py.modulo m "
+                    "WHERE tm.id_modulo = m.id AND tm.tenant_id = :t AND m.slug = 'transporte'"
+                ),
+                {"t": tenant.id},
+            )
+            await s.commit()
+        uid = await _cria_usuario_comum_transporte(admin_engine, tenant.id)
+        _as_user(admin_engine, uid, tenant.id, tenant.slug)()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.get(
+                "/api/v2/transporte-regulado/recadastramento/ciclos"
+            )
+        assert r.status_code == 403, r.text
+
+        # Controle: contratado, o MESMO usuário passa. Sem isto, um 403 por
+        # qualquer outro motivo (usuário sem grupo, rota inexistente) passaria.
+        async with _sm(admin_engine)() as s:
+            await contratar(s, tenant.id, ["transporte"])
+            await s.commit()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.get(
+                "/api/v2/transporte-regulado/recadastramento/ciclos"
+            )
+        assert r.status_code == 200, r.text
+    finally:
+        await _encerrar_arreio(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_http_ajuste_sem_justificativa_e_422_na_borda(admin_engine):
+    """O schema barra na borda (422), e o controle prova que o bom passa."""
+    tenant = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, tenant.id, ["transporte"])
+            await s.commit()
+        await _permissionario(admin_engine, tenant.id)
+        ciclo = await _ciclo(admin_engine, tenant.id)
+        async with _sm(admin_engine)() as db:
+            await tr.gerar_convocacoes(db, tenant_id=tenant.id, ciclo_id=ciclo.id)
+        conv = (await _convocacoes(admin_engine, tenant.id, ciclo.id))[0]
+        uid = await _cria_usuario_comum_transporte(admin_engine, tenant.id)
+        _as_user(admin_engine, uid, tenant.id, tenant.slug)()
+
+        rota = (
+            "/api/v2/transporte-regulado/recadastramento/convocacoes/"
+            f"{conv.id}/prazo"
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.put(rota, json={"prazo": FIM.isoformat()})
+            assert r.status_code == 422, r.text
+            r = await client.put(
+                rota,
+                json={"prazo": FIM.isoformat(), "justificativa": "Motivo do balcao"},
+            )
+            assert r.status_code == 200, r.text
+    finally:
+        await _encerrar_arreio(admin_engine, tenant.id)

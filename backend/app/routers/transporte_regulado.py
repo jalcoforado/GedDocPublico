@@ -49,6 +49,12 @@ from ..schemas.transporte_regulado import (
     AlvaraRelatorioListResponse,
     AlvaraRelatorioItem,
     AlvaraKPIsResponse,
+    RecadastramentoAjustePrazo,
+    RecadastramentoCicloCreate,
+    RecadastramentoCicloOut,
+    RecadastramentoCicloUpdate,
+    RecadastramentoConvocacaoOut,
+    RecadastramentoGeracaoOut,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -1172,3 +1178,195 @@ async def listar_auditoria_alvara(
         db, tenant_id=tenant_id, alvara_id=alvara_id, limit=limit, offset=offset
     )
     return AlvaraAuditoriaListResponse(eventos=[e for e in eventos])
+
+
+# ========================= Recadastramento (P5.1) =========================
+#
+# Recadastramento não é renovação de alvará: renovação trata do documento de
+# operação, recadastramento de o titular continuar elegível.
+#
+# Todos os endpoints passam por `require_permission("transporte_regulado")`,
+# que é também o gate de contratação do módulo — transação de módulo não
+# contratado entra no conjunto de bloqueados ANTES do bypass de super-usuário.
+# Leitura sem `action`; escrita com `inserir`/`atualizar`/`excluir`. Nunca
+# `"visualizar"`: não é uma `Action` válida e vira 500 para usuário comum.
+
+recadastramento_router = APIRouter(
+    prefix="/transporte-regulado/recadastramento", tags=["transporte-regulado"]
+)
+
+
+@recadastramento_router.get("/ciclos", response_model=Paginated[RecadastramentoCicloOut])
+async def list_ciclos_recadastramento(
+    situacao: str | None = None,
+    q: str | None = Query(None, description="Busca por nome do ciclo (substring)"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Paginated[RecadastramentoCicloOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_ciclos(
+        db, tenant_id=tenant_id, situacao=situacao, q=q, limit=page_size, offset=offset
+    )
+    return Paginated(
+        items=[RecadastramentoCicloOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@recadastramento_router.post(
+    "/ciclos",
+    response_model=RecadastramentoCicloOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_ciclo_recadastramento(
+    payload: RecadastramentoCicloCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoCicloOut:
+    ciclo = await tr_svc.criar_ciclo(db, tenant_id=tenant_id, payload=payload)
+    return RecadastramentoCicloOut.model_validate(ciclo)
+
+
+@recadastramento_router.get(
+    "/ciclos/{ciclo_id}", response_model=RecadastramentoCicloOut
+)
+async def get_ciclo_recadastramento(
+    ciclo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoCicloOut:
+    ciclo = await tr_svc.obter_ciclo(db, tenant_id=tenant_id, ciclo_id=ciclo_id)
+    return RecadastramentoCicloOut.model_validate(ciclo)
+
+
+@recadastramento_router.put(
+    "/ciclos/{ciclo_id}", response_model=RecadastramentoCicloOut
+)
+async def update_ciclo_recadastramento(
+    ciclo_id: int,
+    payload: RecadastramentoCicloUpdate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoCicloOut:
+    ciclo = await tr_svc.atualizar_ciclo(
+        db, tenant_id=tenant_id, ciclo_id=ciclo_id, payload=payload
+    )
+    return RecadastramentoCicloOut.model_validate(ciclo)
+
+
+@recadastramento_router.delete(
+    "/ciclos/{ciclo_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_ciclo_recadastramento(
+    ciclo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await tr_svc.excluir_ciclo(db, tenant_id=tenant_id, ciclo_id=ciclo_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@recadastramento_router.post(
+    "/ciclos/{ciclo_id}/gerar-convocacoes", response_model=RecadastramentoGeracaoOut
+)
+async def gerar_convocacoes_do_ciclo(
+    ciclo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoGeracaoOut:
+    """Ato explícito, não efeito de criar o ciclo: separar as duas coisas dá ao
+    operador a chance de conferir janela e critério antes de comprometer prazos.
+    Idempotente — rodar de novo alcança quem entrou depois, sem duplicar."""
+    resultado = await tr_svc.gerar_convocacoes(
+        db, tenant_id=tenant_id, ciclo_id=ciclo_id
+    )
+    return RecadastramentoGeracaoOut(**resultado)
+
+
+@recadastramento_router.get(
+    "/ciclos/{ciclo_id}/convocacoes",
+    response_model=Paginated[RecadastramentoConvocacaoOut],
+)
+async def list_convocacoes_do_ciclo(
+    ciclo_id: int,
+    tipo: str | None = Query(None, description="permissionario | empresa"),
+    q: str | None = Query(
+        None, description="Busca por nome do permissionário ou razão social"
+    ),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Paginated[RecadastramentoConvocacaoOut]:
+    # `q` e `page` são do SERVIDOR. Filtrar no cliente sobre a página truncada
+    # faz a tela afirmar que um registro não existe — foi o defeito que a fatia
+    # anterior consertou na busca de alvarás.
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_convocacoes(
+        db,
+        tenant_id=tenant_id,
+        ciclo_id=ciclo_id,
+        tipo=tipo,
+        q=q,
+        limit=page_size,
+        offset=offset,
+    )
+    return Paginated(
+        items=[RecadastramentoConvocacaoOut(**r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@recadastramento_router.put(
+    "/convocacoes/{convocacao_id}/prazo",
+    response_model=RecadastramentoConvocacaoOut,
+)
+async def ajustar_prazo_da_convocacao(
+    convocacao_id: int,
+    payload: RecadastramentoAjustePrazo,
+    usuario: Usuario = Depends(
+        require_permission("transporte_regulado", "atualizar")
+    ),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoConvocacaoOut:
+    """Justificativa obrigatória: sem ela o ajuste vira favor invisível.
+    `ajustado_por` vem do token, nunca do payload."""
+    conv = await tr_svc.ajustar_prazo(
+        db,
+        tenant_id=tenant_id,
+        convocacao_id=convocacao_id,
+        payload=payload,
+        usuario_id=usuario.id,
+    )
+    return RecadastramentoConvocacaoOut(
+        id=conv.id,
+        id_ciclo=conv.id_ciclo,
+        id_permissionario=conv.id_permissionario,
+        id_empresa=conv.id_empresa,
+        tipo_regulado="permissionario" if conv.id_permissionario else "empresa",
+        # O nome não é recarregado aqui: a tela que ajusta já o tem em mãos, e
+        # buscá-lo custaria uma consulta a mais em cada ajuste.
+        nome_regulado="",
+        prazo=conv.prazo,
+        prazo_original=conv.prazo_original,
+        ajustado=conv.ajustado_em is not None,
+        ajuste_justificativa=conv.ajuste_justificativa,
+        ajustado_por=conv.ajustado_por,
+        ajustado_em=conv.ajustado_em,
+        situacao=conv.situacao,
+        criado_em=conv.criado_em,
+    )
