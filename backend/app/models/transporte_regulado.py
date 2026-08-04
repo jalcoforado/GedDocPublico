@@ -479,3 +479,103 @@ class RecadastramentoConvocacao(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class RecadastramentoItem(Base):
+    """Item do catálogo de documentos exigidos no recadastramento.
+
+    Catálogo **por tenant**, reusado por todo ciclo — molde do
+    `pagamentos.checklist_item`. Amarrá-lo ao ciclo obrigaria a redigitar a
+    lista toda campanha, e não haveria de onde herdar.
+
+    `aplica_a`: `permissionario` | `empresa` | `ambos`. CNH é de pessoa,
+    contrato social é de empresa; lista única deixaria metade dos itens sempre
+    "não se aplica", e o operador marcaria por marcar.
+
+    `ativo=False` tira o item das exigências novas **sem** apagar as marcações
+    antigas, que continuam legíveis no histórico.
+    """
+
+    __tablename__ = "recadastramento_item"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    descricao: Mapped[str] = mapped_column(String(200), nullable=False)
+    aplica_a: Mapped[str] = mapped_column(String(20), nullable=False)
+    obrigatorio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    ordem: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class RecadastramentoMarca(Base):
+    """Marcação de um item do checklist numa convocação. **Log append-only.**
+
+    Não existe linha "o item X está marcado": existe a sequência de marcações,
+    e o estado corrente é a **mais recente** do par `(convocação, item)`.
+    Desmarcar depois de marcar é informação — um servidor que voltou atrás
+    deixou rastro, e sobrescrever a linha apagaria isso.
+
+    Por isso a tabela **não** tem índice único em `(id_convocacao, id_item)`.
+    A ausência é o desenho, não esquecimento.
+
+    `id_usuario` é anulável, ao contrário do de `RecadastramentoDecisao`:
+    marcação pode vir de rotina automática futura; decisão, nunca.
+    """
+
+    __tablename__ = "recadastramento_marca"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_convocacao: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.recadastramento_convocacao.id"), nullable=False
+    )
+    id_item: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.recadastramento_item.id"), nullable=False
+    )
+    marcado: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    observacao: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    id_usuario: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class RecadastramentoDecisao(Base):
+    """Deferimento, indeferimento ou reabertura de uma convocação.
+
+    Tabela, e não colunas na convocação — diferente do ajuste de prazo da P5.1.
+    A diferença é que ajuste tem um estado corrente e um valor original,
+    enquanto a decisão é uma **sequência**: indeferido, reaberto, deferido.
+    Em coluna, cada reabertura apagaria a decisão anterior, que é justamente o
+    histórico de que a P5.3 vai precisar.
+
+    `RecadastramentoConvocacao.situacao` segue sendo o estado corrente,
+    desnormalizado para a listagem não precisar de subconsulta por linha.
+    """
+
+    __tablename__ = "recadastramento_decisao"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_convocacao: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.recadastramento_convocacao.id"), nullable=False
+    )
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    parecer: Mapped[str] = mapped_column(Text, nullable=False)
+    # NOT NULL: decisão sem autor não é decisão.
+    id_usuario: Mapped[int] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=False
+    )
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
