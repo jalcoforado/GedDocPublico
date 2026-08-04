@@ -396,3 +396,86 @@ class AlvaraAuditoria(Base):
         ForeignKey("utils.usuario.id"), nullable=True
     )
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+# ==================== Recadastramento (P5.1) ============================
+
+
+class RecadastramentoCiclo(Base):
+    """Campanha de recadastramento do município.
+
+    Não confundir com renovação de alvará (`Alvara.renovado_de`): renovação
+    trata do DOCUMENTO de operação; recadastramento trata de o TITULAR
+    continuar elegível. Um permissionário pode ter alvará válido e estar em
+    falta com o recadastramento.
+
+    `criterio_escalonamento`: `final_documento` (último dígito do CPF/CNPJ
+    distribui em dez faixas na janela) ou `sem_escalonamento` (todos no
+    `data_fim`). Nascimento e número de permissão foram descartados de
+    propósito — são anuláveis, e empresa não tem nascimento.
+
+    `situacao`: `rascunho` | `aberto` | `encerrado`.
+    """
+
+    __tablename__ = "recadastramento_ciclo"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    data_inicio: Mapped[date] = mapped_column(Date, nullable=False)
+    data_fim: Mapped[date] = mapped_column(Date, nullable=False)
+    criterio_escalonamento: Mapped[str] = mapped_column(String(30), nullable=False)
+    situacao: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="rascunho"
+    )
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class RecadastramentoConvocacao(Base):
+    """Quem foi chamado num ciclo, e com que prazo.
+
+    O vínculo com o regulado é o par de FKs anuláveis, **exatamente uma
+    preenchida** — mesmo desenho do `Alvara` (que usa "ao menos uma"), e não
+    `(tipo, id)` polimórfico: o par preserva integridade referencial de
+    verdade. Garantido por `CHECK` no banco além da validação no serviço.
+
+    `prazo_original` guarda o que a regra calculou. Sem ele o ajuste não é
+    auditável — não dá para saber do que se afastou.
+    """
+
+    __tablename__ = "recadastramento_convocacao"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_ciclo: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.recadastramento_ciclo.id"), nullable=False
+    )
+    id_permissionario: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.permissionario.id"), nullable=True
+    )
+    id_empresa: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.empresa.id"), nullable=True
+    )
+    prazo: Mapped[date] = mapped_column(Date, nullable=False)
+    prazo_original: Mapped[date] = mapped_column(Date, nullable=False)
+    ajuste_justificativa: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ajustado_por: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
+    ajustado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # `convocado` nesta fatia. P5.2 acrescenta o fechamento; P5.3, o atraso.
+    situacao: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="convocado"
+    )
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
