@@ -142,6 +142,26 @@ async def _convocacoes(engine, tenant_id: int, ciclo_id: int):
         )
 
 
+async def _um_usuario(engine, tenant_id: int) -> int:
+    """Id de um usuário REAL do tenant.
+
+    `ajustado_por` é FK para `utils.usuario`. Cravar `usuario_id=1` passava no
+    banco de dev (onde o id 1 existe de outra semeadura) e estourava
+    `ForeignKeyViolationError` no CI, que roda em banco limpo. Verde local não
+    prova nada sobre o CI quando o teste depende de um id que ele não criou.
+    """
+    async with _sm(engine)() as s:
+        return (
+            await s.execute(
+                text(
+                    "SELECT id FROM utils.usuario WHERE tenant_id = :t "
+                    "AND excluido = false ORDER BY id LIMIT 1"
+                ),
+                {"t": tenant_id},
+            )
+        ).scalar_one()
+
+
 # ======================= Escalonamento (função pura) =======================
 
 
@@ -477,6 +497,7 @@ async def test_ajuste_grava_autor_data_e_preserva_prazo_original(admin_engine):
     ciclo, conv = await _uma_convocacao(admin_engine, t.id)
     original = conv.prazo_original
     novo = ciclo.data_fim
+    uid = await _um_usuario(admin_engine, t.id)
 
     async with _sm(admin_engine)() as db:
         ajustada = await tr.ajustar_prazo(
@@ -486,13 +507,13 @@ async def test_ajuste_grava_autor_data_e_preserva_prazo_original(admin_engine):
             payload=RecadastramentoAjustePrazo(
                 prazo=novo, justificativa="Titular internado, comprovante anexo"
             ),
-            usuario_id=1,
+            usuario_id=uid,
         )
 
     assert ajustada.prazo == novo
     assert ajustada.prazo_original == original, "prazo_original foi sobrescrito"
     assert ajustada.ajuste_justificativa.startswith("Titular internado")
-    assert ajustada.ajustado_por == 1
+    assert ajustada.ajustado_por == uid
     assert ajustada.ajustado_em is not None
 
 
