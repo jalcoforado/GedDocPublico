@@ -647,3 +647,162 @@ async def test_alvara_excluir_inexistente(admin_engine):
             await tr_svc.excluir_alvara(s, tenant_id=tenant.id, alvara_id=99999)
 
     assert exc.value.status_code == 404
+
+
+# ================== Busca por número (server-side) ======================
+#
+# O defeito que estes testes travam: a tela filtrava `items` NO CLIENTE, sobre
+# a página já truncada em `page_size`. O usuário digitava um número que existe
+# no banco e a tela respondia "nenhum alvará" — não "não vejo tudo", mas a
+# interface AFIRMANDO que o registro não existe.
+#
+# Por isso o caso central usa `limit` menor que o total e procura um registro
+# que comprovadamente NÃO está na primeira página. Um teste que buscasse dentro
+# do limite passaria igual com o filtro client-side e não provaria nada.
+
+
+async def _n_alvaras(admin_engine, tenant_id, perm_id, numeros: list[str]):
+    """Cria alvarás na ordem dada. `criado_em desc` inverte a ordem de saída."""
+    async with _sm(admin_engine)() as s:
+        for n in numeros:
+            await tr_svc.criar_alvara(
+                s, tenant_id=tenant_id,
+                payload=AlvaraCreate(
+                    numero_alvara=n,
+                    data_inicio=date(2024, 1, 1),
+                    data_validade=date(2030, 12, 31),
+                    tipo_servico="taxi",
+                    id_permissionario=perm_id,
+                ),
+            )
+
+
+@pytest.mark.asyncio
+async def test_busca_acha_alvara_fora_da_pagina_atual(admin_engine):
+    """O caso que o filtro client-side errava."""
+    tenant = await _provisionar(admin_engine)
+    perm = await _permissionario(admin_engine, tenant.id)
+    # Criados nesta ordem; a listagem é `criado_em desc`, então ALV-PRIMEIRO é
+    # o mais ANTIGO e cai no fim — fora de qualquer página inicial pequena.
+    await _n_alvaras(
+        admin_engine, tenant.id, perm.id,
+        ["ALV-PRIMEIRO", "ALV-B", "ALV-C", "ALV-D", "ALV-E"],
+    )
+
+    async with _sm(admin_engine)() as s:
+        # Controle: com o limite pequeno, o alvará procurado NÃO vem na página.
+        pagina, total = await tr_svc.listar_alvaras(
+            s, tenant_id=tenant.id, limit=2, offset=0
+        )
+        assert total == 5
+        assert "ALV-PRIMEIRO" not in [a.numero_alvara for a in pagina], (
+            "o setup não reproduz o cenário: o alvará procurado precisa estar "
+            "FORA da primeira página, senão o teste passaria mesmo com filtro "
+            "no cliente."
+        )
+
+        # A propriedade: buscar acha, mesmo com o mesmo limite pequeno.
+        achados, total_busca = await tr_svc.listar_alvaras(
+            s, tenant_id=tenant.id, q="ALV-PRIMEIRO", limit=2, offset=0
+        )
+
+    assert [a.numero_alvara for a in achados] == ["ALV-PRIMEIRO"], (
+        "a busca não alcançou registro fora da página atual — é o defeito "
+        "original: a tela diria que o alvará não existe."
+    )
+    assert total_busca == 1, "`total` tem de refletir o filtro, não o acervo"
+
+
+@pytest.mark.asyncio
+async def test_busca_e_substring_e_ignora_caixa(admin_engine):
+    tenant = await _provisionar(admin_engine)
+    perm = await _permissionario(admin_engine, tenant.id)
+    await _n_alvaras(admin_engine, tenant.id, perm.id, ["ALV-2026-XY", "OUTRO-9"])
+
+    async with _sm(admin_engine)() as s:
+        por_pedaco, _ = await tr_svc.listar_alvaras(s, tenant_id=tenant.id, q="2026")
+        minusculo, _ = await tr_svc.listar_alvaras(s, tenant_id=tenant.id, q="alv-2026-xy")
+        nenhum, total_nenhum = await tr_svc.listar_alvaras(s, tenant_id=tenant.id, q="NAO-EXISTE")
+
+    assert [a.numero_alvara for a in por_pedaco] == ["ALV-2026-XY"]
+    assert [a.numero_alvara for a in minusculo] == ["ALV-2026-XY"]
+    assert nenhum == [] and total_nenhum == 0
+
+
+@pytest.mark.asyncio
+async def test_busca_vazia_nao_filtra(admin_engine):
+    """`q` ausente, vazio ou só espaços devolve o acervo — não zero."""
+    tenant = await _provisionar(admin_engine)
+    perm = await _permissionario(admin_engine, tenant.id)
+    await _n_alvaras(admin_engine, tenant.id, perm.id, ["ALV-X", "ALV-Y"])
+
+    async with _sm(admin_engine)() as s:
+        for termo in (None, "", "   "):
+            _, total = await tr_svc.listar_alvaras(s, tenant_id=tenant.id, q=termo)
+            assert total == 2, f"q={termo!r} não deveria filtrar nada"
+
+
+@pytest.mark.asyncio
+async def test_busca_combina_com_filtro_de_vinculo(admin_engine):
+    """Busca e filtro de empresa se somam — e `total` acompanha os dois."""
+    tenant = await _provisionar(admin_engine)
+    perm = await _permissionario(admin_engine, tenant.id)
+    emp = await _empresa(admin_engine, tenant.id)
+
+    async with _sm(admin_engine)() as s:
+        # `RUIDO-EMP` existe para o termo ser CARGA: ele tambem e da empresa,
+        # entao sem o filtro de busca `com_empresa` traria dois e a assercao
+        # abaixo falharia. Sem ele, este teste passava mesmo sem `q` algum.
+        for numero, vinculo in [
+            ("ALV-COMUM-1", "perm"),
+            ("ALV-COMUM-2", "emp"),
+            ("RUIDO-EMP", "emp"),
+        ]:
+            await tr_svc.criar_alvara(
+                s, tenant_id=tenant.id,
+                payload=AlvaraCreate(
+                    numero_alvara=numero,
+                    data_inicio=date(2024, 1, 1),
+                    data_validade=date(2030, 12, 31),
+                    tipo_servico="taxi",
+                    id_permissionario=perm.id if vinculo == "perm" else None,
+                    id_empresa=emp.id if vinculo == "emp" else None,
+                ),
+            )
+
+        # "ALV-COMUM" casa os dois; a empresa reduz a um.
+        so_termo, total_termo = await tr_svc.listar_alvaras(
+            s, tenant_id=tenant.id, q="ALV-COMUM"
+        )
+        com_empresa, total_empresa = await tr_svc.listar_alvaras(
+            s, tenant_id=tenant.id, q="ALV-COMUM", empresa_id=emp.id
+        )
+
+    assert total_termo == 2 and len(so_termo) == 2
+    assert total_empresa == 1, (
+        "`total` ignorou um dos filtros — sintoma de condição aplicada só na "
+        "consulta de itens e não na de contagem."
+    )
+    assert [a.numero_alvara for a in com_empresa] == ["ALV-COMUM-2"]
+
+
+@pytest.mark.asyncio
+async def test_busca_nao_vaza_entre_tenants(admin_engine):
+    """Mesmo número em dois tenants: cada um acha só o seu."""
+    t1 = await _provisionar(admin_engine)
+    t2 = await _provisionar(admin_engine)
+    p1 = await _permissionario(admin_engine, t1.id)
+    p2 = await _permissionario(admin_engine, t2.id)
+    # O segundo numero de cada tenant faz o termo ser CARGA: sem o filtro,
+    # `total` seria 2 e as assercoes cairiam. Sem ele, este teste ficava verde
+    # com a busca completamente desligada.
+    await _n_alvaras(admin_engine, t1.id, p1.id, ["ALV-IGUAL", "RUIDO-T1"])
+    await _n_alvaras(admin_engine, t2.id, p2.id, ["ALV-IGUAL", "RUIDO-T2"])
+
+    async with _sm(admin_engine)() as s:
+        a1, tot1 = await tr_svc.listar_alvaras(s, tenant_id=t1.id, q="ALV-IGUAL")
+        a2, tot2 = await tr_svc.listar_alvaras(s, tenant_id=t2.id, q="ALV-IGUAL")
+
+    assert tot1 == 1 and tot2 == 1
+    assert a1[0].tenant_id == t1.id
+    assert a2[0].tenant_id == t2.id

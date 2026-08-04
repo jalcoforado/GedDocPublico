@@ -416,15 +416,21 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   consomem `.items`. **Consequência que não foi resolvida:** essas telas não têm UI de paginação e o
 >   `page_size` padrão é 50, então exibem no máximo 50 registros. Não é regressão (antes exibiam zero
 >   ou estouravam), mas é teto real. Resolver exige decidir UI de paginação — decisão de produto.
-> - **ABERTO — mais grave que o teto acima: a busca de alvarás é client-side sobre a lista já
->   truncada.** Em `frontend/app/(app)/transporte-regulado/alvaras/page.tsx` (perto da linha 433) o
->   filtro por número de alvará roda sobre o array que já veio limitado aos 50 registros da página
->   atual — não sobre o total do tenant. O usuário digita um número de alvará que existe no banco e a
->   tela diz que não achou nada, porque o registro correspondente nunca chegou ao array filtrado.
->   Diferente do teto de exibição (que é "não vejo tudo"), este é "procurei e a tela mentiu que não
->   existe". Resolver exige busca server-side (parâmetro de filtro na rota `GET
->   /transporte-regulado/alvaras`, hoje sem suporte a busca por número).
-> - **ABERTO — falta guarda para a classe de defeito do contrato de paginação.** A ordem de rotas
+> - ~~**ABERTO — a busca de alvarás é client-side sobre a lista já truncada.**~~ **FECHADO em
+>   2026-08-04.** `GET /transporte-regulado/alvaras` passou a aceitar `q` (substring em
+>   `numero_alvara`, `lower(...) LIKE lower(...)`, idioma de `routers/_crud.py`), e a tela manda o
+>   termo para o servidor com debounce de 300 ms em vez de filtrar `items`. Dois achados de
+>   passagem: (1) o termo já estava na `queryKey` **sem ir para a API**, então cada tecla
+>   invalidava o cache e refazia a mesma requisição; (2) as condições do service estavam
+>   **duplicadas** entre a consulta e a contagem — filtro acrescentado a só uma das cópias faria
+>   `total` divergir de `items`. Agora são montadas uma vez. O estado vazio também distingue "não
+>   há alvarás" de "a busca não achou": a segunda mensagem não oferece "cadastrar", que convidaria
+>   a duplicar um alvará existente. Cinco testes de service + um HTTP que prova a FIAÇÃO (um `q`
+>   declarado no router e esquecido na chamada ao service passaria em toda a bateria de service).
+>   Provados por inversão: sem o filtro, 4 dos 5 ficam vermelhos.
+>
+> - ~~**ABERTO — falta guarda para a classe de defeito do contrato de paginação.**~~ **FECHADO em
+>   2026-08-04** (detalhe no fim deste item). A ordem de rotas
 >   ganhou `tests/test_guarda_ordem_rotas.py`, que varre a aplicação inteira e travou a classe de
 >   defeito das 422 por sombreamento de rota. O contrato `Paginated` (item acima, teto de 50) não
 >   ganhou guarda equivalente: nada reprova hoje o próximo `response_model=Paginated[...]` no backend
@@ -433,9 +439,21 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   por onze dias, com o `tsc` verde o tempo todo. Duas formas possíveis de guarda, nenhuma construída
 >   ainda: (1) um teste/script que compara os `response_model=Paginated[` do backend com os
 >   `request<Paginated<` do `api.ts` e reprova divergência; (2) validar o envelope `{items, total,
->   page, page_size}` dentro do `request<T>()` genérico, em vez de confiar no cast estático. Fora do
->   escopo da leva que registrou este item — decisão de fazer fica para quando alguém for mexer de
->   novo em paginação.
+>   page, page_size}` dentro do `request<T>()` genérico, em vez de confiar no cast estático.
+>
+>   **FECHADO em 2026-08-04 pela opção (1):** `backend/tests/test_guarda_contrato_paginado.py`
+>   varre `app.routes` (o objeto real, não o fonte) e cruza com as chamadas GET de `api.ts`. Pega
+>   as duas direções — endpoint paginado tipado como array, e cliente esperando envelope de rota
+>   que não pagina. No estado atual: **zero divergências**, 6 endpoints pulados por não serem
+>   consumidos pelo frontend.
+>
+>   Duas coisas a saber antes de mexer nela. **O container do backend monta só `./backend`**, então
+>   `frontend/lib/api.ts` não existe lá; o CI roda pytest no runner com o repositório inteiro. A
+>   guarda **pula fora do CI e FALHA com `CI=1`** — sem essa assimetria explícita ela sumiria em
+>   silêncio no único lugar onde roda. E o extrator é **varredura por caractere, não regex**: a
+>   primeira versão usava `request<(.+?)>\(` com `re.S`, e o `.+?` atravessava linhas e comentários
+>   até achar um `>(` qualquer, porque `>` também fecha genérico aninhado (`Paginated<X>>`) — o
+>   "tipo" capturado continha blocos inteiros do arquivo e a guarda ficava verde comparando lixo.
 
 ### 2.3 Frota — backlog de telemetria
 

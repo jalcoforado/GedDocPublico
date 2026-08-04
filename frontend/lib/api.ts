@@ -2700,8 +2700,16 @@ export const api = {
     },
   },
   alvaras: {
-    list: (params?: { empresa_id?: number; permissionario_id?: number }) =>
-      request<Paginated<Alvara>>(`/transporte-regulado/alvaras${qs(params ?? {})}`),
+    // `q` busca por número NO SERVIDOR. Filtrar no cliente aqui era o defeito:
+    // a lista vem truncada em `page_size`, então número fora da primeira página
+    // sumia e a tela dizia "nenhum registro" com o alvará no banco.
+    list: (params?: {
+      empresa_id?: number;
+      permissionario_id?: number;
+      q?: string;
+      page?: number;
+      page_size?: number;
+    }) => request<Paginated<Alvara>>(`/transporte-regulado/alvaras${qs(params ?? {})}`),
     get: (id: number) =>
       request<Alvara>(`/transporte-regulado/alvaras/${id}`),
     create: (data: AlvaraInput) =>

@@ -737,18 +737,23 @@ alvaras_router = APIRouter(
 async def list_alvaras(
     empresa_id: int | None = None,
     permissionario_id: int | None = None,
+    q: str | None = Query(None, description="Busca por número do alvará (substring)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> Paginated[AlvaraOut]:
+    # `q` é do SERVIDOR de propósito. A tela filtrava no cliente sobre a página
+    # já truncada em `page_size`, então busca por número que estivesse fora da
+    # primeira página devolvia "nada encontrado" com o registro no banco.
     offset = (page - 1) * page_size
     rows, total = await tr_svc.listar_alvaras(
         db,
         tenant_id=tenant_id,
         empresa_id=empresa_id,
         permissionario_id=permissionario_id,
+        q=q,
         limit=page_size,
         offset=offset,
     )

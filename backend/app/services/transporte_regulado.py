@@ -1125,29 +1125,42 @@ async def obter_alvara(
 
 
 async def listar_alvaras(
-    db: AsyncSession, *, tenant_id: int, empresa_id: int | None = None, permissionario_id: int | None = None, limit: int = 50, offset: int = 0
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    empresa_id: int | None = None,
+    permissionario_id: int | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> tuple[list[Alvara], int]:
-    """Lista alvarás do tenant, opcionalmente filtrando por empresa ou permissionário."""
-    stmt = select(Alvara).where(
-        Alvara.tenant_id == tenant_id,
-        Alvara.excluido.is_(False),
-    )
-    if empresa_id is not None:
-        stmt = stmt.where(Alvara.id_empresa == empresa_id)
-    if permissionario_id is not None:
-        stmt = stmt.where(Alvara.id_permissionario == permissionario_id)
-    stmt = stmt.order_by(Alvara.criado_em.desc())
+    """Lista alvarás do tenant, filtrando por empresa, permissionário ou número.
 
-    count_stmt = select(func.count(Alvara.id)).where(
-        Alvara.tenant_id == tenant_id,
-        Alvara.excluido.is_(False),
-    )
+    `q` é busca por substring em `numero_alvara`, e existe porque a tela
+    filtrava no cliente sobre a página já truncada em 50: o usuário digitava um
+    número que existe no banco e a tela dizia que não achou. Não é "não vejo
+    tudo" — é a tela afirmando que o registro não existe.
+
+    As condições são montadas UMA vez e aplicadas às duas consultas. Antes eram
+    duplicadas, e um filtro acrescentado só numa das cópias devolveria `total`
+    incoerente com `items` — a paginação passaria a mentir de outro jeito.
+    """
+    condicoes = [Alvara.tenant_id == tenant_id, Alvara.excluido.is_(False)]
     if empresa_id is not None:
-        count_stmt = count_stmt.where(Alvara.id_empresa == empresa_id)
+        condicoes.append(Alvara.id_empresa == empresa_id)
     if permissionario_id is not None:
-        count_stmt = count_stmt.where(Alvara.id_permissionario == permissionario_id)
+        condicoes.append(Alvara.id_permissionario == permissionario_id)
+    termo = (q or "").strip()
+    if termo:
+        # `lower(...) LIKE lower(...)` é o idioma de `routers/_crud.py`. Não usa
+        # índice, e não vale criar um: `%termo%` não é sargável de qualquer
+        # forma, e a tabela é pequena por tenant.
+        condicoes.append(func.lower(Alvara.numero_alvara).like(f"%{termo.lower()}%"))
+
+    stmt = select(Alvara).where(*condicoes).order_by(Alvara.criado_em.desc())
+    count_stmt = select(func.count(Alvara.id)).where(*condicoes)
+
     total = (await db.execute(count_stmt)).scalar_one() or 0
-
     resultado = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
     return resultado, total
 

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Inbox, Plus, ScrollText } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -130,12 +130,25 @@ export default function AlvarasPage() {
   const [respForm, setRespForm] = useState({ id_usuario: "", cargo_funcao: "" });
   const [respErr, setRespErr] = useState<string | null>(null);
 
+  // Debounce da busca. Antes `busca` já entrava na `queryKey` sem ir para a
+  // API: cada tecla invalidava o cache e refazia a MESMA requisição. Agora o
+  // termo vai para o servidor, então sem debounce seria uma consulta por tecla.
+  const [buscaAplicada, setBuscaAplicada] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setBuscaAplicada(busca.trim()), 300);
+    return () => clearTimeout(t);
+  }, [busca]);
+
   const listaQ = useQuery({
-    queryKey: ["tr-alvaras", empresaFiltro, permFiltro, busca],
+    queryKey: ["tr-alvaras", empresaFiltro, permFiltro, buscaAplicada],
     queryFn: () =>
       api.alvaras.list({
         empresa_id: empresaFiltro ? Number(empresaFiltro) : undefined,
         permissionario_id: permFiltro ? Number(permFiltro) : undefined,
+        // Busca NO SERVIDOR. Filtrar `items` aqui era o defeito: a lista chega
+        // truncada em `page_size`, então número fora da primeira página
+        // desaparecia e a tela afirmava que o alvará não existe.
+        q: buscaAplicada || undefined,
       }),
   });
 
@@ -437,9 +450,9 @@ export default function AlvarasPage() {
     saveM.mutate(payload);
   }
 
-  const filteredData = listaQ.data?.items.filter((a) =>
-    a.numero_alvara.toLowerCase().includes(busca.toLowerCase())
-  ) ?? [];
+  // Sem filtro no cliente: o que chega já veio filtrado pelo servidor.
+  const filteredData = listaQ.data?.items ?? [];
+  const buscando = buscaAplicada.length > 0;
 
   return (
     <div className="space-y-4">
@@ -498,12 +511,19 @@ export default function AlvarasPage() {
       {listaQ.isLoading ? (
         <div className="text-center text-muted-foreground py-8">Carregando...</div>
       ) : filteredData.length === 0 ? (
+        // Dois estados distintos, mensagem distinta. "Cadastre o primeiro
+        // alvará" numa busca sem resultado é informação errada — o tenant pode
+        // ter centenas, e o botão convidaria a duplicar um que já existe.
         <EmptyState
           icon={Inbox}
-          title="Nenhum alvará"
-          description="Cadastre o primeiro alvará do transporte regulado."
+          title={buscando ? "Nenhum alvará encontrado" : "Nenhum alvará"}
+          description={
+            buscando
+              ? `Nada corresponde a "${buscaAplicada}". A busca cobre todos os alvarás do município, não só os desta página.`
+              : "Cadastre o primeiro alvará do transporte regulado."
+          }
           action={
-            canCreate ? (
+            !buscando && canCreate ? (
               <Button onClick={openNew}>
                 <Plus className="mr-1 h-4 w-4" />
                 Cadastrar alvará

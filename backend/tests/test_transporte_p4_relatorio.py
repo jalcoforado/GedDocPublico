@@ -422,3 +422,76 @@ async def test_http_usuario_comum_acessa_relatorio_kpis(admin_engine):
         from app.database import engine as app_engine
         await app_engine.dispose()
         await _cleanup_tenant_http(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_http_busca_de_alvara_atravessa_a_paginacao(admin_engine):
+    """`q` chega do HTTP até o SQL — e acha fora da página corrente.
+
+    Teste de service prova a consulta; este prova a FIAÇÃO. Um `q` declarado no
+    router e esquecido na chamada ao service passaria em toda a bateria de
+    service e devolveria, por HTTP, a lista inteira sem filtrar — que é
+    exatamente o defeito original visto de outro ângulo.
+
+    `page_size=1` força o cenário: sem busca server-side, o alvará procurado
+    não estaria na resposta.
+    """
+    from app.schemas.transporte_regulado import PermissionarioCreate
+
+    tenant = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, tenant.id, ["transporte"])
+            await s.commit()
+
+        async with _sm(admin_engine)() as s:
+            perm = await tr_svc.criar_permissionario(
+                s, tenant_id=tenant.id,
+                payload=PermissionarioCreate(
+                    nome="Busca HTTP", cpf=str(uuid.uuid4().int)[:11],
+                    tipo_servico="taxi",
+                ),
+            )
+        async with _sm(admin_engine)() as s:
+            for numero in ["ALV-ACHAR", "ALV-RUIDO-1", "ALV-RUIDO-2"]:
+                await tr_svc.criar_alvara(
+                    s, tenant_id=tenant.id,
+                    payload=AlvaraCreate(
+                        numero_alvara=numero,
+                        data_inicio=date(2024, 1, 1),
+                        data_validade=date(2030, 12, 31),
+                        tipo_servico="taxi",
+                        id_permissionario=perm.id,
+                    ),
+                )
+
+        uid = await _cria_usuario_comum_transporte(admin_engine, tenant.id)
+        _as_user(admin_engine, uid, tenant.id, tenant.slug)()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            sem_busca = await client.get(
+                "/api/v2/transporte-regulado/alvaras?page_size=1"
+            )
+            com_busca = await client.get(
+                "/api/v2/transporte-regulado/alvaras?page_size=1&q=ALV-ACHAR"
+            )
+
+        assert sem_busca.status_code == 200, sem_busca.text
+        assert com_busca.status_code == 200, com_busca.text
+
+        # Controle: sem busca, o alvará procurado NÃO vem — é o mais antigo e a
+        # ordenação é `criado_em desc`. Sem esta asserção o teste passaria
+        # mesmo que `page_size` fosse ignorado.
+        assert [a["numero_alvara"] for a in sem_busca.json()["items"]] != ["ALV-ACHAR"]
+        assert sem_busca.json()["total"] == 3
+
+        corpo = com_busca.json()
+        assert [a["numero_alvara"] for a in corpo["items"]] == ["ALV-ACHAR"], (
+            "o `q` do router não chegou ao service — a fiação está solta."
+        )
+        assert corpo["total"] == 1, "`total` tem de refletir a busca"
+    finally:
+        app.dependency_overrides.clear()
+        from app.database import engine as app_engine
+        await app_engine.dispose()
+        await _cleanup_tenant_http(admin_engine, tenant.id)
