@@ -1870,3 +1870,483 @@ def gerar_csv_alvaras(alvaras_com_kpis: list[dict]) -> str:
     writer.writeheader()
     writer.writerows(alvaras_com_kpis)
     return output.getvalue()
+
+
+# ==================== Recadastramento (P5.1) ==============================
+#
+# Recadastramento NÃO é renovação de alvará. Renovação trata do documento de
+# operação (`renovar_alvara`, acima); recadastramento trata de o titular
+# continuar elegível. Um permissionário pode ter alvará válido e estar em
+# falta com o recadastramento.
+#
+# Spec: docs/superpowers/specs/2026-08-04-transporte-p5-1-recadastramento-ciclo-design.md
+
+from sqlalchemy import or_ as _or
+from sqlalchemy.exc import IntegrityError as _IntegrityError
+
+from ..models import RecadastramentoCiclo, RecadastramentoConvocacao
+from ..schemas.transporte_regulado import (
+    RecadastramentoAjustePrazo,
+    RecadastramentoCicloCreate,
+    RecadastramentoCicloUpdate,
+)
+
+CRITERIOS_ESCALONAMENTO = ("final_documento", "sem_escalonamento")
+SITUACOES_CICLO = ("rascunho", "aberto", "encerrado")
+# Masculino para permissionário, feminino para empresa. Não é preciosismo de
+# idioma: filtrar "ativo" nos dois convoca ZERO empresas, sem erro nenhum.
+SITUACAO_PERMISSIONARIO_ATIVO = "ativo"
+SITUACAO_EMPRESA_ATIVA = "ativa"
+FAIXAS_ESCALONAMENTO = 10
+
+
+async def obter_ciclo(
+    db: AsyncSession, *, tenant_id: int, ciclo_id: int
+) -> RecadastramentoCiclo:
+    """Carrega ciclo pelo id, filtrando tenant. 404 cross-tenant, não 403."""
+    stmt = select(RecadastramentoCiclo).where(
+        RecadastramentoCiclo.tenant_id == tenant_id,
+        RecadastramentoCiclo.id == ciclo_id,
+        RecadastramentoCiclo.excluido.is_(False),
+    )
+    ciclo = (await db.execute(stmt)).scalar_one_or_none()
+    if not ciclo:
+        raise HTTPException(status_code=404, detail="Ciclo não encontrado")
+    return ciclo
+
+
+async def listar_ciclos(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    situacao: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[RecadastramentoCiclo], int]:
+    """Lista ciclos do tenant, janela mais recente primeiro.
+
+    Condições montadas UMA vez e aplicadas à consulta e à contagem — duplicar
+    é como `total` passa a divergir de `items`.
+    """
+    condicoes = [
+        RecadastramentoCiclo.tenant_id == tenant_id,
+        RecadastramentoCiclo.excluido.is_(False),
+    ]
+    if situacao:
+        condicoes.append(RecadastramentoCiclo.situacao == situacao)
+    termo = (q or "").strip()
+    if termo:
+        condicoes.append(
+            func.lower(RecadastramentoCiclo.nome).like(f"%{termo.lower()}%")
+        )
+
+    stmt = (
+        select(RecadastramentoCiclo)
+        .where(*condicoes)
+        .order_by(
+            RecadastramentoCiclo.data_inicio.desc(), RecadastramentoCiclo.id.desc()
+        )
+    )
+    count_stmt = select(func.count(RecadastramentoCiclo.id)).where(*condicoes)
+
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+    itens = (await db.execute(stmt.limit(limit).offset(offset))).scalars().all()
+    return itens, total
+
+
+async def _validar_nome_ciclo_unico(
+    db: AsyncSession, *, tenant_id: int, nome: str, ignorar_id: int | None = None
+) -> None:
+    """Dois ciclos "Recadastramento 2026" no mesmo município é erro de
+    digitação, não caso de uso. O índice único parcial também barra; isto aqui
+    é para a mensagem ser legível em vez de um erro de integridade."""
+    stmt = select(RecadastramentoCiclo.id).where(
+        RecadastramentoCiclo.tenant_id == tenant_id,
+        RecadastramentoCiclo.nome == nome,
+        RecadastramentoCiclo.excluido.is_(False),
+    )
+    if ignorar_id is not None:
+        stmt = stmt.where(RecadastramentoCiclo.id != ignorar_id)
+    if (await db.execute(stmt)).scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=409, detail="Já existe um ciclo com esse nome neste tenant"
+        )
+
+
+async def criar_ciclo(
+    db: AsyncSession, *, tenant_id: int, payload: RecadastramentoCicloCreate
+) -> RecadastramentoCiclo:
+    """Cria ciclo em `rascunho`. A situação não vem do payload."""
+    await _validar_nome_ciclo_unico(db, tenant_id=tenant_id, nome=payload.nome)
+    ciclo = RecadastramentoCiclo(
+        tenant_id=tenant_id,
+        situacao="rascunho",
+        criado_em=datetime.utcnow(),
+        **payload.model_dump(),
+    )
+    db.add(ciclo)
+    await db.commit()
+    await db.refresh(ciclo)
+    return ciclo
+
+
+async def atualizar_ciclo(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    ciclo_id: int,
+    payload: RecadastramentoCicloUpdate,
+) -> RecadastramentoCiclo:
+    """Atualiza ciclo.
+
+    Mudar a janela NÃO remarca convocações já geradas (§8 da spec): remarcar em
+    massa prazo já comunicado é decisão de produto, e a alternativa silenciosa
+    — mudar sem avisar — é a pior das duas.
+    """
+    ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=ciclo_id)
+    dados = payload.model_dump(exclude_unset=True)
+
+    if dados.get("nome") and dados["nome"] != ciclo.nome:
+        await _validar_nome_ciclo_unico(
+            db, tenant_id=tenant_id, nome=dados["nome"], ignorar_id=ciclo_id
+        )
+
+    # A janela é confrontada com o VALOR GRAVADO quando só uma das datas vem no
+    # payload. O validador do schema enxerga apenas o que foi enviado: mandar
+    # só `data_fim`, anterior ao `data_inicio` já persistido, passaria por ele.
+    inicio = dados.get("data_inicio") or ciclo.data_inicio
+    fim = dados.get("data_fim") or ciclo.data_fim
+    if inicio and fim and inicio > fim:
+        raise HTTPException(
+            status_code=400, detail="data_inicio não pode ser posterior a data_fim"
+        )
+
+    for chave, valor in dados.items():
+        setattr(ciclo, chave, valor)
+    ciclo.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(ciclo)
+    return ciclo
+
+
+async def excluir_ciclo(db: AsyncSession, *, tenant_id: int, ciclo_id: int) -> None:
+    """Soft-delete do ciclo. As convocações continuam no banco — apagá-las
+    esconderia que aquelas pessoas foram convocadas."""
+    ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=ciclo_id)
+    ciclo.excluido = True
+    ciclo.atualizado_em = datetime.utcnow()
+    await db.commit()
+
+
+def prazo_do_regulado(documento: str | None, ciclo: RecadastramentoCiclo) -> date_class:
+    """Prazo individual do regulado dentro da janela do ciclo. Função pura.
+
+    `final_documento`: o último CARACTERE do CPF/CNPJ escolhe uma de dez faixas
+    iguais em `[data_inicio, data_fim]`; o prazo é o FIM da faixa. Caractere não
+    numérico — a base vinda do legado costuma ter cadastro sujo — cai na faixa
+    final, em vez de derrubar a geração inteira por causa de um registro.
+
+    `sem_escalonamento`: todos recebem `data_fim`.
+
+    Faixa vazia é aceitável: se ninguém termina em 7, ninguém tem aquele prazo.
+    Redistribuir tornaria o prazo de cada um dependente da composição da base, e
+    o recálculo mudaria prazo já comunicado.
+    """
+    if ciclo.criterio_escalonamento != "final_documento":
+        return ciclo.data_fim
+
+    texto = (documento or "").strip()
+    ultimo = texto[-1] if texto else ""
+    if not ultimo.isdigit():
+        return ciclo.data_fim
+
+    faixa = int(ultimo)
+    total_dias = (ciclo.data_fim - ciclo.data_inicio).days
+    # Fim da faixa, com a última caindo exatamente em `data_fim`.
+    dias = ((faixa + 1) * total_dias) // FAIXAS_ESCALONAMENTO
+    return ciclo.data_inicio + timedelta(days=dias)
+
+
+def _validar_vinculo_exclusivo(
+    id_permissionario: int | None, id_empresa: int | None
+) -> None:
+    """Exatamente um dos dois. Diferente do `Alvara`, que aceita "ao menos um".
+
+    O banco também tem o CHECK `ck_recadconv_vinculo_exclusivo`; esta validação
+    existe pela mensagem, não no lugar dele.
+    """
+    if bool(id_permissionario) == bool(id_empresa):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Convocação deve ter exatamente um vínculo: "
+                "permissionário OU empresa"
+            ),
+        )
+
+
+async def gerar_convocacoes(
+    db: AsyncSession, *, tenant_id: int, ciclo_id: int
+) -> dict[str, int]:
+    """Convoca todo regulado ativo ainda sem convocação neste ciclo.
+
+    **Idempotente por desenho.** Rodar de novo alcança quem foi cadastrado
+    depois do primeiro disparo — que é o caso real — sem duplicar nem remarcar
+    quem já tem prazo. A garantia final é o índice único parcial no banco, não
+    esta consulta: duas execuções concorrentes passariam as duas pela checagem.
+
+    Devolve `criadas` e `ja_existentes`. Um `0/0` diz ao operador que não há
+    regulado ativo, o que é diferente de "funcionou".
+
+    Não remove convocação de quem deixou de ser ativo depois de convocado:
+    apagar a linha esconderia que a pessoa foi convocada. P5.3 decide o destino
+    desses casos.
+    """
+    ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=ciclo_id)
+    if ciclo.situacao == "encerrado":
+        raise HTTPException(
+            status_code=409, detail="Ciclo encerrado não gera convocações"
+        )
+
+    convocados = (
+        await db.execute(
+            select(
+                RecadastramentoConvocacao.id_permissionario,
+                RecadastramentoConvocacao.id_empresa,
+            ).where(
+                RecadastramentoConvocacao.tenant_id == tenant_id,
+                RecadastramentoConvocacao.id_ciclo == ciclo_id,
+                RecadastramentoConvocacao.excluido.is_(False),
+            )
+        )
+    ).all()
+    perms_convocados = {linha[0] for linha in convocados if linha[0] is not None}
+    empresas_convocadas = {linha[1] for linha in convocados if linha[1] is not None}
+
+    permissionarios = (
+        await db.execute(
+            select(Permissionario.id, Permissionario.cpf).where(
+                Permissionario.tenant_id == tenant_id,
+                Permissionario.excluido.is_(False),
+                # Masculino. Ver SITUACAO_PERMISSIONARIO_ATIVO.
+                Permissionario.situacao == SITUACAO_PERMISSIONARIO_ATIVO,
+            )
+        )
+    ).all()
+    empresas = (
+        await db.execute(
+            select(Empresa.id, Empresa.cnpj).where(
+                Empresa.tenant_id == tenant_id,
+                Empresa.excluido.is_(False),
+                # Feminino. Ver SITUACAO_EMPRESA_ATIVA.
+                Empresa.situacao == SITUACAO_EMPRESA_ATIVA,
+            )
+        )
+    ).all()
+
+    agora = datetime.utcnow()
+    criadas = 0
+    ja_existentes = 0
+
+    for perm_id, cpf in permissionarios:
+        if perm_id in perms_convocados:
+            ja_existentes += 1
+            continue
+        prazo = prazo_do_regulado(cpf, ciclo)
+        db.add(
+            RecadastramentoConvocacao(
+                tenant_id=tenant_id,
+                id_ciclo=ciclo_id,
+                id_permissionario=perm_id,
+                prazo=prazo,
+                prazo_original=prazo,
+                situacao="convocado",
+                criado_em=agora,
+            )
+        )
+        criadas += 1
+
+    for empresa_id, cnpj in empresas:
+        if empresa_id in empresas_convocadas:
+            ja_existentes += 1
+            continue
+        prazo = prazo_do_regulado(cnpj, ciclo)
+        db.add(
+            RecadastramentoConvocacao(
+                tenant_id=tenant_id,
+                id_ciclo=ciclo_id,
+                id_empresa=empresa_id,
+                prazo=prazo,
+                prazo_original=prazo,
+                situacao="convocado",
+                criado_em=agora,
+            )
+        )
+        criadas += 1
+
+    try:
+        await db.commit()
+    except _IntegrityError:
+        # O índice único recusou: outra geração do mesmo ciclo correu junto.
+        # 409 é honesto — rodar de novo resolve, e a segunda passada verá tudo
+        # como `ja_existentes`.
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Geração concorrente detectada; "
+                "rode novamente para conferir o resultado"
+            ),
+        )
+
+    return {"criadas": criadas, "ja_existentes": ja_existentes}
+
+
+async def obter_convocacao(
+    db: AsyncSession, *, tenant_id: int, convocacao_id: int
+) -> RecadastramentoConvocacao:
+    """Carrega convocação pelo id, filtrando tenant. 404 cross-tenant."""
+    stmt = select(RecadastramentoConvocacao).where(
+        RecadastramentoConvocacao.tenant_id == tenant_id,
+        RecadastramentoConvocacao.id == convocacao_id,
+        RecadastramentoConvocacao.excluido.is_(False),
+    )
+    conv = (await db.execute(stmt)).scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Convocação não encontrada")
+    return conv
+
+
+async def listar_convocacoes(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    ciclo_id: int,
+    tipo: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """Convocados de um ciclo, com o nome do regulado já resolvido.
+
+    Devolve dicionários, e não entidades, porque a tela precisa do nome — que
+    mora em duas tabelas diferentes conforme o tipo de regulado. Resolver isso
+    no router custaria uma consulta por linha.
+
+    `tipo` aceita `permissionario` ou `empresa`. `q` casa nome do permissionário
+    OU razão social da empresa. Busca e paginação no SERVIDOR: a fatia anterior
+    consertou exatamente o defeito de filtrar no cliente sobre lista truncada,
+    em que a tela afirmava que um registro não existia.
+    """
+    await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=ciclo_id)
+
+    condicoes = [
+        RecadastramentoConvocacao.tenant_id == tenant_id,
+        RecadastramentoConvocacao.id_ciclo == ciclo_id,
+        RecadastramentoConvocacao.excluido.is_(False),
+    ]
+    if tipo == "permissionario":
+        condicoes.append(RecadastramentoConvocacao.id_permissionario.isnot(None))
+    elif tipo == "empresa":
+        condicoes.append(RecadastramentoConvocacao.id_empresa.isnot(None))
+    termo = (q or "").strip()
+    if termo:
+        alvo = f"%{termo.lower()}%"
+        condicoes.append(
+            _or(
+                func.lower(Permissionario.nome).like(alvo),
+                func.lower(Empresa.razao_social).like(alvo),
+            )
+        )
+
+    def _com_joins(stmt):
+        """Os dois LEFT JOIN são idênticos na consulta e na contagem. Montados
+        aqui uma vez pelo mesmo motivo das condições: divergir faz `total`
+        deixar de bater com `items`."""
+        return stmt.outerjoin(
+            Permissionario,
+            Permissionario.id == RecadastramentoConvocacao.id_permissionario,
+        ).outerjoin(Empresa, Empresa.id == RecadastramentoConvocacao.id_empresa)
+
+    base = _com_joins(
+        select(RecadastramentoConvocacao, Permissionario.nome, Empresa.razao_social)
+    ).where(*condicoes)
+    count_stmt = _com_joins(
+        select(func.count(RecadastramentoConvocacao.id))
+    ).where(*condicoes)
+
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+    linhas = (
+        await db.execute(
+            base.order_by(
+                RecadastramentoConvocacao.prazo.asc(),
+                RecadastramentoConvocacao.id.asc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+
+    itens: list[dict] = []
+    for conv, nome_perm, razao_social in linhas:
+        itens.append(
+            {
+                "id": conv.id,
+                "id_ciclo": conv.id_ciclo,
+                "id_permissionario": conv.id_permissionario,
+                "id_empresa": conv.id_empresa,
+                "tipo_regulado": (
+                    "permissionario" if conv.id_permissionario else "empresa"
+                ),
+                "nome_regulado": nome_perm or razao_social or "",
+                "prazo": conv.prazo,
+                "prazo_original": conv.prazo_original,
+                "ajustado": conv.ajustado_em is not None,
+                "ajuste_justificativa": conv.ajuste_justificativa,
+                "ajustado_por": conv.ajustado_por,
+                "ajustado_em": conv.ajustado_em,
+                "situacao": conv.situacao,
+                "criado_em": conv.criado_em,
+            }
+        )
+    return itens, total
+
+
+async def ajustar_prazo(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    convocacao_id: int,
+    payload: RecadastramentoAjustePrazo,
+    usuario_id: int | None = None,
+) -> RecadastramentoConvocacao:
+    """Ajuste individual de prazo, com justificativa obrigatória.
+
+    `prazo_original` é preservado: sem ele não dá para saber do que o ajuste se
+    afastou. Prazo no PASSADO é permitido — regularizar alguém retroativamente
+    é caso real de balcão. Fora da janela do ciclo é 400; ciclo encerrado, 409.
+    """
+    conv = await obter_convocacao(db, tenant_id=tenant_id, convocacao_id=convocacao_id)
+    ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=conv.id_ciclo)
+
+    if ciclo.situacao == "encerrado":
+        raise HTTPException(
+            status_code=409, detail="Ciclo encerrado não aceita ajuste de prazo"
+        )
+
+    justificativa = (payload.justificativa or "").strip()
+    if not justificativa:
+        raise HTTPException(status_code=400, detail="Justificativa é obrigatória")
+
+    if not (ciclo.data_inicio <= payload.prazo <= ciclo.data_fim):
+        raise HTTPException(status_code=400, detail="Prazo fora da janela do ciclo")
+
+    conv.prazo = payload.prazo
+    conv.ajuste_justificativa = justificativa
+    conv.ajustado_por = usuario_id
+    conv.ajustado_em = datetime.utcnow()
+    conv.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(conv)
+    return conv

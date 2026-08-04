@@ -936,3 +936,67 @@ class AlvaraKPIsResponse(BaseModel):
     vencidos: int
     a_renovar_30d: int
     indefinidos: int
+
+
+# ==================== Recadastramento (P5.1) ==============================
+CriterioEscalonamento = Literal["final_documento", "sem_escalonamento"]
+CicloSituacao = Literal["rascunho", "aberto", "encerrado"]
+
+
+class RecadastramentoCicloCreate(BaseModel):
+    """Abertura de um ciclo de recadastramento.
+
+    `situacao` NÃO entra: ciclo nasce em `rascunho` e muda por ato próprio.
+    """
+
+    nome: str = Field(min_length=1, max_length=120)
+    data_inicio: date
+    data_fim: date
+    criterio_escalonamento: CriterioEscalonamento = "final_documento"
+    observacoes: str | None = None
+
+    @model_validator(mode="after")
+    def _janela_consistente(self) -> "RecadastramentoCicloCreate":
+        if self.data_inicio > self.data_fim:
+            raise ValueError("data_inicio não pode ser posterior a data_fim.")
+        return self
+
+
+class RecadastramentoCicloUpdate(BaseModel):
+    """Atualização de ciclo — todos os campos opcionais.
+
+    A janela só é validada aqui quando as DUAS datas vêm no payload; o caso de
+    uma só (que precisa confrontar o valor já gravado) é do serviço.
+    """
+
+    nome: str | None = Field(default=None, min_length=1, max_length=120)
+    data_inicio: date | None = None
+    data_fim: date | None = None
+    criterio_escalonamento: CriterioEscalonamento | None = None
+    situacao: CicloSituacao | None = None
+    observacoes: str | None = None
+
+    @model_validator(mode="after")
+    def _janela_consistente(self) -> "RecadastramentoCicloUpdate":
+        if self.data_inicio and self.data_fim and self.data_inicio > self.data_fim:
+            raise ValueError("data_inicio não pode ser posterior a data_fim.")
+        return self
+
+
+class RecadastramentoAjustePrazo(BaseModel):
+    """Ajuste individual de prazo.
+
+    A justificativa é obrigatória e não aceita espaço em branco: sem ela o
+    ajuste vira favor invisível. `min_length` no campo não basta — `"   "` tem
+    três caracteres.
+    """
+
+    prazo: date
+    justificativa: str = Field(min_length=5, max_length=2000)
+
+    @field_validator("justificativa")
+    @classmethod
+    def _justificativa_nao_vazia(cls, v: str) -> str:
+        if v.strip() == "":
+            raise ValueError("justificativa não pode estar vazia.")
+        return v
