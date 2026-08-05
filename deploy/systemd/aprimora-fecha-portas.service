@@ -1,0 +1,21 @@
+[Unit]
+Description=Fecha na internet as portas de banco/backend/frontend do Aprimora
+Documentation=file:///root/GedDocPublico/RUNBOOK.md
+# TEM de rodar depois do Docker: o daemon recria a chain DOCKER-USER ao subir e
+# levaria as regras junto. Rodar antes deixaria a unidade verde e as portas
+# abertas — o modo de falha desta camada é sempre parecer instalada.
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# As regras não persistem sozinhas; `RemainAfterExit` mantém a unidade ativa
+# para que `systemctl status` reflita o estado pretendido.
+RemainAfterExit=yes
+# Caminho fora do repositório de propósito: firewall de máquina não deve
+# depender de o clone estar presente nem num commit específico. A fonte
+# versionada é `deploy/vps/aprimora-fecha-portas.sh` — ver RUNBOOK.
+ExecStart=/usr/local/sbin/aprimora-fecha-portas.sh
+
+[Install]
+WantedBy=multi-user.target

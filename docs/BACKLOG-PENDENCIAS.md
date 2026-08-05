@@ -206,8 +206,14 @@ servidor, ransomware ou o provedor sumir. Falta escolher o destino (bucket, segu
 provedor) — a escolha tem custo e implica onde o dado do município passa a residir, então não é
 chamada de agente.
 
-Relacionado: a unidade `aprimora-fecha-portas` (regras de `DOCKER-USER`, item 1.0.01) existe **só na
-VPS** e não está versionada. Reinstalar o servidor perderia essa camada em silêncio.
+Relacionado, e **já fechado na mesma sessão**: a unidade `aprimora-fecha-portas` (regras de
+`DOCKER-USER`, item 1.0.01) existia **só na VPS**. Agora está em `deploy/vps/` +
+`deploy/systemd/`, com duas correções que a versão do servidor não tinha — `set -euo pipefail` e
+descoberta da interface pela rota default, falhando se ela não existir, porque regra com `-i
+<interface inexistente>` é aceita sem reclamar e **nunca casa pacote nenhum** (unidade verde,
+`iptables -L` mostrando tudo, portas abertas). O Redis entrou na lista: estava a salvo pelo bind em
+`127.0.0.1`, mas fora desta camada. `test_guarda_portas_publicadas.py` agora cruza o compose com a
+lista `PORTAS=` e reprova serviço publicado que o firewall não cubra.
 
 ### 1.0 Deriva de `APP_NAME` no ambiente de dev — RBAC apontando para o sistema errado
 

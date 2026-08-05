@@ -453,9 +453,63 @@ ransomware ou o provedor sumir. Enquanto o destino remoto não for definido
 (bucket, segunda VPS, storage do provedor), esta é a limitação a ter em mente
 ao dizer "temos backup".
 
-Nota relacionada: a unidade `aprimora-fecha-portas`, que aplica as regras de
-`DOCKER-USER`, existe **só na VPS** e não está versionada. Reinstalar o
-servidor do zero perderia essa camada sem aviso.
+---
+
+## Firewall da VPS — a segunda camada das portas
+
+A camada 1 é o `docker-compose.yml`, que publica tudo em `127.0.0.1:` menos a
+8090 (`tests/test_guarda_portas_publicadas.py`). A camada 2 são regras de
+`DOCKER-USER` aplicadas no boot. Ela existe porque a camada 1 é um arquivo
+editável — e porque `docker-compose.override.yml` é gitignored, usa `!override`
+e pode republicar em `0.0.0.0` sem passar por guarda nenhuma.
+
+Fonte versionada desde 2026-08-05: `deploy/vps/aprimora-fecha-portas.sh` e
+`deploy/systemd/aprimora-fecha-portas.service`. Até então existiam **só na
+VPS** — reinstalar o servidor teria perdido a camada em silêncio.
+
+```bash
+install -m 755 deploy/vps/aprimora-fecha-portas.sh /usr/local/sbin/
+cp deploy/systemd/aprimora-fecha-portas.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now aprimora-fecha-portas
+```
+
+O caminho é `/usr/local/sbin` e **não** o repositório, ao contrário das
+unidades de backup: firewall de máquina não deve depender de o clone estar
+presente nem num commit específico. O preço é a possibilidade de deriva entre a
+cópia instalada e a versionada — reinstale ao mexer no script.
+
+Três coisas que essa camada ensinou, e que valem para qualquer bloqueio futuro:
+
+- **`ufw` não alcança porta publicada por container.** O Docker insere DNAT em
+  `PREROUTING`, que desvia do `INPUT` inteiro.
+- **O DNAT reescreve a porta antes da `DOCKER-USER`.** A regra tem de casar a
+  porta de **dentro** do container. É por isso que a lista tem `3000` e não só
+  `3100`: o mapeamento é `3100:3000`. Foi por não saber disso que a 3100
+  continuou aberta depois da primeira tentativa.
+- **`After=docker.service` é obrigatório.** O daemon recria a chain ao subir e
+  leva as regras junto; sem isso a unidade fica verde e as portas abertas.
+
+O script descobre a interface pela rota default e **falha** se ela não existir.
+Isso não é zelo: regra inserida com `-i <interface inexistente>` é aceita sem
+reclamação e nunca casa pacote nenhum — `systemctl status` verde, `iptables -L`
+mostrando as regras, e as portas abertas. Verificado por inversão em
+2026-08-05.
+
+Conferir:
+
+```bash
+systemctl status aprimora-fecha-portas
+iptables -L DOCKER-USER -n -v
+ip6tables -L DOCKER-USER -n -v          # o IPv6 tem chain própria
+```
+
+E de fora da máquina, que é a única prova que conta:
+
+```bash
+for p in 5432 8000 3100 6379; do
+  timeout 5 bash -c "exec 3<>/dev/tcp/<ip>/$p" 2>/dev/null && echo "$p ABERTA" || echo "$p fechada"
+done
+```
 
 ---
 

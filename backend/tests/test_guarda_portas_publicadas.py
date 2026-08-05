@@ -39,6 +39,8 @@ import yaml
 
 RAIZ = Path(__file__).resolve().parents[2]
 COMPOSE = RAIZ / "docker-compose.yml"
+FECHA_PORTAS = RAIZ / "deploy" / "vps" / "aprimora-fecha-portas.sh"
+UNIDADE_FECHA_PORTAS = RAIZ / "deploy" / "systemd" / "aprimora-fecha-portas.service"
 
 # A única porta que deve responder da internet: o nginx, que é a entrada
 # oficial e o único ponto onde a resolução de tenant por `Host` funciona.
@@ -131,6 +133,75 @@ def test_o_banco_nao_e_publicado_na_internet() -> None:
             "arquivo, o repositório é público e `ged_user` é SUPERUSER com "
             "BYPASSRLS. Aconteceu de verdade — ver o docstring do módulo."
         )
+
+
+def _portas_bloqueadas_pelo_firewall() -> set[str]:
+    """Lê a lista `PORTAS=` do script de firewall versionado."""
+    for linha in FECHA_PORTAS.read_text(encoding="utf-8").splitlines():
+        if linha.startswith("PORTAS="):
+            # PORTAS="${PORTAS:-5432 8000 ...}"
+            miolo = linha.split(":-", 1)[-1].rstrip('}"')
+            return set(miolo.split())
+    pytest.fail(f"não achei a linha `PORTAS=` em {FECHA_PORTAS.name}.")
+
+
+def test_o_firewall_cobre_todo_servico_nao_publico() -> None:
+    """Cruza o compose com a segunda camada de defesa.
+
+    A camada 1 é o bind em `127.0.0.1` deste compose. A camada 2 são as regras
+    de `DOCKER-USER` aplicadas por `deploy/vps/aprimora-fecha-portas.sh` na VPS.
+    Elas existem porque a camada 1 é um arquivo editável — e porque
+    `docker-compose.override.yml`, gitignored, pode republicar em `0.0.0.0` sem
+    passar por guarda nenhuma.
+
+    O que se confere aqui é a porta do **lado de dentro** do container. O DNAT
+    do Docker reescreve a porta antes da chain `DOCKER-USER`, então bloquear a
+    porta publicada não adianta quando o mapeamento é `3100:3000`. Foi
+    exatamente esse detalhe que deixou a 3100 aberta depois da primeira
+    tentativa de bloqueio, em 2026-08-05.
+    """
+    _exige_compose()
+    if not FECHA_PORTAS.exists():
+        pytest.fail(
+            f"`{FECHA_PORTAS}` não existe. A unidade `aprimora-fecha-portas` "
+            "roda na VPS; se o script sumiu do repositório, reinstalar o "
+            "servidor perde a camada em silêncio."
+        )
+    bloqueadas = _portas_bloqueadas_pelo_firewall()
+    faltando = []
+    for servico, entrada in _portas_publicadas():
+        partes = entrada.split(":")
+        porta_container = partes[-1]
+        porta_host = partes[-2]
+        if porta_host in PUBLICAS_PERMITIDAS:
+            continue
+        if porta_container not in bloqueadas:
+            faltando.append(f"{servico}: {entrada!r} (dentro: {porta_container})")
+    assert not faltando, (
+        "Serviço publicado que o firewall da VPS não bloqueia: "
+        + "; ".join(faltando)
+        + f". Acrescente a porta de DENTRO do container a `PORTAS=` em "
+        f"{FECHA_PORTAS.name}."
+    )
+
+
+def test_a_unidade_de_firewall_roda_depois_do_docker() -> None:
+    """`After=docker.service`, sem o qual a unidade fica verde e inútil.
+
+    O daemon recria a chain `DOCKER-USER` ao subir. Regra inserida antes disso
+    é levada junto — e o sintoma é `systemctl status` ativo com as portas
+    abertas.
+    """
+    _exige_compose()
+    texto = UNIDADE_FECHA_PORTAS.read_text(encoding="utf-8")
+    assert "After=docker.service" in texto, (
+        f"`{UNIDADE_FECHA_PORTAS.name}` sem `After=docker.service`: o daemon "
+        "recria a chain DOCKER-USER ao subir e apaga as regras."
+    )
+    assert "ExecStart=-" not in texto, (
+        f"`{UNIDADE_FECHA_PORTAS.name}` usa `ExecStart=-`, que faz o systemd "
+        "ignorar a falha."
+    )
 
 
 def test_a_entrada_publica_continua_publicada() -> None:
