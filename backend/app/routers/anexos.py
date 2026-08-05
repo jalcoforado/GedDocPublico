@@ -15,9 +15,10 @@ from ..schemas.processo import AnexoNoProcesso
 from ..services.anexos import (
     AnexoError,
     delete_anexo,
-    get_anexo_path,
+    get_anexo_path_autorizado,
     upload_anexo,
 )
+from ..services.sigilo import SigiloAcessoError
 from ..services.pdf_carimbo import CarimboError, carimbar_anexo_com_cache, invalidate_cache
 
 router = APIRouter(tags=["anexos"])
@@ -70,16 +71,16 @@ async def upload_endpoint(
 async def download_endpoint(
     anexo_id: int,
     inline: bool = Query(False, description="Quando true, serve o arquivo inline (para iframe/visualizador)"),
-    _: Usuario = Depends(get_current_user),
+    usuario: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        anexo, path = await get_anexo_path(
-            db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug
+        anexo, path = await get_anexo_path_autorizado(
+            db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug, usuario=usuario
         )
-    except AnexoError as e:
+    except (AnexoError, SigiloAcessoError) as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
     download_name = (anexo.descricao or anexo.e_doc or f"anexo-{anexo.id}").strip()
@@ -122,16 +123,16 @@ async def delete_endpoint(
 async def carimbado_endpoint(
     anexo_id: int,
     inline: bool = Query(True),
-    _: Usuario = Depends(get_current_user),
+    usuario: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        anexo, source_path = await get_anexo_path(
-            db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug
+        anexo, source_path = await get_anexo_path_autorizado(
+            db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug, usuario=usuario
         )
-    except AnexoError as e:
+    except (AnexoError, SigiloAcessoError) as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
     if not anexo.e_doc or not anexo.e_doc.lower().endswith(".pdf"):

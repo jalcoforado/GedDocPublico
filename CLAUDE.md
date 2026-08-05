@@ -132,7 +132,16 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 docker compose --profile init up bootstrap
 ```
 
-Containers: `aprimora-py-backend` (publicado em **:8001**, interno :8000), `-frontend` (:3100), `-worker`, `-beat`, `-redis`, `-nginx` (:8090), `-db` (:5432). Entrar sempre por `http://localhost:8090` (nginx) — é lá que o roteamento e o header `Host` (resolução de tenant) funcionam.
+Containers: `aprimora-py-backend` (publicado em **:8001** pelo override local, :8000 no compose base), `-frontend` (:3100), `-worker`, `-beat`, `-redis`, `-nginx` (:8090), `-db` (:5432). Entrar sempre por `http://localhost:8090` (nginx) — é lá que o roteamento e o header `Host` (resolução de tenant) funcionam.
+
+**Toda porta do compose base é `127.0.0.1:`, menos a 8090.** Até 2026-08-05 não era: `5432`, `8000` e
+`3100` subiam em `0.0.0.0` e **respondiam da internet na VPS** — com a senha do banco literal neste
+repositório, que é público, e `ged_user` sendo `SUPERUSER`/`BYPASSRLS`. `tests/test_guarda_portas_publicadas.py`
+reprova quem republicar em `0.0.0.0`. Duas armadilhas registradas lá e que valem para qualquer
+bloqueio futuro: **`ufw` não alcança porta publicada por container** (o Docker desvia do `INPUT` com
+DNAT em `PREROUTING`; o bloqueio vai na chain `DOCKER-USER`), e **o DNAT reescreve a porta antes da
+`DOCKER-USER`**, então a regra tem de casar a porta de *dentro* do container — foi por isso que a
+3100 continuou aberta depois da primeira tentativa, sendo o mapeamento `3100:3000`.
 
 **O `:3100` direto não funciona na stack de produção-like.** O `docker-compose.yml` assa
 `NEXT_PUBLIC_API_URL=/api/v2` no bundle — base relativa, que só resolve atrás do nginx. Servido pelo
@@ -266,6 +275,27 @@ Isolamento tem **três camadas** e todas são obrigatórias:
 3. **Disciplina no service** — `tenant_id` **sempre vem do caller** (`require_tenant_id`), **nunca do payload**. Campos server-side (`id_usuario_solicitante`, `status`, `excluido`, `id`) não entram em schemas de entrada. Carga por id filtra `tenant_id` + `excluido.is_(False)` e devolve **404 cross-tenant** (não 403). FKs "soft" (unidade, usuário, veículo) precisam de validação **same-tenant** explícita — a FK do Postgres não filtra por tenant.
 
 Outras convenções de domínio: exclusão é **soft-delete** (`excluido=True`, nunca DELETE físico); unicidade por tenant vira **índice único parcial** `WHERE excluido = false`; transição de estado ilegal é **409**; permissão negada é **403** via `require_permission("<codigo>", "inserir"|"atualizar"|"excluir")` (leitura sem action). Super-usuário faz bypass.
+
+#### Sigilo gradual (LAI) — a quarta dimensão de acesso, e a mais fácil de esquecer
+
+Além de tenant, módulo e permissão, processo tem `nivel_sigilo` (`ostensivo` → `interno` →
+`reservado` → `secreto` → `ultrassecreto`) e usuário tem a credencial `nivel_acesso_sigilo`. Regra:
+alcança o que for **≤** sua credencial; super-usuário passa. A implementação está em
+`services/sigilo.py`, e o guard reaproveitável é **`assert_acesso_processo`** (levanta
+`SigiloAcessoError` → **404**, nunca 403 — 403 confirmaria a existência).
+
+**Todo caminho que serve conteúdo ligado a um processo tem de passar por esse guard**, e isso inclui
+caminho que não menciona processo nenhum na assinatura. O download de anexo ficou de fora por sete
+meses exatamente assim: `require_permission` não cobre sigilo, o endpoint só falava em `anexo_id`, e
+a listagem — que filtra certo — dava a impressão de que o assunto estava resolvido. Qualquer
+autenticado do tenant baixava anexo de processo ultrassecreto iterando o id. Hoje o carregador cru
+`get_anexo_path` é proibido em router (`tests/test_guarda_anexo_sigiloso.py`); use
+`get_anexo_path_autorizado`.
+
+Duas regras que saíram daquele conserto: **a autorização vem antes de resolver o recurso** (senão a
+mensagem de erro distingue "existe" de "não existe" para quem não pode saber), e **teste de service
+não cobre esta classe de defeito** — ela mora na costura router↔service, que é onde o `Depends`
+some.
 
 #### Papéis de banco — a camada 1 hoje está INERTE no runtime (achado F-12)
 

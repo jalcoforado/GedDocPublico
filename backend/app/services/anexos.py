@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings, resolve_anexo_path, tenant_anexos_dir
 from ..models import Anexo, AnexoProcesso, AssinaturaAnexo, Minuta, Processo, Servico
+from .sigilo import SigiloAcessoError, assert_acesso_processo
 
 
 class AnexoError(Exception):
@@ -229,6 +230,84 @@ async def get_anexo_path(
     if path is None:
         raise AnexoError(f"Arquivo {anexo.e_doc} não está no storage")
     return anexo, path
+
+
+async def get_anexo_path_autorizado(
+    db: AsyncSession,
+    anexo_id: int,
+    *,
+    tenant_id: int,
+    tenant_slug: str,
+    usuario,
+):
+    """`get_anexo_path` + checagem de sigilo do processo dono do anexo.
+
+    **É esta função, e não `get_anexo_path`, que endpoint algum deve pular.**
+    `get_anexo_path` é o carregador cru: filtra tenant, `excluido` e `ativo`, e
+    nada mais. Até 2026-08-05 os dois endpoints que servem conteúdo de anexo
+    (`/download` e `/carimbado.pdf`) chamavam o carregador cru direto, então
+    qualquer autenticado do tenant baixava o anexo de processo **ultrassecreto**
+    iterando `anexo_id` — o processo não aparecia na listagem dele (que filtra
+    por `nivel_sigilo`), mas o documento vinha.
+
+    O guard `assert_acesso_processo` já existia e já era usado em quatro
+    lugares, inclusive no download **pela via de assinatura**. Só a via direta
+    ficou de fora. `tests/test_guarda_anexo_sigiloso.py` reprova quem voltar a
+    chamar o carregador cru de dentro de um router.
+
+    Anexo **sem** vínculo utilizável é negado, e isso é deliberado: o único
+    caminho de criação (`upload_anexo`) cria o vínculo na mesma transação, então
+    um anexo solto ou é resíduo do schema legado ou é vínculo apagado — em
+    nenhum dos dois casos há processo cujo sigilo consultar, e negar é a direção
+    segura. Medido no banco de dev na data: 16 anexos ativos, 0 sem vínculo.
+
+    **O predicado do vínculo espelha o da listagem** (`processos.py::
+    _anexos_do_processo`): `excluido = false` e `desentranhado_em IS NULL`.
+    Espelhar não é preciosismo — é a regra que impede que este conserto repita
+    o defeito que ele corrige. Anexo **desentranhado** (removido formalmente do
+    processo, Fase P6) some da listagem; se o download não filtrasse igual, ele
+    continuaria alcançável por id, que é exatamente a forma do defeito original,
+    uma camada acima. `AnexoProcesso.ativo` **não** entra, porque a listagem
+    também não o usa: divergir aqui esconderia da tela um anexo que o download
+    entrega, ou o contrário.
+
+    **Vários vínculos são possíveis** — o schema tem `anexo_herdado`, e as
+    tabelas `protocolos.*` são compartilhadas com o legado. Por isso a consulta
+    devolve todos e o acesso é concedido se a credencial alcançar **qualquer
+    um** deles. É a semântica que casa com a tela: se o anexo aparece na
+    listagem de um processo que o usuário pode ver, ele pode baixá-lo. Exigir
+    acesso a *todos* negaria download legítimo de processo ostensivo por causa
+    de um segundo vínculo que o usuário nem sabe que existe.
+    """
+    # A autorização vem ANTES de resolver o arquivo, de propósito. Na ordem
+    # inversa, um anexo cujo arquivo sumiu do storage responderia "Arquivo X
+    # não está no storage" em vez de "não encontrado" — distinguindo, para
+    # quem não pode ver o documento, o anexo que existe do que não existe.
+    processo_ids = list(
+        (
+            await db.execute(
+                select(AnexoProcesso.id_processo).where(
+                    AnexoProcesso.id_anexo == anexo_id,
+                    AnexoProcesso.tenant_id == tenant_id,
+                    AnexoProcesso.excluido.is_(False),
+                    AnexoProcesso.desentranhado_em.is_(None),
+                )
+            )
+        ).scalars()
+    )
+    if not processo_ids:
+        raise SigiloAcessoError("Anexo não encontrado")
+    for processo_id in processo_ids:
+        try:
+            await assert_acesso_processo(
+                db, tenant_id=tenant_id, processo_id=processo_id, usuario=usuario
+            )
+        except SigiloAcessoError:
+            continue
+        return await get_anexo_path(
+            db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug
+        )
+    raise SigiloAcessoError("Anexo não encontrado")
 
 
 async def anexo_esta_assinado(
