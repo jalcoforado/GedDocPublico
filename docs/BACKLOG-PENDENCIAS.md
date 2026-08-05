@@ -88,6 +88,48 @@
 
 ## 1. Curto prazo — itens concretos em aberto
 
+### ~~1.0.01 Postgres da VPS respondendo da internet~~ — FECHADO em 2026-08-05
+
+**O achado mais grave registrado neste documento até hoje.** Apareceu ao conferir um relatório
+externo que dizia, genericamente, "fechar portas diretas de banco e backend". A verificação mostrou
+que não era genérico:
+
+- `5432`, `8000` e `3100` aceitavam conexão de fora em `103.230.142.69` (só a `8090` deveria).
+- Sonda de `SSLRequest` na 5432 respondeu `N`: Postgres real, **sem TLS**.
+- A senha estava **literal** no `docker-compose.yml` (`ged_password_secure_local`, não `${VAR:-}`),
+  e este repositório é **público**.
+- `ged_user` é `SUPERUSER` com `BYPASSRLS` — as camadas 1, 2 e 3 do isolamento multi-tenant são
+  todas irrelevantes para quem entra por ali.
+
+Não se tentou autenticar: a correção é a mesma com ou sem a prova, e o servidor tem dados reais de
+homologação.
+
+**Isto era anterior ao `SEC-RLS-ROLLOUT`, e não o contrário.** Trocar o papel do runtime não protege
+nada enquanto `ged_user` for alcançável direto na 5432.
+
+Conserto em duas camadas:
+
+1. **Compose** — toda porta passou a `127.0.0.1:`, menos a `8090`. É o conserto de verdade, porque
+   sobrevive a `docker compose up` e a reboot. Guarda: `tests/test_guarda_portas_publicadas.py`.
+2. **Firewall na VPS** — unidade systemd `aprimora-fecha-portas` (`/usr/local/sbin/aprimora-fecha-portas.sh`),
+   `After=docker.service`, idempotente, inserindo `DROP` em `DOCKER-USER` para `eth0`. Defesa em
+   profundidade; continua válida se alguém republicar uma porta por override.
+
+Duas armadilhas que custaram uma rodada cada, e que valem para qualquer bloqueio futuro:
+
+- **`ufw` não alcança porta publicada por container.** O Docker insere DNAT em `PREROUTING`, que
+  desvia do `INPUT`. Por isso a regra vai em `DOCKER-USER`, e não em `ufw`.
+- **O DNAT reescreve a porta ANTES da `DOCKER-USER`.** A regra tem de casar a porta de *dentro* do
+  container. Com o mapeamento `3100:3000`, bloquear `3100` não fez nada — a 3100 seguiu aberta na
+  verificação, e só fechou ao bloquear `3000`. As outras duas funcionaram por acidente, sendo
+  `5432:5432` e `8000:8000`.
+
+**Pendente, e é decisão do Jorge:** a senha `ged_password_secure_local` continua no repositório
+público e continua sendo a do banco da VPS. Fechar a porta reduz a exposição, não a elimina — quem
+tiver alcance à rede interna, ou uma futura porta republicada por engano, entra com uma credencial
+publicada. Rotacionar **não** é editar o compose: `POSTGRES_PASSWORD` só age na criação do volume,
+então a troca é `ALTER ROLE ged_user PASSWORD ...` mais as URLs de conexão.
+
 ### 1.0 Deriva de `APP_NAME` no ambiente de dev — RBAC apontando para o sistema errado
 
 *(Descoberto em 2026-07-28, durante a fatia F1 da modularização.)*

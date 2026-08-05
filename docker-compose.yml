@@ -70,7 +70,10 @@ services:
       ALLOWED_ORIGINS: http://localhost:8090,http://localhost:3000,http://localhost:3100
       MAX_UPLOAD_SIZE_MB: "20"
     ports:
-      - "8000:8000"
+      # Só localhost. A entrada pública é o nginx na 8090 — publicar o backend
+      # em 0.0.0.0 contornava o nginx e, com STRICT_TENANT_RESOLUTION=false,
+      # entregava o tenant padrão sem passar pela resolução por `Host`.
+      - "127.0.0.1:8000:8000"
     volumes: *backend-volumes
     networks: *backend-networks
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
@@ -122,7 +125,8 @@ services:
       INTERNAL_API_URL: http://backend:8000/api/v2
       NODE_ENV: production
     ports:
-      - "3100:3000"
+      # Só localhost — o Next é servido ao público pelo nginx.
+      - "127.0.0.1:3100:3000"
     networks:
       - aprimora-py
 
@@ -176,7 +180,12 @@ services:
       POSTGRES_PASSWORD: ged_password_secure_local
       POSTGRES_DB: ged_saas_db
     ports:
-      - "5432:5432"
+      # Só localhost. Até 2026-08-05 esta linha era "5432:5432", ou seja
+      # 0.0.0.0, e na VPS o Postgres respondia da internet — com a senha logo
+      # acima, literal, num repositório PÚBLICO, e `ged_user` sendo SUPERUSER
+      # com BYPASSRLS. Verificado: a 5432 aceitava conexão e o servidor sequer
+      # oferecia TLS (SSLRequest -> 'N').
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:

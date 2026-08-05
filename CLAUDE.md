@@ -132,7 +132,16 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 docker compose --profile init up bootstrap
 ```
 
-Containers: `aprimora-py-backend` (publicado em **:8001**, interno :8000), `-frontend` (:3100), `-worker`, `-beat`, `-redis`, `-nginx` (:8090), `-db` (:5432). Entrar sempre por `http://localhost:8090` (nginx) — é lá que o roteamento e o header `Host` (resolução de tenant) funcionam.
+Containers: `aprimora-py-backend` (publicado em **:8001** pelo override local, :8000 no compose base), `-frontend` (:3100), `-worker`, `-beat`, `-redis`, `-nginx` (:8090), `-db` (:5432). Entrar sempre por `http://localhost:8090` (nginx) — é lá que o roteamento e o header `Host` (resolução de tenant) funcionam.
+
+**Toda porta do compose base é `127.0.0.1:`, menos a 8090.** Até 2026-08-05 não era: `5432`, `8000` e
+`3100` subiam em `0.0.0.0` e **respondiam da internet na VPS** — com a senha do banco literal neste
+repositório, que é público, e `ged_user` sendo `SUPERUSER`/`BYPASSRLS`. `tests/test_guarda_portas_publicadas.py`
+reprova quem republicar em `0.0.0.0`. Duas armadilhas registradas lá e que valem para qualquer
+bloqueio futuro: **`ufw` não alcança porta publicada por container** (o Docker desvia do `INPUT` com
+DNAT em `PREROUTING`; o bloqueio vai na chain `DOCKER-USER`), e **o DNAT reescreve a porta antes da
+`DOCKER-USER`**, então a regra tem de casar a porta de *dentro* do container — foi por isso que a
+3100 continuou aberta depois da primeira tentativa, sendo o mapeamento `3100:3000`.
 
 **O `:3100` direto não funciona na stack de produção-like.** O `docker-compose.yml` assa
 `NEXT_PUBLIC_API_URL=/api/v2` no bundle — base relativa, que só resolve atrás do nginx. Servido pelo
