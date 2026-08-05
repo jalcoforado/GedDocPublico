@@ -351,6 +351,110 @@ async def test_autorizacao_precede_a_resolucao_do_arquivo(admin_engine, ambiente
             )
 
 
+async def test_anexo_desentranhado_nao_e_baixavel(admin_engine, ambiente):
+    """Desentranhado some da listagem — tem de sumir do download também.
+
+    A primeira versão desta correção não filtrava `desentranhado_em`, e por
+    isso repetia, uma camada acima, o defeito que ela corrige: a listagem
+    (`processos.py::_anexos_do_processo`) esconde o anexo removido do processo,
+    e o download continuava entregando por id. Apontado em revisão externa.
+    """
+    async with _sessao(admin_engine) as s:
+        usuario = await _usuario(s, ambiente["tenant_id"], "ultrassecreto")
+        await s.execute(text(
+            "UPDATE protocolos.anexo_processo SET desentranhado_em = NOW() "
+            "WHERE id_anexo = :a AND tenant_id = :t"
+        ), {"a": ambiente["anexo_ostensivo"], "t": ambiente["tenant_id"]})
+        await s.commit()
+
+    async with _sessao(admin_engine) as s:
+        with pytest.raises(SigiloAcessoError):
+            await get_anexo_path_autorizado(
+                s,
+                ambiente["anexo_ostensivo"],
+                tenant_id=ambiente["tenant_id"],
+                tenant_slug=ambiente["tenant_slug"],
+                usuario=usuario,
+            )
+
+
+async def test_dois_vinculos_nao_estouram_e_o_ostensivo_libera(admin_engine, ambiente):
+    """Vínculo múltiplo é possível no schema (`anexo_herdado`) — e quebrava.
+
+    A primeira versão usava `scalar_one_or_none()`, que levanta
+    `MultipleResultsFound` com dois vínculos: HTTP 500, não 403 nem 404. O
+    banco de dev tem 1 vínculo por anexo, então nada aqui teria acusado; o
+    schema é compartilhado com o legado, que usa `anexo_herdado`.
+
+    A semântica escolhida é "alcança QUALQUER vínculo": o anexo do processo
+    reservado ganha um segundo vínculo com o processo ostensivo, e a credencial
+    `interno` — que não alcança `reservado` — passa a poder baixar. É o que a
+    tela mostra: o documento aparece na listagem do processo ostensivo.
+    """
+    async with _sessao(admin_engine) as s:
+        usuario = await _usuario(s, ambiente["tenant_id"], "interno")
+        # Segundo vínculo, reaproveitando a movimentação do processo ostensivo.
+        await s.execute(text(
+            """
+            INSERT INTO protocolos.anexo_processo
+                (tenant_id, id_processo, id_anexo, id_movimentacao, ordem,
+                 ativo, excluido, anexo_herdado)
+            SELECT ap.tenant_id, ap.id_processo, :anexo_reservado,
+                   ap.id_movimentacao, 2, true, false, true
+            FROM protocolos.anexo_processo ap
+            WHERE ap.id_anexo = :anexo_ostensivo AND ap.tenant_id = :t
+            """
+        ), {
+            "anexo_reservado": ambiente["anexo_reservado"],
+            "anexo_ostensivo": ambiente["anexo_ostensivo"],
+            "t": ambiente["tenant_id"],
+        })
+        await s.commit()
+
+    async with _sessao(admin_engine) as s:
+        anexo, _path = await get_anexo_path_autorizado(
+            s,
+            ambiente["anexo_reservado"],
+            tenant_id=ambiente["tenant_id"],
+            tenant_slug=ambiente["tenant_slug"],
+            usuario=usuario,
+        )
+        assert anexo.id == ambiente["anexo_reservado"]
+
+
+async def test_dois_vinculos_ambos_acima_da_credencial_negam(admin_engine, ambiente):
+    """Controle do caso acima: "qualquer um" não pode virar "sempre".
+
+    Sem este teste, trocar o laço por um `return` incondicional passaria — e a
+    checagem inteira viraria decorativa para anexo com mais de um vínculo.
+    """
+    async with _sessao(admin_engine) as s:
+        usuario = await _usuario(s, ambiente["tenant_id"], "interno")
+        # Segundo vínculo, mas apontando de novo para o processo RESERVADO.
+        await s.execute(text(
+            """
+            INSERT INTO protocolos.anexo_processo
+                (tenant_id, id_processo, id_anexo, id_movimentacao, ordem,
+                 ativo, excluido, anexo_herdado)
+            SELECT ap.tenant_id, ap.id_processo, ap.id_anexo,
+                   ap.id_movimentacao, 2, true, false, true
+            FROM protocolos.anexo_processo ap
+            WHERE ap.id_anexo = :a AND ap.tenant_id = :t
+            """
+        ), {"a": ambiente["anexo_reservado"], "t": ambiente["tenant_id"]})
+        await s.commit()
+
+    async with _sessao(admin_engine) as s:
+        with pytest.raises(SigiloAcessoError):
+            await get_anexo_path_autorizado(
+                s,
+                ambiente["anexo_reservado"],
+                tenant_id=ambiente["tenant_id"],
+                tenant_slug=ambiente["tenant_slug"],
+                usuario=usuario,
+            )
+
+
 # ---------------------------------------------------------------- estrutural
 
 
