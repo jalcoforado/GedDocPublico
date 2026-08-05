@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Ban,
   CarFront,
   CheckCircle2,
   ClipboardCheck,
@@ -30,12 +31,14 @@ interface PageParams {
   params: Promise<{ id: string; convocacaoId: string }>;
 }
 
-type Ato = "deferir" | "indeferir" | "reabrir";
+type Ato = "deferir" | "indeferir" | "reabrir" | "suspender" | "reativar";
 
 const ATO_TITULO: Record<Ato, string> = {
   deferir: "Deferir recadastramento",
   indeferir: "Indeferir recadastramento",
   reabrir: "Reabrir recadastramento",
+  suspender: "Suspender por falta de recadastramento",
+  reativar: "Reativar recadastramento",
 };
 
 const SITUACAO_INTENT: Record<string, "neutral" | "success" | "danger" | "info"> = {
@@ -43,6 +46,7 @@ const SITUACAO_INTENT: Record<string, "neutral" | "success" | "danger" | "info">
   em_analise: "info",
   deferido: "success",
   indeferido: "danger",
+  suspenso: "danger",
 };
 
 const DECISAO_INTENT: Record<string, "success" | "danger" | "warning"> = {
@@ -113,6 +117,10 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
       if (ato === "deferir") return api.recadastramento.atendimento.deferir(convId, dados);
       if (ato === "indeferir")
         return api.recadastramento.atendimento.indeferir(convId, dados);
+      if (ato === "suspender")
+        return api.recadastramento.atendimento.suspender(convId, dados);
+      if (ato === "reativar")
+        return api.recadastramento.atendimento.reativar(convId, dados);
       return api.recadastramento.atendimento.reabrir(convId, dados);
     },
     onSuccess: () => {
@@ -162,6 +170,11 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
   }
 
   const decidida = ficha.situacao === "deferido" || ficha.situacao === "indeferido";
+  const suspensa = ficha.situacao === "suspenso";
+  // Quem decide o atraso é o SERVIDOR (`em_atraso` na ficha). Recalcular aqui
+  // com a data do navegador faria o botão aparecer ou sumir conforme o relógio
+  // da máquina do atendente.
+  const vencida = ficha.em_atraso;
   const vist = ficha.vistorias;
 
   return (
@@ -183,7 +196,16 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
         actions={
           canEdit ? (
             <div className="flex flex-wrap gap-2">
-              {decidida ? (
+              {/* Suspensa tem UMA saída, e não duas: reativar. Oferecer
+                  "Reabrir" aqui deixaria a trilha ambígua — uma suspensão
+                  desfeita por reabertura não se distingue de um indeferimento
+                  desfeito. O backend recusa, e a tela não deve nem sugerir. */}
+              {suspensa ? (
+                <Button variant="secondary" onClick={() => abrirAto("reativar")}>
+                  <RotateCcw className="mr-1 h-4 w-4" />
+                  Reativar
+                </Button>
+              ) : decidida ? (
                 <Button variant="secondary" onClick={() => abrirAto("reabrir")}>
                   <RotateCcw className="mr-1 h-4 w-4" />
                   Reabrir
@@ -208,6 +230,18 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
                     <XCircle className="mr-1 h-4 w-4" />
                     Indeferir
                   </Button>
+                  {/* Só aparece com o prazo vencido: o backend devolve 409
+                      para suspensão prematura, e botão que só serve para
+                      receber erro é armadilha. */}
+                  {vencida && (
+                    <Button
+                      variant="danger"
+                      onClick={() => abrirAto("suspender")}
+                    >
+                      <Ban className="mr-1 h-4 w-4" />
+                      Suspender
+                    </Button>
+                  )}
                 </>
               )}
             </div>
@@ -422,6 +456,19 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
       >
         <div className="space-y-3">
           {atoErr && <div className="text-sm text-danger">{atoErr}</div>}
+          {ato === "suspender" && (
+            <p className="text-sm text-muted-foreground">
+              A suspensão vale para <strong>esta convocação</strong>: não altera a
+              situação do cadastro do regulado nem os alvarás. Enquanto suspensa,
+              a ficha não aceita marcação nem decisão.
+            </p>
+          )}
+          {ato === "reativar" && (
+            <p className="text-sm text-muted-foreground">
+              Reativar devolve a convocação para atendimento. As marcações já
+              feitas continuam valendo, e a suspensão permanece no histórico.
+            </p>
+          )}
           {ato === "reabrir" && (
             <p className="text-sm text-muted-foreground">
               A decisão anterior permanece no histórico. Reabrir devolve a convocação

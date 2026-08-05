@@ -1145,6 +1145,8 @@ class RecadastramentoSituacaoAtendimentoOut(BaseModel):
 
     id_convocacao: int
     situacao: str
+    prazo: date
+    em_atraso: bool
     tipo_regulado: str
     nome_regulado: str
     itens: list[RecadastramentoChecklistItemOut]

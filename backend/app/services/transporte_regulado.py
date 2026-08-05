@@ -2833,6 +2833,12 @@ async def situacao_atendimento(
     return {
         "id_convocacao": conv.id,
         "situacao": conv.situacao,
+        # P5.3: a ficha não mostrava o prazo, numa tela que existe por causa
+        # dele. Além de informação que faltava ao atendente, é o que permite à
+        # tela só oferecer "Suspender" depois do vencimento, em vez de oferecer
+        # sempre e deixar o operador colher 409.
+        "prazo": conv.prazo,
+        "em_atraso": esta_em_atraso(conv, date_class.today()),
         "tipo_regulado": tipo_do_regulado(conv),
         "nome_regulado": await nome_do_regulado(db, tenant_id=tenant_id, conv=conv),
         "itens": itens,

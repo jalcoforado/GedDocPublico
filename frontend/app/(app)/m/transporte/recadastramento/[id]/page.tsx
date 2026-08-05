@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, IdCard, Inbox, Play, RefreshCw } from "lucide-react";
+import { AlarmClock, Building2, IdCard, Inbox, Play, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 
@@ -33,6 +33,19 @@ const SITUACAO_INTENT: Record<string, "neutral" | "success" | "info"> = {
   aberto: "success",
   encerrado: "info",
 };
+
+/** Selo de atraso na listagem: prazo vencido E situação ainda aberta — a mesma
+ *  regra de `esta_em_atraso` no servidor.
+ *
+ *  Isto é APENAS o selo. A contagem de dias e o relatório de faltosos vêm do
+ *  servidor, que é a autoridade sobre "hoje" — o relógio do posto de
+ *  atendimento não decide quem está em falta. */
+const SITUACOES_ABERTAS = ["convocado", "em_analise"];
+
+function emAtraso(c: RecadastramentoConvocacao): boolean {
+  if (!SITUACOES_ABERTAS.includes(c.situacao)) return false;
+  return c.prazo < new Date().toISOString().slice(0, 10);
+}
 
 export default function CicloRecadastramentoPage({ params }: PageParams) {
   const { id } = use(params);
@@ -171,12 +184,24 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
           { label: ciclo.nome },
         ]}
         actions={
-          canCreate && !encerrado ? (
-            <Button onClick={() => gerarM.mutate()} disabled={gerarM.isPending}>
-              <Play className="mr-1 h-4 w-4" />
-              {gerarM.isPending ? "Gerando..." : "Gerar convocações"}
-            </Button>
-          ) : undefined
+          <div className="flex flex-wrap gap-2">
+            {/* Sem este link a tela de faltosos existiria e ninguem chegaria
+                nela. `__tests__/rotas-modulo.test.ts` reprova pagina orfa —
+                e so passou a reprovar DE VERDADE na P5.3, ver o docstring de
+                lá. */}
+            <Link href={`/m/transporte/recadastramento/${cicloId}/faltosos`}>
+              <Button variant="secondary">
+                <AlarmClock className="mr-1 h-4 w-4" />
+                Faltosos
+              </Button>
+            </Link>
+            {canCreate && !encerrado && (
+              <Button onClick={() => gerarM.mutate()} disabled={gerarM.isPending}>
+                <Play className="mr-1 h-4 w-4" />
+                {gerarM.isPending ? "Gerando..." : "Gerar convocações"}
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -275,6 +300,7 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
                         ajustado (era {c.prazo_original})
                       </Badge>
                     )}
+                    {emAtraso(c) && <Badge intent="danger">em atraso</Badge>}
                   </div>
                 </TD>
                 <TD className="text-sm text-muted-foreground">{c.situacao}</TD>

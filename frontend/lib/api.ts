@@ -2170,6 +2170,9 @@ export interface RecadastramentoVistorias {
 export interface RecadastramentoAtendimento {
   id_convocacao: number;
   situacao: string;
+  prazo: string;
+  /** Derivado no SERVIDOR — a tela não decide quem está em falta. */
+  em_atraso: boolean;
   tipo_regulado: string;
   nome_regulado: string;
   itens: RecadastramentoChecklistItem[];

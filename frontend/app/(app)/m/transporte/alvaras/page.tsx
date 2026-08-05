@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Inbox, Plus, ScrollText } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -570,6 +571,16 @@ export default function AlvarasPage() {
                 </TD>
                 <TD className="text-right">
                   <div className="inline-flex flex-wrap justify-end gap-2">
+                    {/* A tela de detalhe (auditoria + veículos) existia desde a
+                        P3 e NÃO tinha link nenhum: só se chegava digitando a
+                        URL. Achado em 2026-08-05, ao consertar a guarda de
+                        página órfã, que até então truncava a rota no primeiro
+                        segmento dinâmico e por isso nunca a examinou. */}
+                    <Link href={`/m/transporte/alvaras/${a.id}`}>
+                      <Button variant="secondary" size="sm">
+                        Detalhes
+                      </Button>
+                    </Link>
                     {canCreate && (
                       <>
                         <Button variant="secondary" size="sm" onClick={() => openDocs(a)}>

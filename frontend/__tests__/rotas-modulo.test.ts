@@ -251,21 +251,54 @@ describe("P5.2 — nenhuma tela de módulo fica órfã", () => {
    * em Alvarás e Relatórios: as telas existiam desde P2/P4 e só se chegava
    * nelas digitando a URL. Nada quebrava — nem teste, nem build.
    *
-   * Uma página é alcançável se o seu caminho aparece como texto em algum
-   * `href` da app. Página com segmento dinâmico é conferida pelo prefixo
-   * literal, que é o que uma template string revela.
+   * **Corrigido na P5.3.** A primeira versão truncava a rota no primeiro
+   * segmento dinâmico (`rota.split("/[")[0]`), então
+   * `/m/transporte/recadastramento/[id]/faltosos` era conferida como
+   * `/m/transporte/recadastramento` — que existe. Na prática **toda página
+   * aninhada sob segmento dinâmico ficava isenta**, inclusive a de atendimento
+   * da própria P5.2, que a guarda dizia proteger. Descoberto ao inverter: tirar
+   * o link de Faltosos não deixava o teste vermelho.
+   *
+   * Agora a rota vira um padrão: cada `[param]` casa com o interior de uma
+   * template string (`${cicloId}`), e os trechos literais têm de bater na
+   * ordem. É o que distingue "citada" de "tem um ancestral citado".
    */
+  function padraoDaRota(rota: string): RegExp {
+    const corpo = rota
+      .split("/")
+      .filter(Boolean)
+      .map((seg) => {
+        if (seg.startsWith("[")) {
+          // Casa o que uma template string põe no lugar: `${cicloId}`.
+          return "[^/`\"']+";
+        }
+        // Segmento literal de rota do Next é [a-z0-9-]; nada aqui precisa de
+        // escape de regex. A asserção existe para que, no dia em que um
+        // segmento tiver ponto ou parêntese, isto vire erro em vez de casar
+        // errado em silêncio.
+        expect(seg, `segmento de rota fora de [a-z0-9-]: ${seg}`).toMatch(
+          /^[a-z0-9-]+$/,
+        );
+        return seg;
+      })
+      .join("/");
+    // Borda à direita: sem ela `/faltosos` casaria dentro de `/faltosos-x`.
+    return new RegExp("/" + corpo + "(?![a-z0-9-])");
+  }
+
   it("toda página sob m/ é citada em algum href da app", () => {
     const fontes = fontesDaApp();
     const orfas = paginasDeModulo(DIR_M).filter((rota) => {
-      const literal = rota.split("/[")[0];
       // A raiz do módulo (`/m/<slug>`) vem do menu e do launcher; o alvo aqui
       // são as subpáginas.
-      if (literal.split("/").length <= 3) return false;
-      return !fontes.includes(literal);
+      if (rota.split("/").filter(Boolean).length <= 2) return false;
+      return !padraoDaRota(rota).test(fontes);
     });
 
-    expect(orfas).toEqual([]);
+    expect(
+      orfas,
+      "página sob m/ sem nenhum href apontando para ela: existe, funciona, e só se chega digitando a URL",
+    ).toEqual([]);
   });
 
   it("a varredura realmente encontrou páginas", () => {
