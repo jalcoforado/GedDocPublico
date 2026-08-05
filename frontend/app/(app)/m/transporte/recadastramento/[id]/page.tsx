@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, IdCard, Inbox, Play, RefreshCw } from "lucide-react";
+import Link from "next/link";
 import { use, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -278,11 +279,23 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
                 </TD>
                 <TD className="text-sm text-muted-foreground">{c.situacao}</TD>
                 <TD className="text-right">
-                  {canEdit && !encerrado && (
-                    <Button variant="secondary" size="sm" onClick={() => abrirAjuste(c)}>
-                      Ajustar prazo
+                  <div className="inline-flex flex-wrap justify-end gap-2">
+                    {/* Sem este link a tela de atendimento existiria e ninguem
+                        chegaria nela — foi o defeito que a costura de
+                        2026-08-01 achou em Alvaras e Relatorios. */}
+                    <Button variant="secondary" size="sm" asChild>
+                      <Link
+                        href={`/m/transporte/recadastramento/${cicloId}/convocacao/${c.id}`}
+                      >
+                        Atender
+                      </Link>
                     </Button>
-                  )}
+                    {canEdit && !encerrado && (
+                      <Button variant="secondary" size="sm" onClick={() => abrirAjuste(c)}>
+                        Ajustar prazo
+                      </Button>
+                    )}
+                  </div>
                 </TD>
               </TR>
             ))}

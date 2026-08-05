@@ -206,3 +206,71 @@ describe("F3 — o nginx precisa conhecer as rotas", () => {
     },
   );
 });
+
+/**
+ * Toda página sob `app/(app)/m/`, como caminho de rota.
+ *
+ * Segmento dinâmico (`[id]`) vira `:param`, porque o que se procura no código
+ * é o PREFIXO literal antes dele — `.../recadastramento/${id}/convocacao/` é o
+ * máximo que dá para casar numa template string.
+ */
+function paginasDeModulo(dir: string, prefixo = "/m"): string[] {
+  const achados: string[] = [];
+  for (const entrada of readdirSync(dir, { withFileTypes: true })) {
+    if (!entrada.isDirectory()) continue;
+    const caminho = join(dir, entrada.name);
+    const rota = `${prefixo}/${entrada.name}`;
+    if (existsSync(join(caminho, "page.tsx"))) achados.push(rota);
+    achados.push(...paginasDeModulo(caminho, rota));
+  }
+  return achados;
+}
+
+/** Todo o código-fonte de `app/` e `components/`, concatenado. */
+function fontesDaApp(): string {
+  const partes: string[] = [];
+  const anda = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const caminho = join(dir, e.name);
+      if (e.isDirectory()) anda(caminho);
+      else if (/\.tsx?$/.test(e.name)) partes.push(readFileSync(caminho, "utf-8"));
+    }
+  };
+  anda(join(RAIZ, "app"));
+  anda(join(RAIZ, "components"));
+  anda(join(RAIZ, "lib"));
+  // Junta com quebra de linha via String.fromCharCode(10): escrever a
+  // sequencia de escape por ferramenta materializa o byte real e quebra a
+  // string — aconteceu nesta mesma linha.
+  return partes.join(String.fromCharCode(10));
+}
+
+describe("P5.2 — nenhuma tela de módulo fica órfã", () => {
+  /**
+   * "Tela pronta sem `href`" é o defeito que a costura de 2026-08-01 encontrou
+   * em Alvarás e Relatórios: as telas existiam desde P2/P4 e só se chegava
+   * nelas digitando a URL. Nada quebrava — nem teste, nem build.
+   *
+   * Uma página é alcançável se o seu caminho aparece como texto em algum
+   * `href` da app. Página com segmento dinâmico é conferida pelo prefixo
+   * literal, que é o que uma template string revela.
+   */
+  it("toda página sob m/ é citada em algum href da app", () => {
+    const fontes = fontesDaApp();
+    const orfas = paginasDeModulo(DIR_M).filter((rota) => {
+      const literal = rota.split("/[")[0];
+      // A raiz do módulo (`/m/<slug>`) vem do menu e do launcher; o alvo aqui
+      // são as subpáginas.
+      if (literal.split("/").length <= 3) return false;
+      return !fontes.includes(literal);
+    });
+
+    expect(orfas).toEqual([]);
+  });
+
+  it("a varredura realmente encontrou páginas", () => {
+    // Controle: sem isto, um erro de caminho faria a asserção acima passar
+    // sobre lista vazia — exatamente o modo de falha do `redirects()` async.
+    expect(paginasDeModulo(DIR_M).length).toBeGreaterThan(10);
+  });
+});

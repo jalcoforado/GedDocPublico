@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Plus, RefreshCw } from "lucide-react";
+import { ClipboardList, Inbox, Plus, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -198,12 +198,20 @@ export default function RecadastramentoPage() {
           { label: "Recadastramento" },
         ]}
         actions={
-          canCreate ? (
-            <Button onClick={openNew}>
-              <Plus className="mr-1 h-4 w-4" />
-              Novo ciclo
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" asChild>
+              <Link href="/m/transporte/recadastramento/itens">
+                <ClipboardList className="mr-1 h-4 w-4" />
+                Itens exigidos
+              </Link>
             </Button>
-          ) : undefined
+            {canCreate && (
+              <Button onClick={openNew}>
+                <Plus className="mr-1 h-4 w-4" />
+                Novo ciclo
+              </Button>
+            )}
+          </div>
         }
       />
 
