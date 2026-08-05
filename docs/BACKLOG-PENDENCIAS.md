@@ -130,6 +130,39 @@ tiver alcance à rede interna, ou uma futura porta republicada por engano, entra
 publicada. Rotacionar **não** é editar o compose: `POSTGRES_PASSWORD` só age na criação do volume,
 então a troca é `ALTER ROLE ged_user PASSWORD ...` mais as URLs de conexão.
 
+### ~~1.0.02 Download de anexo ignorava o sigilo do processo~~ — FECHADO em 2026-08-05
+
+`GET /anexos/{id}/download` e `GET /anexos/{id}/carimbado.pdf` exigiam só `get_current_user` e
+chamavam o carregador cru `get_anexo_path`, que filtra tenant, `excluido` e `ativo` e mais nada.
+Qualquer autenticado do tenant baixava o anexo de um processo **ultrassecreto** iterando `anexo_id`.
+
+O que torna o caso instrutivo é que **a barreira existia**: `services/sigilo.py` implementa a LAI
+com cinco níveis, `assert_acesso_processo` é o guard reaproveitável, e ele já estava aplicado em
+quatro lugares — inclusive no download **pela via de assinatura** (`services/assinaturas.py:514`).
+A listagem de processos filtra por `nivel_sigilo` desde sempre. Só a via direta de anexo ficou de
+fora, e nenhum teste cruzava anexo com sigilo.
+
+Três razões pelas quais isso sobreviveu, todas reaproveitáveis:
+
+- **`require_permission` não cobre sigilo.** São eixos diferentes. Um endpoint pode estar
+  corretamente gateado por permissão e módulo e ainda assim entregar documento sigiloso.
+- **O endpoint não menciona processo.** A assinatura fala em `anexo_id`; o processo só aparece
+  depois do join. Uma varredura por "endpoints de processo" não acha este.
+- **Teste de service não pega.** `test_sigilo_enforcement.py` testa serviço e passava; o defeito
+  morava na costura router↔service — o mesmo lugar dos três 422 por sombreamento de rota e das dez
+  rotas do transporte com `action` inexistente.
+
+Conserto: `get_anexo_path_autorizado` resolve o processo dono pelo vínculo e aplica o guard. Guarda
+estrutural proíbe router de chamar o carregador cru. Duas decisões registradas no docstring — a
+autorização vem **antes** de resolver o arquivo (senão a mensagem distingue "existe" de "não
+existe"), e anexo **sem vínculo ativo é negado** (fail-closed; medido: 16 anexos ativos, 0 sem
+vínculo).
+
+**O que este item NÃO fecha:** o eixo de *permissão* sobre anexo continua aberto. O download segue
+sem `require_permission` — qualquer autenticado do tenant baixa anexo de processo **ostensivo** que
+talvez não devesse ver. É a mesma lacuna do item 1.0.8, e a decisão é do Jorge, porque mexer nisso
+muda política de acesso.
+
 ### 1.0 Deriva de `APP_NAME` no ambiente de dev — RBAC apontando para o sistema errado
 
 *(Descoberto em 2026-07-28, durante a fatia F1 da modularização.)*

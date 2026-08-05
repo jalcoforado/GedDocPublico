@@ -276,6 +276,27 @@ Isolamento tem **três camadas** e todas são obrigatórias:
 
 Outras convenções de domínio: exclusão é **soft-delete** (`excluido=True`, nunca DELETE físico); unicidade por tenant vira **índice único parcial** `WHERE excluido = false`; transição de estado ilegal é **409**; permissão negada é **403** via `require_permission("<codigo>", "inserir"|"atualizar"|"excluir")` (leitura sem action). Super-usuário faz bypass.
 
+#### Sigilo gradual (LAI) — a quarta dimensão de acesso, e a mais fácil de esquecer
+
+Além de tenant, módulo e permissão, processo tem `nivel_sigilo` (`ostensivo` → `interno` →
+`reservado` → `secreto` → `ultrassecreto`) e usuário tem a credencial `nivel_acesso_sigilo`. Regra:
+alcança o que for **≤** sua credencial; super-usuário passa. A implementação está em
+`services/sigilo.py`, e o guard reaproveitável é **`assert_acesso_processo`** (levanta
+`SigiloAcessoError` → **404**, nunca 403 — 403 confirmaria a existência).
+
+**Todo caminho que serve conteúdo ligado a um processo tem de passar por esse guard**, e isso inclui
+caminho que não menciona processo nenhum na assinatura. O download de anexo ficou de fora por sete
+meses exatamente assim: `require_permission` não cobre sigilo, o endpoint só falava em `anexo_id`, e
+a listagem — que filtra certo — dava a impressão de que o assunto estava resolvido. Qualquer
+autenticado do tenant baixava anexo de processo ultrassecreto iterando o id. Hoje o carregador cru
+`get_anexo_path` é proibido em router (`tests/test_guarda_anexo_sigiloso.py`); use
+`get_anexo_path_autorizado`.
+
+Duas regras que saíram daquele conserto: **a autorização vem antes de resolver o recurso** (senão a
+mensagem de erro distingue "existe" de "não existe" para quem não pode saber), e **teste de service
+não cobre esta classe de defeito** — ela mora na costura router↔service, que é onde o `Depends`
+some.
+
 #### Papéis de banco — a camada 1 hoje está INERTE no runtime (achado F-12)
 
 A aplicação conecta como `ged_user`, que é `SUPERUSER` e `BYPASSRLS`: **a RLS não filtra nada em
