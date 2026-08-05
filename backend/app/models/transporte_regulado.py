@@ -579,3 +579,40 @@ class RecadastramentoDecisao(Base):
         ForeignKey("utils.usuario.id"), nullable=False
     )
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class RecadastramentoNotificacao(Base):
+    """Que convocação foi notificada, quando, por quem, e com que notificação.
+
+    Não guarda a mensagem: isso é da `aprimora_py.notificacao`, criada pelo
+    motor existente, que já registra canal, destinatário, `enviado_em` e `erro`.
+    Duplicar aqui produziria duas versões da verdade sobre o mesmo envio.
+
+    **É log, não estado.** Sem único em `(id_convocacao, ...)`: segundo e
+    terceiro aviso são linhas novas, e é justamente a contagem deles que
+    justifica uma suspensão. Mesmo desenho de `RecadastramentoMarca`.
+
+    A P5.3 dispara em lote e à mão. A automação por job, quando vier, escreve
+    nesta mesma tabela — foi por isso que o registro entrou junto com o disparo
+    manual, e não depois.
+    """
+
+    __tablename__ = "recadastramento_notificacao"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_convocacao: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.recadastramento_convocacao.id"), nullable=False
+    )
+    id_notificacao: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.notificacao.id"), nullable=False
+    )
+    # NOT NULL: envio em lote é ato de operador. Sem autor não há a quem
+    # perguntar por que o município notificou.
+    id_usuario: Mapped[int] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=False
+    )
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
