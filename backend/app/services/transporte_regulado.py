@@ -2408,11 +2408,15 @@ async def ajustar_prazo(
 #
 # Spec: docs/superpowers/specs/2026-08-04-transporte-p5-2-recadastramento-atendimento-design.md
 
+from sqlalchemy import and_ as _and
+
 from ..models import (
     RecadastramentoDecisao,
     RecadastramentoItem,
     RecadastramentoMarca,
+    RecadastramentoNotificacao,
 )
+from . import notificacoes as notificacoes_svc
 from ..schemas.transporte_regulado import (
     RecadastramentoDecisaoInput,
     RecadastramentoItemCreate,
@@ -2421,13 +2425,26 @@ from ..schemas.transporte_regulado import (
 )
 
 APLICA_A_VALIDOS = ("permissionario", "empresa", "ambos")
-TIPOS_DECISAO = ("deferimento", "indeferimento", "reabertura")
+# Vocabulário de `recadastramento_decisao.tipo`, espelhando o CHECK da 0083.
+# `suspensao` e `reativacao` entraram na P5.3 em vez de uma entidade própria de
+# recurso: a trilha é uma só e cronológica.
+TIPOS_DECISAO = (
+    "deferimento",
+    "indeferimento",
+    "reabertura",
+    "suspensao",
+    "reativacao",
+)
 # Colunas NOT NULL do item. Mesma razão de `NAO_ANULAVEIS_DO_CICLO`: todo campo
 # do `Update` é opcional, então `{"descricao": null}` chega, e gravá-lo seria
 # IntegrityError — HTTP 500 num erro de ENTRADA.
 NAO_ANULAVEIS_DO_ITEM = ("descricao", "aplica_a", "obrigatorio", "ordem", "ativo")
 # Situações da convocação em que ainda cabe mexer no checklist.
 SITUACOES_ABERTAS = ("convocado", "em_analise")
+# P5.3. Fica aqui, junto de SITUACOES_ABERTAS, porque é a ausência dela nessa
+# tupla que faz a suspensão bloquear checklist e decisão — as duas constantes
+# só fazem sentido lado a lado.
+SITUACAO_SUSPENSO = "suspenso"
 # `condicional` NÃO entra. É o valor que parece aprovado e não é; aceitá-lo
 # seria decisão de produto, não detalhe de implementação.
 RESULTADO_VISTORIA_ACEITO = "aprovado"
@@ -2620,7 +2637,13 @@ async def marcar_item_recadastramento(
         raise HTTPException(
             status_code=409,
             detail=(
-                "Convocação já decidida; reabra antes de alterar o checklist"
+                # A suspensão da P5.3 entrou fora de SITUACOES_ABERTAS, então
+                # cai aqui de graça — mas a mensagem antiga mandaria reabrir, e
+                # para suspensa o caminho é REATIVAR. Mensagem que aponta a
+                # porta errada custa um chamado de suporte por ocorrência.
+                "Convocação suspensa; reative antes de alterar o checklist"
+                if conv.situacao == SITUACAO_SUSPENSO
+                else "Convocação já decidida; reabra antes de alterar o checklist"
             ),
         )
 
@@ -2845,7 +2868,12 @@ async def decidir_recadastramento(
         )
     if conv.situacao not in SITUACOES_ABERTAS:
         raise HTTPException(
-            status_code=409, detail="Convocação já decidida; reabra antes de decidir"
+            status_code=409,
+            detail=(
+                "Convocação suspensa; reative antes de decidir"
+                if conv.situacao == SITUACAO_SUSPENSO
+                else "Convocação já decidida; reabra antes de decidir"
+            ),
         )
 
     parecer = (payload.parecer or "").strip()
@@ -2903,7 +2931,15 @@ async def reabrir_recadastramento(
         )
     if conv.situacao not in ("deferido", "indeferido"):
         raise HTTPException(
-            status_code=409, detail="Só convocação decidida pode ser reaberta"
+            status_code=409,
+            detail=(
+                # Reabertura e reativação não são portas alternativas para o
+                # mesmo estado: uma suspensão desfeita por "reabertura" ficaria
+                # indistinguível de um indeferimento desfeito na trilha.
+                "Convocação suspensa: use reativar, não reabrir"
+                if conv.situacao == SITUACAO_SUSPENSO
+                else "Só convocação decidida pode ser reaberta"
+            ),
         )
 
     parecer = (payload.parecer or "").strip()
@@ -2941,3 +2977,383 @@ async def listar_decisoes(
         .order_by(RecadastramentoDecisao.criado_em.asc(), RecadastramentoDecisao.id.asc())
     )
     return list((await db.execute(stmt)).scalars().all())
+
+
+# ==========================================================================
+# P5.3 — atraso, faltosos, suspensão, reativação e notificação em lote
+# ==========================================================================
+
+# Resultados possíveis de um item do lote de notificação. `sem_contato` NÃO é
+# erro: `telefone` e `email` são anuláveis em Permissionario e Empresa, então
+# cadastro incompleto é caso comum, não borda.
+RESULTADOS_NOTIFICACAO = ("enviada", "sem_contato")
+
+
+def esta_em_atraso(conv: RecadastramentoConvocacao, hoje: date_class) -> bool:
+    """Atraso é DERIVADO, não coluna — esta função é a definição única.
+
+    Persistir exigiria job diário e criaria janela em que o banco discorda do
+    calendário; pior, o `ajustar_prazo` da P5.1 teria de lembrar de recalcular,
+    e esquecer seria silencioso. Derivado, ajustar o prazo desfaz o atraso na
+    mesma consulta.
+
+    O que torna isso seguro é o atraso **não gatear nada**: quem perdeu o prazo
+    segue podendo marcar checklist e ser deferido; só a suspensão fecha. Se um
+    dia o atraso passar a bloquear, esta decisão tem de ser reexaminada.
+    """
+    return conv.prazo < hoje and conv.situacao in SITUACOES_ABERTAS
+
+
+def _condicao_em_atraso(hoje: date_class):
+    """A mesma regra de `esta_em_atraso`, em SQL.
+
+    Duas expressões da mesma regra é exatamente o que produz teste verde e tela
+    errada. Ficam lado a lado de propósito, e há teste que compara as duas sobre
+    o mesmo conjunto.
+    """
+    return _and(
+        RecadastramentoConvocacao.prazo < hoje,
+        RecadastramentoConvocacao.situacao.in_(SITUACOES_ABERTAS),
+    )
+
+
+async def listar_faltosos(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    ciclo_id: int,
+    hoje: date_class | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """Relatório de faltosos do ciclo: KPIs mais a lista dos atrasados.
+
+    `hoje` é injetável para que o teste não dependa da data da máquina — sem
+    isso, um teste de atraso passa hoje e falha amanhã, ou pior, passa sempre
+    porque a data escolhida ficou longe demais.
+    """
+    ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=ciclo_id)
+    hoje = hoje or date_class.today()
+
+    do_ciclo = [
+        RecadastramentoConvocacao.tenant_id == tenant_id,
+        RecadastramentoConvocacao.id_ciclo == ciclo_id,
+        RecadastramentoConvocacao.excluido.is_(False),
+    ]
+
+    async def _conta(*extra) -> int:
+        stmt = select(func.count(RecadastramentoConvocacao.id)).where(
+            *do_ciclo, *extra
+        )
+        return (await db.execute(stmt)).scalar_one() or 0
+
+    kpis = {
+        "convocados": await _conta(),
+        "atendidos": await _conta(
+            RecadastramentoConvocacao.situacao.in_(("deferido", "indeferido"))
+        ),
+        "em_atraso": await _conta(_condicao_em_atraso(hoje)),
+        "suspensos": await _conta(
+            RecadastramentoConvocacao.situacao == SITUACAO_SUSPENSO
+        ),
+    }
+
+    base = (
+        select(
+            RecadastramentoConvocacao,
+            Permissionario.nome,
+            Permissionario.cpf,
+            Empresa.razao_social,
+            Empresa.cnpj,
+        )
+        .outerjoin(
+            Permissionario,
+            Permissionario.id == RecadastramentoConvocacao.id_permissionario,
+        )
+        .outerjoin(Empresa, Empresa.id == RecadastramentoConvocacao.id_empresa)
+        .where(*do_ciclo, _condicao_em_atraso(hoje))
+        .order_by(
+            RecadastramentoConvocacao.prazo.asc(),
+            RecadastramentoConvocacao.id.asc(),
+        )
+    )
+    linhas = (await db.execute(base.limit(limit).offset(offset))).all()
+
+    # Última notificação só dos ids desta página. Uma subconsulta correlacionada
+    # por linha custaria caro para um dado que a tela usa como coluna auxiliar.
+    ids_pagina = [linha[0].id for linha in linhas]
+    ultima_por_conv: dict[int, datetime] = {}
+    if ids_pagina:
+        notif = (
+            await db.execute(
+                select(
+                    RecadastramentoNotificacao.id_convocacao,
+                    func.max(RecadastramentoNotificacao.criado_em),
+                )
+                .where(
+                    RecadastramentoNotificacao.tenant_id == tenant_id,
+                    RecadastramentoNotificacao.id_convocacao.in_(ids_pagina),
+                )
+                .group_by(RecadastramentoNotificacao.id_convocacao)
+            )
+        ).all()
+        ultima_por_conv = {cid: quando for cid, quando in notif}
+
+    itens = []
+    for conv, nome_perm, cpf, razao_social, cnpj in linhas:
+        itens.append(
+            {
+                "id": conv.id,
+                "tipo_regulado": (
+                    "permissionario" if conv.id_permissionario else "empresa"
+                ),
+                "nome_regulado": nome_perm or razao_social or "",
+                "documento": cpf or cnpj or "",
+                "prazo": conv.prazo,
+                "dias_atraso": (hoje - conv.prazo).days,
+                "situacao": conv.situacao,
+                "ultima_notificacao": ultima_por_conv.get(conv.id),
+            }
+        )
+
+    return {
+        "ciclo": {"id": ciclo.id, "nome": ciclo.nome, "situacao": ciclo.situacao},
+        "kpis": kpis,
+        "itens": itens,
+        "total": kpis["em_atraso"],
+    }
+
+
+async def suspender_convocacao(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    convocacao_id: int,
+    payload: RecadastramentoDecisaoInput,
+    usuario_id: int,
+    hoje: date_class | None = None,
+) -> RecadastramentoDecisao:
+    """Suspende a convocação de quem não recadastrou. Ato humano, com parecer.
+
+    **Suspende só a convocação.** Não toca em `Permissionario.situacao`, em
+    `Empresa.situacao` nem em alvará — decisão do Jorge em 2026-08-05. É
+    reversível e não tem efeito colateral em outro módulo; o que fazer com o
+    alvará de um suspenso é decisão separada.
+
+    Exige prazo vencido. Suspender quem está dentro do prazo é erro de operação,
+    não escolha do município, então vira 409 com a data na mensagem em vez de
+    passar silenciosamente.
+    """
+    hoje = hoje or date_class.today()
+    conv = await obter_convocacao(db, tenant_id=tenant_id, convocacao_id=convocacao_id)
+    ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=conv.id_ciclo)
+    if ciclo.situacao == "encerrado":
+        raise HTTPException(
+            status_code=409, detail="Ciclo encerrado não aceita suspensão"
+        )
+    if conv.situacao == SITUACAO_SUSPENSO:
+        raise HTTPException(status_code=409, detail="Convocação já está suspensa")
+    if conv.situacao not in SITUACOES_ABERTAS:
+        raise HTTPException(
+            status_code=409,
+            detail="Convocação já decidida; reabra antes de suspender",
+        )
+    if conv.prazo >= hoje:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Prazo ainda não venceu (termina em {conv.prazo.isoformat()}); "
+                "não há falta a suspender"
+            ),
+        )
+
+    parecer = (payload.parecer or "").strip()
+    if not parecer:
+        raise HTTPException(status_code=400, detail="Parecer é obrigatório")
+
+    decisao = RecadastramentoDecisao(
+        tenant_id=tenant_id,
+        id_convocacao=convocacao_id,
+        tipo="suspensao",
+        parecer=parecer,
+        id_usuario=usuario_id,
+        criado_em=datetime.utcnow(),
+    )
+    db.add(decisao)
+    conv.situacao = SITUACAO_SUSPENSO
+    conv.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(decisao)
+    return decisao
+
+
+async def reativar_convocacao(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    convocacao_id: int,
+    payload: RecadastramentoDecisaoInput,
+    usuario_id: int,
+) -> RecadastramentoDecisao:
+    """Desfaz a suspensão. É o deferimento do recurso, e o parecer é o julgamento.
+
+    Volta para `convocado`, e não para `em_analise` mesmo que estivesse em
+    análise antes: reativar é recomeçar o atendimento, e inferir o estado
+    anterior exigiria guardá-lo. As marcas de checklist **não** são apagadas —
+    são log append-only e continuam valendo.
+    """
+    conv = await obter_convocacao(db, tenant_id=tenant_id, convocacao_id=convocacao_id)
+    ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=conv.id_ciclo)
+    if ciclo.situacao == "encerrado":
+        raise HTTPException(
+            status_code=409, detail="Ciclo encerrado não aceita reativação"
+        )
+    if conv.situacao != SITUACAO_SUSPENSO:
+        raise HTTPException(
+            status_code=409, detail="Só convocação suspensa pode ser reativada"
+        )
+
+    parecer = (payload.parecer or "").strip()
+    if not parecer:
+        raise HTTPException(status_code=400, detail="Parecer é obrigatório")
+
+    decisao = RecadastramentoDecisao(
+        tenant_id=tenant_id,
+        id_convocacao=convocacao_id,
+        tipo="reativacao",
+        parecer=parecer,
+        id_usuario=usuario_id,
+        criado_em=datetime.utcnow(),
+    )
+    db.add(decisao)
+    conv.situacao = "convocado"
+    conv.atualizado_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(decisao)
+    return decisao
+
+
+async def _contato_do_regulado(
+    db: AsyncSession, *, tenant_id: int, conv: RecadastramentoConvocacao
+) -> tuple[str, str | None, str | None]:
+    """(nome, email, telefone) do regulado. Os dois contatos são anuláveis."""
+    if conv.id_permissionario:
+        linha = (
+            await db.execute(
+                select(
+                    Permissionario.nome, Permissionario.email, Permissionario.telefone
+                ).where(
+                    Permissionario.tenant_id == tenant_id,
+                    Permissionario.id == conv.id_permissionario,
+                )
+            )
+        ).first()
+    else:
+        linha = (
+            await db.execute(
+                select(
+                    Empresa.razao_social, Empresa.email, Empresa.telefone
+                ).where(
+                    Empresa.tenant_id == tenant_id,
+                    Empresa.id == conv.id_empresa,
+                )
+            )
+        ).first()
+    if not linha:
+        return "", None, None
+    nome, email, telefone = linha
+    return (nome or ""), (email or None), (telefone or None)
+
+
+async def notificar_faltosos(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    ciclo_id: int,
+    convocacao_ids: list[int],
+    usuario_id: int,
+) -> list[dict]:
+    """Dispara aviso em lote e registra cada envio. Manual nesta fatia.
+
+    **Um cadastro incompleto não derruba o lote.** `email` e `telefone` são
+    anuláveis nos dois modelos de regulado, então faltoso sem contato é caso
+    comum. Cada item volta com resultado próprio (`enviada` ou `sem_contato`) e
+    a tela mostra a contagem dos dois. Falhar tudo por um cadastro sem telefone
+    tornaria o recurso inutilizável no município que mais precisa dele.
+
+    Notificar duas vezes é legítimo: o log não deduplica, e é a contagem de
+    avisos que depois justifica uma suspensão.
+
+    O motor de notificações só aplica preferência de canal quando o destinatário
+    é usuário do sistema (`id_usuario`); aqui o destinatário é o regulado, então
+    o envio não é filtrado por opt-out de servidor — verificado em
+    `services/notificacoes.enviar`, não suposto.
+    """
+    ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=ciclo_id)
+
+    resultados: list[dict] = []
+    for convocacao_id in convocacao_ids:
+        conv = await obter_convocacao(
+            db, tenant_id=tenant_id, convocacao_id=convocacao_id
+        )
+        if conv.id_ciclo != ciclo_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Convocação {convocacao_id} não pertence a este ciclo",
+            )
+
+        nome, email, telefone = await _contato_do_regulado(
+            db, tenant_id=tenant_id, conv=conv
+        )
+        canais = [c for c, tem in (("email", email), ("whatsapp", telefone)) if tem]
+        if not canais:
+            resultados.append(
+                {
+                    "id_convocacao": convocacao_id,
+                    "nome_regulado": nome,
+                    "resultado": "sem_contato",
+                    "canais": [],
+                }
+            )
+            continue
+
+        criadas = await notificacoes_svc.enviar(
+            db,
+            tenant_id=tenant_id,
+            destinatarios=[
+                notificacoes_svc.Destinatario(email=email, telefone=telefone)
+            ],
+            canais=canais,
+            tipo="recadastramento.faltoso",
+            titulo=f"Recadastramento pendente — {ciclo.nome}",
+            mensagem=(
+                f"{nome}, o prazo do seu recadastramento venceu em "
+                f"{conv.prazo.isoformat()}. Procure a prefeitura para regularizar."
+            ),
+            payload={"id_ciclo": ciclo_id, "id_convocacao": convocacao_id},
+        )
+        for n in criadas:
+            db.add(
+                RecadastramentoNotificacao(
+                    tenant_id=tenant_id,
+                    id_convocacao=convocacao_id,
+                    id_notificacao=n.id,
+                    id_usuario=usuario_id,
+                    criado_em=datetime.utcnow(),
+                )
+            )
+        resultados.append(
+            {
+                "id_convocacao": convocacao_id,
+                "nome_regulado": nome,
+                "resultado": "enviada",
+                "canais": canais,
+            }
+        )
+
+    # Um commit para todas as linhas de log. `enviar` já commitou as
+    # notificações em si, então uma queda entre as duas coisas deixa envio sem
+    # registro — buraco de log, nunca mensagem perdida nem duplicada. O
+    # inverso (registrar e não enviar) seria pior.
+    await db.commit()
+    return resultados
