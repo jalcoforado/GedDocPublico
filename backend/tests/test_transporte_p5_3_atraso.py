@@ -28,8 +28,9 @@ from datetime import date, timedelta
 
 import pytest
 from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.models import RecadastramentoDecisao, RecadastramentoNotificacao
 from app.schemas.transporte_regulado import (
@@ -37,9 +38,14 @@ from app.schemas.transporte_regulado import (
     RecadastramentoCicloCreate,
     RecadastramentoDecisaoInput,
 )
+from app.main import app
 from app.services import transporte_regulado as tr
+from app.services.modulos import contratar
 from tests.test_transporte_p5_2_atendimento import (
+    _as_user,
     _convocacao,
+    _cria_usuario_comum_transporte,
+    _encerrar_arreio,
     _empresa,
     _item,
     _marcar,
@@ -579,3 +585,138 @@ async def test_suspensao_exige_parecer_nas_duas_camadas(admin_engine):
             )
         ).scalar_one()
     assert nenhuma == 0
+
+
+# ============================== HTTP (P5.3) ==============================
+
+
+@pytest.mark.asyncio
+async def test_http_rito_da_suspensao_com_usuario_comum(admin_engine):
+    """Faltosos → notificar → suspender → tentar mexer → reativar.
+
+    Usuário COMUM, não super-usuário. Em `auth/perms.py` o bypass de SU retorna
+    antes do `getattr(item, action)`, e foi assim que 10 rotas do transporte
+    devolveram 500 por meses sem nenhum teste acusar. Toda rota nova desta
+    fatia passa por aqui.
+    """
+    tenant = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, tenant.id, ["transporte"])
+            await s.commit()
+
+        perm = await _com_contato(
+            admin_engine, tenant.id,
+            await _permissionario(admin_engine, tenant.id, nome="Faltoso HTTP"),
+        )
+        ciclo = await _ciclo_vencido(admin_engine, tenant.id)
+        _c, conv = await _convocacao(admin_engine, tenant.id, perm, ciclo=ciclo)
+
+        uid = await _cria_usuario_comum_transporte(admin_engine, tenant.id)
+        _as_user(admin_engine, uid, tenant.id, tenant.slug)()
+        base = "/api/v2/transporte-regulado/recadastramento"
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.get(f"{base}/ciclos/{ciclo.id}/faltosos")
+            assert r.status_code == 200, r.text
+            corpo = r.json()
+            assert corpo["kpis"]["em_atraso"] == 1
+            assert corpo["itens"][0]["id"] == conv.id
+            assert corpo["itens"][0]["dias_atraso"] > 0
+            assert corpo["itens"][0]["ultima_notificacao"] is None
+
+            r = await client.post(
+                f"{base}/ciclos/{ciclo.id}/notificar",
+                json={"convocacao_ids": [conv.id]},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()[0]["resultado"] == "enviada"
+
+            r = await client.get(f"{base}/ciclos/{ciclo.id}/faltosos")
+            assert r.json()["itens"][0]["ultima_notificacao"] is not None
+
+            r = await client.post(
+                f"{base}/convocacoes/{conv.id}/suspender",
+                json={"parecer": "Nao compareceu apos notificacao."},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["tipo"] == "suspensao"
+
+            # Suspensa sai dos faltosos e entra no contador de suspensos.
+            r = await client.get(f"{base}/ciclos/{ciclo.id}/faltosos")
+            assert r.json()["kpis"]["em_atraso"] == 0
+            assert r.json()["kpis"]["suspensos"] == 1
+
+            # E recusa deferimento, mandando REATIVAR e não reabrir.
+            r = await client.post(
+                f"{base}/convocacoes/{conv.id}/deferir",
+                json={"parecer": "Tentativa indevida."},
+            )
+            assert r.status_code == 409, r.text
+            assert "reative" in r.json()["detail"].lower()
+
+            r = await client.post(
+                f"{base}/convocacoes/{conv.id}/reativar",
+                json={"parecer": "Recurso deferido pelo gestor."},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["tipo"] == "reativacao"
+
+            # Reativada volta a contar como falta — o prazo segue vencido.
+            r = await client.get(f"{base}/ciclos/{ciclo.id}/faltosos")
+            assert r.json()["kpis"]["em_atraso"] == 1
+            assert r.json()["kpis"]["suspensos"] == 0
+
+            # A trilha inteira ficou registrada.
+            r = await client.get(f"{base}/convocacoes/{conv.id}/decisoes")
+            assert [d["tipo"] for d in r.json()] == ["suspensao", "reativacao"]
+    finally:
+        async with _sm(admin_engine)() as s:
+            await s.execute(
+                text(
+                    "DELETE FROM transporte_regulado.recadastramento_notificacao "
+                    "WHERE tenant_id=:t"
+                ),
+                {"t": tenant.id},
+            )
+            await s.execute(
+                text("DELETE FROM aprimora_py.notificacao WHERE tenant_id=:t"),
+                {"t": tenant.id},
+            )
+            await s.commit()
+        await _encerrar_arreio(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_http_suspender_no_prazo_e_409_e_nao_500(admin_engine):
+    """Controle do usuário comum: a recusa tem de ser 409, nunca 500.
+
+    O defeito histórico do módulo foi `action` inexistente devolvendo
+    AttributeError → 500 só para não-SU. Um teste que aceitasse "deu erro"
+    passaria por cima disso.
+    """
+    tenant = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, tenant.id, ["transporte"])
+            await s.commit()
+        perm = await _permissionario(admin_engine, tenant.id, nome="No Prazo")
+        _c, conv = await _convocacao(admin_engine, tenant.id, perm)
+
+        uid = await _cria_usuario_comum_transporte(admin_engine, tenant.id)
+        _as_user(admin_engine, uid, tenant.id, tenant.slug)()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.post(
+                "/api/v2/transporte-regulado/recadastramento"
+                f"/convocacoes/{conv.id}/suspender",
+                json={"parecer": "Suspensao prematura."},
+            )
+        assert r.status_code == 409, r.text
+        assert "Prazo ainda não venceu" in r.json()["detail"]
+    finally:
+        await _encerrar_arreio(admin_engine, tenant.id)

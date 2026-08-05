@@ -1176,3 +1176,64 @@ class RecadastramentoDecisaoOut(BaseModel):
     parecer: str
     id_usuario: int
     criado_em: datetime
+
+
+# ------------------------------------------------------- P5.3 — faltosos
+
+
+class RecadastramentoFaltosoOut(BaseModel):
+    """Uma linha do relatório de faltosos.
+
+    `dias_atraso` vem calculado do servidor, e não da tela: o atraso é
+    derivado de `prazo < hoje`, e "hoje" do navegador pode não ser o do
+    servidor — fuso e relógio errado do posto de atendimento produziriam
+    contagens diferentes para o mesmo registro.
+    """
+
+    id: int
+    tipo_regulado: str
+    nome_regulado: str
+    documento: str
+    prazo: date
+    dias_atraso: int
+    situacao: str
+    ultima_notificacao: datetime | None = None
+
+
+class RecadastramentoFaltososKpis(BaseModel):
+    convocados: int
+    atendidos: int
+    em_atraso: int
+    suspensos: int
+
+
+class RecadastramentoCicloResumoOut(BaseModel):
+    id: int
+    nome: str
+    situacao: str
+
+
+class RecadastramentoFaltososOut(BaseModel):
+    ciclo: RecadastramentoCicloResumoOut
+    kpis: RecadastramentoFaltososKpis
+    itens: list[RecadastramentoFaltosoOut]
+    total: int
+
+
+class RecadastramentoNotificarInput(BaseModel):
+    """Ids das convocações a notificar. Explícito, e não "todos os faltosos do
+    ciclo": disparo em massa sem seleção é o tipo de ação que o operador não
+    consegue conferir antes de confirmar."""
+
+    convocacao_ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class RecadastramentoNotificacaoResultadoOut(BaseModel):
+    """`sem_contato` NÃO é erro — `email` e `telefone` são anuláveis nos dois
+    modelos de regulado, então cadastro incompleto é caso comum. A tela mostra
+    a contagem dos dois resultados."""
+
+    id_convocacao: int
+    nome_regulado: str
+    resultado: str
+    canais: list[str]

@@ -2196,6 +2196,44 @@ export interface RecadastramentoParecerInput {
   parecer: string;
 }
 
+// ------------------------------- P5.3 -------------------------------
+
+export interface RecadastramentoFaltoso {
+  id: number;
+  tipo_regulado: string;
+  nome_regulado: string;
+  documento: string;
+  prazo: string;
+  /** Calculado no SERVIDOR. O "hoje" do navegador pode divergir do dele. */
+  dias_atraso: number;
+  situacao: string;
+  ultima_notificacao: string | null;
+}
+
+export interface RecadastramentoFaltososKpis {
+  convocados: number;
+  atendidos: number;
+  em_atraso: number;
+  suspensos: number;
+}
+
+/** O endpoint devolve este objeto, NÃO `Paginated<Faltoso>` — declarar array
+ *  aqui deixaria o `tsc` verde e estouraria em `.map is not a function`. */
+export interface RecadastramentoFaltosos {
+  ciclo: { id: number; nome: string; situacao: string };
+  kpis: RecadastramentoFaltososKpis;
+  itens: RecadastramentoFaltoso[];
+  total: number;
+}
+
+export interface RecadastramentoNotificacaoResultado {
+  id_convocacao: number;
+  nome_regulado: string;
+  /** `enviada` | `sem_contato`. `sem_contato` não é erro: contato é anulável. */
+  resultado: string;
+  canais: string[];
+}
+
 // ============================ Alvara ======================================
 export interface Alvara {
   id: number;
@@ -3077,6 +3115,30 @@ export const api = {
         request<RecadastramentoDecisao>(
           `/transporte-regulado/recadastramento/convocacoes/${convocacaoId}/reabrir`,
           { method: "POST", body: JSON.stringify(data) },
+        ),
+      suspender: (convocacaoId: number, data: RecadastramentoParecerInput) =>
+        request<RecadastramentoDecisao>(
+          `/transporte-regulado/recadastramento/convocacoes/${convocacaoId}/suspender`,
+          { method: "POST", body: JSON.stringify(data) },
+        ),
+      reativar: (convocacaoId: number, data: RecadastramentoParecerInput) =>
+        request<RecadastramentoDecisao>(
+          `/transporte-regulado/recadastramento/convocacoes/${convocacaoId}/reativar`,
+          { method: "POST", body: JSON.stringify(data) },
+        ),
+    },
+    faltosos: {
+      list: (cicloId: number, params?: { limit?: number; offset?: number }) =>
+        request<RecadastramentoFaltosos>(
+          `/transporte-regulado/recadastramento/ciclos/${cicloId}/faltosos${qs(params ?? {})}`,
+        ),
+      notificar: (cicloId: number, convocacaoIds: number[]) =>
+        request<RecadastramentoNotificacaoResultado[]>(
+          `/transporte-regulado/recadastramento/ciclos/${cicloId}/notificar`,
+          {
+            method: "POST",
+            body: JSON.stringify({ convocacao_ids: convocacaoIds }),
+          },
         ),
     },
     convocacoes: {

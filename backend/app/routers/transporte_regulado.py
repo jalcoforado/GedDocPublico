@@ -57,6 +57,9 @@ from ..schemas.transporte_regulado import (
     RecadastramentoGeracaoOut,
     RecadastramentoDecisaoInput,
     RecadastramentoDecisaoOut,
+    RecadastramentoFaltososOut,
+    RecadastramentoNotificacaoResultadoOut,
+    RecadastramentoNotificarInput,
     RecadastramentoItemCreate,
     RecadastramentoItemOut,
     RecadastramentoItemUpdate,
@@ -1623,3 +1626,107 @@ async def reabrir_convocacao(
         usuario_id=usuario.id,
     )
     return RecadastramentoDecisaoOut.model_validate(d)
+
+
+# ==================================================================== P5.3
+
+
+@recadastramento_router.get(
+    "/ciclos/{ciclo_id}/faltosos",
+    response_model=RecadastramentoFaltososOut,
+)
+async def relatorio_faltosos(
+    ciclo_id: int,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoFaltososOut:
+    """Quem perdeu o prazo e ainda não foi atendido.
+
+    `hoje` não é parâmetro do endpoint de propósito: a data é do servidor.
+    Aceitá-la da tela deixaria o relatório de faltosos depender do relógio do
+    posto de atendimento.
+    """
+    dados = await tr_svc.listar_faltosos(
+        db, tenant_id=tenant_id, ciclo_id=ciclo_id, limit=limit, offset=offset
+    )
+    return RecadastramentoFaltososOut.model_validate(dados)
+
+
+@recadastramento_router.post(
+    "/convocacoes/{convocacao_id}/suspender",
+    response_model=RecadastramentoDecisaoOut,
+)
+async def suspender_convocacao(
+    convocacao_id: int,
+    payload: RecadastramentoDecisaoInput,
+    usuario: Usuario = Depends(
+        require_permission("transporte_regulado", "atualizar")
+    ),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoDecisaoOut:
+    """Ato humano, com parecer. Atinge SÓ a convocação — não muda a situação do
+    regulado nem mexe em alvará."""
+    d = await tr_svc.suspender_convocacao(
+        db,
+        tenant_id=tenant_id,
+        convocacao_id=convocacao_id,
+        payload=payload,
+        usuario_id=usuario.id,
+    )
+    return RecadastramentoDecisaoOut.model_validate(d)
+
+
+@recadastramento_router.post(
+    "/convocacoes/{convocacao_id}/reativar",
+    response_model=RecadastramentoDecisaoOut,
+)
+async def reativar_convocacao(
+    convocacao_id: int,
+    payload: RecadastramentoDecisaoInput,
+    usuario: Usuario = Depends(
+        require_permission("transporte_regulado", "atualizar")
+    ),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RecadastramentoDecisaoOut:
+    """Desfaz a suspensão. É o deferimento do recurso, e o parecer é o
+    julgamento — por isso não há entidade separada de recurso."""
+    d = await tr_svc.reativar_convocacao(
+        db,
+        tenant_id=tenant_id,
+        convocacao_id=convocacao_id,
+        payload=payload,
+        usuario_id=usuario.id,
+    )
+    return RecadastramentoDecisaoOut.model_validate(d)
+
+
+@recadastramento_router.post(
+    "/ciclos/{ciclo_id}/notificar",
+    response_model=list[RecadastramentoNotificacaoResultadoOut],
+)
+async def notificar_faltosos(
+    ciclo_id: int,
+    payload: RecadastramentoNotificarInput,
+    usuario: Usuario = Depends(
+        require_permission("transporte_regulado", "atualizar")
+    ),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[RecadastramentoNotificacaoResultadoOut]:
+    """Aviso em lote. Devolve o resultado POR item: cadastro sem contato volta
+    como `sem_contato` e não derruba o resto do lote."""
+    resultados = await tr_svc.notificar_faltosos(
+        db,
+        tenant_id=tenant_id,
+        ciclo_id=ciclo_id,
+        convocacao_ids=payload.convocacao_ids,
+        usuario_id=usuario.id,
+    )
+    return [
+        RecadastramentoNotificacaoResultadoOut.model_validate(r) for r in resultados
+    ]
