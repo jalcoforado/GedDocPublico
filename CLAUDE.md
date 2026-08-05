@@ -115,6 +115,14 @@ em algum `href` da app. Tela pronta e sem link não quebra nada — nem build, n
 transporte passou meses assim, alcançável só digitando a URL. Tela nova precisa de caminho até ela
 no mesmo PR.
 
+**Essa guarda só passou a valer de verdade na P5.3.** Até lá ela truncava a rota no primeiro
+segmento dinâmico, então `/m/transporte/recadastramento/[id]/faltosos` era conferida como
+`/m/transporte/recadastramento` — que existe. Na prática **toda página aninhada sob `[param]` estava
+isenta**, inclusive a de atendimento da própria P5.2, que a guarda dizia proteger. Ao consertar,
+apareceu uma órfã real e antiga: o detalhe do alvará, pronto desde a P3, sem nenhum link. A lição
+não é sobre esta guarda — é que **guarda verde só significa alguma coisa depois de invertida**; esta
+passou duas fatias sem nunca ter sido.
+
 O nginx nasceu como *Strangler Fig* na frente de um monolito PHP legado. Hoje a versão Python é tratada como **independente** — não portar comportamento do PHP nem consultá-lo como fonte de verdade. O que sobra dessa herança e continua valendo: o schema Postgres é compartilhado com o legado (`utils.*`, `protocolos.*` são tabelas legadas; `aprimora_py.*` e `frota.*` são nossos), e o nginx tem uma regex de rotas migradas (ver "Adicionando um módulo").
 
 ## Comandos

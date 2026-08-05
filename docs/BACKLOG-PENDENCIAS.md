@@ -542,9 +542,38 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 > **Limite conhecido:** editar a `descricao` de um item muda o texto exibido em fechamentos
 > antigos. Preservar o texto no momento da marca resolveria, ao custo de duplicar dado.
 >
-> **Aberto — P5.3**: estado em atraso, relatório de faltosos, suspensão como ato humano,
-> notificação. `RecadastramentoConvocacao.situacao` hoje tem `convocado`, `em_analise`, `deferido`
-> e `indeferido`; o atraso entra aí.
+> **P5.3 entregue em 2026-08-05** — atraso, faltosos, suspensão e reativação. Spec e plano em
+> `docs/superpowers/`. Migration `0083`: dois tipos novos de decisão (`suspensao`, `reativacao`) e
+> `recadastramento_notificacao`. Telas em `.../[id]/faltosos` e os atos no atendimento.
+>
+> **O atraso NÃO virou coluna.** É derivado (`prazo < hoje AND situação aberta`), calculado na
+> consulta. Persistir exigiria job diário e criaria janela em que o banco discorda do calendário;
+> pior, o ajuste de prazo da P5.1 teria de lembrar de recalcular, e esquecer seria silencioso. O que
+> torna isso seguro é o atraso **não gatear nada** — decisão do Jorge: quem perdeu o prazo continua
+> podendo ser atendido, só a suspensão fecha. Se um dia o atraso passar a bloquear, a escolha tem de
+> ser reexaminada.
+>
+> **A suspensão atinge só a convocação** — não muda `Permissionario.situacao`, `Empresa.situacao`
+> nem alvará. Há teste só para isso, porque "melhorar" a suspensão para refletir no cadastro
+> passaria despercebido e teria efeito no módulo inteiro.
+>
+> Sem entidade de recurso: `suspensao` e `reativacao` são atos com parecer na mesma trilha
+> cronológica de `recadastramento_decisao`. A reativação é o deferimento do recurso e o parecer é o
+> julgamento. Consequência: **não há prazo para interpor recurso**. Se o município precisar cobrar
+> esse prazo, é fatia própria.
+>
+> Três coisas que só apareceram lendo o código, e não supondo:
+>
+> - `SITUACOES_ABERTAS` já fazia a suspensão bloquear checklist e decisão **sem uma linha nova** —
+>   mas as mensagens dos 409 mandavam *reabrir*, e para suspensa o caminho é *reativar*.
+> - `TIPOS_DECISAO` estava definido e **não era usado por ninguém**; `decidir_recadastramento`
+>   validava contra um literal. Agora espelha o CHECK.
+> - `recadastramento_convocacao.situacao` **não tem CHECK** — o vocabulário é imposto só pelo
+>   serviço. Por isso `suspenso` não exigiu nada do banco. Não foi acrescentado agora para não mudar
+>   a premissa da P5.1 num PR que não é sobre isso.
+>
+> **Ainda aberto do recadastramento:** notificação automática por job (o registro de envio já
+> existe, então falta só o gatilho) e o efeito da suspensão sobre alvará.
 
 > **Atualizado em 2026-08-01, pela fatia de costura de navegação** (spec e plano em
 > `docs/superpowers/`). "Entregues e no ar" era verdade só para o backend. Três coisas mudaram, e a
