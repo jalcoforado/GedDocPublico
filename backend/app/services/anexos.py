@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings, resolve_anexo_path, tenant_anexos_dir
 from ..models import Anexo, AnexoProcesso, AssinaturaAnexo, Minuta, Processo, Servico
+from .sigilo import SigiloAcessoError, assert_acesso_processo
 
 
 class AnexoError(Exception):
@@ -229,6 +230,59 @@ async def get_anexo_path(
     if path is None:
         raise AnexoError(f"Arquivo {anexo.e_doc} não está no storage")
     return anexo, path
+
+
+async def get_anexo_path_autorizado(
+    db: AsyncSession,
+    anexo_id: int,
+    *,
+    tenant_id: int,
+    tenant_slug: str,
+    usuario,
+):
+    """`get_anexo_path` + checagem de sigilo do processo dono do anexo.
+
+    **É esta função, e não `get_anexo_path`, que endpoint algum deve pular.**
+    `get_anexo_path` é o carregador cru: filtra tenant, `excluido` e `ativo`, e
+    nada mais. Até 2026-08-05 os dois endpoints que servem conteúdo de anexo
+    (`/download` e `/carimbado.pdf`) chamavam o carregador cru direto, então
+    qualquer autenticado do tenant baixava o anexo de processo **ultrassecreto**
+    iterando `anexo_id` — o processo não aparecia na listagem dele (que filtra
+    por `nivel_sigilo`), mas o documento vinha.
+
+    O guard `assert_acesso_processo` já existia e já era usado em quatro
+    lugares, inclusive no download **pela via de assinatura**. Só a via direta
+    ficou de fora. `tests/test_guarda_anexo_sigiloso.py` reprova quem voltar a
+    chamar o carregador cru de dentro de um router.
+
+    Anexo **sem** vínculo ativo com processo é negado, e isso é deliberado: o
+    único caminho de criação (`upload_anexo`) cria o vínculo na mesma
+    transação, então um anexo solto ou é resíduo do schema legado ou é vínculo
+    apagado — em nenhum dos dois casos há processo cujo sigilo consultar, e
+    negar é a direção segura. Medido no banco de dev na data: 16 anexos ativos,
+    0 sem vínculo.
+    """
+    # A autorização vem ANTES de resolver o arquivo, de propósito. Na ordem
+    # inversa, um anexo cujo arquivo sumiu do storage responderia "Arquivo X
+    # não está no storage" em vez de "não encontrado" — distinguindo, para
+    # quem não pode ver o documento, o anexo que existe do que não existe.
+    processo_id = (
+        await db.execute(
+            select(AnexoProcesso.id_processo).where(
+                AnexoProcesso.id_anexo == anexo_id,
+                AnexoProcesso.tenant_id == tenant_id,
+                AnexoProcesso.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if processo_id is None:
+        raise SigiloAcessoError("Anexo não encontrado")
+    await assert_acesso_processo(
+        db, tenant_id=tenant_id, processo_id=processo_id, usuario=usuario
+    )
+    return await get_anexo_path(
+        db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug
+    )
 
 
 async def anexo_esta_assinado(
