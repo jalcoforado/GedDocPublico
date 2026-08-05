@@ -198,14 +198,35 @@ run_migrations() {
   docker compose exec -T backend python -m app.cli.seed_bootstrap || log "seed_bootstrap falhou — verificar manualmente"
 }
 
-# Backup database (optional)
+# Backup antes do deploy (opcional, BACKUP_DB=1)
+#
+# A versão anterior desta função era:
+#
+#     docker compose exec -T db pg_dump ... > "$BACKUP_FILE" || log "Backup skipped"
+#     log "✓ Backup saved to $BACKUP_FILE"
+#
+# Três defeitos numa linha e meia. O redirecionamento cria o arquivo ANTES de o
+# `pg_dump` rodar, então dump que falha deixa no disco um arquivo de zero byte
+# com nome de backup. O `|| log` engole a falha e o deploy segue — justo o
+# deploy que vai rodar migration. E o `✓ Backup saved` imprime igual nos dois
+# casos, de modo que o log do CI afirma que há backup quando não há.
+#
+# Agora delega para o script que verifica antes de publicar, e uma falha ABORTA
+# o deploy: se o ponto é ter o banco salvo antes da migration, deployar sem ele
+# é exatamente o que não se pode fazer.
 backup_database() {
   if [ "$BACKUP_DB" = "1" ]; then
-    log "Backing up database..."
-    BACKUP_FILE="backups/db_backup_$(date +'%Y%m%d_%H%M%S').sql"
-    mkdir -p backups
-    docker compose exec -T db pg_dump -U ged_user ged_saas_db > "$BACKUP_FILE" || log "Backup skipped"
-    log "✓ Backup saved to $BACKUP_FILE"
+    log "Backup pré-deploy..."
+    # Sem pipe para o `tee`: este script roda com `set -e` e SEM `pipefail`,
+    # então o status de um pipeline é o do `tee` e a falha do backup sumiria —
+    # reencenando o defeito descrito acima, uma camada acima.
+    if ./scripts/backup-aprimora.sh >>deploy.log 2>&1; then
+      tail -5 deploy.log
+      log "✓ Backup pré-deploy concluído e verificado"
+    else
+      tail -20 deploy.log
+      error "Backup pré-deploy FALHOU. Deploy abortado: rodar migration sem backup é o cenário que o backup existe para evitar. Para deployar assim mesmo, BACKUP_DB=0."
+    fi
   fi
 }
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Prova de restore do backup mais recente do Aprimora
+Documentation=file:///root/GedDocPublico/RUNBOOK.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/GedDocPublico
+ExecStart=/root/GedDocPublico/scripts/backup-verificar.sh
+TimeoutStartSec=3600

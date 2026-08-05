@@ -1,0 +1,17 @@
+[Unit]
+Description=Backup do Aprimora (banco + papéis + uploads)
+Documentation=file:///root/GedDocPublico/RUNBOOK.md
+# O backup depende do Docker; sem ele o script aborta com erro, que é o
+# comportamento certo — mas esperar o daemon evita ruído no boot.
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/GedDocPublico
+ExecStart=/root/GedDocPublico/scripts/backup-aprimora.sh
+# Sem `-` no ExecStart e sem `|| true` em lugar nenhum: falha de backup TEM de
+# aparecer como unidade falhada em `systemctl list-units --failed`. Backup que
+# falha em silêncio é pior que backup nenhum, porque cria a crença de que
+# existe um.
+TimeoutStartSec=1800

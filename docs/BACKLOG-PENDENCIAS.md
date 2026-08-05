@@ -163,6 +163,52 @@ sem `require_permission` — qualquer autenticado do tenant baixa anexo de proce
 talvez não devesse ver. É a mesma lacuna do item 1.0.8, e a decisão é do Jorge, porque mexer nisso
 muda política de acesso.
 
+### ~~1.0.03 A VPS não tinha backup~~ — FECHADO em 2026-08-05, com uma ressalva aberta
+
+Estado medido antes: **um** arquivo em `/root/backups`, `pre_migration_20260724_031052.sql.gz`,
+43 KB, de 24 de julho. `crontab -l` vazio, nenhum timer systemd de backup, nenhuma cópia fora da
+máquina. Doze dias de dado operacional em homologação sem rede de segurança nenhuma.
+
+O `backup_database` do `scripts/deploy.sh` existia e estava desligado por padrão. Mais grave que
+estar desligado é como estava escrito:
+
+```sh
+docker compose exec -T db pg_dump ... > "$BACKUP_FILE" || log "Backup skipped"
+log "✓ Backup saved to $BACKUP_FILE"
+```
+
+O redirecionamento cria o arquivo **antes** de o `pg_dump` rodar; o `||` engole a falha; e a linha
+seguinte anuncia sucesso nos dois casos. Ligar `BACKUP_DB=1` teria produzido, num dia ruim, um
+arquivo de zero byte com nome de backup e um log do CI afirmando que ele existe. É a mesma família
+do export vazio que `app/cli/backup.py` já barra, e do backup sem contexto de tenant descrito no
+docstring de lá: **artefato plausível e inútil, cujo defeito só aparece no dia do restore**.
+
+Entregue: `scripts/backup-aprimora.sh` (banco `-Fc` + `pg_dumpall --globals-only` + uploads,
+gerando em área de espera e publicando por `mv` só depois de verificar), `scripts/backup-verificar.sh`
+(restore real num banco descartável, comparando as 198 tabelas contra o vivo), unidades systemd
+versionadas em `deploy/systemd/`, e `test_guarda_backup.py` com 7 asserções, **todas provadas por
+inversão**.
+
+Duas coisas que só apareceram por rodar de verdade na VPS, e nenhuma teria aparecido na leitura:
+
+- **A primeira execução publicou o backup e saiu com exit 2.** `ls "$dir"/aprimora_*` num diretório
+  vazio sai com status 2, e sob `pipefail` isso derrubava o script na poda — *depois* de publicar.
+  Com o timer, a unidade ficaria vermelha todo dia com o backup perfeito, e a retenção nunca
+  rodaria. Corrigido com `nullglob`.
+- **`app/cli/backup.py` cobre menos da metade do que parece.** `TENANTED_TABLES` tem 26 tabelas,
+  congeladas na Fase 34; o banco tem hoje **55** com `tenant_id`. Transporte regulado, pagamentos,
+  minuta, notificação, workflow e `audit_log` ficam de fora. Ele serve para migrar/clonar tenant,
+  não como backup — o RUNBOOK agora diz isso em cima da seção.
+
+**A ressalva, que continua aberta e é decisão do Jorge:** não há cópia **fora da máquina**. O que
+existe protege contra `DROP TABLE`, migration ruim e apagão de dado; não protege contra perda do
+servidor, ransomware ou o provedor sumir. Falta escolher o destino (bucket, segunda VPS, storage do
+provedor) — a escolha tem custo e implica onde o dado do município passa a residir, então não é
+chamada de agente.
+
+Relacionado: a unidade `aprimora-fecha-portas` (regras de `DOCKER-USER`, item 1.0.01) existe **só na
+VPS** e não está versionada. Reinstalar o servidor perderia essa camada em silêncio.
+
 ### 1.0 Deriva de `APP_NAME` no ambiente de dev — RBAC apontando para o sistema errado
 
 *(Descoberto em 2026-07-28, durante a fatia F1 da modularização.)*

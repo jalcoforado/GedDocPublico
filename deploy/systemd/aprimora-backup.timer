@@ -1,0 +1,14 @@
+[Unit]
+Description=Backup diário do Aprimora
+
+[Timer]
+# 03:20 UTC = 00:20 em Brasília. Fora da janela de uso e longe do
+# `apt-daily-upgrade` (06:25) e do `logrotate` (00:00).
+OnCalendar=*-*-* 03:20:00 UTC
+# Se a VPS estiver desligada na hora, roda no próximo boot. Sem isto, máquina
+# que reinicia à noite simplesmente pula o backup do dia — em silêncio.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

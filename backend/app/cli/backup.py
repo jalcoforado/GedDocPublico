@@ -27,6 +27,14 @@ Para restaurar em outro DB:
 `aprimora_app`. O EXPORT, esse sim, roda no papel administrativo, e é o que
 esta CLI faz.
 
+**ISTO NÃO É O BACKUP DO SISTEMA.** É exportação de UM tenant, para migrar ou
+clonar. A lista `TENANTED_TABLES` abaixo tem **26 tabelas**, congeladas na Fase
+34; o banco tem hoje **55 com `tenant_id`**. Ficam de fora, entre outras, as de
+transporte regulado, pagamentos, minuta, notificação, workflow e `audit_log` —
+e ficam de fora **em silêncio**, porque a lista é literal e não deriva do
+schema. Para backup de verdade: `scripts/backup-aprimora.sh` e a seção "Backup
+da máquina (VPS)" do RUNBOOK.
+
 Tabelas: 26 tenanted (na ordem topológica das FKs) + a tabela `tenant` raiz.
 
 Catálogos globais (utils.estado, utils.cidade, etc) NÃO entram — o destino

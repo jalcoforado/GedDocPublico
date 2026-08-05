@@ -358,7 +358,115 @@ garantem que o mesmo navegador pode estar logado nos dois sem conflito.
 
 ---
 
+## Backup da máquina (VPS)
+
+**São duas coisas diferentes e nenhuma substitui a outra.** Esta seção é o
+backup operacional — o que existe para o servidor voltar. A seção seguinte,
+"Backup por tenant", é uma ferramenta de migração/clonagem de tenant, e **não**
+serve como backup: ver o aviso lá.
+
+### Como era até 2026-08-05
+
+Um dump. Manual. De 24 de julho. 43 KB, em `/root/backups`, na mesma máquina do
+banco. Sem cron, sem timer, sem cópia externa. Doze dias de dado operacional a
+um `DROP` de distância, e nada que sobrevivesse à perda do disco.
+
+Havia um `backup_database` no `scripts/deploy.sh`, desligado por padrão
+(`BACKUP_DB=1`) e escrito de um jeito que **fabricava um arquivo de zero byte
+quando o `pg_dump` falhava**, engolia o erro e ainda imprimia `✓ Backup saved`.
+O detalhe está no docstring de `backend/tests/test_guarda_backup.py`.
+
+### O que existe agora
+
+```bash
+scripts/backup-aprimora.sh     # banco + papéis globais + uploads
+scripts/backup-verificar.sh    # restaura de verdade num banco descartável
+```
+
+O backup grava em `/root/backups/diario/aprimora_<timestampZ>/`, com quatro
+arquivos: `banco.dump` (`pg_dump -Fc`), `globais.sql` (`pg_dumpall
+--globals-only`), `uploads.tgz` e `SHA256SUMS`. Aos domingos, uma cópia vai
+para `semanal/`. Retenção: 14 diários, 8 semanais.
+
+Três propriedades que **não** são detalhe de implementação:
+
+- **Verifica antes de publicar.** Tudo é gerado numa área de espera e só é
+  movido para o destino depois de passar em `pg_restore -l`, piso de tamanho e
+  checagem dos quatro papéis da família SEC. Um diretório em `diario/` é, por
+  construção, um backup que passou. Não existe estado intermediário com nome
+  de pronto.
+- **Os papéis vêm junto.** Sem `--globals-only`, restore num cluster novo morre
+  no primeiro `GRANT ... TO aprimora_app`.
+- **Os uploads vêm junto.** Anexo não vive no banco — o caminho é registro, o
+  arquivo é disco. Backup só do Postgres restaura processos apontando para
+  arquivos que não existem mais.
+
+### Prova de restore
+
+```bash
+scripts/backup-verificar.sh                     # o mais recente
+scripts/backup-verificar.sh /root/backups/diario/aprimora_<ts>
+```
+
+Cria um banco descartável no mesmo cluster, restaura com `--exit-on-error`,
+compara a contagem de **todas** as tabelas de `utils`, `protocolos`,
+`aprimora_py` e `frota` contra o banco vivo, e derruba o banco de trabalho no
+`trap`. Não toca `ged_saas_db` em momento nenhum.
+
+Reprova em três situações, todas exercitadas em 2026-08-05: dump corrompido
+depois de gravado (SHA256SUMS), dump que não restaura (`--exit-on-error`) e
+dump íntegro de um banco vazio (contagens). Esta última é a que importa — é a
+falha que passa por qualquer verificação sintática.
+
+**Backup nunca restaurado não é backup.** Enquanto ninguém rodar isto, "temos
+backup" é hipótese, não fato.
+
+### Agendamento
+
+Unidades versionadas em `deploy/systemd/`. Instalação na VPS:
+
+```bash
+cp deploy/systemd/aprimora-backup*.{service,timer} /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now aprimora-backup.timer aprimora-backup-verificar.timer
+systemctl list-timers 'aprimora-*'
+```
+
+Backup diário às 03:20 UTC; prova de restore às segundas, 04:10 UTC. `Persistent=true`
+nos dois: máquina desligada na hora roda no próximo boot, em vez de pular o dia
+em silêncio. Nenhum `ExecStart=-` — falha tem de aparecer em
+`systemctl --failed`.
+
+Conferir depois de um incidente:
+
+```bash
+systemctl status aprimora-backup.service
+journalctl -u aprimora-backup.service --since '7 days ago'
+ls -la /root/backups/diario
+```
+
+### O que ainda NÃO está resolvido
+
+**Não há cópia fora da máquina.** Backup no mesmo disco protege contra `DROP
+TABLE`, migration ruim e apagão de dado — não contra perda do servidor,
+ransomware ou o provedor sumir. Enquanto o destino remoto não for definido
+(bucket, segunda VPS, storage do provedor), esta é a limitação a ter em mente
+ao dizer "temos backup".
+
+Nota relacionada: a unidade `aprimora-fecha-portas`, que aplica as regras de
+`DOCKER-USER`, existe **só na VPS** e não está versionada. Reinstalar o
+servidor do zero perderia essa camada sem aviso.
+
+---
+
 ## Backup por tenant
+
+> **Isto não é o backup do sistema.** É uma ferramenta de exportação de um
+> tenant — feita para migrar ou clonar, não para restaurar o servidor. A lista
+> `TENANTED_TABLES` (`app/cli/backup.py`) tem **26 tabelas**, congeladas na
+> Fase 34; o banco tem hoje **55 tabelas com `tenant_id`**. Ficam de fora, entre
+> outras, as de transporte regulado, pagamentos, minuta, notificação, workflow e
+> `audit_log`. Para backup de verdade, use a seção acima.
 
 ### Inspecionar o tamanho
 

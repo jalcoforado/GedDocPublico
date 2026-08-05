@@ -1,0 +1,19 @@
+# Fim de linha para arquivos que só rodam em Linux.
+#
+# `core.autocrlf=true` na máquina de quem desenvolve (Windows) deixa a cópia de
+# trabalho com CRLF. Pelo `git pull` na VPS isso não aparece — o checkout em
+# Linux devolve LF. Mas copiar o arquivo direto do Windows para o servidor
+# (scp, docker cp) leva o `\r` junto, e o sintoma é o shebang quebrado:
+# `bash\r: No such file or directory`. Aconteceu ao testar os scripts de backup
+# em 2026-08-05, e a correção na hora foi um `sed -i 's/\r$//'` — que é remendo,
+# não conserto.
+#
+# Em unidade systemd o efeito é pior porque é silencioso: o `\r` entra no valor
+# de `ExecStart=`, o caminho fica com um caractere invisível a mais e a unidade
+# falha com "No such file or directory" apontando para um arquivo que existe.
+#
+# Deliberadamente NÃO há `* text=auto` aqui: renormalizaria o repositório
+# inteiro num commit só, e o custo não se justifica.
+*.sh        text eol=lf
+*.service   text eol=lf
+*.timer     text eol=lf

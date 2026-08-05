@@ -1,0 +1,13 @@
+[Unit]
+Description=Prova de restore semanal do backup do Aprimora
+
+[Timer]
+# Segunda-feira 04:10 UTC, depois do backup diário de domingo (que também vira
+# a cópia semanal). Semanal e não diário: o restore cria um banco de trabalho
+# no mesmo cluster, e uma vez por semana já converte "temos backup" de hipótese
+# em fato observado — que é o ponto.
+OnCalendar=Mon *-*-* 04:10:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
