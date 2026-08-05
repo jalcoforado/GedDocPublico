@@ -110,6 +110,11 @@ porque, durante a F3, a varredura manual por linha contendo `href` falhou **trê
 e **nenhuma das três quebrou teste**. Link errado ainda funciona pelo 308, então o sintoma é salto
 extra e URL velha na barra; a chave órfã só piora o Ctrl+K em silêncio.
 
+Desde a P5.2 ele também reprova **página órfã**: toda subpágina sob `app/(app)/m/` tem de ser citada
+em algum `href` da app. Tela pronta e sem link não quebra nada — nem build, nem teste — e a P2/P4 do
+transporte passou meses assim, alcançável só digitando a URL. Tela nova precisa de caminho até ela
+no mesmo PR.
+
 O nginx nasceu como *Strangler Fig* na frente de um monolito PHP legado. Hoje a versão Python é tratada como **independente** — não portar comportamento do PHP nem consultá-lo como fonte de verdade. O que sobra dessa herança e continua valendo: o schema Postgres é compartilhado com o legado (`utils.*`, `protocolos.*` são tabelas legadas; `aprimora_py.*` e `frota.*` são nossos), e o nginx tem uma regex de rotas migradas (ver "Adicionando um módulo").
 
 ## Comandos
@@ -194,7 +199,8 @@ O backend roda com bind-mount do working tree (`./backend:/app`), então `docker
 
 **Verde local não garante verde no CI.** O container tem coisas que o runner não tem: `/app` gravável, o serviço `redis` na rede e o `backend/.env` (gitignored) com credenciais reais do Google. O CI supre isso via env do job — ao adicionar teste que dependa de credencial, storage ou Redis, confira `.github/workflows/backend-tests.yml`.
 
-**São três workflows** (`backend-tests`, `frontend-tests`, `e2e-assinatura`) e os dois que tocam o banco repetem a mesma sequência de bootstrap (stubs → dump → role `aprimora_app` → `alembic stamp 0020` → `upgrade head` → seeds). Corrigiu bootstrap num, verifique o outro.
+**São três workflows de teste** (`backend-tests`, `frontend-tests`, `e2e-assinatura`), mais o
+`deploy-vps`, que **não** é disparado por push: ele espera os três (ver "Deploy"). Os dois que tocam o banco repetem a mesma sequência de bootstrap (stubs → dump → role `aprimora_app` → `alembic stamp 0020` → `upgrade head` → seeds). Corrigiu bootstrap num, verifique o outro.
 
 ### Migrations
 
@@ -207,7 +213,24 @@ docker exec aprimora-py-backend alembic downgrade -1   # valide reversibilidade
 
 ### Deploy (VPS de homologação)
 
-Merge em `main` dispara `deploy-vps.yml`, que roda `scripts/deploy.sh start` por SSH. Duas armadilhas custaram várias rodadas de diagnóstico:
+Merge em `main` **não dispara o deploy direto**. Desde 2026-08-04, `deploy-vps.yml` roda por
+`workflow_run` **depois** do `Backend tests`, e um job `gate` confere por API se `Frontend tests` e
+`E2E assinatura` também fecharam em `success` **no mesmo SHA**. Antes disso os quatro corriam em
+paralelo e a VPS recebia código reprovado — aconteceu em `a1a0c8e`. Consequências práticas:
+
+- **O deploy demora ~8 min a mais**, porque espera a suíte. Não é lentidão nova, é a espera que
+  faltava.
+- **Um workflow só no gatilho, e é de propósito.** `workflow_run` com vários dispara uma vez *por
+  workflow que termina*, não uma vez quando todos terminam — dois deploys simultâneos seriam
+  piores, e `cancel-in-progress` cortaria um deploy pela metade.
+- **O filtro `paths:` saiu** (o gatilho não aceita filtro de caminho), então push só de
+  documentação também deploya. Build desperdiçado é barulhento; deploy que não acontece é
+  silencioso.
+- **Renomear um workflow de teste barra TODO deploy, em silêncio** — o portão procura por nome.
+  `tests/test_guarda_portao_de_deploy.py` reprova quem esquecer.
+- **`workflow_dispatch` passa direto pelo portão**, e continua sendo o escape manual.
+
+O `deploy.sh` roda `scripts/deploy.sh start` por SSH. Duas armadilhas custaram várias rodadas de diagnóstico:
 
 **O script se sobrescreve em execução.** `deploy_full` chama `pull_code`, que faz `git reset --hard` sobre o próprio `scripts/deploy.sh` enquanto o bash já o está executando; as funções foram parseadas na entrada. Hoje há um `exec` do script novo após o pull (`DEPLOY_REEXECUTADO` evita laço), mas **mudança no `deploy.sh` ainda leva um deploy para valer** quando a cópia no servidor é anterior a esse `exec` — nesse caso, dispare `gh workflow run deploy-vps.yml` uma segunda vez.
 

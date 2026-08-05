@@ -415,7 +415,7 @@ provavelmente a mesma deriva de env.
 P0–P4 entregues e no ar (permissionário, empresa, veículo, vistorias, alvarás com documentos,
 responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 
-- **P5** — Recadastramento. **P5.1 entregue em 2026-08-04**; P5.2 e P5.3 seguem abertas (detalhe
+- **P5** — Recadastramento. **P5.1 e P5.2 entregues em 2026-08-04**; P5.3 segue aberta (detalhe
   logo abaixo).
 - **P6** — Rotas / linhas
 - **P7** — Ocorrências regulatórias
@@ -441,10 +441,35 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 > comunicado é decisão de produto, e a alternativa silenciosa seria pior. Fica registrado como
 > limite conhecido, não como defeito.
 >
-> **Aberto — P5.2** (checklist documental, parecer, amarra da vistoria, fechamento do
-> recadastramento) e **P5.3** (estado em atraso, relatório de faltosos, suspensão como ato humano,
-> notificação). `RecadastramentoConvocacao.situacao` só tem `convocado` nesta fatia, e é onde as
-> duas próximas encaixam.
+> **P5.2 entregue em 2026-08-04** — atendimento e fechamento. Spec e plano em `docs/superpowers/`.
+> Migration `0082` com três tabelas: `recadastramento_item` (catálogo por tenant),
+> `recadastramento_marca` (log append-only) e `recadastramento_decisao`. Telas em
+> `/m/transporte/recadastramento/itens` e `.../[id]/convocacao/[convocacaoId]`.
+>
+> Quatro decisões que o código sozinho não explica:
+>
+> - **Deferir exige completude; indeferir não.** É a assimetria central. Indeferir por falta de
+>   documento é o caso real do balcão; exigir completude para indeferir deixaria o sistema só
+>   sabendo dizer sim. Travado por `test_indeferir_sem_completude_e_permitido`.
+> - **A marcação é log, não estado.** `recadastramento_marca` **não tem** índice único em
+>   `(id_convocacao, id_item)`, e a ausência é o desenho: marcar, desmarcar e marcar de novo são
+>   três linhas, e a mais recente vence. Um único ali apagaria o rastro de quem voltou atrás.
+> - **`marcado is None` não é `False`.** Ninguém-olhou e olhou-mas-não-está-em-ordem são coisas
+>   diferentes, e a tela mostra as duas.
+> - **`condicional` não é `aprovado`.** A amarra da vistoria exige `aprovado`; aceitar condicional
+>   seria decisão de produto.
+>
+> Duas assunções permissivas, marcadas como reversíveis na spec: regulado **sem veículo** satisfaz
+> a amarra por vacuidade (a tela distingue de "todos em dia"), e vistoria **sem `data_validade`**
+> conta como válida (cadastro herdado costuma não ter, e bloquear por falta de dado puniria o
+> regulado por falha do município).
+>
+> **Limite conhecido:** editar a `descricao` de um item muda o texto exibido em fechamentos
+> antigos. Preservar o texto no momento da marca resolveria, ao custo de duplicar dado.
+>
+> **Aberto — P5.3**: estado em atraso, relatório de faltosos, suspensão como ato humano,
+> notificação. `RecadastramentoConvocacao.situacao` hoje tem `convocado`, `em_analise`, `deferido`
+> e `indeferido`; o atraso entra aí.
 
 > **Atualizado em 2026-08-01, pela fatia de costura de navegação** (spec e plano em
 > `docs/superpowers/`). "Entregues e no ar" era verdade só para o backend. Três coisas mudaram, e a
