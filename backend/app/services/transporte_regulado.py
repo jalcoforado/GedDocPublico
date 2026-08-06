@@ -15,7 +15,14 @@ from sqlalchemy import select, func, case
 from sqlalchemy.sql import literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Empresa, Permissionario, VeiculoRegulado, Usuario
+from ..models import (
+    Empresa,
+    Permissionario,
+    Ponto,
+    PontoOcupacao,
+    VeiculoRegulado,
+    Usuario,
+)
 from ..models.transporte_regulado import (
     VeiculoDocumento,
     VeiculoAvaliacao,
@@ -49,6 +56,10 @@ from ..schemas.transporte_regulado import (
     AlvaraDocumentoOut,
     AlvaraResponsavelCreate,
     AlvaraResponsavelOut,
+    PontoCreate,
+    PontoUpdate,
+    PontoOcuparInput,
+    PontoLiberarInput,
 )
 
 
@@ -3363,3 +3374,440 @@ async def notificar_faltosos(
     # inverso (registrar e não enviar) seria pior.
     await db.commit()
     return resultados
+
+
+# =========================================================== P6: pontos e vagas
+#
+# O objeto regulatório de táxi e mototáxi é o PONTO, com vagas numeradas. A
+# exclusividade — uma vaga um ocupante, um permissionário uma vaga — está
+# garantida por dois índices únicos parciais criados na 0084. As checagens
+# abaixo existem para devolver 409 com mensagem útil, NÃO para garantir a
+# regra: entre o SELECT e o INSERT de uma checagem não há nada segurando duas
+# requisições concorrentes. Ver `test_o_banco_barra_sem_passar_pelo_servico`.
+
+MOTIVOS_LIBERACAO = ("transferencia", "desistencia", "cassacao", "obito", "outro")
+
+
+async def _carregar_ponto(db: AsyncSession, *, tenant_id: int, ponto_id: int) -> Ponto:
+    ponto = (
+        await db.execute(
+            select(Ponto).where(
+                Ponto.id == ponto_id,
+                Ponto.tenant_id == tenant_id,
+                Ponto.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if ponto is None:
+        raise HTTPException(status_code=404, detail="Ponto não encontrado")
+    return ponto
+
+
+async def _validar_nome_ponto_unico(
+    db: AsyncSession, *, tenant_id: int, nome: str, excluir_id: int | None = None
+) -> None:
+    stmt = select(Ponto.id).where(
+        Ponto.tenant_id == tenant_id,
+        func.lower(Ponto.nome) == nome.strip().lower(),
+        Ponto.excluido.is_(False),
+    )
+    if excluir_id is not None:
+        stmt = stmt.where(Ponto.id != excluir_id)
+    if (await db.execute(stmt)).first() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Já existe um ponto chamado '{nome.strip()}'",
+        )
+
+
+def _ocupacao_vigente():
+    """Vigente = sem `ate` e não excluída. Mesmo predicado dos índices únicos.
+
+    Existe como função por um motivo: escrito à mão em cada consulta, mais cedo
+    ou mais tarde uma delas esquece o `excluido` e passa a enxergar ocupação
+    apagada. A divergência entre o que a tela mostra e o que o índice impede é
+    do tipo que chega como "não consigo ocupar a vaga que está livre".
+    """
+    return _and(PontoOcupacao.ate.is_(None), PontoOcupacao.excluido.is_(False))
+
+
+async def _contagem_ocupadas(
+    db: AsyncSession, *, tenant_id: int, ponto_ids: list[int]
+) -> dict[int, int]:
+    if not ponto_ids:
+        return {}
+    linhas = (
+        await db.execute(
+            select(PontoOcupacao.id_ponto, func.count(PontoOcupacao.id))
+            .where(
+                PontoOcupacao.tenant_id == tenant_id,
+                PontoOcupacao.id_ponto.in_(ponto_ids),
+                _ocupacao_vigente(),
+            )
+            .group_by(PontoOcupacao.id_ponto)
+        )
+    ).all()
+    return {linha[0]: int(linha[1]) for linha in linhas}
+
+
+async def listar_pontos(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    q: str | None = None,
+    tipo_servico: str | None = None,
+    situacao: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[tuple[Ponto, int]], int]:
+    """Pontos com a contagem de vagas ocupadas de cada um.
+
+    Condições montadas UMA vez para consulta e contagem. Duplicá-las é como
+    `total` passa a divergir de `items` quando alguém acrescenta filtro a só
+    uma das cópias — aconteceu na busca de alvarás.
+    """
+    condicoes = [Ponto.tenant_id == tenant_id, Ponto.excluido.is_(False)]
+    termo = (q or "").strip()
+    if termo:
+        condicoes.append(func.lower(Ponto.nome).like(f"%{termo.lower()}%"))
+    if tipo_servico:
+        condicoes.append(Ponto.tipo_servico == tipo_servico)
+    if situacao:
+        condicoes.append(Ponto.situacao == situacao)
+
+    total = (
+        await db.execute(select(func.count(Ponto.id)).where(*condicoes))
+    ).scalar_one() or 0
+    pontos = list(
+        (
+            await db.execute(
+                select(Ponto)
+                .where(*condicoes)
+                .order_by(Ponto.nome.asc(), Ponto.id.asc())
+                .limit(limit)
+                .offset(offset)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    ocupadas = await _contagem_ocupadas(
+        db, tenant_id=tenant_id, ponto_ids=[p.id for p in pontos]
+    )
+    return [(p, ocupadas.get(p.id, 0)) for p in pontos], total
+
+
+async def obter_ponto(
+    db: AsyncSession, *, tenant_id: int, ponto_id: int
+) -> tuple[Ponto, int]:
+    ponto = await _carregar_ponto(db, tenant_id=tenant_id, ponto_id=ponto_id)
+    ocupadas = await _contagem_ocupadas(db, tenant_id=tenant_id, ponto_ids=[ponto.id])
+    return ponto, ocupadas.get(ponto.id, 0)
+
+
+async def criar_ponto(
+    db: AsyncSession, *, tenant_id: int, payload: PontoCreate
+) -> Ponto:
+    await _validar_nome_ponto_unico(db, tenant_id=tenant_id, nome=payload.nome)
+    ponto = Ponto(
+        tenant_id=tenant_id, criado_em=datetime.utcnow(), **payload.model_dump()
+    )
+    db.add(ponto)
+    await db.flush()
+    return ponto
+
+
+async def atualizar_ponto(
+    db: AsyncSession, *, tenant_id: int, ponto_id: int, payload: PontoUpdate
+) -> Ponto:
+    ponto = await _carregar_ponto(db, tenant_id=tenant_id, ponto_id=ponto_id)
+    dados = payload.model_dump(exclude_unset=True)
+
+    if dados.get("nome"):
+        await _validar_nome_ponto_unico(
+            db, tenant_id=tenant_id, nome=dados["nome"], excluir_id=ponto_id
+        )
+
+    if dados.get("vagas_total") is not None:
+        # Reduzir abaixo do maior número ocupado deixaria ocupação FORA do mapa
+        # da tela: presente no banco, invisível na interface. Pior dos dois
+        # mundos, e silencioso.
+        maior = (
+            await db.execute(
+                select(func.max(PontoOcupacao.numero_vaga)).where(
+                    PontoOcupacao.tenant_id == tenant_id,
+                    PontoOcupacao.id_ponto == ponto_id,
+                    _ocupacao_vigente(),
+                )
+            )
+        ).scalar()
+        if maior is not None and dados["vagas_total"] < int(maior):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Não é possível reduzir para {dados['vagas_total']} vagas: "
+                    f"a vaga {int(maior)} está ocupada. Libere-a antes."
+                ),
+            )
+
+    for campo, valor in dados.items():
+        setattr(ponto, campo, valor)
+    ponto.atualizado_em = datetime.utcnow()
+    await db.flush()
+    return ponto
+
+
+async def excluir_ponto(db: AsyncSession, *, tenant_id: int, ponto_id: int) -> None:
+    ponto = await _carregar_ponto(db, tenant_id=tenant_id, ponto_id=ponto_id)
+    vigentes = (
+        await db.execute(
+            select(func.count(PontoOcupacao.id)).where(
+                PontoOcupacao.tenant_id == tenant_id,
+                PontoOcupacao.id_ponto == ponto_id,
+                _ocupacao_vigente(),
+            )
+        )
+    ).scalar_one() or 0
+    if vigentes:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"O ponto tem {vigentes} vaga(s) ocupada(s). Libere-as antes de "
+                "excluir, ou inative o ponto para apenas impedir novas ocupações."
+            ),
+        )
+    ponto.excluido = True
+    ponto.atualizado_em = datetime.utcnow()
+    await db.flush()
+
+
+def _ocupacao_dict(oc: PontoOcupacao, nome: str | None, cpf: str | None) -> dict:
+    return {
+        "id": oc.id,
+        "id_ponto": oc.id_ponto,
+        "numero_vaga": oc.numero_vaga,
+        "id_permissionario": oc.id_permissionario,
+        "desde": oc.desde,
+        "ate": oc.ate,
+        "motivo_liberacao": oc.motivo_liberacao,
+        "observacoes": oc.observacoes,
+        "nome_permissionario": nome,
+        "cpf_permissionario": cpf,
+    }
+
+
+async def mapa_de_vagas(db: AsyncSession, *, tenant_id: int, ponto_id: int) -> dict:
+    """As `vagas_total` vagas, livres inclusive.
+
+    Devolver só as ocupadas obrigaria a tela a deduzir os buracos, e "a vaga 7
+    sumiu" é um defeito que ninguém vê até alguém reclamar.
+    """
+    ponto = await _carregar_ponto(db, tenant_id=tenant_id, ponto_id=ponto_id)
+    linhas = (
+        await db.execute(
+            select(PontoOcupacao, Permissionario.nome, Permissionario.cpf)
+            .join(Permissionario, Permissionario.id == PontoOcupacao.id_permissionario)
+            .where(
+                PontoOcupacao.tenant_id == tenant_id,
+                PontoOcupacao.id_ponto == ponto_id,
+                _ocupacao_vigente(),
+            )
+        )
+    ).all()
+    por_vaga = {linha[0].numero_vaga: linha for linha in linhas}
+
+    vagas = []
+    for numero in range(1, ponto.vagas_total + 1):
+        achado = por_vaga.get(numero)
+        vagas.append(
+            {
+                "numero_vaga": numero,
+                "ocupacao": None
+                if achado is None
+                else _ocupacao_dict(achado[0], achado[1], achado[2]),
+            }
+        )
+    return {
+        "id_ponto": ponto.id,
+        "nome": ponto.nome,
+        "situacao": ponto.situacao,
+        "vagas_total": ponto.vagas_total,
+        "vagas_ocupadas": len(por_vaga),
+        "vagas": vagas,
+    }
+
+
+async def listar_ocupacoes(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    ponto_id: int,
+    apenas_vigentes: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    await _carregar_ponto(db, tenant_id=tenant_id, ponto_id=ponto_id)
+    condicoes = [
+        PontoOcupacao.tenant_id == tenant_id,
+        PontoOcupacao.id_ponto == ponto_id,
+        PontoOcupacao.excluido.is_(False),
+    ]
+    if apenas_vigentes:
+        condicoes.append(PontoOcupacao.ate.is_(None))
+
+    total = (
+        await db.execute(select(func.count(PontoOcupacao.id)).where(*condicoes))
+    ).scalar_one() or 0
+    linhas = (
+        await db.execute(
+            select(PontoOcupacao, Permissionario.nome, Permissionario.cpf)
+            .join(Permissionario, Permissionario.id == PontoOcupacao.id_permissionario)
+            .where(*condicoes)
+            .order_by(PontoOcupacao.desde.desc(), PontoOcupacao.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+    return [_ocupacao_dict(l[0], l[1], l[2]) for l in linhas], total
+
+
+async def ocupar_vaga(
+    db: AsyncSession, *, tenant_id: int, ponto_id: int, payload: PontoOcuparInput
+) -> PontoOcupacao:
+    ponto = await _carregar_ponto(db, tenant_id=tenant_id, ponto_id=ponto_id)
+
+    if ponto.situacao != "ativo":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ponto inativo não recebe novas ocupações",
+        )
+    if not 1 <= payload.numero_vaga <= ponto.vagas_total:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Vaga {payload.numero_vaga} não existe: o ponto tem "
+                f"{ponto.vagas_total} vaga(s)."
+            ),
+        )
+
+    # Same-tenant explícito: a FK do Postgres não filtra por tenant, e 404
+    # cross-tenant (não 403) é a regra do repositório.
+    regulado = (
+        await db.execute(
+            select(Permissionario).where(
+                Permissionario.id == payload.id_permissionario,
+                Permissionario.tenant_id == tenant_id,
+                Permissionario.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if regulado is None:
+        raise HTTPException(status_code=404, detail="Permissionário não encontrado")
+
+    ocupada = (
+        await db.execute(
+            select(PontoOcupacao.id).where(
+                PontoOcupacao.tenant_id == tenant_id,
+                PontoOcupacao.id_ponto == ponto_id,
+                PontoOcupacao.numero_vaga == payload.numero_vaga,
+                _ocupacao_vigente(),
+            )
+        )
+    ).first()
+    if ocupada is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A vaga {payload.numero_vaga} já está ocupada",
+        )
+
+    # A mensagem diz ONDE o permissionário está. Sem isso o atendente recebe
+    # "já tem vaga" e não sabe o que fazer: precisa achar o outro ponto para
+    # liberar, e procurar à mão num cadastro de dezenas de pontos é o atrito
+    # que faz o operador desistir do sistema.
+    atual = (
+        await db.execute(
+            select(Ponto.nome, PontoOcupacao.numero_vaga)
+            .join(Ponto, Ponto.id == PontoOcupacao.id_ponto)
+            .where(
+                PontoOcupacao.tenant_id == tenant_id,
+                PontoOcupacao.id_permissionario == payload.id_permissionario,
+                _ocupacao_vigente(),
+            )
+        )
+    ).first()
+    if atual is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"{regulado.nome} já ocupa a vaga {atual[1]} do ponto "
+                f"'{atual[0]}'. Libere-a antes."
+            ),
+        )
+
+    ocupacao = PontoOcupacao(
+        tenant_id=tenant_id,
+        id_ponto=ponto_id,
+        numero_vaga=payload.numero_vaga,
+        id_permissionario=payload.id_permissionario,
+        desde=payload.desde or date_class.today(),
+        observacoes=payload.observacoes,
+        criado_em=datetime.utcnow(),
+    )
+    db.add(ocupacao)
+    await db.flush()
+    return ocupacao
+
+
+async def liberar_vaga(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    ponto_id: int,
+    ocupacao_id: int,
+    payload: PontoLiberarInput,
+) -> PontoOcupacao:
+    """Encerra a vigência. NÃO apaga a linha — o histórico é o produto.
+
+    Em disputa de ponto, "quem estava na vaga 3 em março" é exatamente a
+    pergunta que se faz, e um DELETE aqui deixaria o município sem resposta.
+    """
+    await _carregar_ponto(db, tenant_id=tenant_id, ponto_id=ponto_id)
+    ocupacao = (
+        await db.execute(
+            select(PontoOcupacao).where(
+                PontoOcupacao.id == ocupacao_id,
+                PontoOcupacao.id_ponto == ponto_id,
+                PontoOcupacao.tenant_id == tenant_id,
+                PontoOcupacao.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if ocupacao is None:
+        raise HTTPException(status_code=404, detail="Ocupação não encontrada")
+    if ocupacao.ate is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Esta ocupação já foi encerrada em {ocupacao.ate.isoformat()}",
+        )
+
+    ate = payload.ate or date_class.today()
+    if ate < ocupacao.desde:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"A data de liberação ({ate.isoformat()}) é anterior ao início "
+                f"da ocupação ({ocupacao.desde.isoformat()})."
+            ),
+        )
+    motivo = payload.motivo_liberacao
+    if motivo is not None and motivo not in MOTIVOS_LIBERACAO:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Motivo inválido. Use um de: {', '.join(MOTIVOS_LIBERACAO)}",
+        )
+
+    ocupacao.ate = ate
+    ocupacao.motivo_liberacao = motivo
+    ocupacao.atualizado_em = datetime.utcnow()
+    await db.flush()
+    return ocupacao

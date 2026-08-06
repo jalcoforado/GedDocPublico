@@ -82,10 +82,10 @@ def upgrade() -> None:
         ),
         sa.Column("nome", sa.String(150), nullable=False),
         sa.Column("codigo", sa.String(40), nullable=True),
-        # Sem CHECK restringindo a taxi|mototaxi: o resto do módulo trata
-        # `tipo_servico` como texto livre, e apertar só aqui criaria uma
-        # incoerência que o próximo desenvolvedor teria de descobrir sozinho.
-        # O formulário sugere; o banco não impõe.
+        # Sem CHECK, igual a permissionário, empresa e veículo: neste módulo o
+        # vocabulário de `tipo_servico` é imposto pelo Literal `TipoServico` do
+        # schema, na borda. Acrescentar CHECK só aqui criaria uma incoerência
+        # que o próximo desenvolvedor teria de descobrir sozinho.
         sa.Column("tipo_servico", sa.String(30), nullable=False),
         sa.Column("logradouro", sa.String(200), nullable=True),
         sa.Column("numero", sa.String(20), nullable=True),

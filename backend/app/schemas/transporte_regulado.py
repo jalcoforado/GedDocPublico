@@ -1239,3 +1239,100 @@ class RecadastramentoNotificacaoResultadoOut(BaseModel):
     nome_regulado: str
     resultado: str
     canais: list[str]
+
+
+# ------------------------------------------------------------------ P6: pontos
+
+
+class PontoBase(BaseModel):
+    nome: str = Field(min_length=1, max_length=150)
+    codigo: str | None = Field(default=None, max_length=40)
+    # `TipoServico`, o mesmo Literal de permissionário, empresa e veículo. A
+    # coluna no banco é `String(30)` sem CHECK, também como as outras — a
+    # restrição vive na borda, e o vocabulário já tem `outro` como escape.
+    tipo_servico: TipoServico
+    logradouro: str | None = Field(default=None, max_length=200)
+    numero: str | None = Field(default=None, max_length=20)
+    complemento: str | None = Field(default=None, max_length=100)
+    bairro: str | None = Field(default=None, max_length=100)
+    cep: str | None = Field(default=None, max_length=9)
+    vagas_total: int = Field(ge=1)
+    situacao: Literal["ativo", "inativo"] = "ativo"
+    observacoes: str | None = None
+
+
+class PontoCreate(PontoBase):
+    pass
+
+
+class PontoUpdate(BaseModel):
+    nome: str | None = Field(default=None, min_length=1, max_length=150)
+    codigo: str | None = Field(default=None, max_length=40)
+    tipo_servico: TipoServico | None = None
+    logradouro: str | None = Field(default=None, max_length=200)
+    numero: str | None = Field(default=None, max_length=20)
+    complemento: str | None = Field(default=None, max_length=100)
+    bairro: str | None = Field(default=None, max_length=100)
+    cep: str | None = Field(default=None, max_length=9)
+    vagas_total: int | None = Field(default=None, ge=1)
+    situacao: Literal["ativo", "inativo"] | None = None
+    observacoes: str | None = None
+
+
+class PontoOut(PontoBase):
+    id: int
+    # Desnormalizado na listagem: é o número que o gestor procura, e resolvê-lo
+    # por linha na tela custaria uma requisição por ponto.
+    vagas_ocupadas: int = 0
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PontoOcupacaoOut(BaseModel):
+    id: int
+    id_ponto: int
+    numero_vaga: int
+    id_permissionario: int
+    nome_permissionario: str | None = None
+    cpf_permissionario: str | None = None
+    desde: date
+    ate: date | None = None
+    motivo_liberacao: str | None = None
+    observacoes: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PontoVagaOut(BaseModel):
+    """Uma vaga do mapa. `ocupacao` nula = vaga livre.
+
+    O mapa devolve SEMPRE as `vagas_total` vagas, livres inclusive — a tela
+    precisa desenhar a grade inteira, e deduzir os buracos no cliente é como
+    "vaga 7 sumiu" vira defeito difícil de ver.
+    """
+
+    numero_vaga: int
+    ocupacao: PontoOcupacaoOut | None = None
+
+
+class PontoMapaOut(BaseModel):
+    id_ponto: int
+    nome: str
+    situacao: str
+    vagas_total: int
+    vagas_ocupadas: int
+    vagas: list[PontoVagaOut]
+
+
+class PontoOcuparInput(BaseModel):
+    numero_vaga: int = Field(ge=1)
+    id_permissionario: int
+    desde: date | None = None
+    observacoes: str | None = None
+
+
+class PontoLiberarInput(BaseModel):
+    ate: date | None = None
+    motivo_liberacao: str | None = Field(default=None, max_length=30)
