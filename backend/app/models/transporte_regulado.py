@@ -616,3 +616,86 @@ class RecadastramentoNotificacao(Base):
         ForeignKey("utils.usuario.id"), nullable=False
     )
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class Ponto(Base):
+    """Ponto de estacionamento regulado — a praça onde os táxis ficam.
+
+    P6. O objeto regulatório de táxi e mototáxi não é linha nem itinerário: é o
+    ponto, com um número finito de vagas numeradas. Linha/itinerário
+    (distrital, escolar) é outra entidade e outra fatia.
+
+    `nome` é único por tenant entre não excluídos, em `lower(...)`: dois pontos
+    com o mesmo nome no mesmo município são erro de digitação.
+
+    `tipo_servico` é texto livre, como no resto do módulo — não há CHECK
+    restringindo a `taxi|mototaxi`. Apertar só aqui criaria uma incoerência que
+    o próximo desenvolvedor teria de descobrir sozinho.
+    """
+
+    __tablename__ = "ponto"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    nome: Mapped[str] = mapped_column(String(150), nullable=False)
+    codigo: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    tipo_servico: Mapped[str] = mapped_column(String(30), nullable=False)
+    logradouro: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    numero: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    complemento: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    bairro: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    cep: Mapped[str | None] = mapped_column(String(9), nullable=True)
+    vagas_total: Mapped[int] = mapped_column(Integer, nullable=False)
+    situacao: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="ativo"
+    )
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class PontoOcupacao(Base):
+    """Quem ocupa qual vaga, desde quando, e quem ocupava antes.
+
+    **A exclusividade não está aqui — está no banco.** Dois índices únicos
+    parciais, criados na `0084`: `(id_ponto, numero_vaga)` e
+    `(tenant_id, id_permissionario)`, ambos `WHERE ate IS NULL AND excluido =
+    false`. O serviço também checa, mas só para devolver 409 com mensagem útil:
+    entre o `SELECT` e o `INSERT` de uma checagem de serviço não há nada
+    segurando duas requisições concorrentes. Mesma lição da P5.1.
+
+    **É log, não estado.** Liberar preenche `ate` e `motivo_liberacao`; não
+    apaga a linha. É o `WHERE ate IS NULL` que devolve a vaga ao índice sem
+    destruir o histórico — e em disputa de ponto "quem estava na vaga 3 em
+    março" é exatamente a pergunta que se faz.
+
+    Não há transferência atômica: transferir é liberar e ocupar, dois atos.
+    Entre um e outro a vaga fica disputável, e isso está registrado na spec
+    como limite conhecido, não como descuido.
+    """
+
+    __tablename__ = "ponto_ocupacao"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_ponto: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.ponto.id"), nullable=False
+    )
+    numero_vaga: Mapped[int] = mapped_column(Integer, nullable=False)
+    id_permissionario: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.permissionario.id"), nullable=False
+    )
+    desde: Mapped[date] = mapped_column(Date, nullable=False)
+    ate: Mapped[date | None] = mapped_column(Date, nullable=True)
+    motivo_liberacao: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

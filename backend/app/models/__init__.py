@@ -87,6 +87,8 @@ from .tenant import Tenant
 from .transporte_regulado import (
     Empresa,
     Permissionario,
+    Ponto,
+    PontoOcupacao,
     RecadastramentoCiclo,
     RecadastramentoConvocacao,
     RecadastramentoDecisao,
@@ -181,6 +183,8 @@ __all__ = [
     "RecadastramentoItem",
     "RecadastramentoMarca",
     "RecadastramentoNotificacao",
+    "Ponto",
+    "PontoOcupacao",
     "PlatformAuditLog",
     "PlatformPrincipal",
     "Servico",
