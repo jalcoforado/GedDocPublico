@@ -101,6 +101,9 @@ Três coisas que **não** podem ser desfeitas:
   registro histórico permanente, os tokens antigos ficam para sempre.
 - **`permanent: true` (308) é cache de navegador.** Destino errado que chegue a produção não se
   conserta com redeploy: cada usuário precisa limpar o cache. Confira com `curl -I` antes.
+- **`link_url` tem de NASCER com `/m/<slug>/`.** O 308 existe para o que já foi gravado, não para o
+  que ainda vai ser: `notificacao.link_url` é registro permanente, e cada linha com prefixo legado
+  é um salto extra e uma URL velha na barra, para sempre. `tests/test_guarda_link_url.py` reprova.
 - **Prefixo novo em `ROTA_MODULO` exige regra nova em `redirects()`**, e o `href` do menu tem de
   apontar para `/m/<slug>/…`, não para o caminho antigo.
 
@@ -378,7 +381,11 @@ O agente `migrations-checker` (`.claude/agents/`) roda esse checklist; `frota-re
 ### Adicionando um módulo — o que costuma ser esquecido
 
 1. Registrar **todos** os routers em `main.py` com `prefix="/api/v2"`.
-2. Tipos + métodos em `frontend/lib/api.ts`; entrada em `components/Sidebar.tsx`.
+2. Tipos + métodos em `frontend/lib/api.ts`; entrada de menu em
+   **`frontend/lib/menus/<modulo>.ts`** — não em `components/Sidebar.tsx`, que desde a F2 só
+   consome dali. Item novo também precisa entrar na tabela `PERMISSOES_ESPERADAS` de
+   `__tests__/menus.test.tsx`, e o card do hub do módulo, se houver, no mesmo commit da tela
+   (a guarda de página órfã reprova o contrário).
 3. **Adicionar a rota de topo à regex de `location ~ ^/(...)` em `nginx/default.conf`** — sem isso a página cai no fallback legado e "some" no `:8090`, mesmo funcionando em `:3000`.
 4. Migration com o boilerplate de RLS acima.
 5. Testes `backend/tests/test_<modulo>_*.py`.

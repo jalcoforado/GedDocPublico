@@ -40,8 +40,19 @@
     `app/(app)/m/<slug>/`; na raiz ficaram só as transversais da D5. `ROTA_MODULO` continua vivo, e
     não por inércia: é a fonte dos redirects, e `notificacao.link_url` é registro permanente.
     Guardas em `frontend/__tests__/rotas-modulo.test.ts` (57 asserções, quatro provadas por
-    inversão). Falta a **F4**: `public.modulos`/`configuracoes_modulos` fora do ORM, `Sidebar.tsx`
-    antiga deletada, `link_url` nascendo já prefixado.
+    inversão).
+  - **F4** (2026-08-06) — fecha a modularização. Era menor do que este documento anunciava, e um
+    dos três itens **já estava feito**: `Sidebar.tsx` não é "a antiga" desde a F2 — ela consome
+    `lib/menus` (`MENUS`, `menuDoModulo`, `canSeeItem`), não tem `NAV` próprio e é o componente
+    vivo do layout. Não havia nada a deletar; a afirmação estava velha. Os outros dois eram reais e
+    pequenos: os modelos `ModuloLegado`/`ConfiguracoesModulosLegado` (mapeamento morto das tabelas
+    do PHP, zero usos fora de `models/`) saíram do ORM, e `link_url` passou a nascer com
+    `/m/<slug>/`.
+    O que fica de durável é a **guarda** (`tests/test_guarda_link_url.py`), não a linha corrigida:
+    havia **um** escritor de `link_url`, e um só se conserta à mão. O problema é o segundo — a
+    P5.3 deixou a "notificação automática por job" do transporte explicitamente em aberto, e esse
+    job vai gravar `link_url`. Sem guarda ele nasce legado e ninguém percebe, porque o 308 faz
+    funcionar. Duas asserções, ambas invertidas, uma delas controle contra verde por vacuidade.
 - **Cuidado ao validar módulos na homologação:** o seed contrata os **cinco** módulos no tenant
   `sobral`. O caso de "tenant com um módulo só" — onde estava o defeito crítico da F2 — **não é
   exercitado** por navegação normal. Use a aba Módulos do admin de plataforma para descontratar.

@@ -46,9 +46,7 @@ from .localizacao import Bairro, Cidade, Endereco, Estado
 from .manifestante import Manifestante, TipoManifestante
 from .minuta import Minuta, MinutaHistorico, TemplateDocumento
 from .modulo import (
-    ConfiguracoesModulosLegado,
     Modulo,
-    ModuloLegado,
     ModuloTransacao,
     TenantModulo,
 )
@@ -129,7 +127,6 @@ __all__ = [
     "LancamentoExtrato",
     "ContaFonteHistorico",
     "CcdClasse",
-    "ConfiguracoesModulosLegado",
     "ContaBancaria",
     "Cidade",
     "ComplementacaoDocumental",
@@ -165,7 +162,6 @@ __all__ = [
     "Minuta",
     "MinutaHistorico",
     "Modulo",
-    "ModuloLegado",
     "ModuloTransacao",
     "Motorista",
     "MovimentacaoConta",

@@ -192,7 +192,13 @@ async def _notificar_alerta_sla(
             f"O processo {processo.numero_processo} está há {dias} dia(s) no "
             f"estado '{instance.estado_atual}' (SLA: {sla_dias} dia(s))."
         ),
-        link_url=f"/processos/{processo.id}",
+        # Prefixo `/m/<slug>` desde a F4. Até aqui a notificação nascia com
+        # `/processos/{id}`, que só funciona porque a F3 deixou um 308 vivo
+        # para a URL antiga — e `notificacao.link_url` é registro histórico
+        # PERMANENTE, então cada linha gravada assim é um salto extra e uma
+        # URL velha na barra, para sempre. O redirect existe para o que já
+        # foi gravado, não para o que ainda vai ser.
+        link_url=f"/m/protocolo/processos/{processo.id}",
         payload={
             "id_processo": processo.id,
             "id_workflow_instance": instance.id,
