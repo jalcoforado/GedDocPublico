@@ -544,7 +544,7 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 
 - **P5** — Recadastramento. **P5.1 e P5.2 entregues em 2026-08-04**; P5.3 segue aberta (detalhe
   logo abaixo).
-- **P6** — Rotas / linhas
+- ~~**P6** — Rotas / linhas~~ → **pontos e vagas, entregue em 2026-08-06** (detalhe abaixo). Linha/itinerário continua aberto.
 - **P7** — Ocorrências regulatórias
 - **P8** — Workflows avançados
 
@@ -626,6 +626,55 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >
 > **Ainda aberto do recadastramento:** notificação automática por job (o registro de envio já
 > existe, então falta só o gatilho) e o efeito da suspensão sobre alvará.
+
+> **P6 entregue em 2026-08-06 — mas não é o que o roadmap dizia.** Spec e plano em
+> `docs/superpowers/`. Migration `0084` com `ponto` e `ponto_ocupacao`; telas em
+> `/m/transporte/pontos` e `.../pontos/[id]`.
+>
+> **"Rotas / linhas" eram duas coisas, e táxi e mototáxi — o volume do balcão — não têm nenhuma
+> das duas: têm PONTO.** Uma tabela genérica tentando servir ponto e linha serviria mal aos dois.
+> Decisão do Jorge: esta fatia é o ponto. O card do hub virou dois — "Pontos e Vagas" (entregue) e
+> "Linhas e Itinerários" (por fazer, distrital e escolar).
+>
+> Quatro escolhas, todas registradas na spec: vaga **numerada**, ocupante é o **permissionário**,
+> ocupação é **log com vigência**, e o ponto **não bloqueia nada**.
+>
+> **A exclusividade mora em dois índices únicos parciais, não num `if`.** Duas requisições
+> concorrentes de "ocupar a vaga 3" passariam as duas por uma checagem de serviço — entre o `SELECT`
+> e o `INSERT` não há nada segurando. `test_o_banco_barra_sem_passar_pelo_servico` contorna o
+> serviço e insere direto, esperando `IntegrityError`; sem ele, apagar os índices manteria a bateria
+> verde.
+>
+> **Não existe tabela de vaga:** a vaga é o inteiro `numero_vaga`. Uma tabela cujo único conteúdo é
+> um número sequencial custaria join em toda leitura e daria o que os índices já dão.
+>
+> **Não há transferência atômica** — transferir é liberar e ocupar, dois atos. Entre um e outro a
+> vaga fica disputável; limite conhecido, não descuido. O conserto, se um dia precisar, é um
+> endpoint numa transação só.
+>
+> **Assunção imposta, marcada para conferir:** um permissionário ocupa no máximo uma vaga. Apertar
+> agora e soltar depois é apagar um índice; o inverso exige limpar dado sujo que já entrou.
+>
+> Duas coisas que a fatia encontrou e consertou fora do próprio escopo:
+>
+> - **`listar_permissionarios` não tinha busca**, e o seletor de ocupante só enxergaria os 50
+>   primeiros — inutilizável em município real. Ganhou `q` (nome OU CPF). De quebra, as condições
+>   estavam **duplicadas** entre consulta e contagem: acrescentar `q` a só uma faria a tela mostrar
+>   1 resultado dizendo "de 300". É o mesmo defeito que a busca de alvarás corrigiu, na função ao
+>   lado.
+> - **A guarda de página órfã não pegava o caso principal.** Removendo o card do hub E o item do
+>   menu de `/m/transporte/pontos` ela seguia verde, porque o breadcrumb do detalhe cita a lista e a
+>   lista cita o detalhe — duas páginas do mesmo recurso referenciando uma à outra parecem citadas,
+>   com o recurso inteiro inalcançável. Exatamente o buraco que deixou Alvarás e Relatórios
+>   invisíveis por meses. Agora cada rota é conferida contra as fontes de **fora do próprio
+>   subdiretório**, com três provas por inversão, uma delas de controle.
+>
+> **Segunda vez nesta sessão que uma guarda verde não guardava nada** — a primeira foi o teste de
+> "liberar não apaga", que passava mesmo com a linha sendo soft-deletada, porque a asserção
+> consultava a tabela crua sem filtrar `excluido`. As duas só apareceram por inversão.
+>
+> **Ainda aberto do P6:** linha/itinerário (distrital, escolar), fila de espera por vaga e
+> geolocalização — todos fora de escopo por decisão, e registrados na spec.
 
 > **Atualizado em 2026-08-01, pela fatia de costura de navegação** (spec e plano em
 > `docs/superpowers/`). "Entregues e no ar" era verdade só para o backend. Três coisas mudaram, e a

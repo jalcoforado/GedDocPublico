@@ -48,31 +48,45 @@ UNIDADE_FECHA_PORTAS = RAIZ / "deploy" / "systemd" / "aprimora-fecha-portas.serv
 PUBLICAS_PERMITIDAS = {"8090"}
 
 
-def _exige_compose() -> None:
+def _exige(*caminhos: Path) -> None:
     """Pula fora do CI; **falha** dentro dele.
 
     Mesma assimetria de `test_guarda_portao_de_deploy.py` e pelo mesmo motivo:
-    o container local monta só `./backend:/app`, então o `docker-compose.yml`
-    da raiz não existe ali. O CI roda pytest no runner com o repositório
+    o container local monta só `./backend:/app`, então nem `docker-compose.yml`
+    nem `deploy/` existem ali. O CI roda pytest no runner com o repositório
     inteiro. Sem a assimetria explícita a guarda sumiria em silêncio no único
     lugar onde é obrigatória.
+
+    **Recebe TODOS os arquivos de que o teste depende, e não só o compose.**
+    A primeira versão checava apenas o `docker-compose.yml`: numa máquina onde
+    ele tivesse sido copiado e `deploy/` não, os testes de firewall estouravam
+    com falha dura — um deles com `FileNotFoundError` cru — parecendo defeito
+    de código quando era só arquivo fora de alcance. Aconteceu ao rodar a suíte
+    completa em 2026-08-06.
 
     Para exercitá-la localmente:
 
         docker cp docker-compose.yml aprimora-py-backend:/
+        docker cp deploy aprimora-py-backend:/
     """
-    if COMPOSE.exists():
+    faltando = [c for c in caminhos if not c.exists()]
+    if not faltando:
         return
+    nomes = ", ".join(f"`{c}`" for c in faltando)
     if os.getenv("CI"):
         pytest.fail(
-            f"`{COMPOSE}` não encontrado COM CI=1. A guarda de portas "
-            "publicadas não pode ser pulada no CI. Se a estrutura do "
-            "repositório mudou, conserte o caminho."
+            f"{nomes} não encontrado(s) COM CI=1. Esta guarda não pode ser "
+            "pulada no CI. Se a estrutura do repositório mudou, conserte o "
+            "caminho — ou explique a remoção no diff."
         )
     pytest.skip(
-        "docker-compose.yml fora do alcance (container monta só ./backend). "
-        "Esta guarda roda no CI; veja o docstring para exercitá-la aqui."
+        f"{nomes} fora do alcance (container monta só ./backend). Esta guarda "
+        "roda no CI; veja o docstring para exercitá-la aqui."
     )
+
+
+def _exige_compose() -> None:
+    _exige(COMPOSE)
 
 
 def _portas_publicadas() -> list[tuple[str, str]]:
@@ -160,13 +174,7 @@ def test_o_firewall_cobre_todo_servico_nao_publico() -> None:
     exatamente esse detalhe que deixou a 3100 aberta depois da primeira
     tentativa de bloqueio, em 2026-08-05.
     """
-    _exige_compose()
-    if not FECHA_PORTAS.exists():
-        pytest.fail(
-            f"`{FECHA_PORTAS}` não existe. A unidade `aprimora-fecha-portas` "
-            "roda na VPS; se o script sumiu do repositório, reinstalar o "
-            "servidor perde a camada em silêncio."
-        )
+    _exige(COMPOSE, FECHA_PORTAS)
     bloqueadas = _portas_bloqueadas_pelo_firewall()
     faltando = []
     for servico, entrada in _portas_publicadas():
@@ -192,7 +200,7 @@ def test_a_unidade_de_firewall_roda_depois_do_docker() -> None:
     é levada junto — e o sintoma é `systemctl status` ativo com as portas
     abertas.
     """
-    _exige_compose()
+    _exige(UNIDADE_FECHA_PORTAS)
     texto = UNIDADE_FECHA_PORTAS.read_text(encoding="utf-8")
     assert "After=docker.service" in texto, (
         f"`{UNIDADE_FECHA_PORTAS.name}` sem `After=docker.service`: o daemon "
