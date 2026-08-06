@@ -4,6 +4,7 @@ import {
   Building2,
   Car,
   IdCard,
+  MapPin,
   RefreshCw,
   Route,
   ScrollText,
@@ -72,6 +73,16 @@ export const CARDS: HubCard[] = [
     desc: "Ciclos de recadastramento: convoca os regulados ativos e escalona o prazo de cada um.",
     ready: true,
   },
-  { icon: Route, title: "Rotas e Linhas", desc: "Rotas, linhas e localidades atendidas." },
+  {
+    href: "/m/transporte/pontos",
+    icon: MapPin,
+    title: "Pontos e Vagas",
+    desc: "Pontos de estacionamento regulados, com vagas numeradas e o histórico de quem ocupou cada uma.",
+    ready: true,
+  },
+  // O roadmap dizia "Rotas / linhas"; ao escopar a P6 apareceu que táxi e
+  // mototáxi não têm linha, têm ponto. Linha/itinerário (distrital,
+  // escolar) é outra entidade e continua por fazer.
+  { icon: Route, title: "Linhas e Itinerários", desc: "Linhas distritais e escolares, com itinerário e horários." },
   { icon: AlertOctagon, title: "Ocorrências", desc: "Ocorrências regulatórias e fiscalização." },
 ];

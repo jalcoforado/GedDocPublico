@@ -2792,7 +2792,15 @@ export const api = {
       request<void>(`/frota/ocorrencias/${id}`, { method: "DELETE" }),
   },
   permissionarios: {
-    list: (params?: { situacao?: string; tipo_servico?: string }) =>
+    list: (params?: {
+      situacao?: string;
+      tipo_servico?: string;
+      // Busca NO SERVIDOR (nome ou CPF). Entrou pela P6: o seletor de
+      // ocupante de vaga precisa achar quem está além dos 50 primeiros.
+      q?: string;
+      page?: number;
+      page_size?: number;
+    }) =>
       request<Paginated<Permissionario>>(`/transporte-regulado/permissionarios${qs(params ?? {})}`),
     get: (id: number) =>
       request<Permissionario>(`/transporte-regulado/permissionarios/${id}`),

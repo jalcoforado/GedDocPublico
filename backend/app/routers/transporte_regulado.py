@@ -84,6 +84,7 @@ permissionarios_router = APIRouter(
 async def list_permissionarios(
     situacao: str | None = None,
     tipo_servico: str | None = None,
+    q: str | None = Query(None, description="Busca por nome ou CPF (substring)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     _: Usuario = Depends(require_permission("transporte_regulado")),
@@ -93,7 +94,7 @@ async def list_permissionarios(
     offset = (page - 1) * page_size
     rows, total = await tr_svc.listar_permissionarios(
         db, tenant_id=tenant_id, situacao=situacao, tipo_servico=tipo_servico,
-        limit=page_size, offset=offset
+        q=q, limit=page_size, offset=offset
     )
     return Paginated(
         items=[PermissionarioOut.model_validate(r) for r in rows],

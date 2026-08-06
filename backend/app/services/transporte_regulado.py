@@ -105,31 +105,56 @@ async def listar_permissionarios(
     tenant_id: int,
     situacao: str | None = None,
     tipo_servico: str | None = None,
+    q: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[Permissionario], int]:
-    stmt = select(Permissionario).where(
+    """Lista permissionários, com busca por nome ou CPF.
+
+    `q` entrou pela P6: o seletor de ocupante de vaga precisa achar quem está
+    além dos 50 primeiros, e sem busca no servidor a tela seria inutilizável em
+    município com cadastro grande.
+
+    As condições passaram a ser montadas UMA vez. Antes eram escritas duas — na
+    consulta e na contagem — e é assim que `total` diverge de `items` quando
+    alguém acrescenta filtro a só uma das cópias. Aconteceu na busca de
+    alvarás; acrescentar `q` sobre a duplicação teria repetido o defeito.
+    """
+    condicoes = [
         Permissionario.tenant_id == tenant_id,
         Permissionario.excluido.is_(False),
-    )
+    ]
     if situacao is not None:
-        stmt = stmt.where(Permissionario.situacao == situacao)
+        condicoes.append(Permissionario.situacao == situacao)
     if tipo_servico is not None:
-        stmt = stmt.where(Permissionario.tipo_servico == tipo_servico)
-    stmt = stmt.order_by(Permissionario.nome)
+        condicoes.append(Permissionario.tipo_servico == tipo_servico)
+    termo = (q or "").strip()
+    if termo:
+        # Nome OU CPF: no balcão se digita um ou outro, e o CPF é o que o
+        # atendente tem no documento em mãos.
+        condicoes.append(
+            _or(
+                func.lower(Permissionario.nome).like(f"%{termo.lower()}%"),
+                Permissionario.cpf.like(f"%{termo}%"),
+            )
+        )
 
-    # Contar total antes de limitar
-    count_stmt = select(func.count(Permissionario.id)).where(
-        Permissionario.tenant_id == tenant_id,
-        Permissionario.excluido.is_(False),
+    total = (
+        await db.execute(select(func.count(Permissionario.id)).where(*condicoes))
+    ).scalar_one() or 0
+    resultado = list(
+        (
+            await db.execute(
+                select(Permissionario)
+                .where(*condicoes)
+                .order_by(Permissionario.nome)
+                .limit(limit)
+                .offset(offset)
+            )
+        )
+        .scalars()
+        .all()
     )
-    if situacao is not None:
-        count_stmt = count_stmt.where(Permissionario.situacao == situacao)
-    if tipo_servico is not None:
-        count_stmt = count_stmt.where(Permissionario.tipo_servico == tipo_servico)
-    total = (await db.execute(count_stmt)).scalar_one() or 0
-
-    resultado = list((await db.execute(stmt.limit(limit).offset(offset))).scalars().all())
     return resultado, total
 
 

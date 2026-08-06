@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -227,22 +227,29 @@ function paginasDeModulo(dir: string, prefixo = "/m"): string[] {
 }
 
 /** Todo o código-fonte de `app/` e `components/`, concatenado. */
-function fontesDaApp(): string {
-  const partes: string[] = [];
+function arquivosDaApp(): { caminho: string; texto: string }[] {
+  const saida: { caminho: string; texto: string }[] = [];
   const anda = (dir: string) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const caminho = join(dir, e.name);
       if (e.isDirectory()) anda(caminho);
-      else if (/\.tsx?$/.test(e.name)) partes.push(readFileSync(caminho, "utf-8"));
+      else if (/\.tsx?$/.test(e.name))
+        saida.push({ caminho, texto: readFileSync(caminho, "utf-8") });
     }
   };
   anda(join(RAIZ, "app"));
   anda(join(RAIZ, "components"));
   anda(join(RAIZ, "lib"));
+  return saida;
+}
+
+function fontesDaApp(): string {
   // Junta com quebra de linha via String.fromCharCode(10): escrever a
   // sequencia de escape por ferramenta materializa o byte real e quebra a
   // string — aconteceu nesta mesma linha.
-  return partes.join(String.fromCharCode(10));
+  return arquivosDaApp()
+    .map((a) => a.texto)
+    .join(String.fromCharCode(10));
 }
 
 describe("P5.2 — nenhuma tela de módulo fica órfã", () => {
@@ -286,13 +293,40 @@ describe("P5.2 — nenhuma tela de módulo fica órfã", () => {
     return new RegExp("/" + corpo + "(?![a-z0-9-])");
   }
 
+  /**
+   * Fontes de FORA do diretório da própria rota.
+   *
+   * Sem este recorte a guarda se satisfaz com auto-referência: a página de
+   * detalhe traz um breadcrumb apontando para a lista, a lista aponta para o
+   * detalhe, e as duas parecem citadas — com o recurso inteiro inalcançável
+   * porque ninguém no hub ou no menu aponta para a lista.
+   *
+   * Não é hipótese: descoberto na P6, invertendo. Removi o card do hub E o
+   * item do menu de `/m/transporte/pontos`, e a guarda continuou VERDE, pelo
+   * breadcrumb de `pontos/[id]`. Era o mesmo buraco que deixou Alvarás e
+   * Relatórios inalcançáveis por meses — a guarda tinha sido escrita para
+   * pegá-lo e não pegava.
+   */
+  function fontesForaDe(rota: string, arquivos: ReturnType<typeof arquivosDaApp>) {
+    // `/m/transporte/pontos` -> .../app/(app)/m/transporte/pontos.
+    // `slice(1)`, não `slice(2)`: DIR_M já termina em `m`, e descartar também
+    // o slug do módulo apontava para um diretório inexistente — nada era
+    // excluído e o recorte não recortava nada. Peguei isso invertendo, que é
+    // o único jeito.
+    const dirDaRota = join(DIR_M, ...rota.split("/").filter(Boolean).slice(1));
+    return arquivos
+      .filter((a) => !a.caminho.startsWith(dirDaRota + sep))
+      .map((a) => a.texto)
+      .join(String.fromCharCode(10));
+  }
+
   it("toda página sob m/ é citada em algum href da app", () => {
-    const fontes = fontesDaApp();
+    const arquivos = arquivosDaApp();
     const orfas = paginasDeModulo(DIR_M).filter((rota) => {
       // A raiz do módulo (`/m/<slug>`) vem do menu e do launcher; o alvo aqui
       // são as subpáginas.
       if (rota.split("/").filter(Boolean).length <= 2) return false;
-      return !padraoDaRota(rota).test(fontes);
+      return !padraoDaRota(rota).test(fontesForaDe(rota, arquivos));
     });
 
     expect(

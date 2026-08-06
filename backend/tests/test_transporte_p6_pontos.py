@@ -581,3 +581,72 @@ async def test_http_usuario_comum_ocupa_e_le_o_mapa(admin_engine):
             assert len(mapa["vagas"]) == 2
     finally:
         await _limpar(admin_engine, t.id)
+
+
+# ------------------------------------------- busca de permissionario (P6)
+
+
+@pytest.mark.asyncio
+async def test_busca_de_permissionario_por_nome_e_cpf(admin_engine):
+    """`q` entrou pela P6: sem ela o seletor de ocupante só enxerga os 50
+    primeiros, e a tela fica inutilizável em município com cadastro grande.
+
+    Afirma também que `total` acompanha o filtro. As condições eram escritas
+    DUAS vezes nesse service — na consulta e na contagem — e acrescentar `q` a
+    só uma das cópias faria a tela mostrar 1 resultado dizendo "de 300".
+    """
+    t = await _provisionar(admin_engine)
+    try:
+        alvo = await _permissionario(admin_engine, t.id, nome="Joaquim Nabuco")
+        await _permissionario(admin_engine, t.id, nome="Maria da Silva")
+
+        async with _sm(admin_engine)() as db:
+            itens, total = await tr.listar_permissionarios(
+                db, tenant_id=t.id, q="nabuco"
+            )
+            assert [i.id for i in itens] == [alvo.id]
+            assert total == 1, "o total tem de acompanhar o filtro"
+
+            # Por CPF, que é o que o atendente tem no documento em mãos.
+            por_cpf, total_cpf = await tr.listar_permissionarios(
+                db, tenant_id=t.id, q=alvo.cpf[:6]
+            )
+            assert alvo.id in [i.id for i in por_cpf] and total_cpf >= 1
+
+            # Sem `q`, os dois voltam.
+            todos, total_todos = await tr.listar_permissionarios(db, tenant_id=t.id)
+            assert total_todos == 2 and len(todos) == 2
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_http_a_busca_de_permissionario_chega_ao_service(admin_engine):
+    """Prova a FIAÇÃO, não a regra.
+
+    Um `q` declarado no router e esquecido na chamada ao service passaria em
+    toda a bateria de service acima. Foi exatamente esse defeito que a busca de
+    alvarás teve: o termo estava na `queryKey` sem ir para a API.
+    """
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            async with s.begin():
+                await contratar(s, t.id, ["transporte"])
+        await _permissionario(admin_engine, t.id, nome="Joaquim Nabuco")
+        await _permissionario(admin_engine, t.id, nome="Maria da Silva")
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+        _as_user(admin_engine, uid, t.id, t.slug)()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            r = await c.get(
+                "/api/v2/transporte-regulado/permissionarios", params={"q": "nabuco"}
+            )
+            assert r.status_code == 200, r.text
+            corpo = r.json()
+            assert corpo["total"] == 1, corpo
+            assert corpo["items"][0]["nome"] == "Joaquim Nabuco"
+    finally:
+        await _limpar(admin_engine, t.id)
