@@ -32,6 +32,7 @@ from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
@@ -45,7 +46,10 @@ from app.schemas.transporte_regulado import (
     PontoUpdate,
 )
 from app.services import transporte_regulado as tr
+from app.services.modulos import contratar
 from tests.test_transporte_p5_2_atendimento import (
+    _as_user,
+    _cria_usuario_comum_transporte,
     _permissionario,
     _provisionar,
     _sm,
@@ -524,5 +528,56 @@ async def test_alvara_para_permissionario_sem_vaga_continua_emitindo(admin_engin
                 ),
             )
         assert alvara.id is not None
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+# ----------------------------------------------------------------- HTTP
+
+
+@pytest.mark.asyncio
+async def test_http_usuario_comum_ocupa_e_le_o_mapa(admin_engine):
+    """Usuário COMUM, não super-usuário.
+
+    O bypass de SU em `auth/perms.py` retorna antes do `getattr(item, action)`,
+    e foi assim que dez rotas do transporte ficaram devolvendo 500 para
+    operador não-SU sem a suíte notar. Toda rota nova precisa de um teste que
+    passe por este caminho.
+    """
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            async with s.begin():
+                # `contratar` RECONCILIA: passar só `["transporte"]`
+                # descontrata os demais. É o que se quer num tenant de teste, e
+                # é como a P5.2 faz.
+                await contratar(s, t.id, ["transporte"])
+
+        p = await _ponto(admin_engine, t.id, nome="Ponto HTTP", vagas=2)
+        perm = await _permissionario(admin_engine, t.id, nome="Beltrano")
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+        _as_user(admin_engine, uid, t.id, t.slug)()
+        base = "/api/v2/transporte-regulado/pontos"
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            r = await c.get(base)
+            assert r.status_code == 200, r.text
+            # Envelope paginado, não array: declarar `X[]` no `api.ts` deixaria
+            # o tsc verde e a tela diria "nenhum registro" com dado no banco.
+            assert set(r.json()) >= {"items", "total", "page", "page_size"}
+
+            r = await c.post(
+                f"{base}/{p.id}/ocupacoes",
+                json={"numero_vaga": 1, "id_permissionario": perm.id},
+            )
+            assert r.status_code in (200, 201), r.text
+
+            r = await c.get(f"{base}/{p.id}/mapa")
+            assert r.status_code == 200, r.text
+            mapa = r.json()
+            assert mapa["vagas_ocupadas"] == 1
+            assert len(mapa["vagas"]) == 2
     finally:
         await _limpar(admin_engine, t.id)

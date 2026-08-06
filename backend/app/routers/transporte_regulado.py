@@ -38,6 +38,13 @@ from ..schemas.transporte_regulado import (
     AlvaraOut,
     AlvaraUpdate,
     AlvaraRenovarInput,
+    PontoCreate,
+    PontoOut,
+    PontoUpdate,
+    PontoMapaOut,
+    PontoOcupacaoOut,
+    PontoOcuparInput,
+    PontoLiberarInput,
     AlvaraDocumentoCreate,
     AlvaraDocumentoOut,
     AlvaraDocumentoUpdate,
@@ -1730,3 +1737,193 @@ async def notificar_faltosos(
     return [
         RecadastramentoNotificacaoResultadoOut.model_validate(r) for r in resultados
     ]
+
+
+# ============================================================ P6: pontos e vagas
+
+pontos_router = APIRouter(
+    prefix="/transporte-regulado/pontos", tags=["transporte-regulado"]
+)
+
+
+def _ponto_out(ponto, ocupadas: int) -> PontoOut:
+    saida = PontoOut.model_validate(ponto)
+    saida.vagas_ocupadas = ocupadas
+    return saida
+
+
+@pontos_router.get("", response_model=Paginated[PontoOut])
+async def list_pontos(
+    q: str | None = Query(None, description="Busca por nome do ponto (substring)"),
+    tipo_servico: str | None = None,
+    situacao: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Paginated[PontoOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_pontos(
+        db,
+        tenant_id=tenant_id,
+        q=q,
+        tipo_servico=tipo_servico,
+        situacao=situacao,
+        limit=page_size,
+        offset=offset,
+    )
+    return Paginated(
+        items=[_ponto_out(p, n) for p, n in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@pontos_router.post("", response_model=PontoOut, status_code=status.HTTP_201_CREATED)
+async def create_ponto(
+    payload: PontoCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> PontoOut:
+    ponto = await tr_svc.criar_ponto(db, tenant_id=tenant_id, payload=payload)
+    await db.commit()
+    await db.refresh(ponto)
+    return _ponto_out(ponto, 0)
+
+
+# ATENÇÃO à ordem: as rotas de segmento literal (`/{id}/mapa`, `/{id}/ocupacoes`)
+# vêm depois de `/{ponto_id}` mas NÃO conflitam, porque o literal está no
+# segundo segmento. O que não pode acontecer é uma rota como `/vagas-livres`
+# depois de `/{ponto_id}` — o FastAPI casa na ordem de declaração e a
+# paramétrica engoliria a literal, devolvendo 422 sem chegar ao handler. Isso
+# aconteceu TRÊS vezes neste arquivo; `tests/test_guarda_ordem_rotas.py` varre a
+# aplicação inteira e reprova.
+@pontos_router.get("/{ponto_id}", response_model=PontoOut)
+async def get_ponto(
+    ponto_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> PontoOut:
+    ponto, ocupadas = await tr_svc.obter_ponto(
+        db, tenant_id=tenant_id, ponto_id=ponto_id
+    )
+    return _ponto_out(ponto, ocupadas)
+
+
+@pontos_router.put("/{ponto_id}", response_model=PontoOut)
+async def update_ponto(
+    ponto_id: int,
+    payload: PontoUpdate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> PontoOut:
+    ponto = await tr_svc.atualizar_ponto(
+        db, tenant_id=tenant_id, ponto_id=ponto_id, payload=payload
+    )
+    await db.commit()
+    _, ocupadas = await tr_svc.obter_ponto(db, tenant_id=tenant_id, ponto_id=ponto_id)
+    return _ponto_out(ponto, ocupadas)
+
+
+@pontos_router.delete("/{ponto_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_ponto(
+    ponto_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await tr_svc.excluir_ponto(db, tenant_id=tenant_id, ponto_id=ponto_id)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@pontos_router.get("/{ponto_id}/mapa", response_model=PontoMapaOut)
+async def get_mapa_de_vagas(
+    ponto_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> PontoMapaOut:
+    return PontoMapaOut.model_validate(
+        await tr_svc.mapa_de_vagas(db, tenant_id=tenant_id, ponto_id=ponto_id)
+    )
+
+
+@pontos_router.get(
+    "/{ponto_id}/ocupacoes", response_model=Paginated[PontoOcupacaoOut]
+)
+async def list_ocupacoes(
+    ponto_id: int,
+    apenas_vigentes: bool = False,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Paginated[PontoOcupacaoOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_ocupacoes(
+        db,
+        tenant_id=tenant_id,
+        ponto_id=ponto_id,
+        apenas_vigentes=apenas_vigentes,
+        limit=page_size,
+        offset=offset,
+    )
+    return Paginated(
+        items=[PontoOcupacaoOut.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@pontos_router.post(
+    "/{ponto_id}/ocupacoes",
+    response_model=PontoOcupacaoOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ocupar_vaga(
+    ponto_id: int,
+    payload: PontoOcuparInput,
+    # `atualizar` e não `inserir`: ocupar uma vaga não cria um cadastro novo,
+    # muda o estado de um ponto existente. Quem pode remanejar vaga é quem
+    # administra o ponto.
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> PontoOcupacaoOut:
+    ocupacao = await tr_svc.ocupar_vaga(
+        db, tenant_id=tenant_id, ponto_id=ponto_id, payload=payload
+    )
+    await db.commit()
+    await db.refresh(ocupacao)
+    return PontoOcupacaoOut.model_validate(ocupacao)
+
+
+@pontos_router.post(
+    "/{ponto_id}/ocupacoes/{ocupacao_id}/liberar", response_model=PontoOcupacaoOut
+)
+async def liberar_vaga(
+    ponto_id: int,
+    ocupacao_id: int,
+    payload: PontoLiberarInput,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> PontoOcupacaoOut:
+    ocupacao = await tr_svc.liberar_vaga(
+        db,
+        tenant_id=tenant_id,
+        ponto_id=ponto_id,
+        ocupacao_id=ocupacao_id,
+        payload=payload,
+    )
+    await db.commit()
+    await db.refresh(ocupacao)
+    return PontoOcupacaoOut.model_validate(ocupacao)

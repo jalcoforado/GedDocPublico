@@ -1839,6 +1839,74 @@ export type TipoServico =
   | "transporte_distrital"
   | "aplicativo"
   | "outro";
+// ------------------------------------------------------------- P6: pontos
+
+export type PontoSituacao = "ativo" | "inativo";
+
+export interface Ponto {
+  id: number;
+  nome: string;
+  codigo: string | null;
+  tipo_servico: TipoServico;
+  logradouro: string | null;
+  numero: string | null;
+  complemento: string | null;
+  bairro: string | null;
+  cep: string | null;
+  vagas_total: number;
+  situacao: PontoSituacao;
+  observacoes: string | null;
+  vagas_ocupadas: number;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export type PontoCreate = Omit<
+  Ponto,
+  "id" | "vagas_ocupadas" | "criado_em" | "atualizado_em"
+>;
+export type PontoUpdate = Partial<PontoCreate>;
+
+export interface PontoOcupacao {
+  id: number;
+  id_ponto: number;
+  numero_vaga: number;
+  id_permissionario: number;
+  nome_permissionario: string | null;
+  cpf_permissionario: string | null;
+  desde: string;
+  ate: string | null;
+  motivo_liberacao: string | null;
+  observacoes: string | null;
+}
+
+/** `ocupacao` nula = vaga livre. O mapa traz SEMPRE as `vagas_total` vagas. */
+export interface PontoVaga {
+  numero_vaga: number;
+  ocupacao: PontoOcupacao | null;
+}
+
+export interface PontoMapa {
+  id_ponto: number;
+  nome: string;
+  situacao: PontoSituacao;
+  vagas_total: number;
+  vagas_ocupadas: number;
+  vagas: PontoVaga[];
+}
+
+export interface PontoOcuparInput {
+  numero_vaga: number;
+  id_permissionario: number;
+  desde?: string | null;
+  observacoes?: string | null;
+}
+
+export interface PontoLiberarInput {
+  ate?: string | null;
+  motivo_liberacao?: string | null;
+}
+
 export type PermissionarioSituacao =
   | "ativo"
   | "pendente"
@@ -3163,6 +3231,54 @@ export const api = {
           { method: "PUT", body: JSON.stringify(data) },
         ),
     },
+  },
+  pontos: {
+    // Toda listagem aqui é `Paginated<...>`, casando com o `response_model` do
+    // backend. Declarar `Ponto[]` deixaria o tsc verde e estouraria no
+    // navegador com `.map is not a function` — ou pior, `data?.length` diria
+    // "nenhum registro" com dado no banco. Aconteceu por 11 dias no transporte.
+    list: (params?: {
+      q?: string;
+      tipo_servico?: string;
+      situacao?: string;
+      page?: number;
+      page_size?: number;
+    }) =>
+      request<Paginated<Ponto>>(
+        `/transporte-regulado/pontos${qs(params ?? {})}`,
+      ),
+    get: (id: number) => request<Ponto>(`/transporte-regulado/pontos/${id}`),
+    create: (data: PontoCreate) =>
+      request<Ponto>("/transporte-regulado/pontos", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: PontoUpdate) =>
+      request<Ponto>(`/transporte-regulado/pontos/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) =>
+      request<void>(`/transporte-regulado/pontos/${id}`, { method: "DELETE" }),
+    mapa: (id: number) =>
+      request<PontoMapa>(`/transporte-regulado/pontos/${id}/mapa`),
+    ocupacoes: (
+      id: number,
+      params?: { apenas_vigentes?: boolean; page?: number; page_size?: number },
+    ) =>
+      request<Paginated<PontoOcupacao>>(
+        `/transporte-regulado/pontos/${id}/ocupacoes${qs(params ?? {})}`,
+      ),
+    ocupar: (id: number, data: PontoOcuparInput) =>
+      request<PontoOcupacao>(`/transporte-regulado/pontos/${id}/ocupacoes`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    liberar: (id: number, ocupacaoId: number, data: PontoLiberarInput) =>
+      request<PontoOcupacao>(
+        `/transporte-regulado/pontos/${id}/ocupacoes/${ocupacaoId}/liberar`,
+        { method: "POST", body: JSON.stringify(data) },
+      ),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),
