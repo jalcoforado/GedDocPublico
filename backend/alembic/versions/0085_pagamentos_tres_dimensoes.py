@@ -36,13 +36,35 @@ FORCE) — o INSERT...SELECT da concessão de `pagamento_gerir` precisa carregar
 (`utils.usuario.id_unidade_trabalho`, `utils.grupo_transacao.id_grupo/
 id_transacao/inserir/atualizar/excluir`, `utils.unidade_trabalho`,
 `utils.transacao.transacao/codigo`) bateram com o schema real.
+
+Achados da revisão de qualidade (corrigidos nesta versão, sem tocar nas duas
+decisões do Jorge — `DELETE` da linha do id_unidade e os testes vermelhos que
+a Tarefa 3 fecha):
+
+- As três passadas de backfill de `id_unidade` filtram tenant explicitamente
+  (`c.tenant_id = d.tenant_id` / `u.tenant_id = d.tenant_id`) — a FK do
+  Postgres não filtra por tenant, e sem o predicado um contrato/usuário de
+  outro tenant gravaria a unidade errada em silêncio.
+- Pré-checagem em `DO $$...$$` antes do `SET NOT NULL` de `id_unidade`:
+  tenant sem nenhuma `unidade_trabalho` ativa deixaria débito vivo sem
+  unidade, e o `SET NOT NULL` cru estouraria como o container morrendo no
+  start (o entrypoint roda `alembic upgrade head` com `set -e`). Agora falha
+  com `RAISE EXCEPTION` dizendo quantos débitos e em quais tenants.
+- `situacao_tramitacao`, `situacao_fila` e `situacao_pagamento` ganharam
+  CHECK de domínio (`ck_debito_situacao_*`), com os valores exatos de
+  `TRAMITACAO`/`FILA`/`PAGAMENTO` de `app.services.pagamentos_estados` —
+  `status` e `categoria` já tinham a mesma rede nesta migration.
+- A cópia de concessão `pagamento_encaminhar` → `pagamento_gerir` agora exige
+  `gt.excluido = false`: sem isso, uma concessão revogada seria copiada ATIVA.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 import sqlalchemy as sa
 from alembic import op
+
+from app.services import pagamentos_estados as est
 
 revision: str = "0085"
 down_revision: str | Sequence[str] | None = "0084"
@@ -72,6 +94,11 @@ MAPA_BACKFILL: dict[str, tuple[str, str, str]] = {
 }
 
 
+def _lista_sql(valores: Iterable[str]) -> str:
+    """Literal SQL `'A','B','C'` a partir de um iterável, ordenado p/ diff estável."""
+    return ",".join(f"'{v}'" for v in sorted(valores))
+
+
 def upgrade() -> None:
     # ---------------------------------------------- 1. colunas das dimensões
     op.add_column("debito", sa.Column("situacao_tramitacao", sa.String(30),
@@ -98,6 +125,20 @@ def upgrade() -> None:
     for coluna in ("situacao_tramitacao", "situacao_fila", "situacao_pagamento"):
         op.alter_column("debito", coluna, nullable=False, schema=S)
 
+    # CHECK de domínio — `status` tem `ck_debito_status` e `categoria` ganha
+    # `ck_contrato_categoria` nesta mesma migration; as três dimensões novas
+    # não podiam ficar sem a mesma rede. Valores vêm de
+    # `app.services.pagamentos_estados` — mudou lá, a próxima migration ajusta.
+    op.create_check_constraint(
+        "ck_debito_situacao_tramitacao", "debito",
+        f"situacao_tramitacao IN ({_lista_sql(est.TRAMITACAO)})", schema=S)
+    op.create_check_constraint(
+        "ck_debito_situacao_fila", "debito",
+        f"situacao_fila IN ({_lista_sql(est.FILA)})", schema=S)
+    op.create_check_constraint(
+        "ck_debito_situacao_pagamento", "debito",
+        f"situacao_pagamento IN ({_lista_sql(est.PAGAMENTO)})", schema=S)
+
     # ------------------------------------------------------- 2. id_unidade
     op.add_column("debito", sa.Column("id_unidade", sa.Integer(), nullable=True), schema=S)
     op.create_foreign_key("fk_debito_unidade", "debito", "unidade_trabalho",
@@ -109,19 +150,26 @@ def upgrade() -> None:
     # homologação, 544 débitos não excluídos): 6 via contrato, 536 via
     # usuário, 2 via último recurso (tenants 151 e 152, cujos solicitantes não
     # tinham unidade cadastrada).
+    # As três passadas filtram tenant explicitamente — a FK do Postgres não
+    # filtra por tenant, e sem o predicado um `contrato` ou `usuario` de outro
+    # tenant gravaria a unidade errada em silêncio nesta coluna, que vira
+    # chave da fila cronológica na F3.
     op.execute(f"""
         UPDATE {S}.debito d SET id_unidade = c.id_unidade
         FROM {S}.contrato c
         WHERE d.id_contrato = c.id AND d.id_unidade IS NULL
+          AND c.tenant_id = d.tenant_id
     """)
     op.execute(f"""
         UPDATE {S}.debito d SET id_unidade = u.id_unidade_trabalho
         FROM utils.usuario u
         WHERE d.id_usuario_solicitante = u.id AND d.id_unidade IS NULL
           AND u.id_unidade_trabalho IS NOT NULL
+          AND u.tenant_id = d.tenant_id
     """)
     # Último recurso: a menor unidade do tenant. Débito sem unidade nenhuma
     # tornaria a coluna inviável como NOT NULL e quebraria a chave da fila na F3.
+    # (já filtrava tenant — `u.tenant_id = d.tenant_id` — mantido explícito.)
     op.execute(f"""
         UPDATE {S}.debito d SET id_unidade = (
             SELECT MIN(u.id) FROM utils.unidade_trabalho u
@@ -129,6 +177,32 @@ def upgrade() -> None:
         ) WHERE d.id_unidade IS NULL
     """)
     op.execute(f"DELETE FROM {S}.debito WHERE id_unidade IS NULL AND excluido = true")
+
+    # Pré-checagem: se algum débito VIVO (excluido = false) escapou das três
+    # passadas — típico de tenant sem nenhuma unidade_trabalho ativa —, o
+    # SET NOT NULL abaixo estouraria com um NotNullViolation cru. Como o
+    # entrypoint roda `alembic upgrade head` com `set -e`, isso apareceria só
+    # como container morrendo no start. Falha aqui, com diagnóstico.
+    op.execute(f"""
+        DO $$
+        DECLARE
+            cnt integer;
+            tenants text;
+        BEGIN
+            SELECT count(*) INTO cnt
+            FROM {S}.debito
+            WHERE id_unidade IS NULL AND excluido = false;
+
+            IF cnt > 0 THEN
+                SELECT string_agg(DISTINCT tenant_id::text, ', ' ORDER BY tenant_id::text)
+                  INTO tenants
+                  FROM {S}.debito
+                 WHERE id_unidade IS NULL AND excluido = false;
+                RAISE EXCEPTION 'migration 0085: % débito(s) vivo(s) ficaram sem id_unidade após o backfill, nos tenants [%]. Esses tenants não têm nenhuma utils.unidade_trabalho ativa (excluido = false) — cadastre ao menos uma unidade nesses tenants antes de aplicar esta migration.', cnt, tenants;
+            END IF;
+        END $$;
+    """)
+
     op.alter_column("debito", "id_unidade", nullable=False, schema=S)
     op.create_index("ix_debito_unidade", "debito", ["tenant_id", "id_unidade"], schema=S)
 
@@ -180,6 +254,11 @@ def upgrade() -> None:
     # Divergência frente ao plano: `utils.grupo_transacao.tenant_id` é
     # NOT NULL (a tabela tem RLS FORCE), então o INSERT precisa carregar
     # `gt.tenant_id` explicitamente — o plano original omitia essa coluna.
+    # `gt.excluido = false` é obrigatório: sem ele, um grupo cuja concessão de
+    # `pagamento_encaminhar` foi revogada (soft-delete, `excluido = true`)
+    # ganharia `pagamento_gerir` ATIVO — a cópia arrastaria uma permissão que
+    # o tenant já havia retirado. `services/permissoes.py` filtra
+    # `excluido.is_(False)` na leitura; a concessão nova tem de nascer coerente.
     op.execute("""
         INSERT INTO utils.grupo_transacao (id_grupo, id_transacao, inserir, atualizar, excluir, tenant_id)
         SELECT gt.id_grupo, novo.id, gt.inserir, gt.atualizar, gt.excluir, gt.tenant_id
@@ -187,7 +266,8 @@ def upgrade() -> None:
         JOIN utils.transacao antiga ON antiga.id = gt.id_transacao
                                    AND antiga.codigo = 'pagamento_encaminhar'
         CROSS JOIN (SELECT id FROM utils.transacao WHERE codigo = 'pagamento_gerir') novo
-        WHERE NOT EXISTS (
+        WHERE gt.excluido = false
+          AND NOT EXISTS (
             SELECT 1 FROM utils.grupo_transacao x
             WHERE x.id_grupo = gt.id_grupo AND x.id_transacao = novo.id
         )
@@ -206,6 +286,9 @@ def downgrade() -> None:
     op.drop_index("ix_debito_unidade", table_name="debito", schema=S)
     op.drop_constraint("fk_debito_unidade", "debito", schema=S, type_="foreignkey")
     op.drop_column("debito", "id_unidade", schema=S)
+    op.drop_constraint("ck_debito_situacao_pagamento", "debito", schema=S, type_="check")
+    op.drop_constraint("ck_debito_situacao_fila", "debito", schema=S, type_="check")
+    op.drop_constraint("ck_debito_situacao_tramitacao", "debito", schema=S, type_="check")
     op.drop_column("debito", "situacao_pagamento", schema=S)
     op.drop_column("debito", "situacao_fila", schema=S)
     op.drop_column("debito", "situacao_tramitacao", schema=S)

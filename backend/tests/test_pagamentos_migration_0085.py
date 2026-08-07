@@ -4,14 +4,43 @@ O que este arquivo protege não é a migration em si (o CI já a roda em banco
 limpo) e sim o CONTRATO: toda combinação que o backfill produz tem de ser
 válida nas três dimensões, e o `status` derivado dela tem de bater com o
 `status` que a linha já tinha. Se não bater, o backfill perdeu informação.
+
+Os testes de mapa rodam sobre `_migration.MAPA_BACKFILL`, importado de verdade
+do arquivo da migration (via `importlib`, não uma segunda cópia colada aqui).
+Antes desta correção, `MAPA` era uma TERCEIRA transcrição do §4.5, e o teste
+só comparava contra si mesmo — editar `MAPA_BACKFILL` na migration sem editar
+este arquivo passava verde com dado backfilled errado.
+`test_mapa_do_teste_bate_com_a_migration` é o que fecha esse buraco.
 """
+import importlib.util
+from pathlib import Path
+
 import pytest
 from sqlalchemy import text
 
 from app.services import pagamentos_estados as est
 
-# Espelha o mapa do §4.5 da spec. Mudou lá, muda aqui, e o teste abaixo
-# confere que o resultado continua consistente.
+_MIGRATION_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "alembic" / "versions" / "0085_pagamentos_tres_dimensoes.py"
+)
+
+
+def _carregar_migration_0085():
+    spec = importlib.util.spec_from_file_location(
+        "aprimora_migration_0085", _MIGRATION_PATH
+    )
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+_migration = _carregar_migration_0085()
+
+# Transcrição independente do §4.5 da spec — existe para o teste abaixo
+# comparar contra `_migration.MAPA_BACKFILL` de verdade, e não contra si
+# mesma. Mudou na spec, muda aqui E na migration; o teste reprova se as duas
+# cópias divergirem.
 MAPA = {
     "RASCUNHO":               ("RASCUNHO", "NAO_REGISTRADA", "NAO_INICIADA"),
     "EM_VALIDACAO":           ("AGUARDANDO_VALIDACAO", "NAO_REGISTRADA", "NAO_INICIADA"),
@@ -32,14 +61,20 @@ MAPA = {
 }
 
 
+def test_mapa_do_teste_bate_com_a_migration():
+    """Sem esta asserção, os testes abaixo validariam uma cópia isolada do
+    mapa — verde mesmo que `MAPA_BACKFILL` da migration 0085 divergisse."""
+    assert MAPA == _migration.MAPA_BACKFILL
+
+
 def test_mapa_cobre_os_dezesseis_status_legados():
     from app.schemas.pagamentos import StatusDebito
     legados = set(StatusDebito.__args__)
-    assert set(MAPA) == legados
+    assert set(_migration.MAPA_BACKFILL) == legados
 
 
 def test_toda_combinacao_do_mapa_e_valida():
-    for legado, (tram, fila, pag) in MAPA.items():
+    for legado, (tram, fila, pag) in _migration.MAPA_BACKFILL.items():
         assert tram in est.TRAMITACAO, legado
         assert fila in est.FILA, legado
         assert pag in est.PAGAMENTO, legado
@@ -56,7 +91,7 @@ def test_backfill_nao_perde_informacao():
     colapsos = {"VALIDADO": "ENVIADO_SECRETARIO",
                 "AGUARDANDO_AUTORIZACAO": "ENVIADO_SECRETARIO",
                 "CONCILIADO": "PAGO"}
-    for legado, (tram, fila, pag) in MAPA.items():
+    for legado, (tram, fila, pag) in _migration.MAPA_BACKFILL.items():
         esperado = colapsos.get(legado, legado)
         assert est.status_legado(tram, fila, pag) == esperado, legado
 
