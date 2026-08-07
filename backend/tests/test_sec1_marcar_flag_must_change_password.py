@@ -590,7 +590,7 @@ async def test_usuario_sem_flag_alterar_senha_sem_efeito_na_flag(admin_engine):
             u = (
                 await s.execute(select(Usuario).where(Usuario.id == uid))
             ).scalar_one()
-            await alterar_senha(s, usuario=u, senha_atual="velha", nova_senha="nova-1")
+            await alterar_senha(s, usuario=u, senha_atual="velha", nova_senha="nova-senha-1")
         async with _sm(admin_engine)() as s:
             u = (
                 await s.execute(select(Usuario).where(Usuario.id == uid))
@@ -599,7 +599,7 @@ async def test_usuario_sem_flag_alterar_senha_sem_efeito_na_flag(admin_engine):
         # Senha nova autentica via bcrypt; MD5 permanece vazio.
         assert u.senha == ""
         ok, _ = verify_password(
-            "nova-1", bcrypt_hash=u.senha_bcrypt, md5_hash=None
+            "nova-senha-1", bcrypt_hash=u.senha_bcrypt, md5_hash=None
         )
         assert ok is True
     finally:

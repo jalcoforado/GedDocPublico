@@ -3,12 +3,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..auth.password import SENHA_MINIMA
+
 
 class CadastroCidadaoRequest(BaseModel):
     cpf_cnpj: str = Field(min_length=11, max_length=14)
     nome: str = Field(min_length=2, max_length=100)
     email: str = Field(min_length=3, max_length=100)
-    senha: str = Field(min_length=4, max_length=100)
+    senha: str = Field(min_length=SENHA_MINIMA, max_length=100)
     telefone: str | None = Field(default=None, max_length=20)
     telefone_whatsapp: bool = False
 

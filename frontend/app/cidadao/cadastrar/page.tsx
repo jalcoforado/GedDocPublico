@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { api } from "@/lib/api";
+import { SENHA_MINIMA } from "@/lib/senha";
 
 export default function CidadaoCadastrarPage() {
   const router = useRouter();
@@ -112,9 +113,11 @@ export default function CidadaoCadastrarPage() {
                 onChange={(e) => setForm({ ...form, senha: e.target.value })}
                 autoComplete="new-password"
                 required
-                minLength={4}
+                minLength={SENHA_MINIMA}
               />
-              <p className="mt-1 text-xs text-muted-foreground">Mínimo 4 caracteres.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Mínimo {SENHA_MINIMA} caracteres.
+              </p>
             </div>
             <div>
               <Label htmlFor="tel">Telefone (opcional)</Label>

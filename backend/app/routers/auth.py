@@ -67,7 +67,13 @@ async def login(
         )
 
     if needs_rehash:
+        # Conversão da credencial legada no primeiro uso: bcrypt entra e o MD5
+        # sai no mesmo ato. O rehash sozinho só ACRESCENTA — sem o zerar, a
+        # linha guardaria um hash reversível ao lado do bcrypt indefinidamente.
+        # Efeito colateral desejado: desbloqueia a assinatura, que recusa
+        # credencial legada (AssinaturaCredencialLegadaError, HTTP 409).
         user.senha_bcrypt = hash_password(payload.senha)
+        user.senha = ""
         await db.commit()
 
     secret = await get_jwt_secret(db)

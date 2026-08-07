@@ -226,6 +226,47 @@ descoberta da interface pela rota default, falhando se ela não existir, porque 
 `127.0.0.1`, mas fora desta camada. `test_guarda_portas_publicadas.py` agora cruza o compose com a
 lista `PORTAS=` e reprova serviço publicado que o firewall não cubra.
 
+### ~~1.0.04 O cadastro público de cidadão gravava a senha em MD5~~ — FECHADO em 2026-08-06
+
+`services/cidadao_auth.py::cadastrar` gravava `senha=hash_md5(payload.senha)` ao lado do bcrypt,
+"espelhando `Positiv\Hash`" — compatibilidade com o portal PHP. MD5 sem sal de senha escolhida por
+pessoa é reversível por rainbow table em tempo de consulta: na prática a senha estava em claro, num
+banco compartilhado, para servir um sistema que este projeto decidiu não sustentar.
+
+Três coisas tornam isto pior do que a soma das partes, e valem como padrão a procurar em outro
+lugar:
+
+- **Era a última exceção, não a regra.** Provisionamento, criação de usuário, reset e troca já
+  gravavam `senha=""` desde o SEC-1. Sobrou exatamente um caminho — e o mais exposto de todos:
+  cadastro público, sem convite e sem servidor no meio. Um caminho esquecido numa migração que
+  "terminou" não se parece com defeito; parece com o código antigo que ninguém tocou.
+- **O piso de senha estava invertido.** O cadastro de cidadão exigia **4** caracteres; a troca de
+  senha do servidor municipal exigia **6**. A porta da rua era mais fraca que a de dentro. E o 6
+  estava escrito à mão em dois lugares (`schemas/auth.py` e `services/conta.py`), que é como dois
+  números que deveriam ser um só acabam divergindo.
+- **O rehash só acrescentava.** O login convertia MD5→bcrypt mas **não apagava** o MD5, então toda
+  linha convertida seguia guardando o hash reversível ao lado do bcrypt, para sempre. `conta.py` e
+  `usuario_senha.py` já zeravam; o login, não.
+
+Entregue: `SENHA_MINIMA = 8` como número único (NIST SP 800-63B §5.1.1.2), aplicado ao cadastro de
+cidadão, ao `nova_senha` e ao `conta.py`; cadastro gravando só bcrypt; login **de cidadão e de
+admin** apagando o MD5 no ato da conversão; `lib/senha.ts` no frontend com a mesma unificação.
+`test_guarda_md5.py` (3 asserções) e `test_senha_sem_md5.py` (5), com as **seis** assertivas
+estruturais provadas por inversão.
+
+A guarda foi escrita duas vezes. A primeira, em regex, deu cinco falsos positivos de duas espécies:
+leu o próprio docstring como código, e confundiu `provisionar_tenant(senha=<em claro>)` — argumento
+para uma função que aplica bcrypt lá dentro — com gravação na coluna. Regex não distingue essas
+coisas; `ast` distingue. **Guarda que grita no caso legítimo é desligada por quem tropeça nela**, e
+aí não guarda mais nada.
+
+**O que NÃO foi feito, de propósito:** `verify_md5` continua vivo, e nenhuma linha existente foi
+convertida em massa. Apagar a verificação hoje trancaria para fora todo usuário cujo banco só tem
+MD5 e que ainda não fez login. A rampa é o próprio login, um usuário por vez. O dia em que
+`verify_md5` puder morrer é o dia em que `SELECT count(*) FROM utils.usuario WHERE senha <> ''`
+(e o mesmo em `usuario_externo`) der zero nos ambientes vivos — é uma medição, não um teste, e por
+isso não tem guarda que a antecipe.
+
 ### 1.0 Deriva de `APP_NAME` no ambiente de dev — RBAC apontando para o sistema errado
 
 *(Descoberto em 2026-07-28, durante a fatia F1 da modularização.)*

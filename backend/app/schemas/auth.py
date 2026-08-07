@@ -1,8 +1,13 @@
 from pydantic import BaseModel, Field
 
+from ..auth.password import SENHA_MINIMA
+
 
 class LoginRequest(BaseModel):
     email: str = Field(min_length=3, max_length=255)
+    # `min_length=1` de propósito: o piso de `SENHA_MINIMA` vale para senha NOVA,
+    # não para autenticar. Aplicá-lo aqui trancaria para fora quem já tem senha
+    # curta — e ainda contaria ao atacante, pelo 422, quantos caracteres não são.
     senha: str = Field(min_length=1, max_length=255)
 
 
@@ -37,4 +42,4 @@ class MeResponse(BaseModel):
 
 class AlterarSenhaRequest(BaseModel):
     senha_atual: str = Field(min_length=1, max_length=255)
-    nova_senha: str = Field(min_length=6, max_length=255)
+    nova_senha: str = Field(min_length=SENHA_MINIMA, max_length=255)

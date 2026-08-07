@@ -15,7 +15,7 @@ from __future__ import annotations
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.password import hash_password, verify_password
+from ..auth.password import SENHA_MINIMA, hash_password, verify_password
 from ..models import Usuario
 from .audit import log as audit_log
 
@@ -37,8 +37,12 @@ async def alterar_senha(
     )
     if not ok:
         raise ContaError("Senha atual incorreta")
-    if len(nova_senha) < 6:
-        raise ContaError("A nova senha deve ter ao menos 6 caracteres")
+    # Redundante com o `min_length` do schema quando a chamada vem por HTTP, e
+    # é a ÚNICA barreira quando vem de dentro (o service é chamado direto por
+    # CLI e por teste). Vale a duplicação; o que não vale é o número duplicado,
+    # que foi como o schema e este `if` ficaram cada um com o seu.
+    if len(nova_senha) < SENHA_MINIMA:
+        raise ContaError(f"A nova senha deve ter ao menos {SENHA_MINIMA} caracteres")
 
     # Grava apenas bcrypt — desbloqueia a assinatura (sem dependência de MD5).
     usuario.senha_bcrypt = hash_password(nova_senha)

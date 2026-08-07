@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
+import { SENHA_MINIMA } from "@/lib/senha";
 
 interface TrocarSenhaCardProps {
   /** SEC-1 Commit 5 — callback executado após a troca bem-sucedida.
@@ -47,7 +48,8 @@ export function TrocarSenhaCard({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
-    if (nova.length < 6) return setErr("A nova senha deve ter ao menos 6 caracteres.");
+    if (nova.length < SENHA_MINIMA)
+      return setErr(`A nova senha deve ter ao menos ${SENHA_MINIMA} caracteres.`);
     if (nova !== confirma) return setErr("A confirmação não confere com a nova senha.");
     m.mutate();
   }

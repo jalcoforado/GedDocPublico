@@ -1,10 +1,19 @@
 """Auth do cidadão (usuário externo).
 
-Senha em MD5, espelhando `Positiv\\Hash` (mesma compatibilidade do admin login).
-Cadastro busca duplicidade por CPF/CNPJ DENTRO do tenant atual — a mesma pessoa
-pode existir como cidadão em mais de uma prefeitura, mas no mesmo tenant é único.
+Senha **só em bcrypt** (`senha_bcrypt`). Cadastro busca duplicidade por CPF/CNPJ
+DENTRO do tenant atual — a mesma pessoa pode existir como cidadão em mais de uma
+prefeitura, mas no mesmo tenant é único.
 
 Fase 13a: cadastrar e login operam dentro de um tenant.
+
+Até 2026-08-06 o cadastro também gravava `senha=hash_md5(...)` "espelhando
+`Positiv\\Hash`" — um hash sem sal, reversível por rainbow table, de senha
+escolhida pelo cidadão. Era o ÚLTIMO gravador de MD5 do sistema; todo o resto
+(provisionamento, criação de usuário, reset, troca) já gravava `senha=""`. O
+racional era compatibilidade com o portal PHP, que este projeto não sustenta
+mais. Ver `auth/password.py` para a política, `tests/test_guarda_md5.py` para a
+guarda que impede a volta e `tests/test_cidadao_senha_sem_md5.py` para o
+comportamento.
 """
 from __future__ import annotations
 
@@ -14,7 +23,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.password import hash_md5, hash_password, verify_password
+from ..auth.password import hash_password, verify_password
 from ..models import UsuarioExterno
 from ..schemas.cidadao import CadastroCidadaoRequest
 
@@ -55,7 +64,7 @@ async def cadastrar(
         nome=payload.nome.strip(),
         cpf_cnpj=cpf_cnpj,
         email=payload.email.strip().lower(),
-        senha=hash_md5(payload.senha),
+        senha="",  # MD5 legado desabilitado — só bcrypt (ver docstring)
         senha_bcrypt=hash_password(payload.senha),
         login_govbr=False,
         ativo=True,
@@ -95,6 +104,11 @@ async def login(
     if not ok:
         raise CidadaoAuthError("CPF/CNPJ ou senha inválidos")
     if needs_rehash:
+        # Conversão da credencial legada no primeiro uso: grava bcrypt e APAGA o
+        # MD5 no mesmo ato. Sem o zerar, a linha ficaria para sempre com um hash
+        # reversível ao lado do bcrypt — o rehash sozinho não tira nada do banco,
+        # só acrescenta. Mesma regra de `services/conta.py` e `usuario_senha.py`.
         cidadao.senha_bcrypt = hash_password(senha)
+        cidadao.senha = ""
         await db.commit()
     return cidadao

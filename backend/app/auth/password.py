@@ -1,20 +1,53 @@
-"""Verificação e hashing de senhas — coexistência MD5 (legacy) ↔ bcrypt.
+"""Verificação e hashing de senhas — bcrypt, com MD5 legado só de LEITURA.
 
 Estratégia transparente (Fase 9.2):
   - `verify_password(plain, bcrypt_hash, md5_hash)`:
       * Tenta bcrypt primeiro (campo `senha_bcrypt`).
       * Cai pra MD5 (campo `senha`) se bcrypt for None ou inválido.
       * Retorna `(ok, needs_rehash)` — `needs_rehash=True` quando autenticou
-        via MD5 e ainda não tem bcrypt; o chamador deve popular `senha_bcrypt`.
+        via MD5 e ainda não tem bcrypt; o chamador deve popular `senha_bcrypt`
+        **e zerar o MD5** (ver abaixo).
   - `hash_password(plain) -> str`: sempre bcrypt.
-  - `hash_md5(plain)` / `verify_md5(...)`: mantidos para o cadastro de cidadão
-    continuar gravando MD5 em `senha` (compat PHP) enquanto também grava bcrypt.
+
+**MD5 é rampa de saída, não compatibilidade.** Desde 2026-08-06 nenhum caminho
+da aplicação GRAVA MD5 — `verify_md5` existe apenas para autenticar credencial
+que já estava no banco, e o chamador converte a linha para bcrypt no mesmo ato.
+Quem esquecer disso é reprovado por `tests/test_guarda_md5.py`.
+
+O último gravador era o cadastro de cidadão, que escrevia
+`senha=hash_md5(payload.senha)` "por compat PHP" — ou seja, criava um hash **sem
+sal e reversível por rainbow table** de uma senha escolhida pelo cidadão, num
+banco compartilhado, para servir um portal que este projeto decidiu não sustentar
+("a versão Python é tratada como independente", CLAUDE.md). O sistema todo já
+gravava `senha=""`: provisionamento, criação de usuário, reset e troca. O
+cadastro público era a única exceção, e era a mais exposta das portas.
+
+Consequência aceita e deliberada: cidadão cadastrado a partir daqui **não
+autentica no portal PHP legado**. Mesma consequência que o admin já tinha desde
+o provisionamento por CLI.
+
+`hash_md5` continua exportado porque `verify_md5` o usa e porque os testes
+precisam FABRICAR credencial legada para provar que a conversão funciona. Usá-lo
+em código de produção é o defeito que a guarda persegue.
 """
 from __future__ import annotations
 
 import hashlib
 
 import bcrypt
+
+# Mínimo de caracteres para senha escolhida por pessoa (NIST SP 800-63B §5.1.1.2
+# manda 8 para segredo escolhido pelo usuário).
+#
+# É UM número, e não um por schema, porque a divergência foi o defeito: o
+# cadastro público de cidadão exigia 4 e a troca de senha do servidor municipal
+# exigia 6 — a porta aberta na rua era mais fraca que a de dentro. O 6 ainda
+# estava duplicado entre `schemas/auth.py` e `services/conta.py`, que é como
+# números assim se separam com o tempo.
+#
+# Não vale para LOGIN: quem já tem senha curta continua entrando. Subir o piso
+# não pode virar bloqueio retroativo de quem já está cadastrado.
+SENHA_MINIMA = 8
 
 
 def hash_md5(plain: str) -> str:
