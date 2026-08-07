@@ -297,7 +297,7 @@ ST_CANCELADO = "CANCELADO"
 ST_ESTORNADO = "ESTORNADO"
 
 EDITAVEIS = (ST_RASCUNHO, ST_DEVOLVIDO)                      # pedido pode ser editado
-AUTORIZAVEIS = (ST_VALIDADO, ST_AGUARDANDO_AUTORIZACAO)  # fila da autoridade
+AUTORIZAVEIS = (ST_ENVIADO_SECRETARIO, ST_AGUARDANDO_AUTORIZACAO)  # fila da autoridade
 EM_TESOURARIA = (ST_ENVIADO_TESOURARIA, ST_EM_PROCESSAMENTO, ST_PAGO_PARCIAL)  # execução
 # Débitos cuja autorização mantém valor RESERVADO na conta pagadora (inclui
 # ESTORNADO: a autorização/OP permanece; basta re-liberar para repagar).

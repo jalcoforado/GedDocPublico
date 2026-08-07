@@ -121,7 +121,7 @@ _LEGADO_TRAMITACAO = {
     AJUSTE_GESTOR: "DEVOLVIDO",
     AJUSTE_VALIDACAO: "DEVOLVIDO",
     AJUSTE_AUTORIDADE: "DEVOLVIDO",
-    AGUARDANDO_AUTORIDADE: "VALIDADO",
+    AGUARDANDO_AUTORIDADE: "ENVIADO_SECRETARIO",
     AUTORIZADA: "AUTORIZADO",
     REJEITADA_GESTOR: "REJEITADO",
     INDEFERIDA_AUTORIDADE: "REJEITADO",
@@ -145,16 +145,12 @@ _LEGADO_PAGAMENTO = {
 def status_legado(tramitacao: str, fila: str, pagamento: str) -> str:
     """Valor de `Debito.status` correspondente às três dimensões.
 
-    Precedência: cancelamento > programado-aguardando-autoridade > execução
-    iniciada > bloqueio de fila > tramitação. Cancelamento vem primeiro
-    porque `CANCELADO` é o único estado que o legado trata como absoluto.
+    Precedência: cancelamento > execução iniciada > bloqueio de fila >
+    tramitação. Cancelamento vem primeiro porque `CANCELADO` é o único estado
+    que o legado trata como absoluto.
     """
     if tramitacao == CANCELADA:
         return "CANCELADO"
-    # Quando está programado para pagar mas ainda aguardando autoridade,
-    # é AGUARDANDO_AUTORIZACAO (não ENVIADO_TESOURARIA que vem após autorizar)
-    if tramitacao == AGUARDANDO_AUTORIDADE and pagamento == PROGRAMADA:
-        return "AGUARDANDO_AUTORIZACAO"
     if pagamento in _LEGADO_PAGAMENTO:
         return _LEGADO_PAGAMENTO[pagamento]
     if fila == BLOQUEADA and tramitacao not in TERMINAIS:
