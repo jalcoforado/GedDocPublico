@@ -17,6 +17,7 @@ from ..schemas.pagamentos import ContaElegivelOut, GrupoAutorizacaoIn
 from . import pagamentos_cadastros as cad
 from . import pagamentos_caixa as caixa
 from . import pagamentos_debitos as deb
+from . import pagamentos_estados as est
 from .pagamentos_debitos import (
     AUTORIZAVEIS, PagamentoDebitoError, _registrar_transicao, listar_parcelas, obter_debito,
     validadores_do_debito,
@@ -226,7 +227,8 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         for d in debitos:
             d.id_conta_pagadora = conta.id
             db.add(OrdemPagamentoDebito(tenant_id=tenant_id, id_ordem=op.id, id_debito=d.id))
-            _registrar_transicao(db, debito=d, novo_status="AUTORIZADO", acao="AUTORIZADO",
+            _registrar_transicao(db, debito=d, acao="AUTORIZADO",
+                                 tramitacao=est.AUTORIZADA, fila=est.ELEGIVEL,
                                  usuario_id=usuario_id, justificativa=justificativa[:255], ip=ip)
             d.atualizado_em = _utcnow()
         ordens.append(op)
@@ -303,8 +305,9 @@ async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         d = debitos_por_id[d_id]
         justificativa = f"Parcelas {', '.join(str(n) for n in sorted(numeros))}"
         if d.status in (deb.ST_AUTORIZADO, deb.ST_ESTORNADO):  # entra na tesouraria
-            _registrar_transicao(db, debito=d, novo_status=deb.ST_ENVIADO_TESOURARIA,
-                                 acao="LIBERADO", usuario_id=usuario_id, justificativa=justificativa, ip=ip)
+            _registrar_transicao(db, debito=d, acao="ENVIADO_TESOURARIA",
+                                 pagamento=est.PROGRAMADA,
+                                 usuario_id=usuario_id, justificativa=justificativa, ip=ip)
         else:  # já em tesouraria: apenas registra a liberação adicional
             db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
                                    status_novo=d.status, acao="LIBERADO", justificativa=justificativa,
@@ -336,7 +339,8 @@ async def revogar_liberacao(db: AsyncSession, *, tenant_id: int, usuario_id: int
     todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
     if (d.status == deb.ST_ENVIADO_TESOURARIA
             and not any(x.status in ("LIBERADA", "PAGA") for x in todas)):
-        _registrar_transicao(db, debito=d, novo_status=deb.ST_AUTORIZADO, acao="LIBERACAO_REVOGADA",
+        _registrar_transicao(db, debito=d, acao="REVOGADO",
+                             tramitacao=est.AUTORIZADA, pagamento=est.NAO_INICIADA,
                              usuario_id=usuario_id, justificativa="Todas as liberações revogadas", ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)
     return p
@@ -370,8 +374,11 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
     p.forma_pagamento = forma_pagamento; p.id_movimentacao = mov.id; p.atualizado_em = _utcnow()
     todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
     pendentes = [x for x in todas if x.id != p.id and x.status == "A_PAGAR"]
-    novo = "PAGO" if not pendentes else "PAGO_PARCIAL"
-    _registrar_transicao(db, debito=d, novo_status=novo, acao="PAGAMENTO", usuario_id=usuario_id,
+    integral = not pendentes
+    fila_destino = est.CONCLUIDA if integral else d.situacao_fila
+    _registrar_transicao(db, debito=d, acao="PAGO", usuario_id=usuario_id,
+                         pagamento=est.PAGA if integral else est.PAGA_PARCIAL,
+                         fila=fila_destino,
                          justificativa=f"Parcela {p.numero} — {forma_pagamento}", ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)
     return p
@@ -386,7 +393,8 @@ async def marcar_em_processamento(db: AsyncSession, *, tenant_id: int, usuario_i
         raise PagamentoDebitoError(
             f"Débito não está pronto para processamento (está '{d.status}').",
             status.HTTP_409_CONFLICT)
-    _registrar_transicao(db, debito=d, novo_status=deb.ST_EM_PROCESSAMENTO, acao="PAGAMENTO",
+    _registrar_transicao(db, debito=d, acao="PROCESSANDO",
+                         pagamento=est.EM_PROCESSAMENTO,
                          usuario_id=usuario_id, justificativa="Pagamento em processamento", ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
@@ -411,8 +419,9 @@ async def estornar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
     alguma_paga = any(x.id != p.id and x.status == "PAGA" for x in todas)
     # nenhuma parcela paga restante → pagamento integralmente revertido (ESTORNADO)
-    novo = deb.ST_PAGO_PARCIAL if alguma_paga else deb.ST_ESTORNADO
-    _registrar_transicao(db, debito=d, novo_status=novo, acao="ESTORNO", usuario_id=usuario_id,
+    pagamento_estado = est.ESTORNADA if not alguma_paga else est.PAGA_PARCIAL
+    _registrar_transicao(db, debito=d, acao="ESTORNADO", usuario_id=usuario_id,
+                         pagamento=pagamento_estado,
                          justificativa=justificativa, ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)
     return p

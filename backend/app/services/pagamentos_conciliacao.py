@@ -218,7 +218,7 @@ async def _talvez_conciliar_debito(db: AsyncSession, *, tenant_id: int, id_parce
     conc = (await db.execute(select(func.count()).select_from(Conciliacao).where(
         Conciliacao.tenant_id == tenant_id, Conciliacao.id_movimentacao.in_(movs)))).scalar_one()
     if conc >= len(movs):
-        _registrar_transicao(db, debito=d, novo_status="CONCILIADO", acao="CONCILIADO",
+        _registrar_transicao(db, debito=d, acao="CONCILIADO",
                              usuario_id=usuario_id, justificativa="Pagamento conciliado no extrato")
         d.atualizado_em = _utcnow()
 
