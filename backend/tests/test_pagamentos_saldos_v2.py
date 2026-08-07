@@ -27,6 +27,7 @@ from app.services import pagamentos_caixa as caixa
 from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_debitos as deb
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.fixtures.pagamentos import id_unidade_padrao
 
 
 def _sm(engine):
@@ -185,20 +186,28 @@ async def test_autorizar_conta_nao_paga_422(admin_engine):
             nat = await cad.criar_natureza(s, tenant_id=t.id, payload=NaturezaCreate(
                 codigo=f"N{uuid.uuid4().hex[:6]}", descricao="Mat"))
         sol = await _novo_usuario(admin_engine, t.id, f"s{uuid.uuid4().hex[:6]}")
+        gestor = await _novo_usuario(admin_engine, t.id, f"g{uuid.uuid4().hex[:6]}")
         apr = await _novo_usuario(admin_engine, t.id, f"a{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
+            unidade_id = await id_unidade_padrao(s, t.id)
             d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol, payload=DebitoCreate(
                 id_fornecedor=forn.id, id_natureza=nat.id, id_fonte_recursos=fonte_id,
+                id_unidade=unidade_id,
                 valor_total="100.00", competencia="2026-07", descricao="x",
                 parcelas=[ParcelaCreate(numero=1, valor="100.00", vencimento="2026-08-01")]))
         async with _sm(admin_engine)() as s:
-            await deb.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
+            d = await deb.enviar_para_gestor(
+                s, tenant_id=t.id, debito_id=d.id, usuario_id=sol,
+                lock_version=d.lock_version)
         async with _sm(admin_engine)() as s:
-            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+            d = await deb.gestor_autorizar(
+                s, tenant_id=t.id, debito_id=d.id, usuario_id=gestor,
+                lock_version=d.lock_version)
         async with _sm(admin_engine)() as s:
-            await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+            d = await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
         async with _sm(admin_engine)() as s:
-            await deb.encaminhar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+            d = await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr,
+                                  lock_version=d.lock_version)
         autorizador = await _novo_usuario(admin_engine, t.id, f"au{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
             await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(

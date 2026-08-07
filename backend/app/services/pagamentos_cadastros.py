@@ -344,6 +344,15 @@ async def _numero_unico(db: AsyncSession, *, tenant_id: int, numero: str,
         raise PagamentoCadastroError(f"Já existe contrato número '{numero}'.", status.HTTP_409_CONFLICT)
 
 
+async def obter_unidade(db: AsyncSession, *, tenant_id: int, unidade_id: int) -> UnidadeTrabalho:
+    u = (await db.execute(select(UnidadeTrabalho).where(
+        UnidadeTrabalho.id == unidade_id, UnidadeTrabalho.tenant_id == tenant_id,
+        UnidadeTrabalho.excluido.is_(False)))).scalar_one_or_none()
+    if u is None:
+        raise PagamentoCadastroError("Unidade não encontrada", status.HTTP_404_NOT_FOUND)
+    return u
+
+
 async def _validar_unidade(db: AsyncSession, *, tenant_id: int, id_unidade: int) -> None:
     u = (await db.execute(select(UnidadeTrabalho.id).where(
         UnidadeTrabalho.id == id_unidade, UnidadeTrabalho.tenant_id == tenant_id,

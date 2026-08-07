@@ -65,6 +65,15 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/pagamentos": {
     anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"],
   },
+  "/m/pagamentos/solicitacoes": {
+    anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar"],
+  },
+  "/m/pagamentos/solicitacoes/gestor": { perm: "pagamento_gerir" },
+  "/m/pagamentos/solicitacoes/validacao": { perm: "pagamento_validar" },
+  "/m/pagamentos/solicitacoes/autoridade": { perm: "pagamento_autorizar" },
+  "/m/pagamentos/solicitacoes/concluidas": {
+    anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar"],
+  },
   "/m/pagamentos/dashboard": {
     anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"],
   },

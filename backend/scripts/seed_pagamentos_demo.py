@@ -36,7 +36,7 @@ from app.models import (
 )
 from app.schemas.pagamentos import (
     AlcadaCreate, ContaCreate, ContratoCreate, DebitoCreate, FonteCreate,
-    FornecedorCreate, MovimentacaoCreate, NaturezaCreate, ParcelaCreate,
+    FornecedorCreate, GrupoAutorizacaoIn, MovimentacaoCreate, NaturezaCreate, ParcelaCreate,
 )
 from app.services import pagamentos_autorizacao as aut
 from app.services import pagamentos_cadastros as cad
@@ -422,6 +422,7 @@ async def seed_cadastros(db: AsyncSession, *, tenant_id: int, admin_id: int) -> 
     return {
         "fornecedores": fornecedores, "naturezas": naturezas,
         "fontes": fontes_por_codigo, "contas": contas, "contratos": contratos,
+        "unidade": unidade,
         "contrato_por_fornecedor": {c.id_fornecedor: c for c in contratos},
     }
 
@@ -481,7 +482,8 @@ def montar_parcelas(valor_total: Decimal, n: int, comp: date) -> list[ParcelaCre
 
 
 async def seed_timeline(db: AsyncSession, *, tenant_id: int, cadastros: dict,
-                         admin_id: int, aprovador_id: int, autorizador_id: int) -> dict:
+                         admin_id: int, aprovador_id: int, validador_id: int,
+                         autorizador_id: int) -> dict:
     print("Semeando linha do tempo (12 meses)...")
     meses = mes_range(12)
     hoje = date.today()
@@ -490,6 +492,7 @@ async def seed_timeline(db: AsyncSession, *, tenant_id: int, cadastros: dict,
     fornecedores = cadastros["fornecedores"]
     naturezas = cadastros["naturezas"]
     contrato_por_forn = cadastros["contrato_por_fornecedor"]
+    unidade = cadastros["unidade"]
 
     stats = {k: 0 for k in STATUS_KEYS}
     total_debitos = 0
@@ -538,7 +541,9 @@ async def seed_timeline(db: AsyncSession, *, tenant_id: int, cadastros: dict,
 
             payload = DebitoCreate(
                 id_fornecedor=forn.id, id_natureza=nat.id, id_conta=conta["obj"].id,
+                id_fonte_recursos=conta["obj"].id_fonte_recursos, id_unidade=unidade.id,
                 id_contrato=id_contrato, valor_total=valor, competencia=comp,
+                numero_ne=f"NE-{mes.year}-{total_debitos + 1:05d}",
                 criticidade=nat.criticidade_padrao, urgente=urgente,
                 justificativa_urgencia=just_urg,
                 descricao=f"Despesa {nat.descricao.lower()} — {forn.nome}"[:255],
@@ -549,6 +554,7 @@ async def seed_timeline(db: AsyncSession, *, tenant_id: int, cadastros: dict,
 
             if status_alvo == "CANCELADO":
                 await deb.cancelar(db, tenant_id=tenant_id, debito_id=d.id, usuario_id=admin_id,
+                                   lock_version=d.lock_version,
                                    justificativa=random.choice(JUSTIFICATIVAS_CANCELAMENTO))
                 stats["CANCELADO"] += 1
                 continue
@@ -556,25 +562,40 @@ async def seed_timeline(db: AsyncSession, *, tenant_id: int, cadastros: dict,
                 stats["RASCUNHO"] += 1
                 continue
 
-            await deb.enviar_aprovacao(db, tenant_id=tenant_id, debito_id=d.id, usuario_id=admin_id)
+            d = await deb.enviar_para_gestor(
+                db, tenant_id=tenant_id, debito_id=d.id, usuario_id=admin_id,
+                lock_version=d.lock_version)
             if status_alvo == "AGUARDANDO_APROVACAO":
                 stats["AGUARDANDO_APROVACAO"] += 1
                 continue
             if status_alvo == "REJEITADO":
-                await deb.rejeitar(db, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador_id,
-                                   justificativa=random.choice(JUSTIFICATIVAS_REJEICAO))
+                await deb.gestor_rejeitar(
+                    db, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador_id,
+                    lock_version=d.lock_version,
+                    justificativa=random.choice(JUSTIFICATIVAS_REJEICAO))
                 stats["REJEITADO"] += 1
                 continue
 
-            await deb.aprovar(db, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador_id)
+            d = await deb.gestor_autorizar(
+                db, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador_id,
+                lock_version=d.lock_version)
             if status_alvo == "APROVADO":
                 stats["APROVADO"] += 1
                 continue
 
+            d = await deb.confirmar_liquidacao(
+                db, tenant_id=tenant_id, debito_id=d.id, usuario_id=validador_id)
+            d = await deb.validar(
+                db, tenant_id=tenant_id, debito_id=d.id, usuario_id=validador_id,
+                lock_version=d.lock_version)
+
             await garantir_saldo(db, tenant_id=tenant_id, usuario_id=admin_id,
                                  conta_id=conta["obj"].id, necessario=d.valor_total, data_ref=mes)
-            await aut.autorizar_lote(db, tenant_id=tenant_id, usuario_id=autorizador_id,
-                                     debito_ids=[d.id])
+            await aut.autorizar_lote(
+                db, tenant_id=tenant_id, usuario_id=autorizador_id,
+                grupos=[GrupoAutorizacaoIn(
+                    id_fonte=d.id_fonte_recursos, id_conta_pagadora=conta["obj"].id,
+                    debito_ids=[d.id])])
             if status_alvo == "AUTORIZADO":
                 # Fila do ordenador (A_PAGAR não liberadas) x fila da tesouraria (LIBERADA
                 # pendente): ~55% dos AUTORIZADO ficam liberados-e-não-pagos (demo da fila
@@ -741,6 +762,8 @@ async def run(tenant_slug: str, reset: bool) -> None:
 
             aprovador_id = await ensure_actor(db, tenant_id=tenant.id, email="aprovador.pag@local.test",
                                               nome="Aprovador Pagamentos (demo)", admin=admin, admin_grupo=grupo_admin)
+            validador_id = await ensure_actor(db, tenant_id=tenant.id, email="validador.pag@local.test",
+                                              nome="Validador Pagamentos (demo)", admin=admin, admin_grupo=grupo_admin)
             autorizador_id = await ensure_actor(db, tenant_id=tenant.id, email="autorizador.pag@local.test",
                                                 nome="Autorizador Pagamentos (demo)", admin=admin, admin_grupo=grupo_admin)
             await ensure_alcada_geral(db, tenant_id=tenant.id, usuario_id=autorizador_id, valor="500000.00")
@@ -748,6 +771,7 @@ async def run(tenant_slug: str, reset: bool) -> None:
             cadastros = await seed_cadastros(db, tenant_id=tenant.id, admin_id=admin_id)
             resultado = await seed_timeline(db, tenant_id=tenant.id, cadastros=cadastros,
                                             admin_id=admin_id, aprovador_id=aprovador_id,
+                                            validador_id=validador_id,
                                             autorizador_id=autorizador_id)
             await imprimir_resumo(db, tenant_id=tenant.id, cadastros=cadastros, stats=resultado)
     finally:

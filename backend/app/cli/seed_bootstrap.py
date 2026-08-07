@@ -66,8 +66,7 @@ MODULO_TRANSACOES: dict[str, tuple[str, ...]] = {
     ),
     "pagamentos": (
         "pagamento_cadastro", "pagamento_solicitar", "pagamento_autorizar",
-        "pagamento_pagar", "pagamento_aprovar", "pagamento_validar",
-        "pagamento_encaminhar", "pagamento_auditar",
+        "pagamento_pagar", "pagamento_validar", "pagamento_auditar", "pagamento_gerir",
     ),
     "frota": ("frota",),
     "transporte": ("transporte_regulado",),

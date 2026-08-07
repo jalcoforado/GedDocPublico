@@ -18,6 +18,7 @@ from app.services import pagamentos_autorizacao as aut
 from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_debitos as deb
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.fixtures.pagamentos import id_unidade_padrao
 
 
 def _sm(engine):
@@ -90,12 +91,14 @@ async def _base(engine, tenant_id, *, situacao="REGULAR"):
         conta = await cad.criar_conta(s, tenant_id=tenant_id, payload=ContaCreate(
             nome="Conta", banco="001", agencia="1", conta=uuid.uuid4().hex[:8],
             id_fonte_recursos=fonte.id, grupo_despesa="CUSTEIO", saldo_inicial="10000.00"))
+        fonte._id_unidade_teste = await id_unidade_padrao(s, tenant_id)
     return forn, nat, fonte, conta
 
 
 def _payload(forn, nat, fonte, *, valor="1000.00", nf=None, ne=None):
     return DebitoCreate(
         id_fornecedor=forn.id, id_natureza=nat.id, id_fonte_recursos=fonte.id,
+        id_unidade=fonte._id_unidade_teste,
         valor_total=valor, competencia="2026-07", descricao="x", numero_nf=nf, numero_ne=ne,
         parcelas=[ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")])
 
@@ -152,19 +155,25 @@ async def _pronto_para_autorizar(engine, tenant_id, forn, nat, fonte, *, valor="
     """Débito em ENVIADO_SECRETARIO (liquidado/validado/encaminhado), com autorizador
     dotado de alçada. Retorna (d, autorizador)."""
     sol = await _novo_usuario(engine, tenant_id, f"s{uuid.uuid4().hex[:6]}")
+    gestor = await _novo_usuario(engine, tenant_id, f"g{uuid.uuid4().hex[:6]}")
     apr = await _novo_usuario(engine, tenant_id, f"a{uuid.uuid4().hex[:6]}")
     autorizador = await _novo_usuario(engine, tenant_id, f"au{uuid.uuid4().hex[:6]}")
     async with _sm(engine)() as s:
         d = await deb.criar_debito(s, tenant_id=tenant_id, usuario_id=sol,
                                    payload=_payload(forn, nat, fonte, valor=valor, ne=ne))
     async with _sm(engine)() as s:
-        await deb.enviar_validacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=sol)
+        d = await deb.enviar_para_gestor(
+            s, tenant_id=tenant_id, debito_id=d.id, usuario_id=sol,
+            lock_version=d.lock_version)
     async with _sm(engine)() as s:
-        await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=apr)
+        d = await deb.gestor_autorizar(
+            s, tenant_id=tenant_id, debito_id=d.id, usuario_id=gestor,
+            lock_version=d.lock_version)
     async with _sm(engine)() as s:
-        await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=apr)
+        d = await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=apr)
     async with _sm(engine)() as s:
-        await deb.encaminhar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=apr)
+        d = await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=apr,
+                             lock_version=d.lock_version)
     async with _sm(engine)() as s:
         await cad.criar_alcada(s, tenant_id=tenant_id, payload=AlcadaCreate(
             id_usuario=autorizador, id_natureza=None, valor_maximo="9999999.00"))
@@ -251,25 +260,8 @@ async def test_detectar_duplicidade_considera_contrato(admin_engine):
 
 
 async def test_suspender_e_reativar(admin_engine):
-    t = await _provisionar(admin_engine)
-    try:
-        forn, nat, fonte, _conta = await _base(admin_engine, t.id)
-        sol = await _novo_usuario(admin_engine, t.id, f"s{uuid.uuid4().hex[:6]}")
-        apr = await _novo_usuario(admin_engine, t.id, f"a{uuid.uuid4().hex[:6]}")
-        tes = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol, payload=_payload(forn, nat, fonte))
-        async with _sm(admin_engine)() as s:
-            await deb.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
-        async with _sm(admin_engine)() as s:
-            ds = await deb.suspender(s, tenant_id=t.id, debito_id=d.id, usuario_id=tes,
-                                     justificativa="Suspeita de duplicidade")
-        assert ds.status == "SUSPENSO"
-        async with _sm(admin_engine)() as s:
-            dr = await deb.reativar(s, tenant_id=t.id, debito_id=d.id, usuario_id=tes)
-        assert dr.status == "EM_VALIDACAO"  # reativa reentra na validação
-    finally:
-        await _cleanup(admin_engine, t.id)
+    assert not hasattr(deb, "suspender")
+    assert not hasattr(deb, "reativar")
 
 
 async def test_checklist_obrigatorio_bloqueia_validacao(admin_engine):
@@ -281,6 +273,7 @@ async def test_checklist_obrigatorio_bloqueia_validacao(admin_engine):
     try:
         forn, nat, fonte, _conta = await _base(admin_engine, t.id)
         sol = await _novo_usuario(admin_engine, t.id, f"s{uuid.uuid4().hex[:6]}")
+        gestor = await _novo_usuario(admin_engine, t.id, f"g{uuid.uuid4().hex[:6]}")
         val = await _novo_usuario(admin_engine, t.id, f"v{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
             item = await chk.criar_item(s, tenant_id=t.id, payload=ChecklistItemCreate(
@@ -288,16 +281,23 @@ async def test_checklist_obrigatorio_bloqueia_validacao(admin_engine):
             d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol,
                                        payload=_payload(forn, nat, fonte, ne="NE-1"))
         async with _sm(admin_engine)() as s:
-            await deb.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
+            d = await deb.enviar_para_gestor(
+                s, tenant_id=t.id, debito_id=d.id, usuario_id=sol,
+                lock_version=d.lock_version)
         async with _sm(admin_engine)() as s:
-            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+            d = await deb.gestor_autorizar(
+                s, tenant_id=t.id, debito_id=d.id, usuario_id=gestor,
+                lock_version=d.lock_version)
+        async with _sm(admin_engine)() as s:
+            d = await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
         # checklist aparece pendente e validar é bloqueado
         async with _sm(admin_engine)() as s:
             itens = await chk.checklist_do_debito(s, tenant_id=t.id, debito_id=d.id)
             assert len(itens) == 1 and itens[0].marcado is False
         async with _sm(admin_engine)() as s:
             with pytest.raises(HTTPException) as exc:
-                await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+                await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val,
+                                  lock_version=d.lock_version)
             assert exc.value.status_code == 422
             assert "checklist" in exc.value.detail.lower()
         # marca o item e valida
@@ -308,7 +308,8 @@ async def test_checklist_obrigatorio_bloqueia_validacao(admin_engine):
             itens = await chk.checklist_do_debito(s, tenant_id=t.id, debito_id=d.id)
             assert itens[0].marcado is True and itens[0].observacao == "NF 123"
         async with _sm(admin_engine)() as s:
-            dv = await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
-        assert dv.status == "VALIDADO"
+            dv = await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val,
+                                   lock_version=d.lock_version)
+        assert dv.situacao_tramitacao == "AGUARDANDO_AUTORIDADE"
     finally:
         await _cleanup(admin_engine, t.id)

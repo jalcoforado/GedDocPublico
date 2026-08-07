@@ -130,6 +130,9 @@ class Contrato(Base):
     vigencia_inicio: Mapped[date] = mapped_column(Date, nullable=False)
     vigencia_fim: Mapped[date] = mapped_column(Date, nullable=False)
     valor_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Categoria para a fila cronológica (F3). Nullable de propósito: obrigar o
+    # ente a classificar todo o histórico no dia do deploy travaria o módulo.
+    categoria: Mapped[str | None] = mapped_column(String(20), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -179,6 +182,28 @@ class Debito(Base):
     justificativa_urgencia: Mapped[str | None] = mapped_column(String(255), nullable=True)
     descricao: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(25), nullable=False, default="RASCUNHO")
+    # --- as três dimensões (F1, spec §4.1) ---------------------------------
+    # `status` acima passa a ser DERIVADO destas três
+    # (services/pagamentos_estados.status_legado) e sobrevive só até a F5,
+    # porque conciliação, exceções, caixa, export, filas e o frontend inteiro
+    # ainda o leem.
+    situacao_tramitacao: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="RASCUNHO")
+    situacao_fila: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="NAO_REGISTRADA")
+    situacao_pagamento: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="NAO_INICIADA")
+    # Unidade administrativa de origem. Antes da F1 só existia via contrato —
+    # débito sem contrato não tinha unidade nenhuma, o que inviabilizava tanto o
+    # papel "Unidade Setorial" quanto a chave da fila cronológica da F3.
+    id_unidade: Mapped[int] = mapped_column(
+        ForeignKey("utils.unidade_trabalho.id"), nullable=False)
+    versao: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    id_gestor_decisor: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True)
+    id_validador: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True)
     id_usuario_solicitante: Mapped[int] = mapped_column(ForeignKey("utils.usuario.id"), nullable=False)
     # Liquidação (v2.0 RF-VAL-02/RN-01) — guarda antes de autorizar.
     liquidacao_confirmada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

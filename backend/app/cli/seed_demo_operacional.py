@@ -530,6 +530,7 @@ async def _apply_pagamentos(tenant_id: int, contagens: dict[str, int]) -> None:
                     db, tenant_id=tenant_id, usuario_id=usuarios["solicitante"],
                     payload=DebitoCreate(
                         id_fornecedor=fornecedores[f_idx], id_natureza=naturezas[n_idx],
+                        id_unidade=id_unidade,
                         id_fonte_recursos=fontes[fo_idx], id_conta=contas[c_idx],
                         id_contrato=contratos[ct_idx] if ct_idx is not None else None,
                         valor_total=valor,
@@ -593,7 +594,7 @@ async def _apply_pagamentos(tenant_id: int, contagens: dict[str, int]) -> None:
 
 def _dividir(total: Decimal, n: int, hoje: date) -> list[tuple[Decimal, date]]:
     """Divide em `n` parcelas fechando exatamente no total (a última absorve o
-    resto do arredondamento — `enviar_validacao` recusa se a soma divergir)."""
+    resto do arredondamento — o envio ao gestor recusa se a soma divergir)."""
     base = (total / n).quantize(Decimal("0.01"))
     parcelas: list[tuple[Decimal, date]] = []
     acumulado = Decimal("0")
@@ -631,34 +632,41 @@ async def _levar_ao_estado(
     await deb_svc.confirmar_liquidacao(
         db, tenant_id=tenant_id, debito_id=debito.id, usuario_id=usuarios["solicitante"]
     )
-    await deb_svc.enviar_validacao(
-        db, tenant_id=tenant_id, debito_id=debito.id, usuario_id=usuarios["solicitante"]
+    debito = await deb_svc.enviar_para_gestor(
+        db, tenant_id=tenant_id, debito_id=debito.id,
+        usuario_id=usuarios["solicitante"], lock_version=debito.lock_version,
     )
     if ate == "em_validacao":
         return
 
     if ate == "devolvido":
-        await deb_svc.devolver(
-            db, tenant_id=tenant_id, debito_id=debito.id, usuario_id=usuarios["validador"],
+        await deb_svc.solicitar_ajuste(
+            db, tenant_id=tenant_id, debito_id=debito.id,
+            usuario_id=usuarios["secretario"], lock_version=debito.lock_version,
+            etapa="GESTOR",
             justificativa="Nota fiscal ilegível — reenviar digitalização.",
         )
         return
 
-    await deb_svc.validar(
-        db, tenant_id=tenant_id, debito_id=debito.id, usuario_id=usuarios["validador"]
+    debito = await deb_svc.gestor_autorizar(
+        db, tenant_id=tenant_id, debito_id=debito.id,
+        usuario_id=usuarios["secretario"], lock_version=debito.lock_version,
+    )
+    debito = await deb_svc.validar(
+        db, tenant_id=tenant_id, debito_id=debito.id,
+        usuario_id=usuarios["validador"], lock_version=debito.lock_version,
     )
     if ate == "validado":
         return
 
-    await deb_svc.encaminhar(
-        db, tenant_id=tenant_id, debito_id=debito.id, usuario_id=usuarios["secretario"]
-    )
     if ate == "encaminhado":
         return
 
     if ate == "suspenso":
-        await deb_svc.suspender(
-            db, tenant_id=tenant_id, debito_id=debito.id, usuario_id=usuarios["autorizador"],
+        await deb_svc.solicitar_ajuste(
+            db, tenant_id=tenant_id, debito_id=debito.id,
+            usuario_id=usuarios["autorizador"], lock_version=debito.lock_version,
+            etapa="AUTORIDADE",
             justificativa="Aguardando parecer da controladoria sobre o enquadramento.",
         )
         return

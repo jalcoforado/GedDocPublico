@@ -23,6 +23,7 @@ from app.services import pagamentos_cadastros as cad_svc
 from app.services import pagamentos_debitos as deb_svc
 from app.services import pagamentos_excecoes as exc_svc
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.fixtures.pagamentos import id_unidade_padrao
 
 
 def _sm(engine):
@@ -76,10 +77,12 @@ async def _cria_debito(engine, tid, usuario_id, *, nat, fonte, conta, forn,
                        descricao, urgente=False, justificativa_urgencia=None):
     hoje = date.today()
     async with _sm(engine)() as db:
+        unidade_id = await id_unidade_padrao(db, tid)
         return await deb_svc.criar_debito(
             db, tenant_id=tid, usuario_id=usuario_id,
             payload=DebitoCreate(
                 id_fornecedor=forn, id_natureza=nat, id_fonte_recursos=fonte,
+                id_unidade=unidade_id,
                 id_conta=conta, valor_total=Decimal("100.00"),
                 competencia=f"{hoje.year:04d}-{hoje.month:02d}", descricao=descricao,
                 urgente=urgente, justificativa_urgencia=justificativa_urgencia,
@@ -124,7 +127,9 @@ async def test_fornecedor_irregular_so_conta_debito_em_andamento(admin_engine):
     d = await _cria_debito(admin_engine, tid, uid, nat=nat, fonte=fonte, conta=conta,
                            forn=irr, descricao="Em curso com irregular")
     async with _sm(admin_engine)() as db:
-        await deb_svc.enviar_validacao(db, tenant_id=tid, debito_id=d.id, usuario_id=uid)
+        await deb_svc.enviar_para_gestor(
+            db, tenant_id=tid, debito_id=d.id, usuario_id=uid,
+            lock_version=d.lock_version)
     async with _sm(admin_engine)() as db:
         rel = await exc_svc.relatorio_excecoes(db, tenant_id=tid)
 

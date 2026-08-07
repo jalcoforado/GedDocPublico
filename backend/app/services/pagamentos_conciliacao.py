@@ -19,6 +19,7 @@ from ..models import (
     Conciliacao, ContaBancaria, Debito, Extrato, LancamentoExtrato, MovimentacaoConta, Parcela,
 )
 from ..schemas.pagamentos import ImportarExtratoIn, SugestaoBaixaOut
+from . import pagamentos_estados as est
 
 _PROVAVEL_DIAS = 3  # tolerância de data para correspondência provável
 
@@ -218,8 +219,9 @@ async def _talvez_conciliar_debito(db: AsyncSession, *, tenant_id: int, id_parce
     conc = (await db.execute(select(func.count()).select_from(Conciliacao).where(
         Conciliacao.tenant_id == tenant_id, Conciliacao.id_movimentacao.in_(movs)))).scalar_one()
     if conc >= len(movs):
-        _registrar_transicao(db, debito=d, novo_status="CONCILIADO", acao="CONCILIADO",
-                             usuario_id=usuario_id, justificativa="Pagamento conciliado no extrato")
+        _registrar_transicao(
+            db, debito=d, acao="CONCILIADO", pagamento=est.CONCILIADA,
+            usuario_id=usuario_id, justificativa="Pagamento conciliado no extrato")
         d.atualizado_em = _utcnow()
 
 

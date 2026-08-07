@@ -21,6 +21,7 @@ from app.services import pagamentos_caixa as caixa
 from app.services import pagamentos_dashboard as dash
 from app.services import pagamentos_debitos as deb
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.fixtures.pagamentos import id_unidade_padrao
 
 
 def _sm(engine):
@@ -86,12 +87,13 @@ async def _base(engine, tenant_id, *, saldo_inicial="10000.00"):
         conta = await cad.criar_conta(s, tenant_id=tenant_id, payload=ContaCreate(
             nome="Conta Dash", banco="001", agencia="1", conta=uuid.uuid4().hex[:8],
             id_fonte_recursos=fonte.id, grupo_despesa="CUSTEIO", saldo_inicial=saldo_inicial))
+        conta._id_unidade_teste = await id_unidade_padrao(s, tenant_id)
     return forn, nat, conta
 
 
 def _payload_debito(forn, nat, conta, *, valor="1000.00", parcelas=None):
     return DebitoCreate(
-        id_fornecedor=forn.id, id_natureza=nat.id,
+        id_fornecedor=forn.id, id_natureza=nat.id, id_unidade=conta._id_unidade_teste,
         id_fonte_recursos=conta.id_fonte_recursos, id_conta=conta.id,
         valor_total=valor, competencia="2026-07", descricao="Compra de material",
         numero_ne="NE-2026-0001",  # empenho obrigatório para autorizar (RN-01)
@@ -117,19 +119,25 @@ async def _debito_aprovado(engine, tenant_id, *, valor="1000.00", saldo_inicial=
     else:
         forn, nat, conta = base
     solicitante = await _novo_usuario(engine, tenant_id, f"sol{uuid.uuid4().hex[:6]}")
+    gestor = await _novo_usuario(engine, tenant_id, f"ges{uuid.uuid4().hex[:6]}")
     aprovador = await _novo_usuario(engine, tenant_id, f"apr{uuid.uuid4().hex[:6]}")
     async with _sm(engine)() as s:
         d = await deb.criar_debito(s, tenant_id=tenant_id, usuario_id=solicitante,
                                    payload=_payload_debito(forn, nat, conta, valor=valor,
                                                            parcelas=parcelas))
     async with _sm(engine)() as s:
-        await deb.enviar_validacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante)
+        d = await deb.enviar_para_gestor(
+            s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante,
+            lock_version=d.lock_version)
+    async with _sm(engine)() as s:
+        d = await deb.gestor_autorizar(
+            s, tenant_id=tenant_id, debito_id=d.id, usuario_id=gestor,
+            lock_version=d.lock_version)
     async with _sm(engine)() as s:  # liquidação é pré-requisito p/ validar (RN-01)
-        await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
+        d = await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
     async with _sm(engine)() as s:
-        await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
-    async with _sm(engine)() as s:
-        d = await deb.encaminhar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador)
+        d = await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=aprovador,
+                             lock_version=d.lock_version)
     return d, solicitante, aprovador, conta
 
 
@@ -240,8 +248,9 @@ async def test_kpis_pipeline_e_30d(admin_engine):
             d_ag = await deb.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
                                           payload=_payload_debito(forn, nat, conta, valor="100.00"))
         async with _sm(admin_engine)() as s:
-            await deb.enviar_validacao(s, tenant_id=t.id, debito_id=d_ag.id,
-                                       usuario_id=solicitante)
+            await deb.enviar_para_gestor(
+                s, tenant_id=t.id, debito_id=d_ag.id, usuario_id=solicitante,
+                lock_version=d_ag.lock_version)
 
         async with _sm(admin_engine)() as s:
             out = await dash.montar_dashboard(s, tenant_id=t.id)

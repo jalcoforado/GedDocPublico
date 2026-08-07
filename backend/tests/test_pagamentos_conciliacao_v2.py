@@ -25,6 +25,7 @@ from app.services import pagamentos_caixa as caixa
 from app.services import pagamentos_conciliacao as conc
 from app.services import pagamentos_debitos as deb
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.fixtures.pagamentos import id_unidade_padrao
 
 
 def _sm(engine):
@@ -97,28 +98,36 @@ async def _base(engine, tenant_id, *, saldo="10000.00"):
         conta = await cad.criar_conta(s, tenant_id=tenant_id, payload=ContaCreate(
             nome="Conta", banco="001", agencia="1", conta=uuid.uuid4().hex[:8],
             id_fonte_recursos=fonte.id, grupo_despesa="CUSTEIO", saldo_inicial=saldo))
+        fonte._id_unidade_teste = await id_unidade_padrao(s, tenant_id)
     return forn, nat, fonte, conta
 
 
 async def _debito_pago(engine, tenant_id, forn, nat, fonte, conta, *, valor="1000.00", venc="2026-08-01"):
     """Percorre o rito completo até PAGO. Retorna (debito, parcela, movimentacao)."""
     sol = await _novo_usuario(engine, tenant_id, f"s{uuid.uuid4().hex[:6]}")
+    gestor = await _novo_usuario(engine, tenant_id, f"g{uuid.uuid4().hex[:6]}")
     val = await _novo_usuario(engine, tenant_id, f"v{uuid.uuid4().hex[:6]}")
     autor = await _novo_usuario(engine, tenant_id, f"au{uuid.uuid4().hex[:6]}")
     tes = await _novo_usuario(engine, tenant_id, f"t{uuid.uuid4().hex[:6]}")
     async with _sm(engine)() as s:
         d = await deb.criar_debito(s, tenant_id=tenant_id, usuario_id=sol, payload=DebitoCreate(
             id_fornecedor=forn.id, id_natureza=nat.id, id_fonte_recursos=fonte.id,
+            id_unidade=fonte._id_unidade_teste,
             valor_total=valor, competencia="2026-07", descricao="x", numero_ne="NE-1",
             parcelas=[ParcelaCreate(numero=1, valor=valor, vencimento=venc)]))
     async with _sm(engine)() as s:
-        await deb.enviar_validacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=sol)
+        d = await deb.enviar_para_gestor(
+            s, tenant_id=tenant_id, debito_id=d.id, usuario_id=sol,
+            lock_version=d.lock_version)
     async with _sm(engine)() as s:
-        await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=val)
+        d = await deb.gestor_autorizar(
+            s, tenant_id=tenant_id, debito_id=d.id, usuario_id=gestor,
+            lock_version=d.lock_version)
     async with _sm(engine)() as s:
-        await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=val)
+        d = await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=val)
     async with _sm(engine)() as s:
-        await deb.encaminhar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=val)
+        d = await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=val,
+                             lock_version=d.lock_version)
     async with _sm(engine)() as s:
         await cad.criar_alcada(s, tenant_id=tenant_id, payload=AlcadaCreate(
             id_usuario=autor, id_natureza=None, valor_maximo="9999999.00"))

@@ -27,6 +27,7 @@ from app.services import pagamentos_cadastros as cad_svc
 from app.services import pagamentos_debitos as deb_svc
 from app.services import pagamentos_export as export
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.fixtures.pagamentos import id_unidade_padrao
 
 
 def _sm(engine):
@@ -76,10 +77,12 @@ async def _cenario(engine):
         [(f"{hoje.year:04d}-01", Decimal("1234.56")), (f"{hoje.year:04d}-02", Decimal("99.90"))]
     ):
         async with _sm(engine)() as db:
+            unidade_id = await id_unidade_padrao(db, tid)
             d = await deb_svc.criar_debito(
                 db, tenant_id=tid, usuario_id=usuario_id,
                 payload=DebitoCreate(
                     id_fornecedor=forn.id, id_natureza=nat.id, id_fonte_recursos=fonte.id,
+                    id_unidade=unidade_id,
                     id_conta=conta.id, valor_total=valor, competencia=competencia,
                     descricao=f"Compra de material {i}",
                     parcelas=[ParcelaCreate(numero=1, valor=valor,
