@@ -1290,6 +1290,65 @@ export interface DebitoDetalhe extends Debito {
   parcelas: Parcela[]; historico: DebitoHistorico[];
 }
 
+// Tipos para o novo fluxo de pagamentos (F1, Tarefa 7+)
+export type SituacaoTramitacao =
+  | "RASCUNHO"
+  | "AGUARDANDO_GESTOR"
+  | "AJUSTE_GESTOR"
+  | "AGUARDANDO_VALIDACAO"
+  | "AJUSTE_VALIDACAO"
+  | "AGUARDANDO_AUTORIDADE"
+  | "AJUSTE_AUTORIDADE"
+  | "AUTORIZADA"
+  | "REJEITADA_GESTOR"
+  | "INDEFERIDA_AUTORIDADE"
+  | "CANCELADA";
+
+export type SituacaoFila =
+  | "NAO_REGISTRADA"
+  | "REGISTRADA"
+  | "BLOQUEADA"
+  | "ELEGIVEL"
+  | "AGUARDANDO_DISPONIBILIDADE"
+  | "EXCECAO_AUTORIZADA"
+  | "CONCLUIDA"
+  | "RETIRADA";
+
+export type SituacaoPagamento =
+  | "NAO_INICIADA"
+  | "PROGRAMADA"
+  | "ENVIADA_BANCO"
+  | "EM_PROCESSAMENTO"
+  | "PAGA_PARCIAL"
+  | "PAGA"
+  | "FALHOU"
+  | "CANCELADA"
+  | "ESTORNADA";
+
+export interface DebitoOut extends Debito {
+  situacao_tramitacao: SituacaoTramitacao;
+  situacao_fila: SituacaoFila;
+  situacao_pagamento: SituacaoPagamento;
+  id_unidade: number;
+  versao: number;
+  lock_version: number;
+  id_gestor_decisor: number | null;
+  id_validador: number | null;
+}
+
+// Payloads para as decisões do fluxo
+export interface DecisaoPayload {
+  lock_version: number;
+}
+
+export interface DecisaoJustificadaPayload extends DecisaoPayload {
+  justificativa: string;
+}
+
+export interface SolicitarAjustePayload extends DecisaoJustificadaPayload {
+  etapa: string;
+}
+
 export interface OrdemPagamento {
   id: number; numero: string; valor_total: string; id_usuario_autorizador: number;
   nome_autorizador: string | null; qtd_debitos: number; criado_em: string;
@@ -3530,8 +3589,6 @@ export const api = {
         request<Debito>(`/pagamentos/debitos/${id}`, { method: "PUT", body: JSON.stringify(data) }),
       remove: (id: number) => request<void>(`/pagamentos/debitos/${id}`, { method: "DELETE" }),
       enviar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/enviar`, { method: "POST" }),
-      // v2.0 rito: validar (validador setorial) e encaminhar (secretário).
-      validar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/validar`, { method: "POST" }),
       encaminhar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/encaminhar`, { method: "POST" }),
       emProcessamento: (id: number) =>
         request<Debito>(`/pagamentos/debitos/${id}/em-processamento`, { method: "POST" }),
@@ -3547,9 +3604,6 @@ export const api = {
       rejeitar: (id: number, justificativa: string) =>
         request<Debito>(`/pagamentos/debitos/${id}/rejeitar`, {
           method: "POST", body: JSON.stringify({ justificativa }) }),
-      cancelar: (id: number, justificativa: string) =>
-        request<Debito>(`/pagamentos/debitos/${id}/cancelar`, {
-          method: "POST", body: JSON.stringify({ justificativa }) }),
       // v2.0
       confirmarLiquidacao: (id: number, dataLiquidacao?: string | null) =>
         request<Debito>(`/pagamentos/debitos/${id}/confirmar-liquidacao`, {
@@ -3560,6 +3614,38 @@ export const api = {
       reativar: (id: number, justificativa: string) =>
         request<Debito>(`/pagamentos/debitos/${id}/reativar`, {
           method: "POST", body: JSON.stringify({ justificativa }) }),
+
+      // F1, Tarefa 7+ — Novo fluxo com etapas de gestor, validação e autoridade
+      // Endpoints do gestor (5 total)
+      enviarParaGestor: (id: number, payload: DecisaoPayload) =>
+        request<DebitoOut>(`/pagamentos/debitos/${id}/enviar-gestor`, {
+          method: "POST", body: JSON.stringify(payload) }),
+      gestorAutorizar: (id: number, payload: DecisaoPayload) =>
+        request<DebitoOut>(`/pagamentos/debitos/${id}/gestor-autorizar`, {
+          method: "POST", body: JSON.stringify(payload) }),
+      gestorRejeitar: (id: number, payload: DecisaoJustificadaPayload) =>
+        request<DebitoOut>(`/pagamentos/debitos/${id}/gestor-rejeitar`, {
+          method: "POST", body: JSON.stringify(payload) }),
+      solicitarAjuste: (id: number, payload: SolicitarAjustePayload) =>
+        request<DebitoOut>(`/pagamentos/debitos/${id}/solicitar-ajuste`, {
+          method: "POST", body: JSON.stringify(payload) }),
+      responderAjuste: (id: number, payload: DecisaoPayload) =>
+        request<DebitoOut>(`/pagamentos/debitos/${id}/responder-ajuste`, {
+          method: "POST", body: JSON.stringify(payload) }),
+
+      // Endpoints de validação e autoridade (4 total)
+      validar: (id: number, payload: DecisaoPayload) =>
+        request<DebitoOut>(`/pagamentos/debitos/${id}/validar`, {
+          method: "POST", body: JSON.stringify(payload) }),
+      autoridadeAprovar: (id: number, payload: DecisaoPayload) =>
+        request<DebitoOut>(`/pagamentos/debitos/${id}/autoridade-aprovar`, {
+          method: "POST", body: JSON.stringify(payload) }),
+      autoridadeIndeferir: (id: number, payload: DecisaoJustificadaPayload) =>
+        request<DebitoOut>(`/pagamentos/debitos/${id}/autoridade-indeferir`, {
+          method: "POST", body: JSON.stringify(payload) }),
+      cancelar: (id: number, payload: DecisaoJustificadaPayload) =>
+        request<DebitoOut>(`/pagamentos/debitos/${id}/cancelar`, {
+          method: "POST", body: JSON.stringify(payload) }),
     },
     // v2.0: bloqueios administrativos de saldo por conta.
     bloqueios: {
