@@ -33,7 +33,7 @@ export const menuPagamentos: MenuModulo = {
         { label: "Dashboard", href: "/m/pagamentos/dashboard", icon: BarChart3,
           anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"] },
         { label: "Solicitações", href: "/m/pagamentos/solicitacoes", icon: ClipboardList,
-          anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar"] },
+          anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar"] },
         { label: "Aguardando Gestor", href: "/m/pagamentos/solicitacoes/gestor", icon: CheckCircle,
           perm: "pagamento_gerir" },
         { label: "Aguardando Validação", href: "/m/pagamentos/solicitacoes/validacao", icon: CheckCircle,
