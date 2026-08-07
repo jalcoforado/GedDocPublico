@@ -36,7 +36,7 @@ def _slug(p: str) -> str:
 
 
 async def _provisionar(engine):
-    slug = _slug("pag_vld")
+    slug = _slug("pagvld")
     async with _sm(engine)() as s:
         tenant, _ = await provisionar_tenant(
             s, slug=slug, nome="Pref Pagamentos Validacao", admin_email=f"{slug}@t.local",
@@ -79,7 +79,9 @@ async def _cleanup(engine, tenant_id: int) -> None:
 
 
 async def _base(engine, tenant_id):
-    """Fornecedor + natureza + fonte + conta prontos para um débito."""
+    """Fornecedor + natureza + fonte + conta + unidade prontos para um débito."""
+    from sqlalchemy import select
+    from app.models import TipoUnidadeTrabalho, UnidadeTrabalho
     async with _sm(engine)() as s:
         forn = await cad.criar_fornecedor(s, tenant_id=tenant_id, payload=FornecedorCreate(
             tipo_pessoa="JURIDICA", cnpj_cpf=_doc(), nome="Fornecedor Vld LTDA"))
@@ -90,12 +92,27 @@ async def _base(engine, tenant_id):
         conta = await cad.criar_conta(s, tenant_id=tenant_id, payload=ContaCreate(
             nome="Conta Vld", banco="001", agencia="1", conta=uuid.uuid4().hex[:8],
             id_fonte_recursos=fonte.id, grupo_despesa="CUSTEIO", saldo_inicial="10000.00"))
-    return forn, nat, conta
+
+        # Unidade
+        tipo_stmt = select(TipoUnidadeTrabalho).limit(1)
+        tipo_result = await s.execute(tipo_stmt)
+        tipo = tipo_result.scalar()
+        if not tipo:
+            tipo = TipoUnidadeTrabalho(tenant_id=tenant_id, tipo_unidade_trabalho="Administração")
+            s.add(tipo)
+            await s.flush()
+        unidade = UnidadeTrabalho(
+            tenant_id=tenant_id, id_tipo_unidade_trabalho=tipo.id,
+            unidade_trabalho="Unidade Vld",
+        )
+        s.add(unidade)
+        await s.commit()
+    return forn, nat, conta, unidade
 
 
-def _payload_debito(forn, nat, conta, *, valor="1000.00"):
+def _payload_debito(forn, nat, conta, unidade, *, valor="1000.00"):
     return DebitoCreate(
-        id_fornecedor=forn.id, id_natureza=nat.id,
+        id_fornecedor=forn.id, id_natureza=nat.id, id_unidade=unidade.id,
         id_fonte_recursos=conta.id_fonte_recursos, id_conta=conta.id,
         valor_total=valor, competencia="2026-07", descricao="Compra de material",
         parcelas=[ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
@@ -118,7 +135,7 @@ async def _novo_usuario(engine, tenant_id, sufixo):
 async def arreio_debito_em_validacao(admin_engine):
     """Retorna (tenant, debito, ...) com débito já em AGUARDANDO_VALIDACAO."""
     t = await _provisionar(admin_engine)
-    forn, nat, conta = await _base(admin_engine, t.id)
+    forn, nat, conta, unidade = await _base(admin_engine, t.id)
 
     # Admin (solicitante)
     async with _sm(admin_engine)() as s:
@@ -134,7 +151,7 @@ async def arreio_debito_em_validacao(admin_engine):
     # Cria débito em RASCUNHO
     async with _sm(admin_engine)() as s:
         d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
-                                   payload=_payload_debito(forn, nat, conta))
+                                   payload=_payload_debito(forn, nat, conta, unidade))
 
     # Envia para gestor
     async with _sm(admin_engine)() as s:
@@ -237,14 +254,14 @@ async def test_autoridade_indeferir_sem_justificativa_422(admin_engine, arreio_d
 async def test_cancelar_de_rascunho(admin_engine):
     """Pode cancelar de RASCUNHO."""
     t = await _provisionar(admin_engine)
-    forn, nat, conta = await _base(admin_engine, t.id)
+    forn, nat, conta, unidade = await _base(admin_engine, t.id)
     async with _sm(admin_engine)() as s:
         solicitante = (await s.execute(text(
             "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
     try:
         async with _sm(admin_engine)() as s:
             d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
-                                       payload=_payload_debito(forn, nat, conta))
+                                       payload=_payload_debito(forn, nat, conta, unidade))
         async with _sm(admin_engine)() as s:
             result = await svc.cancelar(s, tenant_id=t.id, debito_id=d.id,
                                        usuario_id=solicitante, lock_version=d.lock_version,
