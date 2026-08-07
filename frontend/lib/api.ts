@@ -1323,7 +1323,8 @@ export type SituacaoPagamento =
   | "PAGA"
   | "FALHOU"
   | "CANCELADA"
-  | "ESTORNADA";
+  | "ESTORNADA"
+  | "CONCILIADA";
 
 export interface DebitoOut extends Debito {
   situacao_tramitacao: SituacaoTramitacao;
@@ -1346,7 +1347,7 @@ export interface DecisaoJustificadaPayload extends DecisaoPayload {
 }
 
 export interface SolicitarAjustePayload extends DecisaoJustificadaPayload {
-  etapa: string;
+  etapa: "GESTOR" | "VALIDACAO" | "AUTORIDADE";
 }
 
 export interface OrdemPagamento {
@@ -3573,11 +3574,13 @@ export const api = {
     },
     debitos: {
       list: (params?: {
-        status?: string; meus?: boolean; id_fonte?: number; id_natureza?: number;
+        status?: string; situacao_tramitacao?: SituacaoTramitacao; meus?: boolean;
+        id_fonte?: number; id_natureza?: number;
         id_fornecedor?: number; id_contrato?: number; urgente?: boolean; competencia?: string;
       }) =>
         request<Debito[]>(`/pagamentos/debitos${qs({
-          status_f: params?.status, meus: params?.meus, id_fonte: params?.id_fonte,
+          status_f: params?.status, situacao_tramitacao: params?.situacao_tramitacao,
+          meus: params?.meus, id_fonte: params?.id_fonte,
           id_natureza: params?.id_natureza, id_fornecedor: params?.id_fornecedor,
           id_contrato: params?.id_contrato, urgente: params?.urgente,
           competencia: params?.competencia,
@@ -3588,8 +3591,6 @@ export const api = {
       update: (id: number, data: unknown) =>
         request<Debito>(`/pagamentos/debitos/${id}`, { method: "PUT", body: JSON.stringify(data) }),
       remove: (id: number) => request<void>(`/pagamentos/debitos/${id}`, { method: "DELETE" }),
-      enviar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/enviar`, { method: "POST" }),
-      encaminhar: (id: number) => request<Debito>(`/pagamentos/debitos/${id}/encaminhar`, { method: "POST" }),
       emProcessamento: (id: number) =>
         request<Debito>(`/pagamentos/debitos/${id}/em-processamento`, { method: "POST" }),
       // RF-VAL-01/06: checklist documental do débito
@@ -3598,23 +3599,10 @@ export const api = {
       marcarChecklist: (id: number, data: { id_checklist_item: number; marcado: boolean; observacao?: string | null }) =>
         request<ChecklistItemDebito[]>(`/pagamentos/debitos/${id}/checklist`, {
           method: "POST", body: JSON.stringify(data) }),
-      devolver: (id: number, justificativa: string) =>
-        request<Debito>(`/pagamentos/debitos/${id}/devolver`, {
-          method: "POST", body: JSON.stringify({ justificativa }) }),
-      rejeitar: (id: number, justificativa: string) =>
-        request<Debito>(`/pagamentos/debitos/${id}/rejeitar`, {
-          method: "POST", body: JSON.stringify({ justificativa }) }),
       // v2.0
       confirmarLiquidacao: (id: number, dataLiquidacao?: string | null) =>
         request<Debito>(`/pagamentos/debitos/${id}/confirmar-liquidacao`, {
           method: "POST", body: JSON.stringify({ data_liquidacao: dataLiquidacao ?? null }) }),
-      suspender: (id: number, justificativa: string) =>
-        request<Debito>(`/pagamentos/debitos/${id}/suspender`, {
-          method: "POST", body: JSON.stringify({ justificativa }) }),
-      reativar: (id: number, justificativa: string) =>
-        request<Debito>(`/pagamentos/debitos/${id}/reativar`, {
-          method: "POST", body: JSON.stringify({ justificativa }) }),
-
       // F1, Tarefa 7+ — Novo fluxo com etapas de gestor, validação e autoridade
       // Endpoints do gestor (5 total)
       enviarParaGestor: (id: number, payload: DecisaoPayload) =>

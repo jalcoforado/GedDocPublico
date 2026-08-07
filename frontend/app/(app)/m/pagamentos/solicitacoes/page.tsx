@@ -1,7 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,8 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import { useToast } from "@/components/ui/toast";
 import { api, type DebitoOut, type SituacaoTramitacao } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { SITUACAO_TRAMITACAO_CONFIG, getEtapaIndex } from "@/components/pagamentos/statusFluxo";
 import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
 import Link from "next/link";
@@ -21,9 +20,7 @@ function StatusBadge({ situacao }: { situacao: SituacaoTramitacao }) {
 }
 
 export default function SolicitacoesPage() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const router = useRouter();
+  const { can } = useAuth();
 
   const [situacaoFiltro, setSituacaoFiltro] = useState<SituacaoTramitacao | "">("");
   const [fornecedorFiltro, setFornecedorFiltro] = useState("");
@@ -35,7 +32,7 @@ export default function SolicitacoesPage() {
     queryFn: async () => {
       // Lista todos os débitos com status EM_VALIDACAO ou superior (fluxo novo)
       const debitos = await api.pagamentos.debitos.list({
-        status: situacaoFiltro || undefined,
+        situacao_tramitacao: situacaoFiltro || undefined,
       });
 
       // Filtra por fornecedor se necessário
@@ -81,9 +78,11 @@ export default function SolicitacoesPage() {
             Acompanhe as solicitações no fluxo de aprovação
           </p>
         </div>
-        <Link href="/m/pagamentos/solicitacoes/novo">
-          <Button>Nova Solicitação</Button>
-        </Link>
+        {can("pagamento_solicitar") && (
+          <Link href="/m/pagamentos/solicitacoes/novo">
+            <Button>Nova Solicitação</Button>
+          </Link>
+        )}
       </div>
 
       {/* Filtros */}

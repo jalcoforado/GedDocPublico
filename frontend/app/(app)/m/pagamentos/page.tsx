@@ -162,26 +162,26 @@ export default function PagamentosHomePage() {
           <CardFila
             title="Meus rascunhos"
             itens={fila.solicitar}
-            abrirHref="/m/pagamentos/contas-a-pagar"
-            abrirLabel="abrir tela de contas a pagar"
+            abrirHref="/m/pagamentos/solicitacoes"
+            abrirLabel="abrir solicitações"
           />
           <CardFila
             title="Aguardando minha validação"
             itens={fila.validar}
-            abrirHref="/m/pagamentos/contas-a-pagar"
-            abrirLabel="abrir tela de contas a pagar"
+            abrirHref="/m/pagamentos/solicitacoes/validacao"
+            abrirLabel="abrir fila de validação"
           />
           <CardFila
-            title="Aguardando encaminhamento"
+            title="Aguardando decisão do gestor"
             itens={fila.encaminhar}
-            abrirHref="/m/pagamentos/contas-a-pagar"
-            abrirLabel="abrir tela de contas a pagar"
+            abrirHref="/m/pagamentos/solicitacoes/gestor"
+            abrirLabel="abrir fila do gestor"
           />
           <CardFila
             title="Aguardando autorização"
             itens={fila.autorizar}
-            abrirHref="/m/pagamentos/autorizacao"
-            abrirLabel="abrir tela de autorização"
+            abrirHref="/m/pagamentos/solicitacoes/autoridade"
+            abrirLabel="abrir fila da autoridade"
           />
           <CardParcelas
             title="Pagamentos a liberar"

@@ -32,6 +32,7 @@ from app.services import pagamentos_caixa as caixa
 from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_debitos as deb
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.fixtures.pagamentos import id_unidade_padrao
 
 
 def _sm(engine):
@@ -105,14 +106,17 @@ async def _base(engine, tenant_id, *, saldo_inicial="10000.00"):
             tipo_pessoa="JURIDICA", cnpj_cpf=_doc(), nome="Fornecedor Aut LTDA"))
         nat = await cad.criar_natureza(s, tenant_id=tenant_id, payload=NaturezaCreate(
             codigo=f"N{uuid.uuid4().hex[:6]}", descricao="Material"))
+        unidade_id = await id_unidade_padrao(s, tenant_id)
     fonte, conta = await _fonte_conta(engine, tenant_id, saldo_inicial=saldo_inicial)
-    return forn, nat, fonte, conta
+    return forn, nat, fonte, conta, unidade_id
 
 
-def _payload_debito(forn, nat, fonte, conta=None, *, valor="1000.00", parcelas=None):
+def _payload_debito(forn, nat, fonte, conta=None, *, unidade_id: int,
+                    valor="1000.00", parcelas=None):
     return DebitoCreate(
         id_fornecedor=forn.id, id_natureza=nat.id, id_fonte_recursos=fonte.id,
         id_conta=conta.id if conta is not None else None,
+        id_unidade=unidade_id,
         valor_total=valor, competencia="2026-07", descricao="Compra de material",
         numero_ne="NE-2026-0001",  # empenho obrigatório para autorizar (RN-01)
         parcelas=parcelas or [ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
@@ -151,24 +155,33 @@ async def _debito_aprovado(engine, tenant_id, *, valor="1000.00", saldo_inicial=
     validador distintos. Retorna (debito, solicitante_id, validador_id, fonte, conta).
     Com liquidar=False para em EM_VALIDACAO (sem liquidação, não pode validar)."""
     if base is None:
-        forn, nat, fonte, conta = await _base(engine, tenant_id, saldo_inicial=saldo_inicial)
+        forn, nat, fonte, conta, unidade_id = await _base(
+            engine, tenant_id, saldo_inicial=saldo_inicial)
     else:
-        forn, nat, fonte, conta = base
+        forn, nat, fonte, conta, unidade_id = base
     solicitante = await _novo_usuario(engine, tenant_id, f"sol{uuid.uuid4().hex[:6]}")
+    gestor = await _novo_usuario(engine, tenant_id, f"ges{uuid.uuid4().hex[:6]}")
     validador = await _novo_usuario(engine, tenant_id, f"val{uuid.uuid4().hex[:6]}")
     async with _sm(engine)() as s:
         d = await deb.criar_debito(s, tenant_id=tenant_id, usuario_id=solicitante,
-                                   payload=_payload_debito(forn, nat, fonte, conta, valor=valor,
-                                                           parcelas=parcelas))
+                                   payload=_payload_debito(
+                                       forn, nat, fonte, conta, unidade_id=unidade_id,
+                                       valor=valor, parcelas=parcelas))
     async with _sm(engine)() as s:
-        await deb.enviar_validacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante)
-    if liquidar:  # liquidação → validar → encaminhar (chega à fila de autorização)
+        d = await deb.enviar_para_gestor(
+            s, tenant_id=tenant_id, debito_id=d.id, usuario_id=solicitante,
+            lock_version=d.lock_version)
+    async with _sm(engine)() as s:
+        d = await deb.gestor_autorizar(
+            s, tenant_id=tenant_id, debito_id=d.id, usuario_id=gestor,
+            lock_version=d.lock_version)
+    if liquidar:  # liquidação → validar (chega à fila da autoridade)
         async with _sm(engine)() as s:
             await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=validador)
         async with _sm(engine)() as s:
-            await deb.validar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=validador)
-        async with _sm(engine)() as s:
-            d = await deb.encaminhar(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=validador)
+            d = await deb.validar(
+                s, tenant_id=tenant_id, debito_id=d.id, usuario_id=validador,
+                lock_version=d.lock_version)
     else:
         async with _sm(engine)() as s:
             d = await deb.obter_debito(s, tenant_id=tenant_id, debito_id=d.id)
@@ -293,7 +306,7 @@ async def test_ca_aut_05_reserva_reduz_disponivel(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         base = await _base(admin_engine, t.id, saldo_inicial="1000.00")
-        _forn, _nat, fonte, conta = base
+        _forn, _nat, fonte, conta, _unidade_id = base
         autorizador = await _autorizador_com_alcada(admin_engine, t.id)
 
         d_a, _sol_a, _apr_a, _f, _c = await _debito_aprovado(
@@ -330,6 +343,7 @@ async def test_rf_aut_11_fonte_sem_conta_ativa_bloqueia(admin_engine):
                 tipo_pessoa="JURIDICA", cnpj_cpf=_doc(), nome="Forn LTDA"))
             nat = await cad.criar_natureza(s, tenant_id=t.id, payload=NaturezaCreate(
                 codigo=f"N{uuid.uuid4().hex[:6]}", descricao="Material"))
+            unidade_id = await id_unidade_padrao(s, t.id)
         fonte, conta = await _fonte_conta(admin_engine, t.id, ativa=False)  # conta INATIVA
 
         async with _sm(admin_engine)() as s:
@@ -338,18 +352,27 @@ async def test_rf_aut_11_fonte_sem_conta_ativa_bloqueia(admin_engine):
 
         # débito da fonte (sem conta sugerida) percorre o rito até ENVIADO_SECRETARIO
         sol = await _novo_usuario(admin_engine, t.id, f"sol{uuid.uuid4().hex[:6]}")
+        gestor = await _novo_usuario(admin_engine, t.id, f"ges{uuid.uuid4().hex[:6]}")
         val = await _novo_usuario(admin_engine, t.id, f"val{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
             d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol,
-                                       payload=_payload_debito(forn, nat, fonte, conta=None))
+                                       payload=_payload_debito(
+                                           forn, nat, fonte, conta=None,
+                                           unidade_id=unidade_id))
         async with _sm(admin_engine)() as s:
-            await deb.enviar_validacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=sol)
+            d = await deb.enviar_para_gestor(
+                s, tenant_id=t.id, debito_id=d.id, usuario_id=sol,
+                lock_version=d.lock_version)
+        async with _sm(admin_engine)() as s:
+            d = await deb.gestor_autorizar(
+                s, tenant_id=t.id, debito_id=d.id, usuario_id=gestor,
+                lock_version=d.lock_version)
         async with _sm(admin_engine)() as s:
             await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
         async with _sm(admin_engine)() as s:
-            await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
-        async with _sm(admin_engine)() as s:
-            await deb.encaminhar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+            d = await deb.validar(
+                s, tenant_id=t.id, debito_id=d.id, usuario_id=val,
+                lock_version=d.lock_version)
 
         autorizador = await _autorizador_com_alcada(admin_engine, t.id)
         async with _sm(admin_engine)() as s:
@@ -391,16 +414,18 @@ async def test_validar_sem_liquidacao_422(admin_engine):
             admin_engine, t.id, valor="1000.00", liquidar=False)  # fica em EM_VALIDACAO
         async with _sm(admin_engine)() as s:
             with pytest.raises(HTTPException) as exc:
-                await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+                await deb.validar(
+                    s, tenant_id=t.id, debito_id=d.id, usuario_id=val,
+                    lock_version=d.lock_version)
             assert exc.value.status_code == 422
             assert "liquidação" in exc.value.detail.lower()
-        # confirmando a liquidação: validar → encaminhar → autoriza
+        # confirmando a liquidação: validar → autoriza
         async with _sm(admin_engine)() as s:
             await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
         async with _sm(admin_engine)() as s:
-            await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
-        async with _sm(admin_engine)() as s:
-            await deb.encaminhar(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+            d = await deb.validar(
+                s, tenant_id=t.id, debito_id=d.id, usuario_id=val,
+                lock_version=d.lock_version)
         autorizador = await _autorizador_com_alcada(admin_engine, t.id)
         ops = await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d])
         assert len(ops) == 1
@@ -488,7 +513,7 @@ async def test_autorizacao_em_lote_all_or_nothing(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         base = await _base(admin_engine, t.id, saldo_inicial="1000.00")
-        _forn, _nat, fonte, conta = base
+        _forn, _nat, fonte, conta, _unidade_id = base
         autorizador = await _autorizador_com_alcada(admin_engine, t.id)
 
         d_a, _sol_a, _apr_a, _f, _c = await _debito_aprovado(

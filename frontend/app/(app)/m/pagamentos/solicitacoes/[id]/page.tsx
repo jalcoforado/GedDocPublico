@@ -1,7 +1,6 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -11,8 +10,10 @@ import { Label } from "@/components/ui/label";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { ProximaAcao } from "@/components/pagamentos/ProximaAcao";
 import { api, type DebitoOut, type SituacaoTramitacao } from "@/lib/api";
-import { SITUACAO_TRAMITACAO_CONFIG, ETAPAS_FLUXO, getEtapaIndex, aguardandoDecisao } from "@/components/pagamentos/statusFluxo";
+import { useAuth } from "@/lib/auth";
+import { SITUACAO_TRAMITACAO_CONFIG, ETAPAS_FLUXO, getEtapaIndex } from "@/components/pagamentos/statusFluxo";
 import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
 
 function StatusBadge({ situacao }: { situacao: SituacaoTramitacao }) {
@@ -53,12 +54,13 @@ function Stepper({ etapaAtual }: { etapaAtual: number }) {
 export default function DetalheDebitosPage({ params }: { params: { id: string } }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const router = useRouter();
+  const { can } = useAuth();
   const id = parseInt(params.id);
 
   const [openDialog, setOpenDialog] = useState(false);
   const [justificativa, setJustificativa] = useState("");
   const [acaoSelecionada, setAcaoSelecionada] = useState<string | null>(null);
+  const [etapaSelecionada, setEtapaSelecionada] = useState<"GESTOR" | "VALIDACAO" | "AUTORIDADE" | null>(null);
 
   // Carregar débito
   const debitoQ = useQuery({
@@ -68,7 +70,6 @@ export default function DetalheDebitosPage({ params }: { params: { id: string } 
 
   const debito = debitoQ.data as DebitoOut | undefined;
   const etapaAtual = debito ? getEtapaIndex(debito.situacao_tramitacao) : 0;
-  const aguardaDecisao = debito && aguardandoDecisao(debito.situacao_tramitacao);
 
   // Mutations para ações
   const enviarGestorM = useMutation({
@@ -163,6 +164,57 @@ export default function DetalheDebitosPage({ params }: { params: { id: string } 
     },
   });
 
+  const solicitarAjusteM = useMutation({
+    mutationFn: () => {
+      if (!etapaSelecionada) throw new Error("Etapa do ajuste não informada");
+      return api.pagamentos.debitos.solicitarAjuste(id, {
+        lock_version: debito?.lock_version ?? 0,
+        etapa: etapaSelecionada,
+        justificativa,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Ajuste solicitado");
+      qc.invalidateQueries({ queryKey: ["pag-debito", id] });
+      setOpenDialog(false);
+    },
+    onError: (err: any) => toast.error(err.message || "Erro ao solicitar ajuste"),
+  });
+
+  const responderAjusteM = useMutation({
+    mutationFn: () => api.pagamentos.debitos.responderAjuste(id, {
+      lock_version: debito?.lock_version ?? 0,
+    }),
+    onSuccess: () => {
+      toast.success("Ajuste respondido");
+      qc.invalidateQueries({ queryKey: ["pag-debito", id] });
+      setOpenDialog(false);
+    },
+    onError: (err: any) => toast.error(err.message || "Erro ao responder ajuste"),
+  });
+
+  const cancelarM = useMutation({
+    mutationFn: () => api.pagamentos.debitos.cancelar(id, {
+      lock_version: debito?.lock_version ?? 0,
+      justificativa,
+    }),
+    onSuccess: () => {
+      toast.success("Solicitação cancelada");
+      qc.invalidateQueries({ queryKey: ["pag-debito", id] });
+      setOpenDialog(false);
+    },
+    onError: (err: any) => toast.error(err.message || "Erro ao cancelar"),
+  });
+
+  const confirmarLiquidacaoM = useMutation({
+    mutationFn: () => api.pagamentos.debitos.confirmarLiquidacao(id),
+    onSuccess: () => {
+      toast.success("Liquidação confirmada");
+      qc.invalidateQueries({ queryKey: ["pag-debito", id] });
+    },
+    onError: (err: any) => toast.error(err.message || "Erro ao confirmar liquidação"),
+  });
+
   if (debitoQ.isLoading) {
     return <div className="py-8 text-center">Carregando...</div>;
   }
@@ -170,6 +222,10 @@ export default function DetalheDebitosPage({ params }: { params: { id: string } 
   if (!debito) {
     return <div className="py-8 text-center text-danger">Solicitação não encontrada</div>;
   }
+
+  const perfis = [
+    "pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar",
+  ].filter((codigo) => can(codigo));
 
   return (
     <div className="space-y-4">
@@ -270,79 +326,31 @@ export default function DetalheDebitosPage({ params }: { params: { id: string } 
 
         {/* Coluna lateral — ações */}
         <div className="space-y-3">
-          {debito.situacao_tramitacao === "RASCUNHO" && (
-            <Button
-              onClick={() => {
-                setAcaoSelecionada("enviar");
-                setOpenDialog(true);
-              }}
-              className="w-full"
-            >
-              Enviar para Gestor
-            </Button>
-          )}
-
-          {debito.situacao_tramitacao === "AGUARDANDO_GESTOR" && (
-            <>
+          {debito.situacao_tramitacao === "AGUARDANDO_VALIDACAO" &&
+            can("pagamento_validar") && !debito.liquidacao_confirmada && (
               <Button
-                onClick={() => {
-                  setAcaoSelecionada("gestor-autorizar");
-                  setOpenDialog(true);
-                }}
-                className="w-full"
-              >
-                Autorizar
-              </Button>
-              <Button
-                onClick={() => {
-                  setAcaoSelecionada("gestor-rejeitar");
-                  setOpenDialog(true);
-                }}
-                className="w-full"
                 variant="secondary"
-              >
-                Rejeitar
-              </Button>
-            </>
-          )}
-
-          {debito.situacao_tramitacao === "AGUARDANDO_VALIDACAO" && (
-            <>
-              <Button
-                onClick={() => {
-                  setAcaoSelecionada("validar");
-                  setOpenDialog(true);
-                }}
                 className="w-full"
+                onClick={() => confirmarLiquidacaoM.mutate()}
+                disabled={confirmarLiquidacaoM.isPending}
               >
-                Validar
+                Confirmar liquidação
               </Button>
-            </>
-          )}
-
-          {debito.situacao_tramitacao === "AGUARDANDO_AUTORIDADE" && (
-            <>
-              <Button
-                onClick={() => {
-                  setAcaoSelecionada("autoridade-aprovar");
-                  setOpenDialog(true);
-                }}
-                className="w-full"
-              >
-                Aprovar
-              </Button>
-              <Button
-                onClick={() => {
-                  setAcaoSelecionada("autoridade-indeferir");
-                  setOpenDialog(true);
-                }}
-                className="w-full"
-                variant="secondary"
-              >
-                Indeferir
-              </Button>
-            </>
-          )}
+            )}
+          <ProximaAcao
+            tramitacao={debito.situacao_tramitacao}
+            perfis={perfis}
+            onAction={(acao, etapa) => {
+              setJustificativa("");
+              setAcaoSelecionada(acao);
+              setEtapaSelecionada(
+                etapa === "GESTOR" || etapa === "VALIDACAO" || etapa === "AUTORIDADE"
+                  ? etapa
+                  : null,
+              );
+              setOpenDialog(true);
+            }}
+          />
         </div>
       </div>
 
@@ -353,15 +361,21 @@ export default function DetalheDebitosPage({ params }: { params: { id: string } 
         title={
           acaoSelecionada === "enviar"
             ? "Enviar para Gestor"
-            : acaoSelecionada === "gestor-autorizar"
+            : acaoSelecionada === "gestor/autorizar"
               ? "Autorizar"
-              : acaoSelecionada === "gestor-rejeitar"
+              : acaoSelecionada === "gestor/rejeitar"
                 ? "Rejeitar"
                 : acaoSelecionada === "validar"
                   ? "Validar"
-                  : acaoSelecionada === "autoridade-aprovar"
+                  : acaoSelecionada === "autoridade/aprovar"
                     ? "Aprovar"
-                    : "Indeferir"
+                    : acaoSelecionada === "autoridade/indeferir"
+                      ? "Indeferir"
+                      : acaoSelecionada === "ajuste/solicitar"
+                        ? "Solicitar ajuste"
+                        : acaoSelecionada === "ajuste/responder"
+                          ? "Responder ajuste"
+                          : "Cancelar solicitação"
         }
         footer={
           <>
@@ -371,19 +385,27 @@ export default function DetalheDebitosPage({ params }: { params: { id: string } 
             <Button
               onClick={() => {
                 if (acaoSelecionada === "enviar") enviarGestorM.mutate();
-                if (acaoSelecionada === "gestor-autorizar") gestorAutorizarM.mutate();
-                if (acaoSelecionada === "gestor-rejeitar") gestorRejeitarM.mutate();
+                if (acaoSelecionada === "gestor/autorizar") gestorAutorizarM.mutate();
+                if (acaoSelecionada === "gestor/rejeitar") gestorRejeitarM.mutate();
                 if (acaoSelecionada === "validar") validarM.mutate();
-                if (acaoSelecionada === "autoridade-aprovar") autoridadeAprovarM.mutate();
-                if (acaoSelecionada === "autoridade-indeferir") autoridadeIndeferirM.mutate();
+                if (acaoSelecionada === "autoridade/aprovar") autoridadeAprovarM.mutate();
+                if (acaoSelecionada === "autoridade/indeferir") autoridadeIndeferirM.mutate();
+                if (acaoSelecionada === "ajuste/solicitar") solicitarAjusteM.mutate();
+                if (acaoSelecionada === "ajuste/responder") responderAjusteM.mutate();
+                if (acaoSelecionada === "cancelar") cancelarM.mutate();
               }}
+              disabled={
+                ["gestor/rejeitar", "autoridade/indeferir", "ajuste/solicitar", "cancelar"]
+                  .includes(acaoSelecionada ?? "") && !justificativa.trim()
+              }
             >
               Confirmar
             </Button>
           </>
         }
       >
-        {["gestor-rejeitar", "autoridade-indeferir"].includes(acaoSelecionada ?? "") && (
+        {["gestor/rejeitar", "autoridade/indeferir", "ajuste/solicitar", "cancelar"]
+          .includes(acaoSelecionada ?? "") && (
           <div className="space-y-3">
             <Label>Justificativa</Label>
             <Textarea

@@ -303,6 +303,9 @@ async def test_validar_success(admin_engine):
             s, tenant_id=tenant.id, debito_id=debito.id,
             usuario_id=2, lock_version=debito.lock_version,
         )
+        debito = await svc.confirmar_liquidacao(
+            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=3,
+        )
 
         # Validador aprova
         result = await svc.validar(
@@ -330,6 +333,9 @@ async def test_autoridade_aprovar_success(admin_engine):
         debito = await svc.gestor_autorizar(
             s, tenant_id=tenant.id, debito_id=debito.id,
             usuario_id=2, lock_version=debito.lock_version,
+        )
+        debito = await svc.confirmar_liquidacao(
+            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=3,
         )
         debito = await svc.validar(
             s, tenant_id=tenant.id, debito_id=debito.id,
@@ -361,6 +367,9 @@ async def test_autoridade_indeferir_success(admin_engine):
         debito = await svc.gestor_autorizar(
             s, tenant_id=tenant.id, debito_id=debito.id,
             usuario_id=2, lock_version=debito.lock_version,
+        )
+        debito = await svc.confirmar_liquidacao(
+            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=3,
         )
         debito = await svc.validar(
             s, tenant_id=tenant.id, debito_id=debito.id,

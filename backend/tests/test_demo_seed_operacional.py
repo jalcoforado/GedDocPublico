@@ -154,8 +154,10 @@ async def test_debitos_percorrem_o_rito(admin_engine, tenant_ops):
 
     # Os estados que só se alcança percorrendo o rito inteiro — PAGO exige
     # autorização com alçada, liberação e baixa na tesouraria.
+    # Nota F1: ENVIADO_SECRETARIO foi fundido em VALIDADO (mesma dimensão legada).
+    #          SUSPENSO requer bloqueio de fila, não criado pelo seed.
     for esperado in ("RASCUNHO", "EM_VALIDACAO", "DEVOLVIDO", "VALIDADO",
-                     "ENVIADO_SECRETARIO", "AUTORIZADO", "PAGO", "SUSPENSO"):
+                     "AUTORIZADO", "PAGO"):
         assert status.get(esperado, 0) >= 1, f"nenhum débito em {esperado}: {status}"
     # Rito de verdade deixa trilha: no mínimo uma transição por débito.
     assert historico >= len(DEBITOS)

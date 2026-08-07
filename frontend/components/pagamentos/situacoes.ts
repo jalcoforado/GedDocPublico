@@ -127,6 +127,7 @@ export const PAGAMENTO_ROTULO: Record<SituacaoPagamento, Rotulo> = {
   FALHOU: { label: "Falhou no banco", intent: "danger", icone: "alert-circle" },
   CANCELADA: { label: "Cancelado", intent: "neutral", icone: "ban" },
   ESTORNADA: { label: "Estornado", intent: "danger", icone: "undo-2" },
+  CONCILIADA: { label: "Conciliado", intent: "success", icone: "check-check" },
 };
 
 export type EtapaFluxo =

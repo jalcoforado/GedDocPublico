@@ -16,6 +16,7 @@ interface FormState {
   id_fornecedor: number | null;
   id_natureza: number | null;
   id_fonte_recursos: number | null;
+  id_unidade: number | null;
   id_contrato: number | null;
   valor_total: string;
   competencia: string;
@@ -25,6 +26,7 @@ interface FormState {
   urgente: boolean;
   justificativa_urgencia: string;
   descricao: string;
+  vencimento: string;
 }
 
 function emptyForm(): FormState {
@@ -32,6 +34,7 @@ function emptyForm(): FormState {
     id_fornecedor: null,
     id_natureza: null,
     id_fonte_recursos: null,
+    id_unidade: null,
     id_contrato: null,
     valor_total: "",
     competencia: "",
@@ -41,6 +44,7 @@ function emptyForm(): FormState {
     urgente: false,
     justificativa_urgencia: "",
     descricao: "",
+    vencimento: "",
   };
 }
 
@@ -73,6 +77,11 @@ export default function NovasolicitacaoPage() {
     queryFn: () => api.pagamentos.cadastros.contratos.list(),
   });
 
+  const unidadesQ = useQuery({
+    queryKey: ["unidades-all"],
+    queryFn: () => api.unidades.list({ page_size: 200 }),
+  });
+
   // Criar débito
   const criarM = useMutation({
     mutationFn: async (payload: FormState) => {
@@ -81,16 +90,28 @@ export default function NovasolicitacaoPage() {
       if (!payload.id_fornecedor) newErros.id_fornecedor = "Fornecedor é obrigatório";
       if (!payload.id_natureza) newErros.id_natureza = "Natureza é obrigatória";
       if (!payload.id_fonte_recursos) newErros.id_fonte_recursos = "Fonte de recursos é obrigatória";
+      if (!payload.id_unidade) newErros.id_unidade = "Unidade solicitante é obrigatória";
       if (!payload.valor_total) newErros.valor_total = "Valor é obrigatório";
       if (!payload.competencia) newErros.competencia = "Competência é obrigatória";
       if (!payload.descricao) newErros.descricao = "Descrição é obrigatória";
+      if (!payload.vencimento) newErros.vencimento = "Vencimento é obrigatório";
 
       if (Object.keys(newErros).length > 0) {
         setErros(newErros);
         throw new Error("Preencha os campos obrigatórios");
       }
 
-      return api.pagamentos.debitos.create(payload);
+      const { vencimento, ...dados } = payload;
+      return api.pagamentos.debitos.create({
+        ...dados,
+        id_contrato: dados.id_contrato || null,
+        numero_ne: dados.numero_ne.trim() || null,
+        numero_nf: dados.numero_nf.trim() || null,
+        justificativa_urgencia: dados.urgente
+          ? dados.justificativa_urgencia.trim() || null
+          : null,
+        parcelas: [{ numero: 1, valor: Number(dados.valor_total), vencimento }],
+      });
     },
     onSuccess: (debito) => {
       toast.success("Solicitação criada com sucesso");
@@ -198,6 +219,20 @@ export default function NovasolicitacaoPage() {
           </Select>
         </div>
 
+        <div>
+          <Label>Unidade solicitante *</Label>
+          <Select
+            value={form.id_unidade?.toString() ?? ""}
+            onChange={(e) => handleChange("id_unidade", e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">Selecionar unidade...</option>
+            {unidadesQ.data?.items.map((u) => (
+              <option key={u.id} value={u.id}>{u.unidade_trabalho}</option>
+            ))}
+          </Select>
+          {erros.id_unidade && <p className="text-xs text-danger mt-1">{erros.id_unidade}</p>}
+        </div>
+
         {/* Valor Total */}
         <div>
           <Label>Valor Total *</Label>
@@ -224,6 +259,16 @@ export default function NovasolicitacaoPage() {
           {erros.competencia && (
             <p className="text-xs text-danger mt-1">{erros.competencia}</p>
           )}
+        </div>
+
+        <div>
+          <Label>Vencimento da parcela *</Label>
+          <Input
+            type="date"
+            value={form.vencimento}
+            onChange={(e) => handleChange("vencimento", e.target.value)}
+          />
+          {erros.vencimento && <p className="text-xs text-danger mt-1">{erros.vencimento}</p>}
         </div>
 
         {/* NE e NF */}

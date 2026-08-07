@@ -336,7 +336,7 @@ SituacaoFila = Literal[
     "AGUARDANDO_DISPONIBILIDADE", "EXCECAO_AUTORIZADA", "CONCLUIDA", "RETIRADA"]
 SituacaoPagamento = Literal[
     "NAO_INICIADA", "PROGRAMADA", "ENVIADA_BANCO", "EM_PROCESSAMENTO",
-    "PAGA_PARCIAL", "PAGA", "FALHOU", "CANCELADA", "ESTORNADA"]
+    "PAGA_PARCIAL", "PAGA", "FALHOU", "CANCELADA", "ESTORNADA", "CONCILIADA"]
 CategoriaContrato = Literal["BENS", "LOCACOES", "SERVICOS", "OBRAS"]
 # ----------------------------------------------------------------------------
 
@@ -457,7 +457,7 @@ class DecisaoJustificadaIn(DecisaoIn):
 
 class SolicitarAjusteIn(DecisaoJustificadaIn):
     """Solicitação de ajuste na despesa, a partir de qualquer etapa decisória."""
-    etapa: str = Field(min_length=1, max_length=50)
+    etapa: Literal["GESTOR", "VALIDACAO", "AUTORIDADE"]
 
 
 class AutorizarLoteIn(BaseModel):

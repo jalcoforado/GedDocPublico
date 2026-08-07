@@ -173,6 +173,8 @@ async def arreio_debito_em_autoridade(admin_engine, arreio_debito_em_validacao):
 
     # Validador valida → AGUARDANDO_AUTORIDADE
     async with _sm(admin_engine)() as s:
+        d = await svc.confirmar_liquidacao(
+            s, tenant_id=t.id, debito_id=d.id, usuario_id=validador)
         d = await svc.validar(s, tenant_id=t.id, debito_id=d.id,
                              usuario_id=validador, lock_version=d.lock_version)
 
@@ -185,6 +187,8 @@ async def test_validar_transita_para_autoridade(admin_engine, arreio_debito_em_v
     t, d, _sol, _gest, validador, _forn, _nat, _conta = arreio_debito_em_validacao
     try:
         async with _sm(admin_engine)() as s:
+            d = await svc.confirmar_liquidacao(
+                s, tenant_id=t.id, debito_id=d.id, usuario_id=validador)
             result = await svc.validar(s, tenant_id=t.id, debito_id=d.id,
                                       usuario_id=validador, lock_version=d.lock_version)
         assert result.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
