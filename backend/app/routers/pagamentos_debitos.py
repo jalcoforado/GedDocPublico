@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import html as _htmlmod
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import require_tenant_id
@@ -16,10 +16,11 @@ from pydantic import BaseModel, Field
 
 from ..schemas.pagamentos import (
     AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
-    DebitoHistoricoOut, DebitoOut, DebitoUpdate, FichaFonteOut, FilaAutorizacaoFonteGrupo,
-    ChecklistDebitoItemOut, FilaLiberacaoGrupo, FilaTesourariaOut, JustificativaIn, LiquidacaoIn,
-    MarcarChecklistIn, MinhaFilaOut, OrdemPagamentoOut, PagarParcelaIn, ParcelaFilaOut, ParcelaOut,
-    SimulacaoAutorizacaoIn, SimulacaoAutorizacaoOut,
+    DebitoHistoricoOut, DebitoOut, DebitoUpdate, DecisaoIn, DecisaoJustificadaIn, FichaFonteOut,
+    FilaAutorizacaoFonteGrupo, ChecklistDebitoItemOut, FilaLiberacaoGrupo, FilaTesourariaOut,
+    JustificativaIn, LiquidacaoIn, MarcarChecklistIn, MinhaFilaOut, OrdemPagamentoOut,
+    PagarParcelaIn, ParcelaFilaOut, ParcelaOut, SolicitarAjusteIn, SimulacaoAutorizacaoIn,
+    SimulacaoAutorizacaoOut,
 )
 from ..services import pagamentos_autorizacao as aut
 from ..services import pagamentos_caixa as caixa
@@ -150,45 +151,14 @@ async def delete_debito(debito_id: int,
     await svc.excluir_debito(db, tenant_id=tenant_id, debito_id=debito_id)
 
 
-@debitos_router.post("/{debito_id}/enviar", response_model=DebitoOut)
-async def enviar(debito_id: int, request: Request,
-                 usuario: Usuario = Depends(require_permission("pagamento_solicitar")),
-                 tenant_id: int = Depends(require_tenant_id),
-                 db: AsyncSession = Depends(get_db)):
-    d = await svc.enviar_validacao(db, tenant_id=tenant_id, debito_id=debito_id,
-                                   usuario_id=usuario.id, ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
-
-
-@debitos_router.post("/{debito_id}/validar", response_model=DebitoOut)
-async def validar(debito_id: int, request: Request,
-                  usuario: Usuario = Depends(require_any_permission(*PERM_VALIDAR)),
-                  tenant_id: int = Depends(require_tenant_id),
-                  db: AsyncSession = Depends(get_db)):
-    d = await svc.validar(db, tenant_id=tenant_id, debito_id=debito_id,
-                          usuario_id=usuario.id, ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
-
-
-# Alias retrocompatível: /aprovar continua chamando a validação.
-@debitos_router.post("/{debito_id}/aprovar", response_model=DebitoOut)
-async def aprovar(debito_id: int, request: Request,
-                  usuario: Usuario = Depends(require_any_permission(*PERM_VALIDAR)),
-                  tenant_id: int = Depends(require_tenant_id),
-                  db: AsyncSession = Depends(get_db)):
-    d = await svc.validar(db, tenant_id=tenant_id, debito_id=debito_id,
-                          usuario_id=usuario.id, ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
-
-
-@debitos_router.post("/{debito_id}/encaminhar", response_model=DebitoOut)
-async def encaminhar(debito_id: int, request: Request,
-                     usuario: Usuario = Depends(require_any_permission(*PERM_ENCAMINHAR)),
-                     tenant_id: int = Depends(require_tenant_id),
-                     db: AsyncSession = Depends(get_db)):
-    d = await svc.encaminhar(db, tenant_id=tenant_id, debito_id=debito_id,
-                             usuario_id=usuario.id, ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+# Endpoints antigos substituídos pelo novo fluxo (retornam 410 Gone)
+@debitos_router.post("/{debito_id}/encaminhar")
+async def encaminhar_deprecated(debito_id: int):
+    """Endpoint descontinuado. Use o novo fluxo de pagamentos: gestor-autorizar, validar, etc."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Este endpoint foi descontinuado. Use o novo fluxo de pagamentos."
+    )
 
 
 @debitos_router.post("/{debito_id}/devolver", response_model=DebitoOut)
@@ -269,6 +239,117 @@ async def reativar(debito_id: int, payload: JustificativaIn, request: Request,
     d = await svc.reativar(db, tenant_id=tenant_id, debito_id=debito_id, usuario_id=usuario.id,
                            justificativa=payload.justificativa, ip=_ip(request))
     return (await _out(db, tenant_id, [d]))[0]
+
+
+# ===== Fluxo completo com etapas de gestor, validação e autoridade (F1, Tarefa 7) =====
+
+# Endpoints do gestor (5 total)
+@debitos_router.post("/{debito_id}/enviar-gestor", response_model=DebitoOut)
+async def enviar_gestor(debito_id: int, payload: DecisaoIn, request: Request,
+                        usuario: Usuario = Depends(require_permission("pagamento_solicitar")),
+                        tenant_id: int = Depends(require_tenant_id),
+                        db: AsyncSession = Depends(get_db)):
+    """Unidade setorial envia solicitação ao gestor da pasta para juízo de mérito."""
+    d = await svc.enviar_para_gestor(db, tenant_id=tenant_id, debito_id=debito_id,
+                                     usuario_id=usuario.id, lock_version=payload.lock_version,
+                                     ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+@debitos_router.post("/{debito_id}/gestor-autorizar", response_model=DebitoOut)
+async def gestor_autorizar(debito_id: int, payload: DecisaoIn, request: Request,
+                           usuario: Usuario = Depends(require_permission("pagamento_gerir")),
+                           tenant_id: int = Depends(require_tenant_id),
+                           db: AsyncSession = Depends(get_db)):
+    """Gestor da pasta autoriza o mérito e a conveniência da despesa."""
+    d = await svc.gestor_autorizar(db, tenant_id=tenant_id, debito_id=debito_id,
+                                   usuario_id=usuario.id, lock_version=payload.lock_version,
+                                   ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+@debitos_router.post("/{debito_id}/gestor-rejeitar", response_model=DebitoOut)
+async def gestor_rejeitar(debito_id: int, payload: DecisaoJustificadaIn, request: Request,
+                          usuario: Usuario = Depends(require_permission("pagamento_gerir")),
+                          tenant_id: int = Depends(require_tenant_id),
+                          db: AsyncSession = Depends(get_db)):
+    """Gestor rejeita a despesa por falta de mérito ou conveniência."""
+    d = await svc.gestor_rejeitar(db, tenant_id=tenant_id, debito_id=debito_id,
+                                  usuario_id=usuario.id, lock_version=payload.lock_version,
+                                  justificativa=payload.justificativa, ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+@debitos_router.post("/{debito_id}/solicitar-ajuste", response_model=DebitoOut)
+async def solicitar_ajuste(debito_id: int, payload: SolicitarAjusteIn, request: Request,
+                           usuario: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                           tenant_id: int = Depends(require_tenant_id),
+                           db: AsyncSession = Depends(get_db)):
+    """Solicita ajuste na despesa a partir de qualquer etapa decisória."""
+    d = await svc.solicitar_ajuste(db, tenant_id=tenant_id, debito_id=debito_id,
+                                   usuario_id=usuario.id, lock_version=payload.lock_version,
+                                   etapa=payload.etapa, justificativa=payload.justificativa,
+                                   ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+@debitos_router.post("/{debito_id}/responder-ajuste", response_model=DebitoOut)
+async def responder_ajuste(debito_id: int, payload: DecisaoIn, request: Request,
+                           usuario: Usuario = Depends(require_permission("pagamento_solicitar")),
+                           tenant_id: int = Depends(require_tenant_id),
+                           db: AsyncSession = Depends(get_db)):
+    """Unidade responde o ajuste solicitado e volta à etapa que o pediu."""
+    d = await svc.responder_ajuste(db, tenant_id=tenant_id, debito_id=debito_id,
+                                   usuario_id=usuario.id, lock_version=payload.lock_version,
+                                   ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+# Endpoints de validação e autoridade (4 total)
+@debitos_router.post("/{debito_id}/validar", response_model=DebitoOut)
+async def validar(debito_id: int, payload: DecisaoIn, request: Request,
+                  usuario: Usuario = Depends(require_permission("pagamento_validar")),
+                  tenant_id: int = Depends(require_tenant_id),
+                  db: AsyncSession = Depends(get_db)):
+    """Validador da Secretaria de Finanças aprova a conformidade documental e financeira."""
+    d = await svc.validar(db, tenant_id=tenant_id, debito_id=debito_id,
+                          usuario_id=usuario.id, lock_version=payload.lock_version,
+                          ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+@debitos_router.post("/{debito_id}/autoridade-aprovar", response_model=DebitoOut)
+async def autoridade_aprovar(debito_id: int, payload: DecisaoIn, request: Request,
+                             usuario: Usuario = Depends(require_permission("pagamento_autorizar")),
+                             tenant_id: int = Depends(require_tenant_id),
+                             db: AsyncSession = Depends(get_db)):
+    """Autoridade competente aprova a despesa; segue para o pagador."""
+    d = await svc.autoridade_aprovar(db, tenant_id=tenant_id, debito_id=debito_id,
+                                     usuario_id=usuario.id, lock_version=payload.lock_version,
+                                     ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+@debitos_router.post("/{debito_id}/autoridade-indeferir", response_model=DebitoOut)
+async def autoridade_indeferir(debito_id: int, payload: DecisaoJustificadaIn, request: Request,
+                               usuario: Usuario = Depends(require_permission("pagamento_autorizar")),
+                               tenant_id: int = Depends(require_tenant_id),
+                               db: AsyncSession = Depends(get_db)):
+    """Autoridade competente indeferiu a despesa por falta de disponibilidade orçamentária ou legal."""
+    d = await svc.autoridade_indeferir(db, tenant_id=tenant_id, debito_id=debito_id,
+                                       usuario_id=usuario.id, lock_version=payload.lock_version,
+                                       justificativa=payload.justificativa, ip=_ip(request))
+    return (await _out(db, tenant_id, [d]))[0]
+
+
+# Endpoint deprecado: /autorizar (nunca existiu com novo serviço)
+@debitos_router.post("/{debito_id}/autorizar")
+async def autorizar_deprecated(debito_id: int):
+    """Endpoint descontinuado. Use autoridade-aprovar."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Este endpoint foi descontinuado. Use o novo fluxo de pagamentos."
+    )
 
 
 async def _op_out(db, tenant_id: int, ops) -> list[OrdemPagamentoOut]:

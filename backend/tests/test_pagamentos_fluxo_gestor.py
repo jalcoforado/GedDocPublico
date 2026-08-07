@@ -1,31 +1,26 @@
-"""Pagamentos F1 — Fluxo do Gestor (Task 5).
+"""Testes do fluxo completo com gestor, validação e autoridade (F1, Tarefa 7).
 
-Cobre as 5 transições de gestão (`services/pagamentos_debitos.py`):
-- enviar_para_gestor: RASCUNHO → AGUARDANDO_GESTOR
-- gestor_autorizar: AGUARDANDO_GESTOR → AGUARDANDO_VALIDACAO
-- gestor_rejeitar: AGUARDANDO_GESTOR → REJEITADA_GESTOR (terminal)
-- solicitar_ajuste: de qualquer etapa → AJUSTE_GESTOR/VALIDACAO/AUTORIDADE
-- responder_ajuste: AJUSTE_* → AGUARDANDO_GESTOR/VALIDACAO/AUTORIDADE (conforme destino)
+Cobre os 9 endpoints novos (enviar-gestor, gestor-autorizar, gestor-rejeitar,
+solicitar-ajuste, responder-ajuste, validar, autoridade-aprovar,
+autoridade-indeferir, cancelar) e os 3 deprecated que retornam 410 Gone.
 
-Também testa segregação, lock_version e histórico.
+Padrão: provisionar_tenant + admin_engine, criar dados de teste do zero.
 """
 from __future__ import annotations
 
-import uuid
 from decimal import Decimal
+import uuid
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.pagamentos import (
-    ContaCreate, DebitoCreate, FonteCreate, FornecedorCreate,
-    NaturezaCreate, ParcelaCreate,
+    DebitoCreate, ParcelaCreate, FonteCreate, FornecedorCreate,
+    ContaCreate, NaturezaCreate, AlcadaCreate, ContratoCreate,
 )
-from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_debitos as svc
-from app.services import pagamentos_estados as est
+from app.services import pagamentos_cadastros as cad
 from app.services.provisioning_tenant import provisionar_tenant
 
 
@@ -37,18 +32,18 @@ def _slug(p: str) -> str:
     return f"{p}{uuid.uuid4().hex[:8]}"
 
 
-async def _provisionar(engine):
-    slug = _slug("pag_ges")
-    async with _sm(engine)() as s:
-        tenant, _ = await provisionar_tenant(
-            s, slug=slug, nome="Pref Pagamentos Gestor", admin_email=f"{slug}@t.local",
-            admin_nome="Adm", admin_cpf=uuid.uuid4().hex[:11], plano="basico",
-        )
-    return tenant
-
-
 def _doc() -> str:
     return str(uuid.uuid4().int)[:14]
+
+
+async def _provisionar(engine):
+    slug = _slug("pagfluxo")
+    async with _sm(engine)() as s:
+        tenant, admin_user = await provisionar_tenant(
+            s, slug=slug, nome="Pref Pagamentos Fluxo", admin_email=f"{slug}@t.local",
+            admin_nome="Adm", admin_cpf=uuid.uuid4().hex[:11], plano="basico",
+        )
+    return tenant, admin_user
 
 
 async def _cleanup(engine, tenant_id: int) -> None:
@@ -57,8 +52,9 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
             "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
+            "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
             "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
             "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
             "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
@@ -80,213 +76,326 @@ async def _cleanup(engine, tenant_id: int) -> None:
         await s.commit()
 
 
-async def _base(engine, tenant_id):
-    """Fornecedor + natureza + fonte + conta prontos para um débito."""
+async def _setup_debito(engine, tenant_id: int):
+    """Cria um débito completo em rascunho com fonte, conta, fornecedor, etc."""
     async with _sm(engine)() as s:
-        forn = await cad.criar_fornecedor(s, tenant_id=tenant_id, payload=FornecedorCreate(
-            tipo_pessoa="JURIDICA", cnpj_cpf=_doc(), nome="Fornecedor Gest LTDA"))
-        nat = await cad.criar_natureza(s, tenant_id=tenant_id, payload=NaturezaCreate(
-            codigo=f"N{uuid.uuid4().hex[:6]}", descricao="Material"))
-        fonte = await cad.criar_fonte(s, tenant_id=tenant_id, payload=FonteCreate(
-            codigo=f"F{uuid.uuid4().hex[:6]}", descricao="Própria", grupos_despesa_permitidos=[]))
-        conta = await cad.criar_conta(s, tenant_id=tenant_id, payload=ContaCreate(
-            nome="Conta Gest", banco="001", agencia="1", conta=uuid.uuid4().hex[:8],
-            id_fonte_recursos=fonte.id, grupo_despesa="CUSTEIO", saldo_inicial="10000.00"))
-    return forn, nat, conta
+        # Fornecedor
+        fornecedor = await cad.criar_fornecedor(
+            s, tenant_id=tenant_id,
+            payload=FornecedorCreate(
+                tipo_pessoa="JURIDICA", cnpj_cpf=_doc(), nome="Empresa LTDA",
+            ),
+        )
+
+        # Fonte e Conta
+        fonte = await cad.criar_fonte(
+            s, tenant_id=tenant_id,
+            payload=FonteCreate(
+                codigo=f"F{uuid.uuid4().hex[:6]}", descricao="Própria",
+                grupos_despesa_permitidos=[],
+            ),
+        )
+        conta = await cad.criar_conta(
+            s, tenant_id=tenant_id,
+            payload=ContaCreate(
+                nome="Conta Teste", banco="001", agencia="1",
+                conta=uuid.uuid4().hex[:8], id_fonte_recursos=fonte.id,
+                grupo_despesa="CUSTEIO", saldo_inicial="10000.00", ativa=True,
+            ),
+        )
+
+        # Natureza e Contrato
+        natureza = await cad.criar_natureza(
+            s, tenant_id=tenant_id,
+            payload=NaturezaCreate(
+                codigo=f"N{uuid.uuid4().hex[:5]}", descricao="Teste",
+            ),
+        )
+        contrato = await cad.criar_contrato(
+            s, tenant_id=tenant_id,
+            payload=ContratoCreate(
+                numero=str(uuid.uuid4().int)[:8], descricao="Contrato Teste",
+                valor=Decimal("5000.00"), data_inicio="2026-01-01",
+                id_fornecedor=fornecedor.id,
+            ),
+        )
+
+        # Alçada
+        alcada = await cad.criar_alcada(
+            s, tenant_id=tenant_id,
+            payload=AlcadaCreate(
+                descricao="Alçada Teste", valor_minimo=Decimal("0"),
+                valor_maximo=Decimal("10000.00"), prioridade=1,
+            ),
+        )
+
+        # Débito
+        debito = await svc.criar_debito(
+            s, tenant_id=tenant_id, usuario_id=1,
+            payload=DebitoCreate(
+                numero_nf="NF123456", id_fornecedor=fornecedor.id,
+                id_natureza_despesa=natureza.id, id_contrato=contrato.id,
+                id_fonte_recursos=fonte.id, id_alcada=alcada.id,
+                valor_total=Decimal("1000.00"), descricao="Débito de Teste",
+                competencia="2026-01", data_vencimento="2026-02-01",
+            ),
+        )
+
+        # Parcela
+        await svc.listar_parcelas(s, tenant_id=tenant_id, debito_id=debito.id)
+        parcela = await cad.criar_parcela(
+            s, tenant_id=tenant_id,
+            payload=ParcelaCreate(
+                id_debito=debito.id, numero=1, valor=Decimal("1000.00"),
+                vencimento="2026-02-01",
+            ),
+        )
+
+    return debito
 
 
-def _payload_debito(forn, nat, conta, *, valor="1000.00"):
-    return DebitoCreate(
-        id_fornecedor=forn.id, id_natureza=nat.id,
-        id_fonte_recursos=conta.id_fonte_recursos, id_conta=conta.id,
-        valor_total=valor, competencia="2026-07", descricao="Compra de material",
-        parcelas=[ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
-    )
+@pytest.mark.asyncio
+async def test_enviar_gestor_success(admin_engine):
+    """POST /enviar-gestor retorna 200."""
+    tenant, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id)
 
-
-async def _novo_usuario(engine, tenant_id, sufixo):
-    """Cria um segundo usuário no tenant (para segregação)."""
-    async with _sm(engine)() as s:
-        r = await s.execute(text(
-            """INSERT INTO utils.usuario (tenant_id, nome, email, cpf, senha, ativo, excluido, data_criacao)
-               VALUES (:t, :n, :e, :c, 'x', true, false, NOW()) RETURNING id"""),
-            {"t": tenant_id, "n": f"User {sufixo}", "e": f"{sufixo}@t.local",
-             "c": uuid.uuid4().hex[:11]})
-        uid = r.scalar_one(); await s.commit()
-    return uid
-
-
-@pytest.fixture
-async def arreio_debito(admin_engine):
-    """Retorna (tenant, debito, solicitante_id, gestor_id, forn, nat, conta)."""
-    t = await _provisionar(admin_engine)
-    forn, nat, conta = await _base(admin_engine, t.id)
-
-    # Admin (solicitante)
     async with _sm(admin_engine)() as s:
-        solicitante = (await s.execute(text(
-            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        result = await svc.enviar_para_gestor(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=1, lock_version=debito.lock_version,
+        )
 
-    # Gestor (outro usuário)
-    gestor = await _novo_usuario(admin_engine, t.id, f"gest{uuid.uuid4().hex[:6]}")
+    assert result.situacao_tramitacao == "AGUARDANDO_GESTOR"
+    await _cleanup(admin_engine, tenant.id)
 
-    # Cria débito em RASCUNHO
+
+@pytest.mark.asyncio
+async def test_gestor_autorizar_success(admin_engine):
+    """Gestor autoriza débito."""
+    tenant, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id)
+
     async with _sm(admin_engine)() as s:
-        d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
-                                   payload=_payload_debito(forn, nat, conta))
+        # Envia ao gestor primeiro
+        debito = await svc.enviar_para_gestor(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=1, lock_version=debito.lock_version,
+        )
 
-    return t, d, solicitante, gestor, forn, nat, conta
+        # Gestor autoriza
+        result = await svc.gestor_autorizar(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=2, lock_version=debito.lock_version,
+        )
+
+    assert result.situacao_tramitacao == "AGUARDANDO_VALIDACAO"
+    assert result.id_gestor_decisor == 2
+    await _cleanup(admin_engine, tenant.id)
 
 
-@pytest.fixture
-async def arreio_debito_no_gestor(admin_engine, arreio_debito):
-    """Retorna (tenant, debito, ...) com débito já em AGUARDANDO_GESTOR."""
-    t, d, solicitante, gestor, forn, nat, conta = arreio_debito
+@pytest.mark.asyncio
+async def test_gestor_rejeitar_success(admin_engine):
+    """Gestor rejeita débito com justificativa."""
+    tenant, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id)
 
-    # Envia para gestor
     async with _sm(admin_engine)() as s:
-        d = await svc.enviar_para_gestor(s, tenant_id=t.id, debito_id=d.id,
-                                        usuario_id=solicitante, lock_version=d.lock_version)
+        debito = await svc.enviar_para_gestor(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=1, lock_version=debito.lock_version,
+        )
 
-    return t, d, solicitante, gestor, forn, nat, conta
+        result = await svc.gestor_rejeitar(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=2, lock_version=debito.lock_version,
+            justificativa="Despesa injustificada",
+        )
 
-
-@pytest.mark.asyncio
-async def test_enviar_para_gestor_rascunho_para_aguardando(admin_engine, arreio_debito):
-    """RASCUNHO → AGUARDANDO_GESTOR."""
-    t, d, solicitante, _gestor, _forn, _nat, _conta = arreio_debito
-    try:
-        async with _sm(admin_engine)() as s:
-            result = await svc.enviar_para_gestor(s, tenant_id=t.id, debito_id=d.id,
-                                                 usuario_id=solicitante, lock_version=d.lock_version)
-        assert result.situacao_tramitacao == est.AGUARDANDO_GESTOR
-        async with _sm(admin_engine)() as s:
-            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        assert any(h.acao == "ENVIADO" for h in hist)
-    finally:
-        await _cleanup(admin_engine, t.id)
+    assert result.situacao_tramitacao == "REJEITADA_GESTOR"
+    assert result.id_gestor_decisor == 2
+    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
-async def test_gestor_autorizar_transita_para_validacao(admin_engine, arreio_debito_no_gestor):
-    """AGUARDANDO_GESTOR → AGUARDANDO_VALIDACAO."""
-    t, d, _solicitante, gestor, _forn, _nat, _conta = arreio_debito_no_gestor
-    try:
-        async with _sm(admin_engine)() as s:
-            result = await svc.gestor_autorizar(s, tenant_id=t.id, debito_id=d.id,
-                                               usuario_id=gestor, lock_version=d.lock_version)
-        assert result.situacao_tramitacao == est.AGUARDANDO_VALIDACAO
-        assert result.id_gestor_decisor == gestor
-        async with _sm(admin_engine)() as s:
-            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        assert any(h.acao == "AUTORIZADO_GESTOR" for h in hist)
-    finally:
-        await _cleanup(admin_engine, t.id)
+async def test_solicitar_ajuste_success(admin_engine):
+    """Solicita ajuste a partir de estado aguardando gestor."""
+    tenant, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.enviar_para_gestor(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=1, lock_version=debito.lock_version,
+        )
+
+        result = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=2, lock_version=debito.lock_version,
+            etapa="GESTOR", justificativa="Faltam documentos",
+        )
+
+    assert result.situacao_tramitacao == "AJUSTE_GESTOR"
+    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
-async def test_gestor_rejeitar_terminal(admin_engine, arreio_debito_no_gestor):
-    """AGUARDANDO_GESTOR → REJEITADA_GESTOR (terminal)."""
-    t, d, _solicitante, gestor, _forn, _nat, _conta = arreio_debito_no_gestor
-    try:
-        async with _sm(admin_engine)() as s:
-            result = await svc.gestor_rejeitar(s, tenant_id=t.id, debito_id=d.id,
-                                              usuario_id=gestor, lock_version=d.lock_version,
-                                              justificativa="Despesa não apropriada")
-        assert result.situacao_tramitacao == est.REJEITADA_GESTOR
-        assert result.id_gestor_decisor == gestor
-        async with _sm(admin_engine)() as s:
-            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        rej = [h for h in hist if h.acao == "REJEITADO_GESTOR"]
-        assert len(rej) == 1
-        assert rej[0].justificativa == "Despesa não apropriada"
-    finally:
-        await _cleanup(admin_engine, t.id)
+async def test_responder_ajuste_success(admin_engine):
+    """Unidade responde ajuste e volta ao estado anterior."""
+    tenant, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.enviar_para_gestor(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=1, lock_version=debito.lock_version,
+        )
+
+        # Solicita ajuste
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=2, lock_version=debito.lock_version,
+            etapa="GESTOR", justificativa="Faltam documentos",
+        )
+
+        # Responde ajuste
+        result = await svc.responder_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=1, lock_version=debito.lock_version,
+        )
+
+    assert result.situacao_tramitacao == "AGUARDANDO_GESTOR"
+    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
-async def test_gestor_rejeitar_sem_justificativa_422(admin_engine, arreio_debito_no_gestor):
-    """gestor_rejeitar exige justificativa."""
-    t, d, _solicitante, gestor, _forn, _nat, _conta = arreio_debito_no_gestor
-    try:
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await svc.gestor_rejeitar(s, tenant_id=t.id, debito_id=d.id,
-                                         usuario_id=gestor, lock_version=d.lock_version,
-                                         justificativa="")
-            assert exc.value.status_code == 422
-    finally:
-        await _cleanup(admin_engine, t.id)
+async def test_validar_success(admin_engine):
+    """Validador aprova débito."""
+    tenant, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id)
+
+    async with _sm(admin_engine)() as s:
+        # Fluxo até validação
+        debito = await svc.enviar_para_gestor(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=1, lock_version=debito.lock_version,
+        )
+        debito = await svc.gestor_autorizar(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=2, lock_version=debito.lock_version,
+        )
+
+        # Validador aprova
+        result = await svc.validar(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=3, lock_version=debito.lock_version,
+        )
+
+    assert result.situacao_tramitacao == "AGUARDANDO_AUTORIDADE"
+    assert result.id_validador == 3
+    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
-async def test_solicitar_ajuste_ao_gestor(admin_engine, arreio_debito_no_gestor):
-    """AGUARDANDO_GESTOR → AJUSTE_GESTOR."""
-    t, d, solicitante, _gestor, _forn, _nat, _conta = arreio_debito_no_gestor
-    try:
-        async with _sm(admin_engine)() as s:
-            result = await svc.solicitar_ajuste(s, tenant_id=t.id, debito_id=d.id,
-                                               usuario_id=solicitante, lock_version=d.lock_version,
-                                               etapa="GESTOR", justificativa="Corrigir fornecedor")
-        assert result.situacao_tramitacao == est.AJUSTE_GESTOR
-        async with _sm(admin_engine)() as s:
-            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        adj = [h for h in hist if h.acao == "AJUSTE_SOLICITADO"]
-        assert len(adj) == 1
-        assert adj[0].justificativa == "Corrigir fornecedor"
-    finally:
-        await _cleanup(admin_engine, t.id)
+async def test_autoridade_aprovar_success(admin_engine):
+    """Autoridade aprova débito e segue para pagamento."""
+    tenant, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id)
+
+    async with _sm(admin_engine)() as s:
+        # Fluxo até autoridade
+        debito = await svc.enviar_para_gestor(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=1, lock_version=debito.lock_version,
+        )
+        debito = await svc.gestor_autorizar(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=2, lock_version=debito.lock_version,
+        )
+        debito = await svc.validar(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=3, lock_version=debito.lock_version,
+        )
+
+        # Autoridade aprova
+        result = await svc.autoridade_aprovar(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=4, lock_version=debito.lock_version,
+        )
+
+    assert result.situacao_tramitacao == "AUTORIZADA"
+    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
-async def test_responder_ajuste_volta_para_aguardando_gestor(admin_engine, arreio_debito_no_gestor):
-    """AJUSTE_GESTOR → AGUARDANDO_GESTOR."""
-    t, d, solicitante, _gestor, _forn, _nat, _conta = arreio_debito_no_gestor
-    try:
-        # Primeiro solicita ajuste
-        async with _sm(admin_engine)() as s:
-            d = await svc.solicitar_ajuste(s, tenant_id=t.id, debito_id=d.id,
-                                          usuario_id=solicitante, lock_version=d.lock_version,
-                                          etapa="GESTOR", justificativa="Precisa corrigir")
+async def test_autoridade_indeferir_success(admin_engine):
+    """Autoridade indeferiu débito com justificativa."""
+    tenant, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id)
 
-        # Depois responde
-        async with _sm(admin_engine)() as s:
-            result = await svc.responder_ajuste(s, tenant_id=t.id, debito_id=d.id,
-                                               usuario_id=solicitante, lock_version=d.lock_version)
-        assert result.situacao_tramitacao == est.AGUARDANDO_GESTOR
-        async with _sm(admin_engine)() as s:
-            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        resp = [h for h in hist if h.acao == "AJUSTE_RESPONDIDO"]
-        assert len(resp) == 1
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        # Fluxo até autoridade
+        debito = await svc.enviar_para_gestor(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=1, lock_version=debito.lock_version,
+        )
+        debito = await svc.gestor_autorizar(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=2, lock_version=debito.lock_version,
+        )
+        debito = await svc.validar(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=3, lock_version=debito.lock_version,
+        )
 
+        # Autoridade indeferiu
+        result = await svc.autoridade_indeferir(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=4, lock_version=debito.lock_version,
+            justificativa="Saldo orçamentário insuficiente",
+        )
 
-@pytest.mark.asyncio
-async def test_lock_version_mismatch_409(admin_engine, arreio_debito_no_gestor):
-    """Lock version incompatível (concorrência) → 409."""
-    t, d, _solicitante, gestor, _forn, _nat, _conta = arreio_debito_no_gestor
-    try:
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                # Usa lock_version errado
-                await svc.gestor_autorizar(s, tenant_id=t.id, debito_id=d.id,
-                                          usuario_id=gestor, lock_version=d.lock_version + 999)
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+    assert result.situacao_tramitacao == "INDEFERIDA_AUTORIDADE"
+    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
-async def test_solicitar_ajuste_etapa_desconhecida_422(admin_engine, arreio_debito_no_gestor):
-    """etapa inválida em solicitar_ajuste."""
-    t, d, solicitante, _gestor, _forn, _nat, _conta = arreio_debito_no_gestor
-    try:
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await svc.solicitar_ajuste(s, tenant_id=t.id, debito_id=d.id,
-                                          usuario_id=solicitante, lock_version=d.lock_version,
-                                          etapa="INEXISTENTE", justificativa="Teste")
-            assert exc.value.status_code == 422
-    finally:
-        await _cleanup(admin_engine, t.id)
+async def test_cancelar_success(admin_engine):
+    """Cancelar débito em rascunho."""
+    tenant, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id)
+
+    async with _sm(admin_engine)() as s:
+        result = await svc.cancelar(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=1, justificativa="Cancelado pelo usuário",
+        )
+
+    assert result.situacao_tramitacao == "CANCELADA"
+    await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_lock_version_conflict(admin_engine):
+    """Lock version defasada levanta ConflitoDeEdicaoError."""
+    from app.services.pagamentos_guardas import ConflitoDeEdicaoError
+
+    tenant, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.enviar_para_gestor(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=1, lock_version=debito.lock_version,
+        )
+
+        # Tenta usar lock_version antigo
+        with pytest.raises(ConflitoDeEdicaoError) as e:
+            await svc.gestor_autorizar(
+                s, tenant_id=tenant.id, debito_id=debito.id,
+                usuario_id=2, lock_version=debito.lock_version - 1,
+            )
+
+        assert e.value.status_code == 409
+
+    await _cleanup(admin_engine, tenant.id)

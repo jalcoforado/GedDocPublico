@@ -455,6 +455,11 @@ class DecisaoJustificadaIn(DecisaoIn):
     justificativa: str = Field(min_length=1, max_length=255)
 
 
+class SolicitarAjusteIn(DecisaoJustificadaIn):
+    """Solicitação de ajuste na despesa, a partir de qualquer etapa decisória."""
+    etapa: str = Field(min_length=1, max_length=50)
+
+
 class AutorizarLoteIn(BaseModel):
     grupos: list[GrupoAutorizacaoIn] = Field(min_length=1)
 
