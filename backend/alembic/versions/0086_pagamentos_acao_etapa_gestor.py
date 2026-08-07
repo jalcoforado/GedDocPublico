@@ -35,7 +35,7 @@ ACAO_ANTIGA = ("CRIADO", "ENVIADO", "APROVADO", "VALIDADO", "ENCAMINHADO", "DEVO
                "AUTORIZADO", "LIBERADO", "LIBERACAO_REVOGADA", "PAGAMENTO", "ESTORNO", "CANCELADO",
                "LIQUIDADO", "SUSPENSO", "REATIVADO", "CONCILIADO")
 ACAO_NOVA = ACAO_ANTIGA + (
-    "AUTORIZADO_GESTOR", "REJEITADO_GESTOR", "AJUSTE_SOLICITADO", "AJUSTE_RESPONDIDO",
+    "AUTORIZADO_GESTOR", "REJEITADO_GESTOR", "AJUSTE_SOLICITADO", "AJUSTE_RESPONDIDO", "INDEFERIDO",
 )
 
 
@@ -52,7 +52,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute(
         f"DELETE FROM {S}.debito_historico WHERE acao IN "
-        f"('AUTORIZADO_GESTOR','REJEITADO_GESTOR','AJUSTE_SOLICITADO','AJUSTE_RESPONDIDO')")
+        f"('AUTORIZADO_GESTOR','REJEITADO_GESTOR','AJUSTE_SOLICITADO','AJUSTE_RESPONDIDO','INDEFERIDO')")
     op.drop_constraint("ck_debhist_acao", "debito_historico", schema=S, type_="check")
     op.create_check_constraint("ck_debhist_acao", "debito_historico",
                                f"acao IN ({_in(ACAO_ANTIGA)})", schema=S)

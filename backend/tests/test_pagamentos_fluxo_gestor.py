@@ -104,6 +104,28 @@ async def _setup_debito(engine, tenant_id: int):
             ),
         )
 
+        # Unidade (busca a primeira, ou cria uma se não existir)
+        from sqlalchemy import select
+        from app.models import TipoUnidadeTrabalho, UnidadeTrabalho
+        stmt = select(UnidadeTrabalho).where(UnidadeTrabalho.tenant_id == tenant_id).limit(1)
+        unidade_result = await s.execute(stmt)
+        unidade = unidade_result.scalar()
+        if not unidade:
+            # Cria tipo e unidade
+            tipo_stmt = select(TipoUnidadeTrabalho).limit(1)
+            tipo_result = await s.execute(tipo_stmt)
+            tipo = tipo_result.scalar()
+            if not tipo:
+                tipo = TipoUnidadeTrabalho(tenant_id=tenant_id, tipo_unidade_trabalho="Administração")
+                s.add(tipo)
+                await s.flush()
+            unidade = UnidadeTrabalho(
+                tenant_id=tenant_id, id_tipo_unidade_trabalho=tipo.id,
+                unidade_trabalho="Unidade Teste",
+            )
+            s.add(unidade)
+            await s.flush()
+
         # Natureza e Contrato
         natureza = await cad.criar_natureza(
             s, tenant_id=tenant_id,
@@ -114,40 +136,37 @@ async def _setup_debito(engine, tenant_id: int):
         contrato = await cad.criar_contrato(
             s, tenant_id=tenant_id,
             payload=ContratoCreate(
-                numero=str(uuid.uuid4().int)[:8], descricao="Contrato Teste",
-                valor=Decimal("5000.00"), data_inicio="2026-01-01",
-                id_fornecedor=fornecedor.id,
+                numero=f"CT-{uuid.uuid4().hex[:8]}", id_fornecedor=fornecedor.id,
+                id_unidade=unidade.id, objeto="Serviços de Teste",
+                vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
+                valor_total=Decimal("5000.00"),
             ),
         )
 
-        # Alçada
+        # Alçada (requer um usuário)
         alcada = await cad.criar_alcada(
             s, tenant_id=tenant_id,
             payload=AlcadaCreate(
-                descricao="Alçada Teste", valor_minimo=Decimal("0"),
-                valor_maximo=Decimal("10000.00"), prioridade=1,
+                id_usuario=1, id_natureza=natureza.id,
+                valor_maximo=Decimal("10000.00"),
             ),
         )
 
-        # Débito
+        # Débito com parcelas
         debito = await svc.criar_debito(
             s, tenant_id=tenant_id, usuario_id=1,
             payload=DebitoCreate(
                 numero_nf="NF123456", id_fornecedor=fornecedor.id,
-                id_natureza_despesa=natureza.id, id_contrato=contrato.id,
-                id_fonte_recursos=fonte.id, id_alcada=alcada.id,
+                id_natureza=natureza.id, id_contrato=contrato.id,
+                id_fonte_recursos=fonte.id, id_unidade=unidade.id,
                 valor_total=Decimal("1000.00"), descricao="Débito de Teste",
-                competencia="2026-01", data_vencimento="2026-02-01",
-            ),
-        )
-
-        # Parcela
-        await svc.listar_parcelas(s, tenant_id=tenant_id, debito_id=debito.id)
-        parcela = await cad.criar_parcela(
-            s, tenant_id=tenant_id,
-            payload=ParcelaCreate(
-                id_debito=debito.id, numero=1, valor=Decimal("1000.00"),
-                vencimento="2026-02-01",
+                competencia="2026-01",
+                parcelas=[
+                    ParcelaCreate(
+                        numero=1, valor=Decimal("1000.00"),
+                        vencimento="2026-02-01",
+                    ),
+                ],
             ),
         )
 
@@ -368,7 +387,8 @@ async def test_cancelar_success(admin_engine):
     async with _sm(admin_engine)() as s:
         result = await svc.cancelar(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=1, justificativa="Cancelado pelo usuário",
+            usuario_id=1, lock_version=debito.lock_version,
+            justificativa="Cancelado pelo usuário",
         )
 
     assert result.situacao_tramitacao == "CANCELADA"
