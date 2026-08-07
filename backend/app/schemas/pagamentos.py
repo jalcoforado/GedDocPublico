@@ -326,6 +326,20 @@ StatusDebito = Literal["RASCUNHO", "EM_VALIDACAO", "DEVOLVIDO", "VALIDADO",
 StatusParcela = Literal["A_PAGAR", "LIBERADA", "PAGA", "CANCELADA"]
 FormaPagamento = Literal["PIX", "TED", "BOLETO", "DINHEIRO", "OUTRO"]
 
+# --- as três dimensões (F1, spec §4.1) -------------------------------------
+SituacaoTramitacao = Literal[
+    "RASCUNHO", "AGUARDANDO_GESTOR", "AJUSTE_GESTOR", "AGUARDANDO_VALIDACAO",
+    "AJUSTE_VALIDACAO", "AGUARDANDO_AUTORIDADE", "AJUSTE_AUTORIDADE",
+    "AUTORIZADA", "REJEITADA_GESTOR", "INDEFERIDA_AUTORIDADE", "CANCELADA"]
+SituacaoFila = Literal[
+    "NAO_REGISTRADA", "REGISTRADA", "BLOQUEADA", "ELEGIVEL",
+    "AGUARDANDO_DISPONIBILIDADE", "EXCECAO_AUTORIZADA", "CONCLUIDA", "RETIRADA"]
+SituacaoPagamento = Literal[
+    "NAO_INICIADA", "PROGRAMADA", "ENVIADA_BANCO", "EM_PROCESSAMENTO",
+    "PAGA_PARCIAL", "PAGA", "FALHOU", "CANCELADA", "ESTORNADA"]
+CategoriaContrato = Literal["BENS", "LOCACOES", "SERVICOS", "OBRAS"]
+# ----------------------------------------------------------------------------
+
 
 class ParcelaCreate(BaseModel):
     numero: int = Field(ge=1)
@@ -339,6 +353,7 @@ class DebitoCreate(BaseModel):
     id_fonte_recursos: int           # fonte do empenho (vinculante, v2.0)
     id_conta: int | None = None      # conta sugerida (não-vinculante)
     id_contrato: int | None = None
+    id_unidade: int                  # unidade setorial de origem (F1)
     valor_total: Decimal = Field(gt=0)
     competencia: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     numero_ne: str | None = Field(default=None, max_length=30)
@@ -356,6 +371,7 @@ class DebitoUpdate(BaseModel):
     id_fonte_recursos: int | None = None
     id_conta: int | None = None
     id_contrato: int | None = None
+    id_unidade: int | None = None
     valor_total: Decimal | None = Field(default=None, gt=0)
     competencia: str | None = Field(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     numero_ne: str | None = Field(default=None, max_length=30)
@@ -383,7 +399,17 @@ class DebitoOut(BaseModel):
     id_contrato: int | None; valor_total: Decimal; competencia: str
     numero_ne: str | None; numero_nf: str | None; criticidade: CriticidadeLit
     urgente: bool; justificativa_urgencia: str | None; descricao: str
-    status: StatusDebito; id_usuario_solicitante: int
+    status: StatusDebito
+    # `status` acima é legado e derivado; estes três são a verdade (F1).
+    situacao_tramitacao: SituacaoTramitacao
+    situacao_fila: SituacaoFila
+    situacao_pagamento: SituacaoPagamento
+    id_unidade: int
+    versao: int = 1
+    lock_version: int = 0
+    id_gestor_decisor: int | None = None
+    id_validador: int | None = None
+    id_usuario_solicitante: int
     liquidacao_confirmada: bool = False; data_liquidacao: date | None = None
     criado_em: datetime; atualizado_em: datetime | None
 
@@ -416,6 +442,17 @@ class GrupoAutorizacaoIn(BaseModel):
     # justificada; a justificativa é gravada no histórico (auditável).
     permitir_saldo_insuficiente: bool = False
     justificativa_excecao: str | None = Field(default=None, max_length=255)
+
+
+class DecisaoIn(BaseModel):
+    """Payload das decisões do rito. `lock_version` é obrigatório: sem ele não
+    há como distinguir 'decidiu sobre o estado que viu' de 'decidiu sobre um
+    estado que outro usuário já mudou' (spec §6.3)."""
+    lock_version: int
+
+
+class DecisaoJustificadaIn(DecisaoIn):
+    justificativa: str = Field(min_length=1, max_length=255)
 
 
 class AutorizarLoteIn(BaseModel):

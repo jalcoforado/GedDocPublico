@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import Debito, DebitoHistorico, Fornecedor, Parcela, Usuario
 from ..schemas.pagamentos import DebitoCreate, DebitoUpdate
 from . import pagamentos_cadastros as cad
+from . import pagamentos_estados as est
 
 
 def _utcnow() -> datetime:
@@ -48,16 +49,51 @@ async def _validar_refs(db, *, tenant_id: int, payload) -> None:
                 status.HTTP_422_UNPROCESSABLE_ENTITY)
     if payload.id_contrato is not None:
         await cad.obter_contrato(db, tenant_id=tenant_id, contrato_id=payload.id_contrato)
+    await cad.obter_unidade(db, tenant_id=tenant_id, unidade_id=payload.id_unidade)
 
 
-def _registrar_transicao(db, *, debito: Debito, novo_status: str, acao: str,
-                         usuario_id: int | None, justificativa: str | None = None,
+def _sincronizar_status_legado(d: Debito) -> None:
+    """Recalcula `Debito.status` a partir das três dimensões.
+
+    Ponto ÚNICO de escrita da coluna legada. Havendo dois, eles divergem — é
+    exatamente o risco registrado na spec §4.2, e a mitigação é este ser o
+    único. Nenhum outro lugar do código pode atribuir a `d.status`.
+    """
+    d.status = est.status_legado(
+        d.situacao_tramitacao, d.situacao_fila, d.situacao_pagamento)
+
+
+def _registrar_transicao(db, *, debito: Debito, acao: str, usuario_id: int | None,
+                         tramitacao: str | None = None, fila: str | None = None,
+                         pagamento: str | None = None,
+                         justificativa: str | None = None,
                          ip: str | None = None) -> None:
-    db.add(DebitoHistorico(tenant_id=debito.tenant_id, id_debito=debito.id,
-                           status_anterior=debito.status if acao != "CRIADO" else None,
-                           status_novo=novo_status, acao=acao, justificativa=justificativa,
-                           id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
-    debito.status = novo_status
+    """Aplica a mudança nas dimensões informadas, deriva o status legado e grava
+    a trilha — tudo na MESMA transação do caller.
+
+    Passar `tramitacao` exige que a transição seja legal no grafo. As outras
+    duas dimensões não têm grafo nesta fatia: a fila é responsabilidade da F3 e
+    a execução, da F4.
+    """
+    if tramitacao is not None and tramitacao != debito.situacao_tramitacao:
+        if not est.transicao_permitida(debito.situacao_tramitacao, tramitacao):
+            raise PagamentoDebitoError(
+                f"Transição inválida: de '{debito.situacao_tramitacao}' "
+                f"não se vai para '{tramitacao}'.", status.HTTP_409_CONFLICT)
+    status_anterior = debito.status
+    if tramitacao is not None:
+        debito.situacao_tramitacao = tramitacao
+    if fila is not None:
+        debito.situacao_fila = fila
+    if pagamento is not None:
+        debito.situacao_pagamento = pagamento
+    _sincronizar_status_legado(debito)
+    debito.lock_version = (debito.lock_version or 0) + 1
+    db.add(DebitoHistorico(
+        tenant_id=debito.tenant_id, id_debito=debito.id,
+        status_anterior=status_anterior if acao != "CRIADO" else None,
+        status_novo=debito.status, acao=acao, justificativa=justificativa,
+        id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
 
 
 async def detectar_duplicidade(db, *, tenant_id: int, id_fornecedor: int, numero_nf: str | None,
@@ -102,13 +138,16 @@ async def criar_debito(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                competencia=payload.competencia, numero_ne=payload.numero_ne,
                numero_nf=payload.numero_nf, criticidade=payload.criticidade,
                urgente=payload.urgente, justificativa_urgencia=payload.justificativa_urgencia,
-               descricao=payload.descricao, status="RASCUNHO",
+               descricao=payload.descricao,
+               situacao_tramitacao=est.RASCUNHO, situacao_fila=est.NAO_REGISTRADA,
+               situacao_pagamento=est.NAO_INICIADA, status="RASCUNHO",
+               id_unidade=payload.id_unidade,
                id_usuario_solicitante=usuario_id, criado_em=_utcnow())
     db.add(d); await db.flush()
     for p in payload.parcelas:
         db.add(Parcela(tenant_id=tenant_id, id_debito=d.id, numero=p.numero,
                        valor=p.valor, vencimento=p.vencimento, criado_em=_utcnow()))
-    _registrar_transicao(db, debito=d, novo_status="RASCUNHO", acao="CRIADO", usuario_id=usuario_id)
+    _registrar_transicao(db, debito=d, acao="CRIADO", usuario_id=usuario_id)
     await db.commit(); await db.refresh(d)
     return d
 
@@ -189,6 +228,7 @@ async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
         id_fonte_recursos = dados.get("id_fonte_recursos", d.id_fonte_recursos)
         id_conta = dados.get("id_conta", d.id_conta)
         id_contrato = dados.get("id_contrato", d.id_contrato)
+        id_unidade = dados.get("id_unidade", d.id_unidade)
     await _validar_refs(db, tenant_id=tenant_id, payload=_Ref)
     for k, v in dados.items():
         setattr(d, k, v)
@@ -411,6 +451,12 @@ def debito_out(d: Debito, *, nome_fornecedor: str) -> dict:
         "numero_ne": d.numero_ne, "numero_nf": d.numero_nf, "criticidade": d.criticidade,
         "urgente": d.urgente, "justificativa_urgencia": d.justificativa_urgencia,
         "descricao": d.descricao, "status": d.status,
+        "situacao_tramitacao": d.situacao_tramitacao,
+        "situacao_fila": d.situacao_fila,
+        "situacao_pagamento": d.situacao_pagamento,
+        "id_unidade": d.id_unidade, "versao": d.versao,
+        "lock_version": d.lock_version,
+        "id_gestor_decisor": d.id_gestor_decisor, "id_validador": d.id_validador,
         "id_usuario_solicitante": d.id_usuario_solicitante,
         "liquidacao_confirmada": d.liquidacao_confirmada, "data_liquidacao": d.data_liquidacao,
         "criado_em": d.criado_em, "atualizado_em": d.atualizado_em,
