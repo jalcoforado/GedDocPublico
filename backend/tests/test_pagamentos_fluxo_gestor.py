@@ -5,6 +5,12 @@ solicitar-ajuste, responder-ajuste, validar, autoridade-aprovar,
 autoridade-indeferir, cancelar) e os 3 deprecated que retornam 410 Gone.
 
 Padrão: provisionar_tenant + admin_engine, criar dados de teste do zero.
+
+Os atores (gestor/validador/autoridade) são usuários reais criados no tenant,
+não ids fixos — `id_gestor_decisor`, `id_validador` e `DebitoHistorico.id_usuario`
+têm FK para `utils.usuario`, e ids como 1/2/3/4 só "existem por acaso" num banco
+de dev acumulado ao longo de meses. Em banco limpo (CI) eles não existem e a
+gravação estoura `ForeignKeyViolationError`.
 """
 from __future__ import annotations
 
@@ -17,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.pagamentos import (
     DebitoCreate, ParcelaCreate, FonteCreate, FornecedorCreate,
-    ContaCreate, NaturezaCreate, AlcadaCreate, ContratoCreate,
+    ContaCreate, NaturezaCreate, ContratoCreate,
 )
 from app.services import pagamentos_debitos as svc
 from app.services import pagamentos_cadastros as cad
@@ -36,14 +42,37 @@ def _doc() -> str:
     return str(uuid.uuid4().int)[:14]
 
 
+async def _criar_usuario(engine, tenant_id: int, nome: str) -> int:
+    """Usuário mínimo, só para satisfazer FKs de ator (gestor/validador/etc)."""
+    async with _sm(engine)() as s:
+        uid = (await s.execute(text(
+            "INSERT INTO utils.usuario (tenant_id, nome, email, senha, senha_bcrypt, "
+            "cpf, ativo, excluido, app, nivel_acesso_sigilo, must_change_password) "
+            "VALUES (:t, :n, :e, '', '', :c, true, false, 'sistemas', 'interno', false) "
+            "RETURNING id"
+        ), {"t": tenant_id, "n": nome, "e": f"{uuid.uuid4().hex[:10]}@t.local",
+            "c": str(uuid.uuid4().int)[:11]})).scalar_one()
+        await s.commit()
+    return uid
+
+
 async def _provisionar(engine):
+    """Tenant + quatro atores reais: solicitante, gestor, validador, autoridade.
+
+    `provisionar_tenant` devolve `(Tenant, senha_temporaria)` — o segundo valor
+    não é o usuário admin, então os quatro atores são criados à parte.
+    """
     slug = _slug("pagfluxo")
     async with _sm(engine)() as s:
-        tenant, admin_user = await provisionar_tenant(
+        tenant, _senha = await provisionar_tenant(
             s, slug=slug, nome="Pref Pagamentos Fluxo", admin_email=f"{slug}@t.local",
             admin_nome="Adm", admin_cpf=uuid.uuid4().hex[:11], plano="basico",
         )
-    return tenant, admin_user
+    solicitante_id = await _criar_usuario(engine, tenant.id, "Solicitante")
+    gestor_id = await _criar_usuario(engine, tenant.id, "Gestor")
+    validador_id = await _criar_usuario(engine, tenant.id, "Validador")
+    autoridade_id = await _criar_usuario(engine, tenant.id, "Autoridade")
+    return tenant, solicitante_id, gestor_id, validador_id, autoridade_id
 
 
 async def _cleanup(engine, tenant_id: int) -> None:
@@ -76,7 +105,7 @@ async def _cleanup(engine, tenant_id: int) -> None:
         await s.commit()
 
 
-async def _setup_debito(engine, tenant_id: int):
+async def _setup_debito(engine, tenant_id: int, usuario_id: int):
     """Cria um débito completo em rascunho com fonte, conta, fornecedor, etc."""
     async with _sm(engine)() as s:
         # Fornecedor
@@ -143,18 +172,9 @@ async def _setup_debito(engine, tenant_id: int):
             ),
         )
 
-        # Alçada (requer um usuário)
-        alcada = await cad.criar_alcada(
-            s, tenant_id=tenant_id,
-            payload=AlcadaCreate(
-                id_usuario=1, id_natureza=natureza.id,
-                valor_maximo=Decimal("10000.00"),
-            ),
-        )
-
         # Débito com parcelas
         debito = await svc.criar_debito(
-            s, tenant_id=tenant_id, usuario_id=1,
+            s, tenant_id=tenant_id, usuario_id=usuario_id,
             payload=DebitoCreate(
                 numero_nf="NF123456", id_fornecedor=fornecedor.id,
                 id_natureza=natureza.id, id_contrato=contrato.id,
@@ -176,13 +196,13 @@ async def _setup_debito(engine, tenant_id: int):
 @pytest.mark.asyncio
 async def test_enviar_gestor_success(admin_engine):
     """POST /enviar-gestor retorna 200."""
-    tenant, _ = await _provisionar(admin_engine)
-    debito = await _setup_debito(admin_engine, tenant.id)
+    tenant, solicitante_id, _, _, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
 
     async with _sm(admin_engine)() as s:
         result = await svc.enviar_para_gestor(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=1, lock_version=debito.lock_version,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
         )
 
     assert result.situacao_tramitacao == "AGUARDANDO_GESTOR"
@@ -192,65 +212,65 @@ async def test_enviar_gestor_success(admin_engine):
 @pytest.mark.asyncio
 async def test_gestor_autorizar_success(admin_engine):
     """Gestor autoriza débito."""
-    tenant, _ = await _provisionar(admin_engine)
-    debito = await _setup_debito(admin_engine, tenant.id)
+    tenant, solicitante_id, gestor_id, _, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
 
     async with _sm(admin_engine)() as s:
         # Envia ao gestor primeiro
         debito = await svc.enviar_para_gestor(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=1, lock_version=debito.lock_version,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
         )
 
         # Gestor autoriza
         result = await svc.gestor_autorizar(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=2, lock_version=debito.lock_version,
+            usuario_id=gestor_id, lock_version=debito.lock_version,
         )
 
     assert result.situacao_tramitacao == "AGUARDANDO_VALIDACAO"
-    assert result.id_gestor_decisor == 2
+    assert result.id_gestor_decisor == gestor_id
     await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
 async def test_gestor_rejeitar_success(admin_engine):
     """Gestor rejeita débito com justificativa."""
-    tenant, _ = await _provisionar(admin_engine)
-    debito = await _setup_debito(admin_engine, tenant.id)
+    tenant, solicitante_id, gestor_id, _, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
 
     async with _sm(admin_engine)() as s:
         debito = await svc.enviar_para_gestor(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=1, lock_version=debito.lock_version,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
         )
 
         result = await svc.gestor_rejeitar(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=2, lock_version=debito.lock_version,
+            usuario_id=gestor_id, lock_version=debito.lock_version,
             justificativa="Despesa injustificada",
         )
 
     assert result.situacao_tramitacao == "REJEITADA_GESTOR"
-    assert result.id_gestor_decisor == 2
+    assert result.id_gestor_decisor == gestor_id
     await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
 async def test_solicitar_ajuste_success(admin_engine):
     """Solicita ajuste a partir de estado aguardando gestor."""
-    tenant, _ = await _provisionar(admin_engine)
-    debito = await _setup_debito(admin_engine, tenant.id)
+    tenant, solicitante_id, gestor_id, _, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
 
     async with _sm(admin_engine)() as s:
         debito = await svc.enviar_para_gestor(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=1, lock_version=debito.lock_version,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
         )
 
         result = await svc.solicitar_ajuste(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=2, lock_version=debito.lock_version,
+            usuario_id=gestor_id, lock_version=debito.lock_version,
             etapa="GESTOR", justificativa="Faltam documentos",
         )
 
@@ -261,26 +281,26 @@ async def test_solicitar_ajuste_success(admin_engine):
 @pytest.mark.asyncio
 async def test_responder_ajuste_success(admin_engine):
     """Unidade responde ajuste e volta ao estado anterior."""
-    tenant, _ = await _provisionar(admin_engine)
-    debito = await _setup_debito(admin_engine, tenant.id)
+    tenant, solicitante_id, gestor_id, _, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
 
     async with _sm(admin_engine)() as s:
         debito = await svc.enviar_para_gestor(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=1, lock_version=debito.lock_version,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
         )
 
         # Solicita ajuste
         debito = await svc.solicitar_ajuste(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=2, lock_version=debito.lock_version,
+            usuario_id=gestor_id, lock_version=debito.lock_version,
             etapa="GESTOR", justificativa="Faltam documentos",
         )
 
         # Responde ajuste
         result = await svc.responder_ajuste(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=1, lock_version=debito.lock_version,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
         )
 
     assert result.situacao_tramitacao == "AGUARDANDO_GESTOR"
@@ -290,62 +310,62 @@ async def test_responder_ajuste_success(admin_engine):
 @pytest.mark.asyncio
 async def test_validar_success(admin_engine):
     """Validador aprova débito."""
-    tenant, _ = await _provisionar(admin_engine)
-    debito = await _setup_debito(admin_engine, tenant.id)
+    tenant, solicitante_id, gestor_id, validador_id, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
 
     async with _sm(admin_engine)() as s:
         # Fluxo até validação
         debito = await svc.enviar_para_gestor(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=1, lock_version=debito.lock_version,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
         )
         debito = await svc.gestor_autorizar(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=2, lock_version=debito.lock_version,
+            usuario_id=gestor_id, lock_version=debito.lock_version,
         )
         debito = await svc.confirmar_liquidacao(
-            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=3,
+            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=validador_id,
         )
 
         # Validador aprova
         result = await svc.validar(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=3, lock_version=debito.lock_version,
+            usuario_id=validador_id, lock_version=debito.lock_version,
         )
 
     assert result.situacao_tramitacao == "AGUARDANDO_AUTORIDADE"
-    assert result.id_validador == 3
+    assert result.id_validador == validador_id
     await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
 async def test_autoridade_aprovar_success(admin_engine):
     """Autoridade aprova débito e segue para pagamento."""
-    tenant, _ = await _provisionar(admin_engine)
-    debito = await _setup_debito(admin_engine, tenant.id)
+    tenant, solicitante_id, gestor_id, validador_id, autoridade_id = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
 
     async with _sm(admin_engine)() as s:
         # Fluxo até autoridade
         debito = await svc.enviar_para_gestor(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=1, lock_version=debito.lock_version,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
         )
         debito = await svc.gestor_autorizar(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=2, lock_version=debito.lock_version,
+            usuario_id=gestor_id, lock_version=debito.lock_version,
         )
         debito = await svc.confirmar_liquidacao(
-            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=3,
+            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=validador_id,
         )
         debito = await svc.validar(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=3, lock_version=debito.lock_version,
+            usuario_id=validador_id, lock_version=debito.lock_version,
         )
 
         # Autoridade aprova
         result = await svc.autoridade_aprovar(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=4, lock_version=debito.lock_version,
+            usuario_id=autoridade_id, lock_version=debito.lock_version,
         )
 
     assert result.situacao_tramitacao == "AUTORIZADA"
@@ -355,31 +375,31 @@ async def test_autoridade_aprovar_success(admin_engine):
 @pytest.mark.asyncio
 async def test_autoridade_indeferir_success(admin_engine):
     """Autoridade indeferiu débito com justificativa."""
-    tenant, _ = await _provisionar(admin_engine)
-    debito = await _setup_debito(admin_engine, tenant.id)
+    tenant, solicitante_id, gestor_id, validador_id, autoridade_id = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
 
     async with _sm(admin_engine)() as s:
         # Fluxo até autoridade
         debito = await svc.enviar_para_gestor(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=1, lock_version=debito.lock_version,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
         )
         debito = await svc.gestor_autorizar(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=2, lock_version=debito.lock_version,
+            usuario_id=gestor_id, lock_version=debito.lock_version,
         )
         debito = await svc.confirmar_liquidacao(
-            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=3,
+            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=validador_id,
         )
         debito = await svc.validar(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=3, lock_version=debito.lock_version,
+            usuario_id=validador_id, lock_version=debito.lock_version,
         )
 
         # Autoridade indeferiu
         result = await svc.autoridade_indeferir(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=4, lock_version=debito.lock_version,
+            usuario_id=autoridade_id, lock_version=debito.lock_version,
             justificativa="Saldo orçamentário insuficiente",
         )
 
@@ -390,13 +410,13 @@ async def test_autoridade_indeferir_success(admin_engine):
 @pytest.mark.asyncio
 async def test_cancelar_success(admin_engine):
     """Cancelar débito em rascunho."""
-    tenant, _ = await _provisionar(admin_engine)
-    debito = await _setup_debito(admin_engine, tenant.id)
+    tenant, solicitante_id, _, _, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
 
     async with _sm(admin_engine)() as s:
         result = await svc.cancelar(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=1, lock_version=debito.lock_version,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
             justificativa="Cancelado pelo usuário",
         )
 
@@ -409,20 +429,20 @@ async def test_lock_version_conflict(admin_engine):
     """Lock version defasada levanta ConflitoDeEdicaoError."""
     from app.services.pagamentos_guardas import ConflitoDeEdicaoError
 
-    tenant, _ = await _provisionar(admin_engine)
-    debito = await _setup_debito(admin_engine, tenant.id)
+    tenant, solicitante_id, gestor_id, _, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
 
     async with _sm(admin_engine)() as s:
         debito = await svc.enviar_para_gestor(
             s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=1, lock_version=debito.lock_version,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
         )
 
         # Tenta usar lock_version antigo
         with pytest.raises(ConflitoDeEdicaoError) as e:
             await svc.gestor_autorizar(
                 s, tenant_id=tenant.id, debito_id=debito.id,
-                usuario_id=2, lock_version=debito.lock_version - 1,
+                usuario_id=gestor_id, lock_version=debito.lock_version - 1,
             )
 
         assert e.value.status_code == 409

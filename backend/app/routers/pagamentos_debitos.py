@@ -150,9 +150,13 @@ async def delete_debito(debito_id: int,
     await svc.excluir_debito(db, tenant_id=tenant_id, debito_id=debito_id)
 
 
-# Endpoints antigos substituídos pelo novo fluxo (retornam 410 Gone)
+# Endpoints antigos substituídos pelo novo fluxo (retornam 410 Gone). Mantêm o
+# gate de permissão que tinham antes de virar stub: sem isso a varredura de
+# `test_guarda_modularizacao.py` os marca como desprotegidos, e um tenant sem
+# o módulo pagamentos conseguiria bater neles.
 @debitos_router.post("/{debito_id}/encaminhar", status_code=status.HTTP_410_GONE)
-async def encaminhar_deprecated(debito_id: int):
+async def encaminhar_deprecated(debito_id: int,
+                                _: Usuario = Depends(require_permission("pagamento_solicitar"))):
     """Endpoint descontinuado. Use o novo fluxo de pagamentos: gestor-autorizar, validar, etc."""
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
@@ -161,7 +165,8 @@ async def encaminhar_deprecated(debito_id: int):
 
 
 @debitos_router.post("/{debito_id}/devolver", status_code=status.HTTP_410_GONE)
-async def devolver_deprecated(debito_id: int):
+async def devolver_deprecated(debito_id: int,
+                              _: Usuario = Depends(require_permission("pagamento_validar"))):
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
         detail="Endpoint descontinuado. Use solicitar-ajuste na etapa responsável.",
@@ -169,7 +174,8 @@ async def devolver_deprecated(debito_id: int):
 
 
 @debitos_router.post("/{debito_id}/rejeitar", status_code=status.HTTP_410_GONE)
-async def rejeitar_deprecated(debito_id: int):
+async def rejeitar_deprecated(debito_id: int,
+                              _: Usuario = Depends(require_permission("pagamento_validar"))):
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
         detail=("Endpoint descontinuado. A validação financeira não pode rejeitar; "
@@ -218,7 +224,8 @@ async def marcar_checklist(debito_id: int, payload: MarcarChecklistIn,
 
 
 @debitos_router.post("/{debito_id}/suspender", status_code=status.HTTP_410_GONE)
-async def suspender_deprecated(debito_id: int):
+async def suspender_deprecated(debito_id: int,
+                               _: Usuario = Depends(require_permission("pagamento_pagar"))):
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
         detail="Endpoint descontinuado. Bloqueios passam a pertencer à ordem cronológica.",
@@ -226,7 +233,8 @@ async def suspender_deprecated(debito_id: int):
 
 
 @debitos_router.post("/{debito_id}/reativar", status_code=status.HTTP_410_GONE)
-async def reativar_deprecated(debito_id: int):
+async def reativar_deprecated(debito_id: int,
+                              _: Usuario = Depends(require_permission("pagamento_pagar"))):
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
         detail="Endpoint descontinuado. Resolva o bloqueio na ordem cronológica.",
@@ -356,7 +364,8 @@ async def autoridade_indeferir(debito_id: int, payload: DecisaoJustificadaIn, re
 
 # Endpoint deprecado: /autorizar (nunca existiu com novo serviço)
 @debitos_router.post("/{debito_id}/autorizar")
-async def autorizar_deprecated(debito_id: int):
+async def autorizar_deprecated(debito_id: int,
+                               _: Usuario = Depends(require_permission("pagamento_autorizar"))):
     """Endpoint descontinuado. Use autoridade-aprovar."""
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
