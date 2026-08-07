@@ -182,12 +182,12 @@ async def rejeitar(debito_id: int, payload: JustificativaIn, request: Request,
 
 
 @debitos_router.post("/{debito_id}/cancelar", response_model=DebitoOut)
-async def cancelar(debito_id: int, payload: JustificativaIn, request: Request,
-                   usuario: Usuario = Depends(require_permission("pagamento_solicitar")),
+async def cancelar(debito_id: int, payload: DecisaoJustificadaIn, request: Request,
+                   usuario: Usuario = Depends(require_permission("pagamento_autorizar")),
                    tenant_id: int = Depends(require_tenant_id),
                    db: AsyncSession = Depends(get_db)):
     d = await svc.cancelar(db, tenant_id=tenant_id, debito_id=debito_id, usuario_id=usuario.id,
-                           justificativa=payload.justificativa, ip=_ip(request))
+                           lock_version=payload.lock_version, justificativa=payload.justificativa, ip=_ip(request))
     return (await _out(db, tenant_id, [d]))[0]
 
 
