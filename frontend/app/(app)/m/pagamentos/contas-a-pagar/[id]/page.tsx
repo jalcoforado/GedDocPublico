@@ -142,7 +142,9 @@ export default function DebitoDetalhePage() {
   });
 
   const validarM = useMutation({
-    mutationFn: () => api.pagamentos.debitos.validar(id),
+    mutationFn: () => api.pagamentos.debitos.validar(id, {
+      lock_version: debitoQ.data?.lock_version ?? 0,
+    }),
     onSuccess: () => {
       invalidate();
       toast.success("Débito validado.");
@@ -187,7 +189,10 @@ export default function DebitoDetalhePage() {
   });
 
   const cancelarM = useMutation({
-    mutationFn: (justificativa: string) => api.pagamentos.debitos.cancelar(id, justificativa),
+    mutationFn: (justificativa: string) => api.pagamentos.debitos.cancelar(id, {
+      lock_version: debitoQ.data?.lock_version ?? 0,
+      justificativa,
+    }),
     onSuccess: () => {
       invalidate();
       toast.success("Débito cancelado.");

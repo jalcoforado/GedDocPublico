@@ -1286,7 +1286,7 @@ export interface DebitoHistorico {
   criado_em: string;
 }
 
-export interface DebitoDetalhe extends Debito {
+export interface DebitoDetalhe extends DebitoOut {
   parcelas: Parcela[]; historico: DebitoHistorico[];
 }
 

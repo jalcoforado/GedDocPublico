@@ -25,7 +25,8 @@ export function EtapasFluxo({ tramitacao }: EtapasFluxoProps) {
   const etapaAtualIdx = ETAPAS.findIndex((e) => e.key === etapaAtual);
 
   const _isAjuste = tramitacao.startsWith("AJUSTE_");
-  const _isTerminal = [REJEITADA_GESTOR, INDEFERIDA_AUTORIDADE, CANCELADA].includes(tramitacao);
+  const terminais: SituacaoTramitacao[] = [REJEITADA_GESTOR, INDEFERIDA_AUTORIDADE, CANCELADA];
+  const _isTerminal = terminais.includes(tramitacao);
 
   const getEstado = (idx: number): "concluida" | "atual" | "futura" | "ajuste" | "encerrada" => {
     // Ajuste pendente volta para unidade
