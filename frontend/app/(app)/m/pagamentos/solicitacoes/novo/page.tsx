@@ -4,9 +4,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { FilePlus } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
@@ -138,12 +141,15 @@ export default function NovasolicitacaoPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Nova Solicitação de Pagamento</h1>
-        <p className="text-sm text-muted-foreground">
-          Preencha os dados da solicitação. Você poderá editar enquanto estiver em rascunho.
-        </p>
-      </div>
+      <PageHeader
+        breadcrumbs={[
+          { label: "Pagamentos", href: "/m/pagamentos" },
+          { label: "Solicitações", href: "/m/pagamentos/solicitacoes" },
+        ]}
+        title="Nova Solicitação de Pagamento"
+        description="Preencha os dados da solicitação. Você poderá editar enquanto estiver em rascunho."
+        icon={FilePlus}
+      />
 
       <div className="max-w-2xl space-y-6">
         {/* Fornecedor */}

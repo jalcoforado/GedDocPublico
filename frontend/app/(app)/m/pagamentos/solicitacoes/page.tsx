@@ -1,46 +1,59 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import {
+  CheckCircle2,
+  ClipboardList,
+  FileEdit,
+  Gavel,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
 import { useMemo, useState } from "react";
+import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
+import { KpiCard } from "@/components/ui/kpi-card";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { api, type DebitoOut, type SituacaoTramitacao } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { SITUACAO_TRAMITACAO_CONFIG, getEtapaIndex } from "@/components/pagamentos/statusFluxo";
-import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
-import Link from "next/link";
+import { TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
+import { getEtapaIndex } from "@/components/pagamentos/statusFluxo";
+import { fmtMoeda } from "@/components/pagamentos/format";
 
 function StatusBadge({ situacao }: { situacao: SituacaoTramitacao }) {
-  const cfg = SITUACAO_TRAMITACAO_CONFIG[situacao];
-  return <Badge intent={cfg.intent}>{cfg.label}</Badge>;
+  const cfg = TRAMITACAO_ROTULO[situacao];
+  return <Badge intent={cfg.intent} icon={cfg.icon}>{cfg.label}</Badge>;
 }
+
+const ETAPA_INFO = [
+  { label: "Rascunho", icon: FileEdit },
+  { label: "Gestor", icon: Users },
+  { label: "Validação", icon: ShieldCheck },
+  { label: "Autoridade", icon: Gavel },
+  { label: "Concluído", icon: CheckCircle2 },
+] as const;
 
 export default function SolicitacoesPage() {
   const { can } = useAuth();
 
   const [situacaoFiltro, setSituacaoFiltro] = useState<SituacaoTramitacao | "">("");
-  const [fornecedorFiltro, setFornecedorFiltro] = useState("");
+  const [etapaFiltro, setEtapaFiltro] = useState<number | null>(null);
   const [search, setSearch] = useState("");
 
   // Listar solicitações (todas, ou filtradas por situação)
   const listQ = useQuery({
     queryKey: ["pag-solicitacoes-fluxo", situacaoFiltro, search],
     queryFn: async () => {
-      // Lista todos os débitos com status EM_VALIDACAO ou superior (fluxo novo)
       const debitos = await api.pagamentos.debitos.list({
         situacao_tramitacao: situacaoFiltro || undefined,
       });
-
-      // Filtra por fornecedor se necessário
-      if (fornecedorFiltro) {
-        return debitos.filter(d =>
-          d.nome_fornecedor.toLowerCase().includes(fornecedorFiltro.toLowerCase())
-        );
-      }
 
       if (search) {
         return debitos.filter(d =>
@@ -59,30 +72,54 @@ export default function SolicitacoesPage() {
     return (listQ.data ?? []) as DebitoOut[];
   }, [listQ.data]);
 
-  const etapas = useMemo(() => {
-    const map: Record<number, DebitoOut[]> = {};
+  const contagemPorEtapa = useMemo(() => {
+    const map: Record<number, number> = {};
     debitos.forEach(d => {
       const idx = getEtapaIndex(d.situacao_tramitacao);
-      if (!map[idx]) map[idx] = [];
-      map[idx].push(d);
+      map[idx] = (map[idx] ?? 0) + 1;
     });
     return map;
   }, [debitos]);
 
+  const debitosVisiveis = useMemo(() => {
+    if (etapaFiltro === null) return debitos;
+    return debitos.filter((d) => getEtapaIndex(d.situacao_tramitacao) === etapaFiltro);
+  }, [debitos, etapaFiltro]);
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Solicitações de Pagamento</h1>
-          <p className="text-sm text-muted-foreground">
-            Acompanhe as solicitações no fluxo de aprovação
-          </p>
-        </div>
-        {can("pagamento_solicitar") && (
-          <Link href="/m/pagamentos/solicitacoes/novo">
-            <Button>Nova Solicitação</Button>
-          </Link>
-        )}
+      <PageHeader
+        breadcrumbs={[{ label: "Pagamentos", href: "/m/pagamentos" }]}
+        title="Solicitações de Pagamento"
+        description="Acompanhe as solicitações no fluxo de aprovação"
+        icon={ClipboardList}
+        actions={
+          can("pagamento_solicitar") && (
+            <Button asChild>
+              <Link href="/m/pagamentos/solicitacoes/novo">Nova Solicitação</Link>
+            </Button>
+          )
+        }
+      />
+
+      {/* Sumário clicável por etapa */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {ETAPA_INFO.map((etapa, idx) => (
+          <button
+            key={etapa.label}
+            type="button"
+            onClick={() => setEtapaFiltro(etapaFiltro === idx ? null : idx)}
+            className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-card"
+          >
+            <KpiCard
+              label={etapa.label}
+              value={contagemPorEtapa[idx] ?? 0}
+              icon={etapa.icon}
+              intent={idx === etapaFiltro ? "info" : "default"}
+              className={idx === etapaFiltro ? "ring-2 ring-info" : undefined}
+            />
+          </button>
+        ))}
       </div>
 
       {/* Filtros */}
@@ -113,35 +150,39 @@ export default function SolicitacoesPage() {
       </div>
 
       {/* Tabela */}
-      <div className="border rounded-lg overflow-x-auto">
+      <div className="border border-border rounded-card overflow-x-auto bg-surface-1 shadow-card">
         <Table>
           <THead>
             <TR>
               <TH>ID</TH>
               <TH>Fornecedor</TH>
               <TH>Descrição</TH>
-              <TH>Valor</TH>
+              <TH className="text-right">Valor</TH>
               <TH>Situação</TH>
-              <TH>Etapa</TH>
               <TH className="text-right">Ações</TH>
             </TR>
           </THead>
           <TBody>
-            {listQ.isLoading && (
+            {listQ.isLoading && Array.from({ length: 5 }).map((_, i) => (
+              <SkeletonRow key={i} cols={6} />
+            ))}
+            {!listQ.isLoading && debitosVisiveis.length === 0 && (
               <TR>
-                <TD colSpan={7} className="py-8 text-center">
-                  Carregando...
+                <TD colSpan={6} className="p-0">
+                  <EmptyState
+                    icon={ClipboardList}
+                    title="Nenhuma solicitação encontrada"
+                    description={
+                      etapaFiltro !== null || situacaoFiltro || search
+                        ? "Ajuste os filtros para ver outras solicitações."
+                        : "Crie a primeira solicitação de pagamento para começar."
+                    }
+                    className="border-none rounded-none"
+                  />
                 </TD>
               </TR>
             )}
-            {!listQ.isLoading && debitos.length === 0 && (
-              <TR>
-                <TD colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
-                  Nenhuma solicitação encontrada
-                </TD>
-              </TR>
-            )}
-            {debitos.map((d) => (
+            {debitosVisiveis.map((d) => (
               <TR key={d.id}>
                 <TD className="font-mono text-sm">#{d.id}</TD>
                 <TD>{d.nome_fornecedor}</TD>
@@ -150,41 +191,16 @@ export default function SolicitacoesPage() {
                 <TD>
                   <StatusBadge situacao={d.situacao_tramitacao} />
                 </TD>
-                <TD className="text-sm text-muted-foreground">
-                  {getEtapaIndex(d.situacao_tramitacao) === 0 && "Rascunho"}
-                  {getEtapaIndex(d.situacao_tramitacao) === 1 && "Gestor"}
-                  {getEtapaIndex(d.situacao_tramitacao) === 2 && "Validação"}
-                  {getEtapaIndex(d.situacao_tramitacao) === 3 && "Autoridade"}
-                  {getEtapaIndex(d.situacao_tramitacao) === 4 && "Concluído"}
-                </TD>
                 <TD className="text-right">
-                  <Link href={`/m/pagamentos/solicitacoes/${d.id}`}>
-                    <Button size="sm" variant="secondary">
-                      Ver
-                    </Button>
-                  </Link>
+                  <Button asChild size="sm" variant="secondary">
+                    <Link href={`/m/pagamentos/solicitacoes/${d.id}`}>Ver</Link>
+                  </Button>
                 </TD>
               </TR>
             ))}
           </TBody>
         </Table>
       </div>
-
-      {/* Sumário por etapa */}
-      {debitos.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-          {[0, 1, 2, 3, 4].map((idx) => {
-            const count = etapas[idx]?.length ?? 0;
-            const labels = ["Rascunho", "Gestor", "Validação", "Autoridade", "Concluído"];
-            return (
-              <div key={idx} className="p-3 border rounded bg-surface-1">
-                <div className="text-sm font-medium text-muted-foreground">{labels[idx]}</div>
-                <div className="text-2xl font-bold">{count}</div>
-              </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }

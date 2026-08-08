@@ -1,61 +1,34 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { ClipboardList, FileText, History, Receipt } from "lucide-react";
+import { use, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { EtapasFluxo } from "@/components/pagamentos/EtapasFluxo";
 import { ProximaAcao } from "@/components/pagamentos/ProximaAcao";
-import { api, type DebitoOut, type SituacaoTramitacao } from "@/lib/api";
+import { SituacoesDebito } from "@/components/pagamentos/SituacoesDebito";
+import { api, type DebitoOut } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { SITUACAO_TRAMITACAO_CONFIG, ETAPAS_FLUXO, getEtapaIndex } from "@/components/pagamentos/statusFluxo";
+import { TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
 import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
 
-function StatusBadge({ situacao }: { situacao: SituacaoTramitacao }) {
-  const cfg = SITUACAO_TRAMITACAO_CONFIG[situacao];
-  return <Badge intent={cfg.intent}>{cfg.label}</Badge>;
-}
-
-function Stepper({ etapaAtual }: { etapaAtual: number }) {
-  return (
-    <div className="flex items-center justify-between">
-      {ETAPAS_FLUXO.map((e, idx) => (
-        <div key={idx} className="flex items-center flex-1">
-          <div
-            className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
-              idx <= etapaAtual
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground"
-            }`}
-          >
-            {idx + 1}
-          </div>
-          <div className="text-xs font-medium text-muted-foreground ml-2 flex-1 max-w-24">
-            {e.label}
-          </div>
-          {idx < ETAPAS_FLUXO.length - 1 && (
-            <div
-              className={`h-1 flex-1 mx-1 ${
-                idx < etapaAtual ? "bg-primary" : "bg-muted"
-              }`}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export default function DetalheDebitosPage({ params }: { params: { id: string } }) {
+export default function DetalheDebitosPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: idParam } = use(params);
   const qc = useQueryClient();
   const toast = useToast();
   const { can } = useAuth();
-  const id = parseInt(params.id);
+  const id = parseInt(idParam);
 
   const [openDialog, setOpenDialog] = useState(false);
   const [justificativa, setJustificativa] = useState("");
@@ -69,7 +42,6 @@ export default function DetalheDebitosPage({ params }: { params: { id: string } 
   });
 
   const debito = debitoQ.data as DebitoOut | undefined;
-  const etapaAtual = debito ? getEtapaIndex(debito.situacao_tramitacao) : 0;
 
   // Mutations para ações
   const enviarGestorM = useMutation({
@@ -215,117 +187,157 @@ export default function DetalheDebitosPage({ params }: { params: { id: string } 
     onError: (err: any) => toast.error(err.message || "Erro ao confirmar liquidação"),
   });
 
+  const breadcrumbs = [
+    { label: "Pagamentos", href: "/m/pagamentos" },
+    { label: "Solicitações", href: "/m/pagamentos/solicitacoes" },
+  ];
+
   if (debitoQ.isLoading) {
-    return <div className="py-8 text-center">Carregando...</div>;
+    return (
+      <div className="space-y-4">
+        <PageHeader breadcrumbs={breadcrumbs} title="Carregando…" icon={FileText} />
+        <Skeleton className="h-16 w-full" />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="space-y-4 lg:col-span-2">
+            <Skeleton className="h-40 w-full" />
+            <Skeleton className="h-40 w-full" />
+          </div>
+          <Skeleton className="h-56 w-full" />
+        </div>
+      </div>
+    );
   }
 
   if (!debito) {
-    return <div className="py-8 text-center text-danger">Solicitação não encontrada</div>;
+    return (
+      <div className="space-y-4">
+        <PageHeader breadcrumbs={breadcrumbs} title="Solicitação" icon={FileText} />
+        <EmptyState
+          icon={FileText}
+          title="Solicitação não encontrada"
+          description="Ela pode ter sido removida, ou o número informado está incorreto."
+        />
+      </div>
+    );
   }
 
   const perfis = [
     "pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar",
   ].filter((codigo) => can(codigo));
 
+  const rotulo = TRAMITACAO_ROTULO[debito.situacao_tramitacao];
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Solicitação #{debito.id}</h1>
-          <p className="text-sm text-muted-foreground">{debito.nome_fornecedor}</p>
-        </div>
-        <StatusBadge situacao={debito.situacao_tramitacao} />
-      </div>
+      <PageHeader
+        breadcrumbs={breadcrumbs}
+        title={`Solicitação #${debito.id}`}
+        description={debito.nome_fornecedor}
+        icon={FileText}
+        actions={<Badge intent={rotulo.intent} icon={rotulo.icon}>{rotulo.label}</Badge>}
+      />
 
       {/* Stepper */}
-      <div className="p-4 bg-surface-1 rounded border">
-        <Stepper etapaAtual={etapaAtual} />
-      </div>
+      <SectionCard title="Progresso do fluxo" icon={ClipboardList}>
+        <EtapasFluxo tramitacao={debito.situacao_tramitacao} />
+      </SectionCard>
 
-      <div className="grid grid-cols-3 gap-4">
+      {/* Três dimensões */}
+      <SituacoesDebito
+        tramitacao={debito.situacao_tramitacao}
+        fila={debito.situacao_fila}
+        pagamento={debito.situacao_pagamento}
+      />
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Coluna principal */}
-        <div className="col-span-2 space-y-4">
+        <div className="space-y-4 lg:col-span-2">
           {/* Informações gerais */}
-          <div className="p-4 bg-surface-1 border rounded">
-            <h2 className="font-semibold mb-3">Informações</h2>
-            <div className="grid grid-cols-2 gap-4 text-sm">
+          <SectionCard title="Informações" icon={FileText}>
+            <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
               <div>
-                <div className="font-medium text-muted-foreground">Fornecedor</div>
-                <div>{debito.nome_fornecedor}</div>
+                <div className="text-xs font-medium text-foreground-muted">Fornecedor</div>
+                <div className="text-foreground">{debito.nome_fornecedor}</div>
               </div>
               <div>
-                <div className="font-medium text-muted-foreground">Valor Total</div>
-                <div>{fmtMoeda(debito.valor_total)}</div>
+                <div className="text-xs font-medium text-foreground-muted">Valor Total</div>
+                <div className="tabular-nums text-foreground">{fmtMoeda(debito.valor_total)}</div>
+              </div>
+              <div className="sm:col-span-2">
+                <div className="text-xs font-medium text-foreground-muted">Descrição</div>
+                <div className="text-foreground">{debito.descricao}</div>
               </div>
               <div>
-                <div className="font-medium text-muted-foreground">Descrição</div>
-                <div className="col-span-1">{debito.descricao}</div>
+                <div className="text-xs font-medium text-foreground-muted">Competência</div>
+                <div className="text-foreground">{debito.competencia}</div>
               </div>
               <div>
-                <div className="font-medium text-muted-foreground">Competência</div>
-                <div>{debito.competencia}</div>
+                <div className="text-xs font-medium text-foreground-muted">NE</div>
+                <div className="font-mono text-foreground">{debito.numero_ne || "—"}</div>
               </div>
               <div>
-                <div className="font-medium text-muted-foreground">NE</div>
-                <div className="font-mono">{debito.numero_ne || "-"}</div>
-              </div>
-              <div>
-                <div className="font-medium text-muted-foreground">NF</div>
-                <div className="font-mono">{debito.numero_nf || "-"}</div>
+                <div className="text-xs font-medium text-foreground-muted">NF</div>
+                <div className="font-mono text-foreground">{debito.numero_nf || "—"}</div>
               </div>
             </div>
-          </div>
+          </SectionCard>
 
           {/* Parcelas */}
-          <div className="p-4 bg-surface-1 border rounded">
-            <h2 className="font-semibold mb-3">Parcelas</h2>
-            <div className="overflow-x-auto">
-              <Table>
-                <THead>
-                  <TR>
-                    <TH>Número</TH>
-                    <TH>Valor</TH>
-                    <TH>Vencimento</TH>
-                    <TH>Status</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {debitoQ.data?.parcelas?.map((p) => (
-                    <TR key={p.id}>
-                      <TD>{p.numero}</TD>
-                      <TD className="text-right tabular-nums">{fmtMoeda(p.valor)}</TD>
-                      <TD>{fmtData(p.vencimento)}</TD>
-                      <TD>
-                        <Badge intent="neutral">{p.status}</Badge>
-                      </TD>
+          <SectionCard title="Parcelas" icon={Receipt}>
+            {debitoQ.data?.parcelas && debitoQ.data.parcelas.length > 0 ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>Número</TH>
+                      <TH className="text-right">Valor</TH>
+                      <TH>Vencimento</TH>
+                      <TH>Status</TH>
                     </TR>
-                  ))}
-                </TBody>
-              </Table>
-            </div>
-          </div>
+                  </THead>
+                  <TBody>
+                    {debitoQ.data.parcelas.map((p) => (
+                      <TR key={p.id}>
+                        <TD>{p.numero}</TD>
+                        <TD className="text-right tabular-nums">{fmtMoeda(p.valor)}</TD>
+                        <TD>{fmtData(p.vencimento)}</TD>
+                        <TD>
+                          <Badge intent="neutral">{p.status}</Badge>
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </div>
+            ) : (
+              <p className="text-sm text-foreground-subtle">Nenhuma parcela cadastrada.</p>
+            )}
+          </SectionCard>
 
           {/* Histórico */}
-          <div className="p-4 bg-surface-1 border rounded">
-            <h2 className="font-semibold mb-3">Histórico</h2>
-            <div className="space-y-2">
-              {debitoQ.data?.historico?.map((h) => (
-                <div key={h.id} className="text-sm border-l-2 border-muted pl-3 py-2">
-                  <div className="font-medium">{h.acao}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {h.nome_usuario} · {fmtData(h.criado_em)}
+          <SectionCard title="Histórico" icon={History}>
+            {debitoQ.data?.historico && debitoQ.data.historico.length > 0 ? (
+              <div className="space-y-3">
+                {debitoQ.data.historico.map((h) => (
+                  <div key={h.id} className="border-l-2 border-border pl-3 py-0.5 text-sm">
+                    <div className="font-medium text-foreground">{h.acao}</div>
+                    <div className="text-xs text-foreground-muted">
+                      {h.nome_usuario} · {fmtData(h.criado_em)}
+                    </div>
+                    {h.justificativa && (
+                      <div className="mt-1 text-xs italic text-foreground-subtle">{h.justificativa}</div>
+                    )}
                   </div>
-                  {h.justificativa && (
-                    <div className="text-xs mt-1 italic">{h.justificativa}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-foreground-subtle">Sem movimentações registradas.</p>
+            )}
+          </SectionCard>
         </div>
 
         {/* Coluna lateral — ações */}
-        <div className="space-y-3">
+        <div className="space-y-4">
           {debito.situacao_tramitacao === "AGUARDANDO_VALIDACAO" &&
             can("pagamento_validar") && !debito.liquidacao_confirmada && (
               <Button

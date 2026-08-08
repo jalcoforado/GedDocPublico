@@ -61,7 +61,6 @@ export const ITENS_EXTRA: ReadonlyArray<{ item: NavItem; moduloSlug: string; gro
  */
 export const KEYWORDS_POR_HREF: Record<string, string[]> = {
   "/home": ["dashboard", "início"],
-  "/dashboard": ["kpi", "métricas", "bi"],
   "/m/protocolo/workflow": ["bpm", "fluxo"],
   "/m/administracao/organograma": ["unidades", "hierarquia"],
   "/m/administracao/auditoria": ["log", "histórico"],
