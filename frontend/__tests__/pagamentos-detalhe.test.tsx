@@ -43,10 +43,10 @@ describe("EtapasFluxo", () => {
   it("cada etapa tem texto, não só cor", () => {
     render(<EtapasFluxo tramitacao="AGUARDANDO_GESTOR" />);
     for (const nome of [
-      "Unidade",
-      "Gestor",
-      "Validação",
-      "Autoridade",
+      "Unidade setorial",
+      "Gestor da pasta",
+      "Validação financeira",
+      "Autoridade competente",
       "Tesouraria",
     ]) {
       expect(screen.getByText(nome)).toBeInTheDocument();
