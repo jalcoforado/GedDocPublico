@@ -5,7 +5,10 @@ import {
   Check,
   CheckCheck,
   Clock,
+  FileEdit,
   Flag,
+  Gavel,
+  Landmark,
   List,
   Loader,
   Lock,
@@ -13,9 +16,11 @@ import {
   Pencil,
   type LucideIcon,
   Reply,
+  SearchCheck,
   Send,
   SplitSquareHorizontal,
   Undo2,
+  UserCheck,
   Wallet,
   X,
 } from "lucide-react";
@@ -170,6 +175,65 @@ export const ETAPAS: { key: EtapaFluxo; label: string; curto: string }[] = [
   },
   { key: "TESOURARIA", label: "Tesouraria", curto: "Tesouraria" },
 ];
+
+export interface DecisaoEtapa {
+  label: string;
+  icon: LucideIcon;
+  intent: Intent;
+}
+
+export interface EtapaInfo {
+  responsavel: string;
+  descricao: string;
+  icon: LucideIcon;
+  decisoes: DecisaoEtapa[];
+}
+
+/** Texto educativo do stepper (quem decide, o que faz, o que pode decidir em
+ *  cada etapa) — só descritivo, não espelha regra de negócio nenhuma. */
+export const ETAPA_INFO: Record<EtapaFluxo, EtapaInfo> = {
+  UNIDADE: {
+    responsavel: "Unidade setorial",
+    descricao: "Cria a solicitação, anexa os documentos e envia para o gestor da pasta.",
+    icon: FileEdit,
+    decisoes: [],
+  },
+  GESTOR: {
+    responsavel: "Gestor da pasta",
+    descricao: "Analisa a conveniência e o mérito da despesa.",
+    icon: UserCheck,
+    decisoes: [
+      { label: "Autorizar", icon: Check, intent: "success" },
+      { label: "Solicitar ajustes", icon: Reply, intent: "warning" },
+      { label: "Rejeitar", icon: X, intent: "danger" },
+    ],
+  },
+  VALIDACAO: {
+    responsavel: "Unidade de validação financeira",
+    descricao: "Verifica a conformidade fiscal, contábil e documental.",
+    icon: SearchCheck,
+    decisoes: [
+      { label: "Validar", icon: Check, intent: "success" },
+      { label: "Solicitar ajustes", icon: Reply, intent: "warning" },
+    ],
+  },
+  AUTORIDADE: {
+    responsavel: "Autoridade competente",
+    descricao: "Analisa e decide sobre a autorização do pagamento.",
+    icon: Gavel,
+    decisoes: [
+      { label: "Aprovar e ordenar pagamento", icon: Check, intent: "success" },
+      { label: "Solicitar ajustes", icon: Reply, intent: "warning" },
+      { label: "Não aprovar", icon: X, intent: "danger" },
+    ],
+  },
+  TESOURARIA: {
+    responsavel: "Tesouraria",
+    descricao: "Inclui na ordem cronológica e executa o pagamento.",
+    icon: Landmark,
+    decisoes: [],
+  },
+};
 
 /** Espelha `ETAPA_POR_TRAMITACAO` de `services/pagamentos_estados.py`.
  *  Divergir daqui faz o stepper acender a etapa errada. */
