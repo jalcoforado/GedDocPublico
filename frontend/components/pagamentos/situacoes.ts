@@ -1,3 +1,25 @@
+import {
+  AlertCircle,
+  Ban,
+  Calendar,
+  Check,
+  CheckCheck,
+  Clock,
+  Flag,
+  List,
+  Loader,
+  Lock,
+  Minus,
+  Pencil,
+  type LucideIcon,
+  Reply,
+  Send,
+  SplitSquareHorizontal,
+  Undo2,
+  Wallet,
+  X,
+} from "lucide-react";
+
 import type {
   SituacaoFila,
   SituacaoPagamento,
@@ -29,105 +51,105 @@ export const CANCELADA = "CANCELADA" as const;
 export interface Rotulo {
   label: string;
   intent: Intent;
-  icone: string;
+  icon: LucideIcon;
 }
 
 export const TRAMITACAO_ROTULO: Record<SituacaoTramitacao, Rotulo> = {
   RASCUNHO: {
     label: "Rascunho",
     intent: "neutral",
-    icone: "pencil",
+    icon: Pencil,
   },
   AGUARDANDO_GESTOR: {
     label: "Aguardando o gestor da pasta",
     intent: "warning",
-    icone: "clock",
+    icon: Clock,
   },
   AJUSTE_GESTOR: {
     label: "Ajuste solicitado pelo gestor",
     intent: "warning",
-    icone: "reply",
+    icon: Reply,
   },
   AGUARDANDO_VALIDACAO: {
     label: "Aguardando validação financeira",
     intent: "warning",
-    icone: "clock",
+    icon: Clock,
   },
   AJUSTE_VALIDACAO: {
     label: "Ajuste solicitado pela unidade financeira",
     intent: "warning",
-    icone: "reply",
+    icon: Reply,
   },
   AGUARDANDO_AUTORIDADE: {
     label: "Aguardando a autoridade competente",
     intent: "warning",
-    icone: "clock",
+    icon: Clock,
   },
   AJUSTE_AUTORIDADE: {
     label: "Ajuste solicitado pela autoridade",
     intent: "warning",
-    icone: "reply",
+    icon: Reply,
   },
   AUTORIZADA: {
     label: "Autorizada para pagamento",
     intent: "success",
-    icone: "check",
+    icon: Check,
   },
   REJEITADA_GESTOR: {
     label: "Rejeitada pelo gestor",
     intent: "danger",
-    icone: "x",
+    icon: X,
   },
   INDEFERIDA_AUTORIDADE: {
     label: "Indeferida pela autoridade",
     intent: "danger",
-    icone: "x",
+    icon: X,
   },
-  CANCELADA: { label: "Cancelada", intent: "neutral", icone: "ban" },
+  CANCELADA: { label: "Cancelada", intent: "neutral", icon: Ban },
 };
 
 export const FILA_ROTULO: Record<SituacaoFila, Rotulo> = {
-  NAO_REGISTRADA: { label: "Não registrada", intent: "neutral", icone: "minus" },
-  REGISTRADA: { label: "Registrada", intent: "info", icone: "list" },
-  BLOQUEADA: { label: "Bloqueada", intent: "danger", icone: "lock" },
+  NAO_REGISTRADA: { label: "Não registrada", intent: "neutral", icon: Minus },
+  REGISTRADA: { label: "Registrada", intent: "info", icon: List },
+  BLOQUEADA: { label: "Bloqueada", intent: "danger", icon: Lock },
   ELEGIVEL: {
     label: "Elegível para pagamento",
     intent: "success",
-    icone: "check",
+    icon: Check,
   },
   AGUARDANDO_DISPONIBILIDADE: {
     label: "Aguardando disponibilidade financeira",
     intent: "warning",
-    icone: "wallet",
+    icon: Wallet,
   },
   EXCECAO_AUTORIZADA: {
     label: "Exceção autorizada",
     intent: "warning",
-    icone: "flag",
+    icon: Flag,
   },
-  CONCLUIDA: { label: "Concluída", intent: "success", icone: "check" },
-  RETIRADA: { label: "Retirada da fila", intent: "neutral", icone: "minus" },
+  CONCLUIDA: { label: "Concluída", intent: "success", icon: Check },
+  RETIRADA: { label: "Retirada da fila", intent: "neutral", icon: Minus },
 };
 
 export const PAGAMENTO_ROTULO: Record<SituacaoPagamento, Rotulo> = {
-  NAO_INICIADA: { label: "Não iniciado", intent: "neutral", icone: "minus" },
-  PROGRAMADA: { label: "Programado", intent: "info", icone: "calendar" },
-  ENVIADA_BANCO: { label: "Enviado ao banco", intent: "info", icone: "send" },
+  NAO_INICIADA: { label: "Não iniciado", intent: "neutral", icon: Minus },
+  PROGRAMADA: { label: "Programado", intent: "info", icon: Calendar },
+  ENVIADA_BANCO: { label: "Enviado ao banco", intent: "info", icon: Send },
   EM_PROCESSAMENTO: {
     label: "Em processamento",
     intent: "warning",
-    icone: "loader",
+    icon: Loader,
   },
   PAGA_PARCIAL: {
     label: "Pago parcialmente",
     intent: "warning",
-    icone: "split",
+    icon: SplitSquareHorizontal,
   },
-  PAGA: { label: "Pago", intent: "success", icone: "check" },
-  FALHOU: { label: "Falhou no banco", intent: "danger", icone: "alert-circle" },
-  CANCELADA: { label: "Cancelado", intent: "neutral", icone: "ban" },
-  ESTORNADA: { label: "Estornado", intent: "danger", icone: "undo-2" },
-  CONCILIADA: { label: "Conciliado", intent: "success", icone: "check-check" },
+  PAGA: { label: "Pago", intent: "success", icon: Check },
+  FALHOU: { label: "Falhou no banco", intent: "danger", icon: AlertCircle },
+  CANCELADA: { label: "Cancelado", intent: "neutral", icon: Ban },
+  ESTORNADA: { label: "Estornado", intent: "danger", icon: Undo2 },
+  CONCILIADA: { label: "Conciliado", intent: "success", icon: CheckCheck },
 };
 
 export type EtapaFluxo =

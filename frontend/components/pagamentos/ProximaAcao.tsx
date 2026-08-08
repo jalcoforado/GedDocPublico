@@ -1,6 +1,10 @@
 "use client";
 
+import { ArrowRight } from "lucide-react";
+
 import type { SituacaoTramitacao } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { SectionCard } from "@/components/ui/section-card";
 import {
   AJUSTE_AUTORIDADE,
   AJUSTE_GESTOR,
@@ -270,37 +274,29 @@ export function ProximaAcao({
   });
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-      <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
-        Próxima ação
-      </h3>
-      <p className="mb-4 text-sm text-gray-700 dark:text-gray-300">{frase}</p>
+    <SectionCard title="Próxima ação" icon={ArrowRight}>
+      <p className="text-sm text-foreground-muted">{frase}</p>
 
       {acoesPossiveis.length > 0 && (
         <div className="space-y-2">
           {acoesPossiveis.map((acao) => (
-            <button
+            <Button
               key={acao.chave}
               onClick={() => onAction?.(acao.chave, acao.etapa)}
-              className={`w-full rounded px-3 py-2 text-sm font-medium transition-colors ${
-                acao.primaria
-                  ? "bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600"
-                  : acao.destrutiva
-                    ? "border border-red-300 bg-white text-red-600 hover:bg-red-50 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40"
-                    : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-              }`}
+              variant={acao.primaria ? "primary" : acao.destrutiva ? "danger" : "secondary"}
+              className="w-full justify-center"
             >
               {acao.label}
-            </button>
+            </Button>
           ))}
         </div>
       )}
 
       {acoesPossiveis.length === 0 && config.acoes.length > 0 && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-xs text-foreground-subtle">
           Você não tem permissão para executar ações nesta etapa.
         </p>
       )}
-    </div>
+    </SectionCard>
   );
 }

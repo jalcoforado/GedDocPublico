@@ -1,5 +1,4 @@
 import {
-  Banknote,
   BarChart3,
   BookOpen,
   Building2,
@@ -12,9 +11,7 @@ import {
   Layers,
   ListChecks,
   Shield,
-  ShieldCheck,
   UserCircle,
-  Wallet,
 } from "lucide-react";
 
 import type { MenuModulo } from "./tipos";
@@ -42,13 +39,6 @@ export const menuPagamentos: MenuModulo = {
           perm: "pagamento_autorizar" },
         { label: "Concluídas", href: "/m/pagamentos/solicitacoes/concluidas", icon: CheckCircle,
           anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar"] },
-        { label: "Contas a pagar", href: "/m/pagamentos/contas-a-pagar", icon: ClipboardList,
-          anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar"] },
-        { label: "Autorizações", href: "/m/pagamentos/autorizacao", icon: ShieldCheck,
-          anyOf: ["pagamento_autorizar"] },
-        { label: "Tesouraria", href: "/m/pagamentos/tesouraria", icon: Banknote,
-          perm: "pagamento_pagar" },
-        { label: "Caixa", href: "/m/pagamentos/caixa", icon: Wallet, perm: "pagamento_cadastro" },
         // Leitura espelha o `_LEITURA` do router de conciliação; a escrita
         // (importar/baixar/conciliar) exige `pagamento_pagar`.
         { label: "Conciliação", href: "/m/pagamentos/conciliacao", icon: Landmark,

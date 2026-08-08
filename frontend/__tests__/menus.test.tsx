@@ -31,8 +31,6 @@ const TODOS = Object.values(MENUS).flatMap((m) => hrefs(m.grupos.flatMap((g) => 
  */
 const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> = {
   "/home": {},
-  "/dashboard": {},
-  "/para-assinar": {},
   "/m/protocolo/processos": { perm: "processo" },
   "/m/protocolo/workflow": {},
   "/m/protocolo/relatorios": { perm: "processo" },
@@ -77,12 +75,6 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/pagamentos/dashboard": {
     anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"],
   },
-  "/m/pagamentos/contas-a-pagar": {
-    anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar"],
-  },
-  "/m/pagamentos/autorizacao": { anyOf: ["pagamento_autorizar"] },
-  "/m/pagamentos/tesouraria": { perm: "pagamento_pagar" },
-  "/m/pagamentos/caixa": { perm: "pagamento_cadastro" },
   "/m/pagamentos/conciliacao": {
     anyOf: ["pagamento_pagar", "pagamento_autorizar", "pagamento_auditar", "pagamento_cadastro"],
   },

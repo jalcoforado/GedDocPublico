@@ -1,5 +1,7 @@
 "use client";
 
+import { Check, Reply, X } from "lucide-react";
+
 import type { SituacaoTramitacao } from "@/lib/api";
 import {
   AUTORIZADA,
@@ -8,13 +10,37 @@ import {
   ETAPAS,
   INDEFERIDA_AUTORIDADE,
   REJEITADA_GESTOR,
-  type EtapaFluxo,
 } from "@/components/pagamentos/situacoes";
 import { cn } from "@/lib/utils";
 
 interface EtapasFluxoProps {
   tramitacao: SituacaoTramitacao;
 }
+
+type Estado = "concluida" | "atual" | "futura" | "ajuste" | "encerrada";
+
+const ESTADO_CLASSES: Record<Estado, { badge: string; linha: string }> = {
+  concluida: {
+    badge: "bg-success-soft text-success-soft-foreground",
+    linha: "bg-success",
+  },
+  atual: {
+    badge: "bg-info-soft text-info-soft-foreground ring-2 ring-info/40",
+    linha: "bg-muted",
+  },
+  futura: {
+    badge: "bg-muted text-muted-foreground",
+    linha: "bg-muted",
+  },
+  ajuste: {
+    badge: "bg-warning-soft text-warning-soft-foreground",
+    linha: "bg-muted",
+  },
+  encerrada: {
+    badge: "bg-danger-soft text-danger-soft-foreground",
+    linha: "bg-muted",
+  },
+};
 
 /**
  * Stepper das cinco etapas do fluxo de pagamento.
@@ -24,16 +50,16 @@ export function EtapasFluxo({ tramitacao }: EtapasFluxoProps) {
   const etapaAtual = ETAPA_POR_TRAMITACAO[tramitacao];
   const etapaAtualIdx = ETAPAS.findIndex((e) => e.key === etapaAtual);
 
-  const _isAjuste = tramitacao.startsWith("AJUSTE_");
+  const isAjuste = tramitacao.startsWith("AJUSTE_");
   const terminais: SituacaoTramitacao[] = [REJEITADA_GESTOR, INDEFERIDA_AUTORIDADE, CANCELADA];
-  const _isTerminal = terminais.includes(tramitacao);
+  const isTerminal = terminais.includes(tramitacao);
 
-  const getEstado = (idx: number): "concluida" | "atual" | "futura" | "ajuste" | "encerrada" => {
+  const getEstado = (idx: number): Estado => {
     // Ajuste pendente volta para unidade
-    if (_isAjuste && idx === 0) return "ajuste";
+    if (isAjuste && idx === 0) return "ajuste";
 
     // Terminal (rejeitado, indeferido, cancelado)
-    if (_isTerminal) {
+    if (isTerminal) {
       if (idx === etapaAtualIdx) return "encerrada";
       if (idx < etapaAtualIdx) return "concluida";
       return "futura";
@@ -48,10 +74,11 @@ export function EtapasFluxo({ tramitacao }: EtapasFluxoProps) {
   return (
     <div
       aria-label="Etapas do fluxo de pagamento"
-      className="flex items-center gap-2"
+      className="flex items-center"
     >
       {ETAPAS.map((etapa, idx) => {
         const estado = getEstado(idx);
+        const classes = ESTADO_CLASSES[estado];
         const isLast = idx === ETAPAS.length - 1;
 
         return (
@@ -59,35 +86,34 @@ export function EtapasFluxo({ tramitacao }: EtapasFluxoProps) {
             key={etapa.key}
             className={cn("flex items-center", !isLast && "flex-1")}
           >
-            <div
-              data-testid={`etapa-${etapa.key}`}
-              data-estado={estado}
-              className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold",
-                estado === "atual" &&
-                  "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200",
-                estado === "concluida" &&
-                  "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200",
-                estado === "futura" &&
-                  "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
-                estado === "ajuste" &&
-                  "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200",
-                estado === "encerrada" &&
-                  "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200"
-              )}
-            >
-              {idx + 1}
+            <div className="flex flex-col items-center gap-1.5">
+              <div
+                data-testid={`etapa-${etapa.key}`}
+                data-estado={estado}
+                className={cn(
+                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-colors duration-base",
+                  classes.badge,
+                )}
+              >
+                {estado === "concluida" && <Check className="h-4 w-4" aria-hidden="true" />}
+                {estado === "encerrada" && <X className="h-4 w-4" aria-hidden="true" />}
+                {estado === "ajuste" && <Reply className="h-4 w-4" aria-hidden="true" />}
+                {(estado === "atual" || estado === "futura") && idx + 1}
+              </div>
+              <span
+                className={cn(
+                  "hidden text-xs font-medium sm:inline",
+                  estado === "atual" ? "text-foreground" : "text-foreground-muted",
+                )}
+              >
+                {etapa.curto}
+              </span>
             </div>
-            <span className="ml-2 hidden text-sm font-medium sm:inline">
-              {etapa.curto}
-            </span>
             {!isLast && (
               <div
                 className={cn(
-                  "mx-2 h-px flex-1",
-                  idx < etapaAtualIdx
-                    ? "bg-green-300 dark:bg-green-700"
-                    : "bg-gray-300 dark:bg-gray-600"
+                  "mx-2 h-0.5 flex-1 rounded-full transition-colors duration-base",
+                  classes.linha,
                 )}
               />
             )}
