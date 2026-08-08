@@ -2,7 +2,7 @@
 
 Idempotente. Cria (get_or_create):
   1. Catálogo global: utils.sistema(app=settings.app_name) + utils.nivel(valor=0)
-  2. Tenant Sobral (aprimora_py.tenant, id=1) — 0003 é pulada pelo baseline 0020
+  2. Tenant piloto (aprimora_py.tenant, id=1, slug "sobral") — 0003 é pulada pelo baseline 0020
   3. Admin super-usuário admin@local.test (senha dev admin123)
   4. utils.grupo (nível 0, sistema do app_name) + utils.usuario_grupo (tenant 1)
   5. Segredo KEY_LOGIN_GLOBAL_JWT em utils.sistema_constante
@@ -216,14 +216,14 @@ async def seed(db: AsyncSession) -> dict:
         db.add(nivel)
         await db.flush()
 
-    # 2. Tenant Sobral
+    # 2. Tenant piloto (slug fixo "sobral" — só o nome de exibição mudou)
     tenant = (
         await db.execute(select(Tenant).where(Tenant.slug == TENANT_SLUG))
     ).scalars().first()
     if tenant is None:
         tenant = Tenant(
             slug=TENANT_SLUG,
-            nome="Prefeitura de Sobral",
+            nome="Minha Prefeitura",
             plano="basico",
             ativo=True,
             # Tenant.criado_em é TIMESTAMP WITHOUT TIME ZONE — usar UTC naive
