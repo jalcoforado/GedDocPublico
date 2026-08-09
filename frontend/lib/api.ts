@@ -3389,6 +3389,15 @@ export const api = {
       request<PlaceholderInfo[]>("/templates-documento/placeholders-disponiveis"),
   },
 
+  // Imagens embutidas no editor rico (Novo Processo, Templates, Minutas)
+  editorImagens: {
+    upload: (file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return request<{ url: string }>("/editor-imagens", { method: "POST", body: fd });
+    },
+  },
+
   // Minutas de documento (por processo)
   minutas: {
     list: (processoId: number) =>

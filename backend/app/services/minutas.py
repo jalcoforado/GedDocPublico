@@ -606,7 +606,7 @@ async def finalizar_minuta(
             )
 
         corpo_sanitizado = sanitizar_html(m.corpo_html or "")
-        pdf_bytes = html_to_pdf_bytes(corpo_sanitizado, titulo=m.titulo)
+        pdf_bytes = html_to_pdf_bytes(corpo_sanitizado, titulo=m.titulo, tenant_slug=tenant_slug)
 
     anexo = await anexos_svc._criar_anexo_from_bytes(
         db,

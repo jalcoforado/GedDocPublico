@@ -1,23 +1,42 @@
 "use client";
 
+import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
+import { Table } from "@tiptap/extension-table";
+import TableCell from "@tiptap/extension-table-cell";
+import TableHeader from "@tiptap/extension-table-header";
+import TableRow from "@tiptap/extension-table-row";
+import TextAlign from "@tiptap/extension-text-align";
+import Underline from "@tiptap/extension-underline";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
+  AlignCenter,
+  AlignJustify,
+  AlignLeft,
+  AlignRight,
   Bold,
+  Columns3,
   Heading2,
   Heading3,
+  Image as ImageIcon,
   Italic,
   Link as LinkIcon,
   List,
   ListOrdered,
+  Loader2,
   Quote,
   Redo2,
+  Rows3,
+  SeparatorHorizontal,
   Strikethrough,
+  Table as TableIcon,
+  Trash2,
+  Underline as UnderlineIcon,
   Undo2,
 } from "lucide-react";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -25,11 +44,12 @@ interface ToolbarButtonProps {
   onClick: () => void;
   active?: boolean;
   disabled?: boolean;
+  spinning?: boolean;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }
 
-function ToolbarButton({ onClick, active, disabled, label, icon: Icon }: ToolbarButtonProps) {
+function ToolbarButton({ onClick, active, disabled, spinning, label, icon: Icon }: ToolbarButtonProps) {
   return (
     <button
       type="button"
@@ -49,7 +69,7 @@ function ToolbarButton({ onClick, active, disabled, label, icon: Icon }: Toolbar
           : "text-foreground-muted",
       )}
     >
-      <Icon className="h-4 w-4" aria-hidden="true" />
+      <Icon className={cn("h-4 w-4", spinning && "animate-spin")} aria-hidden="true" />
     </button>
   );
 }
@@ -65,6 +85,8 @@ interface RichTextEditorProps {
   minHeight?: number;
   className?: string;
   ariaLabel?: string;
+  /** Sem isso, "inserir imagem" pede uma URL em vez de fazer upload. */
+  onUploadImage?: (file: File) => Promise<string>;
 }
 
 export function RichTextEditor({
@@ -74,7 +96,11 @@ export function RichTextEditor({
   minHeight = 180,
   className,
   ariaLabel,
+  onUploadImage,
 }: RichTextEditorProps) {
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
@@ -89,6 +115,13 @@ export function RichTextEditor({
         HTMLAttributes: { rel: "noopener noreferrer", target: "_blank" },
       }),
       Placeholder.configure({ placeholder }),
+      Underline,
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      Image.configure({ inline: true, HTMLAttributes: { class: "max-w-full" } }),
+      Table.configure({ resizable: false }),
+      TableRow,
+      TableHeader,
+      TableCell,
     ],
     content: value || "",
     editorProps: {
@@ -135,6 +168,33 @@ export function RichTextEditor({
     [],
   );
 
+  const insertImage = useCallback(
+    (ed: Editor) => {
+      if (!onUploadImage) {
+        const url = window.prompt("URL da imagem:", "https://");
+        if (url) ed.chain().focus().setImage({ src: url }).run();
+        return;
+      }
+      fileInputRef.current?.click();
+    },
+    [onUploadImage],
+  );
+
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // permite selecionar o mesmo arquivo de novo
+    if (!file || !editor || !onUploadImage) return;
+    setUploading(true);
+    try {
+      const url = await onUploadImage(file);
+      editor.chain().focus().setImage({ src: url }).run();
+    } catch (err: any) {
+      window.alert(err?.message || "Erro ao enviar imagem.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
   if (!editor) {
     return (
       <div
@@ -148,6 +208,8 @@ export function RichTextEditor({
     );
   }
 
+  const emTabela = editor.isActive("table");
+
   return (
     <div
       className={cn(
@@ -157,6 +219,15 @@ export function RichTextEditor({
         className,
       )}
     >
+      {onUploadImage && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          className="hidden"
+          onChange={handleFileSelected}
+        />
+      )}
       <div
         className="flex flex-wrap items-center gap-0.5 border-b border-border bg-surface-2/40 px-1.5 py-1"
         role="toolbar"
@@ -173,6 +244,12 @@ export function RichTextEditor({
           icon={Italic}
           onClick={() => editor.chain().focus().toggleItalic().run()}
           active={editor.isActive("italic")}
+        />
+        <ToolbarButton
+          label="Sublinhado (Ctrl+U)"
+          icon={UnderlineIcon}
+          onClick={() => editor.chain().focus().toggleUnderline().run()}
+          active={editor.isActive("underline")}
         />
         <ToolbarButton
           label="Tachado"
@@ -195,6 +272,31 @@ export function RichTextEditor({
         />
         <Divider />
         <ToolbarButton
+          label="Alinhar à esquerda"
+          icon={AlignLeft}
+          onClick={() => editor.chain().focus().setTextAlign("left").run()}
+          active={editor.isActive({ textAlign: "left" })}
+        />
+        <ToolbarButton
+          label="Centralizar"
+          icon={AlignCenter}
+          onClick={() => editor.chain().focus().setTextAlign("center").run()}
+          active={editor.isActive({ textAlign: "center" })}
+        />
+        <ToolbarButton
+          label="Alinhar à direita"
+          icon={AlignRight}
+          onClick={() => editor.chain().focus().setTextAlign("right").run()}
+          active={editor.isActive({ textAlign: "right" })}
+        />
+        <ToolbarButton
+          label="Justificar"
+          icon={AlignJustify}
+          onClick={() => editor.chain().focus().setTextAlign("justify").run()}
+          active={editor.isActive({ textAlign: "justify" })}
+        />
+        <Divider />
+        <ToolbarButton
           label="Lista com marcadores"
           icon={List}
           onClick={() => editor.chain().focus().toggleBulletList().run()}
@@ -212,6 +314,11 @@ export function RichTextEditor({
           onClick={() => editor.chain().focus().toggleBlockquote().run()}
           active={editor.isActive("blockquote")}
         />
+        <ToolbarButton
+          label="Linha horizontal"
+          icon={SeparatorHorizontal}
+          onClick={() => editor.chain().focus().setHorizontalRule().run()}
+        />
         <Divider />
         <ToolbarButton
           label="Inserir/editar link"
@@ -219,6 +326,41 @@ export function RichTextEditor({
           onClick={() => promptLink(editor)}
           active={editor.isActive("link")}
         />
+        <ToolbarButton
+          label={uploading ? "Enviando imagem…" : "Inserir imagem"}
+          icon={uploading ? Loader2 : ImageIcon}
+          spinning={uploading}
+          onClick={() => insertImage(editor)}
+          disabled={uploading}
+        />
+        {!emTabela && (
+          <ToolbarButton
+            label="Inserir tabela"
+            icon={TableIcon}
+            onClick={() =>
+              editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+            }
+          />
+        )}
+        {emTabela && (
+          <>
+            <ToolbarButton
+              label="Adicionar coluna"
+              icon={Columns3}
+              onClick={() => editor.chain().focus().addColumnAfter().run()}
+            />
+            <ToolbarButton
+              label="Adicionar linha"
+              icon={Rows3}
+              onClick={() => editor.chain().focus().addRowAfter().run()}
+            />
+            <ToolbarButton
+              label="Excluir tabela"
+              icon={Trash2}
+              onClick={() => editor.chain().focus().deleteTable().run()}
+            />
+          </>
+        )}
         <div className="ml-auto flex items-center gap-0.5">
           <ToolbarButton
             label="Desfazer (Ctrl+Z)"

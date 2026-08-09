@@ -147,6 +147,40 @@ async def test_sanitizar_html_preserva_tags_seguras(admin_engine):
 
 
 @pytest.mark.asyncio
+async def test_sanitizar_html_preserva_imagem_do_editor(admin_engine):
+    """`img` só sobrevive com `src` apontando pro endpoint interno de imagens
+    do editor — qualquer outra origem (externa) é removida (a `<img>` some
+    inteira, sem `src`, o que a torna inofensiva)."""
+    interna = '<img src="/api/v2/editor-imagens/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png" alt="logo">'
+    assert sanitizar_html(interna) == interna
+
+    externa = sanitizar_html('<img src="http://evil.com/x.png" onerror="alert(1)">')
+    assert "src=" not in externa
+    assert "evil.com" not in externa
+
+
+@pytest.mark.asyncio
+async def test_sanitizar_html_preserva_tabela(admin_engine):
+    html = "<table><tr><th>H</th></tr><tr><td>D</td></tr></table>"
+    sanitizado = sanitizar_html(html)
+    assert "<table>" in sanitizado
+    assert "<th>H</th>" in sanitizado
+    assert "<td>D</td>" in sanitizado
+
+
+@pytest.mark.asyncio
+async def test_sanitizar_html_preserva_alinhamento_mas_nao_outro_css(admin_engine):
+    """`style` só sobrevive com `text-align` — qualquer outra propriedade CSS
+    (inclusive tentativa de `url(...)`) é zerada pelo CSSSanitizer do bleach."""
+    alinhado = sanitizar_html('<p style="text-align: center;">centro</p>')
+    assert 'style="text-align: center;"' in alinhado
+
+    malicioso = sanitizar_html('<p style="background: url(javascript:alert(1))">x</p>')
+    assert "url(" not in malicioso
+    assert "javascript:" not in malicioso
+
+
+@pytest.mark.asyncio
 async def test_sanitizar_html_remove_style_tags(admin_engine):
     """Bleach remove <style> e propriedades perigosas."""
     html = '<p style="background: url(javascript:alert(1))">Texto</p>'

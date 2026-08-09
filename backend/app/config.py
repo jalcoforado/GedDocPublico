@@ -237,6 +237,13 @@ def tenant_anexos_dir(tenant_slug: str) -> Path:
     return p
 
 
+def tenant_editor_imagens_dir(tenant_slug: str) -> Path:
+    """Pasta de imagens embutidas em templates/minutas/processos do tenant."""
+    p = Path(get_settings().tenants_storage_root) / tenant_slug / "editor-imagens"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def tenant_carimbados_dir(tenant_slug: str) -> Path:
     """Pasta de PDFs carimbados (cache) do tenant."""
     p = Path(get_settings().tenants_storage_root) / tenant_slug / "carimbados"

@@ -7,7 +7,8 @@
 - `minutas_router`: CRUD de minutas por processo, gated por `processo.atualizar`
   (mesma permissão do upload de anexo). A FINALIZAÇÃO é adicionada no PR-C.
 """
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import require_tenant_id, require_tenant_slug
@@ -25,6 +26,7 @@ from ..schemas.minuta import (
     TemplateDocumentoOut,
     TemplateDocumentoUpdate,
 )
+from ..services import editor_imagens
 from ..services import minutas as svc
 from ..services.placeholders import PLACEHOLDERS_DISPONIVEIS
 
@@ -101,6 +103,38 @@ async def delete_template(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await svc.excluir_template(db, tenant_id=tenant_id, template_id=template_id)
+
+
+# ========================= Imagens do editor rico ============================
+# Mesma população de `templates_router`: quem redige documento/template pode
+# embutir imagem. Sem tabela — ver docstring de `services/editor_imagens.py`.
+imagens_router = APIRouter(prefix="/editor-imagens", tags=["minutas"])
+
+
+@imagens_router.post("", status_code=status.HTTP_201_CREATED)
+async def upload_imagem_editor(
+    file: UploadFile = File(...),
+    _: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_slug: str = Depends(require_tenant_slug),
+) -> dict[str, str]:
+    try:
+        filename = await editor_imagens.salvar_imagem(file, tenant_slug=tenant_slug)
+    except editor_imagens.EditorImagemError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return {"url": f"/api/v2/editor-imagens/{filename}"}
+
+
+@imagens_router.get("/{filename}")
+async def get_imagem_editor(
+    filename: str,
+    _: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_slug: str = Depends(require_tenant_slug),
+):
+    resolved = editor_imagens.resolve_imagem_path(tenant_slug, filename)
+    if resolved is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Imagem não encontrada")
+    path, media_type = resolved
+    return FileResponse(path=str(path), media_type=media_type)
 
 
 # ================================ Minutas ===================================

@@ -273,6 +273,10 @@ export function RedigirDocumentoDialog({
               onChange={setCorpo}
               minHeight={320}
               ariaLabel="Editor do documento"
+              onUploadImage={async (file) => {
+                const { url } = await api.editorImagens.upload(file);
+                return url;
+              }}
             />
           </div>
           <p className="text-xs text-muted-foreground">

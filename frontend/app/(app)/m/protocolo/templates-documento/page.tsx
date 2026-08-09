@@ -249,6 +249,10 @@ export default function TemplatesDocumentoPage() {
               onChange={(html) => setForm({ ...form, corpo_html: html })}
               minHeight={280}
               ariaLabel="Conteúdo do template"
+              onUploadImage={async (file) => {
+                const { url } = await api.editorImagens.upload(file);
+                return url;
+              }}
             />
           </div>
 
