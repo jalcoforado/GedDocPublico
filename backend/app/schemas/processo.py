@@ -18,6 +18,11 @@ class ProcessoCreate(BaseModel):
     nivel_sigilo: str = "ostensivo"
     externo: bool = False
     virtual: bool = True
+    # Só "interno"/"email" aqui — "balcao" e "portal" são setados pelos
+    # fluxos dedicados (protocolo de balcão, portal do cidadão); "api" é
+    # programático. Ver `CanalEntrada` em schemas/protocolo.py para o
+    # domínio completo da coluna.
+    canal_entrada: Literal["interno", "email"] = "interno"
 
 
 class ClassificarSigiloRequest(BaseModel):
@@ -68,6 +73,7 @@ class ProcessoListItem(BaseModel):
     publico: bool
     nivel_sigilo: str = "ostensivo"
     externo: bool
+    canal_entrada: str | None = None
 
     assunto: str | None
     tipo_processo: str | None

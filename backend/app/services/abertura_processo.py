@@ -74,6 +74,7 @@ async def abrir_processo(
         nivel_sigilo=nivel_sigilo,
         externo=payload.externo,
         virtual=payload.virtual,
+        canal_entrada=payload.canal_entrada,
         data_hora_abertura=now,
         id_local_atual=payload.id_unidade_proprietaria,
         id_usuario=usuario_id,
