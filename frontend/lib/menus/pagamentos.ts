@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Banknote,
   BookOpen,
   Building2,
   CheckCircle,
@@ -37,6 +38,8 @@ export const menuPagamentos: MenuModulo = {
           perm: "pagamento_validar" },
         { label: "Aguardando Autoridade", href: "/m/pagamentos/solicitacoes/autoridade", icon: CheckCircle,
           perm: "pagamento_autorizar" },
+        { label: "Tesouraria", href: "/m/pagamentos/tesouraria", icon: Banknote,
+          perm: "pagamento_pagar" },
         { label: "Concluídas", href: "/m/pagamentos/solicitacoes/concluidas", icon: CheckCircle,
           anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar"] },
         // Leitura espelha o `_LEITURA` do router de conciliação; a escrita
