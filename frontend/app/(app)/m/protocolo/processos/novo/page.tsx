@@ -550,6 +550,10 @@ export default function NovoProcessoPage() {
               onChange={(html) => setForm({ ...form, corpo: html })}
               placeholder="Descreva o pedido com detalhes. Use Ctrl+B / Ctrl+I, listas, títulos…"
               minHeight={200}
+              onUploadImage={async (file) => {
+                const { url } = await api.editorImagens.upload(file);
+                return url;
+              }}
             />
             <p className="mt-1 text-xs text-foreground-subtle">
               Texto formatado. Aparece no PDF e na ficha do processo.
