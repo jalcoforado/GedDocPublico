@@ -186,6 +186,48 @@ async def test_conciliacao_tem_extrato_e_sugestoes(admin_engine, tenant_ops):
 
 
 @pytest.mark.asyncio
+async def test_usuarios_pagamentos_tem_a_permissao_do_papel(admin_engine, tenant_ops):
+    """Regressão: `_get_or_create_usuario` cria a linha em `utils.usuario` mas
+    nunca vinculava grupo de permissão nenhum — o usuário logava e não via
+    nada gateado por `require_permission`/`require_any_permission` (foi assim
+    que a fila da tesouraria "sumiu" para `pag.tesoureiro`)."""
+    from app.services import modulos as modulos_svc
+    from app.services.permissoes import load_permissions
+
+    slug, tid = tenant_ops
+    await _apply(_ns(slug, modulo="pagamentos"))
+
+    # `tenant_ops` nasce via INSERT cru, sem módulo contratado — sem isso
+    # `load_permissions` bloqueia toda transação `pagamento_*` via
+    # `codigos_bloqueados` (módulo não contratado), mascarando o próprio
+    # vínculo de grupo que este teste quer provar.
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(f"SET LOCAL app.tenant_id = {int(tid)}"))
+        await modulos_svc.contratar(s, tid, ["pagamentos"])
+        await s.commit()
+
+    esperado = {
+        "pag.solicitante": "pagamento_solicitar",
+        "pag.validador": "pagamento_validar",
+        "pag.secretario": "pagamento_gerir",
+        "pag.autorizador": "pagamento_autorizar",
+        "pag.tesoureiro": "pagamento_pagar",
+    }
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(f"SET LOCAL app.tenant_id = {int(tid)}"))
+        for email_local, codigo in esperado.items():
+            uid = (
+                await s.execute(
+                    text("SELECT id FROM utils.usuario WHERE tenant_id=:t AND email=:e"),
+                    {"t": tid, "e": f"{email_local}@{OPS_EMAIL_DOMAIN}"},
+                )
+            ).scalar_one()
+            perms = await load_permissions(s, uid, tenant_id=tid)
+            codigos = {p.codigo for p in perms.items}
+            assert codigo in codigos, f"{email_local} sem '{codigo}' — tem {codigos}"
+
+
+@pytest.mark.asyncio
 async def test_apply_idempotente(admin_engine, tenant_ops):
     slug, tid = tenant_ops
     await _apply(_ns(slug))
@@ -193,12 +235,21 @@ async def test_apply_idempotente(admin_engine, tenant_ops):
         admin_engine, tid,
         "SELECT count(*) FROM pagamentos.debito WHERE tenant_id=:t AND excluido=false",
     )
+    n_grupos_antes = await _contar(
+        admin_engine, tid,
+        "SELECT count(*) FROM utils.grupo WHERE tenant_id=:t AND grupo LIKE 'Demo — %'",
+    )
     await _apply(_ns(slug))
     depois = await _contar(
         admin_engine, tid,
         "SELECT count(*) FROM pagamentos.debito WHERE tenant_id=:t AND excluido=false",
     )
+    n_grupos_depois = await _contar(
+        admin_engine, tid,
+        "SELECT count(*) FROM utils.grupo WHERE tenant_id=:t AND grupo LIKE 'Demo — %'",
+    )
     assert depois == antes
+    assert n_grupos_depois == n_grupos_antes
 
 
 @pytest.mark.asyncio
@@ -230,3 +281,9 @@ async def test_reset_limpa_tudo(admin_engine, tenant_ops):
         f"AND email LIKE '%@{OPS_EMAIL_DOMAIN}'",
     )
     assert n_users == 0
+
+    n_grupos = await _contar(
+        admin_engine, tid,
+        "SELECT count(*) FROM utils.grupo WHERE tenant_id=:t AND grupo LIKE 'Demo — %'",
+    )
+    assert n_grupos == 0

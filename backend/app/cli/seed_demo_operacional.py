@@ -25,7 +25,8 @@ Decisões de projeto:
       `utils.usuario` com e-mail `%@demo.test`; se os usuários operacionais
       caíssem nesse filtro, sumiriam levando junto as FKs dos débitos.
     - Marcadores para o `reset` limpar só o que é demo: prefixo `DEMO` em
-      códigos/números, CPF/CNPJ nas faixas 99*/998*/997* e placas `DMO*`/`DMR*`.
+      códigos/números, CPF/CNPJ nas faixas 99*/998*/997* e placas `DMO*`/`DMR*`,
+      e grupo de permissão com nome `Demo — ...`.
 """
 from __future__ import annotations
 
@@ -45,7 +46,17 @@ from ..config import get_settings
 # `MIGRATOR_DATABASE_URL` (papel `aprimora_migrator`) quando definida, e de
 # `DATABASE_URL` enquanto não estiver — ver `app/database_admin.py`.
 from ..database_admin import AdminSessionLocal as SessionLocal
-from ..models import Tenant, UnidadeTrabalho, Usuario
+from ..models import (
+    Grupo,
+    GrupoTransacao,
+    Nivel,
+    Sistema,
+    Tenant,
+    Transacao,
+    UnidadeTrabalho,
+    Usuario,
+    UsuarioGrupo,
+)
 
 OPS_EMAIL_DOMAIN = "ops.demo.test"
 OPS_PASSWORD = "Demo@12345"
@@ -65,6 +76,19 @@ USUARIOS_PAGAMENTOS = [
     ("autorizador", "Otávio Prado", "pag.autorizador", "Ordenador de Despesa"),
     ("tesoureiro", "Teresa Cordeiro", "pag.tesoureiro", "Tesoureira"),
 ]
+
+# chave (de USUARIOS_PAGAMENTOS) -> codigo de utils.transacao que o papel
+# precisa pra enxergar sua fila. Sem isso o usuario e criado mas fica sem
+# nenhum grupo de permissao — loga e nao ve nada gateado por
+# require_permission/require_any_permission (ex.: a fila da tesouraria
+# some pra pag.tesoureiro mesmo com o debito autorizado esperando).
+TRANSACAO_POR_PAPEL_PAGAMENTOS = {
+    "solicitante": "pagamento_solicitar",
+    "validador": "pagamento_validar",
+    "secretario": "pagamento_gerir",
+    "autorizador": "pagamento_autorizar",
+    "tesoureiro": "pagamento_pagar",
+}
 
 USUARIOS_OPERACAO = [
     ("frota_gestor", "Marcos Aurélio Pinto", "frota.gestor", "Gestor de Frota"),
@@ -325,11 +349,87 @@ async def _get_or_create_usuario(
     return u.id, True
 
 
+async def _garantir_grupo_demo(
+    db: AsyncSession, *, tenant_id: int, app_name: str, codigo_transacao: str,
+) -> int:
+    """Get-or-create um grupo Operacional (nível valor=1) com grant total na
+    transação informada, e devolve o id do grupo. Idempotente — seguro de
+    rodar em toda chamada de `apply`, inclusive sobre usuário já existente
+    de uma rodada anterior do seed.
+    """
+    transacao = (
+        await db.execute(select(Transacao).where(Transacao.codigo == codigo_transacao))
+    ).scalar_one()
+    nome_grupo = f"Demo — {transacao.transacao}"
+
+    grupo = (
+        await db.execute(
+            select(Grupo).where(
+                Grupo.tenant_id == tenant_id,
+                Grupo.grupo == nome_grupo,
+                Grupo.excluido.is_(False),
+            )
+        )
+    ).scalars().first()
+    if grupo is None:
+        nivel_operacional = (
+            await db.execute(select(Nivel).where(Nivel.valor == 1).limit(1))
+        ).scalar_one()
+        sistema_app = (
+            await db.execute(select(Sistema).where(Sistema.app == app_name).limit(1))
+        ).scalar_one()
+        grupo = Grupo(
+            tenant_id=tenant_id, id_nivel=nivel_operacional.id,
+            id_sistema=sistema_app.id, grupo=nome_grupo, excluido=False,
+        )
+        db.add(grupo)
+        await db.flush()
+
+    tem_grant = (
+        await db.execute(
+            select(GrupoTransacao.id).where(
+                GrupoTransacao.id_grupo == grupo.id,
+                GrupoTransacao.id_transacao == transacao.id,
+                GrupoTransacao.excluido.is_(False),
+            )
+        )
+    ).scalars().first()
+    if tem_grant is None:
+        db.add(GrupoTransacao(
+            tenant_id=tenant_id, id_grupo=grupo.id, id_transacao=transacao.id,
+            inserir=True, atualizar=True, excluir=True, excluido=False,
+        ))
+        await db.flush()
+
+    return grupo.id
+
+
+async def _vincular_usuario_grupo(
+    db: AsyncSession, *, tenant_id: int, usuario_id: int, grupo_id: int, app_name: str,
+) -> None:
+    tem_vinculo = (
+        await db.execute(
+            select(UsuarioGrupo.id).where(
+                UsuarioGrupo.tenant_id == tenant_id,
+                UsuarioGrupo.id_usuario == usuario_id,
+                UsuarioGrupo.id_grupo == grupo_id,
+            )
+        )
+    ).scalars().first()
+    if tem_vinculo is None:
+        db.add(UsuarioGrupo(
+            tenant_id=tenant_id, id_usuario=usuario_id, id_grupo=grupo_id,
+            ativo=True, excluido=False, app=app_name,
+        ))
+
+
 async def _criar_usuarios(
     db: AsyncSession, *, tenant_id: int, id_unidade: int, especificacao: list[tuple],
     cpf_base: int, contagens: dict[str, int],
+    transacao_por_chave: dict[str, str] | None = None,
 ) -> dict[str, int]:
     ids: dict[str, int] = {}
+    app_name = get_settings().app_name
     for i, (chave, nome, email_local, cargo) in enumerate(especificacao):
         uid, criou = await _get_or_create_usuario(
             db, tenant_id=tenant_id, nome=nome, email_local=email_local,
@@ -338,6 +438,15 @@ async def _criar_usuarios(
         ids[chave] = uid
         if criou:
             contagens["usuarios_criados"] += 1
+        if transacao_por_chave and chave in transacao_por_chave:
+            grupo_id = await _garantir_grupo_demo(
+                db, tenant_id=tenant_id, app_name=app_name,
+                codigo_transacao=transacao_por_chave[chave],
+            )
+            await _vincular_usuario_grupo(
+                db, tenant_id=tenant_id, usuario_id=uid, grupo_id=grupo_id,
+                app_name=app_name,
+            )
     await db.commit()
     return ids
 
@@ -368,6 +477,7 @@ async def _apply_pagamentos(tenant_id: int, contagens: dict[str, int]) -> None:
             db, tenant_id=tenant_id, id_unidade=id_unidade,
             especificacao=USUARIOS_PAGAMENTOS, cpf_base=99700000000,
             contagens=contagens,
+            transacao_por_chave=TRANSACAO_POR_PAPEL_PAGAMENTOS,
         )
 
         # --- catálogos ---------------------------------------------------
@@ -1089,6 +1199,18 @@ RESET_TRANSPORTE = [
 ]
 
 RESET_USUARIOS = [
+    # usuario_grupo referencia grupo E usuario — tem que sair antes dos dois.
+    ("usuario_grupo_demo", """
+        DELETE FROM utils.usuario_grupo WHERE tenant_id = :t
+          AND id_grupo IN (SELECT id FROM utils.grupo WHERE tenant_id = :t
+                           AND grupo LIKE 'Demo — %')"""),
+    ("grupo_transacao_demo", """
+        DELETE FROM utils.grupo_transacao WHERE tenant_id = :t
+          AND id_grupo IN (SELECT id FROM utils.grupo WHERE tenant_id = :t
+                           AND grupo LIKE 'Demo — %')"""),
+    ("grupos_demo", """
+        DELETE FROM utils.grupo WHERE tenant_id = :t
+          AND grupo LIKE 'Demo — %'"""),
     ("usuarios_ops", """
         DELETE FROM utils.usuario WHERE tenant_id = :t
           AND email LIKE '%@ops.demo.test'"""),
