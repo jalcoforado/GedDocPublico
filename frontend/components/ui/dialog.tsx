@@ -29,6 +29,16 @@ export function Dialog({ open, onClose, title, children, footer, size = "md" }: 
   const titleId = useId();
   const previouslyFocused = useRef<HTMLElement | null>(null);
 
+  // `onClose` costuma ser um arrow function inline no call-site — nova
+  // referência a cada render do pai (ex.: a cada letra digitada num campo
+  // controlado fora do dialog). Guardar num ref evita que o efeito abaixo
+  // rode de novo nesses casos e roube o foco de volta pro primeiro elemento
+  // focável a cada re-render do pai.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     if (!open) return;
 
@@ -41,7 +51,7 @@ export function Dialog({ open, onClose, title, children, footer, size = "md" }: 
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -69,7 +79,7 @@ export function Dialog({ open, onClose, title, children, footer, size = "md" }: 
       document.body.style.overflow = prevOverflow;
       previous?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
