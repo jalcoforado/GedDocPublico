@@ -3,13 +3,16 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
+  Building2,
   CheckCircle2,
   FilePlus2,
   Globe,
   Hash,
   Info,
+  LayoutTemplate,
   Loader2,
   Lock,
+  Mail,
   Tag,
   Users,
 } from "lucide-react";
@@ -20,6 +23,7 @@ import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { useConfirm } from "@/components/ui/confirm";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
@@ -27,9 +31,34 @@ import { SectionCard } from "@/components/ui/section-card";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { UnidadePicker } from "@/components/UnidadePicker";
-import { api, type ProcessoCreateInput } from "@/lib/api";
+import { api, organogramaApi, type ProcessoCreateInput } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+
+/** Espelha o regex de `backend/app/services/placeholders.py::resolve()`. */
+const TOKEN_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
+/**
+ * Resolve só os placeholders já conhecidos ANTES do processo existir
+ * (requerente, assunto, unidade, data, usuário). `{{processo.numero}}`,
+ * `{{processo.data_abertura}}` e `{{servico.nome}}` ficam literais — não há
+ * como saber o número (gerado pelo banco) nem o serviço (fluxo manual, não
+ * originado do portal) neste ponto.
+ */
+function resolvePlaceholdersParcial(corpoHtml: string, contexto: Record<string, string>): string {
+  return corpoHtml.replace(TOKEN_RE, (match, chave: string) =>
+    chave in contexto ? escapeHtml(contexto[chave]) : match,
+  );
+}
 
 type FormState = {
   id_tipo_processo: number | "";
@@ -41,6 +70,7 @@ type FormState = {
   numero_origem: string;
   publico: boolean;
   externo: boolean;
+  canal_entrada: "interno" | "email";
 };
 
 const DRAFT_KEY = "aprimora.novo-processo.draft.v1";
@@ -109,6 +139,7 @@ function ToggleCard({
 export default function NovoProcessoPage() {
   const router = useRouter();
   const toast = useToast();
+  const confirm = useConfirm();
   const { user } = useAuth();
 
   const [form, setForm] = useState<FormState>({
@@ -121,6 +152,7 @@ export default function NovoProcessoPage() {
     numero_origem: "",
     publico: true,
     externo: false,
+    canal_entrada: "interno",
   });
   const [err, setErr] = useState<string | null>(null);
   const [draftHydrated, setDraftHydrated] = useState(false);
@@ -164,6 +196,15 @@ export default function NovoProcessoPage() {
     queryKey: ["manifestantes-all"],
     queryFn: () => api.manifestantes.list({ page_size: 500 }),
   });
+  const templatesQ = useQuery({
+    queryKey: ["templates-documento", "ativos"],
+    queryFn: () => api.templatesDocumento.list({ apenas_ativos: true }),
+  });
+  // Mesma queryKey do UnidadePicker — reaproveita o cache se ele já buscou.
+  const organogramaQ = useQuery({
+    queryKey: ["organograma"],
+    queryFn: () => organogramaApi.tree(),
+  });
 
   const tipoOptions = useMemo<ComboboxOption<{ id: number }>[]>(() => {
     return (tiposProcessoQ.data ?? []).map((t) => ({
@@ -201,6 +242,58 @@ export default function NovoProcessoPage() {
     setForm({ ...form, id_tipo_processo: id, id_assunto: keepAssunto ? form.id_assunto : "" });
   }
 
+  const templateOptions = useMemo<ComboboxOption[]>(() => {
+    return (templatesQ.data ?? []).map((t) => ({
+      value: t.id,
+      label: t.nome,
+      hint: t.categoria ?? undefined,
+    }));
+  }, [templatesQ.data]);
+
+  const [templateSelecionado, setTemplateSelecionado] = useState<number | "">("");
+
+  async function aplicarTemplate(templateId: number) {
+    const template = templatesQ.data?.find((t) => t.id === templateId);
+    if (!template) return;
+
+    if (form.corpo.trim()) {
+      const ok = await confirm({
+        title: "Substituir o conteúdo?",
+        message: `O texto atual do corpo será substituído pelo modelo "${template.nome}".`,
+        confirmLabel: "Substituir",
+      });
+      if (!ok) {
+        setTemplateSelecionado("");
+        return;
+      }
+    }
+
+    const manifestante = manifestantesQ.data?.items.find((m) => m.id === form.id_manifestante);
+    const assunto = assuntosQ.data?.items.find((a) => a.id === form.id_assunto);
+    const unidade = organogramaQ.data?.find((u) => u.id === form.id_unidade_proprietaria);
+
+    const contexto: Record<string, string> = {
+      "requerente.nome": manifestante?.nome ?? "",
+      "requerente.cpf_cnpj": manifestante?.cpf_cnpj ?? "",
+      "requerente.email": manifestante?.email ?? "",
+      "requerente.telefone":
+        manifestante?.telefone_celular ||
+        manifestante?.telefone_residencial ||
+        manifestante?.telefone_comercial ||
+        "",
+      "processo.assunto": assunto?.assunto ?? "",
+      "processo.observacao": form.observacao,
+      "unidade.nome": unidade?.unidade_trabalho ?? "",
+      "unidade.sigla": unidade?.sigla ?? "",
+      "data_hoje": new Date().toLocaleDateString("pt-BR"),
+      "usuario.nome": user?.nome ?? "",
+    };
+
+    setForm({ ...form, corpo: resolvePlaceholdersParcial(template.corpo_html, contexto) });
+    setTemplateSelecionado("");
+    toast.info(`Modelo "${template.nome}" carregado.`);
+  }
+
   const createM = useMutation({
     mutationFn: (data: ProcessoCreateInput) => api.processos.create(data),
     onSuccess: (p) => {
@@ -235,6 +328,7 @@ export default function NovoProcessoPage() {
       numero_origem: form.numero_origem || null,
       publico: form.publico,
       externo: form.externo,
+      canal_entrada: form.canal_entrada,
       virtual: true,
     });
   }
@@ -255,6 +349,7 @@ export default function NovoProcessoPage() {
       numero_origem: "",
       publico: true,
       externo: false,
+      canal_entrada: "interno",
     });
     setErr(null);
     toast.info("Rascunho descartado.");
@@ -336,6 +431,11 @@ export default function NovoProcessoPage() {
               }
             />
           </div>
+
+          <p className="flex items-start gap-1.5 text-xs text-foreground-subtle">
+            <Lock className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+            Manifestante e assunto não podem ser alterados depois que o processo for aberto.
+          </p>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
@@ -420,7 +520,30 @@ export default function NovoProcessoPage() {
           </div>
 
           <div>
-            <Label htmlFor="corpo">Corpo do processo</Label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label htmlFor="corpo">Corpo do processo</Label>
+              {templateOptions.length > 0 && (
+                <div className="flex w-64 items-center gap-1.5">
+                  <LayoutTemplate
+                    className="h-4 w-4 shrink-0 text-foreground-subtle"
+                    aria-hidden="true"
+                  />
+                  <Combobox
+                    options={templateOptions}
+                    value={templateSelecionado === "" ? null : templateSelecionado}
+                    onChange={(v) => {
+                      if (typeof v === "number") {
+                        setTemplateSelecionado(v);
+                        void aplicarTemplate(v);
+                      }
+                    }}
+                    placeholder="Carregar de um modelo…"
+                    searchPlaceholder="Buscar modelo…"
+                    loading={templatesQ.isLoading}
+                  />
+                </div>
+              )}
+            </div>
             <RichTextEditor
               ariaLabel="Corpo do processo"
               value={form.corpo}
@@ -454,7 +577,7 @@ export default function NovoProcessoPage() {
             />
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <ToggleCard
               checked={form.publico}
               onChange={(v) => setForm({ ...form, publico: v })}
@@ -477,6 +600,20 @@ export default function NovoProcessoPage() {
                 form.externo
                   ? "Processo iniciado por cidadão ou orgão externo."
                   : "Processo aberto por servidor interno da prefeitura."
+              }
+            />
+            <ToggleCard
+              checked={form.canal_entrada === "email"}
+              onChange={(v) =>
+                setForm({ ...form, canal_entrada: v ? "email" : "interno" })
+              }
+              icon={form.canal_entrada === "email" ? Mail : Building2}
+              iconBgClass="bg-brand/10 text-brand"
+              title={form.canal_entrada === "email" ? "Recebido por e-mail" : "Registrado internamente"}
+              description={
+                form.canal_entrada === "email"
+                  ? "Documento chegou por e-mail e está sendo protocolado agora."
+                  : "Não veio de balcão, portal do cidadão nem e-mail."
               }
             />
           </div>

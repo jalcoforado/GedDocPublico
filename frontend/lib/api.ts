@@ -232,6 +232,7 @@ export interface ProcessoListItem {
   /** Sigilo gradual (LAI): ostensivo|interno|reservado|secreto|ultrassecreto */
   nivel_sigilo: NivelSigilo;
   externo: boolean;
+  canal_entrada?: string | null;
   assunto: string | null;
   tipo_processo: string | null;
   manifestante: string | null;
@@ -383,6 +384,8 @@ export interface ProcessoCreateInput {
   nivel_sigilo?: NivelSigilo;
   externo?: boolean;
   virtual?: boolean;
+  /** "balcao"/"portal" vêm dos fluxos dedicados; aqui só interno|email */
+  canal_entrada?: "interno" | "email";
 }
 
 export interface EncaminharInput {

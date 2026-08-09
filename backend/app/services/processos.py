@@ -145,6 +145,7 @@ def _row_to_list(r) -> ProcessoListItem:
         publico=p.publico,
         nivel_sigilo=p.nivel_sigilo,
         externo=p.externo,
+        canal_entrada=p.canal_entrada,
         assunto=r.assunto_nome,
         tipo_processo=r.tipo_processo_nome,
         manifestante=r.manifestante_nome,
