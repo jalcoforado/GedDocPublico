@@ -372,9 +372,16 @@ async def _garantir_grupo_demo(
         )
     ).scalars().first()
     if grupo is None:
+        # nivel valor=1 ("Operacional") não é garantido pelo seed_bootstrap
+        # (que só cria valor=0, Super Usuário) nem por nenhuma migration —
+        # cria on-demand se faltar, em vez de assumir que já existe.
         nivel_operacional = (
             await db.execute(select(Nivel).where(Nivel.valor == 1).limit(1))
-        ).scalar_one()
+        ).scalars().first()
+        if nivel_operacional is None:
+            nivel_operacional = Nivel(nivel="Operacional", valor=1, excluido=False)
+            db.add(nivel_operacional)
+            await db.flush()
         sistema_app = (
             await db.execute(select(Sistema).where(Sistema.app == app_name).limit(1))
         ).scalar_one()
