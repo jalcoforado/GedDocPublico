@@ -12,6 +12,7 @@ import {
   Layers,
   ListChecks,
   Shield,
+  ShieldCheck,
   UserCircle,
 } from "lucide-react";
 
@@ -37,6 +38,10 @@ export const menuPagamentos: MenuModulo = {
         { label: "Aguardando Validação", href: "/m/pagamentos/solicitacoes/validacao", icon: CheckCircle,
           perm: "pagamento_validar" },
         { label: "Aguardando Autoridade", href: "/m/pagamentos/solicitacoes/autoridade", icon: CheckCircle,
+          perm: "pagamento_autorizar" },
+        // Cobre os dois atos do ordenador (Lei 4.320/64): autorizar a despesa
+        // (gera OP) e liberar o pagamento pra tesouraria — abas da mesma tela.
+        { label: "Autorizações", href: "/m/pagamentos/autorizacao", icon: ShieldCheck,
           perm: "pagamento_autorizar" },
         { label: "Tesouraria", href: "/m/pagamentos/tesouraria", icon: Banknote,
           perm: "pagamento_pagar" },
