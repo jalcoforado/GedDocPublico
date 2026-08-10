@@ -2557,7 +2557,7 @@ export const api = {
   users: {
     getGoogleCredential: async () => {
       try {
-        const res = await fetch(`${baseUrl()}/users/me/google-credential`, {
+        const res = await fetch(`${baseUrl()}/auth/users/me/google-credential`, {
           cache: "no-store",
           credentials: "include",
         });
