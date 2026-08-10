@@ -24,6 +24,7 @@ async def test_generate_oauth_url_success(redis_client: Redis):
         user_id=123,
         tenant_id=1,
         minuta_id=456,
+        processo_id=789,
     )
 
     assert "https://accounts.google.com/o/oauth2/v2/auth" in url
@@ -31,6 +32,13 @@ async def test_generate_oauth_url_success(redis_client: Redis):
     # Verify state is in Redis
     keys = await redis_client.keys("oauth_state:*")
     assert len(keys) == 1
+
+    # Regressão: processo_id era recebido pela rota mas nunca chegava a ser
+    # gravado no contexto do state — o callback não tinha como saber pra
+    # onde voltar quando minuta_id vier 0 (usuário só conectando a conta).
+    context = json.loads(await redis_client.get(keys[0]))
+    assert context["processo_id"] == 789
+    assert context["minuta_id"] == 456
 
 
 @pytest.mark.asyncio

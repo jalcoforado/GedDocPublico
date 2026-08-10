@@ -176,7 +176,10 @@ async def initiate_google_oauth(
     """Inicia o fluxo OAuth com Google.
 
     Query params:
-    - minuta_id (required): ID da minuta a ser editada
+    - minuta_id (required): ID da minuta a ser editada. 0 quando o usuário
+      está só conectando a conta, antes de criar qualquer minuta — nesse
+      caso o callback não tenta criar Google Doc nenhum, só guarda a
+      credencial e volta pro processo.
     - processo_id (required): ID do processo associado
 
     Retorna: 307 Redirect para Google consent screen
@@ -188,6 +191,7 @@ async def initiate_google_oauth(
             user_id=user.id,
             tenant_id=tenant_id,
             minuta_id=minuta_id,
+            processo_id=processo_id,
         )
     except ValueError as e:
         raise HTTPException(
@@ -255,8 +259,19 @@ async def handle_google_oauth_callback(
                 status_code=307,
             )
 
-    # Auto-cria Google Doc e redireciona para editor
+    # minuta_id=0 é o "só conectar a conta" (RedigirDocumentoDialog permite
+    # conectar antes de criar qualquer minuta) — sem minuta pra vincular, não
+    # há Google Doc nenhum pra criar. Credenciais já foram salvas acima;
+    # só volta pro processo, de onde o usuário segue o fluxo normal.
     minuta_id = context.get("minuta_id")
+    if not minuta_id:
+        processo_id = context.get("processo_id")
+        return RedirectResponse(
+            url=f"/m/protocolo/processos/{processo_id}?tab=documentos",
+            status_code=307,
+        )
+
+    # Auto-cria Google Doc e redireciona para editor
     try:
         minuta = await criar_google_doc_para_minuta(
             db,

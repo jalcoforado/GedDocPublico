@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -194,3 +195,52 @@ async def test_get_google_credential_status_no_credentials(client, auth_setup, a
     )
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_google_callback_minuta_zero_so_conecta_e_volta_pro_processo(
+    admin_engine, auth_setup, client, admin_token, redis_client
+):
+    """minuta_id=0 é o "só conectar a conta", antes de qualquer minuta existir
+    (RedigirDocumentoDialog permite conectar direto do formulário). Regressão:
+    o callback tentava criar Google Doc pra minuta_id=0 (que não existe) e
+    caía em /minuta-error?error=google_api_error — mesmo com as credenciais
+    já salvas com sucesso. Mocka handle_callback pra não bater na API real do
+    Google; o que este teste prova é o desvio de rota no router, não o OAuth
+    exchange em si (coberto em test_google_oauth_flow.py)."""
+    from app.auth.deps import _resolve_current_user
+
+    s = auth_setup
+    arreio_tenant_http(s["tenant_id"], s["tenant_slug"])
+    app.dependency_overrides[get_redis] = lambda: redis_client
+
+    async def mock_get_current_user_no_gate(user: Usuario = Depends(_resolve_current_user)) -> Usuario:
+        return user
+
+    app.dependency_overrides[get_current_user] = mock_get_current_user_no_gate
+
+    host_header = f"{s['tenant_slug']}.aprimora.local"
+
+    async def _fake_handle_callback(self, code, state, db=None):
+        return {
+            "user_id": s["su_id"],
+            "tenant_id": s["tenant_id"],
+            "minuta_id": 0,
+            "processo_id": 999,
+        }
+
+    with patch(
+        "app.services.google_oauth_flow.GoogleOAuthFlow.handle_callback",
+        _fake_handle_callback,
+    ):
+        response = await client.get(
+            "/api/v2/auth/google/callback?code=fake&state=fake",
+            headers={
+                "Authorization": f"Bearer {admin_token}",
+                "Host": host_header,
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/m/protocolo/processos/999?tab=documentos"
