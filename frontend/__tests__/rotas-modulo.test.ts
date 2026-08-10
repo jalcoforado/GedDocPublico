@@ -38,7 +38,7 @@ const DIR_M = join(DIR_APP, "m");
  * nenhum. Acrescentar nome aqui é decisão de arquitetura — se a tela é de um
  * módulo, o lugar dela é `m/<slug>/`.
  */
-const TRANSVERSAIS = new Set(["home", "dashboard", "perfil", "para-assinar", "m"]);
+const TRANSVERSAIS = new Set(["home", "dashboard", "perfil", "para-assinar", "minuta-error", "m"]);
 
 function subdiretorios(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true })

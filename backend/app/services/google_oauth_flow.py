@@ -64,14 +64,17 @@ class GoogleOAuthFlow:
         return self._secrets_file
 
     async def generate_oauth_url(
-        self, user_id: int, tenant_id: int, minuta_id: int
+        self, user_id: int, tenant_id: int, minuta_id: int, processo_id: int
     ) -> str:
         """Generate OAuth URL and save state to Redis.
 
         Args:
             user_id: ID of the user initiating OAuth flow
             tenant_id: ID of the tenant
-            minuta_id: ID of the minuta/document being edited
+            minuta_id: ID da minuta sendo editada — 0 quando o usuário está só
+                conectando a conta Google, ainda sem nenhuma minuta criada.
+            processo_id: ID do processo associado — usado pelo callback para
+                saber pra onde voltar quando minuta_id vier 0.
 
         Returns:
             Full OAuth authorization URL
@@ -90,6 +93,7 @@ class GoogleOAuthFlow:
             "user_id": user_id,
             "tenant_id": tenant_id,
             "minuta_id": minuta_id,
+            "processo_id": processo_id,
         }
         await self.redis.setex(
             f"oauth_state:{state}",
@@ -123,7 +127,7 @@ class GoogleOAuthFlow:
             db: Database session for storing credentials (optional for tests)
 
         Returns:
-            Dictionary with keys: user_id, tenant_id, minuta_id
+            Dictionary with keys: user_id, tenant_id, minuta_id, processo_id
 
         Raises:
             ValueError: If state is expired, code is invalid, or exchange fails
