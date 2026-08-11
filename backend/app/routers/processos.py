@@ -5,7 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy import select as _select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
 from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db
@@ -508,6 +508,7 @@ async def completo_pdf_endpoint(
     processo_id: int,
     inline: bool = Query(True),
     tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
 ):
@@ -516,7 +517,7 @@ async def completo_pdf_endpoint(
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
-    pdf_bytes = gerar_processo_completo_pdf(detail)
+    pdf_bytes = gerar_processo_completo_pdf(detail, tenant_slug=tenant_slug)
     fname = f"processo-completo-{detail.numero_processo.replace('/', '_')}.pdf"
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
 
