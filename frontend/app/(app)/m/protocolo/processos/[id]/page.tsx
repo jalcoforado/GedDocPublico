@@ -37,6 +37,7 @@ import { SolicitarComplementacaoDialog } from "@/components/SolicitarComplementa
 import { ProcessoApensados } from "@/components/ProcessoApensados";
 import { ProcessoVolumes } from "@/components/ProcessoVolumes";
 import { AssinaturasProcesso } from "@/components/AssinaturasProcesso";
+import { AssistenteProcesso } from "@/components/AssistenteProcesso";
 import { ProcessoTrail } from "@/components/ProcessoTrail";
 import { ProcessoWorkflowPanel } from "@/components/ProcessoWorkflowPanel";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
@@ -708,6 +709,9 @@ export default function ProcessoDetailPage() {
               </>
             );
           })()}
+
+          {/* IA-1 — some sozinho quando nao ha chave de LLM configurada. */}
+          <AssistenteProcesso processoId={p.id} />
 
           <Card>
             <CardHeader>

@@ -174,6 +174,12 @@ class Settings(BaseSettings):
     # explicitamente. Gerar com: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     dados_sensiveis_encryption_key: str = ""
 
+    # Assistente conversacional (IA-1). Vazio em TODO ambiente hoje — e o
+    # sistema tem de funcionar assim: sem chave o endpoint devolve 503 e a tela
+    # não mostra o assistente. Nada mais pode notar a ausência.
+    # Obtenha em https://platform.claude.com/ (conta nossa, não do município).
+    anthropic_api_key: str = ""
+
     # Google OAuth (PR-F) — Google Docs integration.
     # Obtenha em https://console.cloud.google.com/apis/credentials (OAuth 2.0 Web Application)
     google_oauth_client_id: str = ""

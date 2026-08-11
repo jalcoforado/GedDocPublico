@@ -1,6 +1,19 @@
 # Plano do Assistente Conversacional (Chatbot IA)
 
-**Status:** rascunho p/ revisão · **Autor:** Jorge + assist · **Criado:** 2026-05-28
+**Status:** rascunho · **Autor:** Jorge + assist · **Criado:** 2026-05-28
+
+> ⚠️ **Este documento envelheceu em três pontos. A fatia entregue é a IA-1**, especificada em
+> `docs/superpowers/specs/2026-08-07-ia-1-assistente-do-processo-design.md` — leia aquela
+> primeiro. O que mudou:
+>
+> 1. **A trava que este plano declara na última seção caiu.** O sigilo gradual está fechado
+>    (`assert_acesso_processo`), então C2 não depende mais dele.
+> 2. **Este plano antecede a modularização.** As ferramentas que ele lista pertencem ao módulo
+>    `protocolo` e precisariam do gate de contratação (`require_modulo`), que não existia.
+> 3. **D3 foi decidido CONTRA o default deste documento.** A IA-1 não usa tool-calling: injeta o
+>    processo já autorizado no prompt, e o modelo não tem ferramenta para chamar. Tool-calling
+>    volta quando a busca voltar — e a busca depende do item 1.0.8 do backlog, porque ela
+>    transforma aquele buraco de latente em explorável.
 
 > Origem: avaliação do chatbot do projeto `ianalisys_v1` (assistente de análise
 > para restaurantes). Aproveitamos a **arquitetura** (não o domínio): roteamento
