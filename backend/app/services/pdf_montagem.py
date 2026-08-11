@@ -12,19 +12,16 @@ Reusa o cache de carimbado: se o anexo já foi carimbado antes, leitura instant�
 from __future__ import annotations
 
 from io import BytesIO
-from pathlib import Path
 
 from pypdf import PdfReader, PdfWriter
 
-from ..config import get_settings
+from ..config import resolve_anexo_path
 from ..schemas.processo import ProcessoDetail
 from .pdf_capa import gerar_capa_pdf
 from .pdf_carimbo import CarimboError, carimbar_anexo_com_cache
 
 
-def gerar_processo_completo_pdf(detail: ProcessoDetail) -> bytes:
-    settings = get_settings()
-    uploads_dir = Path(settings.uploads_dir)
+def gerar_processo_completo_pdf(detail: ProcessoDetail, *, tenant_slug: str) -> bytes:
     writer = PdfWriter()
 
     # 1. Capa
@@ -40,8 +37,10 @@ def gerar_processo_completo_pdf(detail: ProcessoDetail) -> bytes:
     pdf_anexos.sort(key=lambda a: (a.ordem if a.ordem is not None else 9999, a.id))
 
     for anexo in pdf_anexos:
-        source_path = uploads_dir / (anexo.e_doc or "")
-        if not source_path.exists():
+        # Storage por tenant (Fase 14) primeiro, legacy (Sobral) como fallback —
+        # mesma resolução usada pelo download avulso (services/anexos.py).
+        source_path = resolve_anexo_path(tenant_slug, anexo.e_doc or "")
+        if source_path is None:
             continue
         try:
             carimbado_path = carimbar_anexo_com_cache(
@@ -49,6 +48,7 @@ def gerar_processo_completo_pdf(detail: ProcessoDetail) -> bytes:
                 source_pdf_path=source_path,
                 numero_processo=detail.numero_processo,
                 e_doc=anexo.e_doc or "",
+                tenant_slug=tenant_slug,
             )
         except CarimboError:
             # PDF corrompido — pula em vez de quebrar a montagem inteira.

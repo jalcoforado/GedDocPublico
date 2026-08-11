@@ -45,7 +45,7 @@ async def _run_async(
                 detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
                 if detail is None:
                     raise RuntimeError(f"Processo {processo_id} não encontrado")
-                pdf_bytes = gerar_processo_completo_pdf(detail)
+                pdf_bytes = gerar_processo_completo_pdf(detail, tenant_slug=tenant_slug)
                 numero_safe = detail.numero_processo.replace("/", "_")
 
             out_dir = tenant_jobs_dir(tenant_slug) / str(job_id)
