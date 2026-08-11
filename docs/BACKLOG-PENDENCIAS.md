@@ -342,7 +342,32 @@ isso não tem guarda que a antecipe.
   5 vermelhos contra o comportamento antigo). O endpoint continua em `ENDPOINTS_TRANSVERSAIS` — não
   ganhou gate de módulo nem de permissão, e isso é decisão, não esquecimento.
 
-### 1.0.65 Falha da F1 que só aparece em banco limpo — ainda NÃO diagnosticada
+### ~~1.0.65 Falha da F1 que só aparece em banco limpo~~ — DIAGNOSTICADA E FECHADA
+
+*(Aberto em 2026-07-30. **Fechado em 2026-08-11** — o conserto é de 2026-07-30, no commit `9992e44`;
+o que faltava era alguém voltar e fechar o item.)*
+
+**A causa, exata:** `_cria_usuario_comum` em `tests/test_permissoes_modulo.py` fazia `scalar_one()`
+sobre `utils.nivel WHERE valor <> 0`. Esse nível existe no banco de dev **por herança do legado**,
+mas o `seed_bootstrap` garante somente o valor 0 (Super Usuário) e nenhuma migration o cria — então
+em banco limpo (CI, instalação nova) a query não acha linha e estoura `NoResultFound`. Virou
+get-or-create.
+
+**Verificação (2026-08-11):** run `31452170050` do `Backend tests` em `main` (`04c54e6`) — os 7
+testes de `test_permissoes_modulo.py` passam e o run inteiro tem **zero** `FAILED`.
+
+Duas coisas que ficam:
+
+- **É a mesma raiz do item 1.0.7**, visto do outro lado: o sistema nunca teve um nível não-super, e
+  quem escreve teste ou seed assume que ele existe porque nesta máquina existe. Um apareceu como
+  teste vermelho no CI; o outro é o buraco de autorização latente.
+- **A classe de defeito continua ativa.** Ao escrever a fixture da fatia IA-1 (2026-08-11) tropecei
+  no mesmo padrão e só não quebrei porque copiei o get-or-create daquele arquivo. Suposição sobre
+  dado que só o ambiente local tem é o modo de falha recorrente deste repositório — o mesmo do
+  Critical do review final da F1 (contratação ausente em banco limpo).
+
+<details>
+<summary>Registro original, de quando ainda não se sabia a causa</summary>
 
 *(Aberto em 2026-07-30, depois do merge da F1. **É o item mais urgente desta seção.**)*
 
@@ -373,6 +398,8 @@ tests/test_permissoes_modulo.py ...F
   `seed_bootstrap`) e apontar **as duas** conexões (`PYTEST_DB_HOST` e `DATABASE_URL`) para ele —
   ver a armadilha das duas conexões no `CLAUDE.md`.
 
+</details>
+
 ### 1.0.66 A suíte de backend cresceu para além do teto do CI
 
 O job levava 13–14 min contra um teto de 15; os ~40 testes da F1 empurraram por cima e o teto subiu
@@ -391,21 +418,37 @@ e `workflow` — entre eles `routers/workflow.py:479` (transicionar, usado pelo
 `ProcessoWorkflowPanel.tsx`) e os 4 disparos de job em `routers/jobs.py`. Nenhuma dessas transações
 tem linha em `utils.grupo_transacao`.
 
+> ⚠️ **ATUALIZAÇÃO 2026-08-11 — a premissa "zero grupos não-SU" CAIU no ambiente de dev.**
+> O `seed_demo_operacional` (pagamentos) **cria o nível "Operacional" (valor 1) sob demanda** e um
+> grupo por transação de pagamentos. Medido com a CLI nova: o banco local tem **5 grupos não-SU**
+> (`Demo — Autorizar Pagamento`, `Demo — Gestão da pasta`, `Demo — Pagar — Tesouraria`,
+> `Demo — Solicitar Pagamento`, `Demo — Validar Pagamento`), **todos sem nenhuma das 9**. O gatilho
+> que este item descrevia como futuro já disparou.
+>
+> **Na VPS ainda não** (medido em 2026-08-11): 0 grupos não-SU, 2 grupos totais, e `utils.nivel` só
+> tem `Super Usuario=0` — o seed operacional não rodou lá. Ou seja, o item continua latente **em
+> produção de homologação** e já é real em dev; roda o seed de pagamentos na VPS e vira real lá
+> também.
+>
+> **Ferramenta:** `docker exec aprimora-py-backend python -m app.cli.diagnostico_permissoes
+> --tenant sobral` lista, por grupo não-SU, o que falta. **Ela não concede nada** — conceder é a
+> decisão de política descrita abaixo, e continua sendo do dono do produto.
+
 - **Não afeta ninguém hoje**, e não por sorte: `is_super_usuario` é `nivel.valor == 0`
-  (`services/permissoes.py:92`), o ramo de SU lê `utils.sistema_transacao` e **não**
-  `grupo_transacao`, e no banco existem **zero** grupos com `nivel.valor <> 0` (verificado por
-  query). Todo grupo do sistema é super-usuário.
-- **Aparece no dia em que o primeiro grupo "Operacional" (nível 1) for criado.** Nesse momento, quem
-  cria o grupo escolhe as transações dele — é o passo já documentado em `RUNBOOK.md`.
+  (`services/permissoes.py:92`), e o ramo de SU lê `utils.sistema_transacao` e **não**
+  `grupo_transacao` — então todo grupo super-usuário passa independentemente destas 9. O que mudou é
+  que já existem grupos não-SU (ver acima); eles simplesmente não usam os endpoints gateados nesses
+  códigos, porque são grupos de demonstração de pagamentos.
+- **Aparece de verdade quando um grupo não-SU precisar de uma tela gateada nessas 9 transações.**
+  Nesse momento, quem cria/edita o grupo escolhe as transações dele — passo já documentado em
+  `RUNBOOK.md`, e agora conferível pela CLI acima.
 - **Por que não virou migration:** concessão em bloco **abriria** acesso em vez de preservar. As 9
   transações são novas, então nenhum grupo as tinha; endpoints antigos gateados em `processo,excluir`
   já eram 403 para não-SU antes da branch. Conceder tudo daria a um Operacional o poder de excluir
   processo, que ele nunca teve. Escrever a migration correta exige decidir, código por código e ação
   por ação, quem passa a poder o quê — isso é política de acesso, decisão do dono do produto.
-- **A verificar antes de criar grupo não-SU na VPS:** a apuração acima é do banco **local**. Rodar lá
-  `SELECT count(*) FROM utils.grupo g JOIN utils.nivel n ON n.id=g.id_nivel WHERE n.valor <> 0` — se
-  houver grupo não-SU, existe usuário real perdendo acesso nesses 13 endpoints, e aí a concessão
-  deixa de ser hipótese.
+- ~~**A verificar antes de criar grupo não-SU na VPS**~~ — **feito em 2026-08-11**, resultado no
+  aviso acima. A CLI `diagnostico_permissoes` substitui a query manual e cobre os dois ambientes.
 
 ### 1.0.8 O buraco de autorização — leitura de módulo segue aberta a qualquer autenticado do tenant
 
