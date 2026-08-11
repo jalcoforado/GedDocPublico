@@ -115,11 +115,13 @@ export function RedigirDocumentoDialog({
       setMinutaAtualId(m.id);
       qc.invalidateQueries({ queryKey: ["minutas", processoId] });
       onSaved?.();
-      toast.success("Documento criado em Google Docs. Redirecionando…");
-      // Redirect to Google Docs editor
-      setTimeout(() => {
-        window.location.href = m.google_doc_url || "";
-      }, 1000);
+      // Abre numa aba nova — trocar a própria aba (window.location.href) tirava
+      // o usuário do processo sem volta fácil; assim o app continua aberto e o
+      // Google Docs some sozinho quando a aba é fechada ao terminar de editar.
+      if (m.google_doc_url) {
+        window.open(m.google_doc_url, "_blank", "noopener,noreferrer");
+      }
+      toast.success("Documento criado em Google Docs numa nova aba.");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -143,8 +145,29 @@ export function RedigirDocumentoDialog({
 
   const emEdicao = minutaAtualId !== undefined;
   const carregando = emEdicao && minutaQ.isLoading;
+  // Minuta de origem Google não tem conteúdo pra editar aqui — o texto vive
+  // no Google Docs, não em corpo_html. Mostrar o RichTextEditor pra ela dava
+  // uma tela de edição "normal" só que sempre vazia (nada foi sincronizado
+  // de volta), e "Salvar rascunho" sobrescreveria corpo_html com esse vazio.
+  const ehGoogle = emEdicao ? minutaQ.data?.origem === "google" : origem === "google";
 
-  const footer = emEdicao ? (
+  const footer = emEdicao && ehGoogle ? (
+    <div className="flex justify-end gap-2">
+      <Button variant="secondary" onClick={onClose}>
+        Fechar
+      </Button>
+      <Button
+        onClick={() => {
+          if (minutaQ.data?.google_doc_url) {
+            window.open(minutaQ.data.google_doc_url, "_blank", "noopener,noreferrer");
+          }
+        }}
+        disabled={!minutaQ.data?.google_doc_url}
+      >
+        Abrir no Google Docs
+      </Button>
+    </div>
+  ) : emEdicao ? (
     <div className="flex justify-end gap-2">
       <Button variant="secondary" onClick={onClose}>
         Fechar
@@ -256,6 +279,16 @@ export function RedigirDocumentoDialog({
         </div>
       ) : carregando ? (
         <p className="text-sm text-muted-foreground">Carregando rascunho…</p>
+      ) : ehGoogle ? (
+        <div className="space-y-3">
+          <p className="text-sm text-foreground">
+            <span className="font-medium">{titulo}</span>
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Este documento é editado no Google Docs, não aqui. Use "Abrir no
+            Google Docs" para continuar editando numa aba nova.
+          </p>
+        </div>
       ) : (
         <div className="space-y-4">
           <div className="space-y-1.5">
