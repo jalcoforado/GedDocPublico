@@ -91,6 +91,32 @@ Pós-criação:
 2. Compartilhar URL + credenciais com o cliente
 3. Acompanhar primeiros logins via `aprimora.access` logs (filtrar `tenant_slug=fortaleza`)
 
+### Antes de criar um grupo NÃO super-usuário
+
+O tenant nasce com um grupo `Administradores` de **nível 0** — super-usuário, que passa por
+`utils.sistema_transacao` e ignora `grupo_transacao`. Enquanto todo grupo for nível 0, permissão por
+transação não tem efeito prático.
+
+No dia em que criar um grupo operacional (nível ≠ 0), rode antes:
+
+```bash
+docker exec aprimora-py-backend python -m app.cli.diagnostico_permissoes --tenant fortaleza
+```
+
+Ele lista, por grupo não-SU, quais das 9 transações da migration `0074` (`processo`, `usuario`,
+`catalogo`, `assunto`, `manifestante`, `cidade`, `endereco`, `workflow`, `unidadeTrabalho`) não
+estão concedidas — são as que a fatia F1 usou para gatear 13 endpoints, entre eles transicionar
+workflow e os disparos de job. **Elas não estão concedidas a nenhum grupo**, então um grupo
+operacional novo recebe 403 nesses endpoints até alguém conceder.
+
+Duas armadilhas:
+
+- **O nível operacional pode não existir.** O `seed_bootstrap` garante só o valor 0; nenhuma
+  migration cria outro. Criar grupo não-SU exige criar o nível antes — a CLI avisa quando só há SU.
+- **A CLI não concede nada, de propósito.** Conceder as 9 em bloco daria a um operacional o poder de
+  excluir processo, que ele nunca teve. Quem passa a poder o quê é decisão de política de acesso
+  (item 1.0.7 do backlog), não de ferramenta.
+
 ### Provisionamento que parou no meio (tenant inerte)
 
 Desde `SEC-RLS-00C` o provisionamento são **dois atos**, em papéis de banco

@@ -335,6 +335,14 @@ async def test_provisionamento_que_para_no_ato_municipal_devolve_500_e_deixa_ten
 
         # --- o corpo não vaza -------------------------------------------
         corpo = r.text
+        # A varredura roda sobre o corpo COM o `correlation_id` mascarado. Ele
+        # é hexadecimal aleatório e tem de estar na resposta (asserção logo
+        # abaixo); procurar `str(tenant_id)` — dois ou três dígitos — como
+        # substring do corpo cru faz o teste reprovar por sorteio: um
+        # `correlation_id` sorteado `1ceffbd70493497d` "contém" o tenant 497.
+        # Aconteceu no CI em 2026-08-11. Mascarar preserva o que o teste quer
+        # dizer (o id não vaza POR SI) e tira o dado aleatório do caminho.
+        corpo_varrido = corpo.replace(correlacao, "<correlation_id>")
         for proibido, porque in (
             ("retomar", "o comando de retomada é a linha de comando do ataque"),
             ("python -m", "linha de comando de runbook não trafega em resposta"),
@@ -342,7 +350,7 @@ async def test_provisionamento_que_para_no_ato_municipal_devolve_500_e_deixa_ten
             (str(tenant_id), "id interno de plataforma"),
             (slug, "o slug do tenant não precisa voltar na mensagem de erro"),
         ):
-            assert proibido not in corpo, (
+            assert proibido not in corpo_varrido, (
                 f"a resposta 500 contém {proibido!r} — {porque}. Corpo: {corpo}"
             )
         assert "INATIVO" in corpo and "nenhum acesso" in corpo, (
