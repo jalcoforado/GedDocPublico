@@ -1,5 +1,16 @@
 # IA-1 — Assistente do processo aberto
 
+> **Atualização de 2026-08-12 — o provedor mudou.** Este documento foi escrito com a Anthropic
+> (`claude-opus-5`) como provedor. Por decisão de custo do Jorge, o assistente passou a usar
+> **DeepSeek** (`deepseek-chat`), pela API compatível com o formato OpenAI. A Anthropic continua
+> implementada e é usada quando só a chave dela está configurada; `DEEPSEEK_API_KEY` tem
+> precedência. Nada mais deste desenho mudou — o contexto fechado, os guards e o 503 sem chave são
+> os mesmos, e foi por isso que a troca coube numa classe nova em `services/ia/llm_client.py`.
+>
+> O que **precisa ser reavaliado** com o provedor novo é a única propriedade que o desenho delega
+> ao modelo: **recusar quando a resposta não está no processo** (regra 2 de `conhecimento.py`).
+> Modelos diferentes obedecem instrução negativa de formas diferentes.
+
 **Status:** aprovado · **Data:** 2026-08-07 · **Decisões:** Jorge
 
 Primeira fatia do assistente conversacional. Substitui, para o MVP, o C1+C2 do

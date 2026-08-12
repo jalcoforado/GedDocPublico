@@ -52,3 +52,8 @@ frontend/test-results/
 
 # Docker compose overrides locais (porta, env etc)
 docker-compose.override.yml
+
+# Segredos em arquivo solto. O repo e PUBLICO: uma chave commitada aqui e
+# uma chave vazada, e apagar depois nao resolve -- ela fica no historico e
+# nos forks. Padrao amplo de proposito, para pegar tambem `.secret.local.txt`.
+.secret*.txt

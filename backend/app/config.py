@@ -174,11 +174,19 @@ class Settings(BaseSettings):
     # explicitamente. Gerar com: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     dados_sensiveis_encryption_key: str = ""
 
-    # Assistente conversacional (IA-1). Vazio em TODO ambiente hoje — e o
-    # sistema tem de funcionar assim: sem chave o endpoint devolve 503 e a tela
-    # não mostra o assistente. Nada mais pode notar a ausência.
-    # Obtenha em https://platform.claude.com/ (conta nossa, não do município).
+    # Assistente conversacional (IA-1). Com as DUAS vazias — o estado de todo
+    # ambiente até 2026-08-12 — o endpoint devolve 503 e a tela não mostra o
+    # assistente. Nada mais no sistema pode notar a ausência.
+    #
+    # `deepseek_api_key` tem PRECEDÊNCIA sobre a Anthropic (ver
+    # `services/ia/llm_client.py::obter_cliente`). Escolha do Jorge em
+    # 2026-08-12: começar pelo DeepSeek, por custo. A interface `LLMClient`
+    # já existia, então trocar de provedor é acrescentar uma classe — não
+    # mexer no assistente.
     anthropic_api_key: str = ""
+    deepseek_api_key: str = ""
+    deepseek_modelo: str = "deepseek-chat"
+    deepseek_base_url: str = "https://api.deepseek.com"
 
     # Google OAuth (PR-F) — Google Docs integration.
     # Obtenha em https://console.cloud.google.com/apis/credentials (OAuth 2.0 Web Application)
