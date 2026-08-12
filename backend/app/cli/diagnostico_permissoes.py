@@ -132,7 +132,18 @@ async def _concedidas(db: AsyncSession, grupo_id: int) -> set[str]:
 
 
 async def diagnosticar(slug: str | None) -> int:
-    """Imprime o relatório. Devolve o código de saída."""
+    """Imprime o relatório. Devolve o código de saída.
+
+    A sessão é aberta DUAS vezes de propósito: sem tenant para o que é global
+    (`utils.nivel`, `aprimora_py.tenant` — sem RLS), e uma por tenant com
+    `AdminSessionLocal(tenant_id)` para o que é tenanted (`utils.grupo`,
+    `utils.grupo_transacao`). Sem a GUC, um papel NOBYPASSRLS lê **zero
+    grupos** e o relatório diz "nenhum grupo" com grupos no banco — o pior
+    resultado possível numa ferramenta de diagnóstico. A primeira versão desta
+    CLI tinha esse defeito e passava no banco de dev porque lá ela conectava
+    como `ged_user`; só o CI, onde `MIGRATOR_DATABASE_URL` aponta mesmo para
+    `aprimora_migrator`, reprovou.
+    """
     async with AdminSessionLocal() as db:
         niveis = await _niveis(db)
         tem_nao_su = any(valor != 0 for _, valor in niveis)
@@ -155,9 +166,13 @@ async def diagnosticar(slug: str | None) -> int:
             )
         print()
 
-        achou_lacuna = False
-        for tenant_id, tenant_slug in await _tenants(db, slug):
-            grupos = await _grupos(db, tenant_id)
+        alvos = await _tenants(db, slug)
+
+    achou_lacuna = False
+    for tenant_id, tenant_slug in alvos:
+        # Sessão POR TENANT, com a GUC instalada — ver o docstring acima.
+        async with AdminSessionLocal(tenant_id) as db_t:
+            grupos = await _grupos(db_t, tenant_id)
             print(f"Tenant `{tenant_slug}` — {len(grupos)} grupo(s)")
             if not grupos:
                 print("  (nenhum grupo)")
@@ -173,7 +188,7 @@ async def diagnosticar(slug: str | None) -> int:
                     )
                     continue
 
-                concedidas = await _concedidas(db, grupo_id)
+                concedidas = await _concedidas(db_t, grupo_id)
                 faltando = [c for c in TRANSACOES_0074 if c not in concedidas]
                 if faltando:
                     achou_lacuna = True
@@ -192,13 +207,13 @@ async def diagnosticar(slug: str | None) -> int:
                     )
             print()
 
-        if achou_lacuna:
-            print(
-                "Há grupo não-SU sem as transações da 0074. Isso NÃO é\n"
-                "necessariamente erro — pode ser exatamente a política desejada.\n"
-                "Conceder é decisão de quem define o acesso; esta CLI só mostra."
-            )
-        return 0
+    if achou_lacuna:
+        print(
+            "Há grupo não-SU sem as transações da 0074. Isso NÃO é\n"
+            "necessariamente erro — pode ser exatamente a política desejada.\n"
+            "Conceder é decisão de quem define o acesso; esta CLI só mostra."
+        )
+    return 0
 
 
 def main() -> None:

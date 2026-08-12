@@ -57,7 +57,16 @@ WORKER_URL = f"postgresql+asyncpg://aprimora_worker:{DB_PASS}@{DB_HOST}:{DB_PORT
 # `get_settings()`, que é `lru_cache` e memoiza a configuração no primeiro
 # import de `app.database`. `setdefault` para que a linha de comando ainda
 # possa sobrepor.
-os.environ.setdefault("MIGRATOR_DATABASE_URL", MIGRATOR_URL)
+#
+# `setdefault` sozinho NÃO bastava: o `docker-compose.yml` declara
+# `MIGRATOR_DATABASE_URL=` (definida e VAZIA, para o fallback documentado em
+# `database_admin.py`), e `setdefault` respeita a chave existente. O efeito era
+# a suíte rodar como `ged_user`/BYPASSRLS no container e como
+# `aprimora_migrator`/NOBYPASSRLS no CI — a divergência exata que deixou passar
+# localmente uma CLI que lia zero linhas sob RLS. Vazio aqui significa
+# "não configurada".
+if not os.environ.get("MIGRATOR_DATABASE_URL"):
+    os.environ["MIGRATOR_DATABASE_URL"] = MIGRATOR_URL
 
 
 @pytest_asyncio.fixture(scope="function")
