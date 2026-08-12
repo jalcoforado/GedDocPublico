@@ -647,6 +647,51 @@ substituir `tenant_id = 1` por `tenant_id = N`.
 
 ---
 
+## Ligar o assistente de IA (IA-1) num ambiente
+
+O assistente responde perguntas sobre o processo aberto. **Sem chave de provedor
+ele não existe para o usuário**: o endpoint devolve 503 e o painel não é
+renderizado — é o comportamento projetado, não uma falha a investigar.
+
+A chave vai em **`backend/.env`**, que o container enxerga como `/app/.env` pelo
+bind-mount `./backend:/app`. O arquivo é gitignored e **não existe no
+repositório** — crie à mão, uma vez por ambiente:
+
+```bash
+# na VPS, em /root/GedDocPublico
+printf 'DEEPSEEK_API_KEY=sk-...
+' > backend/.env
+chmod 600 backend/.env
+docker compose restart backend worker
+```
+
+O `restart` não é opcional: `get_settings()` é `lru_cache`, então o processo em
+execução não relê o arquivo.
+
+**Não acrescente a chave ao `docker-compose.yml`.** É o instinto certo para
+qualquer outro segredo deste projeto e o errado para este: variável definida e
+vazia vence o arquivo `.env` na precedência do pydantic-settings, então
+`DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}` entregaria `""` em todo ambiente que
+não a definisse na raiz e **desligaria o assistente onde ele funciona**, sem
+erro e sem log. `tests/test_guarda_chave_ia.py` reprova quem tentar.
+
+Conferir se pegou, sem abrir a tela:
+
+```bash
+docker exec aprimora-py-backend python -c   "from app.services.ia.llm_client import obter_cliente; c=obter_cliente(); print(type(c).__name__, c._modelo)"
+```
+
+Provedores, em ordem de precedência (`services/ia/llm_client.py::obter_cliente`):
+`DEEPSEEK_API_KEY` → `deepseek-chat`; `ANTHROPIC_API_KEY` → `claude-opus-5`.
+
+Duas coisas que a operação precisa saber, e que não são técnicas:
+
+- **O conteúdo do processo trafega para o provedor**, inclusive de processo
+  `reservado` ou `secreto` que o usuário tenha credencial para ver. Não há
+  recusa por nível de sigilo hoje.
+- **Nada da conversa é gravado** — nem pergunta, nem resposta. Sair da tela
+  apaga. Decisão de LGPD registrada na spec da IA-1.
+
 ## Observabilidade
 
 ### Logs estruturados
