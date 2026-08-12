@@ -500,10 +500,10 @@ ROTAS_POR_MODULO: dict[tuple[str, str], str] = {
     ("GET", "/api/v2/grupos"): "administracao",
     ("GET", "/api/v2/grupos/{grupo_id}"): "administracao",
     ("GET", "/api/v2/grupos/{grupo_id}/transacoes"): "administracao",
-    ("GET", "/api/v2/jobs"): "administracao",
-    ("GET", "/api/v2/jobs/agenda"): "administracao",
-    ("GET", "/api/v2/jobs/{job_id}"): "administracao",
-    ("GET", "/api/v2/jobs/{job_id}/resultado"): "administracao",
+    ("GET", "/api/v2/jobs"): "protocolo",
+    ("GET", "/api/v2/jobs/agenda"): "protocolo",
+    ("GET", "/api/v2/jobs/{job_id}"): "protocolo",
+    ("GET", "/api/v2/jobs/{job_id}/resultado"): "protocolo",
 }
 
 

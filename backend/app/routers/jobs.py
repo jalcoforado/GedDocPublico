@@ -37,7 +37,7 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 @router.get(
     "",
     response_model=list[JobOut],
-    dependencies=[Depends(require_modulo("administracao")), Depends(require_permission("processo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def list_jobs_endpoint(
     todos: bool = Query(False, description="Se True, retorna jobs de todos os usuários do tenant"),
@@ -55,7 +55,7 @@ async def list_jobs_endpoint(
 # mais forte dos oito endpoints afetados no repo (ver o comentário equivalente
 # em `routers/catalogo.py` e `routers/localizacao.py`). Antes da branch, esta
 # rota não tocava banco nem tenant algum — só lia `celery_app.conf.beat_schedule`
-# in-process. Agora `require_modulo("administracao")` injeta `require_tenant_id`
+# in-process. Agora `require_modulo("protocolo")` injeta `require_tenant_id`
 # (400 possível fora do nginx, com `STRICT_TENANT_RESOLUTION=true` e Host sem
 # subdomínio resolvível) E abre uma sessão de banco para dois SELECTs
 # (`slugs_contratados`, que resolve contratados + módulos não-contratáveis).
@@ -63,7 +63,7 @@ async def list_jobs_endpoint(
 @router.get(
     "/agenda",
     response_model=list[AgendaItem],
-    dependencies=[Depends(require_modulo("administracao")), Depends(require_permission("processo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def listar_agenda_endpoint(
     _: Usuario = Depends(get_current_user),
@@ -86,7 +86,7 @@ async def listar_agenda_endpoint(
 @router.get(
     "/{job_id}",
     response_model=JobOut,
-    dependencies=[Depends(require_modulo("administracao")), Depends(require_permission("processo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def get_job_endpoint(
     job_id: int,
@@ -202,14 +202,17 @@ async def disparar_limpeza(
     # limpar artefatos do próprio protocolo — sem escapatória, já que o gate
     # de módulo roda antes do bypass de super-usuário.
     #
-    # Inconsistência aceita (Task 3, 2026-07-30): os 4 GETs deste mesmo router
-    # (listar, agenda, detalhe, resultado) passaram a exigir require_modulo
-    # ("administracao") — é o mecanismo de fila que é administracao no mapa
-    # de rotas, não o conteúdo dos artefatos. Resultado: um tenant com
-    # `protocolo` e sem `administracao` dispara esta limpeza mas não lê o
-    # resultado de nenhum job. Decisão humana registrada no escopo da fatia;
-    # não "corrigir" trocando o gate de um lado ou de outro sem falar com o
-    # Jorge primeiro.
+    # A inconsistência que estava registrada aqui — os 4 GETs exigindo
+    # `require_modulo("administracao")` enquanto as escritas exigiam a
+    # transação `processo` — foi RESOLVIDA em 2026-08-11 (item 1.0.8, decisão
+    # do Jorge): os GETs passaram a exigir `require_modulo("protocolo")`.
+    #
+    # O que forçou a decisão: enquanto só o módulo era cobrado na leitura, a
+    # incoerência era invisível. Ao cobrar também a transação, ela produziria
+    # a vítima inversa — tenant com `administracao` e sem `protocolo` deixaria
+    # de LER jobs que já não podia disparar nem limpar. Os dois eixos agora
+    # dizem a mesma coisa, e o argumento é o desta linha logo acima: todo job
+    # deste router é de protocolo.
     current: Usuario = Depends(require_permission("processo", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
@@ -228,7 +231,7 @@ async def disparar_limpeza(
 
 @router.get(
     "/{job_id}/resultado",
-    dependencies=[Depends(require_modulo("administracao")), Depends(require_permission("processo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def baixar_resultado(
     job_id: int,
