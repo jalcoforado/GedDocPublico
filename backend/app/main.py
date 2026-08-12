@@ -22,6 +22,7 @@ from .routers import (
     frota,
     grupos,
     health,
+    ia,
     jobs,
     localizacao,
     manifestantes,
@@ -144,6 +145,7 @@ app.include_router(pagamentos_debitos.operacoes_router, prefix="/api/v2")
 app.include_router(minutas.templates_router, prefix="/api/v2")
 app.include_router(minutas.imagens_router, prefix="/api/v2")
 app.include_router(minutas.minutas_router, prefix="/api/v2")
+app.include_router(ia.router, prefix="/api/v2")
 app.include_router(workflow.router, prefix="/api/v2")
 app.include_router(workflow.instances_router, prefix="/api/v2")
 app.include_router(workflow.mapeamento_router, prefix="/api/v2")

@@ -5021,6 +5021,88 @@ export const notificacoesApi = {
     }),
 };
 
+// ============================================================
+// Assistente conversacional (IA-1) — escopo de UM processo aberto.
+//
+// Objeto próprio, seguindo a organização por domínio do resto do arquivo
+// (`protocoloApi`, `ccdApi`, `processosApi`, `notificacoesApi`).
+// ============================================================
+
+export const iaApi = {
+  /** Há chave de LLM configurada neste ambiente?
+   *
+   * A tela consulta isto antes de oferecer o assistente. Sem a checagem o
+   * usuário descobriria a indisponibilidade só depois de digitar e esperar. */
+  iaDisponivel: () => request<{ disponivel: boolean }>(`/ia/disponivel`),
+
+  /** Pergunta sobre um processo, recebendo a resposta em pedaços (SSE).
+   *
+   * **Não usa `request<T>()` de propósito.** Aquele helper faz `res.json()`,
+   * que aguarda o corpo inteiro — o oposto do que o streaming existe para
+   * fazer. Aqui lemos o `ReadableStream` e entregamos cada pedaço via
+   * callback, então a resposta aparece enquanto é gerada.
+   *
+   * Erros vêm ANTES do stream começar (o backend consome o primeiro pedaço
+   * para poder transformar exceção em status HTTP), então um `!res.ok` aqui é
+   * confiável — não é meio-caminho de uma resposta boa. */
+  iaPerguntarSobreProcesso: async (
+    processoId: number,
+    pergunta: string,
+    onPedaco: (texto: string) => void,
+    sinal?: AbortSignal,
+  ): Promise<void> => {
+    const res = await fetch(
+      `${baseUrl()}/ia/processos/${processoId}/perguntar`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pergunta }),
+        credentials: "include",
+        cache: "no-store",
+        signal: sinal,
+      },
+    );
+    if (!res.ok) {
+      let detalhe = `Erro ${res.status}`;
+      try {
+        const corpo = await res.json();
+        if (corpo?.detail) detalhe = String(corpo.detail);
+      } catch {
+        // corpo não-JSON: fica a mensagem genérica
+      }
+      throw new ApiError(detalhe, res.status);
+    }
+    if (!res.body) throw new ApiError("Resposta sem corpo.", 500);
+
+    const leitor = res.body.getReader();
+    const decodificador = new TextDecoder();
+    // O buffer existe porque um chunk da rede NÃO corresponde a um evento SSE:
+    // um evento pode chegar partido em dois chunks, e dois eventos podem vir
+    // no mesmo. Processar chunk a chunk corta mensagens ao meio.
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await leitor.read();
+      if (done) break;
+      buffer += decodificador.decode(value, { stream: true });
+      const partes = buffer.split("\n\n");
+      buffer = partes.pop() ?? "";
+      for (const parte of partes) {
+        for (const linha of parte.split("\n")) {
+          if (!linha.startsWith("data: ")) continue;
+          const cru = linha.slice(6);
+          if (cru === "{}") continue; // evento de fim
+          try {
+            const { texto } = JSON.parse(cru);
+            if (texto) onPedaco(texto);
+          } catch {
+            // pedaço malformado: ignora em vez de derrubar a resposta inteira
+          }
+        }
+      }
+    }
+  },
+};
+
 export interface WorkflowSlaAlerta {
   id: number;
   id_workflow_instance: number;

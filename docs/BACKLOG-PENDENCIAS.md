@@ -855,15 +855,40 @@ gerencial) estão em `main` e no ar. O que resta é uma **iniciativa nova**, nã
 - Sem coordenação de edição concorrente e sem contagem de páginas (o Google não expõe o metadado;
   a alternativa é exportar PDF e contar).
 
-### 2.5 Chatbot / assistente conversacional
+### 2.5 Chatbot / assistente conversacional — IA-1 ENTREGUE; busca continua fora
 
-- **Evidência:** `backend/app/services/ia/` **não existe**. Zero linhas escritas.
-- [`CHATBOT-PLAN.md`](../CHATBOT-PLAN.md) segue como rascunho, travado em **seis decisões humanas**
-  (seção 3 do plano): D1 público-alvo do MVP, D2 provider, D3 grounding (tool-calling com catálogo
-  fixo × SQL livre), D4 profundidade da validação factual, D5 execução inline SSE × Celery,
-  D6 escopo de ações (só leitura × mutação de estado).
-- Restrição inegociável já registrada no plano: o bot roda sob o mesmo RLS multi-tenant e o mesmo
-  sigilo gradual — nunca pode responder o que o usuário não veria pela UI.
+**A fatia IA-1 está em `services/ia/`**: assistente sobre UM processo já aberto, dentro de
+`/m/protocolo/processos/[id]`. Spec em
+[`docs/superpowers/specs/2026-08-07-ia-1-assistente-do-processo-design.md`](superpowers/specs/2026-08-07-ia-1-assistente-do-processo-design.md).
+As seis decisões do `CHATBOT-PLAN.md` foram respondidas para esta fatia — público: servidor interno;
+provider: `claude-opus-5`; grounding: **contexto fechado, sem tool-calling**; validação: prompt de
+recusa + números calculados em Python; execução: SSE inline; ações: só leitura.
+
+**A decisão que mais importa, e que diverge do plano de maio:** o plano previa tool-calling com
+catálogo de ferramentas. Para esta fatia é a escolha errada — com tool-calling o guard de sigilo tem
+de valer em *cada* ferramenta, para sempre, inclusive na que alguém acrescentar em seis meses (é a
+costura onde o download de anexo ficou aberto sete meses, item 1.0.02). Injetando o processo já
+resolvido e já autorizado no prompt, **o modelo não tem o que chamar**: o isolamento vira propriedade
+da arquitetura em vez de disciplina recorrente.
+
+**O que continua aberto, e por quê:**
+
+- **A busca (`buscar_processo`, `meus_processos`) ficou fora de propósito, e o item 1.0.8 é o
+  motivo.** Hoje o eixo de permissão não é aplicado na leitura, mas isso é *latente*: o menu é
+  filtrado por permissão, então quem não tem acesso nunca vê o link e alcançar o dado exige saber a
+  URL. **Um chatbot com busca remove exatamente esse atrito** — entrega numa frase o que hoje exige
+  conhecer a rota. O bot não cria o buraco; converte um buraco latente num explorável. O item 1.0.8
+  registra como gatilho de priorização "a criação do primeiro grupo não-SU"; **o chatbot com busca é
+  um segundo gatilho**, e fechar 1.0.8 (junto com 1.0.7) é pré-requisito dele.
+- **Sem persistência de conversa.** Nada de `ia_sessao`/`ia_mensagem`/`ia_trace` — seriam repositório
+  novo de conteúdo ligado a processo sigiloso, com retenção e direito de eliminação a definir.
+  Consequência aceita: não dá para medir custo por tenant ainda.
+- **Sem conteúdo de anexo.** Só metadado; ler PDF é outra fatia e outro risco.
+- **Sem portal do cidadão.** Outro provider de auth, outra noção de "meus processos", e é justamente
+  quem não tem credencial de sigilo. Fatia própria, não um `if`.
+- **`ANTHROPIC_API_KEY` não está definida em ambiente nenhum.** Por desenho isso não quebra nada: o
+  endpoint devolve 503, a tela não aparece, e a suíte passa sem chave, sem rede e sem o pacote
+  instalado (o `import anthropic` é lazy e os testes injetam dublê).
 
 ---
 
