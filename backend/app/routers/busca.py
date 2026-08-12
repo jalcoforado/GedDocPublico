@@ -9,13 +9,17 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Manifestante, Processo, Usuario
 
 router = APIRouter(prefix="/busca", tags=["busca"])
 
 
-@router.get("")
+@router.get(
+    "",
+    dependencies=[Depends(require_permission("processo"))],
+)
 async def busca_global(
     q: str = Query("", min_length=2, max_length=80),
     _: Usuario = Depends(get_current_user),

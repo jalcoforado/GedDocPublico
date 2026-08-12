@@ -66,7 +66,7 @@ async def upload_endpoint(
 
 @router.get(
     "/anexos/{anexo_id}/download",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def download_endpoint(
     anexo_id: int,
@@ -118,7 +118,7 @@ async def delete_endpoint(
 
 @router.get(
     "/anexos/{anexo_id}/carimbado.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def carimbado_endpoint(
     anexo_id: int,

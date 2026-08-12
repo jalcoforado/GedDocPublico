@@ -23,7 +23,11 @@ from ..services.usuario_senha import resetar_senha_usuario
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
 
 
-@router.get("", response_model=Paginated[UsuarioOut])
+@router.get(
+    "",
+    dependencies=[Depends(require_permission("usuario"))],
+    response_model=Paginated[UsuarioOut],
+)
 async def list_usuarios(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -89,7 +93,11 @@ async def _get_usuario_or_404(
     return user
 
 
-@router.get("/{usuario_id}", response_model=UsuarioDetail)
+@router.get(
+    "/{usuario_id}",
+    dependencies=[Depends(require_permission("usuario"))],
+    response_model=UsuarioDetail,
+)
 async def get_usuario(
     usuario_id: int,
     _: Usuario = Depends(get_current_user),

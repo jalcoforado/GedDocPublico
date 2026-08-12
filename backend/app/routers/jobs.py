@@ -37,7 +37,7 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 @router.get(
     "",
     response_model=list[JobOut],
-    dependencies=[Depends(require_modulo("administracao"))],
+    dependencies=[Depends(require_modulo("administracao")), Depends(require_permission("processo"))],
 )
 async def list_jobs_endpoint(
     todos: bool = Query(False, description="Se True, retorna jobs de todos os usuários do tenant"),
@@ -63,7 +63,7 @@ async def list_jobs_endpoint(
 @router.get(
     "/agenda",
     response_model=list[AgendaItem],
-    dependencies=[Depends(require_modulo("administracao"))],
+    dependencies=[Depends(require_modulo("administracao")), Depends(require_permission("processo"))],
 )
 async def listar_agenda_endpoint(
     _: Usuario = Depends(get_current_user),
@@ -86,7 +86,7 @@ async def listar_agenda_endpoint(
 @router.get(
     "/{job_id}",
     response_model=JobOut,
-    dependencies=[Depends(require_modulo("administracao"))],
+    dependencies=[Depends(require_modulo("administracao")), Depends(require_permission("processo"))],
 )
 async def get_job_endpoint(
     job_id: int,
@@ -228,7 +228,7 @@ async def disparar_limpeza(
 
 @router.get(
     "/{job_id}/resultado",
-    dependencies=[Depends(require_modulo("administracao"))],
+    dependencies=[Depends(require_modulo("administracao")), Depends(require_permission("processo"))],
 )
 async def baixar_resultado(
     job_id: int,

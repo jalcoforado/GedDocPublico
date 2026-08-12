@@ -10,6 +10,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
+from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import AuditLog, Usuario
 from ..schemas.audit import AuditLogOut, AuditLogPage
@@ -17,7 +18,11 @@ from ..schemas.audit import AuditLogOut, AuditLogPage
 router = APIRouter(prefix="/audit", tags=["audit"])
 
 
-@router.get("", response_model=AuditLogPage)
+@router.get(
+    "",
+    dependencies=[Depends(require_permission("auditoria"))],
+    response_model=AuditLogPage,
+)
 async def list_audit(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),

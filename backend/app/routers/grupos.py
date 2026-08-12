@@ -36,7 +36,7 @@ async def _get_grupo_or_404(db: AsyncSession, grupo_id: int, tenant_id: int) -> 
 @router.get(
     "",
     response_model=list[GrupoOut],
-    dependencies=[Depends(require_modulo("administracao"))],
+    dependencies=[Depends(require_modulo("administracao")), Depends(require_permission("usuario"))],
 )
 async def list_grupos(
     _: Usuario = Depends(get_current_user),
@@ -51,7 +51,7 @@ async def list_grupos(
 @router.get(
     "/{grupo_id}",
     response_model=GrupoOut,
-    dependencies=[Depends(require_modulo("administracao"))],
+    dependencies=[Depends(require_modulo("administracao")), Depends(require_permission("usuario"))],
 )
 async def get_grupo(
     grupo_id: int,
@@ -96,7 +96,7 @@ async def update_grupo(
 @router.get(
     "/{grupo_id}/transacoes",
     response_model=list[GrupoTransacaoOut],
-    dependencies=[Depends(require_modulo("administracao"))],
+    dependencies=[Depends(require_modulo("administracao")), Depends(require_permission("usuario"))],
 )
 async def list_grupo_transacoes(
     grupo_id: int,

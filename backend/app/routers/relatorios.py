@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
 from ..auth.modulos import require_modulo
+from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Usuario
 from ..schemas.relatorio import RelatorioFiltro, RelatorioResposta
@@ -57,7 +58,7 @@ def _filtro(
 @router.get(
     "/processos.json",
     response_model=RelatorioResposta,
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def relatorio_json(
     _: Usuario = Depends(get_current_user),
@@ -77,7 +78,7 @@ async def relatorio_json(
 
 @router.get(
     "/processos.csv",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def relatorio_csv(
     _: Usuario = Depends(get_current_user),
@@ -138,7 +139,7 @@ async def relatorio_csv(
 
 @router.get(
     "/processos.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def relatorio_pdf(
     inline: bool = Query(True),
@@ -171,7 +172,7 @@ async def relatorio_pdf(
 @router.get(
     "/tramitacao.json",
     response_model=RelatorioTramitacaoResposta,
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def tramitacao_json(
     _: Usuario = Depends(get_current_user),
@@ -191,7 +192,7 @@ async def tramitacao_json(
 
 @router.get(
     "/tramitacao.csv",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def tramitacao_csv(
     _: Usuario = Depends(get_current_user),
@@ -290,7 +291,7 @@ async def tramitacao_csv(
 
 @router.get(
     "/tramitacao.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def tramitacao_pdf(
     inline: bool = Query(True),
@@ -339,7 +340,7 @@ def _filtro_assinaturas(
 @router.get(
     "/assinaturas.json",
     response_model=RelatorioAssinaturasResposta,
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def assinaturas_json(
     _: Usuario = Depends(get_current_user),
@@ -358,7 +359,7 @@ async def assinaturas_json(
 
 @router.get(
     "/assinaturas.csv",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def assinaturas_csv(
     _: Usuario = Depends(get_current_user),
@@ -422,7 +423,7 @@ async def assinaturas_csv(
 
 @router.get(
     "/assinaturas.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def assinaturas_pdf(
     inline: bool = Query(True),
