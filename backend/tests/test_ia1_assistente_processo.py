@@ -450,15 +450,21 @@ async def test_pergunta_vazia_e_gigante_sao_recusadas(admin_engine, cenario) -> 
 
 
 def test_sem_chave_o_cliente_recusa_explicitamente(monkeypatch) -> None:
-    """`ANTHROPIC_API_KEY` vazia é o estado NORMAL hoje, em todo ambiente.
+    """Sem chave de provedor NENHUM, o contrato é erro tipado (→ 503).
 
-    O contrato é: erro tipado (→ 503), nunca `None` silencioso e nunca um
-    `AttributeError` lá adiante.
+    Nunca `None` silencioso, nunca `AttributeError` lá adiante.
+
+    As DUAS variáveis são zeradas desde 2026-08-12: com a entrada do DeepSeek
+    como provedor preferido, limpar só `ANTHROPIC_API_KEY` deixaria de
+    descrever "sem chave" — e o teste passaria a medir outra coisa, ou a
+    falhar em qualquer máquina que tivesse a chave do DeepSeek configurada
+    (que hoje é o caso do container de dev).
     """
     from app import config
 
     config.get_settings.cache_clear()
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "")
     try:
         with pytest.raises(IAIndisponivelError):
             obter_cliente()
@@ -471,6 +477,7 @@ def test_com_chave_o_cliente_e_construido(monkeypatch) -> None:
     from app import config
 
     config.get_settings.cache_clear()
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-teste-nao-usada")
     try:
         cliente = obter_cliente()
