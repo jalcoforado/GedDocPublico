@@ -117,6 +117,34 @@ Duas armadilhas:
   excluir processo, que ele nunca teve. Quem passa a poder o quê é decisão de política de acesso
   (item 1.0.7 do backlog), não de ferramenta.
 
+#### Desde o item 1.0.8 (2026-08-11), a LEITURA também precisa ser concedida
+
+Antes desta data, um grupo operacional sem transação nenhuma ainda **lia** processos, usuários,
+auditoria e relatórios: só a escrita era gateada. Hoje 58 GETs exigem a transação correspondente,
+sem `action` — ler basta ter a transação, marcada ou não em inserir/atualizar/excluir.
+
+Conjunto mínimo para um operacional de **protocolo** conseguir usar as telas:
+
+| Transação | Por quê, se você for cortar a lista |
+|---|---|
+| `processo` | processos, PDFs, trilha, volumes, relatórios, busca e os jobs |
+| `assunto`, `manifestante` | abertura e consulta de processo |
+| `workflow` | tramitação e o editor, se o tenant usar BPM |
+| `unidadeTrabalho` | **não é opcional**: alimenta o `UnidadePicker`, e sem ela não se abre processo |
+| `usuario` | exibir "quem fez o quê" nas telas de protocolo, não só administrar gente |
+
+`unidadeTrabalho` e `usuario` na lista de um perfil de *protocolo* parecem fora de lugar e não são:
+essas duas leituras são consumidas por telas de todos os módulos. Foi exatamente por isso que elas
+ficaram sem gate de **módulo** em 2026-07-30 — a razão está registrada em
+`tests/test_guarda_modularizacao.py`.
+
+Catálogo de formulário (`/estados`, `/cidades`, `/tipos-*`, `/catalogo/*`, classes CCD, espécies
+documentais) **não** exige transação, por decisão registrada: são as listas que preenchem `<select>`
+em toda tela, e cobrá-las obrigaria todo grupo a receber `catalogo` só para abrir um formulário.
+
+A leitura da trilha de auditoria pede a transação `auditoria` (migration `0090`), que é do módulo
+`administracao`.
+
 ### Provisionamento que parou no meio (tenant inerte)
 
 Desde `SEC-RLS-00C` o provisionamento são **dois atos**, em papéis de banco

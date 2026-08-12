@@ -450,33 +450,33 @@ tem linha em `utils.grupo_transacao`.
 - ~~**A verificar antes de criar grupo não-SU na VPS**~~ — **feito em 2026-08-11**, resultado no
   aviso acima. A CLI `diagnostico_permissoes` substitui a query manual e cobre os dois ambientes.
 
-### 1.0.8 O buraco de autorização — leitura de módulo segue aberta a qualquer autenticado do tenant
+### ~~1.0.8 O buraco de autorização — leitura aberta a qualquer autenticado do tenant~~ — FECHADO em 2026-08-11
 
 *(Aberto de propósito pela fatia `feat/leitura-por-modulo` (2026-07-30), que fechou o item 1.0.5.
-Prometido duas vezes no escopo aprovado
-(`docs/superpowers/specs/2026-07-30-leitura-por-modulo-escopo.md`, seção "A decisão" e seção "Fora
-de escopo") como item de backlog próprio; criado agora no review final.)*
+Fechado pela fatia `feat/1-0-8-leitura-com-permissao`; escopo em
+`docs/superpowers/specs/2026-08-11-1-0-8-leitura-com-permissao-escopo.md`.)*
 
-- "Fechar a leitura" eram **dois** problemas distintos: o buraco da **modularização** (tenant sem o
-  módulo contratado lê os dados dele) e o buraco de **autorização** (qualquer autenticado do tenant
-  lê `/usuarios`, `/grupos`, `/audit` e os demais, independente de ter a transação concedida). A
-  fatia de 2026-07-30 fechou só o primeiro, com `require_modulo` — que **deliberadamente não olha o
-  usuário**.
-- **Por que ficou de fora, e não é omissão:** fechar o segundo exigiria trocar (ou somar)
-  `require_permission("<transacao>")` nos GETs, o que muda política de acesso — cada usuário passaria
-  a precisar da transação concedida ao grupo dele. Hoje isso seria **inócuo**: todo grupo do sistema é
-  super-usuário (`nivel.valor = 0`, verificado por query, item 1.0.7), então ninguém perderia acesso
-  na prática. Mas no dia em que o primeiro grupo "Operacional" (nível 1) for criado, os GETs hoje
-  liberados virariam 403 em massa para esse grupo até alguém conceder as transações — evento
-  disruptivo se acontecer sem aviso.
-- **Essa concessão é decisão do dono do produto**, já registrada como item 1.0.7 (as 9 transações da
-  0074 sem linha em `utils.grupo_transacao`) justamente por essa razão: é política de acesso, não
-  refactor.
-- **Ao retomar:** não é "aplicar `require_permission` nos GETs" isoladamente — isso pressupõe que as
-  transações certas já estão concedidas aos grupos certos, que é o próprio item 1.0.7. Os dois
-  precisam andar juntos, e o gatilho para priorizar é a criação do primeiro grupo não-SU (ver
-  "a verificar" no item 1.0.7).
-- Sem prazo.
+- **O que era:** a contratação de módulo responde *"o tenant tem este módulo?"*. Ela nunca respondeu
+  *"este usuário pode ler isto?"* — e ninguém mais respondia. Qualquer autenticado do tenant lia
+  `/processos`, `/usuarios`, `/grupos`, `/audit`, os relatórios e os PDFs.
+- **Medição por introspecção da app real, 2026-08-11 — antes:** 107 GETs com permissão, **72 só com
+  `require_modulo`** e **15 só autenticados**. Depois: sobram **18** catálogos de formulário e **11**
+  rotas de si-mesmo, todos como decisão registrada em `LEITURA_SEM_PERMISSAO_DECIDIDA`
+  (`tests/test_guarda_modularizacao.py`), cada entrada com a razão ao lado.
+- **58 GETs** ganharam `require_permission("<codigo>")` **sem `action`** — a forma de leitura —,
+  **somando** ao gate de módulo, não o substituindo. O código de cada rota foi **herdado dos irmãos
+  de escrita do mesmo router**, não inventado.
+- **A fatia entrou INERTE, e isso era o ponto.** Não existe grupo não-super-usuário (medido nos dois
+  ambientes pelo item 1.0.7) e o SU passa por cima do gate: ninguém perdeu acesso no dia em que
+  entrou. Era a janela mais barata que ia existir — depois do primeiro grupo Operacional, a mesma
+  mudança seria 403 em massa para aquele grupo.
+- **Transação nova `auditoria`** (migration `0090`, módulo `administracao`): `/audit` não tinha irmão
+  de escrita e nenhum dos 24 códigos existentes lhe cabia.
+- **O que isto CRIA, e é a contrapartida honesta:** o item 1.0.7 deixa de ser hipotético. Quem criar
+  o primeiro grupo Operacional precisa conceder também a leitura — inclusive `unidadeTrabalho` e
+  `usuario`, que alimentam o `UnidadePicker` e a exibição de "quem fez o quê" em telas de
+  **protocolo**. O conjunto sugerido está no RUNBOOK, seção "Antes de criar um grupo NÃO
+  super-usuário", e a CLI `app.cli.diagnostico_permissoes` mostra o que falta.
 
 ### ~~1.0.85 SEC-RLS-00D — `UPDATE` em `aprimora_py.tenant` precisa ser grant POR COLUNA~~ — FEITO
 
