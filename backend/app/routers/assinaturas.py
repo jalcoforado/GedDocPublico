@@ -74,7 +74,7 @@ async def solicitar_endpoint(
 @router.get(
     "/processos/{processo_id}/solicitacoes-assinatura",
     response_model=list[SolicitacaoOut],
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def listar_do_processo_endpoint(
     processo_id: int,
@@ -214,7 +214,7 @@ async def recusar_endpoint(
 @router.get(
     "/assinaturas/{assinatura_anexo_id}/validar",
     response_model=ValidacaoOut,
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def validar_endpoint(
     assinatura_anexo_id: int,
@@ -238,7 +238,7 @@ async def validar_endpoint(
 @router.get(
     "/assinaturas/{assinatura_anexo_id}/evidencias",
     response_model=EvidenciasOut,
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def evidencias_endpoint(
     assinatura_anexo_id: int,
@@ -284,7 +284,7 @@ async def revogar_validacao_publica_endpoint(
 
 @router.get(
     "/assinaturas/{assinatura_anexo_id}/comprovante.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def comprovante_endpoint(
     assinatura_anexo_id: int,

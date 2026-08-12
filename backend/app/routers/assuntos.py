@@ -89,7 +89,7 @@ async def delete_tipo_processo(
 @router.get(
     "/assuntos",
     response_model=Paginated[AssuntoOut],
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("assunto"))],
 )
 async def list_assuntos(
     _: Usuario = Depends(get_current_user),

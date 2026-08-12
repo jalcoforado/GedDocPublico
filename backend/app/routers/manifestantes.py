@@ -90,7 +90,7 @@ async def delete_tipo_manifestante(
 @router.get(
     "/manifestantes",
     response_model=Paginated[ManifestanteOut],
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("manifestante"))],
 )
 async def list_manifestantes(
     _: Usuario = Depends(get_current_user),

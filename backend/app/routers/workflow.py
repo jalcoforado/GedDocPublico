@@ -61,7 +61,7 @@ router = APIRouter(prefix="/workflow-definitions", tags=["workflow"])
 @router.get(
     "",
     response_model=list[WorkflowDefinitionListItem],
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("workflow"))],
 )
 async def list_workflow_definitions(
     _: Usuario = Depends(get_current_user),
@@ -81,7 +81,7 @@ async def list_workflow_definitions(
 @router.get(
     "/{wf_id}",
     response_model=WorkflowDefinitionOut,
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("workflow"))],
 )
 async def get_workflow_definition(
     wf_id: int,
@@ -260,7 +260,7 @@ async def delete_workflow_definition(
 
 @router.get(
     "/{wf_id}/versoes",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("workflow"))],
 )
 async def list_versoes_mesmo_slug(
     wf_id: int,
@@ -370,7 +370,7 @@ async def _get_instance_or_404(
 @instances_router.get(
     "",
     response_model=list[WorkflowInstanceOut],
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("workflow"))],
 )
 async def list_workflow_instances(
     _: Usuario = Depends(get_current_user),
@@ -392,7 +392,7 @@ async def list_workflow_instances(
 @instances_router.get(
     "/{instance_id}",
     response_model=WorkflowInstanceDetail,
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("workflow"))],
 )
 async def get_workflow_instance(
     instance_id: int,
@@ -540,7 +540,7 @@ mapeamento_router = APIRouter(prefix="/tipo-processo-workflow", tags=["workflow"
 @mapeamento_router.get(
     "",
     response_model=list[TipoProcessoWorkflowOut],
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("workflow"))],
 )
 async def list_mapeamentos(
     _: Usuario = Depends(get_current_user),
@@ -626,7 +626,7 @@ alertas_router = APIRouter(prefix="/workflow-alertas", tags=["workflow"])
 @alertas_router.get(
     "",
     response_model=list[WorkflowSlaAlertaDetail],
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("workflow"))],
 )
 async def list_alertas(
     _: Usuario = Depends(get_current_user),
@@ -732,7 +732,7 @@ processos_workflow_router = APIRouter(tags=["workflow"])
 @processos_workflow_router.get(
     "/processos/{processo_id}/workflow",
     response_model=WorkflowInstanceDetail | None,
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def get_workflow_do_processo(
     processo_id: int,

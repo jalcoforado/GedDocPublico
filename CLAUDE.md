@@ -52,10 +52,21 @@ módulo contratado. Não "melhore" essa dependência para também checar permiss
 Jorge antes — mudaria política de acesso, e há teste (`test_usuario_sem_permissao_continua_lendo`)
 que trava essa propriedade.
 
-Lacuna que **continua** aberta, e é outro problema: a contratação fecha só a metade de "tenant tem
-o módulo?" — não fecha "este usuário pode ler isto?". `/usuarios`, `/grupos`, `/audit` e outros
-seguem legíveis por **qualquer** autenticado do tenant. Detalhes e decisão em
-`docs/BACKLOG-PENDENCIAS.md`, item 1.0.8.
+A outra metade — "este usuário pode ler isto?" — foi fechada em 2026-08-11 pelo item 1.0.8: 58 GETs
+ganharam `require_permission("<codigo>")` **sem `action`**, somando ao gate de módulo. Ficam livres,
+por decisão registrada em `LEITURA_SEM_PERMISSAO_DECIDIDA`, só os catálogos de formulário e as rotas
+de si-mesmo. **GET novo nasce exigindo transação** — `test_leitura_sem_permissao_nao_cresce_sem_decisao`
+reprova o contrário, e a isenção pede razão escrita ao lado da entrada.
+
+Duas consequências que valem lembrar antes de mexer em permissão:
+
+- **A fatia entrou inerte, e isso não é o estado permanente.** Todo grupo é super-usuário hoje, e o
+  SU passa por cima do gate. Quem criar o primeiro grupo não-SU precisa conceder a **leitura**
+  também — inclusive `unidadeTrabalho` e `usuario`, que alimentam telas de *protocolo*. Conjunto
+  sugerido no `RUNBOOK.md`; `app.cli.diagnostico_permissoes` mostra o que falta.
+- **`require_permission` é o terceiro eixo, não o único.** Continua valendo que módulo
+  (`require_modulo`) e sigilo (`assert_acesso_processo`) são independentes dele; nenhum substitui
+  outro.
 
 ### A interface (fatia F2, PR #17, em `main` desde 2026-07-31)
 

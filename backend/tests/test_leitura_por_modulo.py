@@ -1,7 +1,17 @@
-"""Tenant sem o módulo não LÊ os dados dele — e usuário sem permissão continua lendo.
+"""Tenant sem o módulo não LÊ os dados dele — a fatia de 2026-07-30.
 
-Os dois lados da decisão desta fatia, no mesmo arquivo de propósito: quem mexer
-num vê o outro.
+Os dois lados da decisão daquela fatia, no mesmo arquivo de propósito: quem
+mexer num vê o outro.
+
+**Atualizado em 2026-08-11 (item 1.0.8).** O título deste arquivo terminava em
+"e usuário sem permissão continua lendo", e era verdade: `require_modulo`
+respondia só à contratação, então quem não tinha transação nenhuma lia tudo do
+módulo contratado. O item 1.0.8 trocou essa política — a leitura agora soma
+`require_permission` — e os testes daqui foram ajustados **um a um**, não em
+bloco: `test_require_modulo_nao_olha_o_usuario` preserva a propriedade original
+no nível da dependency, onde ela continua verdadeira, e
+`test_usuario_sem_permissao_agora_leva_403` registra o que mudou. Trocar a
+política sem deixar as duas escritas teria apagado a memória do porquê.
 
 Fixtures espelham tests/test_permissoes_modulo.py::test_http_su_sem_modulo_recebe_403
 (``_as_user``/``_cleanup_tenant_http``): dependency_overrides de
@@ -13,6 +23,7 @@ import uuid
 
 import pytest
 import pytest_asyncio
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -38,6 +49,13 @@ ROTAS_PROTOCOLO = [
     "/api/v2/cidades",
     "/api/v2/workflow-definitions",
     "/api/v2/catalogo/prioridades",
+    # `/jobs` mudou de `administracao` para `protocolo` em 2026-08-11 (item
+    # 1.0.8): todo job deste router é de protocolo — PDF de processo, carimbo,
+    # relatório de tramitação — e as escritas sempre exigiram a transação
+    # `processo`. Enquanto só o módulo era cobrado, a incoerência era
+    # invisível; ao cobrar também a transação, um tenant com `administracao` e
+    # sem `protocolo` deixaria de ler jobs que já não podia disparar.
+    "/api/v2/jobs",
 ]
 
 # Task 3: representativos das 11 rotas de administracao (o mapa completo é
@@ -47,7 +65,6 @@ ROTAS_PROTOCOLO = [
 ROTAS_ADMINISTRACAO = [
     "/api/v2/grupos",
     "/api/v2/catalogo/niveis",
-    "/api/v2/jobs",
 ]
 
 
@@ -286,19 +303,62 @@ async def test_com_administracao_contratada_leitura_passa(rota, tenant_com_admin
 
 
 @pytest.mark.asyncio
-async def test_usuario_sem_permissao_continua_lendo(tenant_com_protocolo_usuario_nu):
-    """A PROPRIEDADE DA FATIA. Se este teste falhar, alguém trocou require_modulo
-    por require_permission e a fatia virou mudança de política de acesso."""
+async def test_require_modulo_nao_olha_o_usuario(tenant_com_protocolo_usuario_nu):
+    """A PROPRIEDADE DA FATIA de 2026-07-30 — hoje verificada na DEPENDENCY.
+
+    Até 2026-08-11 este teste batia em `GET /api/v2/processos` com um usuário
+    sem permissão nenhuma e exigia **200**: era assim que se provava que
+    `require_modulo` decide por contratação e não por usuário.
+
+    O item 1.0.8 mudou a política deliberadamente (decisão do Jorge,
+    2026-08-11): aquela rota agora soma `require_permission("processo")`, e o
+    mesmo usuário nu leva 403 — por AUTORIZAÇÃO, não por contratação. Manter a
+    asserção antiga seria travar uma política que o dono do produto trocou.
+
+    Mas a propriedade original continua verdadeira e continua valendo a pena
+    travar: `require_modulo` **não olha o usuário**. O que muda é o nível em
+    que se mede. Aqui a dependency é chamada direto — sem a outra no caminho —,
+    e passar com um usuário que não tem grupo, transação nem nível é
+    exatamente a afirmação. Se alguém acrescentar uma consulta de permissão
+    dentro de `auth/modulos.py`, este teste reprova.
+    """
+    from app.auth.modulos import require_modulo
+    from app.database import SessionLocal
+
+    tenant_com_protocolo_usuario_nu()
+    # O `_as_user` já instalou o override; o que importa aqui é o tenant e o
+    # usuário nu que ele representa.
+    from app.auth.deps import get_current_user as _dep
+    usuario = await app.dependency_overrides[_dep]()
+
+    async with SessionLocal() as db:
+        db.info["tenant_id"] = int(usuario.tenant_id)
+        # Não levanta: contratado é contratado, independentemente de quem pede.
+        await require_modulo("protocolo")(tenant_id=int(usuario.tenant_id), db=db)
+
+        # E o controle que tira a vacuidade: a MESMA chamada, com um módulo que
+        # este tenant não contratou, tem de barrar. Sem esta linha, um `_check`
+        # que virasse `return None` deixaria a asserção de cima passar para
+        # sempre — dizendo exatamente nada sobre a propriedade.
+        with pytest.raises(HTTPException) as exc:
+            await require_modulo("frota")(tenant_id=int(usuario.tenant_id), db=db)
+        assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_usuario_sem_permissao_agora_leva_403(tenant_com_protocolo_usuario_nu):
+    """O par do teste acima, e o registro do que o item 1.0.8 trocou.
+
+    Sem este, a mudança de política ficaria só na ausência do teste antigo —
+    e ausência não se lê num diff futuro. Aqui ela fica escrita: mesmo tenant,
+    mesmo módulo contratado, mesma rota; o que barra agora é o usuário.
+    """
     tenant_com_protocolo_usuario_nu()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         r = await c.get("/api/v2/processos")
-    # `== 200` (não `!= 403`) pela mesma razão da Task 2: a asserção fraca
-    # deixaria passar um 500 — inclusive o que o próprio `require_modulo`
-    # levanta quando `slugs_contratados` volta vazio (catálogo corrompido).
-    # Este é o teste que prova a propriedade central da fatia; não pode ser
-    # o único vizinho ainda com a asserção que os outros dois abandonaram.
-    assert r.status_code == 200, (
-        f"usuário sem permissão perdeu leitura: {r.status_code} {r.text} — "
-        "esta fatia fecha contratação, não autorização"
+    assert r.status_code == 403, r.text
+    assert "Sem permissão" in r.json()["detail"], (
+        "tem de ser 403 de AUTORIZAÇÃO. 'Módulo não contratado' aqui "
+        f"significaria que a contratação quebrou: {r.text}"
     )

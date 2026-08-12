@@ -297,7 +297,7 @@ async def _load_processo_protocolo(
 
 @router.get(
     "/{processo_id}/etiqueta.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def etiqueta_pdf(
     processo_id: int,
@@ -326,7 +326,7 @@ async def etiqueta_pdf(
 
 @router.get(
     "/{processo_id}/comprovante.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def comprovante_pdf(
     processo_id: int,
@@ -759,7 +759,7 @@ async def sugerir_ccd(
 @router.get(
     "/vencendo-prazo",
     response_model=list[TemporalidadeOut],
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def relatorio_vencendo_prazo(
     dias: int = Query(default=180, ge=1, le=3650, description="Janela em dias"),

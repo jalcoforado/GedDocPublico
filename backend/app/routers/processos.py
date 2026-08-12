@@ -152,7 +152,7 @@ async def require_acesso_processo(
 @router.get(
     "",
     response_model=Paginated[ProcessoListItem],
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def list_endpoint(
     tenant_id: int = Depends(require_tenant_id),
@@ -188,7 +188,7 @@ async def list_endpoint(
 @router.get(
     "/{processo_id}",
     response_model=ProcessoDetail,
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def detail_endpoint(
     processo_id: int,
@@ -207,7 +207,7 @@ async def detail_endpoint(
 @router.get(
     "/{processo_id}/checklist-documentos",
     response_model=ChecklistDocumentosResponse,
-    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def checklist_documentos_servidor(
     processo_id: int,
@@ -253,7 +253,7 @@ async def solicitar_complementacao(
 @router.get(
     "/{processo_id}/complementacoes",
     response_model=list[ComplementacaoOut],
-    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def listar_complementacoes_servidor(
     processo_id: int,
@@ -354,7 +354,7 @@ async def create_endpoint(
 
 @router.get(
     "/{processo_id}/trail",
-    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def get_trail(
     processo_id: int,
@@ -374,7 +374,7 @@ async def get_trail(
 @router.get(
     "/{processo_id}/temporalidade",
     response_model=TemporalidadeOut,
-    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def temporalidade_endpoint(
     processo_id: int,
@@ -460,7 +460,7 @@ def _pdf_response(pdf_bytes: bytes, *, inline: bool, fname: str) -> Response:
 
 @router.get(
     "/{processo_id}/capa.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def capa_pdf_endpoint(
     processo_id: int,
@@ -481,7 +481,7 @@ async def capa_pdf_endpoint(
 
 @router.get(
     "/{processo_id}/etiqueta-unica.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def etiqueta_unica_pdf(
     processo_id: int,
@@ -502,7 +502,7 @@ async def etiqueta_unica_pdf(
 
 @router.get(
     "/{processo_id}/completo.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def completo_pdf_endpoint(
     processo_id: int,
@@ -524,7 +524,7 @@ async def completo_pdf_endpoint(
 
 @router.get(
     "/{processo_id}/etiqueta-dupla.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def etiqueta_dupla_pdf(
     processo_id: int,
@@ -545,7 +545,7 @@ async def etiqueta_dupla_pdf(
 
 @router.get(
     "/encaminhamentos/{encaminhamento_id}/comprovante.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def comprovante_pdf_endpoint(
     encaminhamento_id: int,
@@ -727,7 +727,7 @@ async def desapensar_endpoint(
 @router.get(
     "/{processo_id}/apensamentos",
     response_model=list[ApensamentoOut],
-    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def list_apensamentos_endpoint(
     processo_id: int,
@@ -752,7 +752,7 @@ async def list_apensamentos_endpoint(
 @router.get(
     "/{processo_id}/apensados",
     response_model=list[ProcessoApensadoItem],
-    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def list_processos_apensados_endpoint(
     processo_id: int,
@@ -792,7 +792,7 @@ async def list_processos_apensados_endpoint(
 
 @router.get(
     "/apensamentos/{apensamento_id}/termo.pdf",
-    dependencies=[Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def termo_apensamento_pdf(
     apensamento_id: int,
@@ -935,7 +935,7 @@ async def desentranhar_anexo_endpoint(
 
 @router.get(
     "/{processo_id}/anexos/{anexo_processo_id}/termo-desentranhamento.pdf",
-    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def termo_desentranhamento_pdf(
     processo_id: int,
@@ -1012,7 +1012,7 @@ async def _vol_hydrate(db: AsyncSession, vol: _VolP6) -> VolumeOut:
 @router.get(
     "/{processo_id}/volumes",
     response_model=list[VolumeOut],
-    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
 )
 async def list_volumes_endpoint(
     processo_id: int,

@@ -70,7 +70,9 @@ MODULO_TRANSACOES: dict[str, tuple[str, ...]] = {
     ),
     "frota": ("frota",),
     "transporte": ("transporte_regulado",),
-    "administracao": ("usuario", "unidadeTrabalho", "configuracao"),
+    # `auditoria` (migration 0090, item 1.0.8) fica em administração: a trilha
+    # atravessa todos os módulos, mas quem a lê é quem administra o município.
+    "administracao": ("usuario", "unidadeTrabalho", "configuracao", "auditoria"),
     "comum": ("dashboard",),
 }
 

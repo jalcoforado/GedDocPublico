@@ -16,7 +16,11 @@ from ..schemas.unidade import (
 router = APIRouter(prefix="/unidades-trabalho", tags=["unidades-trabalho"])
 
 
-@router.get("", response_model=Paginated[UnidadeTrabalhoOut])
+@router.get(
+    "",
+    dependencies=[Depends(require_permission("unidadeTrabalho"))],
+    response_model=Paginated[UnidadeTrabalhoOut],
+)
 async def list_unidades(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
@@ -65,7 +69,11 @@ async def _get_unidade_or_404(
     return u
 
 
-@router.get("/{unidade_id}", response_model=UnidadeTrabalhoOut)
+@router.get(
+    "/{unidade_id}",
+    dependencies=[Depends(require_permission("unidadeTrabalho"))],
+    response_model=UnidadeTrabalhoOut,
+)
 async def get_unidade(
     unidade_id: int,
     _: Usuario = Depends(get_current_user),

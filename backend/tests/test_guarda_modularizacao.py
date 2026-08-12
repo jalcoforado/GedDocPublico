@@ -175,95 +175,181 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
 }
 
 
-ENDPOINTS_LEITURA_SEM_GATE: set[tuple[str, str]] = {
-    # DECISÕES REGISTRADAS, não dívida. Até 2026-07-30 esta lista tinha 76
-    # entradas: GETs que pertenciam a um módulo e não tinham gate porque os
-    # routers da geração protocolo seguem uma convenção anterior à
-    # modularização — *escrita gateada, leitura liberada a qualquer usuário
-    # autenticado do tenant*. Nesta fatia (2026-07-30-leitura-por-modulo), a
-    # Task 2 deu `require_modulo("protocolo")` a 58 delas e a Task 3 deu
-    # `require_modulo("administracao")` a outras 12; as 70 saíram daqui no
-    # mesmo commit que as gateou (o destino de cada uma está em
-    # ROTAS_POR_MODULO, mais abaixo).
-    #
-    # No review final da fatia, `/organograma` voltou desta tabela para cá:
-    # a Task 3 tinha gateado com `administracao`, mas quem consome
-    # `organogramaApi.tree()` no frontend é o `UnidadePicker`, usado em telas
-    # de PROTOCOLO (abertura de processo, balcão, editor de workflow,
-    # dashboard, unidades-trabalho) — ver a entrada dela, logo abaixo. Ficam
-    # 69 gateadas (58 protocolo + 11 administracao) e 7 aqui.
-    #
-    # Sobram estas 7, e elas NÃO vão ganhar gate — não é trabalho que falta
-    # terminar. É a conclusão de que cada uma delas não pertence a um módulo
-    # só: ou o consumo real é cruzado (gatear com o slug de um quebraria os
-    # outros que a consomem), ou é decisão humana de que o recurso é do
-    # sistema, não do módulo. `test_endpoints_leitura_sem_gate_nao_cresce_sem_decisao`,
-    # mais abaixo, trava o tamanho e o conteúdo exatos desta lista — leia o
-    # docstring dele antes de acrescentar ou remover uma entrada.
+ENDPOINTS_LEITURA_SEM_GATE: set[tuple[str, str]] = set()
+"""VAZIA desde 2026-08-11 (item 1.0.8) — e isso é o fim de uma história.
 
-    # Recurso do sistema, não de módulo (decisão humana, 2026-07-30). Hoje
-    # varre só processos, mas o índice vai crescer para outros módulos; um
-    # gate de `protocolo` já nasceria errado para a próxima fatia que o
-    # ampliar.
-    ("GET", "/api/v2/busca"),
+Em 2026-07-29 esta lista tinha **76** entradas: GETs que pertenciam a um módulo
+e não tinham gate nenhum, porque os routers da geração protocolo seguiam uma
+convenção anterior à modularização — *escrita gateada, leitura liberada a
+qualquer autenticado do tenant*. A fatia `leitura-por-modulo` (2026-07-30) deu
+`require_modulo` a 69 e deixou 7, cada uma com a razão escrita ao lado: consumo
+cruzado comprovado entre módulos, ou decisão humana de que o recurso é do
+sistema.
 
-    # Transversal: consumo cruzado comprovado por 3 módulos — protocolo
-    # (relatório de assinaturas, `AssinaturasProcesso`), transporte (alvarás)
-    # e administração. Usuário é gente; todo módulo referencia gente para
-    # exibir quem fez o quê. Gatear com `administracao` daria 403 em
-    # protocolo e transporte, que não têm esse módulo contratado.
-    ("GET", "/api/v2/usuarios"),
-    ("GET", "/api/v2/usuarios/{usuario_id}"),
+Aquelas 7 razões eram todas sobre **contratação de módulo** — e continuam
+válidas: `/organograma` e `/unidades-trabalho` alimentam o `UnidadePicker` de
+telas de PROTOCOLO, e gateá-las com `administracao` impediria a abertura de
+processo num tenant que não contratou administração. O item 1.0.8 não as
+contradiz: ele acrescenta a pergunta ORTOGONAL, a de autorização, que nenhuma
+delas respondia. As 7 ganharam `require_permission` de leitura e saíram daqui
+por terem gate, não por terem perdido a razão.
 
-    # Transversal: consumo cruzado comprovado por 4 módulos — administração,
-    # frota (motoristas, solicitações, veículos) e protocolo (processos,
-    # relatórios, tramitação, serviços, `AcoesProcesso`). Unidade de trabalho
-    # é o organograma da prefeitura: mesmo raciocínio de `/usuarios`, mesmo
-    # risco de quebrar frota e protocolo se gateada com `administracao`.
-    ("GET", "/api/v2/unidades-trabalho"),
-    ("GET", "/api/v2/unidades-trabalho/{unidade_id}"),
+A lista fica declarada, vazia, de propósito: o par de testes abaixo continua
+valendo e é o que impede que ela volte a crescer em silêncio.
+"""
 
-    # Transversal por decisão humana (2026-07-30): compliance registra ações
-    # de TODOS os módulos, não só administracao. Uma prefeitura sob guarda
-    # legal não pode perder a leitura da própria trilha de auditoria por não
-    # ter contratado o módulo administração.
-    ("GET", "/api/v2/audit"),
-
-    # Transversal: reclassificada no review final (2026-07-30). A Task 3
-    # tinha gateado com `administracao` seguindo o agrupamento da tela
-    # "organograma", mas quem de fato consome a árvore é `organogramaApi.tree()`
-    # (`frontend/lib/api.ts`) — export de topo, não `api.organograma`, o que
-    # fez os parsers automáticos da triagem original errarem a checagem de
-    # consumo real. `organogramaApi.tree()` é chamado pelo `UnidadePicker`
-    # (`frontend/components/UnidadePicker.tsx`), usado em telas de
-    # PROTOCOLO: abertura de processo (campo obrigatório "Unidade
-    # proprietária", `app/(app)/processos/novo/page.tsx`), balcão
-    # (`app/(app)/protocolo/balcao/page.tsx`), editor de workflow
-    # (`components/workflow/WorkflowEditPanel.tsx`), dashboard
-    # (`app/(app)/dashboard/page.tsx`) e unidades-trabalho
-    # (`app/(app)/unidades-trabalho/page.tsx`). Gatear com `administracao`
-    # dava 403 no picker de um tenant com `protocolo` e sem `administracao`
-    # e IMPEDIA A ABERTURA DE PROCESSO. É a mesma árvore de `unidade_trabalho`
-    # que já é transversal (ver `/unidades-trabalho`, acima), servida ao
-    # mesmo picker, nas mesmas telas.
-    ("GET", "/api/v2/organograma"),
-}
+# Snapshot da decisão humana, e o par obrigatório da lista acima: as duas
+# mudam no mesmo commit, nunca uma só. Vazio aqui não é "ninguém decidiu
+# nada" — é "a decisão é que não sobrou exceção de gate de módulo".
+ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS: frozenset[tuple[str, str]] = frozenset()
 
 
-# Snapshot exato da decisão da Task 4 (2026-07-30, com o ajuste do review
-# final que devolveu `/organograma`) — não é uma contagem, é a lista
-# completa. Ver test_endpoints_leitura_sem_gate_nao_cresce_sem_decisao, logo
-# abaixo, para o porquê de comparar o conjunto inteiro em vez de só o
-# tamanho.
-ENDPOINTS_LEITURA_SEM_GATE_DECIDIDOS: frozenset[tuple[str, str]] = frozenset({
-    ("GET", "/api/v2/busca"),
-    ("GET", "/api/v2/usuarios"),
-    ("GET", "/api/v2/usuarios/{usuario_id}"),
-    ("GET", "/api/v2/unidades-trabalho"),
-    ("GET", "/api/v2/unidades-trabalho/{unidade_id}"),
-    ("GET", "/api/v2/audit"),
-    ("GET", "/api/v2/organograma"),
+# Leitura que NÃO exige transação — a decisão registrada do item 1.0.8. Não é
+# dívida: é a resposta a "quem pode ler isto?" para os casos em que exigir
+# permissão não protegeria nada e cobraria caro.
+LEITURA_SEM_PERMISSAO_DECIDIDA: frozenset[tuple[str, str]] = frozenset({
+    # -- Catálogos de formulário. São as listas que preenchem `<select>` em
+    # todo módulo. Exigir transação para ler "a lista de estados" não protege
+    # dado sensível nenhum e obrigaria todo grupo futuro a receber `catalogo`
+    # só para abrir uma tela. O gate de MÓDULO continua valendo neles.
+    ("GET", "/api/v2/estados"),
+    ("GET", "/api/v2/cidades"),
+    ("GET", "/api/v2/bairros"),
+    ("GET", "/api/v2/enderecos"),
+    ("GET", "/api/v2/tipos-processo"),
+    ("GET", "/api/v2/tipos-anexo"),
+    ("GET", "/api/v2/tipos-manifestante"),
+    ("GET", "/api/v2/assunto-tipo-anexo"),
+    ("GET", "/api/v2/catalogo/niveis"),
+    ("GET", "/api/v2/catalogo/prioridades"),
+    ("GET", "/api/v2/catalogo/sistemas"),
+    ("GET", "/api/v2/catalogo/tipos-unidade"),
+    ("GET", "/api/v2/catalogo/transacoes"),
+    ("GET", "/api/v2/protocolo/ccd-classes"),
+    ("GET", "/api/v2/protocolo/ccd-classes/tree"),
+    ("GET", "/api/v2/protocolo/especies-documentais"),
+    ("GET", "/api/v2/protocolo/ttd-regras"),
+    ("GET", "/api/v2/protocolo/sugerir-ccd"),
+
+    # -- De si-mesmo. O sujeito da consulta é o próprio requisitante; exigir
+    # transação para alguém ler os próprios dados não protege ninguém dele
+    # mesmo. `/permissoes/me` é o caso extremo: exigir permissão para ler as
+    # próprias permissões seria circular.
+    ("GET", "/api/v2/auth/me"),
+    ("GET", "/api/v2/auth/google"),
+    ("GET", "/api/v2/auth/google/callback"),
+    ("GET", "/api/v2/permissoes/me"),
+    ("GET", "/api/v2/modulos/me"),
+    ("GET", "/api/v2/notificacoes/me"),
+    ("GET", "/api/v2/notificacoes/preferencias"),
+    ("GET", "/api/v2/notificacoes/telefone"),
+    ("GET", "/api/v2/solicitacoes-assinatura/me/pendentes"),
+    ("GET", "/api/v2/tenants/me/onboarding"),
+    # Resposta constante sobre a própria sessão (`is_platform_admin` é `false`
+    # fixo desde SEC-01A). Não lê dado de ninguém.
+    ("GET", "/api/v2/admin/me"),
 })
+
+
+def gets_sem_permissao(app=None) -> set[tuple[str, str]]:
+    """GETs de usuário municipal autenticado que não exigem transação.
+
+    Deliberadamente NÃO conta o que não tem sujeito municipal: rota pública,
+    de cidadão (credencial própria, escopo próprio) e de plataforma são outro
+    realm — cobrá-las por `utils.transacao` não faria sentido.
+    """
+    if app is None:
+        from app.main import app
+
+    # Prefixo, e não identidade com `get_current_user`: existe a variante
+    # `get_current_user_no_password_gate` (whitelist do SEC-1, usada por
+    # `/permissoes/me` e `/auth/me`). Casar só a função principal deixaria
+    # essas rotas fora da varredura — invisíveis para a guarda.
+    achados: set[tuple[str, str]] = set()
+    for rota in getattr(app, "routes", []):
+        caminho = getattr(rota, "path", "")
+        if not caminho.startswith("/api/v2") or "GET" not in getattr(rota, "methods", set()):
+            continue
+
+        origens: set[tuple[str, str]] = set()
+        municipal = False
+
+        def anda(dep, prof=0):
+            nonlocal municipal
+            if prof > 5 or getattr(dep, "call", None) is None:
+                return
+            origens.add(
+                (getattr(dep.call, "__module__", ""), getattr(dep.call, "__qualname__", ""))
+            )
+            if getattr(dep.call, "__name__", "").startswith("get_current_user"):
+                municipal = True
+            for sub in getattr(dep, "dependencies", []):
+                anda(sub, prof + 1)
+
+        for d in getattr(getattr(rota, "dependant", None), "dependencies", []):
+            anda(d)
+
+        # Sujeito municipal é `get_current_user`. Rota pública e de cidadão
+        # não têm nenhum, e a de plataforma tem outro (`require_platform_admin`,
+        # RS256) — nenhum deles é cobrável por `utils.transacao`.
+        if not municipal:
+            continue
+        if any(q == "require_platform_admin" for _, q in origens):
+            continue
+        if origens & GATES_DE_PERMISSAO:
+            continue
+        achados.add(("GET", caminho))
+    return achados
+
+
+def test_leitura_sem_permissao_nao_cresce_sem_decisao():
+    """Item 1.0.8: GET novo nasce exigindo transação, ou a isenção é registrada.
+
+    Este é o teste que a fatia de 2026-07-30 não tinha como escrever: naquele
+    momento 76 GETs estavam de fora, e uma guarda nesse estado só teria como
+    congelar a dívida. Hoje a dívida é zero e a lista é a decisão.
+
+    Se falhar porque você ACRESCENTOU um GET: o caminho normal é dar-lhe
+    `require_permission("<codigo>")` — leitura, sem `action` —, herdando o
+    código dos irmãos de escrita do mesmo router. Só registre a isenção aqui
+    se o endpoint for catálogo de formulário ou de si-mesmo, e escreva a razão
+    ao lado da entrada.
+
+    Se falhar porque uma entrada VIROU obsoleta (o endpoint ganhou permissão ou
+    sumiu): tire a linha. Uma isenção que apodrece deixa de ser decisão e vira
+    ruído — e ruído é o que faz a próxima pessoa parar de ler a lista.
+    """
+    reais = gets_sem_permissao()
+    novos = reais - LEITURA_SEM_PERMISSAO_DECIDIDA
+    obsoletos = LEITURA_SEM_PERMISSAO_DECIDIDA - reais
+    assert not novos and not obsoletos, (
+        f"GETs sem permissão fora da lista: {sorted(novos)}. "
+        f"Entradas obsoletas na lista: {sorted(obsoletos)}."
+    )
+
+
+def test_a_guarda_de_permissao_enxerga_ausencia_de_gate():
+    """Prova por inversão: numa app fake sem gate, a varredura ACUSA.
+
+    Sem este par, `gets_sem_permissao()` poderia estar devolvendo conjunto
+    vazio por defeito próprio — um `continue` a mais, um atributo trocado — e
+    o teste acima passaria verde para sempre, dizendo exatamente nada.
+    """
+    from fastapi import APIRouter, Depends, FastAPI
+
+    from app.auth.deps import get_current_user
+
+    fake = FastAPI()
+    r = APIRouter()
+
+    # Com `get_current_user` e sem permissão: é exatamente a forma do defeito
+    # que a guarda persegue — autenticado, municipal, e nada mais.
+    @r.get("/api/v2/inventado")
+    async def _inventado(_=Depends(get_current_user)):  # pragma: no cover
+        return {}
+
+    fake.include_router(r)
+    assert ("GET", "/api/v2/inventado") in gets_sem_permissao(app=fake)
 
 
 def test_endpoints_leitura_sem_gate_nao_cresce_sem_decisao():
@@ -414,10 +500,10 @@ ROTAS_POR_MODULO: dict[tuple[str, str], str] = {
     ("GET", "/api/v2/grupos"): "administracao",
     ("GET", "/api/v2/grupos/{grupo_id}"): "administracao",
     ("GET", "/api/v2/grupos/{grupo_id}/transacoes"): "administracao",
-    ("GET", "/api/v2/jobs"): "administracao",
-    ("GET", "/api/v2/jobs/agenda"): "administracao",
-    ("GET", "/api/v2/jobs/{job_id}"): "administracao",
-    ("GET", "/api/v2/jobs/{job_id}/resultado"): "administracao",
+    ("GET", "/api/v2/jobs"): "protocolo",
+    ("GET", "/api/v2/jobs/agenda"): "protocolo",
+    ("GET", "/api/v2/jobs/{job_id}"): "protocolo",
+    ("GET", "/api/v2/jobs/{job_id}/resultado"): "protocolo",
 }
 
 
