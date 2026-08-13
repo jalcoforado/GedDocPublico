@@ -26,6 +26,14 @@ x-backend-env: &backend-env
   # segredo padrão. Como gerar: ver `.env.example`.
   DADOS_SENSIVEIS_ENCRYPTION_KEY: ${DADOS_SENSIVEIS_ENCRYPTION_KEY:?defina no .env da raiz — veja .env.example}
 
+  # A chave do provedor de LLM (IA-1) NÃO entra aqui, e a ausência é
+  # deliberada — ela vive em `backend/.env`, que o app lê como `/app/.env`.
+  # Variável definida e VAZIA vence o arquivo na precedência do
+  # pydantic-settings, então um `DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}`
+  # desligaria o assistente em todo ambiente que não a definisse na raiz — em
+  # silêncio, com o painel sumindo da tela. Ver `.env.example` e
+  # `tests/test_guarda_chave_ia.py`.
+
 x-backend-volumes: &backend-volumes
   - ./backend:/app
   - ./uploads:/app/uploads
