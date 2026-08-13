@@ -34,7 +34,7 @@ from app.config import get_settings
 from app.main import app
 from app.models import Usuario
 from app.schemas.pagamentos import (
-    ContaCreate, FonteCreate, MovimentacaoCreate,
+    ContaCreate, FonteCreate, ImportarExtratoIn, MovimentacaoCreate,
 )
 from app.services import pagamentos_cadastros as cad_svc
 from app.services import pagamentos_caixa as caixa_svc
@@ -88,16 +88,19 @@ async def _cenario(engine):
         await caixa_svc.lancar_movimentacao(
             db, tenant_id=tid, usuario_id=usuario_id,
             payload=MovimentacaoCreate(id_conta=conta.id, tipo="ENTRADA",
+                                       origem="RECEITA",
                                        valor=Decimal("1234.56"), data=date.today(),
                                        descricao="Repasse do Tesouro"))
         await db.commit()
 
     async with _sm(engine)() as db:
         extrato = await conc_svc.importar_extrato(
-            db, tenant_id=tid, usuario_id=usuario_id, id_conta=conta.id,
-            conteudo="data;historico;documento;favorecido;valor;tipo\n"
-                     f"{date.today().isoformat()};TED recebida;DOC1;Fulano;1234,56;CREDITO\n",
-            nome_arquivo="extrato.csv")
+            db, tenant_id=tid, usuario_id=usuario_id,
+            payload=ImportarExtratoIn(
+                id_conta=conta.id, formato="CSV", nome_arquivo="extrato.csv",
+                conteudo="data;historico;documento;favorecido;valor;tipo\n"
+                         f"{date.today().isoformat()};TED recebida;DOC1;Fulano;1234,56;CREDITO\n",
+            ))
         await db.commit()
 
     return tid, conta.id, extrato.id, tenant.slug
@@ -210,8 +213,16 @@ async def test_pdf_do_painel_tem_o_conteudo_e_nao_so_bytes(admin_engine) -> None
         async with _sm(admin_engine)() as db:
             pdf = await export.pdf_painel_caixa(db, tenant_id=tid)
         assert pdf[:4] == b"%PDF"
-        texto = "".join(
-            p.extract_text() or "" for p in pypdf.PdfReader(io.BytesIO(pdf)).pages
+        # Espaços normalizados antes de comparar: a extração quebra a célula
+        # entre linhas quando a coluna é estreita — "Conta C13" saiu como
+        # "...2976 Conta" + quebra + "C13 BB...". Afirmar sobre isso seria
+        # afirmar sobre LAYOUT e não sobre conteúdo: o teste ficaria vermelho
+        # no dia em que a largura mudasse, sem nada ter quebrado para quem lê
+        # o relatório.
+        texto = " ".join(
+            "".join(
+                p.extract_text() or "" for p in pypdf.PdfReader(io.BytesIO(pdf)).pages
+            ).split()
         )
         assert "Painel de caixa" in texto
         assert "Conta C13" in texto, texto[:400]
