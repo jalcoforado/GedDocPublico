@@ -605,6 +605,15 @@ export default function ProcessoDetailPage() {
               <AcoesProcesso processo={p} />
             </CardContent>
           </Card>
+
+          {/* IA-1 — na aba VISÃO, e não em Documentos, onde nasceu.
+              As três perguntas que ele sugere ("resuma o andamento", "o que
+              significa a última movimentação", "como está o prazo") são todas
+              sobre o que esta aba mostra. Em Documentos ele ficava escondido
+              atrás de um clique que ninguém tem motivo para dar — o Jorge não
+              o encontrou sozinho no dia em que subiu.
+              Some sozinho quando não há chave de LLM configurada. */}
+          <AssistenteProcesso processoId={p.id} />
         </div>
       )}
 
@@ -709,9 +718,6 @@ export default function ProcessoDetailPage() {
               </>
             );
           })()}
-
-          {/* IA-1 — some sozinho quando nao ha chave de LLM configurada. */}
-          <AssistenteProcesso processoId={p.id} />
 
           <Card>
             <CardHeader>
