@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCheck, FileUp, Landmark, Link2, ListChecks } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
+import { BotaoExportarCsv } from "@/components/pagamentos/BotoesExportar";
 import { fmtData, fmtDataHora, fmtMoeda } from "@/components/pagamentos/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -354,6 +355,18 @@ export default function ConciliacaoPage() {
             title="Lançamentos do extrato"
             description={`${pendentes} pendente(s) de ${lancamentos.length}.`}
           >
+            {/* Export (C1.3). Dentro do card, e não no header dele, porque
+                `SectionCard` não tem slot de ação — mexer no componente
+                compartilhado por causa de um botão teria raio de alcance
+                maior que o da fatia. */}
+            {extratoSel && (
+              <div className="flex justify-end">
+                <BotaoExportarCsv
+                  csvUrl={api.pagamentos.conciliacao.lancamentosCsvUrl(extratoSel.id)}
+                  rotulo="lançamentos do extrato"
+                />
+              </div>
+            )}
             {lancamentosQ.isLoading ? (
               <p className="text-sm text-muted">Carregando…</p>
             ) : (

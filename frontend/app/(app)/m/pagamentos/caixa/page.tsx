@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { BotaoExportarCsv, BotoesExportar } from "@/components/pagamentos/BotoesExportar";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -177,7 +178,14 @@ export default function CaixaPage() {
             Painel de saldo por conta e lançamentos de entrada/saída.
           </p>
         </div>
-        <Button onClick={abrirLancar}>Lançar entrada/saída</Button>
+        <div className="flex items-center gap-2">
+          <BotoesExportar
+            csvUrl={api.pagamentos.caixa.painelCsvUrl()}
+            pdfUrl={api.pagamentos.caixa.painelPdfUrl()}
+            rotulo="painel de caixa"
+          />
+          <Button onClick={abrirLancar}>Lançar entrada/saída</Button>
+        </div>
       </div>
 
       <Table>
@@ -235,9 +243,19 @@ export default function CaixaPage() {
       </Table>
 
       <div className="space-y-2">
-        <h2 className="text-lg font-semibold text-foreground">
-          Extrato{selecionada ? ` — ${selecionada.nome}` : ""}
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-foreground">
+            Extrato{selecionada ? ` — ${selecionada.nome}` : ""}
+          </h2>
+          {/* Só quando há conta escolhida: o endpoint é por conta, e um botão
+              que baixa o extrato "de nada" é pior que botão ausente. */}
+          {selecionada !== null && (
+            <BotaoExportarCsv
+              csvUrl={api.pagamentos.caixa.extratoCsvUrl(selecionada.id_conta)}
+              rotulo={`extrato da conta ${selecionada.nome}`}
+            />
+          )}
+        </div>
         {selecionada === null ? (
           <p className="text-sm text-muted-foreground">
             Selecione uma conta no painel acima para ver o extrato.

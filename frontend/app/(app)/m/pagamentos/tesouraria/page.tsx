@@ -19,6 +19,7 @@ import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { api, type ParcelaTesourariaItem } from "@/lib/api";
+import { BotoesExportar } from "@/components/pagamentos/BotoesExportar";
 
 type TabId = "pagar" | "ops" | "pagas";
 
@@ -393,7 +394,17 @@ function TabOps() {
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface-1">
+    <div className="space-y-3">
+      {/* Export da LISTA (C1.3). Não confundir com o `pdfUrl` de cada linha:
+          aquele é a OP individual, este é o relatório de todas. */}
+      <div className="flex justify-end">
+        <BotoesExportar
+          csvUrl={api.pagamentos.ordens.listaCsvUrl()}
+          pdfUrl={api.pagamentos.ordens.listaPdfUrl()}
+          rotulo="ordens de pagamento"
+        />
+      </div>
+      <div className="overflow-hidden rounded-lg border border-border bg-surface-1">
       <Table variant="flat">
         <THead>
           <TR>
@@ -433,6 +444,7 @@ function TabOps() {
           + {ordens.length - MAX_ORDENS} anteriores
         </p>
       )}
+      </div>
     </div>
   );
 }
