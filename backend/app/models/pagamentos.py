@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric, String, Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -267,6 +268,13 @@ class OrdemPagamento(Base):
     valor_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     ip_origem: Mapped[str | None] = mapped_column(String(45), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # RN-15 (migration 0091). Antes disto a exceção de saldo insuficiente só
+    # existia como texto concatenado na justificativa do histórico, e o
+    # relatório de exceções a achava por `LIKE` — que devolve zero linhas, em
+    # silêncio, no dia em que alguém reescrever a frase.
+    excecao_saldo: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False)
+    justificativa_excecao: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class OrdemPagamentoDebito(Base):

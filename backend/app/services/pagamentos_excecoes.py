@@ -8,17 +8,16 @@ inventada aqui: cada exceção corresponde a algo que o modelo JÁ registra —
 Cada regra devolve as linhas em falta e um total. O relatório inteiro é uma
 foto do agora; não há persistência nem snapshot.
 
-DÍVIDA CONHECIDA — a exceção de saldo insuficiente (RN-15). `autorizar_lote`
-grava a justificativa concatenada em texto livre no histórico:
+DÍVIDA PAGA em 2026-08-13 (fatia C1.3, migration 0091) — a exceção de saldo
+insuficiente (RN-15). Ela era achada por `LIKE` sobre um texto concatenado na
+justificativa do histórico, e o modo de falha era o pior possível num relatório
+de compliance: frase reescrita ⇒ zero linhas, em silêncio, indistinguível de
+"não houve exceção".
 
-    justificativa += f" — EXCEÇÃO DE SALDO (RN-15): {...}"
-
-Não há coluna estruturada, então a regra abaixo depende de `LIKE` sobre esse
-marcador e quebra se a frase mudar. A correção certa é promover a exceção a
-coluna (`ordem_pagamento.excecao_saldo` + justificativa própria) com migration
-e backfill — adiada aqui porque exigiria migration, e havia outra frente
-mexendo na numeração ao mesmo tempo. Enquanto isso, o marcador está isolado
-na constante `MARCADOR_RN15`: se mudar lá, muda aqui.
+Hoje a fonte é `ordem_pagamento.excecao_saldo`, coluna. O `MARCADOR_RN15`
+continua existindo porque a aplicação **ainda grava o texto** — `debito_historico`
+é registro histórico e a frase está em linhas antigas —, mas nenhuma consulta
+depende mais dele.
 """
 from __future__ import annotations
 
@@ -32,11 +31,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
     ContaBancaria, Debito, DebitoHistorico, Fornecedor, LancamentoExtrato,
-    MovimentacaoConta,
+    MovimentacaoConta, OrdemPagamento, OrdemPagamentoDebito,
 )
 
-# Marcador gravado por `pagamentos_autorizacao.autorizar_lote`. Mantido aqui
-# em constante para que a fragilidade fique num ponto só.
+# Marcador que `pagamentos_autorizacao.autorizar_lote` ainda grava no texto do
+# histórico. NÃO é mais fonte de consulta (ver docstring); fica aqui porque o
+# backfill da 0091 dependeu dele e o teste de paridade ainda o usa para provar
+# que a coluna encontra o mesmo conjunto que o `LIKE` encontrava.
 MARCADOR_RN15 = "EXCEÇÃO DE SALDO (RN-15)"
 
 # Situações de fornecedor que não deveriam sustentar despesa em andamento.
@@ -95,14 +96,19 @@ async def _saldo_insuficiente(db: AsyncSession, tenant_id: int, limite: int) -> 
                    "e deve ser conferida — é a exceção mais sensível do rito."),
         severidade="alta",
     )
+    # Fonte: a coluna (0091), não mais o `LIKE`. O conjunto é o mesmo — uma
+    # linha por débito de uma OP autorizada com exceção —, e há teste de
+    # paridade que compara as duas fontes sobre o mesmo dado.
     stmt = (
-        select(DebitoHistorico.id_debito, DebitoHistorico.justificativa,
-               DebitoHistorico.criado_em, Debito.descricao, Debito.valor_total)
-        .join(Debito, Debito.id == DebitoHistorico.id_debito)
-        .where(DebitoHistorico.tenant_id == tenant_id,
-               DebitoHistorico.justificativa.like(f"%{MARCADOR_RN15}%"),
+        select(OrdemPagamentoDebito.id_debito,
+               OrdemPagamento.justificativa_excecao,
+               OrdemPagamento.criado_em, Debito.descricao, Debito.valor_total)
+        .join(OrdemPagamentoDebito, OrdemPagamentoDebito.id_ordem == OrdemPagamento.id)
+        .join(Debito, Debito.id == OrdemPagamentoDebito.id_debito)
+        .where(OrdemPagamento.tenant_id == tenant_id,
+               OrdemPagamento.excecao_saldo.is_(True),
                Debito.excluido.is_(False))
-        .order_by(DebitoHistorico.criado_em.desc())
+        .order_by(OrdemPagamento.criado_em.desc())
     )
     linhas, exc.total = await _colher(db, stmt, limite)
     exc.itens = [
