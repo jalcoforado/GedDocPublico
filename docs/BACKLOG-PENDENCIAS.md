@@ -600,6 +600,40 @@ sobe é o `main` **do momento do deploy**, não o SHA que foi testado. Commit no
 entre o fim dos testes e o deploy vai junto, sem ter passado pelo portão. Resolver exige o workflow
 passar o SHA e o `deploy.sh` fazer checkout dele.
 
+### ~~1.1.4 21 testes de RLS vermelhos só na máquina — deriva de GRANT~~ — FECHADO em 2026-08-14
+
+Convivíamos com ~21 falhas locais em `test_rls_isolation`, `test_rls_papeis_minimos`,
+`test_rls_bypass_caracterizacao`, `test_grant_por_coluna_tenant` e `test_pr3b_config_inicial`, todas
+verdes no CI. Todas diziam a mesma coisa — `permission denied for table X` sob `aprimora_app` — e
+foram tratadas como ruído de ambiente por semanas.
+
+**Medição (2026-08-13), que é o que faltava:**
+
+| | `protocolos` | `utils` | `aprimora_py` |
+|---|---|---|---|
+| local | 81 de 86 sem DML | 86 de 86 | 17 de 18 |
+| VPS | 0 | 0 | 6 de 18 ← as revogadas de propósito |
+
+**Causa:** o `scripts/bootstrap-db.sh` só aplica o GRANT-cobertor quando ele mesmo carrega o dump na
+mesma execução. O `else` que o pula está **certo** (SEC-01A: repetir o cobertor desfaria os `REVOKE`
+das 0076/0079/0080). Mas isso significa que **banco criado antes de o passo existir nunca recebe o
+cobertor, e re-rodar o bootstrap não conserta — por decisão, não por bug.**
+
+**Conserto:** `app.cli.reparar_grants` — o cobertor seguro de repetir, porque reafirma na mesma
+transação todas as revogações declaradas pelas migrations. O passo 4b do bootstrap passa a chamá-lo
+em banco existente. Depois de aplicar, o local ficou idêntico à VPS e os 21 testes passaram.
+
+Três coisas a levar adiante:
+
+- **A VPS estava correta.** Isto era higiene de dev, não bloqueio do `SEC-RLS-ROLLOUT`. Foi medido
+  antes de escrever qualquer código, e valeu a pena: a hipótese inicial era o oposto.
+- **Mas a razão de não doer é o F-12.** O runtime conecta como `ged_user` (`BYPASSRLS`), então
+  nenhum destes grants é exercitado fora dos testes. Num ambiente com essa deriva, o dia em que
+  `APP_DATABASE_URL` for definida não degrada nada: para tudo de uma vez.
+- **O custo real foi o vermelho virar paisagem.** 21 falhas permanentes são o esconderijo perfeito
+  para a 22ª. `tests/test_guarda_reparar_grants.py` troca isso por uma falha só, que diz o que
+  fazer.
+
 ### 1.1.5 Suíte não estava verde antes do F1
 
 Duas falhas confirmadas como anteriores à branch `feat/modularizacao-f1` (verificado por
