@@ -44,6 +44,7 @@ import sys
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..database_admin import AdminSessionLocal
 
 # As 9 da 0074. Não é a lista de "tudo que existe" — é a lista das que a F1
@@ -85,6 +86,84 @@ async def _tenants(db: AsyncSession, slug: str | None) -> list[tuple[int, str]]:
         )
     ).all()
     return [(int(r[0]), str(r[1])) for r in linhas]
+
+
+#: Uma linha de `utils.sistema`: (id, app, nº de linhas em `sistema_transacao`).
+LinhaSistema = tuple[int, str, int]
+
+
+def avaliar_sistema(linhas: list[LinhaSistema], app_name: str) -> list[str]:
+    """Confere se `APP_NAME` aterrissa num `utils.sistema` utilizável.
+
+    Função PURA para poder ser invertida em teste sem banco — o defeito que ela
+    procura é justamente do tipo que não aparece no ambiente de quem escreve o
+    teste.
+
+    O que está em jogo: `load_permissions` filtra grupo por
+    `Sistema.app == app_name`, e o ramo de super-usuário lê
+    `utils.sistema_transacao` daquele mesmo sistema. Se `APP_NAME` apontar para
+    uma linha SEM transações, o usuário continua sendo SU — e enxerga um
+    catálogo vazio. Não é 403 em uma tela: é o sistema inteiro em branco, sem
+    erro nenhum no log.
+
+    Medido em 2026-08-14: o dev local tem uma linha só (`sistemas`, alinhada); a
+    VPS tem DUAS (`aprimora` id 2 com 0 transações, `sistemas` id 3 com 25) e um
+    `Administradores` duplicado em cada, com o mesmo admin nos dois. Hoje ela
+    roda em `sistemas` e está correta — mas um `APP_NAME=aprimora` acidental
+    entrega esse cenário de catálogo vazio.
+    """
+    problemas: list[str] = []
+    casadas = [linha for linha in linhas if linha[1] == app_name]
+
+    if not casadas:
+        disponiveis = ", ".join(sorted(f"`{app}`" for _, app, _ in linhas)) or "(nenhuma)"
+        problemas.append(
+            f"APP_NAME=`{app_name}` não casa com nenhuma linha de `utils.sistema`. "
+            f"Existentes: {disponiveis}. Todo o RBAC fica vazio."
+        )
+        return problemas
+
+    if len(casadas) > 1:
+        ids = ", ".join(str(sid) for sid, _, _ in casadas)
+        problemas.append(
+            f"APP_NAME=`{app_name}` casa com {len(casadas)} linhas de "
+            f"`utils.sistema` (ids {ids}). Qual delas o RBAC usa depende da "
+            "ordem do banco — indefinido é pior que errado."
+        )
+
+    for sid, _app, transacoes in casadas:
+        if transacoes == 0:
+            problemas.append(
+                f"O sistema id {sid} não tem NENHUMA linha em "
+                "`utils.sistema_transacao`. Super-usuário nele enxerga catálogo "
+                "vazio: nenhuma tela, e nenhum erro."
+            )
+
+    orfas = [(sid, app, tx) for sid, app, tx in linhas if app != app_name]
+    if orfas:
+        detalhe = ", ".join(f"id {sid} (`{app}`, {tx} transações)" for sid, app, tx in orfas)
+        problemas.append(
+            f"Há {len(orfas)} linha(s) de `utils.sistema` fora do APP_NAME ativo: "
+            f"{detalhe}. Não quebram nada hoje, mas um APP_NAME trocado por "
+            "engano aterrissa numa delas."
+        )
+    return problemas
+
+
+async def _sistemas(db: AsyncSession) -> list[LinhaSistema]:
+    linhas = (
+        await db.execute(
+            text(
+                "SELECT s.id, s.app, count(st.id_transacao) "
+                "  FROM utils.sistema s "
+                "  LEFT JOIN utils.sistema_transacao st ON st.id_sistema = s.id "
+                " WHERE s.excluido = false "
+                " GROUP BY s.id, s.app "
+                " ORDER BY s.id"
+            )
+        )
+    ).all()
+    return [(int(r[0]), str(r[1]), int(r[2])) for r in linhas]
 
 
 async def _niveis(db: AsyncSession) -> list[tuple[str, int]]:
@@ -144,13 +223,25 @@ async def diagnosticar(slug: str | None) -> int:
     como `ged_user`; só o CI, onde `MIGRATOR_DATABASE_URL` aponta mesmo para
     `aprimora_migrator`, reprovou.
     """
+    app_name = get_settings().app_name
     async with AdminSessionLocal() as db:
+        sistemas = await _sistemas(db)
+        problemas_sistema = avaliar_sistema(sistemas, app_name)
         niveis = await _niveis(db)
         tem_nao_su = any(valor != 0 for _, valor in niveis)
 
         print("=" * 68)
         print("Diagnóstico de permissões por grupo (item 1.0.7)")
         print("=" * 68)
+        print()
+        print(f"Sistema ativo — APP_NAME=`{app_name}` (`utils.sistema`):")
+        for sid, app, transacoes in sistemas:
+            marca = "  ← ATIVO" if app == app_name else ""
+            print(f"  - id {sid}: app=`{app}`, {transacoes} transação(ões){marca}")
+        if problemas_sistema:
+            print()
+            for problema in problemas_sistema:
+                print(f"  ⚠ {problema}")
         print()
         print("Níveis no catálogo (`utils.nivel`):")
         for nome, valor in niveis:
