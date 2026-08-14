@@ -13,6 +13,10 @@ vi.mock("@/lib/api", () => ({
         extratos: vi.fn(),
         importar: vi.fn(),
         lancamentos: vi.fn(),
+        // C1.3: o componente monta a URL de export no render. Mock parcial que
+        // esquece uma função nova quebra os 5 testes deste arquivo de uma vez,
+        // com `is not a function` — que parece defeito do componente e não é.
+        lancamentosCsvUrl: vi.fn(() => "/api/v2/pagamentos/extratos/1/lancamentos.csv"),
         sugestoes: vi.fn(),
         baixaAutomatica: vi.fn(),
         conciliar: vi.fn(),

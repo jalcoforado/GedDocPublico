@@ -12,7 +12,10 @@ from ..schemas.pagamentos import (
     ConciliacaoOut, ConciliarIn, ExtratoOut, ImportarExtratoIn, LancamentoExtratoOut,
     SugestaoBaixaOut,
 )
+from fastapi import Response
+
 from ..services import pagamentos_conciliacao as conc
+from ..services import pagamentos_export as export
 
 router = APIRouter(prefix="/pagamentos", tags=["pagamentos-conciliacao"])
 
@@ -35,6 +38,19 @@ async def listar_extratos(id_conta: int | None = None,
                           db: AsyncSession = Depends(get_db)):
     return [ExtratoOut.model_validate(e)
             for e in await conc.listar_extratos(db, tenant_id=tenant_id, id_conta=id_conta)]
+
+
+@router.get("/extratos/{extrato_id}/lancamentos.csv")
+async def lancamentos_csv(extrato_id: int,
+                          _: Usuario = Depends(require_any_permission(*_LEITURA)),
+                          tenant_id: int = Depends(require_tenant_id),
+                          db: AsyncSession = Depends(get_db)):
+    """Lançamentos do extrato em CSV — a matéria-prima da conciliação."""
+    conteudo = await export.csv_lancamentos(db, tenant_id=tenant_id, id_extrato=extrato_id)
+    return Response(
+        content=conteudo, media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="lancamentos-{extrato_id}.csv"'},
+    )
 
 
 @router.get("/extratos/{extrato_id}/lancamentos", response_model=list[LancamentoExtratoOut])

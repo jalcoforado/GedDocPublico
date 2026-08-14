@@ -223,6 +223,13 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         db.add(op); await db.flush()
         justificativa = f"OP {op.numero}"
         if conta.id in excecao_por_conta:
+            # Coluna E texto, desde a migration 0091. A coluna é o que o
+            # relatório de exceções consulta; o texto continua porque
+            # `debito_historico` é registro histórico — quem lê a trilha tem de
+            # ver a mesma justificativa de sempre, inclusive nas linhas
+            # anteriores à coluna.
+            op.excecao_saldo = True
+            op.justificativa_excecao = excecao_por_conta[conta.id]
             justificativa += f" — EXCEÇÃO DE SALDO (RN-15): {excecao_por_conta[conta.id]}"
         for d in debitos:
             d.id_conta_pagadora = conta.id

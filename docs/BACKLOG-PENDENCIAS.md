@@ -621,13 +621,32 @@ provavelmente a mesma deriva de env.
 
 ## 2. Módulos com escopo declarado e não implementado
 
-### 2.1 Pagamentos — Onda C
+### 2.1 Pagamentos — Onda C — C1 ENTREGUE; C2 continua em aberto
 
-- **Evidência de que não existe nada:** `grep` por `xlsx|csv|export|relatorio` nos quatro routers
-  (`pagamentos_cadastros.py`, `pagamentos_caixa.py`, `pagamentos_conciliacao.py`,
-  `pagamentos_debitos.py`) retorna **zero** ocorrências.
-- **Escopo previsto:** relatórios de exceção, export PDF/XLSX/CSV, integrações contábil e bancária,
-  API idempotente.
+**Este item afirmou por semanas que "não existe nada", e estava errado desde a C1.1.** A frase
+vinha de um `grep` feito uma vez e nunca refeito; quando a C1.3 foi desenhada, os endpoints da
+C1.1 já existiam há dias — sem nenhuma tela que os chamasse, que é a razão de ninguém ter notado.
+Fica registrado como o padrão a vigiar: **evidência datada envelhece em silêncio**, e "nenhuma
+ocorrência" é a afirmação mais fácil de manter parada.
+
+O que está no ar:
+
+- **C1.1** (`8e4434d`, PR #15) — export CSV da lista de débitos. Nasceu **sem UI**: o endpoint
+  existia e nenhuma tela o oferecia. A C1.3 foi quem pendurou o botão.
+- **C1.2** (`cbb207d`, PR #16) — relatório de exceções. A RN-15 (autorização acima do saldo) era
+  detectada por `LIKE` no texto da justificativa do histórico.
+- **C1.3** (`e8be143` + `2311239`, PR #39) — duas coisas. A RN-15 virou **coluna estruturada**
+  (`ordem_pagamento.excecao_saldo` + `justificativa_excecao`, migration `0091`, com backfill que
+  extrai o texto já gravado), deixando de depender de casar prosa. E as quatro listagens que
+  faltavam ganharam export: painel de caixa (CSV+PDF), extrato de conta (CSV), lançamentos de
+  extrato (CSV) e ordens de pagamento (CSV+PDF) — todas com botão na tela, no mesmo PR.
+
+O que falta — **C2, e continua bloqueado em spec externa**: integração contábil, integração
+bancária e API idempotente. Não há como desenhar sem o contrato do sistema contábil e o do banco.
+
+- **XLSX não foi entregue e é decisão, não esquecimento.** CSV abre no Excel e não adiciona
+  dependência; o PDF existe só onde há leitura de conferência (painel e ordens), e é gerado **a
+  partir do mesmo CSV**, para que os dois números nunca divirjam.
 - O próprio spec municipal joga **PDF/OCR de extrato e API bancária real** para uma "3ª etapa" —
   não confundir com o que a Onda C entrega.
 - Contexto: Ondas A e B estão inteiras em produção (migrations 0063→0072).

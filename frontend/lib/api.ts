@@ -3549,6 +3549,14 @@ export const api = {
     },
     caixa: {
       painel: () => request<ContaSaldoPainel[]>("/pagamentos/caixa/painel"),
+      /** Exportações (Onda C, C1.3). URL em vez de fetch+blob, como
+       *  `ordens.pdfUrl`: o navegador baixa com o cookie de sessão e a barra
+       *  de progresso é a dele — reimplementar isso em JS só acrescenta
+       *  estados de erro para manter. */
+      painelCsvUrl: () => `${BROWSER_API_URL}/pagamentos/caixa/painel.csv`,
+      painelPdfUrl: () => `${BROWSER_API_URL}/pagamentos/caixa/painel.pdf`,
+      extratoCsvUrl: (contaId: number) =>
+        `${BROWSER_API_URL}/pagamentos/contas/${contaId}/extrato.csv`,
       saldo: (contaId: number) => request<SaldoConta>(`/pagamentos/contas/${contaId}/saldo`),
       extrato: (contaId: number) =>
         request<Movimentacao[]>(`/pagamentos/contas/${contaId}/extrato`),
@@ -3570,6 +3578,8 @@ export const api = {
         }),
       lancamentos: (extratoId: number) =>
         request<LancamentoExtrato[]>(`/pagamentos/extratos/${extratoId}/lancamentos`),
+      lancamentosCsvUrl: (extratoId: number) =>
+        `${BROWSER_API_URL}/pagamentos/extratos/${extratoId}/lancamentos.csv`,
       sugestoes: (extratoId: number) =>
         request<SugestaoBaixa[]>(`/pagamentos/extratos/${extratoId}/sugestoes`),
       /** Concilia de uma vez todas as correspondências EXATAS do extrato. */
@@ -3676,6 +3686,10 @@ export const api = {
     ordens: {
       list: () => request<OrdemPagamento[]>("/pagamentos/ordens-pagamento"),
       pdfUrl: (id: number) => `${BROWSER_API_URL}/pagamentos/ordens-pagamento/${id}/pdf`,
+      /** A LISTA em CSV/PDF (C1.3) — não confundir com `pdfUrl`, que é o
+       *  documento de UMA ordem. */
+      listaCsvUrl: () => `${BROWSER_API_URL}/pagamentos/ordens-pagamento/exportar.csv`,
+      listaPdfUrl: () => `${BROWSER_API_URL}/pagamentos/ordens-pagamento/exportar.pdf`,
     },
     parcelas: {
       pagar: (id: number, data: { forma_pagamento: string; data_pagamento?: string | null }) =>

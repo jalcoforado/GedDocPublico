@@ -416,6 +416,34 @@ async def relatorio_excecoes(limite_por_regra: int = 50,
         db, tenant_id=tenant_id, limite_por_regra=limite_por_regra)
 
 
+# C1.3 — export das ordens. ANTES de `/ordens-pagamento/{ordem_id}/pdf`:
+# `exportar.csv` e `exportar.pdf` casariam em `{ordem_id}` se viessem depois, e
+# a requisição morreria em 422 antes de chegar ao handler. Foi assim três vezes
+# no transporte; `tests/test_guarda_ordem_rotas.py` cobre o caso.
+@operacoes_router.get("/ordens-pagamento/exportar.csv")
+async def exportar_ordens_csv(_: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                              tenant_id: int = Depends(require_tenant_id),
+                              db: AsyncSession = Depends(get_db)):
+    """Ordens de pagamento em CSV, com a exceção de saldo (RN-15) como coluna."""
+    conteudo = await export.csv_ordens(db, tenant_id=tenant_id)
+    return Response(
+        content=conteudo, media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="ordens-pagamento.csv"'},
+    )
+
+
+@operacoes_router.get("/ordens-pagamento/exportar.pdf")
+async def exportar_ordens_pdf(_: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                              tenant_id: int = Depends(require_tenant_id),
+                              db: AsyncSession = Depends(get_db)):
+    """A mesma lista em PDF — o documento que o controle interno arquiva."""
+    conteudo = await export.pdf_ordens(db, tenant_id=tenant_id)
+    return Response(
+        content=conteudo, media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="ordens-pagamento.pdf"'},
+    )
+
+
 @operacoes_router.get("/ordens-pagamento", response_model=list[OrdemPagamentoOut])
 async def list_ordens(_: Usuario = Depends(require_any_permission("pagamento_autorizar", "pagamento_pagar")),
                       tenant_id: int = Depends(require_tenant_id),
