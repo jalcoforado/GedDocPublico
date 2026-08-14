@@ -65,7 +65,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA protocolos, utils, 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA protocolos, utils, aprimora_py, public TO aprimora_app;
 SQL
 else
-  log "Passo 3b: GRANT-cobertor pulado (banco já existente — grants vêm das migrations)"
+  log "Passo 3b: GRANT-cobertor pulado (banco já existente — reparo no passo 4b)"
 fi
 
 # Passo 4 — baseline + migrations
@@ -89,6 +89,33 @@ SQL
 HEAD_REV=$( cd "$REPO" && python -m alembic heads 2>/dev/null | awk 'NR==1{print $1}' )
 if [ -n "$HEAD_REV" ]; then
   psql_db -v ON_ERROR_STOP=1 -c "UPDATE aprimora_py.alembic_version SET version_num = '$HEAD_REV'" >/dev/null
+fi
+
+# Passo 4b — reparo de grants em banco JÁ EXISTENTE
+#
+# Pular o cobertor no passo 3b é a decisão certa, mas ela deixava um buraco:
+# banco criado ANTES de o 3b existir nunca recebeu o cobertor, e re-rodar o
+# bootstrap não consertava — por decisão, não por bug. Ficava sem a DML de
+# baseline em `protocolos.*` e `utils.*` para sempre, e o sintoma era ~21
+# testes de RLS vermelhos SÓ na máquina, verdes no CI (que sempre parte de
+# banco novo). Medido em 2026-08-13: 81/86 tabelas de `protocolos` e 86/86 de
+# `utils` sem DML no dev local; a VPS estava correta.
+#
+# `reparar_grants` é o cobertor SEGURO de repetir: aplica e, na MESMA
+# transação, reafirma todas as revogações declaradas pelas migrations
+# (0076/0079/0080). `tests/test_guarda_reparar_grants.py` reprova se as duas
+# listas divergirem.
+#
+# Roda DEPOIS do `upgrade head`, e não junto do 3b, porque precisa que
+# `platform_principal` e as demais tabelas revogadas existam — num banco em
+# revision anterior à 0076 o `REVOKE` morreria em "relation does not exist".
+# Efeito colateral aceito: aqui o cobertor alcança tabela de `aprimora_py`
+# criada por migration nova que tenha esquecido o próprio `GRANT`. Quem cobra
+# essa disciplina é o CI, onde o cobertor continua rodando ANTES das migrations
+# — e é o CI que gateia PR.
+if [ "$SCHEMA_LOADED" = "1" ]; then
+  log "Passo 4b: reparo idempotente de grants"
+  ( cd "$REPO" && python -m app.cli.reparar_grants --aplicar )
 fi
 
 # Passo 5 — seed mínimo
