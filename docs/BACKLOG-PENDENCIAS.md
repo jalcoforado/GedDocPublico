@@ -267,25 +267,40 @@ MD5 e que ainda não fez login. A rampa é o próprio login, um usuário por vez
 (e o mesmo em `usuario_externo`) der zero nos ambientes vivos — é uma medição, não um teste, e por
 isso não tem guarda que a antecipe.
 
-### 1.0 Deriva de `APP_NAME` no ambiente de dev — RBAC apontando para o sistema errado
+### 1.0 Deriva de `APP_NAME` — MEDIDO em 2026-08-14; a descrição de 07-28 estava vencida
 
-*(Descoberto em 2026-07-28, durante a fatia F1 da modularização.)*
+*(Descoberto em 2026-07-28, durante a fatia F1. **Remedido em 2026-08-14, e quase nada do texto
+original continuava verdadeiro** — o item pedia "verificar na VPS antes de decidir o conserto", e
+foi essa verificação que o desmontou.)*
 
-- `utils.sistema` tem **duas** linhas: `Aprimora` (`app = 'aprimora'`, id 1) e `Sistemas`
-  (`app = 'sistemas'`, id 2).
-- O container `aprimora-py-backend` em execução tem `APP_NAME=aprimora`, mas o
-  `docker-compose.yml` **versionado** e o default de `backend/app/config.py` dizem `sistemas`.
-- Todo o RBAC do ambiente local (grupos, `usuario_grupo`, `sistema_transacao`) foi construído sob
-  `aprimora`. **Um `docker compose up -d` que recrie o container realinha para `sistemas` e derruba
-  as permissões do admin local** — `load_permissions` filtra grupos por `Sistema.app == app_name`.
-- É a mesma classe de bug que o `CLAUDE.md` registra como já tendo causado 403 geral em todo tenant
-  provisionado.
-- **Consequência já visível:** explica a falha de
-  `tests/test_pr5a_dashboard_servicos.py::test_http_dashboard_com_perm_acessa`, que estava sendo
-  tratada como "pré-existente inexplicada".
-- Não investigado: qual é o estado na VPS de homologação. **Verificar lá antes de decidir o
-  conserto** — se produção estiver sob `sistemas`, o errado é só o container local; se estiver sob
-  `aprimora`, a correção envolve migrar dados.
+O que o item afirmava e **não** é mais verdade: que o local tinha duas linhas em `utils.sistema`,
+que o container rodava com `APP_NAME=aprimora`, e que um `docker compose up -d` derrubaria as
+permissões do admin. Também não é mais verdade a "consequência já visível": a suíte fecha
+1304/0 hoje, `test_pr5a_dashboard_servicos` incluído.
+
+**Estado real, medido:**
+
+| | `utils.sistema` | `APP_NAME` | veredito |
+|---|---|---|---|
+| local | 1 linha: id 1 `sistemas`, 25 transações | `sistemas` | alinhado |
+| VPS | 2 linhas: id 2 `aprimora` **0 transações**; id 3 `sistemas` 25 | `sistemas` | roda no certo |
+
+Na VPS há um `Administradores` duplicado, um em cada sistema, com o **mesmo** `admin@local.test`
+nos dois. Em execução está tudo correto — mas a linha órfã é uma armadilha, e ela não falha do
+jeito que o item supunha. `APP_NAME=aprimora` não daria 403 em tela nenhuma: o admin continua
+super-usuário (o nível é 0), e o ramo de SU lê `utils.sistema_transacao` **daquele** sistema, que
+tem zero linhas. O resultado é **catálogo vazio** — todas as telas somem, e nada vai para o log.
+Um erro barulhento seria melhor.
+
+**O que foi feito:** `app.cli.diagnostico_permissoes` passou a abrir com a seção "Sistema ativo",
+que confronta `APP_NAME` com `utils.sistema` e aponta linha órfã, `app` ambíguo, ausência de
+correspondência e catálogo vazio. A lógica é uma função pura (`avaliar_sistema`) com teste de
+tabela — teste que lesse o banco passaria verde para sempre no dev local, que tem uma linha só e
+alinhada, sem nunca exercitar um caso ruim.
+
+**O que continua aberto, e é decisão sua:** apagar a linha `aprimora` (id 2) e o grupo órfão na
+VPS. É mutação de dados em homologação, não faço sem sua palavra. Enquanto ela existir, a
+armadilha existe — agora com um espelho que a mostra.
 
 ### 1.0.5 Leitura de módulo sem gate de permissão — FECHADO (contratação; autorização segue item 1.0.8)
 
