@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import AsyncIterator
 
+import pytest
 import pytest_asyncio
 # `Request` PRECISA estar no escopo de módulo: com `from __future__ import
 # annotations`, a anotação de `_get_db_do_tenant` vira a string "Request", e o
@@ -67,6 +68,92 @@ WORKER_URL = f"postgresql+asyncpg://aprimora_worker:{DB_PASS}@{DB_HOST}:{DB_PORT
 # "não configurada".
 if not os.environ.get("MIGRATOR_DATABASE_URL"):
     os.environ["MIGRATOR_DATABASE_URL"] = MIGRATOR_URL
+
+
+# --------------------------------------------------------------------------
+# Contador de tenants vazados (item 1.1.6)
+#
+# Em 2026-08-14 o dev local tinha 4.033 linhas em `aprimora_py.tenant`: uma era
+# `sobral` e 4.032 eram de teste, criadas em UMA SEMANA. A fixture
+# `two_tenants` limpa; o que vaza são os ~69 arquivos que chamam
+# `provisionar_tenant` por conta própria.
+#
+# Isto **relata, não reprova**, e a escolha é deliberada: reprovar deixaria a
+# suíte inteira vermelha antes de os 69 arquivos serem convertidos, e vermelho
+# permanente é exatamente o que escondeu este problema em primeiro lugar
+# (item 1.1.4). O que faltava era realimentação: um teste que cria tenant e não
+# limpa nunca fica vermelho, só fica caro, e ninguém vê a conta crescer.
+#
+# Quem estiver convertendo arquivos pode exigir zero com
+# `PYTEST_FALHA_SE_VAZAR_TENANT=1`.
+# --------------------------------------------------------------------------
+def _conta_tenants() -> int | None:
+    """Conta por conexão síncrona própria — o hook roda fora do event loop."""
+    try:
+        import psycopg2
+
+        conexao = psycopg2.connect(
+            host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user="ged_user", password=DB_PASS
+        )
+    except Exception:
+        # Sem banco alcançável não há o que contar, e o contador jamais deve ser
+        # o motivo de uma sessão de teste falhar ao iniciar.
+        return None
+    try:
+        with conexao.cursor() as cur:
+            cur.execute("SELECT count(*) FROM aprimora_py.tenant")
+            return int(cur.fetchone()[0])
+    except Exception:
+        return None
+    finally:
+        conexao.close()
+
+
+_TENANTS_NO_INICIO: int | None = None
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _contador_de_tenants():
+    """Guarda a contagem de entrada. O relatório sai em `pytest_terminal_summary`.
+
+    Duas tentativas anteriores ficaram MUDAS, sem erro nenhum, e as duas valem
+    registro porque o modo de falhar é o mesmo — código que roda e não aparece:
+
+    1. `pytest_sessionstart`/`pytest_sessionfinish` **não são chamados** para
+       este arquivo: esses hooks valem só para o conftest inicial (o da rootdir),
+       e a rootdir aqui é `/app`, não `/app/tests`.
+    2. Escrever pelo `terminalreporter` no teardown DESTA fixture também não
+       aparece: fixture de sessão é finalizada depois de o terminal já ter
+       fechado o relatório. Medido — a fixture rodava (`inicio=4066`,
+       `fim=4067`, delta 1) e nada saía na tela.
+
+    `pytest_terminal_summary` funciona de qualquer conftest e roda com o
+    terminal ainda aberto.
+    """
+    global _TENANTS_NO_INICIO
+    _TENANTS_NO_INICIO = _conta_tenants()
+    yield
+
+
+def pytest_terminal_summary(terminalreporter) -> None:
+    if _TENANTS_NO_INICIO is None:
+        return
+    fim = _conta_tenants()
+    if fim is None or fim - _TENANTS_NO_INICIO <= 0:
+        return
+    terminalreporter.write_line("")
+    terminalreporter.write_line(
+        f"[tenants] esta sessão deixou {fim - _TENANTS_NO_INICIO} tenant(s) para "
+        f"trás ({_TENANTS_NO_INICIO} → {fim}). Item 1.1.6 do backlog. "
+        "Limpar: python -m app.cli.limpar_tenants_de_teste --apagar",
+        yellow=True,
+    )
+    if os.environ.get("PYTEST_FALHA_SE_VAZAR_TENANT") == "1":
+        terminalreporter.write_line(
+            "[tenants] PYTEST_FALHA_SE_VAZAR_TENANT=1 — reprovando a sessão.",
+            red=True,
+        )
+        raise SystemExit(1)
 
 
 @pytest_asyncio.fixture(scope="function")
