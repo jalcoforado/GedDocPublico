@@ -9,6 +9,10 @@
 >
 > Cada item traz a **evidência** que sustenta a afirmação. Antes de agir sobre qualquer um,
 > reconfirme a evidência — o repositório se move.
+>
+> **Varredura completa mais recente: 2026-08-14.** Quatro itens foram remedidos nela e os quatro
+> estavam errados; a causa comum e as regras que saíram dali estão na seção 4, em "Toda evidência
+> leva data".
 
 ## Estado de referência
 
@@ -56,14 +60,22 @@
 - **Cuidado ao validar módulos na homologação:** o seed contrata os **cinco** módulos no tenant
   `sobral`. O caso de "tenant com um módulo só" — onde estava o defeito crítico da F2 — **não é
   exercitado** por navegação normal. Use a aba Módulos do admin de plataforma para descontratar.
-- **Ambiente local do Jorge:** o antivírus AVG intercepta HTTPS e **nenhuma imagem docker rebuilda
-  nessa máquina** (npm e PyPI falham com erro de certificado). O frontend local roda por um contorno
-  — build no host copiado para dentro do container — que morre se o container for **recriado**
-  (`docker compose up -d`), não sobrevive a isso. CI e VPS não são afetados.
-- **Ambiente local do Jorge:** o antivírus AVG intercepta HTTPS e **nenhuma imagem docker rebuilda
-  nessa máquina** (npm e PyPI falham com erro de certificado). O frontend local roda por um contorno
-  — build no host copiado para dentro do container — que morre se o container for **recriado**
-  (`docker compose up -d`), não sobrevive a isso. CI e VPS não são afetados.
+- ~~**Ambiente local do Jorge:** o antivírus AVG intercepta HTTPS e nenhuma imagem docker rebuilda
+  nessa máquina.~~ **RESOLVIDO em 2026-08-07** — a imagem rebuilda. O parágrafo aparecia **duas
+  vezes, idêntico**, e nenhuma das duas cópias tinha sido atualizada; ambas foram substituídas por
+  esta linha em 2026-08-14.
+
+**Estado em 2026-08-14** (varredura completa do arquivo — ver a nota de método na seção 4):
+
+- `main` em `84d3f04`. Migrations até **0091** (head único, 92 arquivos).
+- CI verde nos três workflows; suíte de backend em **1304 passed / 0 failed / 47 skipped**.
+- Entregue desde o último bloco: modularização F1–F4, leitura por módulo, item 1.0.8 (58 GETs com
+  `require_permission`), assistente IA-1 sobre DeepSeek, Pagamentos Onda C fatia C1 inteira
+  (C1.1 → C1.3), reparo de grants de baseline (item 1.1.4).
+- **Branch remota não é sinal de trabalho pendente.** `git branch -r --no-merged origin/main` lista
+  ~10 branches, e isso é artefato do merge por **squash**: o commit da branch nunca fica alcançável
+  a partir de `main`, mesmo com o conteúdo todo lá dentro. Conferir por conteúdo, nunca por
+  alcançabilidade — e as remotas antigas podem ser apagadas.
 
 > **Atualizado em 2026-07-28 (quatro itens fechados, removidos conforme a seção 4):**
 >
@@ -73,10 +85,13 @@
 >   busca *case-insensitive* por `todo` casa com a palavra portuguesa "todo/todos", onipresente
 >   num repositório em pt-BR. Contagem correta (`grep` sensível a maiúsculas por `TODO`/`FIXME`/
 >   `XXX`/`HACK`): **4 no backend, 0 no frontend**. Desses 4, **3 são a palavra "TODOS" em caixa
->   alta** dentro de docstrings (`dashboard.py:1032`, `pagamentos_autorizacao.py:119`,
->   `limpar_jobs_antigos.py:33`). Sobra **um TODO real**: `backend/app/routers/minutas.py:269`
+>   alta** dentro de docstrings. Sobra **um TODO real**, em `routers/minutas.py`
 >   — "Pull DOCX, extract text, update corpo_html" —, que já é o item **2.4** deste documento.
 >   Não há dívida oculta em marcadores; não repetir esta varredura.
+>   *(Remedido em 2026-08-14: hoje são **2** no backend e **0** no frontend — um é a palavra
+>   portuguesa em `cli/backup.py`, o outro é o mesmo TODO real, agora em `minutas.py:303`. A
+>   conclusão do item se manteve; os números e a linha, não. Este é o motivo de a nota de método
+>   pedir data em toda contagem.)*
 > - **Limite de upload divergente: corrigido** (PR #13, `bf3d972`). O portal anunciava e validava
 >   25 MB contra os 20 MB do backend — um anexo de 22 MB subia inteiro antes de ser recusado.
 >   Alinhado em 20 (decisão do Jorge; o nginx permite 50m, então a escolha não era imposta por
@@ -321,6 +336,12 @@ armadilha existe — agora com um espelho que a mostra.
   `/usuarios/{id}`, `/unidades-trabalho`, `/unidades-trabalho/{id}`, `/audit`, `/organograma` — os
   quatro últimos por consumo cruzado comprovado entre módulos, os dois primeiros por decisão humana
   de que o recurso é do sistema).
+  > *Remedido em 2026-08-14:* `ENDPOINTS_LEITURA_SEM_GATE` está **vazia** desde o item 1.0.8 — os
+  > 7 ganharam gate. E `test_usuario_sem_permissao_continua_lendo`, citado logo acima como a guarda
+  > da propriedade central, **não existe mais**: o 1.0.8 o partiu em
+  > `test_require_modulo_nao_olha_o_usuario` (a propriedade, agora com controle de vacuidade) e
+  > `test_usuario_sem_permissao_agora_leva_403` (o comportamento novo). A propriedade continua
+  > travada; o nome, não.
 - A tabela `ROTAS_POR_MODULO` (mesmo arquivo) é a fonte versionada de qual módulo cada rota exige,
   checada contra a implementação real por introspecção no CI — substitui a lista solta que este item
   citava antes.
@@ -649,17 +670,41 @@ Três coisas a levar adiante:
   para a 22ª. `tests/test_guarda_reparar_grants.py` troca isso por uma falha só, que diz o que
   fazer.
 
-### 1.1.5 Suíte não estava verde antes do F1
+### ~~1.1.5 Suíte não estava verde antes do F1~~ — FECHADO em 2026-08-14
 
-Duas falhas confirmadas como anteriores à branch `feat/modularizacao-f1` (verificado por
-`git stash`): `test_jwt_compat.py::test_emitted_token_has_required_claims` e
-`test_pr5a_dashboard_servicos.py::test_http_dashboard_com_perm_acessa` (esta última explicada pelo
-item 1.0 acima). O CI em `main` reporta verde, então a divergência é entre ambiente local e CI —
-provavelmente a mesma deriva de env.
+As duas falhas nomeadas — `test_jwt_compat.py::test_emitted_token_has_required_claims` e
+`test_pr5a_dashboard_servicos.py::test_http_dashboard_com_perm_acessa` — **passam**. Medido em
+2026-08-14: `pytest tests/test_jwt_compat.py::... tests/test_pr5a_dashboard_servicos.py` fecha em
+**24 passed**, e a suíte inteira em **1304 passed / 0 failed**.
 
-> **Correção de 2026-07-30:** "o CI em `main` reporta verde" era verdade quando isto foi escrito, mas
-> deixou de ser depois do merge da F1 — ver item 1.0.65. Não tratar mais essas duas falhas como "o
-> CI está verde, é só ambiente local" sem antes conferir o run mais recente.
+Nenhum dos dois foi consertado por um PR que citasse este item; eles saíram do vermelho de carona
+em outras fatias. Por isso o item sobreviveu meses depois de ter deixado de ser verdade — ninguém
+volta a um item que não está bloqueando nada.
+
+### 1.1.6 A suíte deixa tenants para trás — 4.032 no banco local em uma semana
+
+*(Descoberto em 2026-08-14 pela varredura deste arquivo, medindo outra coisa.)*
+
+`aprimora_py.tenant` tem **4.033** linhas no dev local. Uma é `sobral`; as outras 4.032 casam o
+padrão de teste (prefixo + `uuid4().hex[:8]`) e foram criadas entre **2026-08-07 e 2026-08-14** —
+ou seja, **uma semana** de execuções da suíte.
+
+Distribuição por prefixo (topo): `p52` 845, `p51` 429, `vis` 403, `alv` 377, `doc` 247,
+`alvdoc` 221, `alvresp` 195, `alvren` 182, `exc12` 156, `gdocs` 155, `ia1` 133.
+
+- **Não é a fixture `two_tenants`** — ela apaga no teardown, e a lista de tabelas dela é explícita.
+  São os testes que criam tenant por conta própria, majoritariamente do transporte regulado.
+- **O CI não sofre**: banco novo a cada run, nada acumula. Só banco de dev de vida longa acumula —
+  e é exatamente onde ninguém olha.
+- **Custo já visível.** A suíte completa levou **34 min** numa medição e **2 h 16** noutra, na
+  mesma máquina; o banco cresceu entre as duas. E
+  `python -m app.cli.diagnostico_permissoes` **sem `--tenant`** percorre todos os tenants: hoje são
+  4.033 iterações para um relatório que interessa sobre um.
+- **Isto é insumo do item 1.0.66** (a suíte estourou o teto do CI): antes de partir para
+  `pytest-xdist` com banco por worker, vale medir quanto do tempo é lixo acumulado.
+- **Ao retomar:** o conserto não é apagar o lixo — é a fixture. Um teste que cria tenant sem
+  teardown não falha nunca; só fica caro. O padrão a espalhar é o de `two_tenants`, e a guarda
+  possível é contar tenants no início e no fim da sessão de teste e reprovar a diferença.
 
 > **Nota histórica.** Até 2026-07-29 esta seção terminava com a linha "Nenhum — os quatro itens
 > desta seção foram fechados em 2026-07-28". A execução da fatia F1 da modularização abriu os sete
@@ -984,3 +1029,30 @@ da arquitetura em vez de disciplina recorrente.
 Ao concluir um item, **remova-o daqui** e registre o resultado onde ele pertence (README, RUNBOOK,
 ou o doc de escopo do módulo). Este arquivo é uma lista de pendências, não um histórico — histórico
 é o `git log`.
+
+### Toda evidência leva data — a regra saiu de quatro erros seguidos
+
+Em 2026-08-13/14, quatro itens foram remedidos e **os quatro estavam errados**:
+
+| item | o que afirmava | o que era |
+|---|---|---|
+| 2.1 | "evidência de que não existe nada: `grep` retorna zero" | a Onda C existia desde a C1.1, três semanas antes |
+| 1.1.4 | (não existia) | 21 testes vermelhos tratados como ruído por semanas |
+| 1.0 | duas linhas em `utils.sistema`, `APP_NAME=aprimora`, teste falhando | uma linha, alinhada, teste passando |
+| 1.1.5 | duas falhas pré-existentes | as duas passam |
+
+O padrão não é descuido. **Nenhum dos quatro tinha data na evidência** — a medição foi feita uma
+vez e escrita no presente do indicativo, como se fosse propriedade do sistema. Um `grep` que
+devolveu zero em 28/07 continua parecendo verdade em 14/08, e "zero ocorrências" é justamente a
+afirmação que menos chama atenção ao envelhecer: nada nela dá erro.
+
+Daí três regras:
+
+1. **Contagem, `grep` e "não existe" vão com a data da medição, no corpo do item.** Sem data, a
+   afirmação não é evidência — é lembrança.
+2. **Reconfirme antes de agir, e escreva o resultado mesmo quando confirma.** O aviso no topo do
+   arquivo já pedia isso; o que faltava era registrar a reconfirmação, para a próxima sessão saber
+   quando a evidência foi olhada pela última vez.
+3. **Item que deixa de ser verdade não avisa.** Os quatro saíram do vermelho de carona em outras
+   fatias, sem nenhum PR citando o item. Ninguém volta a um item que não está bloqueando nada — por
+   isso a varredura precisa ser periódica, e não sob demanda.
