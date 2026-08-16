@@ -702,9 +702,29 @@ Distribuição por prefixo (topo): `p52` 845, `p51` 429, `vis` 403, `alv` 377, `
   4.033 iterações para um relatório que interessa sobre um.
 - **Isto é insumo do item 1.0.66** (a suíte estourou o teto do CI): antes de partir para
   `pytest-xdist` com banco por worker, vale medir quanto do tempo é lixo acumulado.
-- **Ao retomar:** o conserto não é apagar o lixo — é a fixture. Um teste que cria tenant sem
-  teardown não falha nunca; só fica caro. O padrão a espalhar é o de `two_tenants`, e a guarda
-  possível é contar tenants no início e no fim da sessão de teste e reprovar a diferença.
+**Entregue em 2026-08-14 — a realimentação e a vassoura, não o conserto:**
+
+- **`app.cli.limpar_tenants_de_teste`** apaga o acumulado. `--dry-run` é o padrão; apagar exige
+  `--apagar`. O classificador (`eh_tenant_de_teste`) é função pura com 27 testes, e a maior parte
+  deles cobre o **falso positivo** — nome de município que se pareça com lixo de teste —, porque
+  deixar lixo custa espaço e apagar tenant real custa o tenant. Deleta com
+  `session_replication_role = replica`: `aprimora_py.tenant` recebe **97 FKs, 95 delas
+  `NO ACTION`**, e ordenar 96 tabelas topologicamente seria uma lista que envelhece a cada
+  migration.
+- **O contador na `conftest.py`** imprime, ao fim de cada sessão, quantos tenants ela deixou para
+  trás. **Relata, não reprova** — reprovar deixaria a suíte inteira vermelha antes de os 69
+  arquivos serem convertidos, e vermelho permanente é exatamente o que escondeu o item 1.1.4.
+  `PYTEST_FALHA_SE_VAZAR_TENANT=1` exige zero, para quem estiver convertendo.
+- **Ensaio do mecanismo** (2026-08-14, com `ROLLBACK`): 4.032 tenants e **63.221** linhas
+  dependentes em 96 tabelas, sem nenhum erro de FK. Maiores: `tenant_modulo` 20.060,
+  `utils.usuario` 4.523, `audit_log` 4.098.
+
+**O que continua ABERTO, e é o conserto de verdade:** a fixture. Os ~69 arquivos que chamam
+`provisionar_tenant` direto precisam de um teardown, no padrão de `two_tenants`. Enquanto isso não
+acontecer, o CLI é vassoura e o contador é o aviso de que é hora de varrer.
+
+**Não foi apagado nada** no banco local: decisão do Jorge em 2026-08-14, ferramenta entregue sem
+execução.
 
 > **Nota histórica.** Até 2026-07-29 esta seção terminava com a linha "Nenhum — os quatro itens
 > desta seção foram fechados em 2026-07-28". A execução da fatia F1 da modularização abriu os sete
