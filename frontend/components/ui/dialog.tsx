@@ -26,8 +26,29 @@ const FOCUSABLE =
 
 export function Dialog({ open, onClose, title, children, footer, size = "md" }: DialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   const previouslyFocused = useRef<HTMLElement | null>(null);
+
+  // Destino de retorno do foco: o PRIMEIRO evento de foco que cruza a
+  // fronteira "fora → dentro" do dialog carrega em `relatedTarget` o
+  // elemento que perdeu o foco — o trigger. Isso cobre inclusive o
+  // `autoFocus` de filho, que dispara no commit, ANTES de qualquer efeito
+  // do pai (efeitos, mesmo de layout, rodam filho-primeiro): o evento é a
+  // única testemunha do trigger nesse instante. Movimentação de foco
+  // interna tem relatedTarget dentro do dialog e não sobrescreve; o ciclo
+  // zera no fechamento, então reabrir captura o novo trigger.
+  function capturaRetorno(e: React.FocusEvent) {
+    if (previouslyFocused.current) return; // primeiro ingresso vence o ciclo
+    const origem = e.relatedTarget;
+    if (
+      origem instanceof HTMLElement &&
+      origem !== document.body &&
+      !dialogRef.current?.contains(origem)
+    ) {
+      previouslyFocused.current = origem;
+    }
+  }
 
   // `onClose` costuma ser um arrow function inline no call-site — nova
   // referência a cada render do pai (ex.: a cada letra digitada num campo
@@ -42,11 +63,31 @@ export function Dialog({ open, onClose, title, children, footer, size = "md" }: 
   useEffect(() => {
     if (!open) return;
 
-    previouslyFocused.current = document.activeElement as HTMLElement | null;
-
-    // initial focus
-    const items = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
-    items?.[0]?.focus();
+    // Foco inicial. O botão "Fechar" mora no header, antes do conteúdo no
+    // DOM — como primeiro focável, ele capturava o foco de TODO dialog. A
+    // regra aqui: (1) `autoFocus` de um filho já focou algo durante o commit
+    // (antes deste efeito) → preservar; (2) senão, primeiro focável que não
+    // seja o Fechar (campo do conteúdo ou 1ª ação do footer); (3) só Fechar
+    // existe → Fechar. Ele continua na ordem de tabulação normal (trap).
+    const root = dialogRef.current;
+    if (root && !root.contains(document.activeElement)) {
+      // Fallback defensivo da captura de retorno: neste ponto a árvore já
+      // foi commitada e nada dentro do dialog recebeu foco — quem está
+      // focado AGORA é o elemento externo anterior. (O caminho principal é
+      // o evento de foco em `capturaRetorno`; este cobre ambiente sem
+      // relatedTarget.)
+      const ativo = document.activeElement;
+      if (
+        !previouslyFocused.current &&
+        ativo instanceof HTMLElement &&
+        ativo !== document.body
+      ) {
+        previouslyFocused.current = ativo;
+      }
+      const items = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
+      const alvo = items.find((el) => el !== closeRef.current) ?? items[0];
+      alvo?.focus();
+    }
 
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -73,11 +114,14 @@ export function Dialog({ open, onClose, title, children, footer, size = "md" }: 
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
-    const previous = previouslyFocused.current;
     return () => {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
-      previous?.focus?.();
+      // Lido no CLEANUP (não no corpo do efeito): a captura pode acontecer
+      // depois do efeito rodar (evento de foco do autoFocus/StrictMode).
+      const previous = previouslyFocused.current;
+      previouslyFocused.current = null; // cada abertura é um novo ciclo
+      if (previous?.isConnected) previous.focus();
     };
   }, [open]);
 
@@ -93,6 +137,7 @@ export function Dialog({ open, onClose, title, children, footer, size = "md" }: 
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        onFocus={capturaRetorno}
         className={cn(
           "w-full rounded-t-dialog bg-card text-card-foreground shadow-dialog animate-slide-up",
           "sm:rounded-dialog sm:animate-scale-in",
@@ -105,6 +150,7 @@ export function Dialog({ open, onClose, title, children, footer, size = "md" }: 
             {title}
           </h2>
           <button
+            ref={closeRef}
             type="button"
             onClick={onClose}
             aria-label="Fechar"
