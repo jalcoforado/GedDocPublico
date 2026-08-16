@@ -696,8 +696,11 @@ Distribuição por prefixo (topo): `p52` 845, `p51` 429, `vis` 403, `alv` 377, `
   São os testes que criam tenant por conta própria, majoritariamente do transporte regulado.
 - **O CI não sofre**: banco novo a cada run, nada acumula. Só banco de dev de vida longa acumula —
   e é exatamente onde ninguém olha.
-- **Custo já visível.** A suíte completa levou **34 min** numa medição e **2 h 16** noutra, na
-  mesma máquina; o banco cresceu entre as duas. E
+- **Custo:** ~~a suíte levou 34 min numa medição e 2 h 16 noutra~~ — **essa inferência não se
+  sustentou.** Uma terceira medição deu **7 h 22**, e medir a limpeza isoladamente mostrou que ela
+  custa ~0 (15,2 s contra 14,9 s no mesmo módulo, dentro do ruído). As três rodadas foram
+  concorrentes com outro trabalho na máquina, então **o tempo de suíte aqui não mede nada** e não
+  deve ser usado como argumento. O que continua verdade é o custo estrutural: E
   `python -m app.cli.diagnostico_permissoes` **sem `--tenant`** percorre todos os tenants: hoje são
   4.033 iterações para um relatório que interessa sobre um.
 - **Isto é insumo do item 1.0.66** (a suíte estourou o teto do CI): antes de partir para
@@ -719,12 +722,34 @@ Distribuição por prefixo (topo): `p52` 845, `p51` 429, `vis` 403, `alv` 377, `
   dependentes em 96 tabelas, sem nenhum erro de FK. Maiores: `tenant_modulo` 20.060,
   `utils.usuario` 4.523, `audit_log` 4.098.
 
-**O que continua ABERTO, e é o conserto de verdade:** a fixture. Os ~69 arquivos que chamam
-`provisionar_tenant` direto precisam de um teardown, no padrão de `two_tenants`. Enquanto isso não
-acontecer, o CLI é vassoura e o contador é o aviso de que é hora de varrer.
+**O conserto, entregue em 2026-08-16:** `_limpa_tenants_do_modulo`, fixture `autouse` de escopo de
+**módulo** na `conftest.py`. Apaga os tenants criados durante o módulo — `id >` o maior id de
+entrada, então nunca alcança `sobral` nem tenant preexistente.
 
-**Não foi apagado nada** no banco local: decisão do Jorge em 2026-08-14, ferramenta entregue sem
-execução.
+- **Uma fixture no conftest, e não teardown em 69 arquivos.** Editar 69 arquivos entregaria a mesma
+  propriedade com 69 chances de esquecer uma — e teste que esquece o teardown continua **verde**,
+  logo o esquecimento não teria sintoma. `autouse` não tem como ser esquecida.
+- **Escopo de módulo por custo, não por gosto.** Apagar varre as 96 tabelas com `tenant_id`, e nem
+  todas têm índice por ele: por função seriam ~96 × 1.300 varreduras; por módulo, ~96 × 100, com os
+  ids em lote. Correção não é problema porque **nenhuma fixture deste conftest vive além da
+  função** (conferido uma a uma).
+- **Falha de limpeza não derruba o módulo** — o contador de sessão continua denunciando o que
+  sobrou, e teste vermelho por causa da faxina seria pior que o vazamento.
+- `PYTEST_NAO_LIMPAR_TENANT=1` desliga, para depurar olhando o que o teste deixou.
+- Medido: `test_transporte_p5_2_atendimento.py` (28 testes) vazava 28 tenants e passou a vazar
+  **zero**; lote de 6 arquivos, 85 testes, também zero.
+
+**O acumulado de 4.032 continua no banco local** — decisão do Jorge em 2026-08-14 de receber a
+ferramenta sem executá-la. A fixture impede o crescimento; quem apaga o que já está lá é
+`limpar_tenants_de_teste --apagar`.
+
+**Achado de carona, já consertado:** a rodada de validação cruzou a meia-noite e cinco testes de
+frota caíram com `date(2026, 8, 16) == date(2026, 8, 15)`. Não tinha relação com a limpeza —
+`HOJE = date.today()` era avaliado no import e comparado, horas depois, com data gerada pelo
+servidor. Era **flake permanente**, não regressão: qualquer rodada que atravesse a meia-noite
+reprova, e no CI (20 min) isso é ~1,4% das execuções. As seis asserções contra data server-side
+passaram a usar `date.today()` na hora, e `HOJE` ficou só para deslocamentos, com a razão escrita
+ao lado da definição nos quatro arquivos.
 
 > **Nota histórica.** Até 2026-07-29 esta seção terminava com a linha "Nenhum — os quatro itens
 > desta seção foram fechados em 2026-07-28". A execução da fatia F1 da modularização abriu os sete

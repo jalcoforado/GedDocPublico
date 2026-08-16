@@ -26,6 +26,12 @@ from app.schemas.frota import (
 from app.services import frota as frota_svc
 from app.services.provisioning_tenant import provisionar_tenant
 
+# `HOJE` é fixo no import de propósito: serve de BASE ESTÁVEL para deslocamentos
+# (`HOJE + timedelta(...)`) dentro de um teste. Não use em asserção contra data
+# gerada pelo SERVIDOR: a suíte roda por horas e, quando cruza a meia-noite, o
+# servidor devolve o dia seguinte e a comparação estoura. Aconteceu em
+# 2026-08-15→16, em cinco testes de frota, numa rodada de 7 h 22. Nesses casos
+# compare com `date.today()` avaliado NA HORA da asserção.
 HOJE = date.today()
 _placa_seq = itertools.count(1)
 
@@ -109,7 +115,7 @@ async def test_criar_manutencao_poe_veiculo_em_manutencao(admin_engine):
         m = await _criar_manut(admin_engine, t.id, v, tipo="corretiva")
         assert m.status == "aberta"
         assert m.tipo == "corretiva"
-        assert m.data_abertura == HOJE       # default server-side
+        assert m.data_abertura == date.today()  # default server-side; ver a nota de HOJE
         assert await _veiculo_situacao(admin_engine, v) == "manutencao"
     finally:
         await _cleanup(admin_engine, t.id)
@@ -153,7 +159,7 @@ async def test_iniciar_e_concluir_libera_veiculo(admin_engine):
                 payload=VeiculoManutencaoConcluir(custo_final=250.50),
             )
         assert concluida.status == "concluida"
-        assert concluida.data_conclusao == HOJE          # default server-side
+        assert concluida.data_conclusao == date.today()  # server-side; ver a nota de HOJE
         assert float(concluida.custo_final) == 250.50
         assert await _veiculo_situacao(admin_engine, v) == "disponivel"  # liberado
     finally:
