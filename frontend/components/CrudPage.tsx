@@ -42,8 +42,14 @@ export interface CrudColumn<T> {
 interface CrudPageProps<T extends { id: number }> {
   title: string;
   queryKey: any[];
-  /** Função que retorna `{items, total, page, page_size}` ou `T[]` direto. */
-  fetchList: () => Promise<{ items: T[]; total?: number } | T[]>;
+  /**
+   * Função que retorna `{items, total, page, page_size}` ou `T[]` direto.
+   * Recebe a página atual; respostas paginadas devem repassá-la à API
+   * (`page`), senão a navegação renderiza sempre a primeira página.
+   */
+  fetchList: (params: {
+    page: number;
+  }) => Promise<{ items: T[]; total?: number; page?: number; page_size?: number } | T[]>;
   createFn: (data: any) => Promise<T>;
   updateFn: (id: number, data: any) => Promise<T>;
   deleteFn: (id: number) => Promise<void>;
@@ -85,12 +91,19 @@ export function CrudPage<T extends { id: number }>({
   const [form, setForm] = useState<any>(emptyForm);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     onSearchChange?.(q);
   }, [q, onSearchChange]);
 
-  const listQ = useQuery({ queryKey, queryFn: fetchList });
+  // A página entra na queryKey para que páginas diferentes não colidam no
+  // cache; as mutations seguem invalidando por prefixo (`queryKey` do caller),
+  // o que alcança todas as páginas da família.
+  const listQ = useQuery({
+    queryKey: [...queryKey, { page }],
+    queryFn: () => fetchList({ page }),
+  });
 
   const createM = useMutation({
     mutationFn: (data: any) => createFn(data),
@@ -151,6 +164,24 @@ export function CrudPage<T extends { id: number }>({
     ? listQ.data
     : (listQ.data as { items: T[] } | undefined)?.items ?? [];
 
+  // Metadata real da resposta paginada; array simples (contrato legítimo de
+  // alguns call-sites) fica sem controles de paginação.
+  const meta =
+    listQ.data && !Array.isArray(listQ.data)
+      ? typeof listQ.data.total === "number" &&
+        typeof listQ.data.page_size === "number" &&
+        listQ.data.page_size > 0
+        ? { total: listQ.data.total, page_size: listQ.data.page_size }
+        : null
+      : null;
+  const lastPage = meta ? Math.max(1, Math.ceil(meta.total / meta.page_size)) : 1;
+
+  // Página órfã (ex.: exclusão do último item da última página): volta para a
+  // última página válida em vez de exibir um vazio falso.
+  useEffect(() => {
+    if (meta && page > lastPage) setPage(lastPage);
+  }, [meta, page, lastPage]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -163,7 +194,10 @@ export function CrudPage<T extends { id: number }>({
           <Input
             placeholder="Buscar..."
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setPage(1);
+            }}
             className="max-w-sm"
           />
         )}
@@ -236,6 +270,32 @@ export function CrudPage<T extends { id: number }>({
           ))}
         </TBody>
       </Table>
+
+      {meta && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            {meta.total} registros — página {page}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page === 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page >= lastPage}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Próxima
+            </Button>
+          </div>
+        </div>
+      )}
 
       <Dialog
         open={open}

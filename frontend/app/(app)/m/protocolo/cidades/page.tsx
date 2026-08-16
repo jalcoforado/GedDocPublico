@@ -14,7 +14,7 @@ export default function CidadesPage() {
     <CrudPage<Cidade>
       title="Cidades"
       queryKey={["cidades", q]}
-      fetchList={() => api.cidades.list({ q: q || undefined, page_size: 50 })}
+      fetchList={({ page }) => api.cidades.list({ q: q || undefined, page, page_size: 50 })}
       createFn={api.cidades.create}
       updateFn={api.cidades.update}
       deleteFn={api.cidades.remove}

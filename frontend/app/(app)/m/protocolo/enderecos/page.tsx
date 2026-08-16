@@ -22,7 +22,7 @@ export default function EnderecosPage() {
     <CrudPage<Endereco>
       title="Endereços"
       queryKey={["enderecos", q]}
-      fetchList={() => api.enderecos.list({ q: q || undefined, page_size: 50 })}
+      fetchList={({ page }) => api.enderecos.list({ q: q || undefined, page, page_size: 50 })}
       createFn={api.enderecos.create}
       updateFn={api.enderecos.update}
       deleteFn={api.enderecos.remove}

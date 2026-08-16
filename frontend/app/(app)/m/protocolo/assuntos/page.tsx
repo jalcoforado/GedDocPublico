@@ -17,7 +17,7 @@ export default function AssuntosPage() {
     <CrudPage<Assunto>
       title="Assuntos"
       queryKey={["assuntos", q]}
-      fetchList={() => api.assuntos.list({ q: q || undefined, page_size: 50 })}
+      fetchList={({ page }) => api.assuntos.list({ q: q || undefined, page, page_size: 50 })}
       createFn={api.assuntos.create}
       updateFn={api.assuntos.update}
       deleteFn={api.assuntos.remove}

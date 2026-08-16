@@ -17,7 +17,7 @@ export default function BairrosPage() {
     <CrudPage<Bairro>
       title="Bairros"
       queryKey={["bairros", q]}
-      fetchList={() => api.bairros.list({ q: q || undefined, page_size: 50 })}
+      fetchList={({ page }) => api.bairros.list({ q: q || undefined, page, page_size: 50 })}
       createFn={api.bairros.create}
       updateFn={api.bairros.update}
       deleteFn={api.bairros.remove}

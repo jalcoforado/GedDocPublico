@@ -17,7 +17,7 @@ export default function ManifestantesPage() {
     <CrudPage<Manifestante>
       title="Manifestantes"
       queryKey={["manifestantes", q]}
-      fetchList={() => api.manifestantes.list({ q: q || undefined, page_size: 50 })}
+      fetchList={({ page }) => api.manifestantes.list({ q: q || undefined, page, page_size: 50 })}
       createFn={api.manifestantes.create}
       updateFn={api.manifestantes.update}
       deleteFn={api.manifestantes.remove}
