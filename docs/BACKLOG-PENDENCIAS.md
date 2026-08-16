@@ -437,12 +437,33 @@ tests/test_permissoes_modulo.py ...F
 
 </details>
 
-### 1.0.66 A suíte de backend cresceu para além do teto do CI
+### 1.0.66 A suíte de backend cresceu para além do teto do CI — METADE ERA DUPLICATA
 
 O job levava 13–14 min contra um teto de 15; os ~40 testes da F1 empurraram por cima e o teto subiu
-para 30 (`c51e8a4`). **Subir de novo não é o conserto** — está escrito no próprio workflow. A suíte é
-serial de propósito: compartilha um único Postgres e os testes de RLS dependem disso. Paralelizar
-exige um banco por worker (`pytest-xdist` + schema/database por processo), ou fatiar o job.
+para 30 (`c51e8a4`). **Subir de novo não é o conserto** — está escrito no próprio workflow.
+
+Este item passou semanas propondo `pytest-xdist` com banco por worker — trabalho grande, arriscado,
+e que mexeria justamente nos testes de RLS, que dependem do Postgres compartilhado. **Ninguém tinha
+medido onde o tempo ia.** Medido em 2026-08-16, job `95111304477`:
+
+| passo | tempo |
+|---|---|
+| bootstrap inteiro (dump + migrations + seeds) | **35 s** |
+| `Run pytest` | 8 min 49 s |
+| `Coverage report` | **10 min 11 s** ← a mesma suíte de novo, instrumentada |
+
+O passo de cobertura rodava `pytest tests/` **inteiro pela segunda vez**. Mais da metade do job era
+duplicata, e o bootstrap — o suspeito óbvio — era 3% dele.
+
+**Fechado em 2026-08-16** juntando cobertura na mesma execução: ~19 min → ~10 min, sem tocar em
+paralelismo. Os dois runs já fechavam `1378 passed`, então o `|| true` do passo antigo não
+mascarava nada. Guarda em `tests/test_guarda_suite_unica_no_ci.py`, com controle para que apagar a
+cobertura não passe verde — duplicar a suíte **não quebra nada**, só custa, e por isso volta em
+silêncio.
+
+**Continua aberto** o crescimento em si: ~10 min contra teto de 30 dá folga por um bom tempo, mas a
+suíte segue serial por dependência real (um Postgres, RLS). Quando voltar a apertar, aí sim vale
+`pytest-xdist` com banco por worker — e a lição aqui é medir os passos antes de escolher o remédio.
 
 ### 1.0.7 As 9 transações da 0074 não estão concedidas a nenhum grupo
 
