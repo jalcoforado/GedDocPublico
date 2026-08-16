@@ -24,6 +24,12 @@ from app.schemas.frota import (
 from app.services import frota as frota_svc
 from app.services.provisioning_tenant import provisionar_tenant
 
+# `HOJE` é fixo no import de propósito: serve de BASE ESTÁVEL para deslocamentos
+# (`HOJE + timedelta(...)`) dentro de um teste. Não use em asserção contra data
+# gerada pelo SERVIDOR: a suíte roda por horas e, quando cruza a meia-noite, o
+# servidor devolve o dia seguinte e a comparação estoura. Aconteceu em
+# 2026-08-15→16, em cinco testes de frota, numa rodada de 7 h 22. Nesses casos
+# compare com `date.today()` avaliado NA HORA da asserção.
 HOJE = date.today()
 _placa_seq = itertools.count(1)
 
@@ -113,7 +119,7 @@ async def test_criar_vistoria_mesmo_tenant(admin_engine):
         assert vist.resultado == "aprovada"
         assert vist.pneus_ok is True
         assert vist.luzes_ok is False     # default
-        assert vist.data_vistoria == HOJE  # default server-side
+        assert vist.data_vistoria == date.today()  # default server-side; ver a nota de HOJE
     finally:
         await _cleanup(admin_engine, t.id)
 

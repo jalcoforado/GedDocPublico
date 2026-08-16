@@ -109,6 +109,112 @@ def _conta_tenants() -> int | None:
         conexao.close()
 
 
+def _conexao_admin():
+    import psycopg2
+
+    return psycopg2.connect(
+        host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user="ged_user", password=DB_PASS
+    )
+
+
+def _maior_id_de_tenant() -> int | None:
+    try:
+        conexao = _conexao_admin()
+    except Exception:
+        return None
+    try:
+        with conexao.cursor() as cur:
+            cur.execute("SELECT coalesce(max(id), 0) FROM aprimora_py.tenant")
+            return int(cur.fetchone()[0])
+    except Exception:
+        return None
+    finally:
+        conexao.close()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _limpa_tenants_do_modulo():
+    """Apaga os tenants criados durante o módulo (item 1.1.6) — o conserto.
+
+    **Por que aqui, e não nos ~69 arquivos.** Todos eles criam tenant chamando
+    `provisionar_tenant` direto e nenhum desfaz. Editar 69 arquivos entregaria a
+    mesma propriedade com 69 chances de esquecer uma; um teste que esqueça o
+    teardown continua verde, então o esquecimento não teria sintoma. Uma
+    fixture `autouse` no conftest não tem como ser esquecida.
+
+    **Por que escopo de MÓDULO, e não de função.** Duas razões, e a segunda é a
+    que decide:
+
+    - *Correção:* nenhuma fixture deste conftest vive além da função (conferido
+      um a um), então nenhum tenant precisa sobreviver ao módulo. Fosse por
+      função, um tenant criado numa fixture de módulo — se algum dia existir —
+      sumiria no meio do arquivo.
+    - *Custo:* apagar exige varrer as **96** tabelas com `tenant_id`, e nem
+      todas têm índice por ele. Por função seriam ~96 × 1.300 varreduras; por
+      módulo, ~96 × 100, com os ids em lote.
+
+    **`session_replication_role = replica`** pelo mesmo motivo do
+    `app.cli.limpar_tenants_de_teste`: `aprimora_py.tenant` recebe 97 FKs, 95
+    delas `NO ACTION`, e manter uma ordem topológica de 96 tabelas seria uma
+    lista que envelhece a cada migration.
+
+    **Só apaga o que ESTE módulo criou** — `id > ` o maior id de entrada. Nunca
+    alcança `sobral` nem tenant preexistente. O efeito colateral é que duas
+    sessões de teste simultâneas contra o mesmo banco apagariam tenant uma da
+    outra; a suíte é serial de propósito (um Postgres só, ver `1.0.66`).
+
+    Desligável com `PYTEST_NAO_LIMPAR_TENANT=1`, para depurar um teste olhando o
+    que ele deixou no banco.
+    """
+    if os.environ.get("PYTEST_NAO_LIMPAR_TENANT") == "1":
+        yield
+        return
+
+    maior_antes = _maior_id_de_tenant()
+    yield
+    if maior_antes is None:
+        return
+    try:
+        conexao = _conexao_admin()
+    except Exception:
+        return
+    try:
+        with conexao.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM aprimora_py.tenant WHERE id > %s", (maior_antes,)
+            )
+            ids = [linha[0] for linha in cur.fetchall()]
+            if not ids:
+                return
+            cur.execute("SET session_replication_role = replica")
+            cur.execute(
+                """
+                SELECT c.table_schema, c.table_name
+                FROM information_schema.columns c
+                JOIN pg_class pc ON pc.relname = c.table_name
+                JOIN pg_namespace pn
+                  ON pn.oid = pc.relnamespace AND pn.nspname = c.table_schema
+                WHERE c.column_name = 'tenant_id'
+                  AND pc.relkind = 'r'
+                  AND c.table_schema NOT IN ('pg_catalog', 'information_schema')
+                  AND NOT (c.table_schema = 'aprimora_py' AND c.table_name = 'tenant')
+                """
+            )
+            for schema, tabela in cur.fetchall():
+                cur.execute(
+                    f"DELETE FROM {schema}.{tabela} WHERE tenant_id = ANY(%s)", (ids,)
+                )
+            cur.execute("DELETE FROM aprimora_py.tenant WHERE id = ANY(%s)", (ids,))
+        conexao.commit()
+    except Exception:
+        # Limpeza que falha NÃO derruba o módulo: o contador de sessão continua
+        # denunciando o que sobrou, e teste vermelho por causa da faxina seria
+        # pior que o vazamento que ela conserta.
+        conexao.rollback()
+    finally:
+        conexao.close()
+
+
 _TENANTS_NO_INICIO: int | None = None
 
 
