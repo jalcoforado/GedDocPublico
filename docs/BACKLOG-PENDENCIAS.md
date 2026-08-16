@@ -632,10 +632,22 @@ Três decisões que não são óbvias ao ler o YAML:
   contra o antigo "meu código não está na VPS e não sei por quê", que é silencioso.
 - **`workflow_dispatch` passa direto pelo portão** — continua sendo o escape manual.
 
-**ABERTO, e é outro problema:** o `deploy.sh` faz `git reset --hard origin/main` na VPS, então o que
-sobe é o `main` **do momento do deploy**, não o SHA que foi testado. Commit novo que entre em `main`
-entre o fim dos testes e o deploy vai junto, sem ter passado pelo portão. Resolver exige o workflow
-passar o SHA e o `deploy.sh` fazer checkout dele.
+~~**ABERTO, e é outro problema:**~~ **FECHADO em 2026-08-16.** O `deploy.sh` fazia
+`git reset --hard origin/main` na VPS, então subia o `main` **do momento do deploy**, não o SHA
+testado: commit que entrasse em `main` entre o fim da suíte e o deploy ia junto, sem ter passado
+pelo portão. Dito de outro modo, **o portão aprovava um SHA e a VPS recebia outro** — e o deploy
+ficava verde nos dois casos.
+
+- O workflow passa `DEPLOY_SHA` (o `head_sha` do run que abriu o portão) e o `pull_code` reseta
+  nesse commit. Sem a variável — invocação manual no servidor — o comportamento antigo continua.
+- Guarda nas **duas** pontas (`test_guarda_portao_de_deploy.py`): quem passa e quem consome.
+  Remover qualquer uma reabre o buraco, e nenhuma das duas remoções teria sintoma.
+- **A primeira rodada depois desta mudança ainda ignora o `DEPLOY_SHA`**, e isso não é bug: o
+  `pull_code` sobrescreve o próprio `deploy.sh` enquanto o bash já o executa, e o `exec` de
+  re-execução só vem depois do pull. O pinning vale da segunda rodada em diante — mesma armadilha
+  já registrada no `CLAUDE.md`.
+- **Não verificado em execução real**, porque verificar exige um deploy. A prova aqui é estrutural
+  (guarda invertida) mais `bash -n` e validação do YAML.
 
 ### ~~1.1.4 21 testes de RLS vermelhos só na máquina — deriva de GRANT~~ — FECHADO em 2026-08-14
 

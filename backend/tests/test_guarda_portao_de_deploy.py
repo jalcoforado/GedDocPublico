@@ -176,3 +176,53 @@ def test_workflows_de_teste_rodam_em_push_para_main():
             "ele não roda, o portão o vê como `ausente` e barra o deploy — ou, "
             "se for o `Backend tests`, nem chega a existir deploy."
         )
+
+
+# ---------------------------------------------------------------------------
+# O SHA aprovado tem de ser o SHA que sobe (2026-08-16)
+#
+# O portão confere que os três workflows fecharam verdes **naquele SHA**, e o
+# `deploy.sh` jogava isso fora com `git reset --hard origin/main`: subia o
+# `main` do momento do deploy. Commit que entrasse em `main` entre o fim da
+# suíte e o deploy ia junto, sem nunca ter passado pelo portão — o portão
+# aprovava um SHA e a VPS recebia outro.
+#
+# É defeito SILENCIOSO nas duas direções: o deploy fica verde, e o commit não
+# testado roda em homologação sem nada apontar para isso. Por isso a guarda
+# cobre as duas pontas — quem passa (`deploy-vps.yml`) e quem consome
+# (`deploy.sh`) —, já que remover qualquer uma reabre o buraco.
+# ---------------------------------------------------------------------------
+DEPLOY_SH = Path(__file__).resolve().parents[2] / "scripts" / "deploy.sh"
+
+
+def test_workflow_passa_o_sha_aprovado_para_o_script():
+    _exige_workflows()
+    texto = DEPLOY.read_text(encoding="utf-8")
+    assert "export DEPLOY_SHA=" in texto, (
+        "O `deploy-vps.yml` parou de exportar DEPLOY_SHA. Sem ele o `deploy.sh` "
+        "cai em origin/main e a VPS volta a receber um SHA que o portão não "
+        "aprovou."
+    )
+    assert "workflow_run.head_sha" in texto, (
+        "DEPLOY_SHA precisa vir do `head_sha` do run que abriu o portão — é ele "
+        "que os três workflows aprovaram. Qualquer outra origem (github.ref, "
+        "topo do branch) reabre a janela."
+    )
+
+
+def test_script_de_deploy_usa_o_sha_recebido():
+    if not DEPLOY_SH.exists():
+        if os.getenv("CI"):
+            pytest.fail(f"`{DEPLOY_SH}` não encontrado COM CI=1.")
+        pytest.skip("scripts/ fora do alcance (container monta só ./backend).")
+    texto = DEPLOY_SH.read_text(encoding="utf-8")
+    assert "DEPLOY_SHA" in texto, (
+        "`pull_code` voltou a ignorar DEPLOY_SHA. O workflow passa a variável e "
+        "o script a descarta: o portão aprova um SHA e a VPS recebe outro."
+    )
+    # `origin/main` CONTINUA no arquivo, e é correto — é o fallback da invocação
+    # manual no servidor. O que não pode voltar é ele ser o único caminho.
+    assert 'git reset --hard "$alvo"' in texto, (
+        "O `reset` no SHA alvo sumiu de `pull_code`. Só sobrou o fallback, que "
+        "é o comportamento antigo."
+    )
