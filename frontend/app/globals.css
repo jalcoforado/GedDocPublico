@@ -399,11 +399,10 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Focus ring premium — não fica feio em qualquer cor de fundo */
+  /* Foco global: outline não deforma o controle nem empilha com o ring-* dos componentes */
   :focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 2px hsl(var(--bg)), 0 0 0 4px hsl(var(--ring) / 0.6);
-    border-radius: var(--radius-md);
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
   }
 
   /* Selection */
