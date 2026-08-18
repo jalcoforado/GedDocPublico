@@ -1,10 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download, Eye, Paperclip, Stamp, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
@@ -71,7 +74,7 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="text-sm text-gray-600">
+        <div className="text-sm text-muted-foreground">
           {processo.anexos.length} anexo{processo.anexos.length === 1 ? "" : "s"}
         </div>
         <div className="flex gap-2">
@@ -93,26 +96,33 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
       </div>
 
       {processo.anexos.length === 0 ? (
-        <p className="text-sm text-gray-500">Sem anexos.</p>
+        <EmptyState
+          icon={Paperclip}
+          title="Sem anexos"
+          description="Nenhum documento foi anexado a este processo."
+          className="p-6"
+        />
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border bg-card">
           {processo.anexos.map((a) => (
-            <li key={a.id} className="flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+            <li key={a.id} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium text-foreground">
-                  {a.descricao ?? "(sem descrição)"}
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-sm font-medium text-foreground">
+                    {a.descricao ?? "(sem descrição)"}
+                  </span>
+                  {!a.publico && <Badge intent="warning">sigiloso</Badge>}
                 </div>
-                <div className="text-xs text-muted-foreground">
+                <div className="truncate text-xs text-muted-foreground">
                   {tipoNome(a)} · {a.qtd_paginas ?? "?"} pág
-                  {a.publico ? "" : " · sigiloso"}
                   {a.e_doc ? ` · ${a.e_doc}` : ""}
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1 sm:shrink-0 sm:justify-end">
                 {isPdf(a) && (
                   <>
                     <Button
-                      variant="secondary"
+                      variant="ghost"
                       size="sm"
                       onClick={() =>
                         setViewer({
@@ -122,10 +132,11 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
                         })
                       }
                     >
+                      <Eye className="h-4 w-4" aria-hidden="true" />
                       Visualizar
                     </Button>
                     <Button
-                      variant="secondary"
+                      variant="ghost"
                       size="sm"
                       onClick={() =>
                         setViewer({
@@ -135,18 +146,21 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
                         })
                       }
                     >
+                      <Stamp className="h-4 w-4" aria-hidden="true" />
                       Carimbar
                     </Button>
                   </>
                 )}
-                <a
-                  href={anexoDownloadUrl(a.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-9 items-center rounded-md border border-transparent px-3 text-xs font-medium text-primary hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  Baixar
-                </a>
+                <Button variant="ghost" size="sm" asChild>
+                  <a
+                    href={anexoDownloadUrl(a.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Download className="h-4 w-4" aria-hidden="true" />
+                    Baixar
+                  </a>
+                </Button>
                 {a.id_anexo_processo != null && (
                   <AnexoDesentranhar
                     processoId={processo.id}
@@ -155,8 +169,9 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
                   />
                 )}
                 <Button
-                  variant="danger"
+                  variant="ghost"
                   size="sm"
+                  className="text-danger hover:bg-danger-soft hover:text-danger-soft-foreground focus-visible:ring-danger"
                   onClick={async () => {
                     const ok = await confirm({
                       title: "Excluir anexo",
@@ -167,6 +182,7 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
                     if (ok) deleteM.mutate(a.id);
                   }}
                 >
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
                   Excluir
                 </Button>
               </div>
@@ -290,7 +306,7 @@ function UploadDialog({
               if (f && !descricao) setDescricao(f.name);
             }}
             accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods"
-            className="block w-full text-sm text-gray-700 file:mr-3 file:rounded file:border-0 file:bg-aprimora file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white hover:file:bg-aprimora-light"
+            className="block w-full text-sm text-foreground file:mr-3 file:rounded-button file:border-0 file:bg-brand file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary-foreground hover:file:bg-brand-light"
           />
           {file && (
             <p className="mt-1 text-xs text-muted-foreground">
