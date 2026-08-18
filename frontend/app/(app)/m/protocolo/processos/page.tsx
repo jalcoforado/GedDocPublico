@@ -3,7 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, FileText, Lock, Pause, Plus, SearchX } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,39 @@ import { api, NIVEL_SIGILO_LABEL, type ProcessoListFilters } from "@/lib/api";
 
 const PAGE_SIZE = 20;
 
+// Filtros ↔ URL: a URL é a fonte de verdade, para que recarregar, compartilhar
+// e back/forward preservem a listagem. `ativos` ausente cai no default da
+// página (apenas ativos); links externos como `?id_unidade=` da home herdam
+// esse default sem precisar declará-lo.
+function filtrosDaUrl(sp: URLSearchParams): ProcessoListFilters {
+  const num = (k: string) => {
+    const n = Number(sp.get(k));
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+  const desde = sp.get("desde");
+  const ate = sp.get("ate");
+  return {
+    q: sp.get("q") ?? undefined,
+    id_assunto: num("id_assunto"),
+    id_unidade: num("id_unidade"),
+    desde: desde ? `${desde}T00:00:00` : undefined,
+    ate: ate ? `${ate}T23:59:59` : undefined,
+    apenas_ativos: sp.has("ativos") ? sp.get("ativos") === "1" : true,
+  };
+}
+
+function urlDosFiltros(f: ProcessoListFilters, page: number): string {
+  const sp = new URLSearchParams();
+  if (f.q) sp.set("q", f.q);
+  if (f.id_assunto) sp.set("id_assunto", String(f.id_assunto));
+  if (f.id_unidade) sp.set("id_unidade", String(f.id_unidade));
+  if (f.desde) sp.set("desde", f.desde.slice(0, 10));
+  if (f.ate) sp.set("ate", f.ate.slice(0, 10));
+  sp.set("ativos", f.apenas_ativos ? "1" : "0");
+  if (page > 1) sp.set("page", String(page));
+  return sp.toString();
+}
+
 function fmtDate(s: string) {
   const d = new Date(s);
   return (
@@ -30,11 +64,17 @@ function fmtDate(s: string) {
 }
 
 export default function ProcessosPage() {
-  const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState<ProcessoListFilters>({
-    apenas_ativos: true,
-  });
-  const [draft, setDraft] = useState<ProcessoListFilters>({});
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const page = Math.max(1, Number(searchParams.get("page")) || 1);
+  const filters = useMemo(() => filtrosDaUrl(searchParams), [searchParams]);
+  const [draft, setDraft] = useState<ProcessoListFilters>(filters);
+  // Reaproxima o formulário do que a URL diz após back/forward.
+  useEffect(() => {
+    setDraft(filters);
+  }, [filters]);
 
   const assuntosQ = useQuery({
     queryKey: ["assuntos-all"],
@@ -55,15 +95,17 @@ export default function ProcessosPage() {
       }),
   });
 
+  function navigate(f: ProcessoListFilters, p: number) {
+    const q = urlDosFiltros(f, p);
+    router.push(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  }
+
   function applyFilters() {
-    setPage(1);
-    setFilters({ ...draft, apenas_ativos: draft.apenas_ativos ?? false });
+    navigate({ ...draft, apenas_ativos: draft.apenas_ativos ?? false }, 1);
   }
 
   function clearFilters() {
-    setDraft({});
-    setFilters({});
-    setPage(1);
+    navigate({ apenas_ativos: false }, 1);
   }
 
   const totalPages = processosQ.data
@@ -281,7 +323,7 @@ export default function ProcessosPage() {
               variant="secondary"
               size="sm"
               disabled={page === 1}
-              onClick={() => setPage((p) => p - 1)}
+              onClick={() => navigate(filters, page - 1)}
             >
               Anterior
             </Button>
@@ -289,7 +331,7 @@ export default function ProcessosPage() {
               variant="secondary"
               size="sm"
               disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => navigate(filters, page + 1)}
             >
               Próxima
             </Button>
