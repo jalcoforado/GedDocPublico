@@ -35,18 +35,21 @@ const ACTION_LABELS: Record<string, string> = {
   "alvara.veiculo_desvinculado": "Veículo desvinculado",
 };
 
-const ACTION_COLORS: Record<string, string> = {
-  "alvara.criada": "bg-blue-100 text-blue-800",
-  "alvara.editada": "bg-yellow-100 text-yellow-800",
-  "alvara.renovada": "bg-green-100 text-green-800",
-  "alvara.finalizada": "bg-purple-100 text-purple-800",
-  "alvara.excluida": "bg-red-100 text-red-800",
-  "alvara.responsavel_adicionado": "bg-cyan-100 text-cyan-800",
-  "alvara.responsavel_removido": "bg-orange-100 text-orange-800",
-  "alvara.documento_adicionado": "bg-indigo-100 text-indigo-800",
-  "alvara.documento_removido": "bg-pink-100 text-pink-800",
-  "alvara.veiculo_vinculado": "bg-teal-100 text-teal-800",
-  "alvara.veiculo_desvinculado": "bg-amber-100 text-amber-800",
+const ACTION_INTENTS: Record<
+  string,
+  "neutral" | "success" | "danger" | "warning" | "info" | "brand"
+> = {
+  "alvara.criada": "info",
+  "alvara.editada": "warning",
+  "alvara.renovada": "success",
+  "alvara.finalizada": "brand",
+  "alvara.excluida": "danger",
+  "alvara.responsavel_adicionado": "info",
+  "alvara.responsavel_removido": "warning",
+  "alvara.documento_adicionado": "brand",
+  "alvara.documento_removido": "danger",
+  "alvara.veiculo_vinculado": "success",
+  "alvara.veiculo_desvinculado": "warning",
 };
 
 function formatDate(dateString: string): string {
@@ -63,17 +66,17 @@ function JsonDiff({ antes, depois }: any) {
   return (
     <div className="space-y-2 text-xs">
       {antes && (
-        <div className="rounded bg-red-50 p-2">
-          <p className="font-semibold text-red-800">Antes:</p>
-          <pre className="whitespace-pre-wrap break-words text-red-700">
+        <div className="rounded bg-danger-soft p-2">
+          <p className="font-semibold text-danger-soft-foreground">Antes:</p>
+          <pre className="whitespace-pre-wrap break-words text-danger-soft-foreground">
             {JSON.stringify(antes, null, 2)}
           </pre>
         </div>
       )}
       {depois && (
-        <div className="rounded bg-green-50 p-2">
-          <p className="font-semibold text-green-800">Depois:</p>
-          <pre className="whitespace-pre-wrap break-words text-green-700">
+        <div className="rounded bg-success-soft p-2">
+          <p className="font-semibold text-success-soft-foreground">Depois:</p>
+          <pre className="whitespace-pre-wrap break-words text-success-soft-foreground">
             {JSON.stringify(depois, null, 2)}
           </pre>
         </div>
@@ -125,7 +128,7 @@ export default function AlvaraDetailPage({ params }: PageParams) {
 
   if (!alvara) {
     return (
-      <div className="p-6 text-center text-red-600">
+      <div className="p-6 text-center text-danger">
         Alvará não encontrado
       </div>
     );
@@ -153,32 +156,32 @@ export default function AlvaraDetailPage({ params }: PageParams) {
 
       {/* Informações do Alvará */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <div className="rounded-lg border bg-white p-6 shadow-sm">
+        <div className="rounded-card border border-border bg-card p-6 shadow-card">
           <h3 className="mb-4 text-lg font-semibold">Informações Básicas</h3>
           <dl className="space-y-3">
             <div>
-              <dt className="text-sm font-medium text-gray-600">Número</dt>
-              <dd className="text-base text-gray-900">{alvara.numero_alvara}</dd>
+              <dt className="text-sm font-medium text-muted-foreground">Número</dt>
+              <dd className="text-base text-foreground">{alvara.numero_alvara}</dd>
             </div>
             <div>
-              <dt className="text-sm font-medium text-gray-600">
+              <dt className="text-sm font-medium text-muted-foreground">
                 Tipo de Serviço
               </dt>
-              <dd className="text-base text-gray-900">
+              <dd className="text-base text-foreground">
                 {alvara.tipo_servico}
               </dd>
             </div>
             <div>
-              <dt className="text-sm font-medium text-gray-600">Data Início</dt>
-              <dd className="text-base text-gray-900">
+              <dt className="text-sm font-medium text-muted-foreground">Data Início</dt>
+              <dd className="text-base text-foreground">
                 {alvara.data_inicio
                   ? new Date(alvara.data_inicio).toLocaleDateString("pt-BR")
                   : "—"}
               </dd>
             </div>
             <div>
-              <dt className="text-sm font-medium text-gray-600">Validade</dt>
-              <dd className="text-base text-gray-900">
+              <dt className="text-sm font-medium text-muted-foreground">Validade</dt>
+              <dd className="text-base text-foreground">
                 {alvara.data_validade
                   ? new Date(alvara.data_validade).toLocaleDateString("pt-BR")
                   : "Indefinido"}
@@ -187,28 +190,28 @@ export default function AlvaraDetailPage({ params }: PageParams) {
           </dl>
         </div>
 
-        <div className="rounded-lg border bg-white p-6 shadow-sm">
+        <div className="rounded-card border border-border bg-card p-6 shadow-card">
           <h3 className="mb-4 text-lg font-semibold">Relacionamentos</h3>
           <dl className="space-y-3">
             <div>
-              <dt className="text-sm font-medium text-gray-600">
+              <dt className="text-sm font-medium text-muted-foreground">
                 Permissionário
               </dt>
-              <dd className="text-base text-gray-900">
+              <dd className="text-base text-foreground">
                 {alvara.id_permissionario ? `ID: ${alvara.id_permissionario}` : "—"}
               </dd>
             </div>
             <div>
-              <dt className="text-sm font-medium text-gray-600">Empresa</dt>
-              <dd className="text-base text-gray-900">
+              <dt className="text-sm font-medium text-muted-foreground">Empresa</dt>
+              <dd className="text-base text-foreground">
                 {alvara.id_empresa ? `ID: ${alvara.id_empresa}` : "—"}
               </dd>
             </div>
             <div>
-              <dt className="text-sm font-medium text-gray-600">
+              <dt className="text-sm font-medium text-muted-foreground">
                 Renovado De
               </dt>
-              <dd className="text-base text-gray-900">
+              <dd className="text-base text-foreground">
                 {alvara.renovado_de ? `Alvará ${alvara.renovado_de}` : "Original"}
               </dd>
             </div>
@@ -217,8 +220,8 @@ export default function AlvaraDetailPage({ params }: PageParams) {
       </div>
 
       {/* Veículos */}
-      <div className="rounded-lg border bg-white shadow-sm">
-        <div className="border-b px-6 py-4 flex items-center justify-between">
+      <div className="rounded-card border border-border bg-card shadow-card">
+        <div className="border-b border-border px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Truck className="h-5 w-5" />
             <h3 className="text-lg font-semibold">Veículos Vinculados</h3>
@@ -233,8 +236,8 @@ export default function AlvaraDetailPage({ params }: PageParams) {
       </div>
 
       {/* Histórico de Auditoria */}
-      <div className="rounded-lg border bg-white shadow-sm">
-        <div className="border-b px-6 py-4">
+      <div className="rounded-card border border-border bg-card shadow-card">
+        <div className="border-b border-border px-6 py-4">
           <div className="flex items-center gap-2">
             <History className="h-5 w-5" />
             <h3 className="text-lg font-semibold">Histórico de Auditoria</h3>
@@ -242,7 +245,7 @@ export default function AlvaraDetailPage({ params }: PageParams) {
         </div>
 
         {auditoriaLoading ? (
-          <div className="p-6 text-center text-gray-600">
+          <div className="p-6 text-center text-muted-foreground">
             Carregando histórico...
           </div>
         ) : !auditoria || auditoria.eventos.length === 0 ? (
@@ -255,21 +258,16 @@ export default function AlvaraDetailPage({ params }: PageParams) {
           </div>
         ) : (
           <>
-            <div className="divide-y">
+            <div className="divide-y divide-border">
               {auditoria.eventos.map((evento) => (
                 <div key={evento.id} className="px-6 py-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1">
                       <div className="mb-2 flex items-center gap-2">
-                        <Badge
-                          className={
-                            ACTION_COLORS[evento.acao] ||
-                            "bg-gray-100 text-gray-800"
-                          }
-                        >
+                        <Badge intent={ACTION_INTENTS[evento.acao] || "neutral"}>
                           {ACTION_LABELS[evento.acao] || evento.acao}
                         </Badge>
-                        <span className="text-xs text-gray-600">
+                        <span className="text-xs text-muted-foreground">
                           {formatDate(evento.criado_em)}
                         </span>
                       </div>
@@ -288,8 +286,8 @@ export default function AlvaraDetailPage({ params }: PageParams) {
 
             {/* Paginação */}
             {auditoria.total && auditoria.total > LIMIT && (
-              <div className="border-t px-6 py-4 flex items-center justify-between">
-                <div className="text-sm text-gray-600">
+              <div className="border-t border-border px-6 py-4 flex items-center justify-between">
+                <div className="text-sm text-muted-foreground">
                   Total: {auditoria.total} eventos
                 </div>
                 <div className="flex gap-2">
