@@ -11,6 +11,7 @@ import {
   Inbox,
   Loader2,
   PenSquare,
+  RefreshCw,
   Search,
   Sparkles,
   TrendingUp,
@@ -127,6 +128,11 @@ export default function HomePage() {
     vencendoPrazo > 0 ||
     naoLidas > 0;
 
+  // Com qualquer contador falho, "sem pendências" seria uma afirmação falsa:
+  // o número pode existir e não ter carregado.
+  const algumaFalha =
+    assinaturasQ.isError || alertasQ.isError || vencendoQ.isError || notifQ.isError;
+
   return (
     <div className="space-y-7">
       <GreetingSection
@@ -135,6 +141,7 @@ export default function HomePage() {
         tenantName={branding?.nome ?? null}
         agora={agora}
         algumaPendencia={algumaPendencia}
+        algumaFalha={algumaFalha}
       />
 
       {/* Ações pendentes */}
@@ -143,8 +150,13 @@ export default function HomePage() {
           <h2 className="font-display text-lg font-semibold tracking-tight text-foreground">
             O que precisa de você
           </h2>
-          <span className="text-[10px] uppercase tracking-[0.15em] text-foreground-subtle">
-            atualizado agora
+          <span
+            className={cn(
+              "text-[10px] uppercase tracking-[0.15em]",
+              algumaFalha ? "text-warning" : "text-foreground-subtle",
+            )}
+          >
+            {algumaFalha ? "alguns dados não carregaram" : "atualizado agora"}
           </span>
         </header>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -160,6 +172,8 @@ export default function HomePage() {
             icon={FileSignature}
             intent="primary"
             loading={assinaturasQ.isLoading}
+            error={assinaturasQ.isError}
+            onRetry={() => assinaturasQ.refetch()}
           />
           <ActionCard
             href="/m/protocolo/workflow"
@@ -173,6 +187,8 @@ export default function HomePage() {
             icon={AlertTriangle}
             intent="warning"
             loading={alertasQ.isLoading}
+            error={alertasQ.isError}
+            onRetry={() => alertasQ.refetch()}
           />
           <ActionCard
             href="/m/protocolo/protocolo/vencendo-prazo"
@@ -186,6 +202,8 @@ export default function HomePage() {
             icon={Archive}
             intent="success"
             loading={vencendoQ.isLoading}
+            error={vencendoQ.isError}
+            onRetry={() => vencendoQ.refetch()}
           />
           <ActionCard
             href="/perfil"
@@ -199,6 +217,8 @@ export default function HomePage() {
             icon={Bell}
             intent="info"
             loading={notifQ.isLoading}
+            error={notifQ.isError}
+            onRetry={() => notifQ.refetch()}
           />
         </div>
       </section>
@@ -210,6 +230,8 @@ export default function HomePage() {
           processos={processosUnidadeQ.data?.items ?? []}
           total={processosUnidadeQ.data?.total ?? 0}
           loading={processosUnidadeQ.isLoading}
+          error={processosUnidadeQ.isError}
+          onRetry={() => processosUnidadeQ.refetch()}
         />
         <AtalhosSection />
       </div>
@@ -227,12 +249,14 @@ function GreetingSection({
   tenantName,
   agora,
   algumaPendencia,
+  algumaFalha,
 }: {
   userName: string;
   isSuperUser: boolean;
   tenantName: string | null;
   agora: Date;
   algumaPendencia: boolean;
+  algumaFalha: boolean;
 }) {
   const primeiroNome = userName.split(/\s+/)[0] || userName;
   const saudacao = saudacaoPorHora(agora);
@@ -271,7 +295,9 @@ function GreetingSection({
           <p className="mt-2 max-w-2xl text-sm text-foreground-muted">
             {algumaPendencia
               ? "Algumas coisas precisam de você hoje. Comece por onde fizer sentido."
-              : "Sem pendências críticas no momento. Bom trabalho."}
+              : algumaFalha
+                ? "Não foi possível carregar algumas pendências. Verifique os cartões abaixo."
+                : "Sem pendências críticas no momento. Bom trabalho."}
           </p>
         </div>
 
@@ -335,6 +361,8 @@ function ActionCard({
   icon: Icon,
   intent,
   loading,
+  error,
+  onRetry,
 }: {
   href: string;
   label: string;
@@ -343,9 +371,50 @@ function ActionCard({
   icon: React.ComponentType<{ className?: string }>;
   intent: Intent;
   loading?: boolean;
+  error?: boolean;
+  onRetry?: () => void;
 }) {
   const style = INTENT_STYLES[intent];
   const zerado = count === 0;
+
+  // Falhou: sem número confiável, o card vira aviso com retry — não Link,
+  // para não aninhar botão dentro de âncora.
+  if (error) {
+    return (
+      <div className="relative flex flex-col gap-3 overflow-hidden rounded-xl border border-danger/40 bg-card p-4 shadow-xs">
+        <span
+          aria-hidden="true"
+          className="absolute left-0 top-0 h-full w-1 bg-danger opacity-100"
+        />
+        <div className="flex items-start justify-between gap-2">
+          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-danger/10 text-danger">
+            <Icon className="h-4 w-4" aria-hidden="true" />
+          </span>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground-subtle">
+            {label}
+          </p>
+          <p className="mt-0.5 font-display text-4xl font-semibold leading-none text-foreground-subtle">
+            —
+          </p>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-danger">Não foi possível carregar.</p>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground hover:bg-muted"
+            >
+              <RefreshCw className="h-3 w-3" aria-hidden="true" />
+              Tentar novamente
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Link
@@ -401,7 +470,7 @@ function ActionCard({
       </div>
 
       <p className="text-xs text-foreground-muted">
-        {count === 0 ? "tudo em dia" : hint}
+        {loading ? "carregando…" : count === 0 ? "tudo em dia" : hint}
       </p>
     </Link>
   );
@@ -426,11 +495,15 @@ function UnidadeSection({
   processos,
   total,
   loading,
+  error,
+  onRetry,
 }: {
   idUnidade: number | null | undefined;
   processos: ProcessoMin[];
   total: number;
   loading: boolean;
+  error?: boolean;
+  onRetry?: () => void;
 }) {
   return (
     <section className="rounded-xl border border-border bg-card shadow-xs">
@@ -473,12 +546,29 @@ function UnidadeSection({
             <Loader2 className="mr-1 inline h-4 w-4 animate-spin" /> Carregando…
           </p>
         )}
-        {idUnidade && !loading && processos.length === 0 && (
+        {idUnidade && !loading && error && (
+          <div className="flex flex-col items-center gap-3 px-3 py-6 text-center">
+            <p className="text-sm text-danger">
+              Não foi possível carregar os processos da sua unidade.
+            </p>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                <RefreshCw className="h-3 w-3" aria-hidden="true" />
+                Tentar novamente
+              </button>
+            )}
+          </div>
+        )}
+        {idUnidade && !loading && !error && processos.length === 0 && (
           <p className="px-3 py-6 text-center text-sm text-foreground-muted">
             Nenhum processo ativo passando agora.
           </p>
         )}
-        {processos.length > 0 && (
+        {!error && processos.length > 0 && (
           <ul className="divide-y divide-border">
             {processos.map((p) => (
               <li key={p.id}>
