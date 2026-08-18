@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Bar,
   BarChart,
@@ -28,13 +28,13 @@ import {
 } from "recharts";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import { useToast } from "@/components/ui/toast";
 import { api, type ComposicaoItem, type StatusDebito } from "@/lib/api";
 import { DEBITO_STATUS_BADGE } from "@/components/pagamentos/statusDebito";
 import { cn } from "@/lib/utils";
@@ -195,20 +195,12 @@ function ComposicaoChart({ titulo, itens }: { titulo: string; itens: ComposicaoI
 
 export default function PagamentosDashboardPage() {
   const [meses, setMeses] = useState(12);
-  const toast = useToast();
   const router = useRouter();
 
   const q = useQuery({
     queryKey: ["pag-dashboard", meses],
     queryFn: () => api.pagamentos.dashboard(meses),
   });
-
-  useEffect(() => {
-    if (q.isError) {
-      toast.error((q.error as Error)?.message ?? "Erro ao carregar dashboard financeiro.");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q.isError]);
 
   if (q.isLoading) {
     return (
@@ -228,11 +220,27 @@ export default function PagamentosDashboardPage() {
     );
   }
 
-  if (!q.data) {
+  if (q.isError || !q.data) {
+    // Erro persistente (não toast): fica na tela até o retry dar certo.
+    // Mesmo padrão do launcher de módulos — mensagem clara + "Tentar novamente".
     return (
-      <div className="rounded-lg border border-danger/40 bg-danger-soft p-4 text-sm text-danger-soft-foreground">
-        Não foi possível carregar o dashboard financeiro.
-      </div>
+      <EmptyState
+        icon={AlertCircle}
+        title="Não foi possível carregar o dashboard financeiro"
+        description={
+          (q.error as Error | null)?.message ??
+          "Verifique sua conexão e tente novamente."
+        }
+        action={
+          <Button
+            variant="secondary"
+            onClick={() => q.refetch()}
+            disabled={q.isRefetching}
+          >
+            {q.isRefetching ? "Carregando…" : "Tentar novamente"}
+          </Button>
+        }
+      />
     );
   }
 
