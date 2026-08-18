@@ -1,10 +1,11 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, FileMinus, Loader2, ScrollText, X } from "lucide-react";
-import { useState } from "react";
+import { AlertTriangle, FileMinus, Loader2, ScrollText } from "lucide-react";
+import { useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -63,6 +64,7 @@ function DesentranharDialog({
 }: Props & { onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const formId = useId();
   const [motivo, setMotivo] = useState("");
   const [autoridade, setAutoridade] = useState("");
 
@@ -97,44 +99,62 @@ function DesentranharDialog({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Desentranhar documento do processo"
+      footer={
+        <>
+          <span className="mr-auto flex items-center gap-1 self-center text-[10px] text-foreground-muted">
+            <ScrollText className="h-3 w-3" aria-hidden="true" />
+            Audit + termo PDF gerados na ação
+          </span>
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button
+            type="submit"
+            form={formId}
+            disabled={
+              mutateM.isPending ||
+              motivo.trim().length < 3 ||
+              autoridade.trim().length < 2
+            }
+            className="bg-danger hover:bg-danger/90 text-danger-foreground"
+          >
+            {mutateM.isPending && (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />
+            )}
+            <FileMinus className="mr-1 h-4 w-4" aria-hidden="true" />
+            Desentranhar
+          </Button>
+        </>
+      }
+    >
       <form
+        id={formId}
         onSubmit={(e) => {
           e.preventDefault();
           mutateM.mutate();
         }}
-        className="w-full max-w-lg overflow-hidden rounded-xl border border-danger/30 bg-card shadow-xl animate-scale-in"
+        className="space-y-4"
       >
-        {/* Header severo */}
-        <header className="flex items-start gap-3 border-b border-danger/30 bg-danger/5 px-5 py-4">
+        {/* Aviso severo: operação formal com efeito em audit + arquivo físico */}
+        <div className="flex items-start gap-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2.5">
           <span
             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-danger/10 text-danger"
             aria-hidden="true"
           >
             <AlertTriangle className="h-4 w-4" />
           </span>
-          <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold tracking-tight text-foreground">
-              Desentranhar documento do processo
-            </h3>
-            <p className="mt-0.5 text-xs text-foreground-muted">
-              Operação formal. Gera termo PDF que vai pro audit log e ao arquivo
-              físico. O documento <strong>não é destruído</strong> — permanece
-              arquivado em separado.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-foreground-muted hover:bg-surface-2"
-            aria-label="Fechar"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </header>
+          <p className="text-xs text-foreground-muted">
+            Operação formal. Gera termo PDF que vai pro audit log e ao arquivo
+            físico. O documento <strong>não é destruído</strong> — permanece
+            arquivado em separado.
+          </p>
+        </div>
 
-        <div className="space-y-4 px-5 py-4">
-          {descricaoAnexo && (
+        {descricaoAnexo && (
             <div className="rounded-md border border-border bg-surface-1 px-3 py-2">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
                 Documento
@@ -174,35 +194,7 @@ function DesentranharDialog({
               Aparece no termo PDF.
             </p>
           </div>
-        </div>
-
-        <footer className="flex items-center justify-between gap-2 border-t border-border bg-surface-1 px-5 py-3">
-          <span className="flex items-center gap-1 text-[10px] text-foreground-muted">
-            <ScrollText className="h-3 w-3" aria-hidden="true" />
-            Audit + termo PDF gerados na ação
-          </span>
-          <div className="flex gap-2">
-            <Button type="button" variant="secondary" onClick={onClose}>
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              disabled={
-                mutateM.isPending ||
-                motivo.trim().length < 3 ||
-                autoridade.trim().length < 2
-              }
-              className="bg-danger hover:bg-danger/90 text-danger-foreground"
-            >
-              {mutateM.isPending && (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />
-              )}
-              <FileMinus className="mr-1 h-4 w-4" aria-hidden="true" />
-              Desentranhar
-            </Button>
-          </div>
-        </footer>
       </form>
-    </div>
+    </Dialog>
   );
 }

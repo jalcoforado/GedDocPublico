@@ -1,10 +1,11 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpenText, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { BookOpenText, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -222,6 +223,7 @@ function VolumeForm({
   onSuccess: () => void;
 }) {
   const toast = useToast();
+  const formId = useId();
   const [numero, setNumero] = useState(editing?.numero ?? numeroSugerido);
   const [paginaInicial, setPaginaInicial] = useState<string>(
     editing?.pagina_inicial != null ? String(editing.pagina_inicial) : "",
@@ -257,28 +259,33 @@ function VolumeForm({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
+    <Dialog
+      open
+      onClose={onClose}
+      title={editing ? `Editar volume ${editing.numero}` : "Novo volume"}
+      size="sm"
+      footer={
+        <>
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button type="submit" form={formId} disabled={saveM.isPending}>
+            {saveM.isPending && (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />
+            )}
+            {editing ? "Salvar" : "Criar"}
+          </Button>
+        </>
+      }
+    >
       <form
+        id={formId}
         onSubmit={(e) => {
           e.preventDefault();
           saveM.mutate();
         }}
-        className="w-full max-w-md space-y-3 rounded-xl border border-border bg-card p-5 shadow-xl animate-scale-in"
+        className="space-y-3"
       >
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">
-            {editing ? `Editar volume ${editing.numero}` : "Novo volume"}
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-foreground-muted hover:bg-surface-2"
-            aria-label="Fechar"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
         <div className="grid grid-cols-3 gap-3">
           <div>
             <Label htmlFor="vol-num">
@@ -326,19 +333,7 @@ function VolumeForm({
             maxLength={500}
           />
         </div>
-
-        <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button type="submit" disabled={saveM.isPending}>
-            {saveM.isPending && (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />
-            )}
-            {editing ? "Salvar" : "Criar"}
-          </Button>
-        </div>
       </form>
-    </div>
+    </Dialog>
   );
 }

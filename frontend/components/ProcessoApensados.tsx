@@ -11,11 +11,12 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { Dialog } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useConfirm } from "@/components/ui/confirm";
@@ -356,6 +357,7 @@ function ApensarDialog({
   onSuccess: () => void;
 }) {
   const toast = useToast();
+  const formId = useId();
   const [idPrincipal, setIdPrincipal] = useState<number | null>(null);
   const [motivo, setMotivo] = useState("");
 
@@ -394,25 +396,39 @@ function ApensarDialog({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Apensar ${numeroProcesso}`}
+      footer={
+        <>
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button
+            type="submit"
+            form={formId}
+            disabled={
+              idPrincipal == null || motivo.trim().length < 3 || apensarM.isPending
+            }
+          >
+            {apensarM.isPending && (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />
+            )}
+            <Paperclip className="mr-1 h-4 w-4" aria-hidden="true" />
+            Apensar
+          </Button>
+        </>
+      }
+    >
       <form
+        id={formId}
         onSubmit={(e) => {
           e.preventDefault();
           apensarM.mutate();
         }}
-        className="w-full max-w-lg space-y-3 rounded-xl border border-border bg-card p-5 shadow-xl animate-scale-in"
+        className="space-y-3"
       >
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Apensar {numeroProcesso}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-foreground-muted hover:bg-surface-2"
-            aria-label="Fechar"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
         <p className="text-xs text-foreground-muted">
           Este processo ({numeroProcesso}) passará a ser apensado (filho) do
           processo escolhido abaixo. Termo de apensamento é gerado automaticamente.
@@ -442,25 +458,7 @@ function ApensarDialog({
             placeholder="Ex: documentos do mesmo objeto, mesmo manifestante, mesma licitação…"
           />
         </div>
-
-        <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button
-            type="submit"
-            disabled={
-              idPrincipal == null || motivo.trim().length < 3 || apensarM.isPending
-            }
-          >
-            {apensarM.isPending && (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />
-            )}
-            <Paperclip className="mr-1 h-4 w-4" aria-hidden="true" />
-            Apensar
-          </Button>
-        </div>
       </form>
-    </div>
+    </Dialog>
   );
 }
