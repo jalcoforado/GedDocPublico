@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, CheckCheck } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { notificacoesApi, type Notificacao } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,8 @@ export function NotificacoesBell() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement | null>(null);
+  const botaoRef = useRef<HTMLButtonElement | null>(null);
+  const popoverId = useId();
 
   const q = useQuery({
     queryKey: ["notificacoes", "me"],
@@ -39,16 +41,27 @@ export function NotificacoesBell() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notificacoes", "me"] }),
   });
 
-  // Fecha ao clicar fora
+  // Fecha ao clicar fora ou por ESC (mesmo padrão do AvatarDropdown); no ESC
+  // o foco volta ao sino, para não ficar perdido num painel que já sumiu.
   useEffect(() => {
     if (!open) return;
-    function handler(e: MouseEvent) {
+    function onClick(e: MouseEvent) {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setOpen(false);
+        botaoRef.current?.focus();
+      }
+    }
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open]);
 
   const count = q.data?.nao_lidas ?? 0;
@@ -61,17 +74,19 @@ export function NotificacoesBell() {
   return (
     <div className="relative" ref={popoverRef}>
       <button
+        ref={botaoRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label="Notificações"
+        aria-label={count > 0 ? `Notificações, ${count} não lidas` : "Notificações"}
         aria-haspopup="true"
         aria-expanded={open}
+        aria-controls={open ? popoverId : undefined}
         className="relative inline-flex h-11 w-11 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <Bell className="h-5 w-5" aria-hidden="true" />
         {count > 0 && (
           <span
-            aria-label={`${count} não lidas`}
+            aria-hidden="true"
             className="absolute right-1.5 top-1.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold leading-none text-danger-foreground"
           >
             {count > 99 ? "99+" : count}
@@ -81,9 +96,10 @@ export function NotificacoesBell() {
 
       {open && (
         <div
-          role="dialog"
+          id={popoverId}
+          role="region"
           aria-label="Notificações"
-          className="absolute right-0 top-full z-50 mt-2 w-[360px] overflow-hidden rounded-md border border-border bg-card shadow-lg"
+          className="fixed inset-x-3 top-16 z-50 overflow-hidden rounded-md border border-border bg-card shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[360px] sm:max-w-[calc(100vw-2rem)]"
         >
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <span className="text-sm font-semibold">Notificações</span>
@@ -100,7 +116,7 @@ export function NotificacoesBell() {
             )}
           </div>
 
-          <div className="max-h-[420px] overflow-y-auto">
+          <div className="max-h-[min(420px,calc(100dvh-8rem))] overflow-y-auto">
             {q.isLoading && (
               <div className="px-3 py-6 text-center text-sm text-muted-foreground">
                 Carregando…
