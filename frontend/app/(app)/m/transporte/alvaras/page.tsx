@@ -93,6 +93,14 @@ function nullify(v: string): string | null {
   return t === "" ? null : t;
 }
 
+// Formata data ISO (YYYY-MM-DD) para exibição pt-BR sem passar por `new Date`:
+// o parse de data-sem-hora é UTC, e em UTC-3 a tela mostraria o dia anterior.
+function formatarData(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  return y && m && d ? `${d}/${m}/${y}` : iso;
+}
+
 function isExpired(dataValidade: string | null | undefined): boolean {
   if (!dataValidade) return false;
   const today = new Date().toISOString().split("T")[0];
@@ -562,7 +570,7 @@ export default function AlvarasPage() {
                         <Badge intent="danger">Expirado</Badge>
                       )}
                       <span className={isExpired(a.data_validade) ? "line-through text-muted-foreground" : ""}>
-                        {a.data_validade}
+                        {formatarData(a.data_validade)}
                       </span>
                     </div>
                   ) : (
@@ -642,7 +650,7 @@ export default function AlvarasPage() {
       >
         <div className="space-y-4">
           {err && (
-            <div className="rounded bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+            <div role="alert" className="rounded border border-danger/40 bg-danger-soft p-3 text-sm text-danger-soft-foreground">
               {err}
             </div>
           )}
@@ -749,14 +757,14 @@ export default function AlvarasPage() {
       >
         <div className="space-y-4">
           {renovarErr && (
-            <div className="rounded bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+            <div role="alert" className="rounded border border-danger/40 bg-danger-soft p-3 text-sm text-danger-soft-foreground">
               {renovarErr}
             </div>
           )}
 
           {selectedAlvaraToRenew && (
-            <div className="rounded border border-amber-200 bg-amber-50 p-4">
-              <div className="text-sm font-medium text-amber-900 mb-2">Alvará Original</div>
+            <div className="rounded border border-warning/40 bg-warning-soft p-4">
+              <div className="text-sm font-medium text-warning-soft-foreground mb-2">Alvará Original</div>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <span className="text-muted-foreground">Número:</span> {selectedAlvaraToRenew.numero_alvara}
@@ -766,7 +774,9 @@ export default function AlvarasPage() {
                 </div>
                 <div>
                   <span className="text-muted-foreground">Válido até:</span>{" "}
-                  <span className="line-through text-red-600 font-semibold">{selectedAlvaraToRenew.data_validade}</span>
+                  <span className="line-through text-danger font-semibold">
+                    {formatarData(selectedAlvaraToRenew.data_validade)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -814,7 +824,7 @@ export default function AlvarasPage() {
       >
         <div className="space-y-4">
           {docErr && (
-            <div className="rounded bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+            <div role="alert" className="rounded border border-danger/40 bg-danger-soft p-3 text-sm text-danger-soft-foreground">
               {docErr}
             </div>
           )}
@@ -926,7 +936,7 @@ export default function AlvarasPage() {
       >
         <div className="space-y-4">
           {respErr && (
-            <div className="rounded bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+            <div role="alert" className="rounded border border-danger/40 bg-danger-soft p-3 text-sm text-danger-soft-foreground">
               {respErr}
             </div>
           )}
