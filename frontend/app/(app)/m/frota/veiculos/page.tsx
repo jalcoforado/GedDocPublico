@@ -1,8 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Car, FileText, Inbox, Plus, Settings2 } from "lucide-react";
-import { useState } from "react";
+import { Car, FileText, Inbox, Plus, SearchX, Settings2 } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -98,6 +98,8 @@ export default function VeiculosPage() {
   const toast = useToast();
   const confirm = useConfirm();
 
+  const [busca, setBusca] = useState("");
+  const [situacaoFiltro, setSituacaoFiltro] = useState<string>("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Veiculo | null>(null);
   const [form, setForm] = useState<VeiculoForm>(EMPTY);
@@ -112,6 +114,18 @@ export default function VeiculosPage() {
   const unidades = unidadesQ.data?.items ?? [];
   const unidadeNome = (id: number | null) =>
     unidades.find((u) => u.id === id)?.unidade_trabalho ?? "—";
+
+  const veiculos = veiculosQ.data ?? [];
+  const filtrados = useMemo(() => {
+    const q = busca.trim().toLowerCase();
+    return veiculos.filter((v) => {
+      if (situacaoFiltro && v.situacao !== situacaoFiltro) return false;
+      if (!q) return true;
+      return [v.placa, v.marca, v.modelo, v.renavam, v.chassi]
+        .some((campo) => campo?.toLowerCase().includes(q));
+    });
+  }, [veiculos, busca, situacaoFiltro]);
+  const temFiltroAtivo = busca.trim() !== "" || situacaoFiltro !== "";
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["frota-veiculos"] });
 
@@ -216,7 +230,36 @@ export default function VeiculosPage() {
         }
       />
 
-      {!veiculosQ.isLoading && (veiculosQ.data?.length ?? 0) === 0 ? (
+      {(veiculosQ.isLoading || veiculos.length > 0) && (
+        <div className="flex flex-wrap gap-3">
+          <div>
+            <Label htmlFor="f_situacao">Situação</Label>
+            <Select
+              id="f_situacao"
+              value={situacaoFiltro}
+              onChange={(e) => setSituacaoFiltro(e.target.value)}
+            >
+              <option value="">Todas</option>
+              {SITUACOES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="min-w-[200px] flex-1">
+            <Label htmlFor="f_busca">Busca</Label>
+            <Input
+              id="f_busca"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Placa, marca, modelo, RENAVAM ou chassi"
+            />
+          </div>
+        </div>
+      )}
+
+      {!veiculosQ.isLoading && veiculos.length === 0 ? (
         <EmptyState
           icon={Inbox}
           title="Nenhum veículo cadastrado"
@@ -228,6 +271,23 @@ export default function VeiculosPage() {
                 Cadastrar veículo
               </Button>
             ) : undefined
+          }
+        />
+      ) : !veiculosQ.isLoading && filtrados.length === 0 && temFiltroAtivo ? (
+        <EmptyState
+          icon={SearchX}
+          title="Nenhum veículo encontrado"
+          description="Nenhum veículo corresponde à busca ou ao filtro aplicado."
+          action={
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setBusca("");
+                setSituacaoFiltro("");
+              }}
+            >
+              Limpar filtros
+            </Button>
           }
         />
       ) : (
@@ -250,7 +310,7 @@ export default function VeiculosPage() {
                 </TD>
               </TR>
             )}
-            {veiculosQ.data?.map((v) => (
+            {filtrados.map((v) => (
               <TR key={v.id}>
                 <TD className="font-mono">{v.placa}</TD>
                 <TD>{[v.marca, v.modelo].filter(Boolean).join(" ") || "—"}</TD>
