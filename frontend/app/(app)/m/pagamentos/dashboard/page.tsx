@@ -309,7 +309,12 @@ export default function PagamentosDashboardPage() {
           intent={kpis.vencidas_qtd > 0 ? "danger" : "default"}
         />
         <KpiCard label="Pago no mês" value={fmtBRL(kpis.pago_no_mes)} icon={Landmark} intent="success" />
-        <Link href="/m/pagamentos" className="block">
+        {/* rounded-card faz o outline do :focus-visible global acompanhar o raio do card */}
+        <Link
+          href="/m/pagamentos"
+          className="block rounded-card"
+          aria-label={`Aguardando aprovação: ${kpis.aguardando_aprovacao_qtd} — abrir fila de pagamentos`}
+        >
           <KpiCard
             label="Aguardando aprovação"
             value={kpis.aguardando_aprovacao_qtd}
@@ -318,7 +323,11 @@ export default function PagamentosDashboardPage() {
             hint="ver fila →"
           />
         </Link>
-        <Link href="/m/pagamentos" className="block">
+        <Link
+          href="/m/pagamentos"
+          className="block rounded-card"
+          aria-label={`Aguardando autorização: ${kpis.aguardando_autorizacao_qtd} — abrir fila de pagamentos`}
+        >
           <KpiCard
             label="Aguardando autorização"
             value={kpis.aguardando_autorizacao_qtd}
@@ -393,15 +402,26 @@ export default function PagamentosDashboardPage() {
                 <TBody>
                   {maiores_debitos.map((deb) => {
                     const badge = STATUS_BADGE[deb.status];
+                    const href = `/m/pagamentos/contas-a-pagar/${deb.id}`;
                     return (
                       <TR
                         key={deb.id}
-                        onClickRow={() => router.push(`/m/pagamentos/contas-a-pagar/${deb.id}`)}
+                        onClickRow={() => router.push(href)}
+                        // Linha clicável precisa do equivalente por teclado; o guard
+                        // de target evita disparo dobrado quando o Enter é no Link interno.
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            router.push(href);
+                          }
+                        }}
                         className="cursor-pointer"
                       >
                         <TD className="max-w-[170px]">
                           <Link
-                            href={`/m/pagamentos/contas-a-pagar/${deb.id}`}
+                            href={href}
                             className="block truncate whitespace-nowrap text-primary hover:underline"
                             title={deb.nome_fornecedor}
                             onClick={(e) => e.stopPropagation()}
@@ -449,7 +469,7 @@ export default function PagamentosDashboardPage() {
                     <span className="flex-1">
                       <Link
                         href={`/m/pagamentos/contas-a-pagar/${p.id_debito}`}
-                        className="font-medium hover:underline"
+                        className="rounded-sm font-medium underline decoration-1 underline-offset-2 hover:decoration-2"
                       >
                         {p.nome_fornecedor}
                       </Link>{" "}
@@ -467,7 +487,7 @@ export default function PagamentosDashboardPage() {
                     <span className="flex-1">
                       <Link
                         href={`/m/pagamentos/contas-a-pagar/${p.id_debito}`}
-                        className="font-medium hover:underline"
+                        className="rounded-sm font-medium underline decoration-1 underline-offset-2 hover:decoration-2"
                       >
                         {p.nome_fornecedor}
                       </Link>{" "}
