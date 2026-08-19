@@ -1,0 +1,32 @@
+{
+  "_comentario": "Ratchet do design:check. Números só podem CAIR. Regrave com `npm run design:check -- --update` ao queimar débito — nunca para acomodar código novo.",
+  "total": 119,
+  "arquivos": {
+    "app/(app)/dashboard/page.tsx": 9,
+    "app/(app)/m/administracao/configuracoes/page.tsx": 2,
+    "app/(app)/m/administracao/organograma/page.tsx": 3,
+    "app/(app)/m/frota/solicitacoes/page.tsx": 1,
+    "app/(app)/m/pagamentos/dashboard/page.tsx": 4,
+    "app/(app)/m/protocolo/templates-documento/page.tsx": 3,
+    "app/(app)/m/protocolo/workflow/[id]/page.tsx": 6,
+    "app/(app)/m/protocolo/workflow/page.tsx": 4,
+    "app/(app)/m/transporte/relatorio/page.tsx": 17,
+    "app/(app)/m/transporte/veiculos/[id]/page.tsx": 4,
+    "app/(app)/m/transporte/veiculos/page.tsx": 1,
+    "components/AssinaturasProcesso.tsx": 3,
+    "components/CrudPage.tsx": 1,
+    "components/MinutasProcesso.tsx": 8,
+    "components/ProcessoWorkflowPanel.tsx": 4,
+    "components/RedigirDocumentoDialog.tsx": 2,
+    "components/UnidadePicker.tsx": 5,
+    "components/admin/TenantEditForm.tsx": 1,
+    "components/organograma/OrganogramaDiagramView.tsx": 1,
+    "components/organograma/OrganogramaListView.tsx": 1,
+    "components/organograma/UnidadeEditDrawer.tsx": 3,
+    "components/transporte-regulado/alvara-veiculos-modal.tsx": 5,
+    "components/workflow/WorkflowDiagram.tsx": 12,
+    "components/workflow/WorkflowEditPage.tsx": 3,
+    "components/workflow/WorkflowEditPanel.tsx": 1,
+    "components/workflow/WorkflowEditor.tsx": 15
+  }
+}
