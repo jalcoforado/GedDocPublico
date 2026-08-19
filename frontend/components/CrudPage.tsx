@@ -91,11 +91,26 @@ export function CrudPage<T extends { id: number }>({
   const [form, setForm] = useState<any>(emptyForm);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  // Termo efetivado após o debounce: o input responde a cada tecla via `q`,
+  // mas quem dispara busca (onSearchChange → queryKey do caller) e reset de
+  // página é só o valor estabilizado — teclas rápidas não geram fetch por tecla.
+  const [qDebounced, setQDebounced] = useState("");
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    onSearchChange?.(q);
-  }, [q, onSearchChange]);
+    const t = setTimeout(() => setQDebounced(q), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  useEffect(() => {
+    onSearchChange?.(qDebounced);
+  }, [qDebounced, onSearchChange]);
+
+  // Novo termo efetivado (inclusive busca limpa) recomeça da página 1; no
+  // mount é no-op porque a página já é 1.
+  useEffect(() => {
+    setPage(1);
+  }, [qDebounced]);
 
   // A página entra na queryKey para que páginas diferentes não colidam no
   // cache; as mutations seguem invalidando por prefixo (`queryKey` do caller),
@@ -194,10 +209,7 @@ export function CrudPage<T extends { id: number }>({
           <Input
             placeholder="Buscar..."
             value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
-              setPage(1);
-            }}
+            onChange={(e) => setQ(e.target.value)}
             className="max-w-sm"
           />
         )}
