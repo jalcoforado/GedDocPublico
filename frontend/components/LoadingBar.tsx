@@ -93,7 +93,7 @@ export function LoadingBar() {
       aria-valuenow={Math.round(progress)}
       aria-valuemin={0}
       aria-valuemax={100}
-      className="pointer-events-none fixed inset-x-0 top-0 z-[200] h-0.5"
+      className="pointer-events-none fixed inset-x-0 top-0 z-toast h-0.5"
     >
       <div
         className="h-full bg-gradient-to-r from-brand via-brand-light to-accent shadow-[0_0_8px_rgba(217,119,6,0.5)]"

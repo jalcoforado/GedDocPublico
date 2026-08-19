@@ -116,6 +116,22 @@ const config: Config = {
           "soft-foreground": "hsl(var(--info-soft-foreground) / <alpha-value>)",
         },
       },
+      // Escala de camadas — os tokens `--z-*` existiam em globals.css desde a
+      // DS v3 e NENHUM componente os usava: cada overlay escolhia um número
+      // solto (z-30/40/50/[100]/[200]) e a ordem entre eles era acidente, não
+      // decisão. Expostos aqui, viram classe semântica (`z-modal`), e quem
+      // acrescentar uma camada nova escolhe o PAPEL em vez de chutar um número
+      // maior que o do vizinho.
+      zIndex: {
+        dropdown: "var(--z-dropdown)",
+        sticky: "var(--z-sticky)",
+        fixed: "var(--z-fixed)",
+        "modal-backdrop": "var(--z-modal-backdrop)",
+        modal: "var(--z-modal)",
+        popover: "var(--z-popover)",
+        tooltip: "var(--z-tooltip)",
+        toast: "var(--z-toast)",
+      },
       borderRadius: {
         xs: "var(--radius-xs)",
         sm: "var(--radius-sm)",

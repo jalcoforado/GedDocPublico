@@ -143,7 +143,7 @@ export function ModuloSwitcher() {
           role="menu"
           aria-label="Trocar de módulo"
           className="
-            absolute left-0 top-[calc(100%+6px)] z-50 w-64
+            absolute left-0 top-[calc(100%+6px)] z-dropdown w-64
             overflow-hidden rounded-lg border border-border bg-card shadow-xl
             animate-scale-in origin-top-left
           "

@@ -152,15 +152,16 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
 
   return (
     <>
-      {/* Camadas do drawer mobile: o Header é sticky z-30, então o overlay
-          precisa ficar estritamente acima dele (z-40) e o painel acima do
-          overlay (z-50). Em desktop o painel é lg:static e o z não interfere. */}
+      {/* Camadas do drawer mobile, pela escala `--z-*`: o Header é `z-sticky`,
+          o overlay fica acima dele (`z-modal-backdrop`) e o painel acima do
+          overlay (`z-modal`). Em desktop o painel é lg:static e o z não
+          interfere. Ordem travada em __tests__/z-index-camadas.test.ts. */}
       <div
         onClick={onClose}
         aria-hidden="true"
         data-testid="sidebar-overlay"
         className={cn(
-          "fixed inset-0 z-40 bg-black/50 transition-opacity duration-200 lg:hidden",
+          "fixed inset-0 z-modal-backdrop bg-black/50 transition-opacity duration-200 lg:hidden",
           open ? "opacity-100" : "pointer-events-none opacity-0",
         )}
       />
@@ -168,7 +169,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         aria-label="Navegação principal"
         data-collapsed={collapsed}
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-72 shrink-0 flex-col overflow-hidden",
+          "fixed inset-y-0 left-0 z-modal flex w-72 shrink-0 flex-col overflow-hidden",
           "border-r border-sidebar-border bg-sidebar text-sidebar-foreground pt-safe transition-[transform,width] duration-base ease-out-expo",
           collapsed ? "lg:static lg:w-[68px]" : "lg:static lg:w-64 lg:translate-x-0",
           open ? "translate-x-0 shadow-xl" : "-translate-x-full shadow-none lg:translate-x-0",

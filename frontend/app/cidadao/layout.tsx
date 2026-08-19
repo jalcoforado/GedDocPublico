@@ -116,7 +116,7 @@ function BottomNav() {
   return (
     <nav
       aria-label="Navegação inferior"
-      className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card pb-safe sm:hidden"
+      className="fixed inset-x-0 bottom-0 z-fixed border-t border-border bg-card pb-safe sm:hidden"
     >
       <div className="flex items-stretch justify-around">
         {items.map((it) => {

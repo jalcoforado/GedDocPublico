@@ -165,7 +165,7 @@ export function ActionsMenu({
       {open && (
         <ul
           role="menu"
-          className="absolute right-0 z-30 mt-1 min-w-[12rem] rounded-dropdown border border-border bg-surface-1 py-1 shadow-dropdown focus:outline-none"
+          className="absolute right-0 z-dropdown mt-1 min-w-[12rem] rounded-dropdown border border-border bg-surface-1 py-1 shadow-dropdown focus:outline-none"
         >
           {items.map((item, i) => {
             const ItemIcon = item.icon;
