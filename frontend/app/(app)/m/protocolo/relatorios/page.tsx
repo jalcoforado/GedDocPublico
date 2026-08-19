@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { useAssuntosAll } from "@/lib/assuntos";
 import {
   api,
   NIVEL_SIGILO_LABEL,
@@ -46,10 +47,7 @@ export default function RelatoriosPage() {
     queryKey: ["unidades-all"],
     queryFn: () => api.unidades.list({ page_size: 200 }),
   });
-  const assuntosQ = useQuery({
-    queryKey: ["assuntos-all"],
-    queryFn: () => api.assuntos.list({ page_size: 200 }),
-  });
+  const assuntosQ = useAssuntosAll();
   const tiposQ = useQuery({
     queryKey: ["tipos-processo"],
     queryFn: () => api.tiposProcesso.list(),
@@ -144,7 +142,7 @@ export default function RelatoriosPage() {
                 }
               >
                 <option value="">Todos</option>
-                {assuntosQ.data?.items.map((a) => (
+                {assuntosQ.data?.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.assunto.length > 60 ? a.assunto.slice(0, 60) + "…" : a.assunto}
                   </option>

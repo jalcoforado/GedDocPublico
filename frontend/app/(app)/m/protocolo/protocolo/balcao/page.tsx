@@ -39,6 +39,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { useAssuntosAll } from "@/lib/assuntos";
 
 type FormState = {
   id_especie_documental: number | "";
@@ -121,10 +122,7 @@ export default function ProtocoloBalcaoPage() {
     queryKey: ["manifestantes-all"],
     queryFn: () => api.manifestantes.list({ page_size: 500 }),
   });
-  const assuntosQ = useQuery({
-    queryKey: ["assuntos-all"],
-    queryFn: () => api.assuntos.list({ page_size: 500 }),
-  });
+  const assuntosQ = useAssuntosAll();
   const ccdTreeQ = useQuery({
     queryKey: ["ccd-tree"],
     queryFn: () => ccdApi.tree(),
@@ -170,7 +168,7 @@ export default function ProtocoloBalcaoPage() {
   }, [manifestantesQ.data]);
 
   const assuntoOptions = useMemo<ComboboxOption[]>(() => {
-    return (assuntosQ.data?.items ?? []).map((a) => ({
+    return (assuntosQ.data ?? []).map((a) => ({
       value: a.id,
       label: a.assunto,
     }));

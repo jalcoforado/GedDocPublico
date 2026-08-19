@@ -18,6 +18,7 @@ import { Select } from "@/components/ui/select";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { api, NIVEL_SIGILO_LABEL, type ProcessoListFilters } from "@/lib/api";
+import { useAssuntosAll } from "@/lib/assuntos";
 
 const PAGE_SIZE = 20;
 
@@ -76,10 +77,7 @@ export default function ProcessosPage() {
     setDraft(filters);
   }, [filters]);
 
-  const assuntosQ = useQuery({
-    queryKey: ["assuntos-all"],
-    queryFn: () => api.assuntos.list({ page_size: 200 }),
-  });
+  const assuntosQ = useAssuntosAll();
   const unidadesQ = useQuery({
     queryKey: ["unidades-all"],
     queryFn: () => api.unidades.list({ page_size: 200 }),
@@ -154,7 +152,7 @@ export default function ProcessosPage() {
                 }
               >
                 <option value="">Todos</option>
-                {assuntosQ.data?.items.map((a) => (
+                {assuntosQ.data?.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.assunto.length > 60 ? a.assunto.slice(0, 60) + "…" : a.assunto}
                   </option>

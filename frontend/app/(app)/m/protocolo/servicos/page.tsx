@@ -35,6 +35,7 @@ import {
   type ServicoInput,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useAssuntosAll } from "@/lib/assuntos";
 
 const NIVEIS_SIGILO = ["ostensivo", "interno", "reservado", "secreto", "ultrassecreto"];
 
@@ -95,10 +96,7 @@ export default function ServicosPage() {
   });
   const unidadesQ = useQuery({ queryKey: ["unidades-all"], queryFn: () => api.unidades.list({ page_size: 200 }) });
   const tiposQ = useQuery({ queryKey: ["tipos-processo"], queryFn: api.tiposProcesso.list });
-  const assuntosQ = useQuery({
-    queryKey: ["assuntos-all"],
-    queryFn: () => api.assuntos.list({ page_size: 500 }).then((r) => r.items),
-  });
+  const assuntosQ = useAssuntosAll();
   const especiesQ = useQuery({ queryKey: ["especies"], queryFn: () => protocoloApi.listEspecies(false) });
 
   const invalidate = () => {

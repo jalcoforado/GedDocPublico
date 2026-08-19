@@ -34,6 +34,7 @@ import { UnidadePicker } from "@/components/UnidadePicker";
 import { api, organogramaApi, type ProcessoCreateInput } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { useAssuntosAll } from "@/lib/assuntos";
 
 /** Espelha o regex de `backend/app/services/placeholders.py::resolve()`. */
 const TOKEN_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
@@ -188,10 +189,7 @@ export default function NovoProcessoPage() {
     queryKey: ["tipos-processo"],
     queryFn: () => api.tiposProcesso.list(),
   });
-  const assuntosQ = useQuery({
-    queryKey: ["assuntos-all"],
-    queryFn: () => api.assuntos.list({ page_size: 500 }),
-  });
+  const assuntosQ = useAssuntosAll();
   const manifestantesQ = useQuery({
     queryKey: ["manifestantes-all"],
     queryFn: () => api.manifestantes.list({ page_size: 500 }),
@@ -222,7 +220,7 @@ export default function NovoProcessoPage() {
   }, [manifestantesQ.data]);
 
   const assuntoOptions = useMemo<ComboboxOption<{ id_tipo_processo: number }>[]>(() => {
-    const all = assuntosQ.data?.items ?? [];
+    const all = assuntosQ.data ?? [];
     const filtered = form.id_tipo_processo
       ? all.filter((a) => a.id_tipo_processo === form.id_tipo_processo)
       : all;
@@ -236,7 +234,7 @@ export default function NovoProcessoPage() {
   function handleTipoChange(v: number | string | null) {
     const id = typeof v === "number" ? v : "";
     // Clear assunto if it doesn't belong to this tipo
-    const currentAssunto = assuntosQ.data?.items.find((a) => a.id === form.id_assunto);
+    const currentAssunto = assuntosQ.data?.find((a) => a.id === form.id_assunto);
     const keepAssunto =
       currentAssunto && (id === "" || currentAssunto.id_tipo_processo === id);
     setForm({ ...form, id_tipo_processo: id, id_assunto: keepAssunto ? form.id_assunto : "" });
@@ -269,7 +267,7 @@ export default function NovoProcessoPage() {
     }
 
     const manifestante = manifestantesQ.data?.items.find((m) => m.id === form.id_manifestante);
-    const assunto = assuntosQ.data?.items.find((a) => a.id === form.id_assunto);
+    const assunto = assuntosQ.data?.find((a) => a.id === form.id_assunto);
     const unidade = organogramaQ.data?.find((u) => u.id === form.id_unidade_proprietaria);
 
     const contexto: Record<string, string> = {
