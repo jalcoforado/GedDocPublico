@@ -6,7 +6,7 @@
 import type { ComponentProps } from "react";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -105,6 +105,38 @@ describe("Sidebar por módulo", () => {
     const frota = screen.getByRole("button", { name: "Frota" });
     const posicao = geral.compareDocumentPosition(frota);
     expect(posicao & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("seção Módulos (rodapé da Sidebar)", () => {
+  it("lista os módulos disponíveis com link para a raiz de cada um", async () => {
+    renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
+    const secao = await waitFor(() => screen.getByTestId("sidebar-modulos"));
+    const pagamentos = within(secao).getByRole("link", { name: /Pagamentos/ });
+    expect(pagamentos).toHaveAttribute("href", "/m/pagamentos");
+    // só o que a API devolveu — módulo não contratado não aparece
+    expect(within(secao).queryByText("Protocolo")).toBeNull();
+  });
+
+  it("o módulo ativo aparece destacado (aria-current)", async () => {
+    renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
+    const secao = await waitFor(() => screen.getByTestId("sidebar-modulos"));
+    const frota = within(secao).getByRole("link", { name: /Frota/ });
+    expect(frota).toHaveAttribute("aria-current", "true");
+    expect(within(secao).getByRole("link", { name: /Pagamentos/ })).not.toHaveAttribute(
+      "aria-current",
+    );
+  });
+
+  it("com um único módulo disponível a seção não aparece", async () => {
+    modulosMock.mockResolvedValue({
+      itens: [{ slug: "frota", nome: "Frota", icone: "Truck", ordem: 1 }],
+    });
+    renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
+    // espera o cabeçalho resolver (mesma query) para garantir que a ausência
+    // da seção não é só a query ainda carregando
+    await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
+    expect(screen.queryByTestId("sidebar-modulos")).toBeNull();
   });
 });
 

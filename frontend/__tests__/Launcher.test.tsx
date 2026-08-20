@@ -16,6 +16,7 @@ vi.mock("@/lib/api", () => ({ api: { modulos: () => modulos() } }));
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: { nome: "Teste" }, loading: false }) }));
 
 import Launcher from "@/app/(launcher)/modulos/page";
+import { descricaoDoModulo } from "@/lib/modulos";
 
 // A página passa a herdar o QueryClient do layout (`Providers`) em vez de
 // criar o próprio — aqui o teste é quem monta o provider, com `retry: false`
@@ -72,5 +73,31 @@ describe("launcher", () => {
     modulos.mockRejectedValue(new Error("falhou"));
     renderLauncher();
     await waitFor(() => expect(screen.getByText(/não foi possível/i)).toBeTruthy());
+  });
+
+  it("cada card traz a descrição do módulo (UX-11.2)", async () => {
+    modulos.mockResolvedValue(TRES);
+    renderLauncher();
+    await waitFor(() => expect(screen.getByText("Frota")).toBeTruthy());
+    const frota = screen.getAllByRole("link").find((a) => a.textContent?.includes("Frota"));
+    expect(frota?.textContent).toContain(descricaoDoModulo("frota"));
+    // e a descrição não é vazia — senão o assert acima passa por vacuidade
+    expect(descricaoDoModulo("frota").length).toBeGreaterThan(10);
+  });
+
+  it("módulo fora do mapa de descrições usa o texto genérico, não quebra o card", async () => {
+    modulos.mockResolvedValue({
+      itens: [
+        ...TRES.itens,
+        { slug: "novo-modulo", nome: "Novo Módulo", icone: null, ordem: 9 },
+      ],
+    });
+    renderLauncher();
+    await waitFor(() => expect(screen.getByText("Novo Módulo")).toBeTruthy());
+    const novo = screen
+      .getAllByRole("link")
+      .find((a) => a.textContent?.includes("Novo Módulo"));
+    expect(novo?.textContent).toContain(descricaoDoModulo("novo-modulo"));
+    expect(descricaoDoModulo("novo-modulo").length).toBeGreaterThan(10);
   });
 });

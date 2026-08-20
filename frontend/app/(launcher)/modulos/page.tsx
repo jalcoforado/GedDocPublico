@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
+import { ArrowRight } from "lucide-react";
+
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { MENUS } from "@/lib/menus";
-import { iconeDoModulo } from "@/lib/modulos";
+import { descricaoDoModulo, iconeDoModulo } from "@/lib/modulos";
 
 /**
  * Tela de seleção de módulos (`/modulos`). Herda o `QueryClient` do
@@ -89,15 +91,18 @@ export default function Launcher() {
     return <p className="text-foreground-muted">Entrando...</p>;
   }
 
+  const hoje = new Intl.DateTimeFormat("pt-BR", { dateStyle: "full" }).format(new Date());
+
   return (
-    <div className="w-full max-w-3xl">
-      <h1 className="mb-1 text-2xl font-semibold text-foreground">
+    <div className="w-full max-w-4xl animate-fade-in">
+      <p className="mb-1 text-sm capitalize text-foreground-subtle">{hoje}</p>
+      <h1 className="mb-1 text-3xl font-semibold tracking-tight text-foreground">
         {user?.nome ? `Bem-vindo(a), ${user.nome}` : "Escolha um módulo"}
       </h1>
-      <p className="mb-6 text-sm text-foreground-muted">
+      <p className="mb-8 text-md text-foreground-muted">
         Selecione o módulo em que deseja trabalhar.
       </p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {ordenados.map((m) => {
           const Icone = iconeDoModulo(m.icone);
           // Módulo cujo slug não está em MENUS não some da tela: cai em
@@ -109,10 +114,23 @@ export default function Launcher() {
             <Link
               key={m.slug}
               href={raiz}
-              className="flex flex-col items-center gap-3 rounded-lg border border-border bg-card p-6 text-center transition hover:border-primary hover:shadow-sm"
+              className="group flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-xs transition-all duration-base hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              <Icone className="h-8 w-8 text-primary" />
-              <span className="font-medium text-foreground">{m.nome}</span>
+              <div className="flex items-start justify-between">
+                <span className="inline-flex h-12 w-12 items-center justify-center rounded-lg bg-brand-gradient text-white shadow-brand">
+                  <Icone className="h-6 w-6" aria-hidden="true" />
+                </span>
+                <ArrowRight
+                  className="h-4 w-4 translate-x-0 text-foreground-subtle opacity-0 transition-all duration-fast group-hover:translate-x-1 group-hover:text-brand group-hover:opacity-100"
+                  aria-hidden="true"
+                />
+              </div>
+              <div>
+                <div className="text-md font-semibold text-foreground">{m.nome}</div>
+                <p className="mt-1 text-sm leading-relaxed text-foreground-muted">
+                  {descricaoDoModulo(m.slug)}
+                </p>
+              </div>
             </Link>
           );
         })}

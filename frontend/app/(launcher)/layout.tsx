@@ -74,9 +74,16 @@ function Shell({ children }: { children: React.ReactNode }) {
   if (!user) return null;
 
   return (
-    <div className="relative min-h-dvh bg-background">
+    <div className="relative min-h-dvh overflow-hidden bg-background">
+      {/* Fundo decorativo (UX-11.2): faixa superior com gradiente sutil da
+          marca + dot-grid, atrás de todo o conteúdo. aria-hidden + pointer-events
+          -none: é puro acabamento. */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-80">
+        <div className="absolute inset-0 bg-gradient-to-b from-brand/10 via-brand/[0.04] to-transparent" />
+        <div className="absolute inset-0 bg-dot-grid opacity-40 [mask-image:linear-gradient(to_bottom,black,transparent)]" />
+      </div>
       <BarraDeSaida />
-      <main className="flex min-h-dvh flex-col items-center justify-center p-6">
+      <main className="relative flex min-h-dvh flex-col items-center justify-center p-6">
         {children}
       </main>
     </div>
