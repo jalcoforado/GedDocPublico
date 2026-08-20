@@ -181,7 +181,9 @@
     --accent: var(--amber-600); /* âmbar #d97706 — inalterado */
     --accent-light: var(--amber-400);
     --accent-dark: var(--amber-800);
-    --accent-foreground: 0 0% 100%;
+    /* Âmbar da marca é claro demais para texto branco (era 3.15:1). Escurecer
+       o TEXTO mantém a cor da marca intacta; escurecer o fundo a mudaria. */
+    --accent-foreground: 24 75% 12%; /* 5.10:1 sobre --accent */
 
     /* Legacy aliases (mantém compat) */
     --aprimora: var(--brand);
@@ -223,7 +225,7 @@
     --danger-soft-foreground: var(--red-700);
 
     --success: var(--emerald-500);
-    --success-foreground: 0 0% 100%;
+    --success-foreground: 158 30% 10%; /* 5.23:1 — branco dava 3.18:1 */
     --success-soft: var(--emerald-100);
     --success-soft-foreground: var(--emerald-700);
 
@@ -350,7 +352,10 @@
     --primary-foreground: 158 20% 10%;
     --ring: var(--brand-light);
 
-    --danger: 0 72% 60%;
+    /* Branco sobre este vermelho dava 3.82:1. Aqui o fundo escurece em vez
+       do texto: branco sobre vermelho é a convenção de ação destrutiva, e
+       inverter para texto escuro leria como aviso, não como perigo. */
+    --danger: 0 72% 47%; /* 5.42:1 com --danger-foreground branco */
     --danger-soft: var(--red-900);
     --danger-soft-foreground: 0 75% 88%;
 
