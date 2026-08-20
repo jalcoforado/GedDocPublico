@@ -6,7 +6,7 @@
 import type { ComponentProps } from "react";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -108,54 +108,44 @@ describe("Sidebar por módulo", () => {
   });
 });
 
-describe("seção Módulos (rodapé da Sidebar)", () => {
-  it("lista os módulos disponíveis com link para a raiz de cada um", async () => {
-    renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
-    const secao = await waitFor(() => screen.getByTestId("sidebar-modulos"));
-    const pagamentos = within(secao).getByRole("link", { name: /Pagamentos/ });
-    expect(pagamentos).toHaveAttribute("href", "/m/pagamentos");
-    // só o que a API devolveu — módulo não contratado não aparece
-    expect(within(secao).queryByText("Protocolo")).toBeNull();
-  });
-
-  it("o módulo ativo aparece destacado (aria-current)", async () => {
-    renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
-    const secao = await waitFor(() => screen.getByTestId("sidebar-modulos"));
-    const frota = within(secao).getByRole("link", { name: /Frota/ });
-    expect(frota).toHaveAttribute("aria-current", "true");
-    expect(within(secao).getByRole("link", { name: /Pagamentos/ })).not.toHaveAttribute(
-      "aria-current",
-    );
-  });
-
-  it("com um único módulo disponível a seção não aparece", async () => {
-    modulosMock.mockResolvedValue({
-      itens: [{ slug: "frota", nome: "Frota", icone: "Truck", ordem: 1 }],
-    });
-    renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
-    // espera o cabeçalho resolver (mesma query) para garantir que a ausência
-    // da seção não é só a query ainda carregando
-    await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
-    expect(screen.queryByTestId("sidebar-modulos")).toBeNull();
-  });
-});
-
-describe("cabeçalho de módulo (topo da Sidebar)", () => {
-  it("dentro de um módulo, com mais de um módulo disponível, mostra seta + nome do módulo e linka para /modulos", async () => {
+describe("cabeçalho de módulo (topo da Sidebar) — seletor", () => {
+  it("dentro de um módulo, com mais de um módulo disponível, é um botão fechado com o nome do módulo", async () => {
     renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
     const header = await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
-    expect(header.tagName).toBe("A");
-    expect(header).toHaveAttribute("href", "/modulos");
+    expect(header.tagName).toBe("BUTTON");
+    expect(header).toHaveAttribute("aria-expanded", "false");
     expect(header.textContent).toContain("Frota");
+    // fechado: nenhum link de outro módulo ocupando a Sidebar
+    expect(screen.queryByTestId("sidebar-modulo-lista")).toBeNull();
   });
 
-  it("em rota transversal, mostra rótulo neutro (não aparenta estar em nenhum módulo específico) e linka para /modulos", async () => {
+  it("clicar abre a lista com os OUTROS módulos (raiz de cada um) e o link para /modulos — clicar de novo fecha", async () => {
+    renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
+    const header = await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
+    fireEvent.click(header);
+    const lista = screen.getByTestId("sidebar-modulo-lista");
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    const pagamentos = within(lista).getByRole("link", { name: /Pagamentos/ });
+    expect(pagamentos).toHaveAttribute("href", "/m/pagamentos");
+    // o módulo ativo não se lista a si mesmo — é o rótulo do botão
+    expect(within(lista).queryByRole("link", { name: /Frota/ })).toBeNull();
+    expect(within(lista).getByRole("link", { name: /todos os módulos/i })).toHaveAttribute(
+      "href",
+      "/modulos",
+    );
+    fireEvent.click(header);
+    expect(screen.queryByTestId("sidebar-modulo-lista")).toBeNull();
+  });
+
+  it("em rota transversal, mostra rótulo neutro e a lista traz todos os módulos", async () => {
     renderSidebar({ modulo: null, open: true, onClose: () => {} });
     const header = await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
-    expect(header.tagName).toBe("A");
-    expect(header).toHaveAttribute("href", "/modulos");
-    expect(header.textContent).toBe("Módulos");
+    expect(header.textContent).toContain("Módulos");
     expect(header.textContent).not.toMatch(/frota|pagamentos/i);
+    fireEvent.click(header);
+    const lista = screen.getByTestId("sidebar-modulo-lista");
+    expect(within(lista).getByRole("link", { name: /Frota/ })).toBeTruthy();
+    expect(within(lista).getByRole("link", { name: /Pagamentos/ })).toBeTruthy();
   });
 
   it("com um único módulo disponível, mostra só o nome do módulo — sem link, sem seta, sem ação", async () => {

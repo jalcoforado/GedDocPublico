@@ -20,7 +20,6 @@ import { canSeeItem, MENUS, menuDoModulo, type NavGroup, type NavItem } from "@/
 import { cn } from "@/lib/utils";
 import { DensityToggle } from "./DensityToggle";
 import { SidebarModuloHeader } from "./SidebarModuloHeader";
-import { SidebarModulos } from "./SidebarModulos";
 import { ThemeToggle } from "./ThemeToggle";
 
 function isPathActive(href: string, pathname: string): boolean {
@@ -429,10 +428,6 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
             </Link>
           )}
         </div>
-
-        {/* Troca de módulo sempre à vista — o menu por módulo (F2) faz os
-            outros menus "sumirem" ao navegar; esta seção é o mapa de volta. */}
-        <SidebarModulos modulo={modulo} collapsed={collapsed} />
 
         {/* Footer com toggles */}
         <div
