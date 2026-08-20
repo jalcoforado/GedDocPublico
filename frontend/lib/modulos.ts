@@ -92,6 +92,28 @@ export const ICONES_MODULO: Record<string, React.ComponentType<{ className?: str
   Settings,
 };
 
+/**
+ * Descrições curtas para o launcher (UX-11.2). O catálogo (`ModuloOut`) não
+ * expõe descrição, e o conjunto de módulos é fixo e pequeno — um mapa local
+ * evita mexer no backend por um texto de vitrine. Slug fora do mapa cai no
+ * genérico: módulo novo no catálogo aparece no launcher sem quebrar (mesmo
+ * fail-open do ícone).
+ */
+export const DESCRICAO_MODULO: Record<string, string> = {
+  protocolo: "Processos, tramitação, anexos e assinatura eletrônica.",
+  pagamentos: "Despesas, ordens de pagamento e conciliação bancária.",
+  frota: "Veículos, motoristas, solicitações e viagens.",
+  transporte: "Permissionários, alvarás e transporte regulado.",
+  administracao: "Usuários, grupos, organograma e configurações do órgão.",
+};
+
+const DESCRICAO_GENERICA = "Acesse as funções deste módulo.";
+
+/** Descrição do módulo para o launcher. Slug desconhecido → texto genérico. */
+export function descricaoDoModulo(slug: string): string {
+  return DESCRICAO_MODULO[slug] ?? DESCRICAO_GENERICA;
+}
+
 /** Resolve o ícone do módulo pelo nome vindo do backend. Nome desconhecido ou nulo → genérico. */
 export function iconeDoModulo(
   nome: string | null | undefined,
