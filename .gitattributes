@@ -17,3 +17,8 @@
 *.sh        text eol=lf
 *.service   text eol=lf
 *.timer     text eol=lf
+# Scripts Node com shebang: o vitest importa scripts/*.mjs nos testes de guarda
+# e o `\r` depois de `#!/usr/bin/env node` vira SyntaxError ("Invalid or
+# unexpected token") no Windows com autocrlf. Aconteceu em 2026-08-20, no
+# checkout seguinte ao merge da UX-01.
+*.mjs       text eol=lf
