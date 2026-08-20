@@ -17,7 +17,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
   return (
     <header
       className="
-        sticky top-0 z-30
+        sticky top-0 z-sticky
         flex items-center gap-3 border-b border-border
         bg-surface-1/85 px-4 py-2.5 pt-safe backdrop-blur-md
         sm:px-6

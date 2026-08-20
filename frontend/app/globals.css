@@ -12,9 +12,10 @@
  *   tabulares. Três camadas: primitivo → semântico → componente.
  *
  * Camada primitiva (novo nesta versão): ramps HSL completos
- *   (green/amber/neutral/status) + escalas não-cor (space, radius,
- *   shadow, text, motion, z-index). NUNCA usar primitivos direto
- *   em componente — sempre via token semântico.
+ *   (green/amber/neutral/status) + escalas não-cor (radius, shadow,
+ *   text, z-index). Espaço/pesos/tracking usam as escalas do próprio
+ *   Tailwind. NUNCA usar primitivos direto em componente — sempre
+ *   via token semântico.
  *
  * Camada semântica: MESMOS NOMES públicos do v2 (zero breaking
  *   change), agora referenciando os primitivos e a nova identidade.
@@ -98,24 +99,7 @@
     --blue-700: 217 91% 25%;
     --blue-900: 217 50% 20%;
 
-    /* --- Espaço (base 4px) --- */
-    --space-0: 0px;
-    --space-1: 0.25rem; /* 4px */
-    --space-2: 0.5rem; /* 8px */
-    --space-3: 0.75rem; /* 12px */
-    --space-4: 1rem; /* 16px */
-    --space-5: 1.25rem; /* 20px */
-    --space-6: 1.5rem; /* 24px */
-    --space-7: 1.75rem; /* 28px */
-    --space-8: 2rem; /* 32px */
-    --space-9: 2.25rem; /* 36px */
-    --space-10: 2.5rem; /* 40px */
-    --space-11: 2.75rem; /* 44px */
-    --space-12: 3rem; /* 48px */
-    --space-14: 3.5rem; /* 56px */
-    --space-16: 4rem; /* 64px */
-    --space-20: 5rem; /* 80px */
-    --space-24: 6rem; /* 96px */
+    /* Espaço: a escala do Tailwind (base 4px) é a fonte — sem tokens próprios. */
 
     /* --- Radius primitivo (novo degrau xs; sm/md/lg/xl/2xl semânticos v2 preservados abaixo) --- */
     --radius-xs: 0.125rem; /* 2px */
@@ -147,20 +131,10 @@
     --leading-3xl: 2.5rem; /* 40px */
 
     --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; /* sobrescrito por next/font (Inter) via .variable no <html> */
-    --font-weight-normal: 400;
-    --font-weight-medium: 500;
-    --font-weight-semibold: 600;
-    --font-weight-bold: 700;
-    --tracking-tight: -0.01em;
-    --tracking-wide: 0.02em;
-
-    /* --- Motion primitivo --- */
-    --motion-fast: 120ms;
-    --motion-base: 200ms;
-    --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+    /* Pesos e tracking: utilities do Tailwind (font-medium, tracking-tight) — sem tokens próprios.
+       Motion: tokens semânticos --duration-* / --ease-* abaixo — os "primitivos" eram duplicata. */
 
     /* --- Z-index --- */
-    --z-base: 0;
     --z-dropdown: 1000;
     --z-sticky: 1100;
     --z-fixed: 1200;
@@ -181,11 +155,11 @@
     --accent: var(--amber-600); /* âmbar #d97706 — inalterado */
     --accent-light: var(--amber-400);
     --accent-dark: var(--amber-800);
-    --accent-foreground: 0 0% 100%;
+    /* Âmbar da marca é claro demais para texto branco (era 3.15:1). Escurecer
+       o TEXTO mantém a cor da marca intacta; escurecer o fundo a mudaria. */
+    --accent-foreground: 24 75% 12%; /* 5.10:1 sobre --accent */
 
-    /* Legacy aliases (mantém compat) */
-    --aprimora: var(--brand);
-    --aprimora-light: var(--brand-light);
+    /* Classes legacy bg-aprimora* vêm do tailwind.config direto de --brand. */
 
     /* === Surfaces (tonal) === */
     --bg: var(--neutral-25); /* canvas geral — off-white, viés frio/verde */
@@ -223,7 +197,7 @@
     --danger-soft-foreground: var(--red-700);
 
     --success: var(--emerald-500);
-    --success-foreground: 0 0% 100%;
+    --success-foreground: 158 30% 10%; /* 5.23:1 — branco dava 3.18:1 */
     --success-soft: var(--emerald-100);
     --success-soft-foreground: var(--emerald-700);
 
@@ -236,18 +210,6 @@
     --info-foreground: 0 0% 100%;
     --info-soft: var(--blue-100);
     --info-soft-foreground: var(--blue-700);
-
-    /* === Spacing scale (referência semântica) === */
-    --space-1: 0.25rem; /* 4px */
-    --space-2: 0.5rem; /* 8px */
-    --space-3: 0.75rem; /* 12px */
-    --space-4: 1rem; /* 16px */
-    --space-5: 1.25rem; /* 20px */
-    --space-6: 1.5rem; /* 24px */
-    --space-8: 2rem; /* 32px */
-    --space-10: 2.5rem; /* 40px */
-    --space-12: 3rem; /* 48px */
-    --space-16: 4rem; /* 64px */
 
     /* === Border radius (v2 preservado — badges/inputs/cards/modais/heroes) === */
     --radius-sm: 0.25rem; /* 4px — badges, inputs internos */
@@ -282,13 +244,10 @@
     --button-radius: var(--radius-md);
     --button-shadow: var(--shadow-sm);
     --button-shadow-hover: var(--shadow-md);
-    --button-ring-offset: 2px;
 
     /* --- Input / Select / Textarea / Combobox --- */
     --input-radius: var(--radius-md);
     --input-shadow: var(--shadow-xs);
-    --input-border: hsl(var(--input));
-    --input-border-hover: hsl(var(--border-strong));
 
     /* --- Table --- */
     --table-radius: var(--radius-lg);
@@ -350,7 +309,10 @@
     --primary-foreground: 158 20% 10%;
     --ring: var(--brand-light);
 
-    --danger: 0 72% 60%;
+    /* Branco sobre este vermelho dava 3.82:1. Aqui o fundo escurece em vez
+       do texto: branco sobre vermelho é a convenção de ação destrutiva, e
+       inverter para texto escuro leria como aviso, não como perigo. */
+    --danger: 0 72% 47%; /* 5.42:1 com --danger-foreground branco */
     --danger-soft: var(--red-900);
     --danger-soft-foreground: 0 75% 88%;
 
@@ -440,26 +402,28 @@
   }
 }
 
-/* === Workflow editor — handles visíveis === */
-.workflow-editor .react-flow__handle {
-  width: 12px;
-  height: 12px;
-  background: hsl(var(--brand));
-  border: 2px solid hsl(var(--surface-1));
-  opacity: 0.85;
-}
-.workflow-editor .react-flow__handle:hover {
-  opacity: 1;
-  transform: scale(1.4);
-  box-shadow: 0 0 0 4px hsl(var(--brand) / 0.2);
-  cursor: crosshair;
-}
-.workflow-editor .react-flow__node {
-  cursor: grab;
-}
-.workflow-editor .react-flow__node.workflow-shift-source {
-  outline: 2px dashed hsl(var(--brand));
-  outline-offset: 4px;
+@layer components {
+  /* === Workflow editor — handles visíveis === */
+  .workflow-editor .react-flow__handle {
+    width: 12px;
+    height: 12px;
+    background: hsl(var(--brand));
+    border: 2px solid hsl(var(--surface-1));
+    opacity: 0.85;
+  }
+  .workflow-editor .react-flow__handle:hover {
+    opacity: 1;
+    transform: scale(1.4);
+    box-shadow: 0 0 0 4px hsl(var(--brand) / 0.2);
+    cursor: crosshair;
+  }
+  .workflow-editor .react-flow__node {
+    cursor: grab;
+  }
+  .workflow-editor .react-flow__node.workflow-shift-source {
+    outline: 2px dashed hsl(var(--brand));
+    outline-offset: 4px;
+  }
 }
 
 @layer utilities {
@@ -479,10 +443,7 @@
     height: 100dvh;
   }
 
-  /* Surface tonal — uso semântico claro */
-  .bg-surface-1 { background-color: hsl(var(--surface-1)); }
-  .bg-surface-2 { background-color: hsl(var(--surface-2)); }
-  .bg-surface-3 { background-color: hsl(var(--surface-3)); }
+  /* bg-surface-1/2/3 vêm da paleta do tailwind.config (com suporte a /alpha) */
   .text-foreground-muted { color: hsl(var(--foreground-muted)); }
   .text-foreground-subtle { color: hsl(var(--foreground-subtle)); }
 

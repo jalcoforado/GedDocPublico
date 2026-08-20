@@ -321,7 +321,7 @@ export function CommandPalette({ open, onOpenChange }: Props) {
       role="dialog"
       aria-modal="true"
       aria-label="Paleta de comandos"
-      className="fixed inset-0 z-[100] flex items-start justify-center px-4 pt-[10vh] sm:pt-[15vh]"
+      className="fixed inset-0 z-popover flex items-start justify-center px-4 pt-[10vh] sm:pt-[15vh]"
     >
       {/* Backdrop */}
       <button

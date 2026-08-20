@@ -1,10 +1,9 @@
 /**
- * Regressão do drawer mobile: o Header é `sticky top-0 z-30`, e o overlay da
- * Sidebar já esteve em `z-30` (empate — a ordem do DOM decidia e o Header
- * ficava clicável por cima do drawer aberto). O contrato aqui é de camadas:
- * overlay estritamente acima do Header (z-30), painel estritamente acima do
- * overlay. jsdom não calcula stacking real, então o teste valida as classes
- * utilitárias `z-N` explicitamente.
+ * Regressão do drawer mobile: o overlay da Sidebar já esteve empatado com o
+ * Header (a ordem do DOM decidia, e o Header ficava clicável por cima do
+ * drawer aberto). O contrato é de camadas: overlay estritamente acima do
+ * Header, painel estritamente acima do overlay. jsdom não calcula stacking
+ * real, então o teste resolve as classes de camada pelos tokens `--z-*`.
  */
 import type { ComponentProps } from "react";
 
@@ -34,6 +33,8 @@ vi.mock("@/lib/api", () => ({
       }),
   },
 }));
+
+import { resolveZ, tokensZ } from "../../__tests__/_camadas";
 
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeProvider } from "@/lib/theme";
@@ -66,17 +67,14 @@ function renderSidebar(props: ComponentProps<typeof Sidebar>) {
   );
 }
 
-/** Extrai o N do utilitário `z-N` (base, sem variante responsiva). */
+/** Resolve a camada do elemento pela escala `--z-*` (fonte: globals.css). */
 function zIndexDe(el: Element): number {
-  const tokens = (el.getAttribute("class") ?? "").split(/\s+/);
-  const z = tokens.find((t) => /^z-\d+$/.test(t));
-  if (!z) throw new Error(`elemento sem utilitário z-N: ${el.getAttribute("class")}`);
-  return Number(z.slice(2));
+  return resolveZ(el.getAttribute("class") ?? "");
 }
 
-// O valor do Header (components/Header.tsx, `sticky top-0 z-30`). Se o Header
-// subir de camada um dia, este contrato precisa ser revisto junto.
-const Z_HEADER = 30;
+// O Header usa `z-sticky`; o contrato compara pela escala, então mudar o VALOR
+// do token não quebra o teste — mudar a ORDEM das camadas quebra, que é o ponto.
+const Z_HEADER = tokensZ().sticky;
 
 describe("camadas do drawer mobile da Sidebar", () => {
   beforeEach(() => {

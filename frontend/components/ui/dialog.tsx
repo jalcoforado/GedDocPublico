@@ -129,7 +129,7 @@ export function Dialog({ open, onClose, title, children, footer, size = "md" }: 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 animate-fade-in sm:items-center sm:p-4"
+      className="fixed inset-0 z-modal flex items-end justify-center bg-black/50 p-0 animate-fade-in sm:items-center sm:p-4"
       onClick={onClose}
     >
       <div

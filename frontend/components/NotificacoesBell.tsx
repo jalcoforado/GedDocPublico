@@ -99,7 +99,7 @@ export function NotificacoesBell() {
           id={popoverId}
           role="region"
           aria-label="Notificações"
-          className="fixed inset-x-3 top-16 z-50 overflow-hidden rounded-md border border-border bg-card shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[360px] sm:max-w-[calc(100vw-2rem)]"
+          className="fixed inset-x-3 top-16 z-dropdown overflow-hidden rounded-md border border-border bg-card shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[360px] sm:max-w-[calc(100vw-2rem)]"
         >
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <span className="text-sm font-semibold">Notificações</span>
