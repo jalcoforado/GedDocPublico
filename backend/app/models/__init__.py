@@ -84,6 +84,9 @@ from .sistema import Sistema
 from .tenant import Tenant
 from .transporte_regulado import (
     Empresa,
+    Linha,
+    LinhaHorario,
+    LinhaParada,
     Permissionario,
     Ponto,
     PontoOcupacao,
@@ -158,6 +161,9 @@ __all__ = [
     "GrupoDespesa",
     "GrupoTransacao",
     "Job",
+    "Linha",
+    "LinhaHorario",
+    "LinhaParada",
     "Manifestante",
     "Minuta",
     "MinutaHistorico",

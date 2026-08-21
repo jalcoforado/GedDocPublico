@@ -8,9 +8,9 @@ Domínio SEPARADO da Frota Interna (schema `transporte_regulado`, permissão
 cassado(a) / inativo(a)); `excluido` é soft-delete. `cpf`/`cnpj` únicos por tenant
 entre não excluídos.
 """
-from datetime import date, datetime
+from datetime import date, datetime, time
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, SmallInteger, String, Text, Time
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -698,4 +698,97 @@ class PontoOcupacao(Base):
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class Linha(Base):
+    """Linha de transporte distrital/escolar — trajeto nomeado, outorgado.
+
+    P6b. Táxi/mototáxi têm ponto (P6); distrital e escolar têm linha, com
+    itinerário (paradas ordenadas) e grade de horários.
+
+    Outorga a empresa E/OU permissionário — ao menos um, e o CHECK
+    `ck_linha_tem_operador` mora no banco (a família P5/P6 já provou que
+    regra só no serviço não segura acesso direto). Coerência de tenant das
+    FKs é do serviço, como sempre.
+
+    `situacao` é FEMININA (`ativa`/`inativa`): a lição ativo×ativa da P5.1 é
+    que o vocabulário segue o gênero da entidade, e filtro com o gênero errado
+    seleciona zero linhas sem erro nenhum.
+    """
+
+    __tablename__ = "linha"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    nome: Mapped[str] = mapped_column(String(150), nullable=False)
+    codigo: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    tipo_servico: Mapped[str] = mapped_column(String(30), nullable=False)
+    id_empresa: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.empresa.id"), nullable=True
+    )
+    id_permissionario: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.permissionario.id"), nullable=True
+    )
+    origem: Mapped[str] = mapped_column(String(150), nullable=False)
+    destino: Mapped[str] = mapped_column(String(150), nullable=False)
+    situacao: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="ativa"
+    )
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class LinhaParada(Base):
+    """Parada do itinerário — referência textual ordenada, sem geo (como a P6).
+
+    `ordem` NÃO tem índice único, de propósito: um único parcial tornaria
+    reordenar uma dança de colisões. A leitura ordena por (ordem, id) —
+    estável — e o endpoint de reordenação renumera 1..N numa transação.
+    """
+
+    __tablename__ = "linha_parada"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_linha: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.linha.id"), nullable=False
+    )
+    ordem: Mapped[int] = mapped_column(Integer, nullable=False)
+    descricao: Mapped[str] = mapped_column(String(200), nullable=False)
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class LinhaHorario(Base):
+    """Partida da grade: (dia_semana 0=seg…6=dom, hora). Não se edita — se
+    apaga e recria (por isso não há `atualizado_em`). A exclusividade
+    `(id_linha, dia_semana, partida)` mora no índice `ux_linha_horario`, não
+    num `if`: duas requisições concorrentes passariam as duas pela checagem
+    do serviço. O serviço checa só para devolver 409 com mensagem útil.
+    """
+
+    __tablename__ = "linha_horario"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_linha: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.linha.id"), nullable=False
+    )
+    dia_semana: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    partida: Mapped[time] = mapped_column(Time, nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
