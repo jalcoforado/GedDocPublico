@@ -180,7 +180,8 @@ export default function DashboardPage() {
   const d: DashboardKpis = q.data;
 
   return (
-    <div className="space-y-6">
+    // data-full-width: dashboard usa a largura toda (opt-out do max-w-7xl do layout, spec §12.2)
+    <div data-full-width className="space-y-6">
       <PageHeader
         variant="hero"
         icon={TrendingUp}

@@ -32,7 +32,13 @@ function Shell({ children }: { children: React.ReactNode }) {
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onOpenSidebar={() => setSidebarOpen(true)} />
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <div key={pathname} className="animate-page-in motion-reduce:animate-none">
+          {/* Contrato de largura (spec §12.2): max-w-7xl centrado por padrão;
+              página full-width (dashboard) opta por fora marcando qualquer
+              elemento seu com data-full-width — o :has() solta o teto. */}
+          <div
+            key={pathname}
+            className="mx-auto w-full max-w-7xl animate-page-in motion-reduce:animate-none has-[[data-full-width]]:max-w-none"
+          >
             {children}
           </div>
         </main>
