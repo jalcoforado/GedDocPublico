@@ -709,3 +709,77 @@ async def test_rls_filtra_as_tres_tabelas_sob_aprimora_app(admin_engine, app_ses
     finally:
         await _limpar(admin_engine, a.id)
         await _limpar(admin_engine, b.id)
+
+
+@pytest.mark.asyncio
+async def test_vincular_alvo_sem_nenhum_id_da_422(admin_engine):
+    """Os três ids None → 422, e a falha não deixa rastro: nenhum ato
+    `vinculo_alvo` entra na trilha."""
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.vincular_alvo_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    id_usuario=None,
+                )
+        assert e.value.status_code == 422
+
+        async with admin_engine.begin() as conn:
+            atos = (
+                await conn.execute(
+                    text(
+                        "SELECT ato FROM transporte_regulado.ocorrencia_andamento "
+                        "WHERE id_ocorrencia = :id ORDER BY criado_em, id"
+                    ),
+                    {"id": ocorrencia.id},
+                )
+            ).scalars().all()
+        assert atos == ["registro"]
+        assert "vinculo_alvo" not in atos
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_listar_andamentos_ordena_por_criado_em_e_id(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.iniciar_apuracao(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+                )
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.anotar_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    parecer="Fiscal esteve no local", id_usuario=None,
+                )
+
+        async with _sm(admin_engine)() as db:
+            andamentos = await tr.listar_andamentos(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+            )
+        assert [a.ato for a in andamentos] == ["registro", "inicio_apuracao", "anotacao"]
+
+        outro = await _provisionar(admin_engine)
+        try:
+            async with _sm(admin_engine)() as db:
+                with pytest.raises(HTTPException) as e:
+                    await tr.listar_andamentos(
+                        db, tenant_id=outro.id, ocorrencia_id=ocorrencia.id,
+                    )
+            assert e.value.status_code == 404
+        finally:
+            await _limpar(admin_engine, outro.id)
+    finally:
+        await _limpar(admin_engine, t.id)
