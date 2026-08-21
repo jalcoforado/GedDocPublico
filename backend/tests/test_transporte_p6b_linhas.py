@@ -22,6 +22,7 @@ from app.schemas.transporte_regulado import (
     LinhaCreate,
     LinhaHorarioCreate,
     LinhaParadaCreate,
+    LinhaParadaUpdate,
     LinhaUpdate,
 )
 from app.services import transporte_regulado as tr
@@ -360,6 +361,139 @@ async def test_parada_nova_entra_no_fim(admin_engine):
         assert p2.ordem == 2
     finally:
         await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_atualizar_parada_troca_descricao_sem_mexer_na_ordem(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        linha = await _linha(admin_engine, t.id, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                parada = await tr.criar_parada(
+                    db, tenant_id=t.id, linha_id=linha.id,
+                    payload=LinhaParadaCreate(descricao="Parada Original"),
+                )
+            ordem_antes = parada.ordem
+            async with db.begin():
+                atualizada = await tr.atualizar_parada(
+                    db, tenant_id=t.id, linha_id=linha.id, parada_id=parada.id,
+                    payload=LinhaParadaUpdate(descricao="Parada Renomeada"),
+                )
+        assert atualizada.descricao == "Parada Renomeada"
+        assert atualizada.ordem == ordem_antes
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_excluir_parada_do_meio_mantem_ordem_das_restantes(admin_engine):
+    """Exclusão é soft e NÃO renumera — a ordem só muda no `reordenar_paradas`
+    explícito. A listagem simplesmente pula a excluída."""
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        linha = await _linha(admin_engine, t.id, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            paradas = []
+            for nome in ("A", "B", "C"):
+                async with db.begin():
+                    paradas.append(
+                        await tr.criar_parada(
+                            db, tenant_id=t.id, linha_id=linha.id,
+                            payload=LinhaParadaCreate(descricao=f"Parada {nome}"),
+                        )
+                    )
+            do_meio = paradas[1]
+            async with db.begin():
+                await tr.excluir_parada(
+                    db, tenant_id=t.id, linha_id=linha.id, parada_id=do_meio.id,
+                )
+            restantes = await tr.listar_paradas(db, tenant_id=t.id, linha_id=linha.id)
+
+        assert [p.id for p in restantes] == [paradas[0].id, paradas[2].id]
+        assert [p.ordem for p in restantes] == [1, 3]
+
+        async with admin_engine.begin() as conn:
+            excluido = (
+                await conn.execute(
+                    text(
+                        "SELECT excluido FROM transporte_regulado.linha_parada "
+                        "WHERE id = :id"
+                    ),
+                    {"id": do_meio.id},
+                )
+            ).scalar_one()
+        assert excluido is True
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_parada_e_horario_cross_tenant_e_inexistente_dao_404(admin_engine):
+    a = await _provisionar(admin_engine)
+    b = await _provisionar(admin_engine)
+    try:
+        id_emp_a, _ = await _operadores(admin_engine, a.id)
+        linha = await _linha(admin_engine, a.id, id_empresa=id_emp_a)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                parada = await tr.criar_parada(
+                    db, tenant_id=a.id, linha_id=linha.id,
+                    payload=LinhaParadaCreate(descricao="Parada Única"),
+                )
+            async with db.begin():
+                horario = await tr.criar_horario(
+                    db, tenant_id=a.id, linha_id=linha.id,
+                    payload=LinhaHorarioCreate(dia_semana=4, partida=time(6, 0)),
+                )
+
+            # Caller do tenant B (cross-tenant): 404, não 403.
+            with pytest.raises(HTTPException) as e:
+                await tr.atualizar_parada(
+                    db, tenant_id=b.id, linha_id=linha.id, parada_id=parada.id,
+                    payload=LinhaParadaUpdate(descricao="Invasão"),
+                )
+            assert e.value.status_code == 404
+
+            with pytest.raises(HTTPException) as e:
+                await tr.excluir_parada(
+                    db, tenant_id=b.id, linha_id=linha.id, parada_id=parada.id,
+                )
+            assert e.value.status_code == 404
+
+            with pytest.raises(HTTPException) as e:
+                await tr.excluir_horario(
+                    db, tenant_id=b.id, linha_id=linha.id, horario_id=horario.id,
+                )
+            assert e.value.status_code == 404
+
+            # Tenant certo, id inventado (alto e improvável de existir): 404.
+            with pytest.raises(HTTPException) as e:
+                await tr.atualizar_parada(
+                    db, tenant_id=a.id, linha_id=linha.id, parada_id=999999999,
+                    payload=LinhaParadaUpdate(descricao="Fantasma"),
+                )
+            assert e.value.status_code == 404
+
+            with pytest.raises(HTTPException) as e:
+                await tr.excluir_parada(
+                    db, tenant_id=a.id, linha_id=linha.id, parada_id=999999999,
+                )
+            assert e.value.status_code == 404
+
+            with pytest.raises(HTTPException) as e:
+                await tr.excluir_horario(
+                    db, tenant_id=a.id, linha_id=linha.id, horario_id=999999999,
+                )
+            assert e.value.status_code == 404
+    finally:
+        await _limpar(admin_engine, a.id)
+        await _limpar(admin_engine, b.id)
 
 
 @pytest.mark.asyncio
