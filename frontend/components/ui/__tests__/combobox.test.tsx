@@ -4,7 +4,7 @@
  * botão do trigger (aninhamento interativo inválido) — teclado nunca chegava
  * nele.
  */
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -30,6 +30,9 @@ describe("Combobox — regressão do fluxo básico", () => {
     const onChange = vi.fn();
     render(<Combobox options={OPCOES} value={null} onChange={onChange} />);
     await userEvent.click(screen.getByRole("combobox"));
+    // o foco do input de busca chega via requestAnimationFrame — teclar antes
+    // dele perde a seta (aconteceu no runner do CI, não localmente)
+    await waitFor(() => expect(screen.getByPlaceholderText("Buscar…")).toHaveFocus());
     await userEvent.keyboard("{ArrowDown}{Enter}");
     expect(onChange).toHaveBeenCalledWith(2, expect.objectContaining({ value: 2 }));
   });
