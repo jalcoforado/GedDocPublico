@@ -12,6 +12,7 @@ from datetime import datetime, time
 
 import pytest
 from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from app.main import app
 from app.models import LinhaHorario, LinhaParada
 from app.schemas.transporte_regulado import (
+    AlvaraCreate,
     LinhaCreate,
     LinhaHorarioCreate,
     LinhaParadaCreate,
@@ -26,7 +28,13 @@ from app.schemas.transporte_regulado import (
     LinhaUpdate,
 )
 from app.services import transporte_regulado as tr
-from tests.test_transporte_p5_2_atendimento import _provisionar, _sm
+from app.services.modulos import contratar
+from tests.test_transporte_p5_2_atendimento import (
+    _as_user,
+    _cria_usuario_comum_transporte,
+    _provisionar,
+    _sm,
+)
 
 
 async def _operadores(engine, tenant_id: int):
@@ -78,6 +86,10 @@ async def _limpar(engine, tenant_id: int) -> None:
             "DELETE FROM transporte_regulado.linha_horario WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.linha_parada WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.linha WHERE tenant_id=:t",
+            # `test_alvara_continua_emitindo_para_operador_de_linha` emite um
+            # alvará ligado ao permissionário: sem apagá-lo antes, o DELETE do
+            # permissionário abaixo esbarra na FK `alvara_id_permissionario_fkey`.
+            "DELETE FROM transporte_regulado.alvara WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.empresa WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.permissionario WHERE tenant_id=:t",
         ):
@@ -686,5 +698,132 @@ async def test_o_banco_barra_horario_duplicado_sem_passar_pelo_servico(admin_eng
                             criado_em=datetime.utcnow(),
                         )
                     )
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+# ----------------------------------------------------------------- HTTP
+
+
+@pytest.mark.asyncio
+async def test_http_usuario_comum_cria_linha_e_le_detalhe(admin_engine):
+    """Usuário COMUM, não super-usuário.
+
+    O bypass de SU em `auth/perms.py` retorna antes do `getattr(item, action)`,
+    e foi assim que dez rotas do transporte ficaram devolvendo 500 para
+    operador não-SU sem a suíte notar. Toda rota nova precisa de um teste que
+    passe por este caminho.
+    """
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            async with s.begin():
+                # `contratar` RECONCILIA: passar só `["transporte"]`
+                # descontrata os demais.
+                await contratar(s, t.id, ["transporte"])
+
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+        _as_user(admin_engine, uid, t.id, t.slug)()
+        base = "/api/v2/transporte-regulado/linhas"
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            r = await c.post(
+                base,
+                json={
+                    "nome": "Linha HTTP",
+                    "origem": "Centro",
+                    "destino": "Bairro Novo",
+                    "tipo_servico": "transporte_distrital",
+                    "id_empresa": id_emp,
+                },
+            )
+            assert r.status_code == 201, r.text
+            linha_id = r.json()["id"]
+
+            r = await c.get(f"{base}/{linha_id}")
+            assert r.status_code == 200, r.text
+            corpo = r.json()
+            assert corpo["paradas"] == []
+            assert corpo["horarios"] == []
+            assert corpo["operador_nome"]
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_http_reordenar_paradas(admin_engine):
+    """Prova de passagem que a rota literal `/ordem` não foi engolida pela
+    paramétrica `/{parada_id}` — senão o PUT abaixo devolveria 422 sem chegar
+    ao handler."""
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            async with s.begin():
+                await contratar(s, t.id, ["transporte"])
+
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        linha = await _linha(admin_engine, t.id, id_empresa=id_emp)
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+        _as_user(admin_engine, uid, t.id, t.slug)()
+        base = f"/api/v2/transporte-regulado/linhas/{linha.id}"
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            r1 = await c.post(f"{base}/paradas", json={"descricao": "Parada A"})
+            assert r1.status_code == 201, r1.text
+            r2 = await c.post(f"{base}/paradas", json={"descricao": "Parada B"})
+            assert r2.status_code == 201, r2.text
+            id_a, id_b = r1.json()["id"], r2.json()["id"]
+
+            r = await c.put(f"{base}/paradas/ordem", json={"ids": [id_b, id_a]})
+            assert r.status_code == 200, r.text
+
+            r = await c.get(base)
+            assert r.status_code == 200, r.text
+            paradas = r.json()["paradas"]
+            assert [p["id"] for p in paradas] == [id_b, id_a]
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_alvara_continua_emitindo_para_operador_de_linha(admin_engine):
+    """O teste do NÃO-gate: linha existir/inativar não trava o alvará do
+    permissionário que a opera — mesma decisão da P6 com o ponto/vaga."""
+    t = await _provisionar(admin_engine)
+    try:
+        _, id_perm = await _operadores(admin_engine, t.id)
+        linha = await _linha(admin_engine, t.id, id_permissionario=id_perm)
+
+        async with _sm(admin_engine)() as db:
+            alvara = await tr.criar_alvara(
+                db,
+                tenant_id=t.id,
+                payload=AlvaraCreate(
+                    numero_alvara=f"ALV-{uuid.uuid4().hex[:8]}",
+                    tipo_servico="transporte_escolar",
+                    id_permissionario=id_perm,
+                ),
+            )
+        assert alvara.id is not None
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.atualizar_linha(
+                    db, tenant_id=t.id, linha_id=linha.id,
+                    payload=LinhaUpdate(situacao="inativa"),
+                )
+
+        async with _sm(admin_engine)() as db:
+            perm_depois = await tr.obter_permissionario(
+                db, tenant_id=t.id, permissionario_id=id_perm
+            )
+        assert perm_depois.situacao == "ativo", (
+            "inativar a linha não pode mudar a situação do permissionário"
+        )
     finally:
         await _limpar(admin_engine, t.id)

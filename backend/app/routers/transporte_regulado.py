@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.deps import require_tenant_id
 from ..auth.perms import require_permission
 from ..database import get_db
-from ..models import Usuario
+from ..models import Empresa, Permissionario, Usuario
 from ..schemas.common import Paginated
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
@@ -72,6 +72,15 @@ from ..schemas.transporte_regulado import (
     RecadastramentoItemUpdate,
     RecadastramentoMarcarInput,
     RecadastramentoSituacaoAtendimentoOut,
+    LinhaCreate,
+    LinhaUpdate,
+    LinhaOut,
+    LinhaParadaOut,
+    LinhaHorarioOut,
+    LinhaParadaCreate,
+    LinhaParadaUpdate,
+    LinhaParadasOrdemInput,
+    LinhaHorarioCreate,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -1928,3 +1937,215 @@ async def liberar_vaga(
     await db.commit()
     await db.refresh(ocupacao)
     return PontoOcupacaoOut.model_validate(ocupacao)
+
+
+linhas_router = APIRouter(
+    prefix="/transporte-regulado/linhas", tags=["transporte-regulado"]
+)
+
+
+async def _linha_out(db, linha, *, com_filhas: bool, tenant_id: int) -> LinhaOut:
+    saida = LinhaOut.model_validate(linha)
+    if linha.id_empresa is not None:
+        emp = await db.get(Empresa, linha.id_empresa)
+        saida.operador_nome = emp.razao_social if emp else None
+    elif linha.id_permissionario is not None:
+        perm = await db.get(Permissionario, linha.id_permissionario)
+        saida.operador_nome = perm.nome if perm else None
+    horarios = await tr_svc.listar_horarios(
+        db, tenant_id=tenant_id, linha_id=linha.id
+    )
+    saida.total_horarios = len(horarios)
+    if com_filhas:
+        saida.horarios = [LinhaHorarioOut.model_validate(h) for h in horarios]
+        saida.paradas = [
+            LinhaParadaOut.model_validate(p)
+            for p in await tr_svc.listar_paradas(
+                db, tenant_id=tenant_id, linha_id=linha.id
+            )
+        ]
+    return saida
+
+
+@linhas_router.get("", response_model=Paginated[LinhaOut])
+async def list_linhas(
+    q: str | None = Query(None, description="Busca por nome ou código (substring)"),
+    tipo_servico: str | None = None,
+    situacao: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Paginated[LinhaOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_linhas(
+        db, tenant_id=tenant_id, q=q, tipo_servico=tipo_servico,
+        situacao=situacao, limit=page_size, offset=offset,
+    )
+    return Paginated(
+        items=[
+            await _linha_out(db, l, com_filhas=False, tenant_id=tenant_id)
+            for l in rows
+        ],
+        total=total, page=page, page_size=page_size,
+    )
+
+
+@linhas_router.post("", response_model=LinhaOut, status_code=status.HTTP_201_CREATED)
+async def create_linha(
+    payload: LinhaCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> LinhaOut:
+    linha = await tr_svc.criar_linha(db, tenant_id=tenant_id, payload=payload)
+    await db.commit()
+    await db.refresh(linha)
+    return await _linha_out(db, linha, com_filhas=True, tenant_id=tenant_id)
+
+
+@linhas_router.get("/{linha_id}", response_model=LinhaOut)
+async def get_linha(
+    linha_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> LinhaOut:
+    linha = await tr_svc.obter_linha(db, tenant_id=tenant_id, linha_id=linha_id)
+    return await _linha_out(db, linha, com_filhas=True, tenant_id=tenant_id)
+
+
+@linhas_router.put("/{linha_id}", response_model=LinhaOut)
+async def update_linha(
+    linha_id: int,
+    payload: LinhaUpdate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> LinhaOut:
+    linha = await tr_svc.atualizar_linha(
+        db, tenant_id=tenant_id, linha_id=linha_id, payload=payload
+    )
+    await db.commit()
+    return await _linha_out(db, linha, com_filhas=True, tenant_id=tenant_id)
+
+
+@linhas_router.delete("/{linha_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_linha(
+    linha_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await tr_svc.excluir_linha(db, tenant_id=tenant_id, linha_id=linha_id)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@linhas_router.post(
+    "/{linha_id}/paradas",
+    response_model=LinhaParadaOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_parada(
+    linha_id: int,
+    payload: LinhaParadaCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> LinhaParadaOut:
+    parada = await tr_svc.criar_parada(
+        db, tenant_id=tenant_id, linha_id=linha_id, payload=payload
+    )
+    await db.commit()
+    return LinhaParadaOut.model_validate(parada)
+
+
+# ATENÇÃO à ordem: `/paradas/ordem` é literal irmã de `/paradas/{parada_id}` e
+# TEM de vir antes — a paramétrica engoliria a literal com 422 sem chegar ao
+# handler. Esse defeito já ocorreu TRÊS vezes neste arquivo;
+# `tests/test_guarda_ordem_rotas.py` varre e reprova.
+@linhas_router.put("/{linha_id}/paradas/ordem", response_model=list[LinhaParadaOut])
+async def reordenar_paradas(
+    linha_id: int,
+    payload: LinhaParadasOrdemInput,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[LinhaParadaOut]:
+    paradas = await tr_svc.reordenar_paradas(
+        db, tenant_id=tenant_id, linha_id=linha_id, ids=payload.ids
+    )
+    await db.commit()
+    return [LinhaParadaOut.model_validate(p) for p in paradas]
+
+
+@linhas_router.put("/{linha_id}/paradas/{parada_id}", response_model=LinhaParadaOut)
+async def update_parada(
+    linha_id: int,
+    parada_id: int,
+    payload: LinhaParadaUpdate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> LinhaParadaOut:
+    parada = await tr_svc.atualizar_parada(
+        db, tenant_id=tenant_id, linha_id=linha_id,
+        parada_id=parada_id, payload=payload,
+    )
+    await db.commit()
+    return LinhaParadaOut.model_validate(parada)
+
+
+@linhas_router.delete(
+    "/{linha_id}/paradas/{parada_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_parada(
+    linha_id: int,
+    parada_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await tr_svc.excluir_parada(
+        db, tenant_id=tenant_id, linha_id=linha_id, parada_id=parada_id
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@linhas_router.post(
+    "/{linha_id}/horarios",
+    response_model=LinhaHorarioOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_horario(
+    linha_id: int,
+    payload: LinhaHorarioCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> LinhaHorarioOut:
+    horario = await tr_svc.criar_horario(
+        db, tenant_id=tenant_id, linha_id=linha_id, payload=payload
+    )
+    await db.commit()
+    return LinhaHorarioOut.model_validate(horario)
+
+
+@linhas_router.delete(
+    "/{linha_id}/horarios/{horario_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_horario(
+    linha_id: int,
+    horario_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await tr_svc.excluir_horario(
+        db, tenant_id=tenant_id, linha_id=linha_id, horario_id=horario_id
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
