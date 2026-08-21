@@ -52,14 +52,30 @@ interface TRProps extends React.HTMLAttributes<HTMLTableRowElement> {
 }
 
 export function TR({ className, highlighted, onClickRow, onClick, ...props }: TRProps) {
+  const handleClick = onClick || (onClickRow ? () => onClickRow() : undefined);
   return (
     <tr
-      onClick={onClick || (onClickRow ? () => onClickRow() : undefined)}
+      onClick={handleClick}
+      // Linha clicável é operável por teclado (fatia 2.7): entra no Tab e
+      // ativa com Enter/Espaço — antes era mouse-only.
+      tabIndex={handleClick ? 0 : undefined}
+      onKeyDown={
+        handleClick
+          ? (e) => {
+              if (e.target !== e.currentTarget) return; // controles internos seguem seus próprios atalhos
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleClick(e as unknown as React.MouseEvent<HTMLTableRowElement>);
+              }
+            }
+          : undefined
+      }
       className={cn(
         "min-h-[var(--table-row-h)] transition-colors duration-fast",
         "hover:bg-surface-2",
         highlighted && "bg-brand/5 hover:bg-brand/10 dark:bg-brand/15 dark:hover:bg-brand/20",
-        (onClick || onClickRow) && "cursor-pointer",
+        handleClick &&
+          "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
         className,
       )}
       {...props}
@@ -99,13 +115,18 @@ export function TH({
         ? ArrowDown
         : ArrowUpDown;
   return (
-    <th className={cn(pad, "p-0", className)} {...props}>
+    <th
+      // aria-sort pertence ao th (fatia 2.7) — no botão interno, leitor de
+      // tela não o associava à coluna.
+      aria-sort={
+        sortState === "asc" ? "ascending" : sortState === "desc" ? "descending" : "none"
+      }
+      className={cn(pad, "p-0", className)}
+      {...props}
+    >
       <button
         type="button"
         onClick={onSortToggle}
-        aria-sort={
-          sortState === "asc" ? "ascending" : sortState === "desc" ? "descending" : "none"
-        }
         className={cn(
           "flex w-full items-center gap-1 text-left",
           pad,
@@ -133,5 +154,29 @@ export function TD({ className, ...props }: React.TdHTMLAttributes<HTMLTableCell
       className={cn("py-[var(--density-pad-y)] px-[var(--density-pad-x)]", className)}
       {...props}
     />
+  );
+}
+
+interface SkeletonRowProps {
+  /** Número de colunas da tabela — uma célula skeleton por coluna. */
+  cols: number;
+  className?: string;
+}
+
+/**
+ * Linha de carregamento (fatia 2.7): mesma altura da linha real (token
+ * `--density-row-h`, respeita o modo compacto) para a tabela não "pular"
+ * quando os dados chegam. `aria-hidden`: esqueleto é acabamento visual,
+ * não conteúdo.
+ */
+export function SkeletonRow({ cols, className }: SkeletonRowProps) {
+  return (
+    <tr aria-hidden="true" className={cn("h-[var(--density-row-h)]", className)}>
+      {Array.from({ length: cols }, (_, i) => (
+        <TD key={i}>
+          <div className="h-3 w-full max-w-[10rem] animate-pulse rounded bg-surface-3" />
+        </TD>
+      ))}
+    </tr>
   );
 }
