@@ -1970,6 +1970,58 @@ export interface PontoLiberarInput {
   motivo_liberacao?: string | null;
 }
 
+// ------------------------------------------------------------- P6b: linhas
+
+export type LinhaSituacao = "ativa" | "inativa";
+
+export interface LinhaParada {
+  id: number;
+  ordem: number;
+  descricao: string;
+  observacoes: string | null;
+}
+
+export interface LinhaHorario {
+  id: number;
+  /** 0=segunda … 6=domingo. */
+  dia_semana: number;
+  /** "HH:MM:SS" — o backend serializa `time` assim. */
+  partida: string;
+}
+
+// "LinhaTransporte", não "Linha": neste arquivo "linha" já significa linha
+// de tabela em vários contextos.
+export interface LinhaTransporte {
+  id: number;
+  nome: string;
+  codigo: string | null;
+  tipo_servico: TipoServico;
+  id_empresa: number | null;
+  id_permissionario: number | null;
+  origem: string;
+  destino: string;
+  situacao: LinhaSituacao;
+  observacoes: string | null;
+  operador_nome: string | null;
+  total_horarios: number;
+  criado_em: string;
+  atualizado_em: string | null;
+  paradas: LinhaParada[];
+  horarios: LinhaHorario[];
+}
+
+export type LinhaTransporteCreate = Omit<
+  LinhaTransporte,
+  | "id"
+  | "operador_nome"
+  | "total_horarios"
+  | "criado_em"
+  | "atualizado_em"
+  | "paradas"
+  | "horarios"
+>;
+export type LinhaTransporteUpdate = Partial<LinhaTransporteCreate>;
+
 export type PermissionarioSituacao =
   | "ativo"
   | "pendente"
@@ -3349,6 +3401,68 @@ export const api = {
       request<PontoOcupacao>(
         `/transporte-regulado/pontos/${id}/ocupacoes/${ocupacaoId}/liberar`,
         { method: "POST", body: JSON.stringify(data) },
+      ),
+  },
+  linhasTransporte: {
+    // Paginado no backend -> Paginated<> aqui. Declarar LinhaTransporte[]
+    // deixaria o tsc verde e estouraria no navegador (11 dias no transporte).
+    list: (params?: {
+      q?: string;
+      tipo_servico?: string;
+      situacao?: string;
+      page?: number;
+      page_size?: number;
+    }) =>
+      request<Paginated<LinhaTransporte>>(
+        `/transporte-regulado/linhas${qs(params ?? {})}`,
+      ),
+    get: (id: number) =>
+      request<LinhaTransporte>(`/transporte-regulado/linhas/${id}`),
+    create: (data: LinhaTransporteCreate) =>
+      request<LinhaTransporte>("/transporte-regulado/linhas", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: LinhaTransporteUpdate) =>
+      request<LinhaTransporte>(`/transporte-regulado/linhas/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) =>
+      request<void>(`/transporte-regulado/linhas/${id}`, { method: "DELETE" }),
+    addParada: (linhaId: number, data: { descricao: string; observacoes?: string | null }) =>
+      request<LinhaParada>(`/transporte-regulado/linhas/${linhaId}/paradas`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    updateParada: (
+      linhaId: number,
+      paradaId: number,
+      data: { descricao?: string; observacoes?: string | null },
+    ) =>
+      request<LinhaParada>(
+        `/transporte-regulado/linhas/${linhaId}/paradas/${paradaId}`,
+        { method: "PUT", body: JSON.stringify(data) },
+      ),
+    removeParada: (linhaId: number, paradaId: number) =>
+      request<void>(
+        `/transporte-regulado/linhas/${linhaId}/paradas/${paradaId}`,
+        { method: "DELETE" },
+      ),
+    reordenarParadas: (linhaId: number, ids: number[]) =>
+      request<LinhaParada[]>(
+        `/transporte-regulado/linhas/${linhaId}/paradas/ordem`,
+        { method: "PUT", body: JSON.stringify({ ids }) },
+      ),
+    addHorario: (linhaId: number, data: { dia_semana: number; partida: string }) =>
+      request<LinhaHorario>(`/transporte-regulado/linhas/${linhaId}/horarios`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    removeHorario: (linhaId: number, horarioId: number) =>
+      request<void>(
+        `/transporte-regulado/linhas/${linhaId}/horarios/${horarioId}`,
+        { method: "DELETE" },
       ),
   },
   tiposAnexo: {
