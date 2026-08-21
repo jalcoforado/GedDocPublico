@@ -20,6 +20,9 @@ from ..models import (
     Linha,
     LinhaHorario,
     LinhaParada,
+    Ocorrencia,
+    OcorrenciaAndamento,
+    OcorrenciaTipo,
     Permissionario,
     Ponto,
     PontoOcupacao,
@@ -4130,3 +4133,237 @@ async def excluir_horario(
         raise HTTPException(404, "Horário não encontrado")
     horario.excluido = True
     await db.flush()
+
+
+# ------------------------------------------------------------- P7: ocorrências
+
+async def _validar_nome_tipo_ocorrencia_unico(
+    db: AsyncSession, *, tenant_id: int, nome: str, alem_de: int | None = None,
+) -> None:
+    stmt = select(OcorrenciaTipo.id).where(
+        OcorrenciaTipo.tenant_id == tenant_id,
+        func.lower(OcorrenciaTipo.nome) == nome.lower(),
+        OcorrenciaTipo.excluido.is_(False),
+    )
+    if alem_de is not None:
+        stmt = stmt.where(OcorrenciaTipo.id != alem_de)
+    if await db.scalar(stmt) is not None:
+        raise HTTPException(409, f"Já existe um tipo de ocorrência chamado '{nome}'")
+
+
+async def listar_tipos_ocorrencia(
+    db: AsyncSession, *, tenant_id: int,
+) -> list[OcorrenciaTipo]:
+    """Inclui os inativos — quem decide o que aparece no formulário de
+    registro novo é o caller (router), não esta consulta."""
+    rows = await db.scalars(
+        select(OcorrenciaTipo)
+        .where(
+            OcorrenciaTipo.tenant_id == tenant_id,
+            OcorrenciaTipo.excluido.is_(False),
+        )
+        .order_by(OcorrenciaTipo.nome)
+    )
+    return list(rows)
+
+
+async def obter_tipo_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, tipo_id: int,
+) -> OcorrenciaTipo:
+    tipo = await db.scalar(
+        select(OcorrenciaTipo).where(
+            OcorrenciaTipo.id == tipo_id,
+            OcorrenciaTipo.tenant_id == tenant_id,
+            OcorrenciaTipo.excluido.is_(False),
+        )
+    )
+    if tipo is None:
+        raise HTTPException(404, "Tipo de ocorrência não encontrado")
+    return tipo
+
+
+async def criar_tipo_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, payload,
+) -> OcorrenciaTipo:
+    await _validar_nome_tipo_ocorrencia_unico(db, tenant_id=tenant_id, nome=payload.nome)
+    tipo = OcorrenciaTipo(
+        tenant_id=tenant_id, criado_em=datetime.utcnow(),
+        **payload.model_dump(),
+    )
+    db.add(tipo)
+    await db.flush()
+    return tipo
+
+
+async def atualizar_tipo_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, tipo_id: int, payload,
+) -> OcorrenciaTipo:
+    tipo = await obter_tipo_ocorrencia(db, tenant_id=tenant_id, tipo_id=tipo_id)
+    dados = payload.model_dump(exclude_unset=True)
+    if "nome" in dados:
+        await _validar_nome_tipo_ocorrencia_unico(
+            db, tenant_id=tenant_id, nome=dados["nome"], alem_de=tipo.id
+        )
+    for campo, valor in dados.items():
+        setattr(tipo, campo, valor)
+    tipo.atualizado_em = datetime.utcnow()
+    await db.flush()
+    return tipo
+
+
+async def excluir_tipo_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, tipo_id: int,
+) -> None:
+    """Inativar (`ativo=false`) é sempre permitido, mas excluir com
+    ocorrência não excluída ainda usando o tipo é 409 — apontamento órfão."""
+    tipo = await obter_tipo_ocorrencia(db, tenant_id=tenant_id, tipo_id=tipo_id)
+    em_uso = await db.scalar(
+        select(Ocorrencia.id).where(
+            Ocorrencia.tenant_id == tenant_id,
+            Ocorrencia.id_tipo == tipo_id,
+            Ocorrencia.excluido.is_(False),
+        )
+    )
+    if em_uso is not None:
+        raise HTTPException(409, "Tipo de ocorrência em uso por ocorrência existente")
+    tipo.excluido = True
+    tipo.atualizado_em = datetime.utcnow()
+    await db.flush()
+
+
+async def _validar_alvos_ocorrencia(
+    db: AsyncSession, *, tenant_id: int,
+    id_permissionario: int | None, id_empresa: int | None, id_veiculo: int | None,
+) -> None:
+    """FK soft: same-tenant e não excluído, senão 404 (não 403 — cross-tenant
+    não confirma existência)."""
+    if id_permissionario is not None:
+        perm = await db.scalar(
+            select(Permissionario.id).where(
+                Permissionario.id == id_permissionario,
+                Permissionario.tenant_id == tenant_id,
+                Permissionario.excluido.is_(False),
+            )
+        )
+        if perm is None:
+            raise HTTPException(404, "Permissionário não encontrado")
+    if id_empresa is not None:
+        emp = await db.scalar(
+            select(Empresa.id).where(
+                Empresa.id == id_empresa,
+                Empresa.tenant_id == tenant_id,
+                Empresa.excluido.is_(False),
+            )
+        )
+        if emp is None:
+            raise HTTPException(404, "Empresa não encontrada")
+    if id_veiculo is not None:
+        veic = await db.scalar(
+            select(VeiculoRegulado.id).where(
+                VeiculoRegulado.id == id_veiculo,
+                VeiculoRegulado.tenant_id == tenant_id,
+                VeiculoRegulado.excluido.is_(False),
+            )
+        )
+        if veic is None:
+            raise HTTPException(404, "Veículo não encontrado")
+
+
+async def obter_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, ocorrencia_id: int,
+) -> Ocorrencia:
+    ocorrencia = await db.scalar(
+        select(Ocorrencia).where(
+            Ocorrencia.id == ocorrencia_id,
+            Ocorrencia.tenant_id == tenant_id,
+            Ocorrencia.excluido.is_(False),
+        )
+    )
+    if ocorrencia is None:
+        raise HTTPException(404, "Ocorrência não encontrada")
+    return ocorrencia
+
+
+async def listar_ocorrencias(
+    db: AsyncSession, *, tenant_id: int,
+    q: str | None = None, situacao: str | None = None, origem: str | None = None,
+    id_tipo: int | None = None, limit: int = 50, offset: int = 0,
+) -> tuple[list[Ocorrencia], int]:
+    # Condições construídas UMA vez e usadas na consulta E na contagem — a
+    # divergência entre as duas já mordeu duas vezes neste módulo.
+    cond = [Ocorrencia.tenant_id == tenant_id, Ocorrencia.excluido.is_(False)]
+    if q:
+        padrao = f"%{q.strip()}%"
+        cond.append(
+            or_(
+                Ocorrencia.descricao.ilike(padrao),
+                Ocorrencia.referencia_alvo.ilike(padrao),
+            )
+        )
+    if situacao:
+        cond.append(Ocorrencia.situacao == situacao)
+    if origem:
+        cond.append(Ocorrencia.origem == origem)
+    if id_tipo:
+        cond.append(Ocorrencia.id_tipo == id_tipo)
+    total = await db.scalar(select(func.count(Ocorrencia.id)).where(*cond)) or 0
+    rows = await db.scalars(
+        select(Ocorrencia)
+        .where(*cond)
+        .order_by(Ocorrencia.criado_em.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(rows), total
+
+
+async def registrar_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, payload, id_usuario: int | None,
+    exigir_alvo: bool = True,
+) -> Ocorrencia:
+    """Registra a ocorrência + o ato `registro` na trilha, num único flush.
+
+    `exigir_alvo=True` é o balcão municipal (padrão); `exigir_alvo=False` é a
+    porta da P7.2 (denúncia do portal), onde o cidadão raramente sabe o id de
+    um permissionário e o vínculo formal fica para a apuração.
+    """
+    tipo = await db.scalar(
+        select(OcorrenciaTipo).where(
+            OcorrenciaTipo.id == payload.id_tipo,
+            OcorrenciaTipo.tenant_id == tenant_id,
+            OcorrenciaTipo.excluido.is_(False),
+        )
+    )
+    if tipo is None or not tipo.ativo:
+        raise HTTPException(422, "Tipo de ocorrência inválido ou inativo")
+
+    await _validar_alvos_ocorrencia(
+        db, tenant_id=tenant_id,
+        id_permissionario=payload.id_permissionario,
+        id_empresa=payload.id_empresa,
+        id_veiculo=payload.id_veiculo,
+    )
+
+    if exigir_alvo and not any(
+        (payload.id_permissionario, payload.id_empresa, payload.id_veiculo)
+    ):
+        raise HTTPException(
+            422, "Informe ao menos um alvo (permissionário, empresa ou veículo)"
+        )
+
+    agora = datetime.utcnow()
+    ocorrencia = Ocorrencia(
+        tenant_id=tenant_id, criado_em=agora,
+        **payload.model_dump(),
+    )
+    db.add(ocorrencia)
+    await db.flush()
+
+    db.add(
+        OcorrenciaAndamento(
+            tenant_id=tenant_id, id_ocorrencia=ocorrencia.id,
+            ato="registro", id_usuario=id_usuario, criado_em=agora,
+        )
+    )
+    await db.flush()
+    return ocorrencia

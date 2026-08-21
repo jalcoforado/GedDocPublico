@@ -1429,3 +1429,69 @@ class LinhaParadasOrdemInput(BaseModel):
 class LinhaHorarioCreate(BaseModel):
     dia_semana: int = Field(ge=0, le=6)
     partida: time
+
+
+# ------------------------------------------------------------- P7: ocorrências
+
+OcorrenciaOrigem = Literal["fiscalizacao", "denuncia", "outro"]
+OcorrenciaSituacao = Literal[
+    "registrada", "em_apuracao", "procedente", "improcedente", "arquivada"
+]
+
+
+class OcorrenciaTipoCreate(BaseModel):
+    nome: str = Field(min_length=1, max_length=150)
+    descricao: str | None = None
+    ativo: bool = True
+
+
+class OcorrenciaTipoUpdate(BaseModel):
+    nome: str | None = Field(default=None, min_length=1, max_length=150)
+    descricao: str | None = None
+    ativo: bool | None = None
+
+
+class OcorrenciaTipoOut(BaseModel):
+    id: int
+    nome: str
+    descricao: str | None = None
+    ativo: bool
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OcorrenciaCreate(BaseModel):
+    id_tipo: int
+    origem: OcorrenciaOrigem
+    data_fato: date
+    descricao: str = Field(min_length=1)
+    id_permissionario: int | None = None
+    id_empresa: int | None = None
+    id_veiculo: int | None = None
+    referencia_alvo: str | None = Field(default=None, max_length=200)
+    observacoes: str | None = None
+
+
+class OcorrenciaAndamentoOut(BaseModel):
+    id: int
+    ato: str
+    parecer: str | None = None
+    id_usuario: int | None = None
+    usuario_nome: str | None = None
+    criado_em: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OcorrenciaOut(OcorrenciaCreate):
+    id: int
+    situacao: OcorrenciaSituacao
+    tipo_nome: str | None = None
+    alvo_resumo: str | None = None
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+    andamentos: list[OcorrenciaAndamentoOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
