@@ -7,7 +7,6 @@ import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -130,19 +129,47 @@ export default function LinhasPage() {
       }),
   });
 
-  // Combobox de operador — empresa e permissionário. Busca NO SERVIDOR: a
-  // lista é carregada quando o dialog abre (mesmo padrão de
-  // processos/novo/page.tsx com manifestantes) e o próprio Combobox filtra
-  // sobre o resultado enquanto o usuário digita.
+  // Seletor de operador — empresa e permissionário. Busca NO SERVIDOR com
+  // debounce, mesmo padrão do seletor de ocupante da P6
+  // (pontos/[id]/page.tsx): filtrar no cliente sobre a primeira página
+  // repete o bug "só enxerga os 50 primeiros".
+  const [buscaEmpresa, setBuscaEmpresa] = useState("");
+  const [buscaEmpresaAplicada, setBuscaEmpresaAplicada] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setBuscaEmpresaAplicada(buscaEmpresa.trim()), 300);
+    return () => clearTimeout(t);
+  }, [buscaEmpresa]);
+
+  const [buscaPerm, setBuscaPerm] = useState("");
+  const [buscaPermAplicada, setBuscaPermAplicada] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setBuscaPermAplicada(buscaPerm.trim()), 300);
+    return () => clearTimeout(t);
+  }, [buscaPerm]);
+
   const empresasQ = useQuery({
-    queryKey: ["tr-empresas-busca"],
-    queryFn: () => api.empresas.list(),
+    queryKey: ["tr-empresas-busca", buscaEmpresaAplicada],
+    queryFn: () => api.empresas.list({ q: buscaEmpresaAplicada || undefined }),
     enabled: dialogOpen,
   });
   const permsQ = useQuery({
-    queryKey: ["tr-perms-busca"],
-    queryFn: () => api.permissionarios.list({ page_size: 200 }),
+    queryKey: ["tr-perms-busca", buscaPermAplicada],
+    queryFn: () => api.permissionarios.list({ q: buscaPermAplicada || undefined }),
     enabled: dialogOpen,
+  });
+
+  // Nome do operador já selecionado — busca dedicada por id, independente
+  // do texto de busca atual (ao editar, o selecionado pode não estar entre
+  // os resultados da busca corrente).
+  const empresaSelecionadaQ = useQuery({
+    queryKey: ["tr-empresa-selecionada", form.id_empresa],
+    queryFn: () => api.empresas.get(form.id_empresa as number),
+    enabled: form.id_empresa !== null,
+  });
+  const permSelecionadoQ = useQuery({
+    queryKey: ["tr-perm-selecionado", form.id_permissionario],
+    queryFn: () => api.permissionarios.get(form.id_permissionario as number),
+    enabled: form.id_permissionario !== null,
   });
 
   function invalidar() {
@@ -175,6 +202,8 @@ export default function LinhasPage() {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+    setBuscaEmpresa("");
+    setBuscaPerm("");
     setDialogOpen(true);
   }
 
@@ -182,6 +211,8 @@ export default function LinhasPage() {
     setEditing(l);
     setForm(paraForm(l));
     setErr(null);
+    setBuscaEmpresa("");
+    setBuscaPerm("");
     setDialogOpen(true);
   }
 
@@ -213,16 +244,16 @@ export default function LinhasPage() {
     salvarM.mutate();
   }
 
-  const empresaOptions = (empresasQ.data?.items ?? []).map((emp) => ({
-    value: emp.id,
-    label: emp.nome_fantasia ?? emp.razao_social,
-    hint: emp.cnpj,
-  }));
-  const permOptions = (permsQ.data?.items ?? []).map((p) => ({
-    value: p.id,
-    label: p.nome,
-    hint: p.cpf,
-  }));
+  const empresaSelecionadaNome = empresaSelecionadaQ.data
+    ? empresaSelecionadaQ.data.nome_fantasia ?? empresaSelecionadaQ.data.razao_social
+    : form.id_empresa !== null
+      ? `Empresa #${form.id_empresa}`
+      : null;
+  const permSelecionadoNome = permSelecionadoQ.data
+    ? permSelecionadoQ.data.nome
+    : form.id_permissionario !== null
+      ? `Permissionário #${form.id_permissionario}`
+      : null;
 
   return (
     <div className="space-y-4">
@@ -425,30 +456,96 @@ export default function LinhasPage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="empresa">Empresa operadora</Label>
-              <Combobox
-                id="empresa"
-                options={empresaOptions}
-                value={form.id_empresa}
-                onChange={(v) => set("id_empresa", v as number | null)}
-                placeholder="Selecione a empresa..."
-                searchPlaceholder="Buscar empresa..."
-                loading={empresasQ.isLoading}
-                emptyText="Nenhuma empresa encontrada."
-              />
+              <Label htmlFor="buscaEmpresa">Empresa operadora</Label>
+              {form.id_empresa !== null ? (
+                <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
+                  <span className="truncate">{empresaSelecionadaNome}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => set("id_empresa", null)}
+                  >
+                    Limpar
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <Input
+                    id="buscaEmpresa"
+                    placeholder="Buscar por razão social/CNPJ..."
+                    value={buscaEmpresa}
+                    onChange={(e) => setBuscaEmpresa(e.target.value)}
+                  />
+                  <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
+                    {empresasQ.isLoading ? (
+                      <div className="p-2 text-xs text-muted-foreground">Carregando...</div>
+                    ) : (empresasQ.data?.items ?? []).length === 0 ? (
+                      <div className="p-2 text-xs text-muted-foreground">
+                        Nenhuma empresa encontrada.
+                      </div>
+                    ) : (
+                      (empresasQ.data?.items ?? []).map((emp) => (
+                        <button
+                          key={emp.id}
+                          type="button"
+                          className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
+                          onClick={() => set("id_empresa", emp.id)}
+                        >
+                          {emp.nome_fantasia ?? emp.razao_social}
+                          <span className="ml-2 text-xs text-muted-foreground">{emp.cnpj}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
             </div>
             <div>
-              <Label htmlFor="permissionario">Permissionário operador</Label>
-              <Combobox
-                id="permissionario"
-                options={permOptions}
-                value={form.id_permissionario}
-                onChange={(v) => set("id_permissionario", v as number | null)}
-                placeholder="Selecione o permissionário..."
-                searchPlaceholder="Buscar permissionário..."
-                loading={permsQ.isLoading}
-                emptyText="Nenhum permissionário encontrado."
-              />
+              <Label htmlFor="buscaPerm">Permissionário operador</Label>
+              {form.id_permissionario !== null ? (
+                <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
+                  <span className="truncate">{permSelecionadoNome}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => set("id_permissionario", null)}
+                  >
+                    Limpar
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <Input
+                    id="buscaPerm"
+                    placeholder="Buscar por nome/CPF..."
+                    value={buscaPerm}
+                    onChange={(e) => setBuscaPerm(e.target.value)}
+                  />
+                  <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
+                    {permsQ.isLoading ? (
+                      <div className="p-2 text-xs text-muted-foreground">Carregando...</div>
+                    ) : (permsQ.data?.items ?? []).length === 0 ? (
+                      <div className="p-2 text-xs text-muted-foreground">
+                        Nenhum permissionário encontrado.
+                      </div>
+                    ) : (
+                      (permsQ.data?.items ?? []).map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
+                          onClick={() => set("id_permissionario", p.id)}
+                        >
+                          {p.nome}
+                          <span className="ml-2 text-xs text-muted-foreground">{p.cpf}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
