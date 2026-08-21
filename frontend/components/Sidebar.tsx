@@ -19,6 +19,7 @@ import { useBranding } from "@/lib/branding";
 import { canSeeItem, MENUS, menuDoModulo, type NavGroup, type NavItem } from "@/lib/menus";
 import { cn } from "@/lib/utils";
 import { DensityToggle } from "./DensityToggle";
+import { Popover } from "@/components/ui/popover";
 import { SidebarModuloHeader } from "./SidebarModuloHeader";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -423,11 +424,20 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                       );
                     }
 
-                    // Item simples (ou pai com children em modo collapsed — vira link p/ 1º filho).
-                    const linkHref = collapsed && item.children?.length ? item.children[0].href : item.href;
-                    const linkActive = collapsed && item.children?.length
-                      ? item.children.some((c) => isPathActive(c.href, pathname))
-                      : active;
+    // Pai com children em modo collapsed: flyout com os filhos (fatia 3.6) —
+                    // a versão anterior virava link para o 1º filho, uma troca
+                    // silenciosa de destino que o usuário não pedia.
+                    if (collapsed && item.children && item.children.length > 0) {
+                      return (
+                        <ItemColapsadoComFilhos
+                          key={item.label}
+                          item={item}
+                          pathname={pathname}
+                        />
+                      );
+                    }
+                    const linkHref = item.href;
+                    const linkActive = active;
 
                     return (
                       <Link
@@ -457,7 +467,9 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                           )}
                           aria-hidden="true"
                         />
-                        <span className={cn("flex-1", collapsed && "lg:hidden")}>
+                        {/* sr-only, não hidden: o rótulo continua sendo o nome
+                            acessível do link no modo colapsado (fatia 3.6) */}
+                        <span className={cn("flex-1", collapsed && "lg:sr-only")}>
                           {item.label}
                         </span>
                       </Link>
@@ -472,11 +484,11 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
             <Link
               href="/admin/tenants"
               title={collapsed ? "Plataforma" : undefined}
-              aria-current={pathname.startsWith("/admin") ? "page" : undefined}
+              aria-current={isPathActive("/admin", pathname) ? "page" : undefined}
               className={cn(
                 "group relative mt-1 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
                 collapsed && "lg:justify-center lg:gap-0 lg:px-0",
-                pathname.startsWith("/admin")
+                isPathActive("/admin", pathname)
                   ? "bg-sidebar-active text-sidebar-foreground"
                   : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",
               )}
@@ -516,5 +528,84 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         </div>
       </nav>
     </>
+  );
+}
+
+/**
+ * Item-pai com filhos no modo colapsado (fatia 3.6): botão que abre um
+ * flyout à direita com os filhos — clicar no pai não navega para lugar
+ * nenhum sozinho.
+ */
+function ItemColapsadoComFilhos({
+  item,
+  pathname,
+}: {
+  item: NavItem;
+  pathname: string;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const gatilhoRef = useRef<HTMLButtonElement>(null);
+  const ativo = item.children!.some((c) => isPathActive(c.href, pathname));
+  const Icon = item.icon;
+
+  const fechar = () => {
+    setAberto(false);
+    gatilhoRef.current?.focus();
+  };
+
+  return (
+    <div className="relative">
+      <button
+        ref={gatilhoRef}
+        type="button"
+        aria-haspopup="true"
+        aria-expanded={aberto}
+        title={item.label}
+        onClick={() => setAberto((v) => !v)}
+        className={cn(
+          "group relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
+          "lg:justify-center lg:gap-0 lg:px-0",
+          ativo
+            ? "bg-sidebar-active text-sidebar-foreground"
+            : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+        )}
+      >
+        <Icon className={cn("h-4 w-4 shrink-0", ativo && "text-accent")} aria-hidden="true" />
+        <span className="flex-1 lg:sr-only">{item.label}</span>
+      </button>
+      <Popover
+        open={aberto}
+        anchorRef={gatilhoRef}
+        onClose={fechar}
+        placement="right-start"
+        className="min-w-[12rem] py-1"
+      >
+        {/* Links de navegação, não menu de ações — sem role=menu para não
+            mascarar o role de link dos filhos. */}
+        <nav aria-label={item.label}>
+          {item.children!.map((child) => {
+            const ChildIcon = child.icon;
+            const childActive = isPathActive(child.href, pathname);
+            return (
+              <Link
+                key={child.href}
+                href={child.href}
+                aria-current={childActive ? "page" : undefined}
+                onClick={() => setAberto(false)}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors duration-fast",
+                  childActive
+                    ? "bg-muted text-foreground"
+                    : "text-foreground hover:bg-muted",
+                )}
+              >
+                <ChildIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="truncate">{child.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+      </Popover>
+    </div>
   );
 }
