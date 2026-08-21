@@ -12,6 +12,7 @@ from datetime import date
 
 import pytest
 from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 from app.main import app
@@ -22,7 +23,13 @@ from app.schemas.transporte_regulado import (
     OcorrenciaTipoUpdate,
 )
 from app.services import transporte_regulado as tr
-from tests.test_transporte_p5_2_atendimento import _provisionar, _sm
+from app.services.modulos import contratar
+from tests.test_transporte_p5_2_atendimento import (
+    _as_user,
+    _cria_usuario_comum_transporte,
+    _provisionar,
+    _sm,
+)
 
 
 async def _operadores(engine, tenant_id: int):
@@ -781,5 +788,91 @@ async def test_listar_andamentos_ordena_por_criado_em_e_id(admin_engine):
             assert e.value.status_code == 404
         finally:
             await _limpar(admin_engine, outro.id)
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_http_usuario_comum_registra_apura_e_decide(admin_engine):
+    """Usuário COMUM, não super-usuário.
+
+    O bypass de SU em `auth/perms.py` retorna antes do `getattr(item,
+    action)`, e foi assim que dez rotas do transporte ficaram devolvendo 500
+    para operador não-SU sem a suíte notar. Toda rota nova precisa de um
+    teste que passe por este caminho.
+    """
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            async with s.begin():
+                # `contratar` RECONCILIA: passar só `["transporte"]`
+                # descontrata os demais.
+                await contratar(s, t.id, ["transporte"])
+
+        tipo = await _tipo(admin_engine, t.id)
+        _, id_perm = await _operadores(admin_engine, t.id)
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+        _as_user(admin_engine, uid, t.id, t.slug)()
+        base = "/api/v2/transporte-regulado/ocorrencias"
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            r = await c.post(
+                base,
+                json={
+                    "id_tipo": tipo.id,
+                    "origem": "fiscalizacao",
+                    "data_fato": "2026-08-01",
+                    "descricao": "Recusa de corrida registrada no balcão",
+                    "id_permissionario": id_perm,
+                },
+            )
+            assert r.status_code == 201, r.text
+            ocorrencia_id = r.json()["id"]
+
+            r = await c.post(f"{base}/{ocorrencia_id}/apurar")
+            assert r.status_code == 200, r.text
+            assert r.json()["situacao"] == "em_apuracao"
+
+            r = await c.post(
+                f"{base}/{ocorrencia_id}/decidir",
+                json={"resultado": "improcedente", "parecer": "Sem elementos"},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["situacao"] == "improcedente"
+
+            r = await c.get(f"{base}/{ocorrencia_id}")
+            assert r.status_code == 200, r.text
+            corpo = r.json()
+            assert [a["ato"] for a in corpo["andamentos"]] == [
+                "registro", "inicio_apuracao", "decisao",
+            ]
+            assert corpo["situacao"] == "improcedente"
+            assert corpo["alvo_resumo"]
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_http_tipos_nao_engolida_pela_parametrica(admin_engine):
+    """Prova de passagem que `/tipos` não foi engolida pela paramétrica
+    `/{ocorrencia_id}` — senão devolveria 422 sem chegar ao handler."""
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            async with s.begin():
+                await contratar(s, t.id, ["transporte"])
+
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+        _as_user(admin_engine, uid, t.id, t.slug)()
+        base = "/api/v2/transporte-regulado/ocorrencias"
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            r = await c.get(f"{base}/tipos")
+            assert r.status_code == 200, r.text
+            assert isinstance(r.json(), list)
     finally:
         await _limpar(admin_engine, t.id)

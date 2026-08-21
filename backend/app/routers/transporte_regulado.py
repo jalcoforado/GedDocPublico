@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.deps import require_tenant_id
 from ..auth.perms import require_permission
 from ..database import get_db
-from ..models import Empresa, Permissionario, Usuario
+from ..models import Empresa, OcorrenciaTipo, Permissionario, Usuario, VeiculoRegulado
 from ..schemas.common import Paginated
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
@@ -81,6 +81,15 @@ from ..schemas.transporte_regulado import (
     LinhaParadaUpdate,
     LinhaParadasOrdemInput,
     LinhaHorarioCreate,
+    OcorrenciaTipoCreate,
+    OcorrenciaTipoUpdate,
+    OcorrenciaTipoOut,
+    OcorrenciaCreate,
+    OcorrenciaOut,
+    OcorrenciaAndamentoOut,
+    OcorrenciaAnotarInput,
+    OcorrenciaVincularInput,
+    OcorrenciaDecidirInput,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -2147,5 +2156,240 @@ async def delete_horario(
     await tr_svc.excluir_horario(
         db, tenant_id=tenant_id, linha_id=linha_id, horario_id=horario_id
     )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+ocorrencias_router = APIRouter(
+    prefix="/transporte-regulado/ocorrencias", tags=["transporte-regulado"]
+)
+
+
+async def _ocorrencia_out(
+    db, oc, *, com_trilha: bool, tenant_id: int
+) -> OcorrenciaOut:
+    saida = OcorrenciaOut.model_validate(oc)
+
+    tipo = await db.get(OcorrenciaTipo, oc.id_tipo)
+    saida.tipo_nome = tipo.nome if tipo else None
+
+    partes: list[str] = []
+    if oc.id_permissionario is not None:
+        perm = await db.get(Permissionario, oc.id_permissionario)
+        if perm and perm.nome:
+            partes.append(perm.nome)
+    if oc.id_empresa is not None:
+        emp = await db.get(Empresa, oc.id_empresa)
+        if emp and emp.razao_social:
+            partes.append(emp.razao_social)
+    if oc.id_veiculo is not None:
+        veic = await db.get(VeiculoRegulado, oc.id_veiculo)
+        if veic and veic.placa:
+            partes.append(veic.placa)
+    saida.alvo_resumo = " - ".join(partes) if partes else None
+
+    if com_trilha:
+        andamentos = await tr_svc.listar_andamentos(
+            db, tenant_id=tenant_id, ocorrencia_id=oc.id
+        )
+        itens = []
+        for a in andamentos:
+            item = OcorrenciaAndamentoOut.model_validate(a)
+            if a.id_usuario is not None:
+                usuario = await db.get(Usuario, a.id_usuario)
+                item.usuario_nome = usuario.nome if usuario else None
+            itens.append(item)
+        saida.andamentos = itens
+
+    return saida
+
+
+# `/tipos*` e literal irma de `/{ocorrencia_id}` - declarada ANTES. Defeito
+# recorrente neste arquivo (parametrica engolindo literal -> 422);
+# `tests/test_guarda_ordem_rotas.py` reprova.
+@ocorrencias_router.get("/tipos", response_model=list[OcorrenciaTipoOut])
+async def list_ocorrencia_tipos(
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[OcorrenciaTipoOut]:
+    tipos = await tr_svc.listar_tipos_ocorrencia(db, tenant_id=tenant_id)
+    return [OcorrenciaTipoOut.model_validate(t) for t in tipos]
+
+
+@ocorrencias_router.post(
+    "/tipos", response_model=OcorrenciaTipoOut, status_code=status.HTTP_201_CREATED
+)
+async def create_ocorrencia_tipo(
+    payload: OcorrenciaTipoCreate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> OcorrenciaTipoOut:
+    tipo = await tr_svc.criar_tipo_ocorrencia(db, tenant_id=tenant_id, payload=payload)
+    await db.commit()
+    return OcorrenciaTipoOut.model_validate(tipo)
+
+
+@ocorrencias_router.put("/tipos/{tipo_id}", response_model=OcorrenciaTipoOut)
+async def update_ocorrencia_tipo(
+    tipo_id: int,
+    payload: OcorrenciaTipoUpdate,
+    _: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> OcorrenciaTipoOut:
+    tipo = await tr_svc.atualizar_tipo_ocorrencia(
+        db, tenant_id=tenant_id, tipo_id=tipo_id, payload=payload
+    )
+    await db.commit()
+    return OcorrenciaTipoOut.model_validate(tipo)
+
+
+@ocorrencias_router.delete(
+    "/tipos/{tipo_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_ocorrencia_tipo(
+    tipo_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await tr_svc.excluir_tipo_ocorrencia(db, tenant_id=tenant_id, tipo_id=tipo_id)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@ocorrencias_router.get("", response_model=Paginated[OcorrenciaOut])
+async def list_ocorrencias(
+    q: str | None = Query(None, description="Busca por descricao ou referencia (substring)"),
+    situacao: str | None = None,
+    origem: str | None = None,
+    id_tipo: int | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Paginated[OcorrenciaOut]:
+    offset = (page - 1) * page_size
+    rows, total = await tr_svc.listar_ocorrencias(
+        db, tenant_id=tenant_id, q=q, situacao=situacao, origem=origem,
+        id_tipo=id_tipo, limit=page_size, offset=offset,
+    )
+    return Paginated(
+        items=[
+            await _ocorrencia_out(db, oc, com_trilha=False, tenant_id=tenant_id)
+            for oc in rows
+        ],
+        total=total, page=page, page_size=page_size,
+    )
+
+
+@ocorrencias_router.post(
+    "", response_model=OcorrenciaOut, status_code=status.HTTP_201_CREATED
+)
+async def create_ocorrencia(
+    payload: OcorrenciaCreate,
+    user: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> OcorrenciaOut:
+    ocorrencia = await tr_svc.registrar_ocorrencia(
+        db, tenant_id=tenant_id, payload=payload, id_usuario=user.id,
+    )
+    await db.commit()
+    await db.refresh(ocorrencia)
+    return await _ocorrencia_out(db, ocorrencia, com_trilha=True, tenant_id=tenant_id)
+
+
+@ocorrencias_router.get("/{ocorrencia_id}", response_model=OcorrenciaOut)
+async def get_ocorrencia(
+    ocorrencia_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> OcorrenciaOut:
+    ocorrencia = await tr_svc.obter_ocorrencia(
+        db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id
+    )
+    return await _ocorrencia_out(db, ocorrencia, com_trilha=True, tenant_id=tenant_id)
+
+
+@ocorrencias_router.post("/{ocorrencia_id}/apurar", response_model=OcorrenciaOut)
+async def apurar_ocorrencia(
+    ocorrencia_id: int,
+    user: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> OcorrenciaOut:
+    ocorrencia = await tr_svc.iniciar_apuracao(
+        db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id, id_usuario=user.id,
+    )
+    await db.commit()
+    return await _ocorrencia_out(db, ocorrencia, com_trilha=True, tenant_id=tenant_id)
+
+
+@ocorrencias_router.post("/{ocorrencia_id}/anotar", response_model=OcorrenciaOut)
+async def anotar_ocorrencia(
+    ocorrencia_id: int,
+    payload: OcorrenciaAnotarInput,
+    user: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> OcorrenciaOut:
+    ocorrencia = await tr_svc.anotar_ocorrencia(
+        db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id,
+        parecer=payload.parecer, id_usuario=user.id,
+    )
+    await db.commit()
+    return await _ocorrencia_out(db, ocorrencia, com_trilha=True, tenant_id=tenant_id)
+
+
+@ocorrencias_router.post("/{ocorrencia_id}/vincular-alvo", response_model=OcorrenciaOut)
+async def vincular_alvo_ocorrencia(
+    ocorrencia_id: int,
+    payload: OcorrenciaVincularInput,
+    user: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> OcorrenciaOut:
+    ocorrencia = await tr_svc.vincular_alvo_ocorrencia(
+        db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id,
+        id_permissionario=payload.id_permissionario,
+        id_empresa=payload.id_empresa,
+        id_veiculo=payload.id_veiculo,
+        id_usuario=user.id,
+    )
+    await db.commit()
+    return await _ocorrencia_out(db, ocorrencia, com_trilha=True, tenant_id=tenant_id)
+
+
+@ocorrencias_router.post("/{ocorrencia_id}/decidir", response_model=OcorrenciaOut)
+async def decidir_ocorrencia(
+    ocorrencia_id: int,
+    payload: OcorrenciaDecidirInput,
+    user: Usuario = Depends(require_permission("transporte_regulado", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> OcorrenciaOut:
+    ocorrencia = await tr_svc.decidir_ocorrencia(
+        db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id,
+        resultado=payload.resultado, parecer=payload.parecer, id_usuario=user.id,
+    )
+    await db.commit()
+    return await _ocorrencia_out(db, ocorrencia, com_trilha=True, tenant_id=tenant_id)
+
+
+@ocorrencias_router.delete(
+    "/{ocorrencia_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_ocorrencia(
+    ocorrencia_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await tr_svc.excluir_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

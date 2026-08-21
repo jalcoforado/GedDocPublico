@@ -1495,3 +1495,20 @@ class OcorrenciaOut(OcorrenciaCreate):
     andamentos: list[OcorrenciaAndamentoOut] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class OcorrenciaAnotarInput(BaseModel):
+    parecer: str = Field(min_length=1)
+
+
+class OcorrenciaVincularInput(BaseModel):
+    id_permissionario: int | None = None
+    id_empresa: int | None = None
+    id_veiculo: int | None = None
+
+
+class OcorrenciaDecidirInput(BaseModel):
+    resultado: Literal["procedente", "improcedente", "arquivada"]
+    parecer: str = Field(min_length=1)
+
+    model_config = ConfigDict(from_attributes=True)
