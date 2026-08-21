@@ -797,7 +797,8 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 
 - **P5** — Recadastramento. **P5.1 e P5.2 entregues em 2026-08-04**; P5.3 segue aberta (detalhe
   logo abaixo).
-- ~~**P6** — Rotas / linhas~~ → **pontos e vagas, entregue em 2026-08-06** (detalhe abaixo). Linha/itinerário continua aberto.
+- ~~**P6** — Rotas / linhas~~ → **pontos e vagas, entregue em 2026-08-06; linha/itinerário (P6b),
+  entregue em 2026-08-21** (detalhe abaixo).
 - **P7** — Ocorrências regulatórias
 - **P8** — Workflows avançados
 
@@ -926,8 +927,28 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 > "liberar não apaga", que passava mesmo com a linha sendo soft-deletada, porque a asserção
 > consultava a tabela crua sem filtrar `excluido`. As duas só apareceram por inversão.
 >
-> **Ainda aberto do P6:** linha/itinerário (distrital, escolar), fila de espera por vaga e
-> geolocalização — todos fora de escopo por decisão, e registrados na spec.
+> **Ainda aberto do P6:** fila de espera por vaga e geolocalização — fora de escopo por decisão, e
+> registrados na spec.
+
+> **P6b (linha/itinerário) entregue em 2026-08-21.** Spec e plano em `docs/superpowers/sdd/`.
+> Modelo `LinhaTransporte` com `paradas` e `horarios` filhos; telas em `/m/transporte/linhas` e
+> `.../[id]`. Fecha o card "Linhas e Itinerários" que a P6 deixou tracejado.
+>
+> Três decisões-chave, todas no banco, não só no serviço:
+>
+> - **Operador ao-menos-um é `CHECK` no banco**, não validação de schema: linha distrital ou
+>   escolar exige empresa **ou** permissionário responsável, e a dupla ausência é rejeitada pela
+>   própria tabela — duas gravações concorrentes que passassem pela validação do serviço ainda
+>   esbarrariam no `CHECK`.
+> - **`ordem` das paradas não tem índice único.** Empate de ordem é estado válido (reordenação em
+>   lote passa por um estado intermediário com duplicata); o que a leitura garante é o desempate
+>   estável por `(ordem, id)`, não a unicidade do valor.
+> - **Horário único vive num índice único parcial**, e a prova é por inversão:
+>   `test_o_banco_barra_sem_passar_pelo_servico`-símile insere direto contornando o serviço e
+>   espera `IntegrityError` — sem o índice, apagar a checagem do serviço manteria a bateria verde.
+> - **Suspensão/gate: nenhum.** A linha não bloqueia nada — nem recadastramento, nem alvará, nem
+>   checklist de outro domínio. Decisão deliberada, para não repetir a amarra que o ponto (P6) já
+>   registrou como "não bloqueia nada".
 
 > **Atualizado em 2026-08-01, pela fatia de costura de navegação** (spec e plano em
 > `docs/superpowers/`). "Entregues e no ar" era verdade só para o backend. Três coisas mudaram, e a
