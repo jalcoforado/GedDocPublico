@@ -95,3 +95,32 @@ describe("ActionsMenu", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "true");
   });
 });
+
+describe("ActionsMenu — portal e devolução de foco (UX-02 fatia 2.6)", () => {
+  it("o menu renderiza em portal — fora de container com overflow-hidden", async () => {
+    render(
+      <div data-testid="recorte" style={{ overflow: "hidden" }}>
+        <ActionsMenu label="Imprimir" items={[{ label: "Capa", onClick: vi.fn() }]} />
+      </div>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /imprimir/i }));
+    const menu = screen.getByRole("menu");
+    expect(screen.getByTestId("recorte").contains(menu)).toBe(false);
+  });
+
+  it("ESC devolve o foco ao botão que abriu", async () => {
+    render(<ActionsMenu label="Imprimir" items={[{ label: "Capa", onClick: vi.fn() }]} />);
+    const trigger = screen.getByRole("button", { name: /imprimir/i });
+    await userEvent.click(trigger);
+    await userEvent.keyboard("{Escape}");
+    expect(trigger).toHaveFocus();
+  });
+
+  it("selecionar um item devolve o foco ao botão que abriu", async () => {
+    render(<ActionsMenu label="Imprimir" items={[{ label: "Capa", onClick: vi.fn() }]} />);
+    const trigger = screen.getByRole("button", { name: /imprimir/i });
+    await userEvent.click(trigger);
+    await userEvent.click(screen.getByRole("menuitem", { name: /capa/i }));
+    expect(trigger).toHaveFocus();
+  });
+});

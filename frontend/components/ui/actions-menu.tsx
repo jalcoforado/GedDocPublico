@@ -4,6 +4,7 @@ import { ChevronDown, type LucideIcon } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
+import { Popover } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 export interface ActionsMenuItem {
@@ -36,10 +37,11 @@ interface ActionsMenuProps {
  * Dropdown leve para agrupar ações relacionadas (ex: "Imprimir" com
  * Capa / Etiqueta / Etiqueta dupla / PDF completo).
  *
- * Sem dependências externas (sem Radix/HeadlessUI). Acessibilidade
- * mínima: role=menu, navegação Arrow/Enter/ESC, foco preserva último
- * item selecionado, click-outside fecha. Suficiente pra toolbars com
- * 3–6 itens.
+ * Desde a UX-02 (fatia 2.6) o painel sai pelo `Popover` (portal + Floating
+ * UI): deixa de ser clipado por `overflow-hidden` e ganha flip/colisão de
+ * viewport. Fechar — por Escape, clique fora ou seleção — devolve o foco ao
+ * botão que abriu; antes o foco caía no body. Acessibilidade: role=menu,
+ * navegação Arrow/Home/End/Enter, roving tabindex.
  */
 export function ActionsMenu({
   label,
@@ -51,24 +53,14 @@ export function ActionsMenu({
 }: ActionsMenuProps) {
   const [open, setOpen] = React.useState(false);
   const [focusIdx, setFocusIdx] = React.useState<number>(-1);
-  const wrapperRef = React.useRef<HTMLDivElement>(null);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
   const itemRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
 
-  // Fecha em click fora.
-  React.useEffect(() => {
-    if (!open) return;
-    function onDocClick(e: MouseEvent) {
-      if (
-        wrapperRef.current &&
-        !wrapperRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-        setFocusIdx(-1);
-      }
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
+  const close = React.useCallback((devolverFoco: boolean) => {
+    setOpen(false);
+    setFocusIdx(-1);
+    if (devolverFoco) triggerRef.current?.focus();
+  }, []);
 
   // Foca o item quando focusIdx muda enquanto aberto.
   React.useEffect(() => {
@@ -86,7 +78,9 @@ export function ActionsMenu({
     return from;
   }
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+  // No trigger E no painel (o portal tira o painel da árvore DOM do wrapper —
+  // keydown de item não borbulha mais até aqui sem esta duplicação).
+  function onKeyDown(e: React.KeyboardEvent) {
     if (!open) {
       if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
         e.preventDefault();
@@ -97,8 +91,7 @@ export function ActionsMenu({
     }
     if (e.key === "Escape") {
       e.preventDefault();
-      setOpen(false);
-      setFocusIdx(-1);
+      close(true);
       return;
     }
     if (e.key === "ArrowDown") {
@@ -125,30 +118,26 @@ export function ActionsMenu({
 
   function handleSelect(item: ActionsMenuItem) {
     if (item.disabled) return;
-    setOpen(false);
-    setFocusIdx(-1);
+    close(true);
     item.onClick();
   }
 
   return (
-    <div
-      ref={wrapperRef}
-      className={cn("relative inline-block", className)}
-      onKeyDown={onKeyDown}
-    >
+    <div className={cn("relative inline-block", className)} onKeyDown={onKeyDown}>
       <Button
+        ref={triggerRef}
         type="button"
         variant={variant}
         size={size}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => {
-          setOpen((v) => {
-            const next = !v;
-            if (next) setFocusIdx(nextEnabled(-1, 1));
-            else setFocusIdx(-1);
-            return next;
-          });
+          if (open) {
+            close(false);
+          } else {
+            setOpen(true);
+            setFocusIdx(nextEnabled(-1, 1));
+          }
         }}
       >
         {Icon && <Icon className="h-4 w-4" aria-hidden="true" />}
@@ -162,11 +151,14 @@ export function ActionsMenu({
         />
       </Button>
 
-      {open && (
-        <ul
-          role="menu"
-          className="absolute right-0 z-dropdown mt-1 min-w-[12rem] rounded-dropdown border border-border bg-surface-1 py-1 shadow-dropdown focus:outline-none"
-        >
+      <Popover
+        open={open}
+        anchorRef={triggerRef}
+        onClose={() => close(true)}
+        placement="bottom-end"
+        className="min-w-[12rem] py-1"
+      >
+        <ul role="menu" onKeyDown={onKeyDown} className="focus:outline-none">
           {items.map((item, i) => {
             const ItemIcon = item.icon;
             return (
@@ -201,7 +193,7 @@ export function ActionsMenu({
             );
           })}
         </ul>
-      )}
+      </Popover>
     </div>
   );
 }
