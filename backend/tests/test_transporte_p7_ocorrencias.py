@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 from app.main import app
 from app.schemas.transporte_regulado import (
+    AlvaraCreate,
     OcorrenciaCreate,
     OcorrenciaTipoCreate,
     OcorrenciaTipoUpdate,
@@ -63,6 +64,10 @@ async def _limpar(engine, tenant_id: int) -> None:
             "DELETE FROM transporte_regulado.ocorrencia_andamento WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.ocorrencia WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.ocorrencia_tipo WHERE tenant_id=:t",
+            # `test_alvara_continua_emitindo_com_ocorrencia_procedente` emite um
+            # alvará ligado ao permissionário: sem apagá-lo antes, o DELETE do
+            # permissionário abaixo esbarra na FK `alvara_id_permissionario_fkey`.
+            "DELETE FROM transporte_regulado.alvara WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.empresa WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.permissionario WHERE tenant_id=:t",
         ):
@@ -310,6 +315,397 @@ async def test_ocorrencia_de_outro_tenant_da_404(admin_engine):
             with pytest.raises(HTTPException) as e:
                 await tr.obter_ocorrencia(db, tenant_id=b.id, ocorrencia_id=ocorrencia.id)
         assert e.value.status_code == 404
+    finally:
+        await _limpar(admin_engine, a.id)
+        await _limpar(admin_engine, b.id)
+
+
+# ------------------------------------------------------------ máquina de estados
+
+
+async def _registrar(engine, tenant_id: int, tipo, *, id_empresa=None, exigir_alvo=True):
+    async with _sm(engine)() as db:
+        async with db.begin():
+            return await tr.registrar_ocorrencia(
+                db, tenant_id=tenant_id,
+                payload=OcorrenciaCreate(
+                    id_tipo=tipo.id, origem="fiscalizacao" if id_empresa else "denuncia",
+                    data_fato=date.today(), descricao="Fato para máquina de estados",
+                    id_empresa=id_empresa,
+                ),
+                id_usuario=None,
+                exigir_alvo=exigir_alvo,
+            )
+
+
+@pytest.mark.asyncio
+async def test_maquina_de_estados_caminho_feliz(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                em_apuracao = await tr.iniciar_apuracao(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+                )
+        assert em_apuracao.situacao == "em_apuracao"
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                decidida = await tr.decidir_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    resultado="improcedente", parecer="Sem elementos", id_usuario=None,
+                )
+        assert decidida.situacao == "improcedente"
+
+        async with admin_engine.begin() as conn:
+            atos = (
+                await conn.execute(
+                    text(
+                        "SELECT ato FROM transporte_regulado.ocorrencia_andamento "
+                        "WHERE id_ocorrencia = :id ORDER BY criado_em, id"
+                    ),
+                    {"id": ocorrencia.id},
+                )
+            ).scalars().all()
+        assert atos == ["registro", "inicio_apuracao", "decisao"]
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_decidir_direto_de_registrada_da_409(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.decidir_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    resultado="improcedente", parecer="Direto", id_usuario=None,
+                )
+        assert e.value.status_code == 409
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_decidir_duas_vezes_da_409(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.iniciar_apuracao(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+                )
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.decidir_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    resultado="arquivada", parecer="Primeira decisão", id_usuario=None,
+                )
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.decidir_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    resultado="arquivada", parecer="Segunda decisão", id_usuario=None,
+                )
+        assert e.value.status_code == 409
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_anotar_em_situacao_final_da_409(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.iniciar_apuracao(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+                )
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.decidir_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    resultado="arquivada", parecer="Arquivo", id_usuario=None,
+                )
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.anotar_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    parecer="Anotação tardia", id_usuario=None,
+                )
+        assert e.value.status_code == 409
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_decidir_sem_parecer_da_422(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.iniciar_apuracao(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+                )
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.decidir_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    resultado="improcedente", parecer="   ", id_usuario=None,
+                )
+        assert e.value.status_code == 422
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_procedente_sem_alvo_da_409(admin_engine):
+    """Denúncia (`exigir_alvo=False`) apurada; decidir procedente sem alvo dá
+    409; vincular o alvo e decidir de novo passa — prova o ciclo
+    denúncia → vincular → decidir."""
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        id_emp, id_perm = await _operadores(admin_engine, t.id)
+        ocorrencia = await _registrar(admin_engine, t.id, tipo, exigir_alvo=False)
+        assert ocorrencia.id_permissionario is None
+        assert ocorrencia.id_empresa is None
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.iniciar_apuracao(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+                )
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.decidir_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    resultado="procedente", parecer="Confirmado", id_usuario=None,
+                )
+        assert e.value.status_code == 409
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                vinculada = await tr.vincular_alvo_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    id_permissionario=id_perm, id_usuario=None,
+                )
+        assert vinculada.id_permissionario == id_perm
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                decidida = await tr.decidir_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    resultado="procedente", parecer="Confirmado após vínculo",
+                    id_usuario=None,
+                )
+        assert decidida.situacao == "procedente"
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_vincular_alvo_grava_na_ocorrencia_e_na_trilha(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        id_emp, id_perm = await _operadores(admin_engine, t.id)
+        ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                vinculada = await tr.vincular_alvo_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    id_permissionario=id_perm, id_usuario=None,
+                )
+        # Passar None para empresa não apaga o vínculo que já existia.
+        assert vinculada.id_permissionario == id_perm
+        assert vinculada.id_empresa == id_emp
+
+        async with admin_engine.begin() as conn:
+            atos = (
+                await conn.execute(
+                    text(
+                        "SELECT ato FROM transporte_regulado.ocorrencia_andamento "
+                        "WHERE id_ocorrencia = :id ORDER BY criado_em, id"
+                    ),
+                    {"id": ocorrencia.id},
+                )
+            ).scalars().all()
+        assert atos == ["registro", "vinculo_alvo"]
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_excluir_fora_de_registrada_da_409(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.iniciar_apuracao(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+                )
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.excluir_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                )
+        assert e.value.status_code == 409
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_alvara_continua_emitindo_com_ocorrencia_procedente(admin_engine):
+    """NÃO-GATE: ocorrência procedente contra um permissionário não trava a
+    emissão de alvará dele — mesma decisão do molde em test_transporte_p6b_linhas.py."""
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        id_emp, id_perm = await _operadores(admin_engine, t.id)
+        ocorrencia = await _registrar(
+            admin_engine, t.id, tipo, exigir_alvo=False,
+        )
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.iniciar_apuracao(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+                )
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.vincular_alvo_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    id_permissionario=id_perm, id_usuario=None,
+                )
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.decidir_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                    resultado="procedente", parecer="Confirmado", id_usuario=None,
+                )
+
+        async with _sm(admin_engine)() as db:
+            alvara = await tr.criar_alvara(
+                db,
+                tenant_id=t.id,
+                payload=AlvaraCreate(
+                    numero_alvara=f"ALV-{uuid.uuid4().hex[:8]}",
+                    tipo_servico="transporte_escolar",
+                    id_permissionario=id_perm,
+                ),
+            )
+        assert alvara.id is not None
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_rls_filtra_as_tres_tabelas_sob_aprimora_app(admin_engine, app_session):
+    """Isolamento cross-tenant nas três tabelas de P7 SOB `app_session` (papel
+    `aprimora_app`, NOBYPASSRLS) — molde exato de
+    `test_rls_filtra_as_tres_tabelas_sob_aprimora_app` em
+    `test_transporte_p6b_linhas.py`."""
+    a = await _provisionar(admin_engine)
+    b = await _provisionar(admin_engine)
+    try:
+        tipo_a = await _tipo(admin_engine, a.id, nome="Tipo RLS A")
+        tipo_b = await _tipo(admin_engine, b.id, nome="Tipo RLS B")
+        id_emp_a, _ = await _operadores(admin_engine, a.id)
+        id_emp_b, _ = await _operadores(admin_engine, b.id)
+        ocorrencia_a = await _registrar(admin_engine, a.id, tipo_a, id_empresa=id_emp_a)
+        ocorrencia_b = await _registrar(admin_engine, b.id, tipo_b, id_empresa=id_emp_b)
+
+        async def _ids_vistos(tenant_id: int, tabela: str) -> set[int]:
+            await app_session.execute(
+                text(f"SET LOCAL app.tenant_id = '{tenant_id}'")
+            )
+            rows = (
+                await app_session.execute(text(f"SELECT id FROM {tabela}"))
+            ).scalars().all()
+            return set(rows)
+
+        # Sob o tenant A: só ids de A aparecem, nunca os de B.
+        ids_tipo = await _ids_vistos(a.id, "transporte_regulado.ocorrencia_tipo")
+        assert tipo_a.id in ids_tipo
+        assert tipo_b.id not in ids_tipo
+        await app_session.rollback()
+
+        ids_ocorrencia = await _ids_vistos(a.id, "transporte_regulado.ocorrencia")
+        assert ocorrencia_a.id in ids_ocorrencia
+        assert ocorrencia_b.id not in ids_ocorrencia
+        await app_session.rollback()
+
+        ids_andamento = await _ids_vistos(a.id, "transporte_regulado.ocorrencia_andamento")
+        async with admin_engine.begin() as conn:
+            andamento_a_id = (
+                await conn.execute(
+                    text(
+                        "SELECT id FROM transporte_regulado.ocorrencia_andamento "
+                        "WHERE id_ocorrencia = :id"
+                    ),
+                    {"id": ocorrencia_a.id},
+                )
+            ).scalar_one()
+            andamento_b_id = (
+                await conn.execute(
+                    text(
+                        "SELECT id FROM transporte_regulado.ocorrencia_andamento "
+                        "WHERE id_ocorrencia = :id"
+                    ),
+                    {"id": ocorrencia_b.id},
+                )
+            ).scalar_one()
+        assert andamento_a_id in ids_andamento
+        assert andamento_b_id not in ids_andamento
+        await app_session.rollback()
+
+        # Sob o tenant B: o simétrico — só ids de B, nunca os de A.
+        ids_tipo = await _ids_vistos(b.id, "transporte_regulado.ocorrencia_tipo")
+        assert tipo_b.id in ids_tipo
+        assert tipo_a.id not in ids_tipo
+        await app_session.rollback()
+
+        ids_ocorrencia = await _ids_vistos(b.id, "transporte_regulado.ocorrencia")
+        assert ocorrencia_b.id in ids_ocorrencia
+        assert ocorrencia_a.id not in ids_ocorrencia
+        await app_session.rollback()
+
+        ids_andamento = await _ids_vistos(b.id, "transporte_regulado.ocorrencia_andamento")
+        assert andamento_b_id in ids_andamento
+        assert andamento_a_id not in ids_andamento
+        await app_session.rollback()
     finally:
         await _limpar(admin_engine, a.id)
         await _limpar(admin_engine, b.id)

@@ -4367,3 +4367,124 @@ async def registrar_ocorrencia(
     )
     await db.flush()
     return ocorrencia
+
+
+SITUACOES_FINAIS_OCORRENCIA = {"procedente", "improcedente", "arquivada"}
+RESULTADOS_DECISAO = SITUACOES_FINAIS_OCORRENCIA  # o CHECK do banco é a rede
+
+
+async def _ato(
+    db: AsyncSession, oc: Ocorrencia, *,
+    ato: str, parecer: str | None, id_usuario: int | None,
+) -> None:
+    db.add(OcorrenciaAndamento(
+        tenant_id=oc.tenant_id, id_ocorrencia=oc.id, ato=ato,
+        parecer=parecer, id_usuario=id_usuario, criado_em=datetime.utcnow(),
+    ))
+
+
+async def iniciar_apuracao(
+    db: AsyncSession, *, tenant_id: int, ocorrencia_id: int, id_usuario: int | None,
+) -> Ocorrencia:
+    oc = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
+    if oc.situacao != "registrada":
+        raise HTTPException(409, "Só se inicia apuração de ocorrência registrada")
+    oc.situacao = "em_apuracao"
+    oc.atualizado_em = datetime.utcnow()
+    await _ato(db, oc, ato="inicio_apuracao", parecer=None, id_usuario=id_usuario)
+    await db.flush()
+    return oc
+
+
+async def anotar_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, ocorrencia_id: int,
+    parecer: str | None, id_usuario: int | None,
+) -> Ocorrencia:
+    if not (parecer or "").strip():
+        raise HTTPException(422, "A anotação exige parecer")
+    oc = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
+    if oc.situacao not in ("registrada", "em_apuracao"):
+        raise HTTPException(409, "Ocorrência em situação final não recebe anotação")
+    await _ato(db, oc, ato="anotacao", parecer=parecer, id_usuario=id_usuario)
+    oc.atualizado_em = datetime.utcnow()
+    await db.flush()
+    return oc
+
+
+async def vincular_alvo_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, ocorrencia_id: int,
+    id_permissionario: int | None = None, id_empresa: int | None = None,
+    id_veiculo: int | None = None, id_usuario: int | None,
+) -> Ocorrencia:
+    if id_permissionario is None and id_empresa is None and id_veiculo is None:
+        raise HTTPException(422, "Informe ao menos um alvo para vincular")
+    oc = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
+    if oc.situacao not in ("registrada", "em_apuracao"):
+        raise HTTPException(409, "Ocorrência em situação final não recebe vínculo de alvo")
+    await _validar_alvos_ocorrencia(
+        db, tenant_id=tenant_id,
+        id_permissionario=id_permissionario,
+        id_empresa=id_empresa,
+        id_veiculo=id_veiculo,
+    )
+    # Só os ids NÃO-nulos passados são gravados — None não apaga vínculo existente.
+    if id_permissionario is not None:
+        oc.id_permissionario = id_permissionario
+    if id_empresa is not None:
+        oc.id_empresa = id_empresa
+    if id_veiculo is not None:
+        oc.id_veiculo = id_veiculo
+    oc.atualizado_em = datetime.utcnow()
+    await _ato(db, oc, ato="vinculo_alvo", parecer=None, id_usuario=id_usuario)
+    await db.flush()
+    return oc
+
+
+async def decidir_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, ocorrencia_id: int,
+    resultado: str, parecer: str | None, id_usuario: int | None,
+) -> Ocorrencia:
+    if resultado not in RESULTADOS_DECISAO:
+        raise HTTPException(422, "Resultado inválido")
+    if not (parecer or "").strip():
+        raise HTTPException(422, "A decisão exige parecer")
+    oc = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
+    if oc.situacao != "em_apuracao":
+        raise HTTPException(409, "Só se decide ocorrência em apuração")
+    if resultado == "procedente" and not (
+        oc.id_permissionario or oc.id_empresa or oc.id_veiculo
+    ):
+        raise HTTPException(
+            409, "Procedência exige alvo vinculado — vincule o alvo antes de decidir"
+        )
+    oc.situacao = resultado
+    oc.atualizado_em = datetime.utcnow()
+    await _ato(db, oc, ato="decisao", parecer=parecer, id_usuario=id_usuario)
+    await db.flush()
+    return oc
+
+
+async def excluir_ocorrencia(
+    db: AsyncSession, *, tenant_id: int, ocorrencia_id: int,
+) -> None:
+    oc = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
+    if oc.situacao != "registrada":
+        raise HTTPException(409, "Só se exclui ocorrência ainda registrada")
+    oc.excluido = True
+    oc.atualizado_em = datetime.utcnow()
+    await db.flush()
+
+
+async def listar_andamentos(
+    db: AsyncSession, *, tenant_id: int, ocorrencia_id: int,
+) -> list[OcorrenciaAndamento]:
+    await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
+    rows = await db.scalars(
+        select(OcorrenciaAndamento)
+        .where(
+            OcorrenciaAndamento.tenant_id == tenant_id,
+            OcorrenciaAndamento.id_ocorrencia == ocorrencia_id,
+        )
+        .order_by(OcorrenciaAndamento.criado_em, OcorrenciaAndamento.id)
+    )
+    return list(rows)
