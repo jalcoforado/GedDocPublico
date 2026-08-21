@@ -4,21 +4,16 @@ import {
   ChevronDown,
   Layers,
   LogOut,
-  Maximize2,
-  Minimize2,
-  Monitor,
-  Moon,
   Settings,
   Shield,
   Sparkles,
-  Sun,
   User as UserIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useRef, useState } from "react";
 
+import { PreferenciasAparencia } from "@/components/PreferenciasAparencia";
 import { Popover } from "@/components/ui/popover";
-import { useTheme, type Density, type ThemePreference } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
@@ -31,21 +26,9 @@ function initials(nome: string | null | undefined): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-const THEME_OPTS: Array<{ value: ThemePreference; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { value: "system", label: "Sistema", icon: Monitor },
-  { value: "light", label: "Claro", icon: Sun },
-  { value: "dark", label: "Escuro", icon: Moon },
-];
-
-const DENSITY_OPTS: Array<{ value: Density; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { value: "comfortable", label: "Confortável", icon: Maximize2 },
-  { value: "compact", label: "Compacto", icon: Minimize2 },
-];
-
 export function AvatarDropdown() {
   const { user, perms, logout } = useAuth();
   const branding = useBranding();
-  const { preference, setPreference, density, setDensity, theme } = useTheme();
 
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -59,17 +42,13 @@ export function AvatarDropdown() {
 
   if (!user) return null;
 
-  const ThemeIcon =
-    THEME_OPTS.find((o) => o.value === preference)?.icon ??
-    (theme === "dark" ? Moon : Sun);
-
   return (
     <div className="relative">
       <button
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
+        aria-haspopup="true"
         aria-expanded={open}
         className={cn(
           "group inline-flex h-10 items-center gap-1.5 rounded-full pl-1 pr-2 transition-colors duration-fast",
@@ -94,8 +73,11 @@ export function AvatarDropdown() {
         />
       </button>
 
+      {/* Painel de conta com seções e radiogroups — não é um menu ARIA de
+          verdade (role=menu exigiria menuitems homogêneos e roubaria o role
+          dos links); div simples anuncia cada controle pelo próprio papel. */}
       <Popover open={open} anchorRef={triggerRef} onClose={fechar} placement="bottom-end" className="w-72">
-        <div role="menu">
+        <div>
           {/* Header da conta */}
           <div className="border-b border-border bg-surface-2/40 px-4 py-3">
             <div className="flex items-center gap-3">
@@ -132,67 +114,9 @@ export function AvatarDropdown() {
             </div>
           </div>
 
-          {/* Tema */}
+          {/* Tema + densidade — radiogroups compartilhados com /perfil (fatia 3.7) */}
           <div className="border-b border-border px-3 py-2">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-foreground-subtle">
-              <ThemeIcon className="h-3 w-3" aria-hidden="true" />
-              Tema
-            </div>
-            <div className="flex rounded-md border border-border bg-surface-1 p-0.5">
-              {THEME_OPTS.map((opt) => {
-                const Icon = opt.icon;
-                const active = preference === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={active}
-                    onClick={() => setPreference(opt.value)}
-                    className={cn(
-                      "inline-flex h-8 flex-1 items-center justify-center gap-1 rounded text-xs font-medium transition-colors duration-fast",
-                      active
-                        ? "bg-brand text-primary-foreground shadow-sm"
-                        : "text-foreground-muted hover:bg-muted hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="h-3 w-3" aria-hidden="true" />
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Densidade */}
-          <div className="border-b border-border px-3 py-2">
-            <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-foreground-subtle">
-              Densidade
-            </div>
-            <div className="flex rounded-md border border-border bg-surface-1 p-0.5">
-              {DENSITY_OPTS.map((opt) => {
-                const Icon = opt.icon;
-                const active = density === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={active}
-                    onClick={() => setDensity(opt.value)}
-                    className={cn(
-                      "inline-flex h-8 flex-1 items-center justify-center gap-1 rounded text-xs font-medium transition-colors duration-fast",
-                      active
-                        ? "bg-brand text-primary-foreground shadow-sm"
-                        : "text-foreground-muted hover:bg-muted hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="h-3 w-3" aria-hidden="true" />
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
+            <PreferenciasAparencia />
           </div>
 
           {/* Links */}
@@ -204,14 +128,14 @@ export function AvatarDropdown() {
               onClick={() => setOpen(false)}
             />
             <MenuLink
-              href="/perfil"
+              href="/perfil/notificacoes"
               icon={Settings}
               label="Preferências de notificação"
               onClick={() => setOpen(false)}
             />
             {perms?.is_super_usuario && (
               <MenuLink
-                href="/auditoria"
+                href="/m/administracao/auditoria"
                 icon={Shield}
                 label="Auditoria"
                 onClick={() => setOpen(false)}
@@ -223,7 +147,6 @@ export function AvatarDropdown() {
           <div className="border-t border-border py-1">
             <button
               type="button"
-              role="menuitem"
               onClick={() => {
                 setOpen(false);
                 logout();
@@ -258,7 +181,6 @@ function MenuLink({
   return (
     <Link
       href={href}
-      role="menuitem"
       onClick={onClick}
       className="
         flex items-center gap-2 px-3 py-2 text-sm text-foreground

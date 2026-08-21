@@ -3,6 +3,7 @@
 import { Bell } from "lucide-react";
 import Link from "next/link";
 
+import { PreferenciasAparencia } from "@/components/PreferenciasAparencia";
 import { TrocarSenhaCard } from "@/components/TrocarSenhaCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth";
@@ -38,6 +39,17 @@ export default function PerfilPage() {
               <dd className="text-foreground">{user.id_unidade_trabalho ?? "—"}</dd>
             </div>
           </dl>
+        </CardContent>
+      </Card>
+
+      {/* Superfície canônica de aparência (UX-03 fatia 3.7) — mesma
+          implementação dos radiogroups do AvatarDropdown. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Aparência</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <PreferenciasAparencia className="max-w-sm" />
         </CardContent>
       </Card>
 
