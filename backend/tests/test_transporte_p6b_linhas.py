@@ -791,6 +791,110 @@ async def test_http_reordenar_paradas(admin_engine):
 
 
 @pytest.mark.asyncio
+async def test_rls_filtra_as_tres_tabelas_sob_aprimora_app(admin_engine, app_session):
+    """Isolamento cross-tenant nas três tabelas SOB `app_session` (papel
+    `aprimora_app`, NOBYPASSRLS) — os demais testes cross-tenant deste arquivo
+    rodam com `admin_engine` (`ged_user`, BYPASSRLS) e provam a camada de
+    serviço, não a policy do Postgres. Este é o único que prova a policy.
+
+    Por inversão: se a policy de `linha`/`linha_parada`/`linha_horario` fosse
+    tautológica (`USING (true)`, equivalente a esquecer o `WHERE` de RLS), o
+    SELECT sob tenant A devolveria as linhas de A **e** de B, e a asserção
+    `id_linha_b not in ids` falharia. É essa asserção — ausência do id do
+    outro tenant, não uma contagem — que fecha o buraco.
+    """
+    a = await _provisionar(admin_engine)
+    b = await _provisionar(admin_engine)
+    try:
+        id_emp_a, _ = await _operadores(admin_engine, a.id)
+        id_emp_b, _ = await _operadores(admin_engine, b.id)
+        linha_a = await _linha(admin_engine, a.id, nome="Linha RLS A", id_empresa=id_emp_a)
+        linha_b = await _linha(admin_engine, b.id, nome="Linha RLS B", id_empresa=id_emp_b)
+
+        async with admin_engine.begin() as conn:
+            r = await conn.execute(
+                text(
+                    "INSERT INTO transporte_regulado.linha_parada "
+                    "(tenant_id, id_linha, ordem, descricao, criado_em) "
+                    "VALUES (:t, :l, 1, 'Parada RLS', NOW()) RETURNING id"
+                ),
+                {"t": a.id, "l": linha_a.id},
+            )
+            parada_a_id = r.scalar_one()
+            r = await conn.execute(
+                text(
+                    "INSERT INTO transporte_regulado.linha_parada "
+                    "(tenant_id, id_linha, ordem, descricao, criado_em) "
+                    "VALUES (:t, :l, 1, 'Parada RLS', NOW()) RETURNING id"
+                ),
+                {"t": b.id, "l": linha_b.id},
+            )
+            parada_b_id = r.scalar_one()
+            r = await conn.execute(
+                text(
+                    "INSERT INTO transporte_regulado.linha_horario "
+                    "(tenant_id, id_linha, dia_semana, partida, criado_em) "
+                    "VALUES (:t, :l, 1, '08:00', NOW()) RETURNING id"
+                ),
+                {"t": a.id, "l": linha_a.id},
+            )
+            horario_a_id = r.scalar_one()
+            r = await conn.execute(
+                text(
+                    "INSERT INTO transporte_regulado.linha_horario "
+                    "(tenant_id, id_linha, dia_semana, partida, criado_em) "
+                    "VALUES (:t, :l, 1, '08:00', NOW()) RETURNING id"
+                ),
+                {"t": b.id, "l": linha_b.id},
+            )
+            horario_b_id = r.scalar_one()
+
+        async def _ids_vistos(tenant_id: int, tabela: str) -> set[int]:
+            await app_session.execute(
+                text(f"SET LOCAL app.tenant_id = '{tenant_id}'")
+            )
+            rows = (
+                await app_session.execute(text(f"SELECT id FROM {tabela}"))
+            ).scalars().all()
+            return set(rows)
+
+        # Sob o tenant A: só ids de A aparecem, nunca os de B.
+        ids_linha = await _ids_vistos(a.id, "transporte_regulado.linha")
+        assert linha_a.id in ids_linha
+        assert linha_b.id not in ids_linha
+        await app_session.rollback()
+
+        ids_parada = await _ids_vistos(a.id, "transporte_regulado.linha_parada")
+        assert parada_a_id in ids_parada
+        assert parada_b_id not in ids_parada
+        await app_session.rollback()
+
+        ids_horario = await _ids_vistos(a.id, "transporte_regulado.linha_horario")
+        assert horario_a_id in ids_horario
+        assert horario_b_id not in ids_horario
+        await app_session.rollback()
+
+        # Sob o tenant B: o simétrico — só ids de B, nunca os de A.
+        ids_linha = await _ids_vistos(b.id, "transporte_regulado.linha")
+        assert linha_b.id in ids_linha
+        assert linha_a.id not in ids_linha
+        await app_session.rollback()
+
+        ids_parada = await _ids_vistos(b.id, "transporte_regulado.linha_parada")
+        assert parada_b_id in ids_parada
+        assert parada_a_id not in ids_parada
+        await app_session.rollback()
+
+        ids_horario = await _ids_vistos(b.id, "transporte_regulado.linha_horario")
+        assert horario_b_id in ids_horario
+        assert horario_a_id not in ids_horario
+        await app_session.rollback()
+    finally:
+        await _limpar(admin_engine, a.id)
+        await _limpar(admin_engine, b.id)
+
+
+@pytest.mark.asyncio
 async def test_alvara_continua_emitindo_para_operador_de_linha(admin_engine):
     """O teste do NÃO-gate: linha existir/inativar não trava o alvará do
     permissionário que a opera — mesma decisão da P6 com o ponto/vaga."""

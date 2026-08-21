@@ -219,7 +219,7 @@ export default function LinhasPage() {
   async function pedirExclusao(l: LinhaTransporte) {
     const ok = await confirm({
       title: `Excluir "${l.nome}"?`,
-      message: "A linha sai das listagens. Paradas e horários são removidos junto.",
+      message: "A linha sai das listagens, junto com seu itinerário e horários.",
       confirmLabel: "Excluir",
       intent: "danger",
     });
@@ -277,7 +277,7 @@ export default function LinhasPage() {
 
       <div className="flex flex-wrap gap-2">
         <Input
-          placeholder="Buscar por nome..."
+          placeholder="Buscar por nome ou código..."
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
           className="max-w-xs"
