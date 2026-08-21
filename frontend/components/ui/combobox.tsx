@@ -5,13 +5,12 @@ import {
   useCallback,
   useEffect,
   useId,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 
+import { Popover } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 export interface ComboboxOption<T = unknown> {
@@ -47,22 +46,6 @@ function defaultFilter<T>(option: ComboboxOption<T>, query: string): boolean {
   return false;
 }
 
-interface PanelPos {
-  left: number;
-  width: number;
-  /** topo do painel quando placement=bottom; ignorado em top */
-  top: number;
-  /** distância do bottom da viewport ao topo do trigger — usado em placement=top */
-  bottom: number;
-  maxHeight: number;
-  placement: "bottom" | "top";
-}
-
-const VIEWPORT_MARGIN = 8;
-const TRIGGER_GAP = 4;
-const DESIRED_PANEL_HEIGHT = 360;
-const MIN_FLIP_THRESHOLD = 200;
-
 export function Combobox<T>({
   options,
   value,
@@ -81,19 +64,12 @@ export function Combobox<T>({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
-  const [pos, setPos] = useState<PanelPos | null>(null);
-  const [mounted, setMounted] = useState(false);
 
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const reactId = useId();
   const listboxId = id ? `${id}-listbox` : `cb-${reactId}-listbox`;
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const filterFn = filter ?? defaultFilter;
   const filtered = useMemo(() => {
@@ -103,73 +79,17 @@ export function Combobox<T>({
 
   const selected = options.find((o) => o.value === value) ?? null;
 
-  const close = useCallback(() => {
+  // Posicionamento (flip/colisão/scroll/resize) e clique-fora agora são do
+  // Popover (Floating UI) — eram ~60 linhas manuais aqui, a "6ª
+  // reimplementação" que a spec §11 aposentou.
+  const close = useCallback((devolverFoco = false) => {
     setOpen(false);
     setQuery("");
     setActiveIdx(0);
+    // Escape/seleção devolvem o foco ao trigger; clique fora NÃO (o usuário
+    // já está indo para outro lugar — roubar o foco de volta seria pior).
+    if (devolverFoco) triggerRef.current?.focus();
   }, []);
-
-  const computePos = useCallback(() => {
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    const vh = window.innerHeight;
-    const vw = window.innerWidth;
-
-    const spaceBelow = vh - rect.bottom - VIEWPORT_MARGIN;
-    const spaceAbove = rect.top - VIEWPORT_MARGIN;
-
-    let placement: "bottom" | "top" = "bottom";
-    let available = spaceBelow;
-    if (spaceBelow < MIN_FLIP_THRESHOLD && spaceAbove > spaceBelow) {
-      placement = "top";
-      available = spaceAbove;
-    }
-    const maxHeight = Math.max(120, Math.min(available, DESIRED_PANEL_HEIGHT));
-
-    let width = rect.width;
-    if (width < 220) width = 220;
-    if (width > vw - VIEWPORT_MARGIN * 2) width = vw - VIEWPORT_MARGIN * 2;
-
-    let left = rect.left;
-    if (left + width + VIEWPORT_MARGIN > vw) {
-      left = vw - width - VIEWPORT_MARGIN;
-    }
-    if (left < VIEWPORT_MARGIN) left = VIEWPORT_MARGIN;
-
-    const top = rect.bottom + TRIGGER_GAP;
-    const bottom = vh - rect.top + TRIGGER_GAP;
-
-    setPos({ left, top, bottom, width, maxHeight, placement });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (open) computePos();
-  }, [open, computePos]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = () => computePos();
-    window.addEventListener("resize", handler);
-    // capture phase to catch nested scroll containers (drawer, dialog, page card)
-    window.addEventListener("scroll", handler, true);
-    return () => {
-      window.removeEventListener("resize", handler);
-      window.removeEventListener("scroll", handler, true);
-    };
-  }, [open, computePos]);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDocClick(e: MouseEvent) {
-      const target = e.target as Node;
-      if (triggerRef.current?.contains(target)) return;
-      if (panelRef.current?.contains(target)) return;
-      close();
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open, close]);
 
   useEffect(() => {
     if (open) {
@@ -201,42 +121,18 @@ export function Combobox<T>({
       const opt = filtered[activeIdx];
       if (opt) {
         onChange(opt.value, opt);
-        close();
+        close(true);
       }
     } else if (e.key === "Escape") {
       e.preventDefault();
-      close();
+      close(true);
     }
   }
 
   function pick(opt: ComboboxOption<T>) {
     onChange(opt.value, opt);
-    close();
+    close(true);
   }
-
-  function clear(e: React.MouseEvent) {
-    e.stopPropagation();
-    onChange(null, null);
-  }
-
-  const panelStyle: React.CSSProperties =
-    pos == null
-      ? {}
-      : pos.placement === "bottom"
-        ? {
-            position: "fixed",
-            left: pos.left,
-            top: pos.top,
-            width: pos.width,
-            maxHeight: pos.maxHeight,
-          }
-        : {
-            position: "fixed",
-            left: pos.left,
-            bottom: pos.bottom,
-            width: pos.width,
-            maxHeight: pos.maxHeight,
-          };
 
   return (
     <div className={cn("relative", className)}>
@@ -276,18 +172,13 @@ export function Combobox<T>({
             placeholder
           )}
         </span>
-        <span className="flex items-center gap-1">
-          {clearable && selected && !disabled && (
-            <span
-              role="button"
-              aria-label="Limpar seleção"
-              tabIndex={-1}
-              onClick={clear}
-              className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" aria-hidden="true" />
-            </span>
+        <span
+          className={cn(
+            "flex items-center gap-1",
+            // reserva o lugar do botão Limpar (irmão absoluto) para o texto não passar por baixo
+            clearable && selected && !disabled && "mr-6",
           )}
+        >
           <ChevronDown
             className={cn(
               "h-4 w-4 shrink-0 text-foreground-muted transition-transform duration-fast",
@@ -298,15 +189,28 @@ export function Combobox<T>({
         </span>
       </button>
 
-      {mounted &&
-        open &&
-        pos &&
-        createPortal(
-          <div
-            ref={panelRef}
-            style={panelStyle}
-            className="z-[1000] flex flex-col overflow-hidden rounded-dropdown border border-border bg-card shadow-dropdown animate-fade-in"
-          >
+      {/* Limpar mora FORA do trigger: botão dentro de botão é aninhamento
+          interativo inválido — era por isso que ele vivia com tabIndex=-1,
+          invisível ao teclado (fatia 2.6). */}
+      {clearable && selected && !disabled && (
+        <button
+          type="button"
+          aria-label="Limpar seleção"
+          onClick={() => onChange(null, null)}
+          className="absolute right-9 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      )}
+
+      <Popover
+        open={open}
+        anchorRef={triggerRef}
+        onClose={() => close(false)}
+        matchAnchorWidth
+        className="min-w-[220px]"
+      >
+        <>
             <div className="flex items-center gap-2 border-b border-border bg-card px-3 py-2">
               <Search
                 className="h-4 w-4 shrink-0 text-foreground-muted"
@@ -388,14 +292,13 @@ export function Combobox<T>({
                   );
                 })}
             </ul>
-            {footer && (
-              <div className="border-t border-border bg-surface-2/40 px-3 py-2 text-xs">
-                {footer}
-              </div>
-            )}
-          </div>,
-          document.body,
+        {footer && (
+          <div className="border-t border-border bg-surface-2/40 px-3 py-2 text-xs">
+            {footer}
+          </div>
         )}
+        </>
+      </Popover>
     </div>
   );
 }
