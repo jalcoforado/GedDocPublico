@@ -13,6 +13,13 @@ interface ConfirmOptions {
   confirmLabel?: string;
   cancelLabel?: string;
   intent?: "primary" | "danger";
+  /**
+   * Ação assíncrona executada AO confirmar, com o botão em loading e o
+   * dialog aberto até terminar (fatia 2.3). Sucesso: fecha e o `confirm()`
+   * resolve `true`. Erro: fecha e o `confirm()` REJEITA com o erro — o
+   * caller trata (toast etc.) como trataria chamando a ação ele mesmo.
+   */
+  onConfirm?: () => Promise<void>;
 }
 
 interface PromptOptions {
@@ -36,17 +43,25 @@ interface ConfirmContextValue {
 const ConfirmContext = createContext<ConfirmContextValue | null>(null);
 
 type Pending =
-  | { kind: "confirm"; opts: ConfirmOptions; resolve: (v: boolean) => void }
+  | {
+      kind: "confirm";
+      opts: ConfirmOptions;
+      resolve: (v: boolean) => void;
+      reject: (e: unknown) => void;
+    }
   | { kind: "prompt"; opts: PromptOptions; resolve: (v: string | null) => void };
 
 export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [promptValue, setPromptValue] = useState("");
+  // true enquanto o onConfirm async está em voo — botão em loading, dialog
+  // aberto, cliques repetidos ignorados.
+  const [executando, setExecutando] = useState(false);
 
   const confirm = useCallback(
     (opts: ConfirmOptions) =>
-      new Promise<boolean>((resolve) => {
-        setPending({ kind: "confirm", opts, resolve });
+      new Promise<boolean>((resolve, reject) => {
+        setPending({ kind: "confirm", opts, resolve, reject });
       }),
     [],
   );
@@ -61,22 +76,36 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   );
 
   const handleCancel = useCallback(() => {
-    if (!pending) return;
+    if (!pending || executando) return; // ação em voo não é cancelável daqui
     if (pending.kind === "confirm") pending.resolve(false);
     else pending.resolve(null);
     setPending(null);
-  }, [pending]);
+  }, [pending, executando]);
 
-  const handleConfirm = useCallback(() => {
-    if (!pending) return;
+  const handleConfirm = useCallback(async () => {
+    if (!pending || executando) return;
     if (pending.kind === "confirm") {
+      const { onConfirm } = pending.opts;
+      if (onConfirm) {
+        setExecutando(true);
+        try {
+          await onConfirm();
+          pending.resolve(true);
+        } catch (e) {
+          pending.reject(e);
+        } finally {
+          setExecutando(false);
+          setPending(null);
+        }
+        return;
+      }
       pending.resolve(true);
     } else {
       if (pending.opts.required && promptValue.trim() === "") return;
       pending.resolve(promptValue);
     }
     setPending(null);
-  }, [pending, promptValue]);
+  }, [pending, promptValue, executando]);
 
   const value = useMemo<ConfirmContextValue>(
     () => ({ confirm, prompt }),
@@ -97,7 +126,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
           size="sm"
           footer={
             <>
-              <Button variant="secondary" onClick={handleCancel}>
+              <Button variant="secondary" disabled={executando} onClick={handleCancel}>
                 {pending.opts.cancelLabel ?? "Cancelar"}
               </Button>
               <Button
@@ -106,6 +135,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                     ? "danger"
                     : "primary"
                 }
+                loading={executando}
                 onClick={handleConfirm}
               >
                 {pending.opts.confirmLabel ??

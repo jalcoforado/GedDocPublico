@@ -1,5 +1,7 @@
-import { cn } from "@/lib/utils";
+import { Loader2 } from "lucide-react";
 import * as React from "react";
+
+import { cn } from "@/lib/utils";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger" | "accent";
 type Size = "sm" | "md" | "lg" | "icon";
@@ -17,6 +19,12 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
    * (não faz sentido em `<a>`).
    */
   asChild?: boolean;
+  /**
+   * Ação em voo: spinner antes do rótulo (que permanece visível), `aria-busy`
+   * e clique bloqueado — o jeito canônico de impedir submit duplo. Ignorado
+   * em modo `asChild` (link não tem estado de submissão).
+   */
+  loading?: boolean;
 }
 
 const VARIANTS: Record<Variant, string> = {
@@ -54,6 +62,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       size = "md",
       type = "button",
       asChild = false,
+      loading = false,
+      disabled,
       children,
       ...props
     },
@@ -67,13 +77,24 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       }>;
       return React.cloneElement(child, {
         ...props,
+        // O forwardRef parava aqui: sem repassar, `ref` no Button asChild
+        // apontava para nada (fatia 2.3).
+        ref,
         // Mescla classes preservando overrides do filho.
         className: cn(merged, child.props.className),
-      });
+      } as Partial<React.HTMLAttributes<HTMLElement>> & { ref: React.Ref<HTMLButtonElement> });
     }
 
     return (
-      <button ref={ref} type={type} className={merged} {...props}>
+      <button
+        ref={ref}
+        type={type}
+        className={merged}
+        aria-busy={loading || undefined}
+        disabled={disabled || loading}
+        {...props}
+      >
+        {loading && <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />}
         {children}
       </button>
     );

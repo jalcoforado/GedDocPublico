@@ -73,4 +73,42 @@ describe("Button — asChild", () => {
     await userEvent.click(screen.getByRole("link"));
     expect(fn).toHaveBeenCalledTimes(1);
   });
+
+  it("repassa a ref para o filho (UX-02 fatia 2.3)", () => {
+    const ref = React.createRef<HTMLAnchorElement>();
+    render(
+      <Button asChild ref={ref as React.Ref<HTMLButtonElement>}>
+        <a href="/x">Ir</a>
+      </Button>,
+    );
+    expect(ref.current).toBe(screen.getByRole("link"));
+  });
+});
+
+describe("Button — loading (UX-02 fatia 2.3)", () => {
+  it("em loading: aria-busy, spinner visível e clique bloqueado", async () => {
+    const fn = vi.fn();
+    render(
+      <Button loading onClick={fn}>
+        Salvar
+      </Button>,
+    );
+    const btn = screen.getByRole("button", { name: /Salvar/ });
+    expect(btn).toHaveAttribute("aria-busy", "true");
+    expect(btn.querySelector(".animate-spin")).not.toBeNull();
+    await userEvent.click(btn).catch(() => {});
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("sem loading: sem aria-busy e sem spinner", () => {
+    render(<Button>Salvar</Button>);
+    const btn = screen.getByRole("button", { name: "Salvar" });
+    expect(btn).not.toHaveAttribute("aria-busy", "true");
+    expect(btn.querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("o rótulo continua visível durante o loading (largura estável, sem tela muda)", () => {
+    render(<Button loading>Salvar</Button>);
+    expect(screen.getByRole("button", { name: /Salvar/ }).textContent).toContain("Salvar");
+  });
 });
