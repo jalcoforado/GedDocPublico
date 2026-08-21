@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -284,5 +284,73 @@ describe("Dialog — restauração de foco", () => {
 
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull(); // fechou sem exceção
+  });
+});
+
+describe("Dialog — clique fora vs drag (UX-02 fatia 2.1)", () => {
+  function renderComOverlay(onClose: () => void) {
+    render(
+      <Dialog open onClose={onClose} title="Título">
+        <p>conteúdo selecionável</p>
+      </Dialog>,
+    );
+    // o overlay é o ancestral do painel — o elemento que recebe o clique de fora
+    return screen.getByRole("dialog").parentElement as HTMLElement;
+  }
+
+  it("clique iniciado E terminado no overlay fecha", () => {
+    const onClose = vi.fn();
+    const overlay = renderComOverlay(onClose);
+    fireEvent.mouseDown(overlay);
+    fireEvent.mouseUp(overlay);
+    fireEvent.click(overlay);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("drag que começa DENTRO (selecionar texto) e solta fora NÃO fecha", () => {
+    const onClose = vi.fn();
+    const overlay = renderComOverlay(onClose);
+    const conteudo = screen.getByText("conteúdo selecionável");
+    fireEvent.mouseDown(conteudo);
+    fireEvent.mouseUp(overlay);
+    // navegadores disparam o click no ancestral comum — aqui, o overlay
+    fireEvent.click(overlay);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("depois de um drag abortado, um clique normal no overlay volta a fechar", () => {
+    const onClose = vi.fn();
+    const overlay = renderComOverlay(onClose);
+    fireEvent.mouseDown(screen.getByText("conteúdo selecionável"));
+    fireEvent.mouseUp(overlay);
+    fireEvent.click(overlay);
+    fireEvent.mouseDown(overlay);
+    fireEvent.mouseUp(overlay);
+    fireEvent.click(overlay);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Dialog — aria-describedby (UX-02 fatia 2.1)", () => {
+  it("com description, o dialog aponta aria-describedby para o texto", () => {
+    render(
+      <Dialog open onClose={() => {}} title="Excluir anexo" description="Esta ação não pode ser desfeita.">
+        <p>corpo</p>
+      </Dialog>,
+    );
+    const dialog = screen.getByRole("dialog");
+    const id = dialog.getAttribute("aria-describedby");
+    expect(id).toBeTruthy();
+    const alvo = document.getElementById(id as string);
+    expect(alvo?.textContent).toBe("Esta ação não pode ser desfeita.");
+  });
+
+  it("sem description não inventa aria-describedby", () => {
+    render(
+      <Dialog open onClose={() => {}} title="Título">
+        <p>corpo</p>
+      </Dialog>,
+    );
+    expect(screen.getByRole("dialog")).not.toHaveAttribute("aria-describedby");
   });
 });

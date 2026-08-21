@@ -9,6 +9,8 @@ interface DialogProps {
   open: boolean;
   onClose: () => void;
   title: string;
+  /** Frase curta sob o título; vira o `aria-describedby` do dialog. */
+  description?: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
   size?: "sm" | "md" | "lg" | "xl";
@@ -24,11 +26,16 @@ const SIZES = {
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function Dialog({ open, onClose, title, children, footer, size = "md" }: DialogProps) {
+export function Dialog({ open, onClose, title, description, children, footer, size = "md" }: DialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
+  const descriptionId = useId();
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  // Onde o último mousedown começou. Selecionar texto dentro do painel e
+  // soltar o mouse fora dispara `click` no ancestral comum (o overlay) — sem
+  // esta memória, o drag fechava o dialog e levava o texto junto.
+  const mousedownNoOverlay = useRef(false);
 
   // Destino de retorno do foco: o PRIMEIRO evento de foco que cruza a
   // fronteira "fora → dentro" do dialog carrega em `relatedTarget` o
@@ -130,13 +137,22 @@ export function Dialog({ open, onClose, title, children, footer, size = "md" }: 
   return (
     <div
       className="fixed inset-0 z-modal flex items-end justify-center bg-black/50 p-0 animate-fade-in sm:items-center sm:p-4"
-      onClick={onClose}
+      onMouseDown={(e) => {
+        mousedownNoOverlay.current = e.target === e.currentTarget;
+      }}
+      onClick={() => {
+        // Só fecha se o gesto COMEÇOU no overlay — clique de verdade lá fora,
+        // não um drag que escapou do painel.
+        if (mousedownNoOverlay.current) onClose();
+        mousedownNoOverlay.current = false;
+      }}
     >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
         onFocus={capturaRetorno}
         className={cn(
           "w-full rounded-t-dialog bg-card text-card-foreground shadow-dialog animate-slide-up",
@@ -145,10 +161,17 @@ export function Dialog({ open, onClose, title, children, footer, size = "md" }: 
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-center justify-between border-b border-border px-5 py-3">
-          <h2 id={titleId} className="text-md font-semibold text-primary">
-            {title}
-          </h2>
+        <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
+          <div className="min-w-0">
+            <h2 id={titleId} className="text-md font-semibold text-primary">
+              {title}
+            </h2>
+            {description && (
+              <p id={descriptionId} className="mt-0.5 text-sm text-foreground-muted">
+                {description}
+              </p>
+            )}
+          </div>
           <button
             ref={closeRef}
             type="button"
