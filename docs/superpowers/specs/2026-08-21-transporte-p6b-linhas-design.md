@@ -32,7 +32,7 @@ Três decisões do Jorge (2026-08-21):
 
 ## Modelo
 
-Três tabelas em `transporte_regulado`, migration **0085**, boilerplate RLS completo do módulo
+Três tabelas em `transporte_regulado`, migration **0092** (head atual: 0091), boilerplate RLS completo do módulo
 (GUC `app.tenant_id`, `current_setting(..., true)`, `ENABLE + FORCE`, grants para
 `aprimora_app` incluindo sequences — os três detalhes que custaram a `0078`).
 
@@ -129,8 +129,10 @@ O serviço também checa — para devolver 409 com mensagem útil — mas quem g
 `linhas_router` novo em `routers/transporte_regulado.py`, prefixo `/api/v2/transporte-regulado`,
 registrado em `main.py`. Transação `transporte_regulado` — **a mesma do resto do módulo**, como
 na P6: nenhum código novo em `utils.transacao`, nada muda em `MODULO_TRANSACOES`. GETs com
-`require_modulo("transporte")` + `require_permission("transporte_regulado")` sem action;
-escritas com a action correspondente.
+`require_permission("transporte_regulado")` sem action (é assim que TODO o módulo gateia leitura —
+a transação pertence ao módulo `transporte`, então o gate de contratação já vem por ela; nenhuma
+rota do transporte usa `require_modulo`, e esta fatia não inaugura a divergência); escritas com a
+action correspondente.
 
 | método | rota | ação | permissão |
 |---|---|---|---|
