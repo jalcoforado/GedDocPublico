@@ -3,7 +3,7 @@
 `cpf`/`cnh_numero` são normalizados (só dígitos). `PermissionarioUpdate` é
 whitelist: `tenant_id`/`id`/`excluido`/`criado_em`/`atualizado_em` nunca aceitos.
 """
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -1336,3 +1336,96 @@ class PontoOcuparInput(BaseModel):
 class PontoLiberarInput(BaseModel):
     ate: date | None = None
     motivo_liberacao: str | None = Field(default=None, max_length=30)
+
+
+# ------------------------------------------------------------- P6b: linhas
+
+LinhaSituacao = Literal["ativa", "inativa"]
+
+
+class LinhaBase(BaseModel):
+    nome: str = Field(min_length=1, max_length=150)
+    codigo: str | None = Field(default=None, max_length=40)
+    tipo_servico: TipoServico
+    id_empresa: int | None = None
+    id_permissionario: int | None = None
+    origem: str = Field(min_length=1, max_length=150)
+    destino: str = Field(min_length=1, max_length=150)
+    situacao: LinhaSituacao = "ativa"
+    observacoes: str | None = None
+
+    @model_validator(mode="after")
+    def _tem_operador(self) -> "LinhaBase":
+        # Espelha o CHECK ck_linha_tem_operador: 422 na borda, o banco é a rede.
+        if self.id_empresa is None and self.id_permissionario is None:
+            raise ValueError("Informe a empresa ou o permissionário responsável pela linha.")
+        return self
+
+
+class LinhaCreate(LinhaBase):
+    pass
+
+
+class LinhaUpdate(BaseModel):
+    # Parcial: o "ao menos um operador" do estado final é conferido no serviço,
+    # porque só lá o payload encontra a linha existente.
+    nome: str | None = Field(default=None, min_length=1, max_length=150)
+    codigo: str | None = Field(default=None, max_length=40)
+    tipo_servico: TipoServico | None = None
+    id_empresa: int | None = None
+    id_permissionario: int | None = None
+    origem: str | None = Field(default=None, min_length=1, max_length=150)
+    destino: str | None = Field(default=None, min_length=1, max_length=150)
+    situacao: LinhaSituacao | None = None
+    observacoes: str | None = None
+
+
+class LinhaParadaOut(BaseModel):
+    id: int
+    ordem: int
+    descricao: str
+    observacoes: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LinhaHorarioOut(BaseModel):
+    id: int
+    dia_semana: int
+    partida: time
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LinhaOut(LinhaBase):
+    id: int
+    # Desnormalizados para a listagem (nome do operador, tamanho da grade).
+    operador_nome: str | None = None
+    total_horarios: int = 0
+    criado_em: datetime
+    atualizado_em: datetime | None = None
+    paradas: list[LinhaParadaOut] = []
+    horarios: list[LinhaHorarioOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LinhaParadaCreate(BaseModel):
+    descricao: str = Field(min_length=1, max_length=200)
+    observacoes: str | None = None
+
+
+class LinhaParadaUpdate(BaseModel):
+    descricao: str | None = Field(default=None, min_length=1, max_length=200)
+    observacoes: str | None = None
+
+
+class LinhaParadasOrdemInput(BaseModel):
+    # A lista COMPLETA de ids na nova ordem — id faltando ou sobrando é 422
+    # no serviço (payload não bate com o estado: cliente desatualizado).
+    ids: list[int] = Field(min_length=1)
+
+
+class LinhaHorarioCreate(BaseModel):
+    dia_semana: int = Field(ge=0, le=6)
+    partida: time

@@ -11,12 +11,15 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func, case, or_
 from sqlalchemy.sql import literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
     Empresa,
+    Linha,
+    LinhaHorario,
+    LinhaParada,
     Permissionario,
     Ponto,
     PontoOcupacao,
@@ -3836,3 +3839,135 @@ async def liberar_vaga(
     ocupacao.atualizado_em = datetime.utcnow()
     await db.flush()
     return ocupacao
+
+
+# ------------------------------------------------------------- P6b: linhas
+
+async def _validar_operadores_linha(
+    db: AsyncSession, *, tenant_id: int,
+    id_empresa: int | None, id_permissionario: int | None,
+) -> None:
+    """FK soft: same-tenant e não excluído, senão 404 (não 403 — cross-tenant
+    não confirma existência)."""
+    if id_empresa is not None:
+        emp = await db.scalar(
+            select(Empresa.id).where(
+                Empresa.id == id_empresa,
+                Empresa.tenant_id == tenant_id,
+                Empresa.excluido.is_(False),
+            )
+        )
+        if emp is None:
+            raise HTTPException(404, "Empresa não encontrada")
+    if id_permissionario is not None:
+        perm = await db.scalar(
+            select(Permissionario.id).where(
+                Permissionario.id == id_permissionario,
+                Permissionario.tenant_id == tenant_id,
+                Permissionario.excluido.is_(False),
+            )
+        )
+        if perm is None:
+            raise HTTPException(404, "Permissionário não encontrado")
+
+
+async def _validar_nome_linha_unico(
+    db: AsyncSession, *, tenant_id: int, nome: str, alem_de: int | None = None,
+) -> None:
+    stmt = select(Linha.id).where(
+        Linha.tenant_id == tenant_id,
+        func.lower(Linha.nome) == nome.lower(),
+        Linha.excluido.is_(False),
+    )
+    if alem_de is not None:
+        stmt = stmt.where(Linha.id != alem_de)
+    if await db.scalar(stmt) is not None:
+        raise HTTPException(409, f"Já existe uma linha chamada '{nome}'")
+
+
+async def obter_linha(db: AsyncSession, *, tenant_id: int, linha_id: int) -> Linha:
+    linha = await db.scalar(
+        select(Linha).where(
+            Linha.id == linha_id,
+            Linha.tenant_id == tenant_id,
+            Linha.excluido.is_(False),
+        )
+    )
+    if linha is None:
+        raise HTTPException(404, "Linha não encontrada")
+    return linha
+
+
+async def listar_linhas(
+    db: AsyncSession, *, tenant_id: int,
+    q: str | None = None, tipo_servico: str | None = None,
+    situacao: str | None = None, limit: int = 50, offset: int = 0,
+) -> tuple[list[Linha], int]:
+    # Condições construídas UMA vez e usadas na consulta E na contagem — a
+    # divergência entre as duas já mordeu duas vezes neste módulo.
+    cond = [Linha.tenant_id == tenant_id, Linha.excluido.is_(False)]
+    if q:
+        padrao = f"%{q.strip()}%"
+        cond.append(or_(Linha.nome.ilike(padrao), Linha.codigo.ilike(padrao)))
+    if tipo_servico:
+        cond.append(Linha.tipo_servico == tipo_servico)
+    if situacao:
+        cond.append(Linha.situacao == situacao)
+    total = await db.scalar(select(func.count(Linha.id)).where(*cond)) or 0
+    rows = await db.scalars(
+        select(Linha).where(*cond).order_by(Linha.nome).limit(limit).offset(offset)
+    )
+    return list(rows), total
+
+
+async def criar_linha(db: AsyncSession, *, tenant_id: int, payload) -> Linha:
+    await _validar_nome_linha_unico(db, tenant_id=tenant_id, nome=payload.nome)
+    await _validar_operadores_linha(
+        db, tenant_id=tenant_id,
+        id_empresa=payload.id_empresa, id_permissionario=payload.id_permissionario,
+    )
+    linha = Linha(
+        tenant_id=tenant_id, criado_em=datetime.utcnow(),
+        **payload.model_dump(),
+    )
+    db.add(linha)
+    await db.flush()
+    return linha
+
+
+async def atualizar_linha(
+    db: AsyncSession, *, tenant_id: int, linha_id: int, payload,
+) -> Linha:
+    linha = await obter_linha(db, tenant_id=tenant_id, linha_id=linha_id)
+    dados = payload.model_dump(exclude_unset=True)
+    if "nome" in dados:
+        await _validar_nome_linha_unico(
+            db, tenant_id=tenant_id, nome=dados["nome"], alem_de=linha.id
+        )
+    # O estado FINAL precisa manter ao menos um operador (o CHECK é a rede).
+    id_emp = dados.get("id_empresa", linha.id_empresa)
+    id_perm = dados.get("id_permissionario", linha.id_permissionario)
+    if id_emp is None and id_perm is None:
+        raise HTTPException(
+            422, "A linha precisa de uma empresa ou um permissionário responsável"
+        )
+    await _validar_operadores_linha(
+        db, tenant_id=tenant_id,
+        id_empresa=dados.get("id_empresa"),
+        id_permissionario=dados.get("id_permissionario"),
+    )
+    for campo, valor in dados.items():
+        setattr(linha, campo, valor)
+    linha.atualizado_em = datetime.utcnow()
+    await db.flush()
+    return linha
+
+
+async def excluir_linha(db: AsyncSession, *, tenant_id: int, linha_id: int) -> None:
+    """Soft-delete SÓ da linha — paradas e horários ficam intactos e
+    invisíveis (toda leitura entra pela linha). Restaurar a linha um dia
+    restaura o itinerário de graça."""
+    linha = await obter_linha(db, tenant_id=tenant_id, linha_id=linha_id)
+    linha.excluido = True
+    linha.atualizado_em = datetime.utcnow()
+    await db.flush()
