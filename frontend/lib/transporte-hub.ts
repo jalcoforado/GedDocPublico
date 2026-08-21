@@ -80,9 +80,12 @@ export const CARDS: HubCard[] = [
     desc: "Pontos de estacionamento regulados, com vagas numeradas e o histórico de quem ocupou cada uma.",
     ready: true,
   },
-  // O roadmap dizia "Rotas / linhas"; ao escopar a P6 apareceu que táxi e
-  // mototáxi não têm linha, têm ponto. Linha/itinerário (distrital,
-  // escolar) é outra entidade e continua por fazer.
-  { icon: Route, title: "Linhas e Itinerários", desc: "Linhas distritais e escolares, com itinerário e horários." },
+  {
+    href: "/m/transporte/linhas",
+    icon: Route,
+    title: "Linhas e Itinerários",
+    desc: "Linhas distritais e escolares, com itinerário e horários.",
+    ready: true,
+  },
   { icon: AlertOctagon, title: "Ocorrências", desc: "Ocorrências regulatórias e fiscalização." },
 ];

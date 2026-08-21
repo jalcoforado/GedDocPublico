@@ -67,6 +67,7 @@ export const KEYWORDS_POR_HREF: Record<string, string[]> = {
   "/m/administracao/jobs": ["celery", "tarefas"],
   "/m/protocolo/manifestantes": ["cidadão", "requerente"],
   "/m/transporte/recadastramento": ["ciclo", "convocação", "prazo", "escalonamento"],
+  "/m/transporte/linhas": ["linha", "itinerario", "horario", "distrital", "escolar"],
   "/perfil/notificacoes": ["email", "whatsapp"],
 };
 

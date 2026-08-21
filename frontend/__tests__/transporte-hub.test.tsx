@@ -51,8 +51,8 @@ describe("hub do transporte regulado", () => {
     // "Rotas e Linhas" virou "Linhas e Itinerários" na P6: ao escopar a fatia
     // ficou claro que táxi e mototáxi não têm linha, têm ponto — e que uma
     // entidade genérica serviria mal aos dois. O ponto foi entregue; linha
-    // distrital/escolar continua por fazer, com nome que diz o que é.
+    // distrital/escolar também foi entregue na P6b — só Ocorrências fica.
     const semHref = CARDS.filter((c) => !c.ready).map((c) => c.title);
-    expect(semHref).toEqual(["Linhas e Itinerários", "Ocorrências"]);
+    expect(semHref).toEqual(["Ocorrências"]);
   });
 });
