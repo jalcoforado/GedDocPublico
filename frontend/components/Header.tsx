@@ -1,10 +1,11 @@
 "use client";
 
-import { Menu } from "lucide-react";
+import { Menu, Search } from "lucide-react";
 import Link from "next/link";
 
 import { AvatarDropdown } from "@/components/AvatarDropdown";
 import { BuscaGlobal } from "@/components/BuscaGlobal";
+import { useCommandPalette } from "@/components/CommandPalette";
 import { ModuloSwitcher } from "@/components/ModuloSwitcher";
 import { NotificacoesBell } from "@/components/NotificacoesBell";
 import { useBranding } from "@/lib/branding";
@@ -14,6 +15,7 @@ interface HeaderProps {
 }
 
 export function Header({ onOpenSidebar }: HeaderProps) {
+  const cmd = useCommandPalette();
   return (
     <header
       className="
@@ -55,6 +57,16 @@ export function Header({ onOpenSidebar }: HeaderProps) {
 
       {/* Right cluster */}
       <div className="flex items-center gap-1.5">
+        {/* Busca no mobile (fatia 3.4): abaixo de md o campo some — este
+            ícone mantém o palette a um toque. */}
+        <button
+          type="button"
+          onClick={() => cmd?.open()}
+          aria-label="Buscar"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-md text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+        >
+          <Search className="h-5 w-5" aria-hidden="true" />
+        </button>
         <ModuloSwitcher />
         <NotificacoesBell />
         <AvatarDropdown />

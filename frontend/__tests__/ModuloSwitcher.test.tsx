@@ -52,6 +52,25 @@ describe("switcher de módulo", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /frota/i })).toBeTruthy());
   });
 
+  it("o painel abre via Popover (portal com colisão de viewport) — UX-03 fatia 3.4", async () => {
+    renderSwitcher();
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: /frota/i })));
+    const menu = screen.getByRole("menu", { name: /trocar de módulo/i });
+    expect(menu.closest("[data-popover]")).not.toBeNull();
+  });
+
+  it("ESC fecha e devolve o foco ao botão do switcher", async () => {
+    renderSwitcher();
+    const trigger = await waitFor(() => screen.getByRole("button", { name: /frota/i }));
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu", { name: /trocar de módulo/i })).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("menu", { name: /trocar de módulo/i })).toBeNull(),
+    );
+    expect(trigger).toHaveFocus();
+  });
+
   it("trocar de módulo vai direto para a raiz, sem passar pelo launcher", async () => {
     renderSwitcher();
     fireEvent.click(await waitFor(() => screen.getByRole("button", { name: /frota/i })));

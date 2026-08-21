@@ -15,8 +15,9 @@ import {
   User as UserIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
+import { Popover } from "@/components/ui/popover";
 import { useTheme, type Density, type ThemePreference } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
@@ -47,25 +48,14 @@ export function AvatarDropdown() {
   const { preference, setPreference, density, setDensity, theme } = useTheme();
 
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    function onClick(e: MouseEvent) {
-      if (!containerRef.current?.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  // Clique-fora/ESC são do Popover (fatia 3.4); fechar devolve o foco ao
+  // avatar em vez de deixá-lo cair no body.
+  const fechar = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
 
   if (!user) return null;
 
@@ -74,8 +64,9 @@ export function AvatarDropdown() {
     (theme === "dark" ? Moon : Sun);
 
   return (
-    <div ref={containerRef} className="relative">
+    <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
@@ -103,15 +94,8 @@ export function AvatarDropdown() {
         />
       </button>
 
-      {open && (
-        <div
-          role="menu"
-          className="
-            absolute right-0 top-[calc(100%+6px)] z-dropdown w-72
-            overflow-hidden rounded-lg border border-border bg-card shadow-xl
-            animate-scale-in origin-top-right
-          "
-        >
+      <Popover open={open} anchorRef={triggerRef} onClose={fechar} placement="bottom-end" className="w-72">
+        <div role="menu">
           {/* Header da conta */}
           <div className="border-b border-border bg-surface-2/40 px-4 py-3">
             <div className="flex items-center gap-3">
@@ -255,7 +239,7 @@ export function AvatarDropdown() {
             </button>
           </div>
         </div>
-      )}
+      </Popover>
     </div>
   );
 }

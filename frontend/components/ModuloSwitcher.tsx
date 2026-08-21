@@ -5,6 +5,7 @@ import { AlertTriangle, ChevronDown } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { Popover } from "@/components/ui/popover";
 import { api, type ModuloOut } from "@/lib/api";
 import { MENUS } from "@/lib/menus";
 import { iconeDoModulo, moduloDoPathname } from "@/lib/modulos";
@@ -29,28 +30,19 @@ export function ModuloSwitcher() {
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const { data, isLoading, isError, refetch, isRefetching } = useQuery({
     queryKey: ["modulos-me"],
     queryFn: api.modulos,
   });
 
-  useEffect(() => {
-    if (!open) return;
-    function onClick(e: MouseEvent) {
-      if (!containerRef.current?.contains(e.target as Node)) setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  // Clique-fora/ESC agora são do Popover (fatia 3.4); ao fechar por ESC ou
+  // clique fora, o foco volta ao botão para não cair no body.
+  const fechar = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
 
   // Carregando: estado transitório e curto (dado cacheado sob a mesma
   // queryKey do launcher) — não vale a pena um esqueleto só para isso.
@@ -114,8 +106,9 @@ export function ModuloSwitcher() {
   }
 
   return (
-    <div ref={containerRef} className="relative">
+    <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
@@ -138,16 +131,8 @@ export function ModuloSwitcher() {
         />
       </button>
 
-      {open && (
-        <div
-          role="menu"
-          aria-label="Trocar de módulo"
-          className="
-            absolute left-0 top-[calc(100%+6px)] z-dropdown w-64
-            overflow-hidden rounded-lg border border-border bg-card shadow-xl
-            animate-scale-in origin-top-left
-          "
-        >
+      <Popover open={open} anchorRef={triggerRef} onClose={fechar} className="w-64">
+        <div role="menu" aria-label="Trocar de módulo">
           <div className="py-1">
             {ordenados.map((m) => (
               <ItemModulo
@@ -178,7 +163,7 @@ export function ModuloSwitcher() {
             </div>
           )}
         </div>
-      )}
+      </Popover>
     </div>
   );
 }
