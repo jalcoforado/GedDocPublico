@@ -792,3 +792,113 @@ class LinhaHorario(Base):
     partida: Mapped[time] = mapped_column(Time, nullable=False)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class OcorrenciaTipo(Base):
+    """Catálogo de tipos de ocorrência, por tenant (P7).
+
+    Município cadastra a tipologia ("Recusa de corrida", "Veículo sem
+    vistoria"...). `ativo=false` só impede uso em registro novo; ocorrências
+    antigas mantêm o tipo. Mesmo padrão do `recadastramento_item` (P5.2),
+    inclusive o limite conhecido lá registrado: editar `nome` muda o texto
+    exibido em ocorrências antigas.
+    """
+
+    __tablename__ = "ocorrencia_tipo"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    nome: Mapped[str] = mapped_column(String(150), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class Ocorrencia(Base):
+    """Registro de fiscalização/denúncia contra a operação regulada (P7).
+
+    Duas portas de entrada — balcão municipal e portal do cidadão —
+    desembocando na mesma entidade. `origem` distingue quem registrou;
+    `id_cidadao` só é preenchido quando `origem = 'denuncia'` (P7.2).
+
+    **Sem CHECK de alvo.** Registro de balcão exige ao menos um dos três
+    alvos (`id_permissionario`/`id_empresa`/`id_veiculo`); denúncia do
+    portal pode nascer só com `referencia_alvo` textual — o cidadão
+    raramente sabe o id de um permissionário, e o vínculo formal é trabalho
+    da apuração (ato `vinculo_alvo`). Um CHECK condicionado à `origem`
+    amarraria política de negócio mutável no schema; a regra fica no
+    serviço e é provada por teste (ver spec §Modelo).
+
+    `situacao` segue o ciclo `registrada → em_apuracao →
+    procedente|improcedente|arquivada`; cada transição vira um ato na
+    trilha (`OcorrenciaAndamento`).
+    """
+
+    __tablename__ = "ocorrencia"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_tipo: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.ocorrencia_tipo.id"), nullable=False
+    )
+    origem: Mapped[str] = mapped_column(String(20), nullable=False)
+    data_fato: Mapped[date] = mapped_column(Date, nullable=False)
+    descricao: Mapped[str] = mapped_column(Text, nullable=False)
+    id_permissionario: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.permissionario.id"), nullable=True
+    )
+    id_empresa: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.empresa.id"), nullable=True
+    )
+    id_veiculo: Mapped[int | None] = mapped_column(
+        ForeignKey("transporte_regulado.veiculo.id"), nullable=True
+    )
+    referencia_alvo: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    id_cidadao: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario_externo.id"), nullable=True
+    )
+    situacao: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="registrada"
+    )
+    observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class OcorrenciaAndamento(Base):
+    """Trilha cronológica append-only de uma ocorrência (P7).
+
+    Mesmo desenho de `RecadastramentoDecisao` (P5.2/P5.3): decisão é um ato
+    com parecer na trilha, não uma coluna que se sobrescreve. `id_usuario`
+    é NULL quando o ato é o registro do próprio cidadão (P7.2).
+
+    Sem `atualizado_em`: ato praticado não se edita — corrigir é registrar
+    um ato novo, não reescrever o anterior.
+    """
+
+    __tablename__ = "ocorrencia_andamento"
+    __table_args__ = {"schema": "transporte_regulado"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_ocorrencia: Mapped[int] = mapped_column(
+        ForeignKey("transporte_regulado.ocorrencia.id"), nullable=False
+    )
+    ato: Mapped[str] = mapped_column(String(20), nullable=False)
+    parecer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    id_usuario: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
