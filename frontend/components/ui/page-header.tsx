@@ -49,8 +49,18 @@ export function PageHeader({
 }: PageHeaderProps) {
   const isHero = variant === "hero";
 
+  // document.title por rota (fatia 3.5): o PageHeader está em toda tela — é o
+  // lugar natural do título da aba enquanto o PageShell (UX-04) não existe.
+  React.useEffect(() => {
+    if (typeof title === "string" && title) {
+      document.title = `${title} — Aprimora`;
+    }
+  }, [title]);
+
   return (
-    <header
+    // <div>, não <header>: o shell já tem o banner; dois <header> aninhados
+    // eram ruído de landmark para leitor de tela (fatia 3.5).
+    <div
       className={cn(
         "relative -mx-4 mb-2 px-4 sm:-mx-6 sm:px-6",
         isHero &&
@@ -129,6 +139,6 @@ export function PageHeader({
           <div className="px-4 sm:px-6">{tabs}</div>
         </div>
       )}
-    </header>
+    </div>
   );
 }

@@ -18,6 +18,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
   const cmd = useCommandPalette();
   return (
     <header
+      aria-label="Cabeçalho do sistema"
       className="
         sticky top-0 z-sticky
         flex items-center gap-3 border-b border-border
