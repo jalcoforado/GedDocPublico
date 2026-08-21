@@ -8,15 +8,22 @@ Fixtures/estilo seguem `test_transporte_p6_pontos.py`: `admin_engine`,
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, time
 
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from app.main import app
-from app.schemas.transporte_regulado import LinhaCreate, LinhaUpdate
+from app.models import LinhaHorario, LinhaParada
+from app.schemas.transporte_regulado import (
+    LinhaCreate,
+    LinhaHorarioCreate,
+    LinhaParadaCreate,
+    LinhaUpdate,
+)
 from app.services import transporte_regulado as tr
 from tests.test_transporte_p5_2_atendimento import _provisionar, _sm
 
@@ -324,5 +331,226 @@ async def test_renomear_linha_para_nome_existente_da_409(admin_engine):
                     payload=LinhaUpdate(nome="Linha Um"),
                 )
         assert e.value.status_code == 409
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+# ------------------------------------------------------ P6b: paradas e horários
+
+
+@pytest.mark.asyncio
+async def test_parada_nova_entra_no_fim(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        linha = await _linha(admin_engine, t.id, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                p1 = await tr.criar_parada(
+                    db, tenant_id=t.id, linha_id=linha.id,
+                    payload=LinhaParadaCreate(descricao="Parada A"),
+                )
+            async with db.begin():
+                p2 = await tr.criar_parada(
+                    db, tenant_id=t.id, linha_id=linha.id,
+                    payload=LinhaParadaCreate(descricao="Parada B"),
+                )
+        assert p1.ordem == 1
+        assert p2.ordem == 2
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_reordenar_renumera_1_a_n(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        linha = await _linha(admin_engine, t.id, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            paradas = {}
+            for nome in ("A", "B", "C"):
+                async with db.begin():
+                    paradas[nome] = await tr.criar_parada(
+                        db, tenant_id=t.id, linha_id=linha.id,
+                        payload=LinhaParadaCreate(descricao=f"Parada {nome}"),
+                    )
+
+            nova_ordem = [paradas["C"].id, paradas["A"].id, paradas["B"].id]
+            async with db.begin():
+                resultado = await tr.reordenar_paradas(
+                    db, tenant_id=t.id, linha_id=linha.id, ids=nova_ordem
+                )
+
+        assert [p.id for p in resultado] == nova_ordem
+        assert [p.ordem for p in resultado] == [1, 2, 3]
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_reordenar_com_id_faltando_ou_sobrando_da_422(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        linha = await _linha(admin_engine, t.id, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            paradas = []
+            for nome in ("A", "B", "C"):
+                async with db.begin():
+                    paradas.append(
+                        await tr.criar_parada(
+                            db, tenant_id=t.id, linha_id=linha.id,
+                            payload=LinhaParadaCreate(descricao=f"Parada {nome}"),
+                        )
+                    )
+
+            # (a) lista parcial: falta um id.
+            with pytest.raises(HTTPException) as e:
+                await tr.reordenar_paradas(
+                    db, tenant_id=t.id, linha_id=linha.id,
+                    ids=[paradas[0].id, paradas[1].id],
+                )
+            assert e.value.status_code == 422
+
+            # (b) lista com id alheio (que não pertence à linha).
+            with pytest.raises(HTTPException) as e:
+                await tr.reordenar_paradas(
+                    db, tenant_id=t.id, linha_id=linha.id,
+                    ids=[paradas[0].id, paradas[1].id, paradas[2].id, 999999],
+                )
+            assert e.value.status_code == 422
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_leitura_ordena_por_ordem_e_id_com_duplicata_plantada(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        linha = await _linha(admin_engine, t.id, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            paradas = []
+            for nome in ("A", "B", "C"):
+                async with db.begin():
+                    paradas.append(
+                        await tr.criar_parada(
+                            db, tenant_id=t.id, linha_id=linha.id,
+                            payload=LinhaParadaCreate(descricao=f"Parada {nome}"),
+                        )
+                    )
+
+        # Planta duplicata de `ordem` direto no banco — contornando o serviço,
+        # que nunca produziria isso sozinho (é exatamente por isso que o
+        # desempate por `id` existe).
+        async with admin_engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE transporte_regulado.linha_parada SET ordem = 1 "
+                    "WHERE id = :id"
+                ),
+                {"id": paradas[2].id},
+            )
+
+        async with _sm(admin_engine)() as db:
+            lidas = await tr.listar_paradas(db, tenant_id=t.id, linha_id=linha.id)
+
+        # Duas com ordem=1 (A e C), desempatadas por id; B com ordem=2 por último.
+        assert [p.id for p in lidas] == [
+            paradas[0].id, paradas[2].id, paradas[1].id,
+        ]
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_horario_duplicado_da_409(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        linha = await _linha(admin_engine, t.id, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.criar_horario(
+                    db, tenant_id=t.id, linha_id=linha.id,
+                    payload=LinhaHorarioCreate(dia_semana=1, partida=time(8, 0)),
+                )
+            with pytest.raises(HTTPException) as e:
+                await tr.criar_horario(
+                    db, tenant_id=t.id, linha_id=linha.id,
+                    payload=LinhaHorarioCreate(dia_semana=1, partida=time(8, 0)),
+                )
+        assert e.value.status_code == 409
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_horario_apagado_libera_o_par(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        linha = await _linha(admin_engine, t.id, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                horario = await tr.criar_horario(
+                    db, tenant_id=t.id, linha_id=linha.id,
+                    payload=LinhaHorarioCreate(dia_semana=2, partida=time(7, 30)),
+                )
+            async with db.begin():
+                await tr.excluir_horario(
+                    db, tenant_id=t.id, linha_id=linha.id, horario_id=horario.id,
+                )
+            # O mesmo par (dia_semana, partida) volta a passar.
+            async with db.begin():
+                novo = await tr.criar_horario(
+                    db, tenant_id=t.id, linha_id=linha.id,
+                    payload=LinhaHorarioCreate(dia_semana=2, partida=time(7, 30)),
+                )
+        assert novo.id != horario.id
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+# ------------------------------------------------------------- a prova estrutural
+
+
+@pytest.mark.asyncio
+async def test_o_banco_barra_horario_duplicado_sem_passar_pelo_servico(admin_engine):
+    """A exclusividade do par (linha, dia_semana, partida) é do índice único
+    parcial, não do `SELECT` de checagem em `criar_horario`. Insere o segundo
+    horário direto pelo banco, contornando o serviço inteiro, e espera
+    `IntegrityError` — sem isso, remover o índice deixaria a bateria toda
+    verde enquanto duas requisições concorrentes duplicariam o horário em
+    produção."""
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _ = await _operadores(admin_engine, t.id)
+        linha = await _linha(admin_engine, t.id, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.criar_horario(
+                    db, tenant_id=t.id, linha_id=linha.id,
+                    payload=LinhaHorarioCreate(dia_semana=3, partida=time(9, 0)),
+                )
+
+        with pytest.raises(IntegrityError):
+            async with _sm(admin_engine)() as db:
+                async with db.begin():
+                    db.add(
+                        LinhaHorario(
+                            tenant_id=t.id, id_linha=linha.id,
+                            dia_semana=3, partida=time(9, 0),
+                            criado_em=datetime.utcnow(),
+                        )
+                    )
     finally:
         await _limpar(admin_engine, t.id)

@@ -3971,3 +3971,162 @@ async def excluir_linha(db: AsyncSession, *, tenant_id: int, linha_id: int) -> N
     linha.excluido = True
     linha.atualizado_em = datetime.utcnow()
     await db.flush()
+
+
+# ---------------------------------------------------- P6b: paradas e horários
+
+async def listar_paradas(
+    db: AsyncSession, *, tenant_id: int, linha_id: int,
+) -> list[LinhaParada]:
+    await obter_linha(db, tenant_id=tenant_id, linha_id=linha_id)
+    rows = await db.scalars(
+        select(LinhaParada)
+        .where(
+            LinhaParada.tenant_id == tenant_id,
+            LinhaParada.id_linha == linha_id,
+            LinhaParada.excluido.is_(False),
+        )
+        # (ordem, id): estável mesmo com ordem duplicada — ver docstring do modelo.
+        .order_by(LinhaParada.ordem, LinhaParada.id)
+    )
+    return list(rows)
+
+
+async def criar_parada(
+    db: AsyncSession, *, tenant_id: int, linha_id: int, payload,
+) -> LinhaParada:
+    await obter_linha(db, tenant_id=tenant_id, linha_id=linha_id)
+    ultima = await db.scalar(
+        select(func.max(LinhaParada.ordem)).where(
+            LinhaParada.tenant_id == tenant_id,
+            LinhaParada.id_linha == linha_id,
+            LinhaParada.excluido.is_(False),
+        )
+    )
+    parada = LinhaParada(
+        tenant_id=tenant_id, id_linha=linha_id,
+        ordem=(ultima or 0) + 1, criado_em=datetime.utcnow(),
+        **payload.model_dump(),
+    )
+    db.add(parada)
+    await db.flush()
+    return parada
+
+
+async def _obter_parada(
+    db: AsyncSession, *, tenant_id: int, linha_id: int, parada_id: int,
+) -> LinhaParada:
+    parada = await db.scalar(
+        select(LinhaParada).where(
+            LinhaParada.id == parada_id,
+            LinhaParada.tenant_id == tenant_id,
+            LinhaParada.id_linha == linha_id,
+            LinhaParada.excluido.is_(False),
+        )
+    )
+    if parada is None:
+        raise HTTPException(404, "Parada não encontrada")
+    return parada
+
+
+async def atualizar_parada(
+    db: AsyncSession, *, tenant_id: int, linha_id: int, parada_id: int, payload,
+) -> LinhaParada:
+    parada = await _obter_parada(
+        db, tenant_id=tenant_id, linha_id=linha_id, parada_id=parada_id
+    )
+    for campo, valor in payload.model_dump(exclude_unset=True).items():
+        setattr(parada, campo, valor)
+    parada.atualizado_em = datetime.utcnow()
+    await db.flush()
+    return parada
+
+
+async def excluir_parada(
+    db: AsyncSession, *, tenant_id: int, linha_id: int, parada_id: int,
+) -> None:
+    parada = await _obter_parada(
+        db, tenant_id=tenant_id, linha_id=linha_id, parada_id=parada_id
+    )
+    parada.excluido = True
+    parada.atualizado_em = datetime.utcnow()
+    await db.flush()
+
+
+async def reordenar_paradas(
+    db: AsyncSession, *, tenant_id: int, linha_id: int, ids: list[int],
+) -> list[LinhaParada]:
+    """Recebe a lista COMPLETA de ids na nova ordem e renumera 1..N na mesma
+    transação. Id faltando ou sobrando é 422: o payload não bate com o estado,
+    o cliente está desatualizado — renumerar por cima esconderia isso."""
+    atuais = await listar_paradas(db, tenant_id=tenant_id, linha_id=linha_id)
+    por_id = {p.id: p for p in atuais}
+    if sorted(ids) != sorted(por_id):
+        raise HTTPException(
+            422, "A lista de paradas não corresponde ao estado atual — recarregue a página"
+        )
+    agora = datetime.utcnow()
+    for nova_ordem, parada_id in enumerate(ids, start=1):
+        parada = por_id[parada_id]
+        if parada.ordem != nova_ordem:
+            parada.ordem = nova_ordem
+            parada.atualizado_em = agora
+    await db.flush()
+    return await listar_paradas(db, tenant_id=tenant_id, linha_id=linha_id)
+
+
+async def listar_horarios(
+    db: AsyncSession, *, tenant_id: int, linha_id: int,
+) -> list[LinhaHorario]:
+    await obter_linha(db, tenant_id=tenant_id, linha_id=linha_id)
+    rows = await db.scalars(
+        select(LinhaHorario)
+        .where(
+            LinhaHorario.tenant_id == tenant_id,
+            LinhaHorario.id_linha == linha_id,
+            LinhaHorario.excluido.is_(False),
+        )
+        .order_by(LinhaHorario.dia_semana, LinhaHorario.partida)
+    )
+    return list(rows)
+
+
+async def criar_horario(
+    db: AsyncSession, *, tenant_id: int, linha_id: int, payload,
+) -> LinhaHorario:
+    await obter_linha(db, tenant_id=tenant_id, linha_id=linha_id)
+    # Checagem para devolver 409 legível; quem garante é ux_linha_horario.
+    existe = await db.scalar(
+        select(LinhaHorario.id).where(
+            LinhaHorario.id_linha == linha_id,
+            LinhaHorario.dia_semana == payload.dia_semana,
+            LinhaHorario.partida == payload.partida,
+            LinhaHorario.excluido.is_(False),
+        )
+    )
+    if existe is not None:
+        raise HTTPException(409, "Esse horário já está na grade para esse dia")
+    horario = LinhaHorario(
+        tenant_id=tenant_id, id_linha=linha_id, criado_em=datetime.utcnow(),
+        **payload.model_dump(),
+    )
+    db.add(horario)
+    await db.flush()
+    return horario
+
+
+async def excluir_horario(
+    db: AsyncSession, *, tenant_id: int, linha_id: int, horario_id: int,
+) -> None:
+    horario = await db.scalar(
+        select(LinhaHorario).where(
+            LinhaHorario.id == horario_id,
+            LinhaHorario.tenant_id == tenant_id,
+            LinhaHorario.id_linha == linha_id,
+            LinhaHorario.excluido.is_(False),
+        )
+    )
+    if horario is None:
+        raise HTTPException(404, "Horário não encontrado")
+    horario.excluido = True
+    await db.flush()
