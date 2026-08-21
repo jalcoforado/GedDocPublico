@@ -67,7 +67,7 @@ export function SidebarModuloHeader({ modulo, collapsed }: Props) {
           "flex w-full items-center gap-2 border-b border-sidebar-border px-3 py-3 text-left text-sm font-medium text-danger",
           "transition-colors duration-fast hover:bg-danger-soft disabled:opacity-60",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          collapsed && "lg:hidden",
+          collapsed && "md:hidden",
         )}
       >
         <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -90,7 +90,7 @@ export function SidebarModuloHeader({ modulo, collapsed }: Props) {
         data-testid="sidebar-modulo-header"
         className={cn(
           "flex items-center gap-2 border-b border-sidebar-border px-3 py-3 text-sm font-medium text-sidebar-foreground/90",
-          collapsed && "lg:hidden",
+          collapsed && "md:hidden",
         )}
       >
         <span className="truncate">{ordenados[0].nome}</span>
@@ -105,7 +105,7 @@ export function SidebarModuloHeader({ modulo, collapsed }: Props) {
   const outros = ordenados.filter((m) => m.slug !== modulo);
 
   return (
-    <div className={cn("border-b border-sidebar-border", collapsed && "lg:hidden")}>
+    <div className={cn("border-b border-sidebar-border", collapsed && "md:hidden")}>
       <button
         type="button"
         data-testid="sidebar-modulo-header"

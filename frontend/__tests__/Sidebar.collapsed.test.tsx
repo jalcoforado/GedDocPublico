@@ -66,7 +66,8 @@ describe("sidebar colapsada (UX-03 fatia 3.6)", () => {
     renderSidebar({ modulo: "pagamentos", open: false, onClose: () => {} });
     const link = screen.getByRole("link", { name: /conciliação/i });
     const rotulo = within(link).getByText("Conciliação");
-    expect(rotulo.className).toContain("lg:sr-only");
-    expect(rotulo.className).not.toContain("lg:hidden");
+    // md:, não lg:, desde a 3.8 — o colapso também vale na faixa tablet
+    expect(rotulo.className).toContain("md:sr-only");
+    expect(rotulo.className).not.toMatch(/(?:md|lg):hidden/);
   });
 });

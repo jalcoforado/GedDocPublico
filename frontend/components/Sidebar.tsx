@@ -79,6 +79,21 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
       typeof document !== "undefined" &&
       document.documentElement.dataset.sidebarCollapsed === "1",
   );
+  // Tablets (768–1024, fatia 3.8): sidebar colapsada SEMPRE presente em vez
+  // de drawer — largura sobra para 68px de ícones, e o hambúrguer custava um
+  // toque por navegação. A preferência do usuário volta a mandar fora da faixa.
+  const TABLET_QUERY = "(min-width: 768px) and (max-width: 1023.98px)";
+  const [tablet, setTablet] = useState(
+    () => typeof window !== "undefined" && window.matchMedia(TABLET_QUERY).matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(TABLET_QUERY);
+    const atualiza = () => setTablet(mq.matches);
+    mq.addEventListener?.("change", atualiza);
+    return () => mq.removeEventListener?.("change", atualiza);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const colapsada = collapsed || tablet;
   // Grupos abertos/fechados — chave: title do grupo. O estado salvo entra já
   // no initializer (anti-FOUC, fatia 3.2): via useEffect os grupos piscavam
   // no default e colapsavam um frame depois.
@@ -218,7 +233,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         aria-hidden="true"
         data-testid="sidebar-overlay"
         className={cn(
-          "fixed inset-0 z-modal-backdrop bg-black/50 transition-opacity duration-200 lg:hidden",
+          "fixed inset-0 z-modal-backdrop bg-black/50 transition-opacity duration-200 md:hidden",
           open ? "opacity-100" : "pointer-events-none opacity-0",
         )}
       />
@@ -226,12 +241,13 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         ref={navRef}
         aria-label="Navegação principal"
         onClick={fechaAoClicarLink}
-        data-collapsed={collapsed}
+        data-collapsed={colapsada}
         className={cn(
           "fixed inset-y-0 left-0 z-modal flex w-72 shrink-0 flex-col overflow-hidden",
           "border-r border-sidebar-border bg-sidebar text-sidebar-foreground pt-safe transition-[transform,width] duration-base ease-out-expo",
-          collapsed ? "lg:static lg:w-[68px]" : "lg:static lg:w-64 lg:translate-x-0",
-          open ? "translate-x-0 shadow-xl" : "-translate-x-full shadow-none lg:translate-x-0",
+          "md:static md:w-[68px] md:translate-x-0",
+          !colapsada && "lg:w-64",
+          open ? "translate-x-0 shadow-xl" : "-translate-x-full shadow-none md:translate-x-0",
         )}
       >
         {/* Brand block */}
@@ -240,10 +256,10 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
             href="/home"
             className={cn(
               "flex items-center gap-2.5 rounded px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              collapsed && "lg:justify-center lg:gap-0",
+              colapsada && "md:justify-center md:gap-0",
             )}
             aria-label="Início"
-            title={collapsed ? branding?.nome ?? "Aprimora" : undefined}
+            title={colapsada ? branding?.nome ?? "Aprimora" : undefined}
           >
             {branding?.logo_url ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -260,7 +276,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                 A
               </div>
             )}
-            <div className={cn(collapsed && "lg:hidden")}>
+            <div className={cn(colapsada && "md:hidden")}>
               <div className="text-base font-semibold leading-tight tracking-tight">
                 {branding?.nome ?? "Aprimora"}
               </div>
@@ -273,7 +289,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
             type="button"
             onClick={onClose}
             aria-label="Fechar menu"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:hidden"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground md:hidden"
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -281,7 +297,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
 
         {/* Cabeçalho de módulo — onde o usuário está e o caminho de volta a
             /modulos. Acima de todos os grupos, de propósito (ver componente). */}
-        <SidebarModuloHeader modulo={modulo} collapsed={collapsed} />
+        <SidebarModuloHeader modulo={modulo} collapsed={colapsada} />
 
         {/* Items */}
         <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 py-2">
@@ -298,15 +314,15 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
             const isOpen = groupOpen[group.title] ?? group.defaultOpen ?? true;
             const groupIsActive = activeGroupTitle === group.title;
             // Em collapsed mode (icon-only), grupos não colapsam — sempre mostra itens.
-            const showItems = collapsed || isOpen;
+            const showItems = colapsada || isOpen;
             const slugId = `nav-group-${group.title.toLowerCase().replace(/\s+/g, "-")}`;
 
             return (
               <div key={group.title} className="rounded-md">
                 {/* Group header — clicável (exceto em collapsed mode, vira só separador). */}
-                {collapsed ? (
+                {colapsada ? (
                   <div
-                    className="my-1 hidden h-px w-full bg-sidebar-border lg:block"
+                    className="my-1 hidden h-px w-full bg-sidebar-border md:block"
                     aria-hidden="true"
                   />
                 ) : (
@@ -354,7 +370,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                     const Icon = item.icon;
                     const active = isPathActive(item.href, pathname);
 
-                    if (item.children && item.children.length > 0 && !collapsed) {
+                    if (item.children && item.children.length > 0 && !colapsada) {
                       const subIsOpen = subOpen[item.label] ?? false;
                       const subSlugId = `nav-sub-${item.label.toLowerCase().replace(/\s+/g, "-")}`;
                       const subGroupActive = item.children.some((c) => isPathActive(c.href, pathname));
@@ -427,7 +443,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
     // Pai com children em modo collapsed: flyout com os filhos (fatia 3.6) —
                     // a versão anterior virava link para o 1º filho, uma troca
                     // silenciosa de destino que o usuário não pedia.
-                    if (collapsed && item.children && item.children.length > 0) {
+                    if (colapsada && item.children && item.children.length > 0) {
                       return (
                         <ItemColapsadoComFilhos
                           key={item.label}
@@ -444,10 +460,10 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                         key={item.label}
                         href={linkHref}
                         aria-current={linkActive ? "page" : undefined}
-                        title={collapsed ? item.label : undefined}
+                        title={colapsada ? item.label : undefined}
                         className={cn(
                           "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
-                          collapsed && "lg:justify-center lg:gap-0 lg:px-0",
+                          colapsada && "md:justify-center md:gap-0 md:px-0",
                           linkActive
                             ? "bg-sidebar-active text-sidebar-foreground"
                             : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",
@@ -469,7 +485,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                         />
                         {/* sr-only, não hidden: o rótulo continua sendo o nome
                             acessível do link no modo colapsado (fatia 3.6) */}
-                        <span className={cn("flex-1", collapsed && "lg:sr-only")}>
+                        <span className={cn("flex-1", colapsada && "md:sr-only")}>
                           {item.label}
                         </span>
                       </Link>
@@ -483,18 +499,18 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
           {isPlatformAdmin && (
             <Link
               href="/admin/tenants"
-              title={collapsed ? "Plataforma" : undefined}
+              title={colapsada ? "Plataforma" : undefined}
               aria-current={isPathActive("/admin", pathname) ? "page" : undefined}
               className={cn(
                 "group relative mt-1 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
-                collapsed && "lg:justify-center lg:gap-0 lg:px-0",
+                colapsada && "md:justify-center md:gap-0 md:px-0",
                 isPathActive("/admin", pathname)
                   ? "bg-sidebar-active text-sidebar-foreground"
                   : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",
               )}
             >
               <Shield className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className={cn("flex-1", collapsed && "lg:hidden")}>Plataforma</span>
+              <span className={cn("flex-1", colapsada && "md:sr-only")}>Plataforma</span>
             </Link>
           )}
         </div>
@@ -503,10 +519,10 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         <div
           className={cn(
             "flex items-center gap-2 border-t border-sidebar-border bg-sidebar-accent/50 px-3 py-3",
-            collapsed ? "lg:flex-col" : "justify-between",
+            colapsada ? "md:flex-col" : "justify-between",
           )}
         >
-          <div className={cn(collapsed && "lg:hidden")}>
+          <div className={cn(colapsada && "md:hidden")}>
             <ThemeToggle />
           </div>
           <div className="flex items-center gap-1.5">
@@ -564,14 +580,14 @@ function ItemColapsadoComFilhos({
         onClick={() => setAberto((v) => !v)}
         className={cn(
           "group relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
-          "lg:justify-center lg:gap-0 lg:px-0",
+          "md:justify-center md:gap-0 md:px-0",
           ativo
             ? "bg-sidebar-active text-sidebar-foreground"
             : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",
         )}
       >
         <Icon className={cn("h-4 w-4 shrink-0", ativo && "text-accent")} aria-hidden="true" />
-        <span className="flex-1 lg:sr-only">{item.label}</span>
+        <span className="flex-1 md:sr-only">{item.label}</span>
       </button>
       <Popover
         open={aberto}

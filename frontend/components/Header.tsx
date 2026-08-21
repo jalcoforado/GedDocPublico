@@ -34,7 +34,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         className="
           inline-flex h-10 w-10 items-center justify-center rounded-md
           text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground
-          lg:hidden
+          md:hidden
         "
       >
         <Menu className="h-5 w-5" aria-hidden="true" />
@@ -43,7 +43,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
       {/* Brand mark — visível em mobile (sidebar tem o logo grande no desktop) */}
       <Link
         href="/home"
-        className="flex items-center gap-2 lg:hidden"
+        className="flex items-center gap-2 md:hidden"
         aria-label="Início"
       >
         <BrandMark />
