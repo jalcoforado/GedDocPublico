@@ -11,6 +11,7 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
         "text-base text-foreground shadow-input placeholder:text-muted-foreground",
         "hover:border-border-strong",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:border-ring",
+        "aria-[invalid=true]:border-danger aria-[invalid=true]:focus-visible:ring-danger",
         "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-input",
         className,
       )}

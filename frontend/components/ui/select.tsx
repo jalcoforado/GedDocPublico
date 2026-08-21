@@ -9,6 +9,7 @@ export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
         "flex h-11 w-full rounded-input border border-input bg-card px-3 py-2 transition-colors duration-fast",
         "text-base text-foreground shadow-input",
         "hover:border-border-strong cursor-pointer",
+        "aria-[invalid=true]:border-danger aria-[invalid=true]:focus-visible:ring-danger",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:border-ring",
         "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-input",
         className,
