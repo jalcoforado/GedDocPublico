@@ -41,6 +41,8 @@ interface SidebarProps {
 
 const COLLAPSED_KEY = "aprimora.sidebar.collapsed";
 const GROUP_STATE_KEY = "aprimora.sidebar.groups.v1";
+const FOCUSABLE =
+  'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function Sidebar({ modulo, open, onClose }: SidebarProps) {
   const pathname = usePathname();
@@ -67,36 +69,34 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
   });
   const isPlatformAdmin = adminMeQ.data?.is_platform_admin ?? false;
   const lastPath = useRef(pathname);
-  // Collapsed (icon-only) — só faz sentido em desktop. Persistido em localStorage.
-  const [collapsed, setCollapsed] = useState(false);
-  // Grupos abertos/fechados — chave: title do grupo.
-  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(NAV.map((g) => [g.title, g.defaultOpen ?? true])),
+  // Collapsed (icon-only) — só faz sentido em desktop. Persistido em
+  // localStorage E espelhado no <html> pelo THEME_INIT_SCRIPT: o initializer
+  // lê a marca para o PRIMEIRO render já sair no estado certo (anti-FOUC,
+  // fatia 3.2) — antes, um useEffect corrigia depois e a sidebar piscava.
+  const [collapsed, setCollapsed] = useState(
+    () =>
+      typeof document !== "undefined" &&
+      document.documentElement.dataset.sidebarCollapsed === "1",
   );
+  // Grupos abertos/fechados — chave: title do grupo. O estado salvo entra já
+  // no initializer (anti-FOUC, fatia 3.2): via useEffect os grupos piscavam
+  // no default e colapsavam um frame depois.
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>(() => {
+    const defaults = Object.fromEntries(NAV.map((g) => [g.title, g.defaultOpen ?? true]));
+    try {
+      const raw = localStorage.getItem(GROUP_STATE_KEY);
+      if (raw) return { ...defaults, ...(JSON.parse(raw) as Record<string, boolean>) };
+    } catch {
+      /* ignore */
+    }
+    return defaults;
+  });
   // Subgrupos (item com children) abertos/fechados — chave: label do item.
   // Não persistido (não exigido); abre sozinho se um filho estiver ativo.
   const [subOpen, setSubOpen] = useState<Record<string, boolean>>({});
   const toggleSub = (label: string) =>
     setSubOpen((prev) => ({ ...prev, [label]: !prev[label] }));
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(COLLAPSED_KEY);
-      if (raw === "1") setCollapsed(true);
-    } catch {
-      /* ignore */
-    }
-    try {
-      const raw = localStorage.getItem(GROUP_STATE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Record<string, boolean>;
-        // Preserva defaults pra grupos novos que ainda não foram salvos
-        setGroupOpen((prev) => ({ ...prev, ...parsed }));
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
 
   // Auto-expand o grupo que contém o item ativo (não fecha grupos abertos).
   useEffect(() => {
@@ -119,6 +119,9 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
       const next = !prev;
       try {
         localStorage.setItem(COLLAPSED_KEY, next ? "1" : "0");
+        // espelha a marca que o THEME_INIT_SCRIPT lê no próximo load
+        if (next) document.documentElement.dataset.sidebarCollapsed = "1";
+        else delete document.documentElement.dataset.sidebarCollapsed;
       } catch {
         /* ignore */
       }
@@ -145,6 +148,59 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
     }
   }, [pathname, onClose]);
 
+  // Drawer mobile como Dialog-pattern (UX-03 fatia 3.1): ESC fecha, Tab fica
+  // preso dentro, o foco entra ao abrir e volta ao gatilho ao fechar. `open`
+  // só é true no drawer (o hambúrguer é lg:hidden); em desktop a nav é
+  // estática e nada disto roda.
+  const navRef = useRef<HTMLElement>(null);
+  const focoAnterior = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const nav = navRef.current;
+    const ativo = document.activeElement;
+    if (ativo instanceof HTMLElement && !nav?.contains(ativo)) {
+      focoAnterior.current = ativo;
+    }
+    if (nav && !nav.contains(document.activeElement)) {
+      nav.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    }
+
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focaveis = navRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
+      if (!focaveis || focaveis.length === 0) return;
+      const primeiro = focaveis[0];
+      const ultimo = focaveis[focaveis.length - 1];
+      const atual = document.activeElement;
+      if (e.shiftKey && atual === primeiro) {
+        e.preventDefault();
+        ultimo.focus();
+      } else if (!e.shiftKey && atual === ultimo) {
+        e.preventDefault();
+        primeiro.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      const anterior = focoAnterior.current;
+      focoAnterior.current = null;
+      if (anterior?.isConnected) anterior.focus();
+    };
+  }, [open, onClose]);
+
+  // Clicar em link da ROTA ATUAL não muda o pathname — o efeito acima nunca
+  // fecharia. Qualquer clique em <a> dentro do drawer aberto fecha.
+  function fechaAoClicarLink(e: React.MouseEvent) {
+    if (!open) return;
+    if ((e.target as HTMLElement).closest("a")) onClose();
+  }
+
   // Calcula quais grupos têm o item ativo (pra realçar o header).
   const activeGroupTitle = useMemo(() => {
     return NAV.find((g) => g.items.some((i) => itemMatchesPath(i, pathname)))?.title;
@@ -166,7 +222,9 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         )}
       />
       <nav
+        ref={navRef}
         aria-label="Navegação principal"
+        onClick={fechaAoClicarLink}
         data-collapsed={collapsed}
         className={cn(
           "fixed inset-y-0 left-0 z-modal flex w-72 shrink-0 flex-col overflow-hidden",
