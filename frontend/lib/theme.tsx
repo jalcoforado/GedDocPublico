@@ -131,6 +131,11 @@ export const THEME_INIT_SCRIPT = `
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     document.documentElement.dataset.density = d;
     document.documentElement.style.colorScheme = dark ? "dark" : "light";
+    // Sidebar colapsada (UX-03 fatia 3.2): a marca no <html> deixa a Sidebar
+    // nascer no estado certo em vez de pintar larga e encolher um frame depois.
+    if (localStorage.getItem("aprimora.sidebar.collapsed") === "1") {
+      document.documentElement.dataset.sidebarCollapsed = "1";
+    }
   } catch (e) {}
 })();
 `.trim();
