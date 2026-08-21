@@ -6,7 +6,7 @@ export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
     <select
       ref={ref}
       className={cn(
-        "flex h-11 w-full rounded-input border border-input bg-card px-3 py-2 transition-colors duration-fast",
+        "flex h-[var(--density-row-h)] w-full rounded-input border border-input bg-card px-3 py-2 transition-colors duration-fast",
         "text-base text-foreground shadow-input",
         "hover:border-border-strong cursor-pointer",
         "aria-[invalid=true]:border-danger aria-[invalid=true]:focus-visible:ring-danger",

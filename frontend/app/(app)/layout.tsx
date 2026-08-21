@@ -39,7 +39,10 @@ function Shell({ children }: { children: React.ReactNode }) {
       <Sidebar modulo={modulo} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onOpenSidebar={() => setSidebarOpen(true)} />
-        <main id="conteudo" className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <main
+          id="conteudo"
+          className="flex-1 overflow-y-auto p-4 sm:p-[var(--density-space)]"
+        >
           {/* Contrato de largura (spec §12.2): max-w-7xl centrado por padrão;
               página full-width (dashboard) opta por fora marcando qualquer
               elemento seu com data-full-width — o :has() solta o teto. */}

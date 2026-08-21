@@ -62,7 +62,9 @@ export function PageHeader({
     // eram ruído de landmark para leitor de tela (fatia 3.5).
     <div
       className={cn(
-        "relative -mx-4 mb-2 px-4 sm:-mx-6 sm:px-6",
+        // O -mx/px espelha o padding do <main> — os dois vêm de --density-space
+        // para o sangramento continuar alinhado em qualquer densidade (3.9).
+        "relative -mx-4 mb-2 px-4 sm:-mx-[var(--density-space)] sm:px-[var(--density-space)]",
         isHero &&
           "border-b border-border bg-gradient-to-br from-brand/5 via-transparent to-accent/5",
         className,
@@ -103,7 +105,7 @@ export function PageHeader({
       )}
 
       {/* Title row */}
-      <div className="flex flex-wrap items-start justify-between gap-3 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3 py-[var(--density-gap)]">
         <div className="flex min-w-0 items-start gap-3">
           {Icon && (
             <div
@@ -135,8 +137,8 @@ export function PageHeader({
 
       {/* Tabs/filtros */}
       {tabs && (
-        <div className="-mx-4 sm:-mx-6 border-b border-border bg-surface-1/40">
-          <div className="px-4 sm:px-6">{tabs}</div>
+        <div className="-mx-4 sm:-mx-[var(--density-space)] border-b border-border bg-surface-1/40">
+          <div className="px-4 sm:px-[var(--density-space)]">{tabs}</div>
         </div>
       )}
     </div>

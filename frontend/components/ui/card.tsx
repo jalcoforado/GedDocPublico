@@ -17,7 +17,10 @@ export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElemen
 export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("flex flex-col gap-1 p-4 pb-3 sm:p-6 sm:pb-3", className)}
+      className={cn(
+        "flex flex-col gap-1 p-4 pb-3 sm:p-[var(--density-space)] sm:pb-3",
+        className,
+      )}
       {...props}
     />
   );
@@ -45,14 +48,19 @@ export function CardDescription({ className, ...props }: React.HTMLAttributes<HT
 }
 
 export function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("p-4 pt-3 sm:p-6 sm:pt-3", className)} {...props} />;
+  return (
+    <div
+      className={cn("p-4 pt-3 sm:p-[var(--density-space)] sm:pt-3", className)}
+      {...props}
+    />
+  );
 }
 
 export function CardFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
-        "flex items-center gap-2 border-t border-border bg-surface-2/40 px-4 py-3 sm:px-6",
+        "flex items-center gap-2 border-t border-border bg-surface-2/40 px-4 py-3 sm:px-[var(--density-space)]",
         className,
       )}
       {...props}

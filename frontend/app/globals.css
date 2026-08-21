@@ -340,11 +340,17 @@
     --density-pad-y: 0.375rem; /* vs 0.5 default */
     --density-pad-x: 0.625rem; /* vs 0.75 default */
     --density-row-h: 2.25rem; /* 36px vs 44px default */
+    --density-space: 1rem; /* vs 1.5 default */
+    --density-gap: 0.5rem; /* vs 0.75 default */
   }
   :root {
     --density-pad-y: 0.5rem;
     --density-pad-x: 0.75rem;
     --density-row-h: 2.75rem;
+    /* Fatia 3.9: densidade deixa de ser só de tabela — espaço de seção
+       (main, cards, PageHeader) e ritmo vertical também encolhem no compacto. */
+    --density-space: 1.5rem;
+    --density-gap: 0.75rem;
   }
 
   html,

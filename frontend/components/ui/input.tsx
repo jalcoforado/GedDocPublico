@@ -7,7 +7,9 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
       ref={ref}
       type={type}
       className={cn(
-        "flex h-11 w-full rounded-input border border-input bg-card px-3 py-2 transition-colors duration-fast",
+        // Altura na mesma régua das linhas de tabela: 2.75rem (=h-11) no
+        // padrão, 2.25rem no compacto (fatia 3.9).
+        "flex h-[var(--density-row-h)] w-full rounded-input border border-input bg-card px-3 py-2 transition-colors duration-fast",
         "text-base text-foreground shadow-input placeholder:text-muted-foreground",
         "hover:border-border-strong",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:border-ring",
