@@ -231,18 +231,11 @@ export default function OcorrenciasPage() {
       setErr("Selecione o tipo da ocorrência.");
       return;
     }
-    // Ao menos um alvo: permissionário, empresa, ou uma referência livre
-    // (útil quando ainda não há vínculo formal — ex.: denúncia contra placa
-    // não identificada). O backend devolve 422 se nenhum vier, mas orientar
-    // antes do round-trip é melhor.
-    if (
-      form.id_permissionario === null &&
-      form.id_empresa === null &&
-      limpo(form.referencia_alvo) === null
-    ) {
-      setErr(
-        "Informe ao menos um alvo: permissionário, empresa, ou uma referência (ex.: placa do veículo).",
-      );
+    // Ao menos um alvo FORMAL: `exigir_alvo` no backend não aceita
+    // `referencia_alvo` sozinha — ela é só complemento textual. Validar
+    // igual ao servidor evita o round-trip que terminaria em 422.
+    if (form.id_permissionario === null && form.id_empresa === null) {
+      setErr("Informe ao menos um alvo: permissionário ou empresa.");
       return;
     }
     registrarM.mutate();
@@ -545,13 +538,16 @@ export default function OcorrenciasPage() {
             <Label htmlFor="referencia">Referência do alvo (opcional)</Label>
             <Input
               id="referencia"
-              placeholder="Ex.: placa do veículo, quando não há permissionário/empresa vinculado"
+              placeholder="Ex.: placa do veículo"
               value={form.referencia_alvo}
               onChange={(e) => set("referencia_alvo", e.target.value)}
             />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Complemento textual (ex.: placa); não substitui o vínculo formal.
+            </p>
           </div>
           <p className="text-xs text-muted-foreground">
-            Informe ao menos um alvo: permissionário, empresa, ou uma referência livre.
+            Informe ao menos um alvo: permissionário ou empresa.
           </p>
           <div>
             <Label htmlFor="obs">Observações</Label>

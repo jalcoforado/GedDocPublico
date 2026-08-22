@@ -331,6 +331,9 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
                     <Button onClick={() => apurarM.mutate()} disabled={apurarM.isPending}>
                       {apurarM.isPending ? "Apurando..." : "Apurar"}
                     </Button>
+                    <Button variant="secondary" onClick={abrirAnotar}>
+                      Anotar
+                    </Button>
                     <Button variant="secondary" onClick={abrirVincular}>
                       Vincular alvo
                     </Button>
