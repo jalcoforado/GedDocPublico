@@ -2022,6 +2022,112 @@ export type LinhaTransporteCreate = Omit<
 >;
 export type LinhaTransporteUpdate = Partial<LinhaTransporteCreate>;
 
+// ---------------------------------------------------------- P7: ocorrências
+//
+// "OcorrenciaTipoTransporte" e não "OcorrenciaTipo": esse último já é o enum
+// de causa das ocorrências de frota (VeiculoOcorrencia), acima. Aqui é
+// cadastro (id/nome/ativo) do transporte regulado — entidade diferente.
+
+export type OcorrenciaOrigem = "fiscalizacao" | "denuncia" | "outro";
+export type OcorrenciaSituacao =
+  | "registrada"
+  | "em_apuracao"
+  | "procedente"
+  | "improcedente"
+  | "arquivada";
+
+export interface OcorrenciaTipoTransporte {
+  id: number;
+  nome: string;
+  descricao: string | null;
+  ativo: boolean;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface OcorrenciaTipoTransporteCreate {
+  nome: string;
+  descricao?: string | null;
+  ativo?: boolean;
+}
+export type OcorrenciaTipoTransporteUpdate =
+  Partial<OcorrenciaTipoTransporteCreate>;
+
+export interface OcorrenciaAndamento {
+  id: number;
+  ato: string;
+  parecer: string | null;
+  id_usuario: number | null;
+  usuario_nome: string | null;
+  criado_em: string;
+}
+
+export interface OcorrenciaTransporte {
+  id: number;
+  id_tipo: number;
+  origem: OcorrenciaOrigem;
+  data_fato: string;
+  descricao: string;
+  id_permissionario: number | null;
+  id_empresa: number | null;
+  id_veiculo: number | null;
+  referencia_alvo: string | null;
+  observacoes: string | null;
+  situacao: OcorrenciaSituacao;
+  tipo_nome: string | null;
+  alvo_resumo: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+  andamentos: OcorrenciaAndamento[];
+}
+
+export interface OcorrenciaTransporteCreate {
+  id_tipo: number;
+  origem: OcorrenciaOrigem;
+  data_fato: string;
+  descricao: string;
+  id_permissionario?: number | null;
+  id_empresa?: number | null;
+  id_veiculo?: number | null;
+  referencia_alvo?: string | null;
+  observacoes?: string | null;
+}
+
+export interface OcorrenciaAnotarInput {
+  parecer: string;
+}
+
+export interface OcorrenciaVincularInput {
+  id_permissionario?: number | null;
+  id_empresa?: number | null;
+  id_veiculo?: number | null;
+}
+
+export interface OcorrenciaDecidirInput {
+  resultado: "procedente" | "improcedente" | "arquivada";
+  parecer: string;
+}
+
+// Schema FECHADO no backend (DenunciaCidadaoOut) — não herda de
+// OcorrenciaTransporte. Exatamente as 7 chaves que o cidadão pode ver; nada
+// de trilha, parecer ou alvo formal aqui.
+export interface DenunciaCidadao {
+  id: number;
+  tipo_nome: string | null;
+  descricao: string;
+  referencia_alvo: string | null;
+  situacao: OcorrenciaSituacao;
+  data_fato: string;
+  criado_em: string;
+}
+
+export interface DenunciaCidadaoCreate {
+  id_tipo: number;
+  descricao: string;
+  referencia_alvo?: string | null;
+  data_fato: string;
+}
+
 export type PermissionarioSituacao =
   | "ativo"
   | "pendente"
@@ -3465,6 +3571,71 @@ export const api = {
         { method: "DELETE" },
       ),
   },
+  ocorrenciasTransporte: {
+    tipos: {
+      list: () =>
+        request<OcorrenciaTipoTransporte[]>(
+          "/transporte-regulado/ocorrencias/tipos",
+        ),
+      create: (data: OcorrenciaTipoTransporteCreate) =>
+        request<OcorrenciaTipoTransporte>(
+          "/transporte-regulado/ocorrencias/tipos",
+          { method: "POST", body: JSON.stringify(data) },
+        ),
+      update: (id: number, data: OcorrenciaTipoTransporteUpdate) =>
+        request<OcorrenciaTipoTransporte>(
+          `/transporte-regulado/ocorrencias/tipos/${id}`,
+          { method: "PUT", body: JSON.stringify(data) },
+        ),
+      remove: (id: number) =>
+        request<void>(`/transporte-regulado/ocorrencias/tipos/${id}`, {
+          method: "DELETE",
+        }),
+    },
+    // Paginado no backend -> Paginated<> aqui (mesma armadilha das linhas).
+    list: (params?: {
+      q?: string;
+      situacao?: string;
+      origem?: string;
+      id_tipo?: number;
+      page?: number;
+      page_size?: number;
+    }) =>
+      request<Paginated<OcorrenciaTransporte>>(
+        `/transporte-regulado/ocorrencias${qs(params ?? {})}`,
+      ),
+    get: (id: number) =>
+      request<OcorrenciaTransporte>(`/transporte-regulado/ocorrencias/${id}`),
+    registrar: (data: OcorrenciaTransporteCreate) =>
+      request<OcorrenciaTransporte>("/transporte-regulado/ocorrencias", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    apurar: (id: number) =>
+      request<OcorrenciaTransporte>(
+        `/transporte-regulado/ocorrencias/${id}/apurar`,
+        { method: "POST" },
+      ),
+    anotar: (id: number, data: OcorrenciaAnotarInput) =>
+      request<OcorrenciaTransporte>(
+        `/transporte-regulado/ocorrencias/${id}/anotar`,
+        { method: "POST", body: JSON.stringify(data) },
+      ),
+    vincularAlvo: (id: number, data: OcorrenciaVincularInput) =>
+      request<OcorrenciaTransporte>(
+        `/transporte-regulado/ocorrencias/${id}/vincular-alvo`,
+        { method: "POST", body: JSON.stringify(data) },
+      ),
+    decidir: (id: number, data: OcorrenciaDecidirInput) =>
+      request<OcorrenciaTransporte>(
+        `/transporte-regulado/ocorrencias/${id}/decidir`,
+        { method: "POST", body: JSON.stringify(data) },
+      ),
+    remove: (id: number) =>
+      request<void>(`/transporte-regulado/ocorrencias/${id}`, {
+        method: "DELETE",
+      }),
+  },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),
     create: (data: Omit<TipoAnexo, "id">) =>
@@ -4014,6 +4185,19 @@ export const api = {
         `/cidadao/processos/${processoId}/complementacoes/${complementacaoId}/responder`,
         { method: "POST" },
       ),
+  },
+
+  // P7.2 — Denúncias do cidadão (outro realm: cookie aprimora_cidadao_token,
+  // schema fechado DenunciaCidadao). Não paginado no backend — lista crua.
+  cidadaoDenuncias: {
+    tipos: () =>
+      requestCidadao<OcorrenciaTipoTransporte[]>("/cidadao/denuncias/tipos"),
+    list: () => requestCidadao<DenunciaCidadao[]>("/cidadao/denuncias"),
+    create: (data: DenunciaCidadaoCreate) =>
+      requestCidadao<DenunciaCidadao>("/cidadao/denuncias", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
   },
 };
 
