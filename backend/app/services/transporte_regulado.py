@@ -4319,13 +4319,14 @@ async def listar_ocorrencias(
 
 async def registrar_ocorrencia(
     db: AsyncSession, *, tenant_id: int, payload, id_usuario: int | None,
-    exigir_alvo: bool = True,
+    exigir_alvo: bool = True, id_cidadao: int | None = None,
 ) -> Ocorrencia:
     """Registra a ocorrência + o ato `registro` na trilha, num único flush.
 
     `exigir_alvo=True` é o balcão municipal (padrão); `exigir_alvo=False` é a
     porta da P7.2 (denúncia do portal), onde o cidadão raramente sabe o id de
-    um permissionário e o vínculo formal fica para a apuração.
+    um permissionário e o vínculo formal fica para a apuração. `id_cidadao`
+    só vem preenchido por essa mesma porta.
     """
     tipo = await db.scalar(
         select(OcorrenciaTipo).where(
@@ -4353,7 +4354,7 @@ async def registrar_ocorrencia(
 
     agora = datetime.utcnow()
     ocorrencia = Ocorrencia(
-        tenant_id=tenant_id, criado_em=agora,
+        tenant_id=tenant_id, criado_em=agora, id_cidadao=id_cidadao,
         **payload.model_dump(),
     )
     db.add(ocorrencia)
@@ -4367,6 +4368,48 @@ async def registrar_ocorrencia(
     )
     await db.flush()
     return ocorrencia
+
+
+async def registrar_denuncia_cidadao(
+    db: AsyncSession, *, tenant_id: int, cidadao, payload,
+) -> Ocorrencia:
+    """Porta P7.2: cidadão registra sem alvo formal, sem `id_usuario` na
+    trilha (ato praticado pelo próprio cidadão, não por um servidor)."""
+    from ..schemas.transporte_regulado import OcorrenciaCreate
+
+    oc_payload = OcorrenciaCreate(
+        id_tipo=payload.id_tipo, origem="denuncia", data_fato=payload.data_fato,
+        descricao=payload.descricao, referencia_alvo=payload.referencia_alvo,
+    )
+    return await registrar_ocorrencia(
+        db, tenant_id=tenant_id, payload=oc_payload, id_usuario=None,
+        exigir_alvo=False, id_cidadao=cidadao.id,
+    )
+
+
+async def listar_denuncias_do_cidadao(
+    db: AsyncSession, *, tenant_id: int, id_cidadao: int,
+) -> list[Ocorrencia]:
+    """Só as denúncias do próprio cidadão, mais recentes primeiro. Resolve
+    `tipo_nome` como atributo transiente — não persiste, só carrega a saída
+    do schema fechado `DenunciaCidadaoOut`."""
+    rows = (
+        await db.execute(
+            select(Ocorrencia, OcorrenciaTipo.nome)
+            .join(OcorrenciaTipo, OcorrenciaTipo.id == Ocorrencia.id_tipo, isouter=True)
+            .where(
+                Ocorrencia.tenant_id == tenant_id,
+                Ocorrencia.id_cidadao == id_cidadao,
+                Ocorrencia.excluido.is_(False),
+            )
+            .order_by(Ocorrencia.criado_em.desc())
+        )
+    ).all()
+    resultado: list[Ocorrencia] = []
+    for oc, tipo_nome in rows:
+        oc.tipo_nome = tipo_nome
+        resultado.append(oc)
+    return resultado
 
 
 SITUACOES_FINAIS_OCORRENCIA = {"procedente", "improcedente", "arquivada"}

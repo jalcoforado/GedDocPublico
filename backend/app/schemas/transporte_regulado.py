@@ -1512,3 +1512,27 @@ class OcorrenciaDecidirInput(BaseModel):
     parecer: str = Field(min_length=1)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# --------------------------------------------------- P7.2: realm cidadão
+
+class DenunciaCidadaoCreate(BaseModel):
+    id_tipo: int
+    descricao: str = Field(min_length=1)
+    referencia_alvo: str | None = Field(default=None, max_length=200)
+    data_fato: date
+
+
+class DenunciaCidadaoOut(BaseModel):
+    """Schema FECHADO — não herda de OcorrenciaOut. O contorno do que o
+    cidadão vê é contrato: nada de trilha, parecer ou alvo formal aqui."""
+
+    id: int
+    tipo_nome: str | None = None
+    descricao: str
+    referencia_alvo: str | None = None
+    situacao: OcorrenciaSituacao
+    data_fato: date
+    criado_em: datetime
+
+    model_config = ConfigDict(from_attributes=True)

@@ -5,14 +5,27 @@
 autenticado + permissão `transporte_regulado`. Mesmo padrão dos routers de `frota`.
 Sem portal público nesta etapa.
 """
+import logging
+
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import require_tenant_id
+from ..auth.deps import get_current_cidadao, require_tenant_id
 from ..auth.perms import require_permission
 from ..database import get_db
-from ..models import Empresa, OcorrenciaTipo, Permissionario, Usuario, VeiculoRegulado
+from ..models import (
+    Empresa,
+    OcorrenciaTipo,
+    Permissionario,
+    Usuario,
+    UsuarioExterno,
+    VeiculoRegulado,
+)
+from ..services import notificacoes
+from ..services.notificacoes import Destinatario
+
+logger = logging.getLogger("transporte_regulado")
 from ..schemas.common import Paginated
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
@@ -90,6 +103,8 @@ from ..schemas.transporte_regulado import (
     OcorrenciaAnotarInput,
     OcorrenciaVincularInput,
     OcorrenciaDecidirInput,
+    DenunciaCidadaoCreate,
+    DenunciaCidadaoOut,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -2378,6 +2393,33 @@ async def decidir_ocorrencia(
         resultado=payload.resultado, parecer=payload.parecer, id_usuario=user.id,
     )
     await db.commit()
+
+    # P7.2: notifica o cidadão que registrou a denúncia — SEMPRE depois do
+    # commit da decisão, nunca antes. `enviar` faz commit próprio; falha de
+    # e-mail (SMTP fora, cidadão sem e-mail já filtrado abaixo, driver com
+    # erro) NUNCA desfaz a decisão, que já está persistida.
+    if ocorrencia.id_cidadao:
+        try:
+            cidadao_denunciante = await db.get(UsuarioExterno, ocorrencia.id_cidadao)
+            if cidadao_denunciante and cidadao_denunciante.email:
+                await notificacoes.enviar(
+                    db, tenant_id=tenant_id,
+                    destinatarios=[Destinatario(email=cidadao_denunciante.email)],
+                    canais=["email"],
+                    tipo="denuncia_decidida",
+                    titulo="Sua denúncia foi analisada",
+                    mensagem=(
+                        f"A denúncia nº {ocorrencia.id} foi analisada. "
+                        "Acompanhe a situação no portal do cidadão."
+                    ),
+                    link_url="/cidadao/denuncias",
+                )
+        except Exception:
+            logger.exception(
+                "Falha ao notificar cidadão da decisão da ocorrência %s",
+                ocorrencia.id,
+            )
+
     return await _ocorrencia_out(db, ocorrencia, com_trilha=True, tenant_id=tenant_id)
 
 
@@ -2393,3 +2435,53 @@ async def delete_ocorrencia(
     await tr_svc.excluir_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ------------------------------------------- P7.2: realm cidadão (denúncias)
+#
+# Outro realm: `get_current_cidadao` + `require_tenant_id`, NUNCA
+# `require_permission` — não há transação municipal nem grupo/nível aqui.
+# A saída usa `DenunciaCidadaoOut`, schema fechado, sem trilha/parecer/alvo.
+
+cidadao_denuncias_router = APIRouter(prefix="/cidadao/denuncias", tags=["cidadao"])
+
+
+@cidadao_denuncias_router.get("/tipos", response_model=list[OcorrenciaTipoOut])
+async def listar_tipos_denuncia_cidadao(
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[OcorrenciaTipoOut]:
+    tipos = await tr_svc.listar_tipos_ocorrencia(db, tenant_id=tenant_id)
+    return [OcorrenciaTipoOut.model_validate(t) for t in tipos if t.ativo]
+
+
+@cidadao_denuncias_router.post(
+    "", response_model=DenunciaCidadaoOut, status_code=status.HTTP_201_CREATED
+)
+async def registrar_denuncia_cidadao_endpoint(
+    payload: DenunciaCidadaoCreate,
+    cidadao: UsuarioExterno = Depends(get_current_cidadao),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> DenunciaCidadaoOut:
+    ocorrencia = await tr_svc.registrar_denuncia_cidadao(
+        db, tenant_id=tenant_id, cidadao=cidadao, payload=payload,
+    )
+    await db.commit()
+    await db.refresh(ocorrencia)
+    tipo = await db.get(OcorrenciaTipo, ocorrencia.id_tipo)
+    saida = DenunciaCidadaoOut.model_validate(ocorrencia)
+    saida.tipo_nome = tipo.nome if tipo else None
+    return saida
+
+
+@cidadao_denuncias_router.get("", response_model=list[DenunciaCidadaoOut])
+async def listar_minhas_denuncias_endpoint(
+    cidadao: UsuarioExterno = Depends(get_current_cidadao),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[DenunciaCidadaoOut]:
+    ocorrencias = await tr_svc.listar_denuncias_do_cidadao(
+        db, tenant_id=tenant_id, id_cidadao=cidadao.id,
+    )
+    return [DenunciaCidadaoOut.model_validate(oc) for oc in ocorrencias]

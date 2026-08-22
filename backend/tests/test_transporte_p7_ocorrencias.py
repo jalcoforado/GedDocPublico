@@ -8,28 +8,64 @@ Fixtures/estilo seguem `test_transporte_p6b_linhas.py`: `admin_engine`,
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 
+from app.auth.jwt import build_cidadao_payload, encode_token, get_jwt_secret
 from app.main import app
+from app.models import UsuarioExterno
 from app.schemas.transporte_regulado import (
     AlvaraCreate,
+    DenunciaCidadaoCreate,
     OcorrenciaCreate,
     OcorrenciaTipoCreate,
     OcorrenciaTipoUpdate,
 )
 from app.services import transporte_regulado as tr
 from app.services.modulos import contratar
+from tests.conftest import arreio_tenant_http
 from tests.test_transporte_p5_2_atendimento import (
     _as_user,
     _cria_usuario_comum_transporte,
     _provisionar,
     _sm,
 )
+
+
+async def _cidadao(engine, tenant_id: int, *, email: str | None = "cidadao@ex.com") -> int:
+    """Cidadão mínimo para os testes de denúncia (P7.2)."""
+    async with _sm(engine)() as s:
+        c = UsuarioExterno(
+            tenant_id=tenant_id, nome="Cidadão de Teste",
+            cpf_cnpj=uuid.uuid4().hex[:11], email=email,
+            ativo=True, excluido=False, uid=uuid.uuid4(),
+            data_criacao=datetime.now(),
+            login_govbr=False, telefone_whatsapp=False,
+        )
+        s.add(c)
+        await s.commit()
+        return c.id
+
+
+async def _get_cidadao(engine, cid: int) -> UsuarioExterno:
+    async with _sm(engine)() as s:
+        return (
+            await s.execute(select(UsuarioExterno).where(UsuarioExterno.id == cid))
+        ).scalar_one()
+
+
+async def _token_cidadao(engine, cid: int, tenant_id: int) -> str:
+    async with _sm(engine)() as s:
+        secret = await get_jwt_secret(s)
+    cidadao = await _get_cidadao(engine, cid)
+    payload = build_cidadao_payload(
+        cidadao.id, cidadao.cpf_cnpj or "", tenant_id=tenant_id
+    )
+    return encode_token(payload, secret)
 
 
 async def _operadores(engine, tenant_id: int):
@@ -68,9 +104,11 @@ async def _limpar(engine, tenant_id: int) -> None:
     await app_engine.dispose()
     async with _sm(engine)() as s:
         for stmt in (
+            "DELETE FROM aprimora_py.notificacao WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.ocorrencia_andamento WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.ocorrencia WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.ocorrencia_tipo WHERE tenant_id=:t",
+            "DELETE FROM utils.usuario_externo WHERE tenant_id=:t",
             # `test_alvara_continua_emitindo_com_ocorrencia_procedente` emite um
             # alvará ligado ao permissionário: sem apagá-lo antes, o DELETE do
             # permissionário abaixo esbarra na FK `alvara_id_permissionario_fkey`.
@@ -874,5 +912,279 @@ async def test_http_tipos_nao_engolida_pela_parametrica(admin_engine):
             r = await c.get(f"{base}/tipos")
             assert r.status_code == 200, r.text
             assert isinstance(r.json(), list)
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+# ---------------------------------------------------------- P7.2: realm cidadão
+
+@pytest.mark.asyncio
+async def test_cidadao_registra_denuncia_sem_alvo(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id, nome="Recusa de corrida")
+        cid = await _cidadao(admin_engine, t.id)
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                cidadao = await db.get(UsuarioExterno, cid)
+                denuncia = await tr.registrar_denuncia_cidadao(
+                    db, tenant_id=t.id, cidadao=cidadao,
+                    payload=DenunciaCidadaoCreate(
+                        id_tipo=tipo.id, descricao="Motorista recusou a corrida",
+                        referencia_alvo="placa ABC1D23", data_fato=date.today(),
+                    ),
+                )
+        assert denuncia.origem == "denuncia"
+        assert denuncia.id_cidadao == cid
+        assert denuncia.id_permissionario is None
+        assert denuncia.id_empresa is None
+        assert denuncia.id_veiculo is None
+        assert denuncia.situacao == "registrada"
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_denuncia_com_tipo_inativo_da_422(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id, ativo=False)
+        cid = await _cidadao(admin_engine, t.id)
+        async with _sm(admin_engine)() as db:
+            cidadao = await db.get(UsuarioExterno, cid)
+            with pytest.raises(HTTPException) as e:
+                await tr.registrar_denuncia_cidadao(
+                    db, tenant_id=t.id, cidadao=cidadao,
+                    payload=DenunciaCidadaoCreate(
+                        id_tipo=tipo.id, descricao="Fato qualquer",
+                        data_fato=date.today(),
+                    ),
+                )
+        assert e.value.status_code == 422
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_cidadao_so_ve_as_suas(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        cid_a = await _cidadao(admin_engine, t.id, email="a@ex.com")
+        cid_b = await _cidadao(admin_engine, t.id, email="b@ex.com")
+
+        async def _registrar_denuncia(cid, descricao):
+            async with _sm(admin_engine)() as db:
+                async with db.begin():
+                    cidadao = await db.get(UsuarioExterno, cid)
+                    return await tr.registrar_denuncia_cidadao(
+                        db, tenant_id=t.id, cidadao=cidadao,
+                        payload=DenunciaCidadaoCreate(
+                            id_tipo=tipo.id, descricao=descricao,
+                            data_fato=date.today(),
+                        ),
+                    )
+
+        d_a = await _registrar_denuncia(cid_a, "Denúncia de A")
+        d_b = await _registrar_denuncia(cid_b, "Denúncia de B")
+
+        async with _sm(admin_engine)() as db:
+            minhas_a = await tr.listar_denuncias_do_cidadao(
+                db, tenant_id=t.id, id_cidadao=cid_a
+            )
+            minhas_b = await tr.listar_denuncias_do_cidadao(
+                db, tenant_id=t.id, id_cidadao=cid_b
+            )
+        ids_a = {d.id for d in minhas_a}
+        ids_b = {d.id for d in minhas_b}
+        assert ids_a == {d_a.id}
+        assert ids_b == {d_b.id}
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_saida_do_cidadao_nao_vaza_campos_internos(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        cid = await _cidadao(admin_engine, t.id)
+        token = await _token_cidadao(admin_engine, cid, t.id)
+        arreio_tenant_http(t.id, t.slug)
+        base = "/api/v2/cidadao/denuncias"
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            r = await c.post(
+                base,
+                json={
+                    "id_tipo": tipo.id,
+                    "descricao": "Excesso de lotação no ponto",
+                    "data_fato": "2026-08-01",
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 201, r.text
+
+            r = await c.get(base, headers={"Authorization": f"Bearer {token}"})
+            assert r.status_code == 200, r.text
+            corpo = r.json()
+            assert len(corpo) >= 1
+            assert set(corpo[0].keys()) == {
+                "id", "tipo_nome", "descricao", "referencia_alvo",
+                "situacao", "data_fato", "criado_em",
+            }
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_decisao_gera_email_neutro_ao_cidadao(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            async with s.begin():
+                await contratar(s, t.id, ["transporte"])
+
+        tipo = await _tipo(admin_engine, t.id)
+        cid = await _cidadao(admin_engine, t.id, email="denunciante@ex.com")
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                cidadao = await db.get(UsuarioExterno, cid)
+                denuncia = await tr.registrar_denuncia_cidadao(
+                    db, tenant_id=t.id, cidadao=cidadao,
+                    payload=DenunciaCidadaoCreate(
+                        id_tipo=tipo.id, descricao="Veículo sem vistoria",
+                        data_fato=date.today(),
+                    ),
+                )
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.iniciar_apuracao(
+                    db, tenant_id=t.id, ocorrencia_id=denuncia.id, id_usuario=None,
+                )
+
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+        _as_user(admin_engine, uid, t.id, t.slug)()
+        base = "/api/v2/transporte-regulado/ocorrencias"
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            r = await c.post(
+                f"{base}/{denuncia.id}/decidir",
+                json={"resultado": "improcedente", "parecer": "Sem elementos"},
+            )
+            assert r.status_code == 200, r.text
+
+        async with admin_engine.begin() as conn:
+            notif = (
+                await conn.execute(
+                    text(
+                        "SELECT destinatario_email, canal, mensagem, tipo "
+                        "FROM aprimora_py.notificacao WHERE tenant_id = :t"
+                    ),
+                    {"t": t.id},
+                )
+            ).mappings().all()
+        assert len(notif) == 1
+        row = notif[0]
+        assert row["destinatario_email"] == "denunciante@ex.com"
+        assert row["canal"] == "email"
+        assert "improcedente" not in row["mensagem"].lower()
+        assert "procedente" not in row["mensagem"].lower()
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_cidadao_sem_email_nao_explode(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            async with s.begin():
+                await contratar(s, t.id, ["transporte"])
+
+        tipo = await _tipo(admin_engine, t.id)
+        cid = await _cidadao(admin_engine, t.id, email=None)
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                cidadao = await db.get(UsuarioExterno, cid)
+                denuncia = await tr.registrar_denuncia_cidadao(
+                    db, tenant_id=t.id, cidadao=cidadao,
+                    payload=DenunciaCidadaoCreate(
+                        id_tipo=tipo.id, descricao="Sem e-mail cadastrado",
+                        data_fato=date.today(),
+                    ),
+                )
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.iniciar_apuracao(
+                    db, tenant_id=t.id, ocorrencia_id=denuncia.id, id_usuario=None,
+                )
+
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+        _as_user(admin_engine, uid, t.id, t.slug)()
+        base = "/api/v2/transporte-regulado/ocorrencias"
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            r = await c.post(
+                f"{base}/{denuncia.id}/decidir",
+                json={"resultado": "arquivada", "parecer": "Arquivado"},
+            )
+            assert r.status_code == 200, r.text
+
+        async with admin_engine.begin() as conn:
+            total = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM aprimora_py.notificacao "
+                        "WHERE tenant_id = :t"
+                    ),
+                    {"t": t.id},
+                )
+            ).scalar_one()
+        assert total == 0
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_http_cidadao_token_real(admin_engine):
+    """Token de verdade (build_cidadao_payload + encode_token), não override
+    de dependência — prova que o realm cidadão funciona ponta a ponta com
+    Authorization: Bearer."""
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        cid = await _cidadao(admin_engine, t.id)
+        token = await _token_cidadao(admin_engine, cid, t.id)
+        arreio_tenant_http(t.id, t.slug)
+        base = "/api/v2/cidadao/denuncias"
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            r = await c.post(
+                base,
+                json={
+                    "id_tipo": tipo.id,
+                    "descricao": "Motorista trafegando em alta velocidade",
+                    "referencia_alvo": "ponto central",
+                    "data_fato": "2026-08-05",
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert r.status_code == 201, r.text
+            assert r.json()["situacao"] == "registrada"
+
+            r = await c.get(base, headers={"Authorization": f"Bearer {token}"})
+            assert r.status_code == 200, r.text
+            assert len(r.json()) == 1
     finally:
         await _limpar(admin_engine, t.id)
