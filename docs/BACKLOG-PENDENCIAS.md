@@ -795,8 +795,8 @@ bancária e API idempotente. Não há como desenhar sem o contrato do sistema co
 P0–P4 entregues e no ar (permissionário, empresa, veículo, vistorias, alvarás com documentos,
 responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 
-- **P5** — Recadastramento. **P5.1 e P5.2 entregues em 2026-08-04**; P5.3 segue aberta (detalhe
-  logo abaixo).
+- ~~**P5** — Recadastramento~~ → **P5.1 e P5.2 entregues em 2026-08-04, P5.3 em 2026-08-05, Fase C
+  (gate de renovação + job + e-mail no ato) em 2026-08-23** (detalhe abaixo).
 - ~~**P6** — Rotas / linhas~~ → **pontos e vagas, entregue em 2026-08-06; linha/itinerário (P6b),
   entregue em 2026-08-21** (detalhe abaixo).
 - ~~**P7** — Ocorrências regulatórias~~ → **entregue em 2026-08-23** (detalhe abaixo).
@@ -878,8 +878,31 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   serviço. Por isso `suspenso` não exigiu nada do banco. Não foi acrescentado agora para não mudar
 >   a premissa da P5.1 num PR que não é sobre isso.
 >
-> **Ainda aberto do recadastramento:** notificação automática por job (o registro de envio já
-> existe, então falta só o gatilho) e o efeito da suspensão sobre alvará.
+> **Fase C entregue em 2026-08-23** — as duas pendências acima fecharam. Spec e plano em
+> `docs/superpowers/sdd/2026-08-23-transporte-p5-pendencias/`; design em
+> `docs/superpowers/specs/2026-08-23-transporte-p5-pendencias-design.md`.
+>
+> - **O efeito da suspensão sobre alvará é um gate, e só na renovação.** `renovar_alvara` recusa com
+>   409 quando o titular (permissionário OU empresa) tem convocação `suspenso` não excluída de
+>   qualquer ciclo, e a mensagem manda para a reativação — não para a reabertura. **Emitir alvará
+>   novo (`criar_alvara`) continua livre**, de propósito: o gate é só da renovação, e há teste
+>   anti-deriva (`test_suspenso_ainda_emite_alvara_novo`) porque "melhorar" isso para também barrar
+>   emissão é a deriva mais provável do próximo PR.
+> - **A notificação automática por job existe** (`app.tasks.notificar_recadastramento`, migration
+>   `0094`), com três janelas MUTUAMENTE EXCLUSIVAS pelo prazo (`atraso` / `lembrete` / `convocacao`)
+>   — não uma cadeia de fallback, porque cadeia quebraria a idempotência ao rodar duas vezes no
+>   mesmo dia. Dedupe por `(id_convocacao, gatilho)`; convocação suspensa não entra no filtro
+>   (`SITUACOES_ABERTAS`); sem e-mail do titular → pula SEM registrar, para ser reavaliada assim que
+>   o cadastro for corrigido. A migration `0094` também é os primeiros GRANTs do papel
+>   `aprimora_worker` no módulo — só a lacuna que a `0078` não alcançou
+>   (`recadastramento_ciclo`/`convocacao`/`notificacao`, `permissionario`, `empresa`), e
+>   `id_usuario` de `recadastramento_notificacao` virou NULLABLE (NULL = envio do job, sem operador).
+> - **Suspensão e reativação também mandam e-mail, mas no ATO, não pelo job** — saem do ROUTER, após
+>   o commit (padrão pós-commit da P7: `try/except` + `db.rollback()` no except; falha de e-mail
+>   nunca desfaz o ato), ao TITULAR, **com o parecer no corpo** — diferente do e-mail neutro do job,
+>   porque aqui o destinatário é o próprio suspenso e o parecer é o julgamento dele. Registra
+>   `RecadastramentoNotificacao(gatilho='suspensao'|'reativacao', id_usuario=<operador>)`. Sem
+>   e-mail → só loga, sem registro e sem erro — mesma regra de recuperação do job.
 
 > **P6 entregue em 2026-08-06 — mas não é o que o roadmap dizia.** Spec e plano em
 > `docs/superpowers/`. Migration `0084` com `ponto` e `ponto_ocupacao`; telas em
