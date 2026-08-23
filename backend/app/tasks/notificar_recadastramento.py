@@ -196,6 +196,24 @@ async def _processar_tenant(
             if not criadas:
                 continue
 
+            if criadas[0].erro is not None:
+                # `notificacoes.enviar` não levanta em falha de driver — grava
+                # `erro` na Notificacao e retorna normalmente. Se registrássemos
+                # o `RecadastramentoNotificacao` aqui, o dedupe da próxima
+                # rodada trataria esta janela como "já avisada" para sempre,
+                # mesmo o e-mail nunca tendo saído. NÃO registrar preserva o
+                # gatilho para a rodada seguinte tentar de novo.
+                logger.warning(
+                    "recadastramento_notificacao_envio_falhou",
+                    extra={
+                        "tenant_id": tenant_id,
+                        "id_convocacao": conv.id,
+                        "gatilho": gatilho,
+                        "erro": criadas[0].erro,
+                    },
+                )
+                continue
+
             db.add(
                 RecadastramentoNotificacao(
                     tenant_id=tenant_id,

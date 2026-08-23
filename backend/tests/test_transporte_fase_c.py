@@ -27,6 +27,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.config import get_settings
 from app.models import RecadastramentoNotificacao
 from app.models.notificacao import Notificacao
 from app.schemas.transporte_regulado import (
@@ -36,6 +37,7 @@ from app.schemas.transporte_regulado import (
     RecadastramentoAjustePrazo,
 )
 from app.main import app
+from app.services import notificacoes as notificacoes_service
 from app.services import transporte_regulado as tr
 from app.services.modulos import contratar
 from app.tasks.notificar_recadastramento import notificar_recadastramento
@@ -397,80 +399,113 @@ async def _registros(engine, tenant_id: int, conv_id: int) -> list[tuple[str, in
     return [(g, n) for g, n in rows]
 
 
+async def _limpar_job(engine, tenant_id: int) -> None:
+    """Cleanup do que os `test_job_*` gravam e `_encerrar_arreio` não alcança:
+    `recadastramento_notificacao` (FK para convocação) e a `Notificacao`
+    criada pelo motor de e-mail. Sem isto o DELETE de convocação dentro de
+    `_encerrar_arreio` esbarraria na FK e mascararia o resultado do teste."""
+    async with _sm(engine)() as db:
+        await db.execute(
+            text(
+                "DELETE FROM transporte_regulado.recadastramento_notificacao "
+                "WHERE tenant_id=:t"
+            ),
+            {"t": tenant_id},
+        )
+        await db.execute(
+            text("DELETE FROM aprimora_py.notificacao WHERE tenant_id=:t"),
+            {"t": tenant_id},
+        )
+        await db.commit()
+    await _encerrar_arreio(engine, tenant_id)
+
+
 @pytest.mark.asyncio
 async def test_job_convocacao_vencida_ganha_atraso(admin_engine):
     t = await _provisionar(admin_engine)
     tid = t.id
-    perm = await _permissionario(admin_engine, tid)
-    perm = await _com_contato(admin_engine, tid, perm)
-    ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
-    _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
-    uid = await _um_usuario(admin_engine, tid)
+    try:
+        perm = await _permissionario(admin_engine, tid)
+        perm = await _com_contato(admin_engine, tid, perm)
+        ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
+        _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
+        uid = await _um_usuario(admin_engine, tid)
 
-    await _prazo(admin_engine, tid, conv.id, uid, HOJE - timedelta(days=2))
+        await _prazo(admin_engine, tid, conv.id, uid, HOJE - timedelta(days=2))
 
-    await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
 
-    regs = await _registros(admin_engine, tid, conv.id)
-    assert [g for g, _n in regs] == ["atraso"]
+        regs = await _registros(admin_engine, tid, conv.id)
+        assert [g for g, _n in regs] == ["atraso"]
+    finally:
+        await _limpar_job(admin_engine, tid)
 
 
 @pytest.mark.asyncio
 async def test_job_rodar_duas_vezes_nao_duplica(admin_engine):
     t = await _provisionar(admin_engine)
     tid = t.id
-    perm = await _permissionario(admin_engine, tid)
-    perm = await _com_contato(admin_engine, tid, perm)
-    ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
-    _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
-    uid = await _um_usuario(admin_engine, tid)
+    try:
+        perm = await _permissionario(admin_engine, tid)
+        perm = await _com_contato(admin_engine, tid, perm)
+        ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
+        _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
+        uid = await _um_usuario(admin_engine, tid)
 
-    await _prazo(admin_engine, tid, conv.id, uid, HOJE - timedelta(days=2))
+        await _prazo(admin_engine, tid, conv.id, uid, HOJE - timedelta(days=2))
 
-    await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
-    await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
 
-    regs = await _registros(admin_engine, tid, conv.id)
-    assert [g for g, _n in regs] == ["atraso"], (
-        "rodar duas vezes não pode duplicar nem cair para outra janela"
-    )
+        regs = await _registros(admin_engine, tid, conv.id)
+        assert [g for g, _n in regs] == ["atraso"], (
+            "rodar duas vezes não pode duplicar nem cair para outra janela"
+        )
+    finally:
+        await _limpar_job(admin_engine, tid)
 
 
 @pytest.mark.asyncio
 async def test_job_prazo_proximo_ganha_lembrete_nao_atraso(admin_engine):
     t = await _provisionar(admin_engine)
     tid = t.id
-    perm = await _permissionario(admin_engine, tid)
-    perm = await _com_contato(admin_engine, tid, perm)
-    ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
-    _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
-    uid = await _um_usuario(admin_engine, tid)
+    try:
+        perm = await _permissionario(admin_engine, tid)
+        perm = await _com_contato(admin_engine, tid, perm)
+        ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
+        _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
+        uid = await _um_usuario(admin_engine, tid)
 
-    await _prazo(admin_engine, tid, conv.id, uid, HOJE + timedelta(days=3))
+        await _prazo(admin_engine, tid, conv.id, uid, HOJE + timedelta(days=3))
 
-    await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
 
-    regs = await _registros(admin_engine, tid, conv.id)
-    assert [g for g, _n in regs] == ["lembrete"]
+        regs = await _registros(admin_engine, tid, conv.id)
+        assert [g for g, _n in regs] == ["lembrete"]
+    finally:
+        await _limpar_job(admin_engine, tid)
 
 
 @pytest.mark.asyncio
 async def test_job_recem_gerada_ganha_convocacao(admin_engine):
     t = await _provisionar(admin_engine)
     tid = t.id
-    perm = await _permissionario(admin_engine, tid)
-    perm = await _com_contato(admin_engine, tid, perm)
-    ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
-    _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
-    uid = await _um_usuario(admin_engine, tid)
+    try:
+        perm = await _permissionario(admin_engine, tid)
+        perm = await _com_contato(admin_engine, tid, perm)
+        ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
+        _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
+        uid = await _um_usuario(admin_engine, tid)
 
-    # Fora da janela de lembrete (padrão 5 dias), mas dentro do ciclo.
-    await _prazo(admin_engine, tid, conv.id, uid, HOJE + timedelta(days=20))
+        # Fora da janela de lembrete (padrão 5 dias), mas dentro do ciclo.
+        await _prazo(admin_engine, tid, conv.id, uid, HOJE + timedelta(days=20))
 
-    await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
 
-    regs = await _registros(admin_engine, tid, conv.id)
-    assert [g for g, _n in regs] == ["convocacao"]
+        regs = await _registros(admin_engine, tid, conv.id)
+        assert [g for g, _n in regs] == ["convocacao"]
+    finally:
+        await _limpar_job(admin_engine, tid)
 
 
 @pytest.mark.asyncio
@@ -478,116 +513,247 @@ async def test_job_precedencia_um_aviso_por_rodada(admin_engine):
     """Vencida e nunca avisada -> SÓ 'atraso' nesta rodada (não lembrete/convocacao)."""
     t = await _provisionar(admin_engine)
     tid = t.id
-    perm = await _permissionario(admin_engine, tid)
-    perm = await _com_contato(admin_engine, tid, perm)
-    ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
-    _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
-    uid = await _um_usuario(admin_engine, tid)
+    try:
+        perm = await _permissionario(admin_engine, tid)
+        perm = await _com_contato(admin_engine, tid, perm)
+        ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
+        _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
+        uid = await _um_usuario(admin_engine, tid)
 
-    await _prazo(admin_engine, tid, conv.id, uid, HOJE - timedelta(days=10))
+        await _prazo(admin_engine, tid, conv.id, uid, HOJE - timedelta(days=10))
 
-    await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
 
-    regs = await _registros(admin_engine, tid, conv.id)
-    assert len(regs) == 1
-    assert regs[0][0] == "atraso"
+        regs = await _registros(admin_engine, tid, conv.id)
+        assert len(regs) == 1
+        assert regs[0][0] == "atraso"
+    finally:
+        await _limpar_job(admin_engine, tid)
 
 
 @pytest.mark.asyncio
 async def test_job_sem_email_pula_sem_registro_e_recupera_depois(admin_engine):
     t = await _provisionar(admin_engine)
     tid = t.id
-    perm = await _permissionario(admin_engine, tid)  # sem contato de propósito
-    ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
-    _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
-    uid = await _um_usuario(admin_engine, tid)
+    try:
+        perm = await _permissionario(admin_engine, tid)  # sem contato de propósito
+        ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
+        _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
+        uid = await _um_usuario(admin_engine, tid)
 
-    await _prazo(admin_engine, tid, conv.id, uid, HOJE - timedelta(days=2))
+        await _prazo(admin_engine, tid, conv.id, uid, HOJE - timedelta(days=2))
 
-    await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
-    regs = await _registros(admin_engine, tid, conv.id)
-    assert regs == [], "sem e-mail não pode registrar nada"
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
+        regs = await _registros(admin_engine, tid, conv.id)
+        assert regs == [], "sem e-mail não pode registrar nada"
 
-    await _com_contato(admin_engine, tid, perm)
+        await _com_contato(admin_engine, tid, perm)
 
-    await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
-    regs = await _registros(admin_engine, tid, conv.id)
-    assert [g for g, _n in regs] == ["atraso"], (
-        "assim que o e-mail existe, a mesma janela tem de ser recuperada"
-    )
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
+        regs = await _registros(admin_engine, tid, conv.id)
+        assert [g for g, _n in regs] == ["atraso"], (
+            "assim que o e-mail existe, a mesma janela tem de ser recuperada"
+        )
+    finally:
+        await _limpar_job(admin_engine, tid)
 
 
 @pytest.mark.asyncio
 async def test_job_suspensa_nao_recebe_lembrete_nem_atraso(admin_engine):
     t = await _provisionar(admin_engine)
     tid = t.id
-    perm = await _permissionario(admin_engine, tid)
-    perm = await _com_contato(admin_engine, tid, perm)
-    ciclo = await _ciclo_vencido(admin_engine, tid)
-    _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
-    uid = await _um_usuario(admin_engine, tid)
+    try:
+        perm = await _permissionario(admin_engine, tid)
+        perm = await _com_contato(admin_engine, tid, perm)
+        ciclo = await _ciclo_vencido(admin_engine, tid)
+        _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
+        uid = await _um_usuario(admin_engine, tid)
 
-    async with _sm(admin_engine)() as db:
-        await tr.suspender_convocacao(
-            db, tenant_id=tid, convocacao_id=conv.id,
-            payload=_parecer(), usuario_id=uid,
-        )
+        async with _sm(admin_engine)() as db:
+            await tr.suspender_convocacao(
+                db, tenant_id=tid, convocacao_id=conv.id,
+                payload=_parecer(), usuario_id=uid,
+            )
 
-    await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
 
-    regs = await _registros(admin_engine, tid, conv.id)
-    assert regs == [], "convocação suspensa não recebe aviso automático nenhum"
+        regs = await _registros(admin_engine, tid, conv.id)
+        assert regs == [], "convocação suspensa não recebe aviso automático nenhum"
+    finally:
+        await _limpar_job(admin_engine, tid)
 
 
 @pytest.mark.asyncio
 async def test_job_isola_tenants(admin_engine):
     ta = await _provisionar(admin_engine)
     tb = await _provisionar(admin_engine)
+    try:
+        perm_a = await _permissionario(admin_engine, ta.id, nome="Perm A")
+        perm_a = await _com_contato(admin_engine, ta.id, perm_a)
+        ciclo_a = await _ciclo_atravessando_hoje(admin_engine, ta.id)
+        _c, conv_a = await _convocacao(admin_engine, ta.id, perm_a, ciclo=ciclo_a)
+        uid_a = await _um_usuario(admin_engine, ta.id)
+        await _prazo(admin_engine, ta.id, conv_a.id, uid_a, HOJE - timedelta(days=2))
 
-    perm_a = await _permissionario(admin_engine, ta.id, nome="Perm A")
-    perm_a = await _com_contato(admin_engine, ta.id, perm_a)
-    ciclo_a = await _ciclo_atravessando_hoje(admin_engine, ta.id)
-    _c, conv_a = await _convocacao(admin_engine, ta.id, perm_a, ciclo=ciclo_a)
-    uid_a = await _um_usuario(admin_engine, ta.id)
-    await _prazo(admin_engine, ta.id, conv_a.id, uid_a, HOJE - timedelta(days=2))
+        perm_b = await _permissionario(admin_engine, tb.id, nome="Perm B")
+        perm_b = await _com_contato(admin_engine, tb.id, perm_b)
+        ciclo_b = await _ciclo_atravessando_hoje(admin_engine, tb.id)
+        _c, conv_b = await _convocacao(admin_engine, tb.id, perm_b, ciclo=ciclo_b)
+        uid_b = await _um_usuario(admin_engine, tb.id)
+        await _prazo(admin_engine, tb.id, conv_b.id, uid_b, HOJE - timedelta(days=2))
 
-    perm_b = await _permissionario(admin_engine, tb.id, nome="Perm B")
-    perm_b = await _com_contato(admin_engine, tb.id, perm_b)
-    ciclo_b = await _ciclo_atravessando_hoje(admin_engine, tb.id)
-    _c, conv_b = await _convocacao(admin_engine, tb.id, perm_b, ciclo=ciclo_b)
-    uid_b = await _um_usuario(admin_engine, tb.id)
-    await _prazo(admin_engine, tb.id, conv_b.id, uid_b, HOJE - timedelta(days=2))
+        # Duas chamadas, uma por tenant — scan completo (tenant_id=None) é
+        # inviável em teste (ver docstring de `notificar_recadastramento`), mas
+        # cada chamada exercita exatamente o mesmo `_processar_tenant` que o scan
+        # completo usaria, e é isso que a asserção abaixo prova: o tenant_id da
+        # `Notificacao` criada é sempre o do tenant processado, nunca o outro.
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=ta.id)
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tb.id)
 
-    # Duas chamadas, uma por tenant — scan completo (tenant_id=None) é
-    # inviável em teste (ver docstring de `notificar_recadastramento`), mas
-    # cada chamada exercita exatamente o mesmo `_processar_tenant` que o scan
-    # completo usaria, e é isso que a asserção abaixo prova: o tenant_id da
-    # `Notificacao` criada é sempre o do tenant processado, nunca o outro.
-    await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=ta.id)
-    await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tb.id)
+        regs_a = await _registros(admin_engine, ta.id, conv_a.id)
+        regs_b = await _registros(admin_engine, tb.id, conv_b.id)
+        assert [g for g, _n in regs_a] == ["atraso"]
+        assert [g for g, _n in regs_b] == ["atraso"]
 
-    regs_a = await _registros(admin_engine, ta.id, conv_a.id)
-    regs_b = await _registros(admin_engine, tb.id, conv_b.id)
-    assert [g for g, _n in regs_a] == ["atraso"]
-    assert [g for g, _n in regs_b] == ["atraso"]
+        async with _sm(admin_engine)() as db:
+            notif_a_id = regs_a[0][1]
+            notif_b_id = regs_b[0][1]
+            tenant_notif_a = (
+                await db.execute(
+                    text("SELECT tenant_id FROM aprimora_py.notificacao WHERE id=:i"),
+                    {"i": notif_a_id},
+                )
+            ).scalar_one()
+            tenant_notif_b = (
+                await db.execute(
+                    text("SELECT tenant_id FROM aprimora_py.notificacao WHERE id=:i"),
+                    {"i": notif_b_id},
+                )
+            ).scalar_one()
+        assert tenant_notif_a == ta.id
+        assert tenant_notif_b == tb.id
+    finally:
+        await _limpar_job(admin_engine, ta.id)
+        await _limpar_job(admin_engine, tb.id)
 
-    async with _sm(admin_engine)() as db:
-        notif_a_id = regs_a[0][1]
-        notif_b_id = regs_b[0][1]
-        tenant_notif_a = (
-            await db.execute(
-                text("SELECT tenant_id FROM aprimora_py.notificacao WHERE id=:i"),
-                {"i": notif_a_id},
+
+@pytest.mark.asyncio
+async def test_job_roda_sob_papel_worker(admin_engine, monkeypatch):
+    """O job de fato conecta como `aprimora_worker` — não sob `ged_user`/
+    `DATABASE_URL` (superuser, BYPASSRLS).
+
+    Com `WORKER_DATABASE_URL` vazia (o default do `.env` de dev), `worker_db_url`
+    cai em `database_url` e todo o resto da bateria deste arquivo exercitou o
+    job sob superuser — inclusive o `test_job_*` de dedupe, que não prova nada
+    sobre RLS/grants do papel real. Este teste aponta `WORKER_DATABASE_URL`
+    para a mesma URL que `test_worker_le_as_quatro_tabelas_e_insere_notificacao_automatica`
+    usa (papel `aprimora_worker`, 0094) e roda o job completo — convocação
+    vencida + e-mail cadastrado — por cima dela.
+    """
+    t = await _provisionar(admin_engine)
+    tid = t.id
+    try:
+        perm = await _permissionario(admin_engine, tid)
+        perm = await _com_contato(admin_engine, tid, perm)
+        ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
+        _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
+        uid = await _um_usuario(admin_engine, tid)
+        await _prazo(admin_engine, tid, conv.id, uid, HOJE - timedelta(days=2))
+
+        get_settings.cache_clear()
+        monkeypatch.setenv("WORKER_DATABASE_URL", WORKER_URL)
+        get_settings.cache_clear()
+        try:
+            assert get_settings().worker_db_url == WORKER_URL
+            await notificar_recadastramento(
+                dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid
             )
-        ).scalar_one()
-        tenant_notif_b = (
-            await db.execute(
-                text("SELECT tenant_id FROM aprimora_py.notificacao WHERE id=:i"),
-                {"i": notif_b_id},
-            )
-        ).scalar_one()
-    assert tenant_notif_a == ta.id
-    assert tenant_notif_b == tb.id
+        finally:
+            monkeypatch.undo()
+            get_settings.cache_clear()
+
+        # A Notificacao e o registro de dedupe nasceram — a task não caiu em
+        # `NotNullViolation`/`permission denied` como caía antes da 0094 sob
+        # o papel real (ver `test_worker_le_as_quatro_tabelas_...` acima).
+        regs = await _registros(admin_engine, tid, conv.id)
+        assert [g for g, _n in regs] == ["atraso"]
+
+        async with _sm(admin_engine)() as db:
+            notif = (
+                await db.execute(
+                    select(Notificacao).where(
+                        Notificacao.tenant_id == tid,
+                        Notificacao.canal == "email",
+                        Notificacao.tipo == "recadastramento.notificacao",
+                    )
+                )
+            ).scalar_one()
+        assert notif.erro is None
+        assert notif.destinatario_email is not None
+    finally:
+        await _limpar_job(admin_engine, tid)
+
+
+@pytest.mark.asyncio
+async def test_job_falha_de_smtp_nao_registra_e_tenta_de_novo(admin_engine, monkeypatch):
+    """Falha do driver de e-mail não pode consumir o gatilho para sempre.
+
+    `notificacoes.enviar` não levanta em falha de SMTP — grava `erro` na
+    `Notificacao` e retorna normalmente. Monkeypatch no DRIVER (`_email_driver`),
+    não em `enviar`, para exercitar exatamente esse caminho real: a
+    `Notificacao` é criada, o despacho falha, `erro` fica setado. Sem o
+    conserto do finding 2, `RecadastramentoNotificacao` seria gravado mesmo
+    assim e o dedupe da próxima rodada trataria a janela como "já avisada"
+    para sempre — o titular nunca mais seria notificado daquele atraso.
+    """
+    t = await _provisionar(admin_engine)
+    tid = t.id
+    try:
+        perm = await _permissionario(admin_engine, tid)
+        perm = await _com_contato(admin_engine, tid, perm)
+        ciclo = await _ciclo_atravessando_hoje(admin_engine, tid)
+        _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
+        uid = await _um_usuario(admin_engine, tid)
+        await _prazo(admin_engine, tid, conv.id, uid, HOJE - timedelta(days=2))
+
+        async def _driver_com_falha(n):
+            raise RuntimeError("smtp indisponível (teste)")
+
+        monkeypatch.setattr(
+            notificacoes_service, "_email_driver", _driver_com_falha
+        )
+
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
+
+        regs = await _registros(admin_engine, tid, conv.id)
+        assert regs == [], (
+            "driver falhou: nenhum (convocacao, gatilho) pode ser registrado"
+        )
+
+        async with _sm(admin_engine)() as db:
+            notif = (
+                await db.execute(
+                    select(Notificacao).where(
+                        Notificacao.tenant_id == tid,
+                        Notificacao.canal == "email",
+                        Notificacao.tipo == "recadastramento.notificacao",
+                    )
+                )
+            ).scalar_one()
+        assert notif.erro is not None
+        assert "smtp indisponível" in notif.erro
+
+        # Driver são de novo: a mesma janela ('atraso') tem de conseguir
+        # registrar na rodada seguinte — o gatilho não foi consumido.
+        monkeypatch.undo()
+
+        await notificar_recadastramento(dias_antes=DIAS_ANTES_PADRAO, tenant_id=tid)
+        regs = await _registros(admin_engine, tid, conv.id)
+        assert [g for g, _n in regs] == ["atraso"], (
+            "com o driver saudável, a rodada seguinte tem de conseguir registrar"
+        )
+    finally:
+        await _limpar_job(admin_engine, tid)
 
 
 # ---------------------------------------------------------------------------
