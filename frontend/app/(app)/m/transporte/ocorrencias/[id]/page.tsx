@@ -186,10 +186,12 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
   });
 
   function abrirVincular() {
-    setVIdEmpresa(null);
-    setVIdPermissionario(null);
+    setVIdEmpresa(ocorrencia?.id_empresa ?? null);
+    setVIdPermissionario(ocorrencia?.id_permissionario ?? null);
     setBuscaEmpresa("");
+    setBuscaEmpresaAplicada("");
     setBuscaPerm("");
+    setBuscaPermAplicada("");
     setErroVincular(null);
     setVincularOpen(true);
   }
@@ -424,6 +426,9 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
 
       <Dialog open={vincularOpen} onClose={() => setVincularOpen(false)} title="Vincular alvo">
         <form className="space-y-3" onSubmit={submeterVincular}>
+          <p className="text-xs text-muted-foreground">
+            Vincular substitui/acrescenta; não remove vínculo existente.
+          </p>
           {erroVincular && (
             <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
               {erroVincular}
@@ -434,7 +439,16 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
             {vIdEmpresa !== null ? (
               <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
                 <span className="truncate">{empresaSelecionadaNome}</span>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setVIdEmpresa(null)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setVIdEmpresa(null);
+                    setBuscaEmpresa("");
+                    setBuscaEmpresaAplicada("");
+                  }}
+                >
                   Limpar
                 </Button>
               </div>
@@ -479,7 +493,11 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => setVIdPermissionario(null)}
+                  onClick={() => {
+                    setVIdPermissionario(null);
+                    setBuscaPerm("");
+                    setBuscaPermAplicada("");
+                  }}
                 >
                   Limpar
                 </Button>

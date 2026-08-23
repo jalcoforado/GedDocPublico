@@ -203,7 +203,9 @@ export default function LinhasPage() {
     setForm(EMPTY);
     setErr(null);
     setBuscaEmpresa("");
+    setBuscaEmpresaAplicada("");
     setBuscaPerm("");
+    setBuscaPermAplicada("");
     setDialogOpen(true);
   }
 
@@ -212,7 +214,9 @@ export default function LinhasPage() {
     setForm(paraForm(l));
     setErr(null);
     setBuscaEmpresa("");
+    setBuscaEmpresaAplicada("");
     setBuscaPerm("");
+    setBuscaPermAplicada("");
     setDialogOpen(true);
   }
 
@@ -464,7 +468,11 @@ export default function LinhasPage() {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => set("id_empresa", null)}
+                    onClick={() => {
+                      set("id_empresa", null);
+                      setBuscaEmpresa("");
+                      setBuscaEmpresaAplicada("");
+                    }}
                   >
                     Limpar
                   </Button>
@@ -510,7 +518,11 @@ export default function LinhasPage() {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => set("id_permissionario", null)}
+                    onClick={() => {
+                      set("id_permissionario", null);
+                      setBuscaPerm("");
+                      setBuscaPermAplicada("");
+                    }}
                   >
                     Limpar
                   </Button>
