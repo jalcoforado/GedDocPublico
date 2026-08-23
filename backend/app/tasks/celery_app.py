@@ -27,6 +27,7 @@ celery_app = Celery(
         "app.tasks.limpar_jobs_antigos",
         "app.tasks.verificar_sla_workflows",
         "app.tasks.snapshot_saldos_pagamentos",
+        "app.tasks.notificar_recadastramento",
     ],
 )
 
@@ -60,5 +61,11 @@ celery_app.conf.beat_schedule = {
     "snapshot-saldos-pagamentos-diario": {
         "task": "app.tasks.snapshot_saldos_pagamentos.run",
         "schedule": crontab(hour=23, minute=30),  # fim do dia
+    },
+    # Transporte Fase C2 — atraso/lembrete/convocação de recadastramento.
+    "notificar-recadastramento-diario": {
+        "task": "app.tasks.notificar_recadastramento.run",
+        "schedule": crontab(hour=7, minute=0),
+        "kwargs": {"dias_antes": 5},
     },
 }
