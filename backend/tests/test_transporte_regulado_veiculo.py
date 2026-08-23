@@ -347,6 +347,52 @@ async def test_listar_filtra_situacao_tipo_e_vinculo(admin_engine):
         await _cleanup(admin_engine, t.id)
 
 
+async def test_listar_filtra_por_q_placa_ou_marca_modelo(admin_engine):
+    """Seletor de alvo-veículo (Fase B, frontend) precisa buscar por PLACA ou
+    MARCA/MODELO. `total` tem de acompanhar `q` — a divergência entre a
+    condição da consulta e a da contagem já mordeu este módulo duas vezes."""
+    t = await _provisionar(admin_engine)
+    try:
+        p = await _permissionario(admin_engine, t.id)
+        placa_alvo = _placa()
+        async with _sm(admin_engine)() as s:
+            v_placa = await tr_svc.criar_veiculo(
+                s, tenant_id=t.id,
+                payload=VeiculoReguladoCreate(
+                    id_permissionario=p.id, placa=placa_alvo,
+                    marca="Fiat", modelo="Uno", tipo_servico="taxi",
+                ),
+            )
+        async with _sm(admin_engine)() as s:
+            v_modelo = await tr_svc.criar_veiculo(
+                s, tenant_id=t.id,
+                payload=VeiculoReguladoCreate(
+                    id_permissionario=p.id, placa=_placa(),
+                    marca="Renault", modelo="Sandero Zebrado", tipo_servico="taxi",
+                ),
+            )
+        async with _sm(admin_engine)() as s:
+            # Busca por PLACA.
+            rows, total = await tr_svc.listar_veiculos(s, tenant_id=t.id, q=placa_alvo)
+            assert total == len(rows) == 1
+            assert rows[0].id == v_placa.id
+
+            # Busca por MODELO (substring, case-insensitive).
+            rows, total = await tr_svc.listar_veiculos(s, tenant_id=t.id, q="zebrado")
+            assert total == len(rows) == 1
+            assert rows[0].id == v_modelo.id
+
+            # Sem q, os dois voltam e total bate com a lista.
+            rows, total = await tr_svc.listar_veiculos(s, tenant_id=t.id)
+            assert total == len(rows) == 2
+
+            # q sem correspondência: lista vazia e total 0 (não diverge).
+            rows, total = await tr_svc.listar_veiculos(s, tenant_id=t.id, q="inexistente-xyz")
+            assert total == len(rows) == 0
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
 # ============================ Soft-delete ===================================
 async def test_delete_faz_soft_delete(admin_engine):
     t = await _provisionar(admin_engine)
