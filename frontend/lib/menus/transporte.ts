@@ -1,4 +1,15 @@
-import { BarChart3, Building2, Bus, Car, IdCard, MapPin, RefreshCw, Route, ScrollText } from "lucide-react";
+import {
+  AlertOctagon,
+  BarChart3,
+  Building2,
+  Bus,
+  Car,
+  IdCard,
+  MapPin,
+  RefreshCw,
+  Route,
+  ScrollText,
+} from "lucide-react";
 
 import type { MenuModulo } from "./tipos";
 
@@ -46,6 +57,12 @@ export const menuTransporte: MenuModulo = {
           label: "Linhas e Itinerários",
           href: "/m/transporte/linhas",
           icon: Route,
+          perm: "transporte_regulado",
+        },
+        {
+          label: "Ocorrências",
+          href: "/m/transporte/ocorrencias",
+          icon: AlertOctagon,
           perm: "transporte_regulado",
         },
         {

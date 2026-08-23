@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, LogOut, PenSquare } from "lucide-react";
+import { AlertOctagon, FileText, LogOut, PenSquare } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -49,6 +49,16 @@ function CidadaoHeader() {
                 )}
               >
                 Abrir processo
+              </Link>
+              <Link
+                href="/cidadao/denuncias"
+                aria-current={pathname.startsWith("/cidadao/denuncias") ? "page" : undefined}
+                className={cn(
+                  "hidden text-foreground transition-colors hover:text-primary sm:inline",
+                  pathname.startsWith("/cidadao/denuncias") && "font-semibold text-primary",
+                )}
+              >
+                Minhas denúncias
               </Link>
               <span className="hidden max-w-[220px] truncate text-xs text-muted-foreground md:inline">
                 {cidadao.nome ?? cidadao.cpf_cnpj}
@@ -110,6 +120,12 @@ function BottomNav() {
       label: "Abrir",
       icon: PenSquare,
       active: pathname === "/cidadao/abrir",
+    },
+    {
+      href: "/cidadao/denuncias",
+      label: "Denúncias",
+      icon: AlertOctagon,
+      active: pathname.startsWith("/cidadao/denuncias"),
     },
   ];
 

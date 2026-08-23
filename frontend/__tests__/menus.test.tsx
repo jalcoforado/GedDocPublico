@@ -59,6 +59,7 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/transporte/alvaras": { perm: "transporte_regulado" },
   "/m/transporte/pontos": { perm: "transporte_regulado" },
   "/m/transporte/linhas": { perm: "transporte_regulado" },
+  "/m/transporte/ocorrencias": { perm: "transporte_regulado" },
   "/m/transporte/recadastramento": { perm: "transporte_regulado" },
   "/m/transporte/relatorio": { perm: "transporte_regulado" },
   "/m/pagamentos": {

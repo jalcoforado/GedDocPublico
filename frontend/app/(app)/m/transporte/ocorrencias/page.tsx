@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Inbox, Plus } from "lucide-react";
+import { AlertTriangle, Inbox, Plus, Tags } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -263,12 +263,20 @@ export default function OcorrenciasPage() {
           { label: "Ocorrências" },
         ]}
         actions={
-          canCreate ? (
-            <Button onClick={abrirNovo}>
-              <Plus className="mr-1 h-4 w-4" />
-              Registrar ocorrência
-            </Button>
-          ) : undefined
+          <div className="flex gap-2">
+            <Link href="/m/transporte/ocorrencias/tipos">
+              <Button variant="secondary">
+                <Tags className="mr-1 h-4 w-4" />
+                Tipos de ocorrência
+              </Button>
+            </Link>
+            {canCreate && (
+              <Button onClick={abrirNovo}>
+                <Plus className="mr-1 h-4 w-4" />
+                Registrar ocorrência
+              </Button>
+            )}
+          </div>
         }
       />
 

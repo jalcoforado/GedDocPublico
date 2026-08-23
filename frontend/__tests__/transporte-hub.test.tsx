@@ -43,16 +43,12 @@ describe("hub do transporte regulado", () => {
     expect(foraDoMenu).toEqual([]);
   });
 
-  it("os dois cards não entregues seguem sem href", () => {
+  it("nenhum card fica sem entrega — hub do transporte 100% ligado", () => {
     // Card tracejado é honesto; card tracejado sobre tela pronta, não.
-    // Recadastramento saiu desta lista na P5.1 e Pontos e Vagas na P6, quando
-    // cada tela passou a existir.
-    //
-    // "Rotas e Linhas" virou "Linhas e Itinerários" na P6: ao escopar a fatia
-    // ficou claro que táxi e mototáxi não têm linha, têm ponto — e que uma
-    // entidade genérica serviria mal aos dois. O ponto foi entregue; linha
-    // distrital/escolar também foi entregue na P6b — só Ocorrências fica.
+    // Recadastramento saiu desta lista na P5.1, Pontos e Vagas na P6, Linhas
+    // e Itinerários na P6b, e Ocorrências — o último — na P7 (Tarefa 8):
+    // todo card do hub do transporte regulado tem tela e href.
     const semHref = CARDS.filter((c) => !c.ready).map((c) => c.title);
-    expect(semHref).toEqual(["Ocorrências"]);
+    expect(semHref).toEqual([]);
   });
 });

@@ -87,5 +87,11 @@ export const CARDS: HubCard[] = [
     desc: "Linhas distritais e escolares, com itinerário e horários.",
     ready: true,
   },
-  { icon: AlertOctagon, title: "Ocorrências", desc: "Ocorrências regulatórias e fiscalização." },
+  {
+    href: "/m/transporte/ocorrencias",
+    icon: AlertOctagon,
+    title: "Ocorrências",
+    desc: "Ocorrências regulatórias e fiscalização: apuração de denúncias e fiscalizações contra permissionários e empresas.",
+    ready: true,
+  },
 ];
