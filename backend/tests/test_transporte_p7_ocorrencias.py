@@ -23,6 +23,7 @@ from app.schemas.transporte_regulado import (
     AlvaraCreate,
     DenunciaCidadaoCreate,
     OcorrenciaCreate,
+    OcorrenciaOut,
     OcorrenciaTipoCreate,
     OcorrenciaTipoUpdate,
 )
@@ -1239,3 +1240,24 @@ def test_denuncia_cidadao_create_rejeita_data_fato_futura():
     amanha = date.today() + timedelta(days=1)
     with pytest.raises(ValidationError, match="A data do fato não pode ser futura"):
         DenunciaCidadaoCreate(id_tipo=1, descricao="Fato X", data_fato=amanha)
+
+
+def test_ocorrencia_out_nao_rejeita_data_fato_futura_ja_gravada():
+    """`OcorrenciaOut` herda de `OcorrenciaBase`, não de `OcorrenciaCreate`: o
+    validador de "não futura" é regra de ENTRADA. Uma linha já no banco com
+    `data_fato` futura (histórica, corrigida por trás, ou só um relógio de
+    servidor adiantado) tem de continuar sendo servida em list/detalhe/decidir
+    sem 500 — sem essa separação de herança, `model_validate` reprovaria a
+    própria leitura."""
+    from datetime import timedelta
+
+    amanha = date.today() + timedelta(days=1)
+    saida = OcorrenciaOut.model_validate(
+        {
+            "id": 1, "id_tipo": 1, "origem": "fiscalizacao",
+            "data_fato": amanha, "descricao": "Fato X",
+            "situacao": "registrada", "criado_em": datetime.utcnow(),
+            "andamentos": [],
+        }
+    )
+    assert saida.data_fato == amanha

@@ -1462,7 +1462,11 @@ class OcorrenciaTipoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class OcorrenciaCreate(BaseModel):
+class OcorrenciaBase(BaseModel):
+    """Campos comuns entre entrada (`OcorrenciaCreate`) e saída (`OcorrenciaOut`),
+    SEM validador de entrada — validação de payload não pode rodar de novo em
+    cima de linha que já está no banco (ver `OcorrenciaCreate`)."""
+
     id_tipo: int
     origem: OcorrenciaOrigem
     data_fato: date
@@ -1473,6 +1477,8 @@ class OcorrenciaCreate(BaseModel):
     referencia_alvo: str | None = Field(default=None, max_length=200)
     observacoes: str | None = None
 
+
+class OcorrenciaCreate(OcorrenciaBase):
     @field_validator("data_fato")
     @classmethod
     def _data_fato_nao_futura(cls, v: date) -> date:
@@ -1492,7 +1498,13 @@ class OcorrenciaAndamentoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class OcorrenciaOut(OcorrenciaCreate):
+class OcorrenciaOut(OcorrenciaBase):
+    """Herda de `OcorrenciaBase`, NÃO de `OcorrenciaCreate` — `model_validate`
+    roda em toda serialização de saída (list/detalhe/decidir), e uma linha
+    com `data_fato` futura já gravada (histórica ou inserida por fora) não
+    pode virar 500 num GET. O validador de "não futura" é regra de entrada,
+    não de leitura."""
+
     id: int
     situacao: OcorrenciaSituacao
     tipo_nome: str | None = None
