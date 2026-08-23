@@ -3316,7 +3316,7 @@ async def reativar_convocacao(
     return decisao
 
 
-async def _contato_do_regulado(
+async def contato_do_regulado(
     db: AsyncSession, *, tenant_id: int, conv: RecadastramentoConvocacao
 ) -> tuple[str, str | None, str | None]:
     """(nome, email, telefone) do regulado. Os dois contatos são anuláveis."""
@@ -3385,7 +3385,7 @@ async def notificar_faltosos(
                 detail=f"Convocação {convocacao_id} não pertence a este ciclo",
             )
 
-        nome, email, telefone = await _contato_do_regulado(
+        nome, email, telefone = await contato_do_regulado(
             db, tenant_id=tenant_id, conv=conv
         )
         canais = [c for c, tem in (("email", email), ("whatsapp", telefone)) if tem]

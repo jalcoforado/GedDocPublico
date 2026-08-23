@@ -6,6 +6,7 @@ autenticado + permissão `transporte_regulado`. Mesmo padrão dos routers de `fr
 Sem portal público nesta etapa.
 """
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import Response, StreamingResponse
@@ -18,6 +19,7 @@ from ..models import (
     Empresa,
     OcorrenciaTipo,
     Permissionario,
+    RecadastramentoNotificacao,
     Usuario,
     UsuarioExterno,
     VeiculoRegulado,
@@ -1718,6 +1720,62 @@ async def suspender_convocacao(
         payload=payload,
         usuario_id=usuario.id,
     )
+
+    # Fase C2: e-mail ao TITULAR da convocação, com o PARECER no corpo — aqui
+    # o destinatário é o próprio suspenso, diferente do e-mail neutro do job
+    # (`notificar_recadastramento`). Sempre depois do commit acima, mesmo
+    # padrão pós-commit do `POST /{id}/decidir` de ocorrências (P7): falha de
+    # e-mail NUNCA desfaz o ato, que já está persistido.
+    try:
+        conv = await tr_svc.obter_convocacao(
+            db, tenant_id=tenant_id, convocacao_id=convocacao_id
+        )
+        _nome, email, _telefone = await tr_svc.contato_do_regulado(
+            db, tenant_id=tenant_id, conv=conv
+        )
+        if email:
+            criadas = await notificacoes.enviar(
+                db,
+                tenant_id=tenant_id,
+                destinatarios=[Destinatario(email=email)],
+                canais=["email"],
+                tipo="recadastramento.suspensao",
+                titulo="Recadastramento suspenso",
+                mensagem=(
+                    "Sua convocação de recadastramento foi suspensa. "
+                    f"Parecer: {d.parecer} "
+                    "Para voltar a renovar seu alvará, procure a prefeitura "
+                    "para reativação."
+                ),
+                link_url="/m/transporte/recadastramento",
+                payload={"id_convocacao": convocacao_id, "gatilho": "suspensao"},
+            )
+            if criadas:
+                db.add(
+                    RecadastramentoNotificacao(
+                        tenant_id=tenant_id,
+                        id_convocacao=convocacao_id,
+                        id_notificacao=criadas[0].id,
+                        id_usuario=usuario.id,
+                        gatilho="suspensao",
+                        criado_em=datetime.utcnow(),
+                    )
+                )
+                await db.commit()
+        else:
+            logger.info(
+                "Suspensão da convocação %s sem e-mail do titular — sem aviso",
+                convocacao_id,
+            )
+    except Exception:
+        # Sessão pode ter sido envenenada por falha DB-level dentro do
+        # `enviar` — sem o rollback, qualquer leitura seguinte estoura 500
+        # mesmo com a suspensão já commitada com sucesso.
+        await db.rollback()
+        logger.exception(
+            "Falha ao notificar suspensão da convocação %s", convocacao_id
+        )
+
     return RecadastramentoDecisaoOut.model_validate(d)
 
 
@@ -1743,6 +1801,56 @@ async def reativar_convocacao(
         payload=payload,
         usuario_id=usuario.id,
     )
+
+    # Fase C2: mesmo desenho pós-commit da suspensão acima — e-mail ao
+    # titular, com o parecer (julgamento do recurso) no corpo, informando o
+    # desbloqueio da renovação.
+    try:
+        conv = await tr_svc.obter_convocacao(
+            db, tenant_id=tenant_id, convocacao_id=convocacao_id
+        )
+        _nome, email, _telefone = await tr_svc.contato_do_regulado(
+            db, tenant_id=tenant_id, conv=conv
+        )
+        if email:
+            criadas = await notificacoes.enviar(
+                db,
+                tenant_id=tenant_id,
+                destinatarios=[Destinatario(email=email)],
+                canais=["email"],
+                tipo="recadastramento.reativacao",
+                titulo="Recadastramento reativado",
+                mensagem=(
+                    "Sua convocação de recadastramento foi reativada. "
+                    f"Parecer: {d.parecer} "
+                    "A renovação do seu alvará está liberada novamente."
+                ),
+                link_url="/m/transporte/recadastramento",
+                payload={"id_convocacao": convocacao_id, "gatilho": "reativacao"},
+            )
+            if criadas:
+                db.add(
+                    RecadastramentoNotificacao(
+                        tenant_id=tenant_id,
+                        id_convocacao=convocacao_id,
+                        id_notificacao=criadas[0].id,
+                        id_usuario=usuario.id,
+                        gatilho="reativacao",
+                        criado_em=datetime.utcnow(),
+                    )
+                )
+                await db.commit()
+        else:
+            logger.info(
+                "Reativação da convocação %s sem e-mail do titular — sem aviso",
+                convocacao_id,
+            )
+    except Exception:
+        await db.rollback()
+        logger.exception(
+            "Falha ao notificar reativação da convocação %s", convocacao_id
+        )
+
     return RecadastramentoDecisaoOut.model_validate(d)
 
 

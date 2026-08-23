@@ -24,9 +24,10 @@ from datetime import date, datetime, timedelta
 import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.models import RecadastramentoNotificacao
 from app.models.notificacao import Notificacao
 from app.schemas.transporte_regulado import (
     AlvaraCreate,
@@ -587,3 +588,207 @@ async def test_job_isola_tenants(admin_engine):
         ).scalar_one()
     assert tenant_notif_a == ta.id
     assert tenant_notif_b == tb.id
+
+
+# ---------------------------------------------------------------------------
+# Fase C2 — e-mail no ATO (suspensão/reativação), não no job.
+#
+# Diferente do job (`notificar_recadastramento`), aqui o destinatário é o
+# próprio suspenso e o e-mail leva o PARECER no corpo — é o julgamento do
+# operador, não um aviso neutro de prazo. A notificação sai do ROUTER, depois
+# do commit do ato (mesmo padrão pós-commit do `POST /{id}/decidir` de
+# ocorrências, P7): falha de e-mail nunca desfaz a suspensão/reativação já
+# persistida.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_suspensao_via_http_notifica_com_parecer(admin_engine):
+    tenant = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, tenant.id, ["transporte"])
+            await s.commit()
+
+        perm = await _com_contato(
+            admin_engine, tenant.id,
+            await _permissionario(admin_engine, tenant.id, nome="Suspenso Email"),
+        )
+        ciclo = await _ciclo_vencido(admin_engine, tenant.id)
+        _c, conv = await _convocacao(admin_engine, tenant.id, perm, ciclo=ciclo)
+
+        uid = await _cria_usuario_comum_transporte(admin_engine, tenant.id)
+        _as_user(admin_engine, uid, tenant.id, tenant.slug)()
+        base = "/api/v2/transporte-regulado/recadastramento"
+        parecer_texto = "Faltou ao recadastramento apos duas notificacoes."
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.post(
+                f"{base}/convocacoes/{conv.id}/suspender",
+                json={"parecer": parecer_texto},
+            )
+        assert r.status_code == 200, r.text
+
+        async with _sm(admin_engine)() as db:
+            notif = (
+                await db.execute(
+                    select(Notificacao).where(
+                        Notificacao.tenant_id == tenant.id,
+                        Notificacao.canal == "email",
+                        Notificacao.tipo == "recadastramento.suspensao",
+                    )
+                )
+            ).scalar_one()
+            registro = (
+                await db.execute(
+                    select(RecadastramentoNotificacao).where(
+                        RecadastramentoNotificacao.tenant_id == tenant.id,
+                        RecadastramentoNotificacao.id_convocacao == conv.id,
+                        RecadastramentoNotificacao.gatilho == "suspensao",
+                    )
+                )
+            ).scalar_one()
+            atual = await db.get(type(perm), perm.id)
+
+        assert notif.destinatario_email == atual.email
+        assert parecer_texto in notif.mensagem
+        assert registro.id_usuario == uid
+        assert registro.id_notificacao == notif.id
+    finally:
+        async with _sm(admin_engine)() as s:
+            await s.execute(
+                text(
+                    "DELETE FROM transporte_regulado.recadastramento_notificacao "
+                    "WHERE tenant_id=:t"
+                ),
+                {"t": tenant.id},
+            )
+            await s.execute(
+                text("DELETE FROM aprimora_py.notificacao WHERE tenant_id=:t"),
+                {"t": tenant.id},
+            )
+            await s.commit()
+        await _encerrar_arreio(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_reativacao_via_http_notifica(admin_engine):
+    tenant = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, tenant.id, ["transporte"])
+            await s.commit()
+
+        perm = await _com_contato(
+            admin_engine, tenant.id,
+            await _permissionario(admin_engine, tenant.id, nome="Reativado Email"),
+        )
+        ciclo = await _ciclo_vencido(admin_engine, tenant.id)
+        _c, conv = await _convocacao(admin_engine, tenant.id, perm, ciclo=ciclo)
+        uid_susp = await _um_usuario(admin_engine, tenant.id)
+
+        async with _sm(admin_engine)() as db:
+            await tr.suspender_convocacao(
+                db, tenant_id=tenant.id, convocacao_id=conv.id,
+                payload=_parecer(), usuario_id=uid_susp,
+            )
+
+        uid = await _cria_usuario_comum_transporte(admin_engine, tenant.id)
+        _as_user(admin_engine, uid, tenant.id, tenant.slug)()
+        base = "/api/v2/transporte-regulado/recadastramento"
+        parecer_texto = "Recurso deferido pelo gestor."
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.post(
+                f"{base}/convocacoes/{conv.id}/reativar",
+                json={"parecer": parecer_texto},
+            )
+        assert r.status_code == 200, r.text
+
+        async with _sm(admin_engine)() as db:
+            notif = (
+                await db.execute(
+                    select(Notificacao).where(
+                        Notificacao.tenant_id == tenant.id,
+                        Notificacao.canal == "email",
+                        Notificacao.tipo == "recadastramento.reativacao",
+                    )
+                )
+            ).scalar_one()
+            registro = (
+                await db.execute(
+                    select(RecadastramentoNotificacao).where(
+                        RecadastramentoNotificacao.tenant_id == tenant.id,
+                        RecadastramentoNotificacao.id_convocacao == conv.id,
+                        RecadastramentoNotificacao.gatilho == "reativacao",
+                    )
+                )
+            ).scalar_one()
+            atual = await db.get(type(perm), perm.id)
+
+        assert notif.destinatario_email == atual.email
+        assert parecer_texto in notif.mensagem
+        assert registro.id_usuario == uid
+        assert registro.id_notificacao == notif.id
+    finally:
+        async with _sm(admin_engine)() as s:
+            await s.execute(
+                text(
+                    "DELETE FROM transporte_regulado.recadastramento_notificacao "
+                    "WHERE tenant_id=:t"
+                ),
+                {"t": tenant.id},
+            )
+            await s.execute(
+                text("DELETE FROM aprimora_py.notificacao WHERE tenant_id=:t"),
+                {"t": tenant.id},
+            )
+            await s.commit()
+        await _encerrar_arreio(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_suspensao_sem_email_nao_explode(admin_engine):
+    """Titular sem e-mail: o ato passa, e não sobra `Notificacao` nenhuma."""
+    tenant = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, tenant.id, ["transporte"])
+            await s.commit()
+
+        perm = await _permissionario(
+            admin_engine, tenant.id, nome="Suspenso Sem Email"
+        )  # sem contato de propósito
+        ciclo = await _ciclo_vencido(admin_engine, tenant.id)
+        _c, conv = await _convocacao(admin_engine, tenant.id, perm, ciclo=ciclo)
+
+        uid = await _cria_usuario_comum_transporte(admin_engine, tenant.id)
+        _as_user(admin_engine, uid, tenant.id, tenant.slug)()
+        base = "/api/v2/transporte-regulado/recadastramento"
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.post(
+                f"{base}/convocacoes/{conv.id}/suspender",
+                json={"parecer": "Sem contato cadastrado."},
+            )
+        assert r.status_code == 200, r.text
+        assert r.json()["tipo"] == "suspensao"
+
+        async with _sm(admin_engine)() as db:
+            notifs = (
+                await db.execute(
+                    select(RecadastramentoNotificacao).where(
+                        RecadastramentoNotificacao.tenant_id == tenant.id,
+                        RecadastramentoNotificacao.id_convocacao == conv.id,
+                    )
+                )
+            ).scalars().all()
+        assert notifs == []
+    finally:
+        await _encerrar_arreio(admin_engine, tenant.id)
