@@ -14,10 +14,11 @@ import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 
 from app.auth.jwt import build_cidadao_payload, encode_token, get_jwt_secret
 from app.main import app
-from app.models import UsuarioExterno
+from app.models import OcorrenciaTipo, UsuarioExterno
 from app.schemas.transporte_regulado import (
     AlvaraCreate,
     DenunciaCidadaoCreate,
@@ -129,6 +130,31 @@ async def test_nome_de_tipo_e_unico_por_tenant(admin_engine):
             # Caixa diferente: a checagem é sobre `lower(nome)`.
             await _tipo(admin_engine, t.id, nome="recusa de corrida")
         assert e.value.status_code == 409
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_o_banco_barra_tipo_duplicado_sem_passar_pelo_servico(admin_engine):
+    """A exclusividade de `nome` (case-insensitive) por tenant é do índice
+    único parcial `ux_ocorrencia_tipo_nome`, não do `SELECT` de checagem em
+    `criar_tipo_ocorrencia`. Insere o segundo tipo direto pelo banco,
+    contornando o serviço inteiro, e espera `IntegrityError` — sem isso,
+    remover o índice deixaria a bateria toda verde enquanto duas requisições
+    concorrentes duplicariam o tipo em produção."""
+    t = await _provisionar(admin_engine)
+    try:
+        await _tipo(admin_engine, t.id, nome="Recusa de corrida")
+
+        with pytest.raises(IntegrityError):
+            async with _sm(admin_engine)() as db:
+                async with db.begin():
+                    db.add(
+                        OcorrenciaTipo(
+                            tenant_id=t.id, nome="RECUSA DE CORRIDA",
+                            ativo=True, criado_em=datetime.utcnow(),
+                        )
+                    )
     finally:
         await _limpar(admin_engine, t.id)
 
@@ -1188,3 +1214,28 @@ async def test_http_cidadao_token_real(admin_engine):
             assert len(r.json()) == 1
     finally:
         await _limpar(admin_engine, t.id)
+
+
+# ---------------------------------- data_fato não pode ser futura (síncrono)
+
+
+def test_ocorrencia_create_rejeita_data_fato_futura():
+    from datetime import timedelta
+
+    from pydantic import ValidationError
+
+    amanha = date.today() + timedelta(days=1)
+    with pytest.raises(ValidationError, match="A data do fato não pode ser futura"):
+        OcorrenciaCreate(
+            id_tipo=1, origem="fiscalizacao", data_fato=amanha, descricao="Fato X",
+        )
+
+
+def test_denuncia_cidadao_create_rejeita_data_fato_futura():
+    from datetime import timedelta
+
+    from pydantic import ValidationError
+
+    amanha = date.today() + timedelta(days=1)
+    with pytest.raises(ValidationError, match="A data do fato não pode ser futura"):
+        DenunciaCidadaoCreate(id_tipo=1, descricao="Fato X", data_fato=amanha)

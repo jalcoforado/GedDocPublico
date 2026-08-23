@@ -240,7 +240,9 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
 
   const ocorrencia = q.data;
   const andamentos = [...(ocorrencia?.andamentos ?? [])].sort(
-    (a, b) => new Date(a.criado_em).getTime() - new Date(b.criado_em).getTime(),
+    (a, b) =>
+      new Date(a.criado_em).getTime() - new Date(b.criado_em).getTime() ||
+      a.id - b.id,
   );
 
   const empresaSelecionadaNome = empresaSelecionadaQ.data

@@ -19,6 +19,18 @@ import { useRequireCidadao } from "@/lib/cidadao-auth";
 
 const MIN_CHARS = 10;
 
+/** Data de hoje no fuso LOCAL, formatada YYYY-MM-DD para o `max` do input.
+ * `new Date().toISOString()` converte para UTC antes de fatiar — em
+ * UTC-3, à noite, isso já é "amanhã" em UTC e o input aceitava uma data
+ * que ainda não chegou no relógio do cidadão. */
+function hojeLocalISO(): string {
+  const d = new Date();
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
 export default function NovaDenunciaPage() {
   const router = useRouter();
   const toast = useToast();
@@ -138,7 +150,7 @@ export default function NovaDenunciaPage() {
                 id="data_fato"
                 type="date"
                 required
-                max={new Date().toISOString().slice(0, 10)}
+                max={hojeLocalISO()}
                 value={dataFato}
                 onChange={(e) => setDataFato(e.target.value)}
               />

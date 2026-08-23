@@ -24,8 +24,6 @@ from ..models import (
 )
 from ..services import notificacoes
 from ..services.notificacoes import Destinatario
-
-logger = logging.getLogger("transporte_regulado")
 from ..schemas.common import Paginated
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
@@ -107,6 +105,8 @@ from ..schemas.transporte_regulado import (
     DenunciaCidadaoOut,
 )
 from ..services import transporte_regulado as tr_svc
+
+logger = logging.getLogger("transporte_regulado")
 
 permissionarios_router = APIRouter(
     prefix="/transporte-regulado/permissionarios", tags=["transporte-regulado"]
@@ -2415,6 +2415,11 @@ async def decidir_ocorrencia(
                     link_url="/cidadao/denuncias",
                 )
         except Exception:
+            # Sessão pode ter sido envenenada por falha DB-level dentro do
+            # `enviar` (ex.: erro ao gravar log de notificação) — sem o
+            # rollback, o SELECT do `_ocorrencia_out` logo abaixo estoura
+            # 500 mesmo com a decisão já commitada com sucesso.
+            await db.rollback()
             logger.exception(
                 "Falha ao notificar cidadão da decisão da ocorrência %s",
                 ocorrencia.id,

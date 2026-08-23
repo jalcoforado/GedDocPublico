@@ -1473,6 +1473,13 @@ class OcorrenciaCreate(BaseModel):
     referencia_alvo: str | None = Field(default=None, max_length=200)
     observacoes: str | None = None
 
+    @field_validator("data_fato")
+    @classmethod
+    def _data_fato_nao_futura(cls, v: date) -> date:
+        if v > date.today():
+            raise ValueError("A data do fato não pode ser futura.")
+        return v
+
 
 class OcorrenciaAndamentoOut(BaseModel):
     id: int
@@ -1521,6 +1528,13 @@ class DenunciaCidadaoCreate(BaseModel):
     descricao: str = Field(min_length=1)
     referencia_alvo: str | None = Field(default=None, max_length=200)
     data_fato: date
+
+    @field_validator("data_fato")
+    @classmethod
+    def _data_fato_nao_futura(cls, v: date) -> date:
+        if v > date.today():
+            raise ValueError("A data do fato não pode ser futura.")
+        return v
 
 
 class DenunciaCidadaoOut(BaseModel):
