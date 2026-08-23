@@ -128,12 +128,11 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
 
   // --- Vincular alvo ------------------------------------------------------
   // Busca NO SERVIDOR com debounce, mesmo padrão do seletor de operador em
-  // linhas/page.tsx. O alvo veículo fica de fora: não há endpoint de
-  // veículos do transporte regulado com busca `q` — mesma decisão do
-  // dialog de registro (ver relatório da Tarefa 7).
+  // linhas/page.tsx.
   const [vincularOpen, setVincularOpen] = useState(false);
   const [vIdEmpresa, setVIdEmpresa] = useState<number | null>(null);
   const [vIdPermissionario, setVIdPermissionario] = useState<number | null>(null);
+  const [vIdVeiculo, setVIdVeiculo] = useState<number | null>(null);
   const [erroVincular, setErroVincular] = useState<string | null>(null);
 
   const [buscaEmpresa, setBuscaEmpresa] = useState("");
@@ -150,6 +149,13 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
     return () => clearTimeout(t);
   }, [buscaPerm]);
 
+  const [buscaVeiculo, setBuscaVeiculo] = useState("");
+  const [buscaVeiculoAplicada, setBuscaVeiculoAplicada] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setBuscaVeiculoAplicada(buscaVeiculo.trim()), 300);
+    return () => clearTimeout(t);
+  }, [buscaVeiculo]);
+
   const empresasQ = useQuery({
     queryKey: ["tr-empresas-busca", buscaEmpresaAplicada],
     queryFn: () => api.empresas.list({ q: buscaEmpresaAplicada || undefined }),
@@ -158,6 +164,11 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
   const permsQ = useQuery({
     queryKey: ["tr-perms-busca", buscaPermAplicada],
     queryFn: () => api.permissionarios.list({ q: buscaPermAplicada || undefined }),
+    enabled: vincularOpen,
+  });
+  const veiculosQ = useQuery({
+    queryKey: ["tr-veiculos-busca", buscaVeiculoAplicada],
+    queryFn: () => api.veiculosRegulados.list({ q: buscaVeiculoAplicada || undefined }),
     enabled: vincularOpen,
   });
   const empresaSelecionadaQ = useQuery({
@@ -170,12 +181,18 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
     queryFn: () => api.permissionarios.get(vIdPermissionario as number),
     enabled: vIdPermissionario !== null,
   });
+  const veiculoSelecionadoQ = useQuery({
+    queryKey: ["tr-veiculo-selecionado", vIdVeiculo],
+    queryFn: () => api.veiculosRegulados.get(vIdVeiculo as number),
+    enabled: vIdVeiculo !== null,
+  });
 
   const vincularM = useMutation({
     mutationFn: () =>
       api.ocorrenciasTransporte.vincularAlvo(ocorrenciaId, {
         id_empresa: vIdEmpresa,
         id_permissionario: vIdPermissionario,
+        id_veiculo: vIdVeiculo,
       }),
     onSuccess: () => {
       toast.success("Alvo vinculado.");
@@ -188,10 +205,13 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
   function abrirVincular() {
     setVIdEmpresa(ocorrencia?.id_empresa ?? null);
     setVIdPermissionario(ocorrencia?.id_permissionario ?? null);
+    setVIdVeiculo(ocorrencia?.id_veiculo ?? null);
     setBuscaEmpresa("");
     setBuscaEmpresaAplicada("");
     setBuscaPerm("");
     setBuscaPermAplicada("");
+    setBuscaVeiculo("");
+    setBuscaVeiculoAplicada("");
     setErroVincular(null);
     setVincularOpen(true);
   }
@@ -199,8 +219,8 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
   function submeterVincular(e: React.FormEvent) {
     e.preventDefault();
     setErroVincular(null);
-    if (vIdEmpresa === null && vIdPermissionario === null) {
-      setErroVincular("Selecione ao menos um alvo: empresa ou permissionário.");
+    if (vIdEmpresa === null && vIdPermissionario === null && vIdVeiculo === null) {
+      setErroVincular("Selecione ao menos um alvo: empresa, permissionário ou veículo.");
       return;
     }
     vincularM.mutate();
@@ -256,6 +276,11 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
     ? permSelecionadoQ.data.nome
     : vIdPermissionario !== null
       ? `Permissionário #${vIdPermissionario}`
+      : null;
+  const veiculoSelecionadoNome = veiculoSelecionadoQ.data
+    ? `${veiculoSelecionadoQ.data.placa} — ${veiculoSelecionadoQ.data.marca} ${veiculoSelecionadoQ.data.modelo}`
+    : vIdVeiculo !== null
+      ? `Veículo #${vIdVeiculo}`
       : null;
 
   return (
@@ -527,6 +552,58 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
                       >
                         {p.nome}
                         <span className="ml-2 text-xs text-muted-foreground">{p.cpf}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+          <div>
+            <Label htmlFor="vBuscaVeiculo">Veículo</Label>
+            {vIdVeiculo !== null ? (
+              <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
+                <span className="truncate">{veiculoSelecionadoNome}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setVIdVeiculo(null);
+                    setBuscaVeiculo("");
+                    setBuscaVeiculoAplicada("");
+                  }}
+                >
+                  Limpar
+                </Button>
+              </div>
+            ) : (
+              <>
+                <Input
+                  id="vBuscaVeiculo"
+                  placeholder="Buscar por placa/marca/modelo..."
+                  value={buscaVeiculo}
+                  onChange={(e) => setBuscaVeiculo(e.target.value)}
+                />
+                <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
+                  {veiculosQ.isLoading ? (
+                    <div className="p-2 text-xs text-muted-foreground">Carregando...</div>
+                  ) : (veiculosQ.data?.items ?? []).length === 0 ? (
+                    <div className="p-2 text-xs text-muted-foreground">
+                      Nenhum veículo encontrado.
+                    </div>
+                  ) : (
+                    (veiculosQ.data?.items ?? []).map((v) => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
+                        onClick={() => setVIdVeiculo(v.id)}
+                      >
+                        {v.placa}
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {v.marca} {v.modelo}
+                        </span>
                       </button>
                     ))
                   )}
