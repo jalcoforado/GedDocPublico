@@ -35,6 +35,15 @@ SLUGS = ("protocolo", "pagamentos", "frota", "transporte", "administracao", "com
 # agregam ATRAVÉS dos módulos, e prefixá-las com um slug seria mentira.
 TRANSVERSAIS = ("/home", "/dashboard", "/perfil", "/para-assinar")
 
+# O realm do cidadão (`app/cidadao/`) não tem prefixo de módulo — não existe
+# `/m/<slug>/` no portal, porque o portal não é gateado por contratação de
+# módulo (ver `test_guarda_modularizacao.py`, bloco "Portal do CIDADÃO"). Até
+# a P7 (Tarefa 5) nenhum `link_url` apontava para lá: toda notificação mirava
+# usuário municipal. `decidir_ocorrencia`, quando a denúncia tem `id_cidadao`,
+# grava `link_url="/cidadao/denuncias"` — destino correto, não um escape da
+# regra. O 308 de `/m/` não existe nem faz sentido no portal.
+PREFIXO_CIDADAO = "/cidadao/"
+
 # `link_url="..."` ou `link_url=f"..."`, só a forma literal. Valor vindo de
 # variável escapa desta guarda — e é por isso que o docstring pede que se
 # escreva o literal na chamada.
@@ -43,6 +52,8 @@ PADRAO = re.compile(r"""link_url\s*=\s*f?["']([^"']+)["']""")
 
 def _aceitavel(url: str) -> bool:
     if url.startswith(tuple(f"/m/{s}/" for s in SLUGS)):
+        return True
+    if url == PREFIXO_CIDADAO.rstrip("/") or url.startswith(PREFIXO_CIDADAO):
         return True
     return url in TRANSVERSAIS or url.startswith(tuple(t + "/" for t in TRANSVERSAIS))
 
@@ -64,7 +75,8 @@ def test_todo_link_url_nasce_com_prefixo_de_modulo() -> None:
         + ". A URL antiga funciona pelo 308, mas `notificacao.link_url` é "
         "registro PERMANENTE — cada linha assim é um salto extra e uma URL "
         f"velha na barra, para sempre. Use `/m/<slug>/…` (slugs: "
-        f"{', '.join(SLUGS)}) ou uma transversal ({', '.join(TRANSVERSAIS)})."
+        f"{', '.join(SLUGS)}), uma transversal ({', '.join(TRANSVERSAIS)}) ou, "
+        f"para notificação ao cidadão, `{PREFIXO_CIDADAO}…`."
     )
 
 

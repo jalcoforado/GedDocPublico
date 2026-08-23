@@ -165,6 +165,14 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     ("GET", "/api/v2/cidadao/processos/{processo_id}"),
     ("GET", "/api/v2/cidadao/processos/{processo_id}/checklist-documentos"),
     ("GET", "/api/v2/cidadao/processos/{processo_id}/complementacoes"),
+    # -- P7 (ocorrências, Tarefa 5): mesmo realm do cidadão acima, mesmo
+    # motivo. `cidadao_denuncias_router` usa `get_current_cidadao`, nunca
+    # `require_permission`/`require_modulo` — o escopo é "só as minhas
+    # denúncias", resolvido no service por `id_cidadao` do token, não por
+    # transação municipal.
+    ("GET", "/api/v2/cidadao/denuncias"),
+    ("GET", "/api/v2/cidadao/denuncias/tipos"),
+    ("POST", "/api/v2/cidadao/denuncias"),
     ("POST", "/api/v2/cidadao/cadastrar"),
     ("POST", "/api/v2/cidadao/login"),
     ("POST", "/api/v2/cidadao/logout"),
