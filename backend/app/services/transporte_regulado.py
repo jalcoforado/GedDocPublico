@@ -3923,6 +3923,53 @@ async def listar_linhas(
     return list(rows), total
 
 
+async def contar_horarios_por_linhas(
+    db: AsyncSession, *, tenant_id: int, linha_ids: list[int],
+) -> dict[int, int]:
+    """Uma query agregada para a página inteira, em vez de uma por linha —
+    é o que tira o N+1 de `list_linhas` (`_linha_out` chamava `listar_horarios`
+    por item, que ainda reexecutava `obter_linha`)."""
+    if not linha_ids:
+        return {}
+    rows = await db.execute(
+        select(LinhaHorario.id_linha, func.count(LinhaHorario.id))
+        .where(
+            LinhaHorario.tenant_id == tenant_id,
+            LinhaHorario.id_linha.in_(linha_ids),
+            LinhaHorario.excluido.is_(False),
+        )
+        .group_by(LinhaHorario.id_linha)
+    )
+    return dict(rows.all())
+
+
+async def nomes_empresas(
+    db: AsyncSession, *, tenant_id: int, empresa_ids: list[int],
+) -> dict[int, str]:
+    if not empresa_ids:
+        return {}
+    rows = await db.execute(
+        select(Empresa.id, Empresa.razao_social).where(
+            Empresa.tenant_id == tenant_id, Empresa.id.in_(empresa_ids)
+        )
+    )
+    return dict(rows.all())
+
+
+async def nomes_permissionarios(
+    db: AsyncSession, *, tenant_id: int, permissionario_ids: list[int],
+) -> dict[int, str]:
+    if not permissionario_ids:
+        return {}
+    rows = await db.execute(
+        select(Permissionario.id, Permissionario.nome).where(
+            Permissionario.tenant_id == tenant_id,
+            Permissionario.id.in_(permissionario_ids),
+        )
+    )
+    return dict(rows.all())
+
+
 async def criar_linha(db: AsyncSession, *, tenant_id: int, payload) -> Linha:
     await _validar_nome_linha_unico(db, tenant_id=tenant_id, nome=payload.nome)
     await _validar_operadores_linha(

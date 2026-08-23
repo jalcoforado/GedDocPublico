@@ -286,6 +286,106 @@ async def test_listar_linhas_filtra_por_q_e_situacao(admin_engine):
         await _limpar(admin_engine, t.id)
 
 
+@pytest.mark.asyncio
+async def test_listar_linhas_sem_n_mais_1(admin_engine):
+    """`list_linhas` resolvia operador_nome/total_horarios linha a linha
+    (`_linha_out` chamando `db.get` + `listar_horarios`, que reexecuta
+    `obter_linha`) — com page_size 100 isso é ~300 queries. A listagem tem de
+    resolver em LOTE: uma contagem agregada de horários, uma busca de
+    empresas e uma de permissionários, independente do nº de linhas na
+    página.
+
+    Conta queries reais via `before_cursor_execute` no engine síncrono por
+    trás do `AsyncEngine` (é o único ponto estável para isso com asyncpg).
+    Cinco linhas hoje disparam bem mais que 6 SELECTs (1 count + 1 lista +
+    2×5 pela função `_linha_out` antiga); o teto de 6 prova que a listagem
+    não cresce com o nº de linhas da página.
+    """
+    from app.database import engine as app_engine
+    from sqlalchemy import event
+
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            async with s.begin():
+                await contratar(s, t.id, ["transporte"])
+
+        id_emp, id_perm = await _operadores(admin_engine, t.id)
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+        _as_user(admin_engine, uid, t.id, t.slug)()
+
+        # Uma linha com EMPRESA (com horário) e outra com PERMISSIONÁRIO (sem
+        # horário) para conferir que operador_nome/total_horarios continuam
+        # exatos depois do lote — não só que o número de queries caiu.
+        linha_emp = await _linha(
+            admin_engine, t.id, nome="Linha Empresa", id_empresa=id_emp
+        )
+        linha_perm = await _linha(
+            admin_engine, t.id, nome="Linha Permissionário", id_permissionario=id_perm
+        )
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                await tr.criar_horario(
+                    db, tenant_id=t.id, linha_id=linha_emp.id,
+                    payload=LinhaHorarioCreate(dia_semana=1, partida=time(8, 0)),
+                )
+                await tr.criar_horario(
+                    db, tenant_id=t.id, linha_id=linha_emp.id,
+                    payload=LinhaHorarioCreate(dia_semana=2, partida=time(9, 0)),
+                )
+        # Outras três linhas sem operador nomeado explicitamente (mesma
+        # empresa) só para engordar a página e provar que o nº de queries
+        # não escala com o nº de linhas.
+        for i in range(3):
+            await _linha(admin_engine, t.id, id_empresa=id_emp)
+
+        # Só conta SELECT nas tabelas do próprio recurso (linha/linha_horario/
+        # empresa/permissionario) — filtra fora o overhead fixo de
+        # autenticação/permissão/módulo (usuario, grupo, tenant_modulo...),
+        # que não é o que este teste está provando.
+        contagem = {"n": 0}
+        tabelas_do_recurso = (
+            "transporte_regulado.linha", "transporte_regulado.empresa",
+            "transporte_regulado.permissionario",
+        )
+
+        def _contar(conn, cursor, statement, parameters, context, executemany):
+            alvo = statement.strip().upper()
+            if alvo.startswith("SELECT") and any(
+                t in statement for t in tabelas_do_recurso
+            ):
+                contagem["n"] += 1
+
+        event.listen(app_engine.sync_engine, "before_cursor_execute", _contar)
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as c:
+                r = await c.get(
+                    "/api/v2/transporte-regulado/linhas", params={"page_size": 100}
+                )
+        finally:
+            event.remove(app_engine.sync_engine, "before_cursor_execute", _contar)
+
+        assert r.status_code == 200, r.text
+        corpo = r.json()
+        assert corpo["total"] == 5
+
+        por_nome = {item["nome"]: item for item in corpo["items"]}
+        assert por_nome["Linha Empresa"]["total_horarios"] == 2
+        assert por_nome["Linha Empresa"]["operador_nome"] is not None
+        assert por_nome["Linha Permissionário"]["total_horarios"] == 0
+        assert por_nome["Linha Permissionário"]["operador_nome"] is not None
+
+        # O teto conta só os SELECTs de `list_linhas`+lote — não escala com
+        # o nº de linhas da página (5 linhas, mesmo teto valeria para 100).
+        assert contagem["n"] <= 6, (
+            f"listagem de linhas fez {contagem['n']} SELECTs — esperado N+1 corrigido (≤6)"
+        )
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
 # ---------------------------------------------------------- atualizar_linha
 
 

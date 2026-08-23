@@ -2007,13 +2007,32 @@ async def list_linhas(
         db, tenant_id=tenant_id, q=q, tipo_servico=tipo_servico,
         situacao=situacao, limit=page_size, offset=offset,
     )
-    return Paginated(
-        items=[
-            await _linha_out(db, l, com_filhas=False, tenant_id=tenant_id)
-            for l in rows
-        ],
-        total=total, page=page, page_size=page_size,
+    # Resolução em LOTE (3 queries fixas, não uma por linha): a listagem não
+    # precisa dos filhos (`com_filhas=False`), só de operador_nome/total_horarios.
+    linha_ids = [l.id for l in rows]
+    empresa_ids = [l.id_empresa for l in rows if l.id_empresa is not None]
+    permissionario_ids = [
+        l.id_permissionario for l in rows if l.id_permissionario is not None
+    ]
+    horarios_por_linha, empresas, permissionarios = (
+        await tr_svc.contar_horarios_por_linhas(
+            db, tenant_id=tenant_id, linha_ids=linha_ids
+        ),
+        await tr_svc.nomes_empresas(db, tenant_id=tenant_id, empresa_ids=empresa_ids),
+        await tr_svc.nomes_permissionarios(
+            db, tenant_id=tenant_id, permissionario_ids=permissionario_ids
+        ),
     )
+    items = []
+    for l in rows:
+        saida = LinhaOut.model_validate(l)
+        if l.id_empresa is not None:
+            saida.operador_nome = empresas.get(l.id_empresa)
+        elif l.id_permissionario is not None:
+            saida.operador_nome = permissionarios.get(l.id_permissionario)
+        saida.total_horarios = horarios_por_linha.get(l.id, 0)
+        items.append(saida)
+    return Paginated(items=items, total=total, page=page, page_size=page_size)
 
 
 @linhas_router.post("", response_model=LinhaOut, status_code=status.HTTP_201_CREATED)
