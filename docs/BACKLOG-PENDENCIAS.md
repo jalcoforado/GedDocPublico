@@ -799,7 +799,7 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
   logo abaixo).
 - ~~**P6** — Rotas / linhas~~ → **pontos e vagas, entregue em 2026-08-06; linha/itinerário (P6b),
   entregue em 2026-08-21** (detalhe abaixo).
-- **P7** — Ocorrências regulatórias
+- ~~**P7** — Ocorrências regulatórias~~ → **entregue em 2026-08-23** (detalhe abaixo).
 - **P8** — Workflows avançados
 
 > **P5.1 entregue em 2026-08-04** — ciclo, convocação, escalonamento e ajuste de prazo. Spec e
@@ -949,6 +949,46 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 > - **Suspensão/gate: nenhum.** A linha não bloqueia nada — nem recadastramento, nem alvará, nem
 >   checklist de outro domínio. Decisão deliberada, para não repetir a amarra que o ponto (P6) já
 >   registrou como "não bloqueia nada".
+
+> **P7 (Ocorrências regulatórias) entregue em 2026-08-23.** Spec e plano em
+> `docs/superpowers/sdd/2026-08-21-transporte-p7-ocorrencias/`. Modelo `OcorrenciaTransporte` +
+> `OcorrenciaAndamento` (trilha) + `OcorrenciaTipoTransporte` (catálogo por tenant); superfície
+> municipal em `/m/transporte/ocorrencias` e `.../tipos`; realm do cidadão em
+> `/cidadao/denuncias` e `.../nova`, fechando o card "Ocorrências" que era o último tracejado do
+> hub do transporte regulado.
+>
+> Cinco decisões-chave, todas registradas na spec:
+>
+> - **Alvo mora em regra de serviço, não em CHECK.** Uma denúncia do cidadão nasce sem alvo formal
+>   — ele não sabe quem é o permissionário ou a empresa, só o que viu. `exigir_alvo` só é cobrado
+>   na hora de decidir como **procedente**: aí sim tem de apontar para um permissionário ou empresa
+>   do próprio tenant, senão **409**. A tela municipal replica essa exigência no cliente para não
+>   gastar round-trip, mas o servidor é quem decide.
+> - **A trilha é append-only, e a decisão é um ato dela, não um campo da ocorrência.**
+>   `OcorrenciaAndamento` acumula registro→apuração→desfecho como linhas, no mesmo desenho de
+>   `recadastramento_decisao` (P5.2) e `recadastramento_marca` — histórico que se apaga não é
+>   histórico.
+> - **Catálogo de tipos é por tenant** (`OcorrenciaTipoTransporte`, `tenant_id` + índice único
+>   parcial em `nome`), não vocabulário global fixo: cada prefeitura nomeia suas próprias categorias
+>   de fiscalização e denúncia.
+> - **O portal do cidadão é outro realm com schema fechado.** `DenunciaCidadaoOut` **não herda** de
+>   `OcorrenciaOut` — não expõe trilha, parecer nem alvo formal, só o que o denunciante tem direito
+>   de ver. Autenticação é o cookie `aprimora_cidadao_token` de sempre (`api.cidadaoDenuncias.*`),
+>   e a mudança de situação dispara notificação por e-mail em linguagem neutra (nunca "sua denúncia
+>   contra Fulano foi arquivada" — o cidadão não tem acesso ao alvo que ele mesmo talvez nem tenha
+>   apontado).
+> - **Ocorrência não é gate de nada** — não bloqueia recadastramento, alvará nem cadastro, o mesmo
+>   não-bloqueio que ponto (P6) e linha (P6b) já registraram. Uma ocorrência procedente é fato
+>   registrado, não suspensão automática; se algum dia acionar suspensão, é decisão de produto à
+>   parte, não efeito colateral de registrar.
+>
+> No frontend, a Tarefa 8 fechou a costura: o card "Ocorrências" do hub (`lib/transporte-hub.ts`)
+> e o item de menu (`lib/menus/transporte.ts`) ganharam `href`/`ready`, e
+> `__tests__/transporte-hub.test.tsx` marca o hub do transporte regulado como **100% ligado** — o
+> último card tracejado desde P0 saiu da lista. A subpágina `/m/transporte/ocorrencias/tipos`
+> ganhou link próprio (botão "Tipos de ocorrência" na listagem), sem o que a guarda de página órfã
+> (`__tests__/rotas-modulo.test.ts`) reprovava mesmo com a tela pronta — o mesmo defeito que a P5.3
+> registrou para o detalhe do alvará.
 
 > **Atualizado em 2026-08-01, pela fatia de costura de navegação** (spec e plano em
 > `docs/superpowers/`). "Entregues e no ar" era verdade só para o backend. Três coisas mudaram, e a
