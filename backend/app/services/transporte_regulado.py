@@ -4461,6 +4461,10 @@ async def listar_denuncias_do_cidadao(
 
 SITUACOES_FINAIS_OCORRENCIA = {"procedente", "improcedente", "arquivada"}
 RESULTADOS_DECISAO = SITUACOES_FINAIS_OCORRENCIA  # o CHECK do banco é a rede
+# Situações que ainda aceitam anotação/vínculo de alvo — o complemento lógico
+# das finais acima. Extraída porque a tupla estava duplicada em
+# `anotar_ocorrencia` e `vincular_alvo_ocorrencia`.
+SITUACOES_ABERTAS_OCORRENCIA = ("registrada", "em_apuracao")
 
 
 async def _ato(
@@ -4493,7 +4497,7 @@ async def anotar_ocorrencia(
     if not (parecer or "").strip():
         raise HTTPException(422, "A anotação exige parecer")
     oc = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
-    if oc.situacao not in ("registrada", "em_apuracao"):
+    if oc.situacao not in SITUACOES_ABERTAS_OCORRENCIA:
         raise HTTPException(409, "Ocorrência em situação final não recebe anotação")
     await _ato(db, oc, ato="anotacao", parecer=parecer, id_usuario=id_usuario)
     oc.atualizado_em = datetime.utcnow()
@@ -4509,7 +4513,7 @@ async def vincular_alvo_ocorrencia(
     if id_permissionario is None and id_empresa is None and id_veiculo is None:
         raise HTTPException(422, "Informe ao menos um alvo para vincular")
     oc = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
-    if oc.situacao not in ("registrada", "em_apuracao"):
+    if oc.situacao not in SITUACOES_ABERTAS_OCORRENCIA:
         raise HTTPException(409, "Ocorrência em situação final não recebe vínculo de alvo")
     await _validar_alvos_ocorrencia(
         db, tenant_id=tenant_id,
