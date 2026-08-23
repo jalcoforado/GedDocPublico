@@ -19,13 +19,15 @@ baterias divergirem em silêncio sobre o que é um cenário válido.
 from __future__ import annotations
 
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.models.notificacao import Notificacao
 from app.schemas.transporte_regulado import (
     AlvaraCreate,
     AlvaraRenovarInput,
@@ -34,6 +36,7 @@ from app.schemas.transporte_regulado import (
 from app.main import app
 from app.services import transporte_regulado as tr
 from app.services.modulos import contratar
+from tests.conftest import WORKER_URL
 from tests.test_transporte_p5_2_atendimento import (
     _as_user,
     _convocacao,
@@ -240,3 +243,107 @@ async def test_http_usuario_comum_toma_409_na_renovacao(admin_engine):
             )
             await s.commit()
         await _encerrar_arreio(admin_engine, tenant.id)
+
+
+# ---------------------------------------------------------------------------
+# Fase C2 — grants do `aprimora_worker` na migration 0094.
+#
+# TDD: `INSERT ... id_usuario=NULL` falha ANTES da 0094 (`id_usuario` ainda
+# NOT NULL) com `NotNullViolation`, e falha de outro jeito (permission denied)
+# se rodado antes dos GRANTs enumerados terem sido aplicados às tabelas que a
+# 0078 não alcançou (`recadastramento_ciclo`, `recadastramento_convocacao`,
+# `recadastramento_notificacao` nasceram depois do `GRANT ... ALL TABLES`
+# daquela migration). Evidência RED capturada no relatório da task.
+# ---------------------------------------------------------------------------
+
+
+def _worker_sm(engine):
+    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+
+@pytest.mark.asyncio
+async def test_worker_le_as_quatro_tabelas_e_insere_notificacao_automatica(admin_engine):
+    """`aprimora_worker` (0094) lê o necessário e insere envio automático.
+
+    O job da Fase C não tem `id_usuario` (ninguém apertou o botão) — daí o
+    INSERT com `id_usuario=None, gatilho='atraso'`. Antes da 0094 isto falha
+    de duas formas possíveis: `NotNullViolation` (coluna ainda obrigatória)
+    ou `permission denied` (grant ainda não concedido nas tabelas que a 0078
+    não alcançou). É essa dupla falha que este teste prova estar corrigida.
+    """
+    t = await _provisionar(admin_engine)
+    tid = t.id
+    perm = await _permissionario(admin_engine, tid)
+    ciclo = await _ciclo_vencido(admin_engine, tid)
+    _c, conv = await _convocacao(admin_engine, tid, perm, ciclo=ciclo)
+
+    # Seed da `Notificacao` real que o motor `notificacoes.enviar` criaria —
+    # via admin (bypass), porque semear cenário não é o que este teste prova.
+    admin_sm = _sm(admin_engine)
+    async with admin_sm() as db:
+        db.add(
+            Notificacao(
+                tenant_id=tid,
+                destinatario_email=f"worker-{uuid.uuid4().hex[:8]}@fasec.test",
+                canal="email",
+                tipo="recadastramento.faltoso",
+                titulo="Recadastramento pendente",
+                mensagem="Seu prazo venceu.",
+                criado_em=datetime.utcnow(),
+            )
+        )
+        await db.commit()
+        notif_id = (
+            await db.execute(
+                text(
+                    "SELECT id FROM aprimora_py.notificacao "
+                    "WHERE tenant_id=:t ORDER BY id DESC LIMIT 1"
+                ),
+                {"t": tid},
+            )
+        ).scalar_one()
+
+    engine = create_async_engine(WORKER_URL)
+    notif_recad_id = None
+    try:
+        Session = _worker_sm(engine)
+        async with Session() as s:
+            await s.execute(text(f"SET LOCAL app.tenant_id = '{tid}'"))
+            for tabela in (
+                "recadastramento_ciclo",
+                "recadastramento_convocacao",
+                "permissionario",
+                "empresa",
+            ):
+                await s.execute(
+                    text(f"SELECT count(*) FROM transporte_regulado.{tabela}")
+                )
+
+            notif_recad_id = (
+                await s.execute(
+                    text(
+                        "INSERT INTO transporte_regulado.recadastramento_notificacao "
+                        "(tenant_id, id_convocacao, id_notificacao, id_usuario, "
+                        "gatilho, criado_em) "
+                        "VALUES (:t, :c, :n, NULL, 'atraso', now()) RETURNING id"
+                    ),
+                    {"t": tid, "c": conv.id, "n": notif_id},
+                )
+            ).scalar_one()
+            await s.commit()
+    finally:
+        await engine.dispose()
+        async with admin_sm() as db:
+            if notif_recad_id is not None:
+                await db.execute(
+                    text(
+                        "DELETE FROM transporte_regulado.recadastramento_notificacao "
+                        "WHERE id=:i"
+                    ),
+                    {"i": notif_recad_id},
+                )
+            await db.execute(
+                text("DELETE FROM aprimora_py.notificacao WHERE id=:i"), {"i": notif_id}
+            )
+            await db.commit()
+        await _encerrar_arreio(admin_engine, tid)

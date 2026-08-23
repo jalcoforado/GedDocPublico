@@ -592,9 +592,18 @@ class RecadastramentoNotificacao(Base):
     terceiro aviso são linhas novas, e é justamente a contagem deles que
     justifica uma suspensão. Mesmo desenho de `RecadastramentoMarca`.
 
-    A P5.3 dispara em lote e à mão. A automação por job, quando vier, escreve
-    nesta mesma tabela — foi por isso que o registro entrou junto com o disparo
-    manual, e não depois.
+    A P5.3 dispara em lote e à mão. A automação por job, da Fase C (migration
+    0094), escreve nesta mesma tabela — foi por isso que o registro entrou
+    junto com o disparo manual, e não depois.
+
+    `id_usuario` é NULLABLE desde a 0094: NULL = envio do job (ninguém
+    apertou o botão). Antes disso o NOT NULL dizia "envio é ato de operador";
+    a automação é o segundo autor legítimo, e a ausência de autor humano
+    passou a ser informação, não lacuna.
+
+    `gatilho` (0094) é a chave da idempotência do job — no máximo um envio por
+    `(id_convocacao, gatilho)`. NULL = linha manual anterior à 0094, que não
+    sabia seu gatilho.
     """
 
     __tablename__ = "recadastramento_notificacao"
@@ -610,11 +619,14 @@ class RecadastramentoNotificacao(Base):
     id_notificacao: Mapped[int] = mapped_column(
         ForeignKey("aprimora_py.notificacao.id"), nullable=False
     )
-    # NOT NULL: envio em lote é ato de operador. Sem autor não há a quem
-    # perguntar por que o município notificou.
-    id_usuario: Mapped[int] = mapped_column(
-        ForeignKey("utils.usuario.id"), nullable=False
+    # NULLABLE desde a 0094: NULL = envio automático pelo job (ver docstring
+    # da classe). Envio manual continua exigindo autor.
+    id_usuario: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
     )
+    # 0094 — gatilho do job: convocacao|lembrete|atraso|suspensao|reativacao.
+    # NULL = linha manual anterior à 0094 (CHECK ck_recadnotif_gatilho).
+    gatilho: Mapped[str | None] = mapped_column(String(30), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
