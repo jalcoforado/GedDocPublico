@@ -1316,12 +1316,47 @@ async def listar_alvaras_vencidos(
     return resultado, total
 
 
+async def _titular_tem_convocacao_suspensa(
+    db: AsyncSession, *, tenant_id: int,
+    id_permissionario: int | None, id_empresa: int | None,
+) -> bool:
+    """Fase C: qualquer convocação suspensa do titular, de qualquer ciclo,
+    bloqueia a RENOVAÇÃO (só ela — emissão nova segue livre, e há teste
+    anti-deriva). Suspensão tem saída (reativação), então o gate é reversível."""
+    if id_permissionario is None and id_empresa is None:
+        return False
+    cond = [
+        RecadastramentoConvocacao.tenant_id == tenant_id,
+        RecadastramentoConvocacao.situacao == SITUACAO_SUSPENSO,
+        RecadastramentoConvocacao.excluido.is_(False),
+    ]
+    alvo = []
+    if id_permissionario is not None:
+        alvo.append(RecadastramentoConvocacao.id_permissionario == id_permissionario)
+    if id_empresa is not None:
+        alvo.append(RecadastramentoConvocacao.id_empresa == id_empresa)
+    cond.append(or_(*alvo))
+    return (await db.scalar(select(RecadastramentoConvocacao.id).where(*cond).limit(1))) is not None
+
+
 async def renovar_alvara(
     db: AsyncSession, *, tenant_id: int, alvara_id: int, payload: AlvaraRenovarInput
 ) -> Alvara:
     """Renova um alvará vencido — cria novo alvará atrelado ao anterior via renovado_de."""
     # Obter alvará original
     original = await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+
+    if await _titular_tem_convocacao_suspensa(
+        db, tenant_id=tenant_id,
+        id_permissionario=original.id_permissionario, id_empresa=original.id_empresa,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Titular com recadastramento suspenso — a renovação fica bloqueada "
+                "até a reativação (Recadastramento → atendimento da convocação)"
+            ),
+        )
 
     # Validar que está vencido
     hoje = datetime.utcnow().date()
