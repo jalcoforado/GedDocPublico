@@ -528,7 +528,7 @@ class ImportarExtratoIn(BaseModel):
     tipo = CREDITO|DEBITO; data em DD/MM/AAAA ou AAAA-MM-DD; valor decimal."""
     id_conta: int
     nome_arquivo: str = Field(min_length=1, max_length=255)
-    formato: Literal["CSV", "OFX", "XLSX", "CNAB"] = "CSV"
+    formato: Literal["CSV", "OFX", "XLSX", "CNAB240"] = "CSV"
     conteudo: str = Field(min_length=1)
 
 

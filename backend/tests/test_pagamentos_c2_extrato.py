@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.schemas.pagamentos import ContaCreate, FonteCreate, ImportarExtratoIn
 from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_conciliacao as conc
-from app.services.pagamentos_extrato_parsers import OfxParseError, parse_ofx
+from app.services.pagamentos_extrato_parsers import Cnab240ParseError, OfxParseError, parse_cnab240, parse_ofx
 from app.services.provisioning_tenant import provisionar_tenant
 
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -274,5 +274,133 @@ async def test_importar_csv_regressao_id_externo_none(admin_engine):
             lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
         assert lancs[0].id_externo is None
         assert lancs[0].id_conta == conta.id
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+# ---------- CNAB240 (C2.2 Task 2) ----------
+#
+# Fixture `fixtures/extrato_exemplo.cnab240.txt` — layout FEBRABAN de extrato
+# construído à mão (spec executável até chegar arquivo real do banco do
+# piloto). 7 linhas de 240 posições (1-based), terminadas em \r\n:
+#
+#   1  header de arquivo   (tipo de registro '0', pulada)
+#   2  header de lote      (tipo de registro '1', pulada)
+#   3  detalhe segmento E  CREDITO 1500.00, data 01/08/2026, doc "1001"
+#   4  detalhe segmento E  DEBITO   150.75, data 05/08/2026, doc zerado -> None
+#   5  detalhe segmento E  DEBITO    89.90, data 09/08/2026, doc "77"
+#   6  trailer de lote     (tipo de registro '5', pulada)
+#   7  trailer de arquivo  (tipo de registro '9', pulada)
+#
+# Posições do registro detalhe (tipo 3, segmento E), 1-based:
+#   1-3   código do banco            "001"
+#   4-7   lote de serviço            "0001"
+#   8     tipo de registro           "3"
+#   9-13  nº sequencial no lote      (não usado)
+#   14    código de segmento         "E"
+#   15-20 filler                     (não usado)
+#   21-28 data do lançamento         DDMMAAAA
+#   29-43 valor, 15 dígitos          inteiro em centavos, sem sinal
+#   44    sinal do valor             'D' débito | 'C' crédito
+#   45-49 nº do documento            5 dígitos zero-padded; zerado -> None
+#   50-89 histórico                  40 chars
+#   90-240 filler                    (não usado)
+
+def test_parse_cnab240_fixture_tres_lancamentos():
+    conteudo = (_FIXTURES / "extrato_exemplo.cnab240.txt").read_text(encoding="utf-8")
+    lancs = parse_cnab240(conteudo)
+    assert len(lancs) == 3
+
+    a = lancs[0]
+    assert a.data == date(2026, 8, 1)
+    assert a.tipo == "CREDITO"
+    assert a.valor == Decimal("1500.00")
+    assert a.documento == "1001"
+    assert a.id_externo == "1001"
+    assert a.historico.strip() == "Repasse FPM"
+
+    b = lancs[1]
+    assert b.data == date(2026, 8, 5)
+    assert b.tipo == "DEBITO"
+    assert b.valor == Decimal("150.75")
+    assert b.documento is None
+    assert b.id_externo is None
+
+    c = lancs[2]
+    assert c.data == date(2026, 8, 9)
+    assert c.tipo == "DEBITO"
+    assert c.valor == Decimal("89.90")
+    assert c.documento == "77"
+    assert c.id_externo == "77"
+
+
+def test_parse_cnab240_linha_tamanho_errado_levanta_erro_com_numero_da_linha():
+    linha_boa = "0" * 240
+    linha_ruim = "0" * 239  # 239 chars: violação
+    conteudo = "\r\n".join([linha_boa, linha_ruim, linha_boa])
+    with pytest.raises(Cnab240ParseError) as exc:
+        parse_cnab240(conteudo)
+    assert "2" in str(exc.value)  # linha 2 (1-based) é a culpada
+
+
+async def test_parse_cnab240_malformado_importar_extrato_422(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        conta = await _conta(admin_engine, t.id)
+        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+        conteudo = "0" * 239
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await conc.importar_extrato(
+                    s, tenant_id=t.id, usuario_id=uid,
+                    payload=ImportarExtratoIn(
+                        id_conta=conta.id, nome_arquivo="ruim.cnab240.txt", formato="CNAB240",
+                        conteudo=conteudo))
+            assert exc.value.status_code == 422
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_importar_cnab240_cria_extrato_e_lancamentos(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        conta = await _conta(admin_engine, t.id)
+        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+        conteudo = (_FIXTURES / "extrato_exemplo.cnab240.txt").read_text(encoding="utf-8")
+        async with _sm(admin_engine)() as s:
+            ex = await conc.importar_extrato(
+                s, tenant_id=t.id, usuario_id=uid,
+                payload=ImportarExtratoIn(
+                    id_conta=conta.id, nome_arquivo="ext.cnab240.txt", formato="CNAB240",
+                    conteudo=conteudo))
+        assert ex.qtd_lancamentos == 3
+        async with _sm(admin_engine)() as s:
+            lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
+        assert {l.id_externo for l in lancs} == {"1001", "77", None}
+        assert all(l.id_conta == conta.id for l in lancs)
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_importar_cnab240_reimportacao_mesmo_arquivo_409(admin_engine):
+    t = await _provisionar(admin_engine)
+    try:
+        conta = await _conta(admin_engine, t.id)
+        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+        conteudo = (_FIXTURES / "extrato_exemplo.cnab240.txt").read_text(encoding="utf-8")
+        async with _sm(admin_engine)() as s:
+            await conc.importar_extrato(
+                s, tenant_id=t.id, usuario_id=uid,
+                payload=ImportarExtratoIn(
+                    id_conta=conta.id, nome_arquivo="ext.cnab240.txt", formato="CNAB240",
+                    conteudo=conteudo))
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await conc.importar_extrato(
+                    s, tenant_id=t.id, usuario_id=uid,
+                    payload=ImportarExtratoIn(
+                        id_conta=conta.id, nome_arquivo="ext2.cnab240.txt", formato="CNAB240",
+                        conteudo=conteudo))
+            assert exc.value.status_code == 409
     finally:
         await _cleanup(admin_engine, t.id)

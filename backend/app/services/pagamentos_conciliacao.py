@@ -21,7 +21,7 @@ from ..models import (
 )
 from ..schemas.pagamentos import ImportarExtratoIn, SugestaoBaixaOut
 from . import pagamentos_estados as est
-from .pagamentos_extrato_parsers import OfxParseError, parse_ofx
+from .pagamentos_extrato_parsers import Cnab240ParseError, OfxParseError, parse_cnab240, parse_ofx
 
 _PROVAVEL_DIAS = 3  # tolerância de data para correspondência provável
 
@@ -101,6 +101,14 @@ def _linhas_ofx(conteudo: str) -> list[dict]:
     return [dataclasses.asdict(p) for p in parseados]
 
 
+def _linhas_cnab240(conteudo: str) -> list[dict]:
+    try:
+        parseados = parse_cnab240(conteudo)
+    except Cnab240ParseError as e:
+        raise ConciliacaoError(str(e), status.HTTP_422_UNPROCESSABLE_ENTITY)
+    return [dataclasses.asdict(p) for p in parseados]
+
+
 async def importar_extrato(db: AsyncSession, *, tenant_id: int, usuario_id: int | None,
                            payload: ImportarExtratoIn) -> Extrato:
     """Importa o extrato, preservando arquivo/hash (RF-EXT-10) e criando os
@@ -127,9 +135,11 @@ async def importar_extrato(db: AsyncSession, *, tenant_id: int, usuario_id: int 
             ln.setdefault("id_externo", None)
     elif payload.formato == "OFX":
         linhas = _linhas_ofx(payload.conteudo)
+    elif payload.formato == "CNAB240":
+        linhas = _linhas_cnab240(payload.conteudo)
     else:
         raise ConciliacaoError(
-            f"Formato {payload.formato} ainda não suportado (use CSV ou OFX).",
+            f"Formato {payload.formato} ainda não suportado (use CSV, OFX ou CNAB240).",
             status.HTTP_422_UNPROCESSABLE_ENTITY)
     if not linhas:
         raise ConciliacaoError("Extrato vazio", status.HTTP_422_UNPROCESSABLE_ENTITY)
