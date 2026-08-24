@@ -13,7 +13,7 @@ import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.main import app
@@ -807,6 +807,208 @@ async def test_alvara_antigo_sem_situacao_nasce_vigente_pelo_default(admin_engin
         await _limpar_alvara_e_engine(admin_engine, t.id)
 
 
+async def _definicao_alvara_custom(engine, tenant_id: int, *, estado_inicial: str) -> None:
+    """Insere a `WorkflowDefinition` ATIVA de slug `transporte-alvara` com
+    `estado_inicial` customizado — simula um tenant que editou o DSL para ter
+    uma etapa intermediária antes de `vigente` (fix-wave, Important 1)."""
+    async with _sm(engine)() as db:
+        db.add(WorkflowDefinition(
+            tenant_id=tenant_id,
+            slug="transporte-alvara",
+            nome="Alvará (custom)",
+            versao=1,
+            ativo=True,
+            dsl={
+                "estado_inicial": estado_inicial,
+                "estados": [
+                    {"slug": estado_inicial, "label": "Aguardando análise"},
+                    {"slug": "vigente", "label": "Vigente"},
+                    {"slug": "renovado", "label": "Renovado", "final": True},
+                    {"slug": "revogado", "label": "Revogado", "final": True},
+                ],
+                "transicoes": [
+                    {"de": estado_inicial, "para": "vigente", "label": "aprovar"},
+                    {"de": "vigente", "para": "renovado", "label": "renovar"},
+                    {"de": "vigente", "para": "revogado", "label": "revogar"},
+                ],
+            },
+            criado_em=datetime.utcnow(),
+        ))
+        await db.commit()
+
+
+async def test_criar_alvara_estado_inicial_customizado_grava_slug_completo(admin_engine):
+    """Important 1 (fix-wave): definição de `transporte-alvara` do tenant com
+    estado intermediário `aguardando_analise_documental` (29 chars) como
+    `estado_inicial` — `criar_alvara` entra nesse estado e `alvara.situacao`
+    grava o slug inteiro, sem truncar. Teste ausente da spec original (Task
+    4) — cobre `estado_inicial` DSL-derivado de ponta a ponta."""
+    estado = "aguardando_analise_documental"
+    assert len(estado) == 29
+    t = await _provisionar(admin_engine)
+    try:
+        await _definicao_alvara_custom(admin_engine, t.id, estado_inicial=estado)
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        a = await _alvara(admin_engine, t.id, id_empresa=id_emp)
+        assert a.situacao == estado
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_criar_alvara_estado_inicial_longo_nao_trunca_500(admin_engine):
+    """Important 1 (fix-wave): estado_inicial com 38 chars — maior que o
+    antigo teto de `alvara.situacao` (varchar(30), migration 0097) — não
+    estoura `StringDataRightTruncation`. Evidência direta da migration 0098:
+    antes dela este teste falha com `DataError`/`IntegrityError` ao tentar
+    persistir o alvará; depois, grava o slug inteiro (varchar(50))."""
+    estado = "aguardando_analise_documental_completa"
+    assert len(estado) == 38
+    t = await _provisionar(admin_engine)
+    try:
+        await _definicao_alvara_custom(admin_engine, t.id, estado_inicial=estado)
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        a = await _alvara(admin_engine, t.id, id_empresa=id_emp)
+        assert a.situacao == estado
+
+        async with _sm(admin_engine)() as db:
+            persistido = (
+                await db.execute(
+                    text(
+                        "SELECT situacao FROM transporte_regulado.alvara "
+                        "WHERE id = :id"
+                    ),
+                    {"id": a.id},
+                )
+            ).scalar_one()
+        assert persistido == estado
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_ocorrencia_situacao_aceita_slug_ate_50_chars(admin_engine):
+    """Important 1 (fix-wave): `ocorrencia.situacao` acompanha o teto de
+    `workflow_instance.estado_atual` (varchar(50), migration 0098) — não
+    fica preso ao antigo varchar(20) (migration 0096). Hoje nenhuma fachada
+    grava um slug tão longo ali (todos os `para=` são literais curtos), mas a
+    coluna precisa ter a mesma capacidade da instância que a comanda: um
+    slug de 21-50 chars não pode truncar silenciosamente se uma fachada
+    futura vier a derivar `situacao` do DSL, como `criar_alvara` já faz."""
+    t = await _provisionar(admin_engine)
+    try:
+        oc_id = await _ocorrencia(admin_engine, t.id)
+        slug_longo = "estado_customizado_bem_comprido_50c"
+        assert len(slug_longo) <= 50 and len(slug_longo) > 20
+        async with _sm(admin_engine)() as db:
+            await db.execute(
+                text(
+                    "UPDATE transporte_regulado.ocorrencia SET situacao = :s "
+                    "WHERE id = :id"
+                ),
+                {"s": slug_longo, "id": oc_id},
+            )
+            await db.commit()
+            persistido = (
+                await db.execute(
+                    text(
+                        "SELECT situacao FROM transporte_regulado.ocorrencia "
+                        "WHERE id = :id"
+                    ),
+                    {"id": oc_id},
+                )
+            ).scalar_one()
+        assert persistido == slug_longo
+    finally:
+        await _limpar_engine(admin_engine, t.id)
+
+
+async def test_recadastramento_convocacao_situacao_aceita_slug_ate_50_chars(admin_engine):
+    """Important 1 (fix-wave): mesma razão do teste acima, para
+    `recadastramento_convocacao.situacao` (antigo varchar(20))."""
+    t = await _provisionar(admin_engine)
+    try:
+        perm = await _permissionario(admin_engine, t.id, nome="Fulano P8 Fix")
+        _ciclo, conv = await _convocacao(admin_engine, t.id, perm)
+        slug_longo = "estado_customizado_bem_comprido_50c"
+        assert len(slug_longo) <= 50 and len(slug_longo) > 20
+        async with _sm(admin_engine)() as db:
+            await db.execute(
+                text(
+                    "UPDATE transporte_regulado.recadastramento_convocacao "
+                    "SET situacao = :s WHERE id = :id"
+                ),
+                {"s": slug_longo, "id": conv.id},
+            )
+            await db.commit()
+            persistido = (
+                await db.execute(
+                    text(
+                        "SELECT situacao FROM "
+                        "transporte_regulado.recadastramento_convocacao "
+                        "WHERE id = :id"
+                    ),
+                    {"id": conv.id},
+                )
+            ).scalar_one()
+        assert persistido == slug_longo
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_definicao_desativada_409_e_nao_recria_semente(admin_engine):
+    """Important 2 (fix-wave): tenant desativa a `WorkflowDefinition` de
+    `transporte-alvara` pelo CRUD de workflow (`ativo=False`) — o próximo ato
+    que precisar dela (`criar_alvara`) responde 409 em pt-BR, e NÃO tenta
+    recriar a semente `versao=1` (que violaria o UNIQUE `(tenant_id, slug,
+    versao)` contra a linha desativada e estouraria `IntegrityError` → 500,
+    antes do fix)."""
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        # Primeiro alvará: cria a semente `transporte-alvara` v1 ativa, lazy.
+        await _alvara(admin_engine, t.id, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            await db.execute(
+                text(
+                    "UPDATE aprimora_py.workflow_definition SET ativo = false "
+                    "WHERE tenant_id = :t AND slug = 'transporte-alvara'"
+                ),
+                {"t": t.id},
+            )
+            await db.commit()
+            (qtd_antes,) = (
+                await db.execute(
+                    text(
+                        "SELECT count(*) FROM aprimora_py.workflow_definition "
+                        "WHERE tenant_id = :t AND slug = 'transporte-alvara'"
+                    ),
+                    {"t": t.id},
+                )
+            ).one()
+        assert qtd_antes == 1
+
+        with pytest.raises(HTTPException) as e:
+            await _alvara(admin_engine, t.id, id_empresa=id_emp)
+        assert e.value.status_code == 409
+        msg = str(e.value.detail)
+        assert "transporte-alvara" in msg
+        assert "desativado" in msg
+
+        async with _sm(admin_engine)() as db:
+            (qtd_depois,) = (
+                await db.execute(
+                    text(
+                        "SELECT count(*) FROM aprimora_py.workflow_definition "
+                        "WHERE tenant_id = :t AND slug = 'transporte-alvara'"
+                    ),
+                    {"t": t.id},
+                )
+            ).one()
+        assert qtd_depois == 1
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
 async def test_renovar_alvara_transiciona_origem_e_cria_filho_vigente(admin_engine):
     """(b) `renovar_alvara` transiciona a instância de ORIGEM para `renovado`
     (inativa) e cria alvará + instância NOVOS, próprios, em `vigente`."""
@@ -1243,6 +1445,81 @@ async def test_indeferir_409_quando_dsl_do_tenant_nao_permite(admin_engine):
                     payload=_parecer("Faltou documento."), usuario_id=uid,
                 )
         assert e.value.status_code == 409
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_decidir_409_antes_do_hop_nao_persiste_decisao(admin_engine):
+    """Important 3 (fix-wave): tenant remove `indeferir` do DSL numa
+    convocação COM instância cujo hop AINDA NÃO aconteceu (`situacao ==
+    'convocado'`, nunca marcada) — `decidir_recadastramento(indeferimento)`
+    responde 409 e `recadastramento_decisao` NÃO ganha linha nova. Antes do
+    fix, `db.add(decisao)` entrava na sessão ANTES do hop
+    (`convocado -> em_analise`, que commita internamente), então a decisão
+    era persistida grudada nesse commit mesmo com a transição de indeferir
+    bloqueada logo depois. O hop em si (mudança de `situacao` para
+    `em_analise`) é aceitável mesmo persistido — só a decisão/marca não
+    pode."""
+    t = await _provisionar(admin_engine)
+    try:
+        uid = await _um_usuario(admin_engine, t.id)
+        perm = await _permissionario(admin_engine, t.id, nome="Fulano P8 Hop")
+        _ciclo, conv = await _convocacao(admin_engine, t.id, perm)
+        assert conv.situacao == "convocado"
+
+        # Cria a definição (lazy, semente) sem disparar o hop — o teste
+        # edita o DSL removendo `indeferir` ANTES de qualquer transição,
+        # mantendo `iniciar_analise` intacto para o hop de `decidir_
+        # recadastramento` (abaixo) ainda funcionar.
+        async with _sm(admin_engine)() as db:
+            await transporte_workflow.obter_definicao(
+                db, tenant_id=t.id, slug="transporte-recadastramento",
+            )
+            await db.commit()
+
+        async with admin_engine.begin() as connx:
+            await connx.execute(
+                text(
+                    "UPDATE aprimora_py.workflow_definition SET dsl = jsonb_set("
+                    "  dsl, '{transicoes}', "
+                    "  (SELECT jsonb_agg(elem) FROM jsonb_array_elements(dsl->'transicoes') elem "
+                    "   WHERE elem->>'label' != 'indeferir')"
+                    ") WHERE tenant_id = :t AND slug = 'transporte-recadastramento'"
+                ),
+                {"t": t.id},
+            )
+
+        async with _sm(admin_engine)() as db:
+            (qtd_antes,) = (
+                await db.execute(
+                    text(
+                        "SELECT count(*) FROM transporte_regulado.recadastramento_decisao "
+                        "WHERE tenant_id = :t"
+                    ),
+                    {"t": t.id},
+                )
+            ).one()
+        assert qtd_antes == 0
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.decidir_recadastramento(
+                    db, tenant_id=t.id, convocacao_id=conv.id, tipo="indeferimento",
+                    payload=_parecer("Faltou documento."), usuario_id=uid,
+                )
+        assert e.value.status_code == 409
+
+        async with _sm(admin_engine)() as db:
+            (qtd_depois,) = (
+                await db.execute(
+                    text(
+                        "SELECT count(*) FROM transporte_regulado.recadastramento_decisao "
+                        "WHERE tenant_id = :t"
+                    ),
+                    {"t": t.id},
+                )
+            ).one()
+        assert qtd_depois == 0
     finally:
         await _limpar_alvara_e_engine(admin_engine, t.id)
 

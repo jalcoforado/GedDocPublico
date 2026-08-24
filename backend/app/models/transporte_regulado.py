@@ -293,8 +293,11 @@ class Alvara(Base):
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
     # P8 D2 (Task 4): comandada pelo workflow (`SEMENTES["transporte-alvara"]`
     # em `services/transporte_workflow.py`) — vigente/renovado/revogado, sem
-    # CHECK (migration 0097; o guardião é o DSL, por tenant).
-    situacao: Mapped[str] = mapped_column(String(30), nullable=False, default="vigente")
+    # CHECK (migration 0097; o guardião é o DSL, por tenant). Ampliada para
+    # varchar(50) na 0098 (fix-wave, Important 1): teto igual ao de
+    # `workflow_instance.estado_atual`, para slug de estado custom do
+    # tenant não truncar em 500.
+    situacao: Mapped[str] = mapped_column(String(50), nullable=False, default="vigente")
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -477,8 +480,11 @@ class RecadastramentoConvocacao(Base):
     )
     ajustado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # `convocado` nesta fatia. P5.2 acrescenta o fechamento; P5.3, o atraso.
+    # P8 fix-wave (Important 1): varchar(50) — igual ao teto de
+    # `workflow_instance.estado_atual` (migration 0098), porque o DSL do
+    # tenant é quem define os slugs de estado, não este modelo.
     situacao: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="convocado"
+        String(50), nullable=False, default="convocado"
     )
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -881,8 +887,11 @@ class Ocorrencia(Base):
     id_cidadao: Mapped[int | None] = mapped_column(
         ForeignKey("utils.usuario_externo.id"), nullable=True
     )
+    # P8 fix-wave (Important 1): varchar(50) — igual ao teto de
+    # `workflow_instance.estado_atual` (migration 0098); slugs de estado do
+    # DSL do tenant podem chegar a 50 chars.
     situacao: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="registrada"
+        String(50), nullable=False, default="registrada"
     )
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)

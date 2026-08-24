@@ -1047,6 +1047,9 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   exige contratar o módulo protocolo; mover para `comum` é decisão futura do Jorge.
 > - Notificação de alerta de SLA para tipos de transporte não dispara: a linha de alerta é criada, mas
 >   o aviso por e-mail é processo-only; implementar quando algum tenant configurar `sla_dias` no tipo.
+>   Hoje o alerta de transporte também NÃO aparece em painel nenhum — a listagem de alertas faz
+>   `INNER JOIN` em `processo`, então uma instância `entidade_tipo != 'processo'` cai fora; o que o
+>   painel mostra é só o "(excedido)" derivado por comparação de data, não o alerta gravado.
 > - `reabrir_recadastramento` grava `situacao` direto sem tocar a instância (`workflow_instance`);
 >   self-heal lazy acontece no ato seguinte — candidata a fachada futura, para ser explícita.
 > - Cobertura HTTP do GET de workflow "com instância" existe só para ocorrência; o endpoint é
@@ -1055,6 +1058,17 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   sem teste multi-instância.
 > - Índice antigo `ix_workflow_instance_processo_ativa` (0008) coexiste com o novo único
 >   polimórfico; aposentá-lo é fatia futura (docstring da 0095).
+> - `SITUACOES_ABERTAS_OCORRENCIA`/`SITUACOES_ABERTAS` seguem hardcoded no service — entidade num
+>   estado custom do tenant (fora da semente) leva 409 em anotar/vincular/marcar/excluir mesmo
+>   estando "aberta" no DSL dele. Configurável de verdade exige derivar "aberto" do próprio DSL
+>   (ex.: `final: false`), não de uma tupla fixa no Python.
+> - Edição de DSL cria versão nova e desativa a antiga (fluxo normal do CRUD de workflow), mas a
+>   instância ativa de uma entidade em estoque fica presa à versão velha — um alvará `vigente` pode
+>   viver anos sem nunca migrar. Alcançar esse estoque exige `migrar_instance`, que hoje mora no
+>   router de workflow (módulo protocolo), não em transporte.
+> - Soft-delete de entidade não finaliza a instância de workflow (`excluir_ocorrencia` deixa a
+>   instância ativa); com `sla_dias` configurado no estado, o beat de SLA segue alertando uma
+>   ocorrência já excluída — falta encerrar (ou pausar) a instância no mesmo ato do soft-delete.
 
 > **Atualizado em 2026-08-01, pela fatia de costura de navegação** (spec e plano em
 > `docs/superpowers/`). "Entregues e no ar" era verdade só para o backend. Três coisas mudaram, e a

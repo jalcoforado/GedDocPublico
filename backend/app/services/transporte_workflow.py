@@ -228,6 +228,23 @@ async def obter_definicao(
     if wf is not None:
         return wf
 
+    existe_inativa = (
+        await db.execute(
+            select(WorkflowDefinition.id)
+            .where(
+                WorkflowDefinition.tenant_id == tenant_id,
+                WorkflowDefinition.slug == slug,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if existe_inativa is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"O workflow {slug!r} está desativado — reative uma versão para "
+            "prosseguir",
+        )
+
     if slug not in SEMENTES:
         raise WorkflowEngineError(f"Sem semente de workflow para slug={slug!r}")
 

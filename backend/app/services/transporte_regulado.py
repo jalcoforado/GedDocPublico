@@ -2848,6 +2848,34 @@ async def marcar_item_recadastramento(
             detail="Item não se aplica a este regulado, ou está inativo",
         )
 
+    # A primeira marcação tira a convocação de `convocado`. Gravado, e não
+    # derivado: derivar exigiria subconsulta por linha na listagem, e a P5.3
+    # vai filtrar por este campo no relatório.
+    #
+    # P8 D3 (Task 5) fix-wave (Important 3): quando há hop, obtém a
+    # instância/faz a transição ANTES de montar a marca — `_instancia_
+    # recadastramento` commita internamente, e `db.add(marca)` antes desse
+    # commit grudaria a marca a ele mesmo que ela não tivesse relação com o
+    # hop. Só monta e adiciona a marca depois do hop resolvido.
+    if conv.situacao == "convocado":
+        conv.atualizado_em = datetime.utcnow()
+        await _instancia_recadastramento(
+            db, tenant_id=tenant_id, conv=conv, usuario_id=usuario_id,
+        )
+        marca = RecadastramentoMarca(
+            tenant_id=tenant_id,
+            id_convocacao=convocacao_id,
+            id_item=item_id,
+            marcado=payload.marcado,
+            observacao=payload.observacao,
+            id_usuario=usuario_id,
+            criado_em=datetime.utcnow(),
+        )
+        db.add(marca)
+        await db.commit()
+        await db.refresh(marca)
+        return marca
+
     marca = RecadastramentoMarca(
         tenant_id=tenant_id,
         id_convocacao=convocacao_id,
@@ -2858,22 +2886,6 @@ async def marcar_item_recadastramento(
         criado_em=datetime.utcnow(),
     )
     db.add(marca)
-
-    # A primeira marcação tira a convocação de `convocado`. Gravado, e não
-    # derivado: derivar exigiria subconsulta por linha na listagem, e a P5.3
-    # vai filtrar por este campo no relatório.
-    #
-    # P8 D3 (Task 5): a transição `convocado -> em_analise` agora passa pelo
-    # workflow (`_instancia_recadastramento` já faz o hop quando necessário)
-    # — commita a marca junto, no mesmo commit da transição.
-    if conv.situacao == "convocado":
-        conv.atualizado_em = datetime.utcnow()
-        await _instancia_recadastramento(
-            db, tenant_id=tenant_id, conv=conv, usuario_id=usuario_id,
-        )
-        await db.refresh(marca)
-        return marca
-
     await db.commit()
     await db.refresh(marca)
     return marca
@@ -3098,6 +3110,17 @@ async def decidir_recadastramento(
                 ),
             )
 
+    # P8 D3 (Task 5) fix-wave (Important 3): a instância/hop é obtida ANTES
+    # de montar a escrita rica — `_instancia_recadastramento` pode commitar
+    # internamente (o hop `convocado -> em_analise`), e se `db.add(decisao)`
+    # entrasse antes desse commit a decisão seria persistida grudada nele,
+    # mesmo que a transição real (`deferir`/`indeferir`, abaixo) depois 409e.
+    # Mesma disciplina de `iniciar_apuracao` (ocorrência): obter a instância
+    # primeiro, só então mutar/adicionar.
+    inst = await _instancia_recadastramento(
+        db, tenant_id=tenant_id, conv=conv, usuario_id=usuario_id,
+    )
+
     decisao = RecadastramentoDecisao(
         tenant_id=tenant_id,
         id_convocacao=convocacao_id,
@@ -3108,13 +3131,11 @@ async def decidir_recadastramento(
     )
     db.add(decisao)
 
-    # P8 D3 (Task 5): a transição é comandada pelo workflow — a completude
-    # (acima) já decidiu se pode chegar aqui; o DSL só espelha esse resultado
-    # (condição `checklist_completo` em `deferir`, que nunca deveria bloquear
-    # neste ponto, já que a checagem de cima é a mesma regra).
-    inst = await _instancia_recadastramento(
-        db, tenant_id=tenant_id, conv=conv, usuario_id=usuario_id,
-    )
+    # A transição é comandada pelo workflow — a completude (acima) já
+    # decidiu se pode chegar aqui; o DSL só espelha esse resultado (condição
+    # `checklist_completo` em `deferir`, que nunca deveria bloquear neste
+    # ponto, já que a checagem de cima é a mesma regra). Commita decisão +
+    # entidade + instância juntos.
     destino = "deferido" if tipo == "deferimento" else "indeferido"
     conv.atualizado_em = datetime.utcnow()
     from . import transporte_workflow as _wf
@@ -3389,6 +3410,24 @@ async def suspender_convocacao(
     if not parecer:
         raise HTTPException(status_code=400, detail="Parecer é obrigatório")
 
+    # P8 D3 (Task 5): `suspender`/`suspender_analise` têm o mesmo destino
+    # ("suspenso") — o engine casa a transição pelo `de` == `estado_atual`
+    # sozinho, então NÃO instância aqui (`obter_ou_criar_instancia` direto,
+    # sem o hop de `_instancia_recadastramento`: suspender de `convocado` não
+    # deve passar por `em_analise` no log).
+    #
+    # fix-wave (Important 3): a instância é obtida ANTES de montar a
+    # decisão — `obter_ou_criar_instancia` commita internamente quando cria;
+    # `db.add(decisao)` antes disso grudaria a decisão nesse commit mesmo
+    # que a transição de suspensão, logo abaixo, ainda pudesse 409ar.
+    from . import transporte_workflow as _wf
+
+    inst = await _wf.obter_ou_criar_instancia(
+        db, tenant_id=tenant_id, slug=WORKFLOW_SLUG_RECADASTRAMENTO,
+        entidade_tipo="convocacao", entidade_id=conv.id,
+        situacao_atual=conv.situacao, usuario_id=usuario_id,
+    )
+
     decisao = RecadastramentoDecisao(
         tenant_id=tenant_id,
         id_convocacao=convocacao_id,
@@ -3399,18 +3438,6 @@ async def suspender_convocacao(
     )
     db.add(decisao)
 
-    # P8 D3 (Task 5): `suspender`/`suspender_analise` têm o mesmo destino
-    # ("suspenso") — o engine casa a transição pelo `de` == `estado_atual`
-    # sozinho, então NÃO instância aqui (`obter_ou_criar_instancia` direto,
-    # sem o hop de `_instancia_recadastramento`: suspender de `convocado` não
-    # deve passar por `em_analise` no log).
-    from . import transporte_workflow as _wf
-
-    inst = await _wf.obter_ou_criar_instancia(
-        db, tenant_id=tenant_id, slug=WORKFLOW_SLUG_RECADASTRAMENTO,
-        entidade_tipo="convocacao", entidade_id=conv.id,
-        situacao_atual=conv.situacao, usuario_id=usuario_id,
-    )
     conv.atualizado_em = datetime.utcnow()
     await _wf.transicionar(
         db, instancia=inst, para=SITUACAO_SUSPENSO, usuario_id=usuario_id,
@@ -3457,6 +3484,16 @@ async def reativar_convocacao(
     if not parecer:
         raise HTTPException(status_code=400, detail="Parecer é obrigatório")
 
+    # fix-wave (Important 3): instância antes da decisão, mesma razão de
+    # `suspender_convocacao` acima.
+    from . import transporte_workflow as _wf
+
+    inst = await _wf.obter_ou_criar_instancia(
+        db, tenant_id=tenant_id, slug=WORKFLOW_SLUG_RECADASTRAMENTO,
+        entidade_tipo="convocacao", entidade_id=conv.id,
+        situacao_atual=conv.situacao, usuario_id=usuario_id,
+    )
+
     decisao = RecadastramentoDecisao(
         tenant_id=tenant_id,
         id_convocacao=convocacao_id,
@@ -3467,13 +3504,6 @@ async def reativar_convocacao(
     )
     db.add(decisao)
 
-    from . import transporte_workflow as _wf
-
-    inst = await _wf.obter_ou_criar_instancia(
-        db, tenant_id=tenant_id, slug=WORKFLOW_SLUG_RECADASTRAMENTO,
-        entidade_tipo="convocacao", entidade_id=conv.id,
-        situacao_atual=conv.situacao, usuario_id=usuario_id,
-    )
     conv.atualizado_em = datetime.utcnow()
     await _wf.transicionar_tentando(
         db, instancia=inst, entidade=conv, usuario_id=usuario_id,
