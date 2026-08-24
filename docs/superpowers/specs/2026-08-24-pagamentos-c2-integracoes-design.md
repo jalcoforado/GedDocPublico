@@ -89,9 +89,11 @@ backend:
 2. **Idempotência em duas camadas**:
    - arquivo: hash SHA-256 do conteúdo em `pagamentos.extrato_importacao` — mesmo arquivo de novo →
      resposta "já importado", zero efeito;
-   - lançamento: chave natural `(conta, id_externo)` quando o formato dá id (FITID no OFX; nosso
-     número/sequencial no CNAB) e `(conta, data, valor, descricao)` como fallback — arquivo que
-     sobrepõe período importa só o que falta.
+   - lançamento: chave natural `(conta, id_externo)` quando o formato dá id (FITID no OFX; nº do
+     documento no CNAB) — arquivo que sobrepõe período importa só o que falta. **Sem `id_externo`
+     não se pula linha**: pagamentos de mesmo valor no mesmo dia são legítimos, e pular por
+     `(data, valor)` esconderia lançamento real; a coincidência vira AVISO de "possível duplicata"
+     no relato do import, decisão do tesoureiro.
 3. Lançamentos entram nas MESMAS tabelas que a conciliação RN-11/RN-14 já lê — a conciliação não
    muda uma linha.
 4. Relato do import na resposta e na tela: total do arquivo, importados, ignorados por duplicata,
