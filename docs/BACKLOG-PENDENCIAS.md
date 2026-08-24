@@ -67,7 +67,8 @@
 
 **Estado em 2026-08-14** (varredura completa do arquivo — ver a nota de método na seção 4):
 
-- `main` em `84d3f04`. Migrations até **0097** (head único, 98 arquivos).
+- `main` em `84d3f04`. Migrations até **0091** (head único, 92 arquivos; em 2026-08-24 já vamos em
+  **0097**, ver o bloco P8 na seção 2.2).
 - CI verde nos três workflows; suíte de backend em **1304 passed / 0 failed / 47 skipped**.
 - Entregue desde o último bloco: modularização F1–F4, leitura por módulo, item 1.0.8 (58 GETs com
   `require_permission`), assistente IA-1 sobre DeepSeek, Pagamentos Onda C fatia C1 inteira
@@ -1013,30 +1014,32 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 > (`__tests__/rotas-modulo.test.ts`) reprovava mesmo com a tela pronta — o mesmo defeito que a P5.3
 > registrou para o detalhe do alvará.
 
-> **P8 entregue em 2026-08-24** — workflows avançados (integração BPM). Spec e plano em
-> `docs/superpowers/sdd/2026-08-23-transporte-p8-workflows/`. Motor BPM polimórfico unifica
-> transições de ocorrência, alvará e recadastramento sob um DSL comum.
+> **P8 entregue em 2026-08-24** — workflows avançados (integração BPM). Spec em
+> `docs/superpowers/specs/2026-08-23-transporte-p8-workflows-design.md`, plano em
+> `docs/superpowers/plans/2026-08-23-transporte-p8-workflows.md`. O motor BPM (Fases 19–21) passa a
+> comandar o estado de ocorrência, alvará e convocação de recadastramento.
 >
 > O que entrou:
 >
 > - **Motor polimórfico** (`workflow_instance` com `entidade_tipo` e `entidade_id`, migration 0095):
->   ocorrências, alvarás e recadastramento executam transições comandadas pelo workflow via
->   fachadas (`WorkflowFacade`), mantendo o contrato HTTP intacto — cliente continua postando no
->   endpoint de sempre e recebendo a mesma resposta.
+>   os atos existentes viraram **fachadas** (`transporte_workflow.py` + `transporte_regulado.py`)
+>   que delegam a transição ao engine e gravam a `situacao` da entidade como cache do estado — o
+>   contrato HTTP não mudou.
 > - **Definições-semente por tenant** (slugs `transporte-ocorrencia`, `transporte-alvara`,
->   `transporte-recadastramento`): espelham as máquinas de estado anteriores — dia 1 idêntico ao dia 0.
->   Instanciação lazy para o estoque: ocorrência/alvará/convocação nascem sem workflow até o primeiro
->   ato que exija transição.
-> - **Migrations 0096–0097:** CHECKs de situação de ocorrência/convocação saem da tabela; o guardião é
->   agora o DSL (`workflow_definicao.transicoes`). Coluna `situacao` no alvará é nova (migration 0097,
->   default `vigente`), substituindo o derivado anterior.
-> - **Ato novo: revogação de alvará** com motivo obrigatório, traçado na trilha `workflow_andamento`.
+>   `transporte-recadastramento`): espelham as máquinas de estado anteriores — dia 1 idêntico ao
+>   dia 0. Instanciação **lazy** para o estoque: o primeiro ato cria a instância já no estado
+>   equivalente à situação atual.
+> - **Migrations 0096–0097:** os CHECKs de situação de ocorrência/convocação saem do banco — o
+>   guardião passa a ser o DSL da definição (`workflow_definition.dsl`). O alvará ganha a coluna
+>   `situacao` (0097, default `vigente`; "vencido" continua derivado de `data_validade`).
+> - **Ato novo: revogação de alvará** (POST `/alvaras/{id}/revogar`) com motivo obrigatório,
+>   registrado no `workflow_transicao_log`.
 > - **Mudança de política aprovada:** reativação de convocação retorna ao estado de **origem**
->   (`convocado` ou `em_analise`), não mais sempre para `convocado`. Há teste separado para ambos os
->   caminhos (`test_reativar_volta_ao_estado_origem`).
-> - **Painel `WorkflowTimeline` (só leitura)** nas três telas (ocorrência, alvará, recadastramento)
->   exibindo a trilha cronológica de transições. GET `/transporte-regulado/workflow/{tipo}/{id}` retorna
->   a instância com andamentos — type-agnostic, com `tipo` sendo um dos slugs acima.
+>   (`convocado` ou `em_analise`), não mais sempre a `convocado`. Teste dos dois caminhos em
+>   `test_suspender_e_reativar_respeita_o_estado_anterior`.
+> - **Painel `WorkflowTimeline` (só leitura)** nas três telas, sobre o GET novo
+>   `/transporte-regulado/workflow/{entidade_tipo}/{entidade_id}` (`entidade_tipo` ∈ ocorrencia |
+>   alvara | convocacao).
 >
 > Pendências registradas para fatia futura:
 >
@@ -1046,12 +1049,12 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   o aviso por e-mail é processo-only; implementar quando algum tenant configurar `sla_dias` no tipo.
 > - `reabrir_recadastramento` grava `situacao` direto sem tocar a instância (`workflow_instance`);
 >   self-heal lazy acontece no ato seguinte — candidata a fachada futura, para ser explícita.
-> - Cobertura HTTP do GET de workflow "com instância" existe só para ocorrência; endpoint é
->   type-agnostic e risco é baixo, mas falta sinalizar falta de testes para os outros tipos.
+> - Cobertura HTTP do GET de workflow "com instância" existe só para ocorrência; o endpoint é
+>   type-agnostic e o risco é baixo, mas um caso HTTP para alvará ou convocação fecharia barato.
 > - Seleção da instância mais recente (quando existem múltiplas) usa `ORDER BY iniciada_em DESC`
 >   sem teste multi-instância.
-> - Índice antigo `ix_workflow_instance_processo_ativa` (0008) coexiste com o novo único polimórfico;
->   aposentar o antigo é fatia futura (docstring em migrations/0095)
+> - Índice antigo `ix_workflow_instance_processo_ativa` (0008) coexiste com o novo único
+>   polimórfico; aposentá-lo é fatia futura (docstring da 0095).
 
 > **Atualizado em 2026-08-01, pela fatia de costura de navegação** (spec e plano em
 > `docs/superpowers/`). "Entregues e no ar" era verdade só para o backend. Três coisas mudaram, e a
