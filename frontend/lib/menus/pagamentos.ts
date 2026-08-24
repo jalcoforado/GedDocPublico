@@ -5,6 +5,7 @@ import {
   Building2,
   CheckCircle,
   ClipboardList,
+  FileSpreadsheet,
   FileText,
   FolderTree,
   Inbox,
@@ -51,6 +52,11 @@ export const menuPagamentos: MenuModulo = {
         // (importar/baixar/conciliar) exige `pagamento_pagar`.
         { label: "Conciliação", href: "/m/pagamentos/conciliacao", icon: Landmark,
           anyOf: ["pagamento_pagar", "pagamento_autorizar", "pagamento_auditar", "pagamento_cadastro"] },
+        // Leitura e geração exigem `pagamento_cadastro`, mesmo gate do router
+        // (`pagamentos_contabil.py`): POST pede action "inserir", GETs só a
+        // transação.
+        { label: "Export contábil", href: "/m/pagamentos/contabil", icon: FileSpreadsheet,
+          perm: "pagamento_cadastro" },
         {
           label: "Cadastros",
           href: "/m/pagamentos/cadastros/fornecedores",
