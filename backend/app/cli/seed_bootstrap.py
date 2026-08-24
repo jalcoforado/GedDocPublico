@@ -235,6 +235,12 @@ async def garantir_workflows_transporte(db: AsyncSession) -> list[str]:
 
     criadas: list[str] = []
     for tenant_id in tenant_ids:
+        # `workflow_definition` tem RLS FORCE: sob papel sem BYPASSRLS, tanto
+        # o SELECT de existência quanto o INSERT precisam da GUC do tenant —
+        # e o flush tem de acontecer AINDA sob essa GUC (linha pendente de um
+        # tenant flushada sob a GUC do próximo viola a policy; foi assim que
+        # test_seed_bootstrap pegou esta função na suíte completa).
+        await _set_local_tenant(db, tenant_id)
         for slug, dsl in SEMENTES.items():
             existe = (
                 await db.execute(
@@ -260,7 +266,7 @@ async def garantir_workflows_transporte(db: AsyncSession) -> list[str]:
                 )
             )
             criadas.append(f"{tenant_id}:{slug}")
-    if criadas:
+        # Flush por tenant, ainda sob a GUC dele (ver comentário acima).
         await db.flush()
     return criadas
 

@@ -90,6 +90,13 @@ async def tenant_ops(admin_engine):
         await _reset(_ns(slug))
         async with _sm(admin_engine)() as s:
             for sql in (
+                # P8: o seed operacional passa pelas fachadas de workflow, que
+                # criam definicao/instancia lazy — sem apagar antes, o DELETE
+                # do tenant esbarra na FK.
+                "DELETE FROM aprimora_py.workflow_sla_alerta WHERE tenant_id = :t",
+                "DELETE FROM aprimora_py.workflow_transicao_log WHERE tenant_id = :t",
+                "DELETE FROM aprimora_py.workflow_instance WHERE tenant_id = :t",
+                "DELETE FROM aprimora_py.workflow_definition WHERE tenant_id = :t",
                 "DELETE FROM utils.usuario WHERE tenant_id = :t",
                 "DELETE FROM utils.unidade_trabalho WHERE tenant_id = :t",
                 "DELETE FROM aprimora_py.tenant WHERE id = :t",
