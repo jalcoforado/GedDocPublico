@@ -169,6 +169,35 @@ SEMENTES: dict[str, dict] = {
             {"de": "vigente", "para": "revogado", "label": "revogar"},
         ],
     },
+    # P8 D3 (Task 5). `estado_anterior` (injetado pelo engine a partir do
+    # último log) é o que permite `reativar`/`reativar_analise` devolverem a
+    # convocação para onde ela estava ANTES da suspensão — diferente da P5.3
+    # (`reativar_convocacao` sempre voltava para `convocado`). `suspender`/
+    # `suspender_analise` têm o mesmo `para` ("suspenso") de propósito: quem
+    # transiciona não precisa escolher o label, o engine casa pelo `de` ==
+    # `estado_atual` sozinho.
+    "transporte-recadastramento": {
+        "estado_inicial": "convocado",
+        "estados": [
+            {"slug": "convocado", "label": "Convocado"},
+            {"slug": "em_analise", "label": "Em análise"},
+            {"slug": "suspenso", "label": "Suspenso"},
+            {"slug": "deferido", "label": "Deferido", "final": True},
+            {"slug": "indeferido", "label": "Indeferido", "final": True},
+        ],
+        "transicoes": [
+            {"de": "convocado", "para": "em_analise", "label": "iniciar_analise"},
+            {"de": "em_analise", "para": "deferido", "label": "deferir",
+             "condicao": "checklist_completo"},
+            {"de": "em_analise", "para": "indeferido", "label": "indeferir"},
+            {"de": "convocado", "para": "suspenso", "label": "suspender"},
+            {"de": "em_analise", "para": "suspenso", "label": "suspender_analise"},
+            {"de": "suspenso", "para": "convocado", "label": "reativar",
+             "condicao": "estado_anterior == 'convocado'"},
+            {"de": "suspenso", "para": "em_analise", "label": "reativar_analise",
+             "condicao": "estado_anterior == 'em_analise'"},
+        ],
+    },
 }
 
 
@@ -290,6 +319,33 @@ async def transicionar(
             f"O workflow {slug!r} não permite {para!r} a partir de "
             f"{instancia.estado_atual!r}",
         ) from exc
+
+
+async def transicionar_tentando(
+    db: AsyncSession, *, instancia: WorkflowInstance, usuario_id: int | None,
+    entidade: Any, slug: str, tentativas: list[str],
+) -> str:
+    """Tenta cada `para` de `tentativas`, NA ORDEM, e usa a primeira que o
+    engine aceitar — caso de uso: `reativar_convocacao` (P8 D3), onde o
+    destino certo depende de `estado_anterior` (condição do DSL) e não do
+    caller, que só sabe que a instância está em `suspenso`.
+
+    Propaga o 409 da ÚLTIMA tentativa se todas forem recusadas — mensagem
+    plausível o bastante (a condição da última tentativa é a mais específica:
+    normalmente a mais "provável" veio primeiro).
+    """
+    se_ultimo_erro: HTTPException | None = None
+    for para in tentativas:
+        try:
+            await transicionar(
+                db, instancia=instancia, para=para, usuario_id=usuario_id,
+                entidade=entidade, slug=slug,
+            )
+            return para
+        except HTTPException as exc:
+            se_ultimo_erro = exc
+    assert se_ultimo_erro is not None  # `tentativas` não pode ser vazia
+    raise se_ultimo_erro
 
 
 def registrar_providers() -> None:

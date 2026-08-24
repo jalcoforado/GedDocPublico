@@ -33,10 +33,14 @@ from tests.test_transporte_p5_2_atendimento import (
     _as_user,
     _convocacao,
     _cria_usuario_comum_transporte,
+    _item,
+    _marcar,
     _permissionario,
     _provisionar,
     _sm,
     _um_usuario,
+    _veiculo,
+    _vistoria,
 )
 from tests.test_transporte_p5_3_atraso import _ciclo_vencido, _parecer
 from tests.test_transporte_p7_ocorrencias import _operadores, _tipo
@@ -723,7 +727,11 @@ async def _limpar_alvara_e_engine(engine, tenant_id: int) -> None:
     (só o teste (c), com convocação suspensa, usa a segunda) — sem apagá-las
     antes, o DELETE de permissionario/empresa dentro de `_limpar_engine`
     esbarra na FK. Apagar tabela sem linha nenhuma é no-op, seguro para os
-    outros testes desta seção."""
+    outros testes desta seção.
+
+    Task 5 acrescentou `veiculo`/`veiculo_vistoria` (cenário de deferimento
+    com vistoria em dia) — mesma FK de permissionario/empresa, mesmo
+    tratamento no-op quando a seção não os usa."""
     async with _sm(engine)() as s:
         for stmt in (
             "DELETE FROM transporte_regulado.recadastramento_decisao WHERE tenant_id=:t",
@@ -731,6 +739,8 @@ async def _limpar_alvara_e_engine(engine, tenant_id: int) -> None:
             "DELETE FROM transporte_regulado.recadastramento_item WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.recadastramento_convocacao WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.recadastramento_ciclo WHERE tenant_id=:t",
+            "DELETE FROM transporte_regulado.veiculo_vistoria WHERE tenant_id=:t",
+            "DELETE FROM transporte_regulado.veiculo WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.alvara WHERE tenant_id=:t",
         ):
             await s.execute(text(stmt), {"t": tenant_id})
@@ -998,5 +1008,240 @@ async def test_http_usuario_comum_revoga_alvara_200(admin_engine):
             )
         assert r.status_code == 200, r.text
         assert r.json()["situacao"] == "revogado"
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+# ============================================================================
+# Task 5 — recadastramento comandado pelo workflow (semente
+# `transporte-recadastramento`, P8 D3)
+# ============================================================================
+#
+# A assimetria da P5.2 (deferir exige completude; indeferir não) fica no
+# service, ANTES da chamada ao engine — o DSL só espelha o resultado. A
+# reativação muda de comportamento nesta fatia: em vez de sempre voltar para
+# `convocado` (P5.3), agora respeita o `estado_anterior` do log — suspensa a
+# partir de `convocado` volta a `convocado`; suspensa a partir de
+# `em_analise` volta a `em_analise`.
+
+
+async def _cenario_recadastramento_completo(engine, tenant_id: int, *, ciclo=None):
+    """Permissionário com item obrigatório e veículo com vistoria em dia —
+    tudo pronto para deferir. Espelha `_cenario_completo` de
+    `test_transporte_p5_2_atendimento.py`."""
+    uid = await _um_usuario(engine, tenant_id)
+    item = await _item(engine, tenant_id, descricao="CNH")
+    perm = await _permissionario(engine, tenant_id, nome="Fulano P8")
+    veic = await _veiculo(engine, tenant_id, perm_id=perm.id)
+    await _vistoria(engine, tenant_id, veic.id, uid, validade=date.today() + timedelta(days=30))
+    _ciclo, conv = await _convocacao(engine, tenant_id, perm, ciclo=ciclo)
+    return uid, item, perm, conv
+
+
+async def test_deferir_completo_sincroniza_estados_e_finaliza(admin_engine):
+    """(a) checklist completo + vistoria em dia: `decidir_recadastramento`
+    defere, `situacao` e `estado_atual` da instância terminam em `deferido`,
+    instância finalizada."""
+    t = await _provisionar(admin_engine)
+    try:
+        uid, item, _perm, conv = await _cenario_recadastramento_completo(admin_engine, t.id)
+        await _marcar(admin_engine, t.id, conv.id, item.id, True, uid)
+
+        async with _sm(admin_engine)() as db:
+            decisao = await tr.decidir_recadastramento(
+                db, tenant_id=t.id, convocacao_id=conv.id, tipo="deferimento",
+                payload=_parecer("Tudo em ordem."), usuario_id=uid,
+            )
+        assert decisao.tipo == "deferimento"
+
+        async with _sm(admin_engine)() as db:
+            recarregada = await tr.obter_convocacao(
+                db, tenant_id=t.id, convocacao_id=conv.id
+            )
+            inst = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "convocacao",
+                        WorkflowInstance.entidade_id == conv.id,
+                    )
+                )
+            ).scalar_one()
+        assert recarregada.situacao == "deferido"
+        assert inst.estado_atual == "deferido"
+        assert inst.ativa is False
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_deferir_incompleto_409_mensagem_p5_2(admin_engine):
+    """(b) checklist incompleto: 409 com a MESMA mensagem da P5.2 — a
+    completude é checada no service, antes de qualquer chamada ao engine."""
+    t = await _provisionar(admin_engine)
+    try:
+        uid, _item_, _perm, conv = await _cenario_recadastramento_completo(admin_engine, t.id)
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.decidir_recadastramento(
+                    db, tenant_id=t.id, convocacao_id=conv.id, tipo="deferimento",
+                    payload=_parecer("Tentando sem completude."), usuario_id=uid,
+                )
+        assert e.value.status_code == 409
+        assert "Deferimento exige checklist obrigatório completo" in e.value.detail
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_suspender_e_reativar_respeita_o_estado_anterior(admin_engine):
+    """(c) O par de condições `estado_anterior`: suspender de `convocado` e
+    reativar volta a `convocado`; suspender de `em_analise` (via marcação) e
+    reativar volta a `em_analise` — não mais sempre `convocado` (P5.3)."""
+    t = await _provisionar(admin_engine)
+    try:
+        perm = await _permissionario(admin_engine, t.id, nome="Direto do convocado")
+        ciclo = await _ciclo_vencido(admin_engine, t.id)
+        uid = await _um_usuario(admin_engine, t.id)
+
+        # 1) suspende direto de `convocado` (nunca marcou nada).
+        _c1, conv1 = await _convocacao(admin_engine, t.id, perm, ciclo=ciclo)
+        async with _sm(admin_engine)() as db:
+            await tr.suspender_convocacao(
+                db, tenant_id=t.id, convocacao_id=conv1.id,
+                payload=_parecer(), usuario_id=uid,
+            )
+        async with _sm(admin_engine)() as db:
+            await tr.reativar_convocacao(
+                db, tenant_id=t.id, convocacao_id=conv1.id,
+                payload=_parecer("Recurso deferido."), usuario_id=uid,
+            )
+        async with _sm(admin_engine)() as db:
+            recarregada1 = await tr.obter_convocacao(
+                db, tenant_id=t.id, convocacao_id=conv1.id
+            )
+        assert recarregada1.situacao == "convocado"
+
+        # 2) marca (entra em `em_analise`) e SÓ ENTÃO suspende.
+        item = await _item(admin_engine, t.id, descricao="Doc P8")
+        perm2 = await _permissionario(admin_engine, t.id, nome="Via em_analise")
+        _c2, conv2 = await _convocacao(admin_engine, t.id, perm2, ciclo=ciclo)
+        await _marcar(admin_engine, t.id, conv2.id, item.id, True, uid)
+        async with _sm(admin_engine)() as db:
+            em_analise = await tr.obter_convocacao(
+                db, tenant_id=t.id, convocacao_id=conv2.id
+            )
+        assert em_analise.situacao == "em_analise"
+
+        async with _sm(admin_engine)() as db:
+            await tr.suspender_convocacao(
+                db, tenant_id=t.id, convocacao_id=conv2.id,
+                payload=_parecer(), usuario_id=uid,
+            )
+        async with _sm(admin_engine)() as db:
+            await tr.reativar_convocacao(
+                db, tenant_id=t.id, convocacao_id=conv2.id,
+                payload=_parecer("Recurso deferido."), usuario_id=uid,
+            )
+        async with _sm(admin_engine)() as db:
+            recarregada2 = await tr.obter_convocacao(
+                db, tenant_id=t.id, convocacao_id=conv2.id
+            )
+        assert recarregada2.situacao == "em_analise"
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_convocacao_de_estoque_em_analise_ganha_workflow_lazy(admin_engine):
+    """(d) Convocação com `situacao='em_analise'` gravada direto no banco
+    (estoque anterior ao P8, sem `WorkflowInstance`) sofre `indeferir`: a
+    instância nasce lazy NO ESTADO CORRENTE (`em_analise`, não `convocado`) e
+    já transiciona no mesmo ato — UMA linha de log."""
+    t = await _provisionar(admin_engine)
+    try:
+        perm = await _permissionario(admin_engine, t.id, nome="Estoque em análise")
+        ciclo = await _ciclo_vencido(admin_engine, t.id)
+        uid = await _um_usuario(admin_engine, t.id)
+        _c, conv = await _convocacao(admin_engine, t.id, perm, ciclo=ciclo)
+
+        async with admin_engine.begin() as connx:
+            await connx.execute(
+                text(
+                    "UPDATE transporte_regulado.recadastramento_convocacao "
+                    "SET situacao = 'em_analise' WHERE id = :id"
+                ),
+                {"id": conv.id},
+            )
+
+        async with _sm(admin_engine)() as db:
+            nenhuma = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "convocacao",
+                        WorkflowInstance.entidade_id == conv.id,
+                    )
+                )
+            ).first()
+        assert nenhuma is None
+
+        async with _sm(admin_engine)() as db:
+            await tr.decidir_recadastramento(
+                db, tenant_id=t.id, convocacao_id=conv.id, tipo="indeferimento",
+                payload=_parecer("Faltou documento."), usuario_id=uid,
+            )
+
+        async with _sm(admin_engine)() as db:
+            inst = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "convocacao",
+                        WorkflowInstance.entidade_id == conv.id,
+                    )
+                )
+            ).scalar_one()
+            logs = (
+                await db.execute(
+                    select(WorkflowTransicaoLog).where(
+                        WorkflowTransicaoLog.id_workflow_instance == inst.id,
+                    )
+                )
+            ).scalars().all()
+        assert inst.estado_atual == "indeferido"
+        assert inst.ativa is False
+        assert len(logs) == 1
+        assert logs[0].estado_de == "em_analise"
+        assert logs[0].estado_para == "indeferido"
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_indeferir_409_quando_dsl_do_tenant_nao_permite(admin_engine):
+    """(e) Tenant edita a própria definição removendo a transição
+    `indeferir` — `decidir_recadastramento` responde 409 vindo do engine."""
+    t = await _provisionar(admin_engine)
+    try:
+        uid, item, _perm, conv = await _cenario_recadastramento_completo(admin_engine, t.id)
+        await _marcar(admin_engine, t.id, conv.id, item.id, True, uid)
+
+        async with admin_engine.begin() as connx:
+            await connx.execute(
+                text(
+                    "UPDATE aprimora_py.workflow_definition SET dsl = jsonb_set("
+                    "  dsl, '{transicoes}', "
+                    "  (SELECT jsonb_agg(elem) FROM jsonb_array_elements(dsl->'transicoes') elem "
+                    "   WHERE elem->>'label' != 'indeferir')"
+                    ") WHERE tenant_id = :t AND slug = 'transporte-recadastramento'"
+                ),
+                {"t": t.id},
+            )
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.decidir_recadastramento(
+                    db, tenant_id=t.id, convocacao_id=conv.id, tipo="indeferimento",
+                    payload=_parecer("Faltou documento."), usuario_id=uid,
+                )
+        assert e.value.status_code == 409
     finally:
         await _limpar_alvara_e_engine(admin_engine, t.id)

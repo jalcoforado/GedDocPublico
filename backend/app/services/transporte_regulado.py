@@ -2759,6 +2759,41 @@ async def itens_aplicaveis(
     return list((await db.execute(stmt)).scalars().all())
 
 
+# P8 D3 (Task 5) — slug do workflow que comanda a convocação.
+WORKFLOW_SLUG_RECADASTRAMENTO = "transporte-recadastramento"
+
+
+async def _instancia_recadastramento(
+    db: AsyncSession, *, tenant_id: int, conv: RecadastramentoConvocacao,
+    usuario_id: int | None,
+):
+    """Devolve (lazy) a `WorkflowInstance` da convocação — entrando em
+    `em_analise` primeiro se `conv.situacao` ainda for `convocado`.
+
+    O hop existe para conciliar duas coisas que continuam válidas: o DSL só
+    define `deferir`/`indeferir`/`suspender_analise` a partir de `em_analise`
+    (a semente `transporte-recadastramento`), mas `SITUACOES_ABERTAS` no
+    service sempre permitiu decidir/marcar direto de `convocado` — é
+    comportamento herdado da P5.2 e há teste de regressão que decide
+    (`indeferimento`) uma convocação nunca marcada. Fazer o hop aqui, dentro
+    da fachada, preserva os dois sem mudar o DSL (que continua sendo o que o
+    brief pede, verbatim) nem o texto visível ao usuário — o hop vira só mais
+    uma linha no log da instância."""
+    from . import transporte_workflow as _wf
+
+    inst = await _wf.obter_ou_criar_instancia(
+        db, tenant_id=tenant_id, slug=WORKFLOW_SLUG_RECADASTRAMENTO,
+        entidade_tipo="convocacao", entidade_id=conv.id,
+        situacao_atual=conv.situacao, usuario_id=usuario_id,
+    )
+    if conv.situacao == "convocado":
+        await _wf.transicionar(
+            db, instancia=inst, para="em_analise", usuario_id=usuario_id,
+            entidade=conv, slug=WORKFLOW_SLUG_RECADASTRAMENTO,
+        )
+    return inst
+
+
 # ------------------------------------------------------------------- marcas
 
 
@@ -2824,9 +2859,17 @@ async def marcar_item_recadastramento(
     # A primeira marcação tira a convocação de `convocado`. Gravado, e não
     # derivado: derivar exigiria subconsulta por linha na listagem, e a P5.3
     # vai filtrar por este campo no relatório.
+    #
+    # P8 D3 (Task 5): a transição `convocado -> em_analise` agora passa pelo
+    # workflow (`_instancia_recadastramento` já faz o hop quando necessário)
+    # — commita a marca junto, no mesmo commit da transição.
     if conv.situacao == "convocado":
-        conv.situacao = "em_analise"
         conv.atualizado_em = datetime.utcnow()
+        await _instancia_recadastramento(
+            db, tenant_id=tenant_id, conv=conv, usuario_id=usuario_id,
+        )
+        await db.refresh(marca)
+        return marca
 
     await db.commit()
     await db.refresh(marca)
@@ -3061,9 +3104,22 @@ async def decidir_recadastramento(
         criado_em=datetime.utcnow(),
     )
     db.add(decisao)
-    conv.situacao = "deferido" if tipo == "deferimento" else "indeferido"
+
+    # P8 D3 (Task 5): a transição é comandada pelo workflow — a completude
+    # (acima) já decidiu se pode chegar aqui; o DSL só espelha esse resultado
+    # (condição `checklist_completo` em `deferir`, que nunca deveria bloquear
+    # neste ponto, já que a checagem de cima é a mesma regra).
+    inst = await _instancia_recadastramento(
+        db, tenant_id=tenant_id, conv=conv, usuario_id=usuario_id,
+    )
+    destino = "deferido" if tipo == "deferimento" else "indeferido"
     conv.atualizado_em = datetime.utcnow()
-    await db.commit()
+    from . import transporte_workflow as _wf
+
+    await _wf.transicionar(
+        db, instancia=inst, para=destino, usuario_id=usuario_id,
+        entidade=conv, slug=WORKFLOW_SLUG_RECADASTRAMENTO,
+    )
     await db.refresh(decisao)
     return decisao
 
@@ -3339,9 +3395,24 @@ async def suspender_convocacao(
         criado_em=datetime.utcnow(),
     )
     db.add(decisao)
-    conv.situacao = SITUACAO_SUSPENSO
+
+    # P8 D3 (Task 5): `suspender`/`suspender_analise` têm o mesmo destino
+    # ("suspenso") — o engine casa a transição pelo `de` == `estado_atual`
+    # sozinho, então NÃO instância aqui (`obter_ou_criar_instancia` direto,
+    # sem o hop de `_instancia_recadastramento`: suspender de `convocado` não
+    # deve passar por `em_analise` no log).
+    from . import transporte_workflow as _wf
+
+    inst = await _wf.obter_ou_criar_instancia(
+        db, tenant_id=tenant_id, slug=WORKFLOW_SLUG_RECADASTRAMENTO,
+        entidade_tipo="convocacao", entidade_id=conv.id,
+        situacao_atual=conv.situacao, usuario_id=usuario_id,
+    )
     conv.atualizado_em = datetime.utcnow()
-    await db.commit()
+    await _wf.transicionar(
+        db, instancia=inst, para=SITUACAO_SUSPENSO, usuario_id=usuario_id,
+        entidade=conv, slug=WORKFLOW_SLUG_RECADASTRAMENTO,
+    )
     await db.refresh(decisao)
     return decisao
 
@@ -3356,10 +3427,17 @@ async def reativar_convocacao(
 ) -> RecadastramentoDecisao:
     """Desfaz a suspensão. É o deferimento do recurso, e o parecer é o julgamento.
 
-    Volta para `convocado`, e não para `em_analise` mesmo que estivesse em
-    análise antes: reativar é recomeçar o atendimento, e inferir o estado
-    anterior exigiria guardá-lo. As marcas de checklist **não** são apagadas —
-    são log append-only e continuam valendo.
+    P8 D3 (Task 5): volta para o estado de ANTES da suspensão — `convocado`
+    se a suspensão veio de lá, `em_analise` se veio de lá —, e não mais
+    sempre `convocado` (comportamento da P5.3). `estado_anterior` vem do
+    último log da instância (injetado pelo engine), então isso só é possível
+    porque a suspensão acima sempre grava um log real, nunca pula direto para
+    `suspenso` sem passar pelo motor. `transicionar_tentando` tenta `reativar`
+    (→`convocado`) e, se a condição de `estado_anterior` bloquear, tenta
+    `reativar_analise` (→`em_analise`) — a ordem não importa para o
+    resultado (só uma das duas condições pode bater), mas importa para a
+    mensagem de erro caso as duas bloqueiem. As marcas de checklist **não**
+    são apagadas — são log append-only e continuam valendo.
     """
     conv = await obter_convocacao(db, tenant_id=tenant_id, convocacao_id=convocacao_id)
     ciclo = await obter_ciclo(db, tenant_id=tenant_id, ciclo_id=conv.id_ciclo)
@@ -3385,9 +3463,19 @@ async def reativar_convocacao(
         criado_em=datetime.utcnow(),
     )
     db.add(decisao)
-    conv.situacao = "convocado"
+
+    from . import transporte_workflow as _wf
+
+    inst = await _wf.obter_ou_criar_instancia(
+        db, tenant_id=tenant_id, slug=WORKFLOW_SLUG_RECADASTRAMENTO,
+        entidade_tipo="convocacao", entidade_id=conv.id,
+        situacao_atual=conv.situacao, usuario_id=usuario_id,
+    )
     conv.atualizado_em = datetime.utcnow()
-    await db.commit()
+    await _wf.transicionar_tentando(
+        db, instancia=inst, entidade=conv, usuario_id=usuario_id,
+        slug=WORKFLOW_SLUG_RECADASTRAMENTO, tentativas=["convocado", "em_analise"],
+    )
     await db.refresh(decisao)
     return decisao
 

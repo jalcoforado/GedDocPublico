@@ -365,8 +365,21 @@ async def test_reativar_o_que_nao_esta_suspenso_e_409(admin_engine):
 
 
 @pytest.mark.asyncio
-async def test_reativacao_volta_para_convocado_e_preserva_a_trilha(admin_engine):
-    """Reativar recomeça o atendimento, mas não apaga marca nem decisão."""
+async def test_reativacao_volta_para_em_analise_e_preserva_a_trilha(admin_engine):
+    """Reativar recomeça o atendimento, mas não apaga marca nem decisão.
+
+    P8 D3 (transporte/p8-workflows, Task 5) MUDOU o destino da reativação:
+    antes desta fatia, `reativar_convocacao` sempre devolvia `convocado`,
+    mesmo quando a suspensão tinha vindo de `em_analise` (era a regra da
+    P5.3, e este teste chamava-se `..._volta_para_convocado_...` e afirmava
+    exatamente isso). A partir do D3 a reativação respeita o estado ANTERIOR
+    à suspensão (`estado_anterior`, do log do workflow) — aqui o cenário
+    marca o item ANTES de suspender, o que tira a convocação de `convocado`
+    e a põe em `em_analise`; suspender a partir dali e depois reativar tem de
+    devolvê-la para `em_analise`, não para `convocado`. O par de cenários
+    (suspender de `convocado` × suspender de `em_analise`) tem cobertura
+    própria em `tests/test_transporte_p8_workflows.py::
+    test_suspender_e_reativar_respeita_o_estado_anterior`."""
     t = await _provisionar(admin_engine)
     tid = t.id
     perm = await _permissionario(admin_engine, tid)
@@ -398,7 +411,7 @@ async def test_reativacao_volta_para_convocado_e_preserva_a_trilha(admin_engine)
         estado = await tr.estado_do_checklist(
             db, tenant_id=tid, convocacao_id=conv.id
         )
-    assert recarregada.situacao == "convocado"
+    assert recarregada.situacao == "em_analise"
     assert [d.tipo for d in trilha] == ["suspensao", "reativacao"]
     marcados = [i for i in estado if i["marcado"] is True]
     assert marcados, "a reativação apagou a marcação — deveria preservar"
