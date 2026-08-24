@@ -543,7 +543,21 @@ class LancamentoExtratoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int; id_extrato: int; data: date; historico: str
     documento: str | None; favorecido: str | None; valor: Decimal
-    tipo: str; conciliado: bool
+    tipo: str; conciliado: bool; id_externo: str | None = None
+
+
+class ImportarExtratoResultadoOut(BaseModel):
+    """Relato da importação (C2.2). `ignorados_por_id_externo` conta linhas
+    puladas por já existir `(id_conta, id_externo)` igual — só se aplica a
+    formato com id de lançamento (OFX); `possiveis_duplicatas` é um aviso
+    (data+valor+tipo já existentes na conta) e NÃO pula nada — pular por
+    esses campos esconderia lançamento real (dois pagamentos iguais no
+    mesmo dia são legítimos)."""
+    total_no_arquivo: int
+    importados: int
+    ignorados_por_id_externo: int
+    possiveis_duplicatas: int
+    extrato: ExtratoOut
 
 
 class SugestaoBaixaOut(BaseModel):

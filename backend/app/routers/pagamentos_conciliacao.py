@@ -9,8 +9,8 @@ from ..auth.perms import require_any_permission, require_permission
 from ..database import get_db
 from ..models import Usuario
 from ..schemas.pagamentos import (
-    ConciliacaoOut, ConciliarIn, ExtratoOut, ImportarExtratoIn, LancamentoExtratoOut,
-    SugestaoBaixaOut,
+    ConciliacaoOut, ConciliarIn, ExtratoOut, ImportarExtratoIn, ImportarExtratoResultadoOut,
+    LancamentoExtratoOut, SugestaoBaixaOut,
 )
 from fastapi import Response
 
@@ -22,13 +22,19 @@ router = APIRouter(prefix="/pagamentos", tags=["pagamentos-conciliacao"])
 _LEITURA = ("pagamento_pagar", "pagamento_autorizar", "pagamento_auditar", "pagamento_cadastro")
 
 
-@router.post("/extratos", response_model=ExtratoOut, status_code=status.HTTP_201_CREATED)
+@router.post("/extratos", response_model=ImportarExtratoResultadoOut,
+            status_code=status.HTTP_201_CREATED)
 async def importar_extrato(payload: ImportarExtratoIn,
                            usuario: Usuario = Depends(require_permission("pagamento_pagar")),
                            tenant_id: int = Depends(require_tenant_id),
                            db: AsyncSession = Depends(get_db)):
     ex = await conc.importar_extrato(db, tenant_id=tenant_id, usuario_id=usuario.id, payload=payload)
-    return ExtratoOut.model_validate(ex)
+    return ImportarExtratoResultadoOut(
+        total_no_arquivo=ex._total_no_arquivo, importados=ex._importados,
+        ignorados_por_id_externo=ex._ignorados_por_id_externo,
+        possiveis_duplicatas=ex._possiveis_duplicatas,
+        extrato=ExtratoOut.model_validate(ex),
+    )
 
 
 @router.get("/extratos", response_model=list[ExtratoOut])

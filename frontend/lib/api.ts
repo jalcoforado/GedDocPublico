@@ -1143,6 +1143,7 @@ export interface LancamentoExtrato {
   valor: string;
   tipo: "CREDITO" | "DEBITO";
   conciliado: boolean;
+  id_externo: string | null;
 }
 
 /** EXATA = mesmo valor e mesma data; PROVAVEL = mesmo valor, até 3 dias de diferença. */
@@ -1176,6 +1177,18 @@ export interface ImportarExtratoInput {
   nome_arquivo: string;
   formato?: "CSV" | "OFX" | "XLSX" | "CNAB";
   conteudo: string;
+}
+
+/** Relato da importação (C2.2). `ignorados_por_id_externo` só se aplica a
+ * formato com id de lançamento (OFX) — linha cujo (conta, FITID) já existe
+ * é pulada. `possiveis_duplicatas` é aviso (data+valor+tipo já existentes
+ * na conta) e NÃO foi pulado. */
+export interface ImportarExtratoResultado {
+  total_no_arquivo: number;
+  importados: number;
+  ignorados_por_id_externo: number;
+  possiveis_duplicatas: number;
+  extrato: ExtratoBancario;
 }
 
 export interface SaldoConta {
@@ -3888,7 +3901,7 @@ export const api = {
       extratos: (idConta?: number) =>
         request<ExtratoBancario[]>(`/pagamentos/extratos${qs({ id_conta: idConta })}`),
       importar: (data: ImportarExtratoInput) =>
-        request<ExtratoBancario>("/pagamentos/extratos", {
+        request<ImportarExtratoResultado>("/pagamentos/extratos", {
           method: "POST",
           body: JSON.stringify({ formato: "CSV", ...data }),
         }),

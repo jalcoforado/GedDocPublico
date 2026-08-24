@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?OFX OFXHEADER="200" VERSION="211" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <SIGNONMSGSRSV1>
+    <SONRS>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <DTSERVER>20260810120000</DTSERVER>
+      <LANGUAGE>POR</LANGUAGE>
+    </SONRS>
+  </SIGNONMSGSRSV1>
+  <BANKMSGSRSV1>
+    <STMTTRNRS>
+      <TRNUID>1</TRNUID>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <STMTRS>
+        <CURDEF>BRL</CURDEF>
+        <BANKACCTFROM>
+          <BANKID>001</BANKID>
+          <ACCTID>123456</ACCTID>
+          <ACCTTYPE>CHECKING</ACCTTYPE>
+        </BANKACCTFROM>
+        <BANKTRANLIST>
+          <DTSTART>20260801000000</DTSTART>
+          <DTEND>20260810235959</DTEND>
+          <STMTTRN>
+            <TRNTYPE>CREDIT</TRNTYPE>
+            <DTPOSTED>20260801120000</DTPOSTED>
+            <TRNAMT>1500.00</TRNAMT>
+            <FITID>F001</FITID>
+            <CHECKNUM>1001</CHECKNUM>
+            <NAME>Prefeitura</NAME>
+            <MEMO>Repasse duodecimo</MEMO>
+          </STMTTRN>
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20260805090000</DTPOSTED>
+            <TRNAMT>-150.75</TRNAMT>
+            <FITID>F002</FITID>
+            <CHECKNUM>1002</CHECKNUM>
+            <NAME>Fornecedor X</NAME>
+            <MEMO>Pagamento fornecedor</MEMO>
+          </STMTTRN>
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20260808153000</DTPOSTED>
+            <TRNAMT>-89.90</TRNAMT>
+            <FITID>F003</FITID>
+            <REFNUM>REF-77</REFNUM>
+            <NAME>Banco</NAME>
+            <MEMO>Tarifa manutencao conta</MEMO>
+          </STMTTRN>
+        </BANKTRANLIST>
+        <LEDGERBAL>
+          <BALAMT>1259.35</BALAMT>
+          <DTASOF>20260810235959</DTASOF>
+        </LEDGERBAL>
+      </STMTRS>
+    </STMTTRNRS>
+  </BANKMSGSRSV1>
+</OFX>

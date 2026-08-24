@@ -7,6 +7,7 @@ levando o débito a CONCILIADO quando todos os pagamentos batem no extrato.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -20,6 +21,7 @@ from ..models import (
 )
 from ..schemas.pagamentos import ImportarExtratoIn, SugestaoBaixaOut
 from . import pagamentos_estados as est
+from .pagamentos_extrato_parsers import OfxParseError, parse_ofx
 
 _PROVAVEL_DIAS = 3  # tolerância de data para correspondência provável
 
@@ -91,16 +93,46 @@ def _parse_csv(conteudo: str) -> list[dict]:
     return out
 
 
+def _linhas_ofx(conteudo: str) -> list[dict]:
+    try:
+        parseados = parse_ofx(conteudo)
+    except OfxParseError as e:
+        raise ConciliacaoError(str(e), status.HTTP_422_UNPROCESSABLE_ENTITY)
+    return [dataclasses.asdict(p) for p in parseados]
+
+
 async def importar_extrato(db: AsyncSession, *, tenant_id: int, usuario_id: int | None,
                            payload: ImportarExtratoIn) -> Extrato:
     """Importa o extrato, preservando arquivo/hash (RF-EXT-10) e criando os
-    lançamentos. Idempotente por (conta, hash) — reimportar o mesmo arquivo 409."""
+    lançamentos. Idempotente por (conta, hash) — reimportar o mesmo arquivo
+    inteiro 409 (RN da C1).
+
+    C2.2: dedupe POR LANÇAMENTO quando o formato dá id (`FITID` do OFX) —
+    linha cujo `(id_conta, id_externo)` já existe é pulada e contada em
+    `ex._ignorados_por_id_externo`. Linha sem id_externo (CSV) segue como
+    antes: só o hash do arquivo protege, porque pular por (data, valor)
+    esconderia lançamento real (dois pagamentos iguais no mesmo dia são
+    legítimos) — por isso o relato só AVISA em `ex._possiveis_duplicatas`,
+    sem pular.
+
+    O relato fica em atributos não persistidos do `Extrato` devolvido
+    (`_total_no_arquivo`, `_importados`, `_ignorados_por_id_externo`,
+    `_possiveis_duplicatas`) para não quebrar quem já consome o retorno
+    como `Extrato` puro (services e testes anteriores à C2.2); o router
+    monta o `ImportarExtratoResultadoOut` a partir deles."""
     await _obter_conta(db, tenant_id=tenant_id, conta_id=payload.id_conta)
-    if payload.formato != "CSV":
+    if payload.formato == "CSV":
+        linhas = _parse_csv(payload.conteudo)
+        for ln in linhas:
+            ln.setdefault("id_externo", None)
+    elif payload.formato == "OFX":
+        linhas = _linhas_ofx(payload.conteudo)
+    else:
         raise ConciliacaoError(
-            f"Formato {payload.formato} ainda não suportado (use CSV).",
+            f"Formato {payload.formato} ainda não suportado (use CSV ou OFX).",
             status.HTTP_422_UNPROCESSABLE_ENTITY)
-    linhas = _parse_csv(payload.conteudo)
+    if not linhas:
+        raise ConciliacaoError("Extrato vazio", status.HTTP_422_UNPROCESSABLE_ENTITY)
     h = hashlib.sha256(payload.conteudo.encode("utf-8")).hexdigest()
     dup = (await db.execute(select(Extrato.id).where(
         Extrato.tenant_id == tenant_id, Extrato.id_conta == payload.id_conta,
@@ -108,15 +140,45 @@ async def importar_extrato(db: AsyncSession, *, tenant_id: int, usuario_id: int 
     if dup is not None:
         raise ConciliacaoError(
             f"Extrato já importado para esta conta (extrato {dup}).", status.HTTP_409_CONFLICT)
+    total_no_arquivo = len(linhas)
     datas = [ln["data"] for ln in linhas]
     ex = Extrato(tenant_id=tenant_id, id_conta=payload.id_conta, nome_arquivo=payload.nome_arquivo,
                  hash=h, formato=payload.formato, status_processamento="PROCESSADO",
-                 qtd_lancamentos=len(linhas), periodo_inicio=min(datas), periodo_fim=max(datas),
+                 qtd_lancamentos=0, periodo_inicio=min(datas), periodo_fim=max(datas),
                  id_usuario=usuario_id, importado_em=_utcnow())
     db.add(ex); await db.flush()
+
+    ids_existentes = set((await db.execute(select(LancamentoExtrato.id_externo).where(
+        LancamentoExtrato.tenant_id == tenant_id, LancamentoExtrato.id_conta == payload.id_conta,
+        LancamentoExtrato.id_externo.isnot(None)))).scalars().all())
+    tuplas_existentes = set((await db.execute(select(
+        LancamentoExtrato.data, LancamentoExtrato.valor, LancamentoExtrato.tipo).where(
+        LancamentoExtrato.tenant_id == tenant_id,
+        LancamentoExtrato.id_conta == payload.id_conta))).all())
+
+    importados = 0
+    ignorados_por_id_externo = 0
+    possiveis_duplicatas = 0
     for ln in linhas:
-        db.add(LancamentoExtrato(tenant_id=tenant_id, id_extrato=ex.id, criado_em=_utcnow(), **ln))
+        id_ext = ln.get("id_externo")
+        if id_ext is not None and id_ext in ids_existentes:
+            ignorados_por_id_externo += 1
+            continue
+        if (ln["data"], ln["valor"], ln["tipo"]) in tuplas_existentes:
+            possiveis_duplicatas += 1
+        db.add(LancamentoExtrato(
+            tenant_id=tenant_id, id_extrato=ex.id, id_conta=payload.id_conta,
+            criado_em=_utcnow(), **ln))
+        importados += 1
+        if id_ext is not None:
+            ids_existentes.add(id_ext)
+
+    ex.qtd_lancamentos = importados
     await db.commit(); await db.refresh(ex)
+    ex._total_no_arquivo = total_no_arquivo
+    ex._importados = importados
+    ex._ignorados_por_id_externo = ignorados_por_id_externo
+    ex._possiveis_duplicatas = possiveis_duplicatas
     return ex
 
 

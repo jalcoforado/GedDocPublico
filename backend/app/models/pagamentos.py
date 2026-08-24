@@ -426,6 +426,7 @@ class LancamentoExtrato(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
     id_extrato: Mapped[int] = mapped_column(ForeignKey("pagamentos.extrato.id"), nullable=False)
+    id_conta: Mapped[int] = mapped_column(ForeignKey("pagamentos.conta_bancaria.id"), nullable=False)
     data: Mapped[date] = mapped_column(Date, nullable=False)
     historico: Mapped[str] = mapped_column(String(255), nullable=False)
     documento: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -433,6 +434,10 @@ class LancamentoExtrato(Base):
     valor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     tipo: Mapped[str] = mapped_column(String(10), nullable=False)  # CREDITO | DEBITO
     conciliado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # FITID do OFX — único por (tenant_id, id_conta) quando presente (índice
+    # parcial da 0099); CSV não tem id, então fica None (dedupe só por hash
+    # de arquivo, comportamento anterior à C2.2).
+    id_externo: Mapped[str | None] = mapped_column(String(64), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 

@@ -129,13 +129,13 @@ export default function ConciliacaoPage() {
         nome_arquivo: form.nome_arquivo.trim(),
         conteudo: form.conteudo,
       }),
-    onSuccess: (ex) => {
+    onSuccess: (res) => {
       setImportOpen(false);
       setForm(formVazio());
       setErroImport(null);
-      setExtratoSel(ex);
+      setExtratoSel(res.extrato);
       invalidar();
-      toast.success(`Extrato importado — ${ex.qtd_lancamentos} lançamento(s).`);
+      toast.success(`Extrato importado — ${res.extrato.qtd_lancamentos} lançamento(s).`);
     },
     onError: (e: unknown) =>
       setErroImport(e instanceof Error ? e.message : "Falha ao importar o extrato."),
