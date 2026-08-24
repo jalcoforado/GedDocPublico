@@ -30,7 +30,14 @@ class WorkflowDefinition(Base):
 
 
 class WorkflowInstance(Base):
-    """Execução concreta de um workflow ligada a um processo (Fase 20a)."""
+    """Execução concreta de um workflow (Fase 20a; polimórfica desde P8 D1).
+
+    `entidade_tipo`/`entidade_id` identificam a entidade dona da instância
+    (``processo``, ``ocorrencia``, ``alvara`` ou ``convocacao``). `id_processo`
+    é preenchido só quando `entidade_tipo == 'processo'` e existe hoje por
+    compatibilidade com o engine (Task 2 da fase P8) e com o índice único
+    parcial antigo da 0008 — não é mais o identificador universal.
+    """
     __tablename__ = "workflow_instance"
     __table_args__ = {"schema": "aprimora_py"}
 
@@ -41,9 +48,11 @@ class WorkflowInstance(Base):
     id_workflow_definition: Mapped[int] = mapped_column(
         ForeignKey("aprimora_py.workflow_definition.id"), nullable=False
     )
-    id_processo: Mapped[int] = mapped_column(
-        ForeignKey("protocolos.processo.id"), nullable=False
+    id_processo: Mapped[int | None] = mapped_column(
+        ForeignKey("protocolos.processo.id"), nullable=True
     )
+    entidade_tipo: Mapped[str] = mapped_column(String(30), nullable=False)
+    entidade_id: Mapped[int] = mapped_column(Integer, nullable=False)
     estado_atual: Mapped[str] = mapped_column(String(50), nullable=False)
     ativa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     iniciada_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
