@@ -63,6 +63,8 @@ from .pagamentos import (
     DebitoChecklistMarca,
     DebitoHistorico,
     Extrato,
+    ExportContabilEvento,
+    ExportContabilLote,
     LancamentoExtrato,
     Fornecedor,
     FornecedorSituacaoHistorico,

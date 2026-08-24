@@ -1372,6 +1372,14 @@ export interface OrdemPagamento {
   id_conta_pagadora?: number | null; valor_reservado?: string | null;
 }
 
+// ---------- export contábil (Onda C2, C2.1) ----------
+export interface ExportContabilLote {
+  id: number; numero: number;
+  periodo_inicio: string | null; periodo_fim: string | null;
+  formato_versao: string; qtd_eventos: number; hash_conteudo: string | null;
+  id_usuario: number | null; gerado_em: string;
+}
+
 export interface ParcelaFila {
   id: number; id_debito: number; numero: number; valor: string; vencimento: string;
   nome_fornecedor: string; descricao_debito: string; vencida: boolean;
@@ -3894,6 +3902,18 @@ export const api = {
           method: "POST",
           body: JSON.stringify(data),
         }),
+    },
+    // Export contábil neutro (Onda C2, C2.1) — lotes imutáveis para sistema
+    // contábil externo. Download por URL, mesmo motivo dos exports da C1.3.
+    contabil: {
+      gerarLote: (ate: string) =>
+        request<ExportContabilLote>("/pagamentos/contabil/lotes", {
+          method: "POST",
+          body: JSON.stringify({ ate }),
+        }),
+      listarLotes: () => request<ExportContabilLote[]>("/pagamentos/contabil/lotes"),
+      arquivoUrl: (loteId: number) =>
+        `${BROWSER_API_URL}/pagamentos/contabil/lotes/${loteId}/arquivo`,
     },
     // Conciliação bancária (Onda B). Escrita exige `pagamento_pagar`; leitura
     // aceita também autorizar/auditar/cadastro.

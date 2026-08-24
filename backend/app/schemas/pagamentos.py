@@ -705,3 +705,18 @@ class DashboardOut(BaseModel):
     por_fonte: list[ComposicaoItem]
     maiores_debitos: list[DebitoResumoItem]
     alertas: DashboardAlertas
+
+
+# ---------- export contábil (C2.1) ----------
+class ExportContabilGerarIn(BaseModel):
+    ate: date
+
+
+class ExportContabilLoteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; numero: int
+    periodo_inicio: date | None; periodo_fim: date | None
+    formato_versao: str; qtd_eventos: int
+    hash_conteudo: str | None
+    id_usuario: int | None
+    gerado_em: datetime

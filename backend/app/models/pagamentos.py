@@ -441,6 +441,42 @@ class LancamentoExtrato(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class ExportContabilLote(Base):
+    """Lote de export contábil (C2.1) — imutável após gerado. `numero` é
+    sequencial POR tenant (índice único parcial); o conteúdo é reconstruído
+    sob demanda a partir dos eventos vinculados e conferido contra `hash_conteudo`
+    — reemissão nunca gera um segundo lote para os mesmos eventos."""
+    __tablename__ = "export_contabil_lote"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    numero: Mapped[int] = mapped_column(Integer, nullable=False)
+    periodo_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
+    periodo_fim: Mapped[date | None] = mapped_column(Date, nullable=True)
+    formato_versao: Mapped[str] = mapped_column(String(20), nullable=False, default="neutro-csv-v1")
+    qtd_eventos: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    hash_conteudo: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    gerado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class ExportContabilEvento(Base):
+    """Evento contábil vinculado a um lote — o "pertence a exatamente um lote"
+    é a unique `(tenant_id, tipo_evento, id_origem)`: um mesmo evento do
+    domínio (débito empenhado, liquidação, pagamento, estorno, cancelamento)
+    entra em um único lote, para sempre. `id_origem` referencia a linha real
+    que originou o evento (ver `services/pagamentos_contabil.py`)."""
+    __tablename__ = "export_contabil_evento"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_lote: Mapped[int] = mapped_column(ForeignKey("pagamentos.export_contabil_lote.id"), nullable=False)
+    tipo_evento: Mapped[str] = mapped_column(String(30), nullable=False)
+    id_origem: Mapped[int] = mapped_column(Integer, nullable=False)
+    ocorrido_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class Conciliacao(Base):
     """Correspondência entre um lançamento do extrato e a movimentação da conta
     (RF-EXT-04/05). Uma por lançamento e uma por movimentação (RN-14)."""
