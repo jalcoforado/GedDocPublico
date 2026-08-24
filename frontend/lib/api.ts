@@ -2128,6 +2128,25 @@ export interface DenunciaCidadaoCreate {
   data_fato: string;
 }
 
+// P8 D3 (Task 6) — painel de workflow, entidade polimórfica
+// (ocorrencia/alvara/convocacao). Espelha WorkflowEntidadeOut/
+// WorkflowTransicaoOut do backend; NÃO é paginado.
+export interface WorkflowTransicaoOut {
+  estado_de: string;
+  estado_para: string;
+  transicao_label: string;
+  executada_em: string;
+  id_usuario: number | null;
+}
+
+export interface WorkflowEntidadeOut {
+  estado_atual: string | null;
+  ativa: boolean | null;
+  dias_no_estado: number | null;
+  sla_dias: number | null;
+  log: WorkflowTransicaoOut[];
+}
+
 export type PermissionarioSituacao =
   | "ativo"
   | "pendente"
@@ -3635,6 +3654,18 @@ export const api = {
       request<void>(`/transporte-regulado/ocorrencias/${id}`, {
         method: "DELETE",
       }),
+  },
+  // P8 D3 (Task 6) — painel de workflow, leitura só. `entidadeTipo` é uma
+  // das três entidades polimórficas comandadas pelo motor (ocorrência,
+  // alvará, convocação de recadastramento).
+  transporteWorkflow: {
+    getWorkflow: (
+      entidadeTipo: "ocorrencia" | "alvara" | "convocacao",
+      entidadeId: number,
+    ) =>
+      request<WorkflowEntidadeOut>(
+        `/transporte-regulado/workflow/${entidadeTipo}/${entidadeId}`,
+      ),
   },
   tiposAnexo: {
     list: () => request<TipoAnexo[]>("/tipos-anexo"),

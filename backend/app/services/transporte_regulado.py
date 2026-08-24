@@ -28,6 +28,8 @@ from ..models import (
     PontoOcupacao,
     VeiculoRegulado,
     Usuario,
+    WorkflowDefinition,
+    WorkflowInstance,
 )
 from ..models.transporte_regulado import (
     VeiculoDocumento,
@@ -39,6 +41,7 @@ from ..models.transporte_regulado import (
     AlvaraVeiculo,
     AlvaraAuditoria,
 )
+from .workflow_engine import carregar_log, compute_dias_no_estado
 from ..schemas.transporte_regulado import (
     EmpresaCreate,
     EmpresaUpdate,
@@ -4823,3 +4826,67 @@ async def listar_andamentos(
         .order_by(OcorrenciaAndamento.criado_em, OcorrenciaAndamento.id)
     )
     return list(rows)
+
+
+async def obter_workflow_de_entidade(
+    db: AsyncSession, *, tenant_id: int, entidade_tipo: str, entidade_id: int,
+) -> dict:
+    """Leitura pura do workflow de uma entidade polimórfica (P8 D3, Task 6).
+
+    NÃO cria instância lazy — diferente das fachadas de mutação
+    (`obter_ou_criar_instancia`), esta função é só leitura: entidade do
+    estoque sem instância ainda devolve `estado_atual=None`, `ativa=None`,
+    `dias_no_estado=None`, `sla_dias=None` e log vazio. A existência da
+    entidade (`ocorrencia`/`alvara`/`convocacao`) é responsabilidade do
+    caller — este ponto só resolve a instância, não valida o path.
+
+    Se houver mais de uma instância para o mesmo par (histórico de
+    workflow reiniciado), usa a mais recente por `iniciada_em`.
+    """
+    instance = (
+        await db.execute(
+            select(WorkflowInstance)
+            .where(
+                WorkflowInstance.tenant_id == tenant_id,
+                WorkflowInstance.entidade_tipo == entidade_tipo,
+                WorkflowInstance.entidade_id == entidade_id,
+            )
+            .order_by(WorkflowInstance.iniciada_em.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if instance is None:
+        return {
+            "estado_atual": None,
+            "ativa": None,
+            "dias_no_estado": None,
+            "sla_dias": None,
+            "log": [],
+        }
+
+    log = await carregar_log(db, instance.id, tenant_id)
+    dias_no_estado = await compute_dias_no_estado(db, instance)
+
+    sla_dias: int | None = None
+    wf = (
+        await db.execute(
+            select(WorkflowDefinition).where(
+                WorkflowDefinition.id == instance.id_workflow_definition,
+                WorkflowDefinition.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if wf is not None:
+        for estado in wf.dsl.get("estados", []):
+            if estado.get("slug") == instance.estado_atual:
+                sla_dias = estado.get("sla_dias")
+                break
+
+    return {
+        "estado_atual": instance.estado_atual,
+        "ativa": instance.ativa,
+        "dias_no_estado": dias_no_estado,
+        "sla_dias": sla_dias,
+        "log": log,
+    }

@@ -26,6 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { api, type RecadastramentoChecklistItem } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { WorkflowTimeline } from "@/components/transporte/WorkflowTimeline";
 
 interface PageParams {
   params: Promise<{ id: string; convocacaoId: string }>;
@@ -410,6 +411,9 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
           </div>
         )}
       </section>
+
+      {/* ---------------------------------------------------------- workflow */}
+      <WorkflowTimeline entidadeTipo="convocacao" entidadeId={convId} />
 
       {/* --------------------------------------------------------- histórico */}
       <section className="space-y-2">

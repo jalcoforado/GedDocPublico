@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { AlvaraVeiculosModal } from "@/components/transporte-regulado/alvara-veiculos-modal";
+import { WorkflowTimeline } from "@/components/transporte/WorkflowTimeline";
 import {
   api,
   type Alvara,
@@ -234,6 +235,9 @@ export default function AlvaraDetailPage({ params }: PageParams) {
           </Button>
         </div>
       </div>
+
+      {/* Fluxo de trabalho */}
+      <WorkflowTimeline entidadeTipo="alvara" entidadeId={alvara.id} />
 
       {/* Histórico de Auditoria */}
       <div className="rounded-card border border-border bg-card shadow-card">

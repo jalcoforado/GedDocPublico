@@ -1570,3 +1570,23 @@ class DenunciaCidadaoOut(BaseModel):
     criado_em: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# --------------------------------------------------- P8 D3 (Task 6): painel
+
+class WorkflowTransicaoOut(BaseModel):
+    estado_de: str
+    estado_para: str
+    transicao_label: str
+    executada_em: datetime
+    id_usuario: int | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WorkflowEntidadeOut(BaseModel):
+    estado_atual: str | None  # None = entidade do estoque sem instância ainda
+    ativa: bool | None
+    dias_no_estado: int | None
+    sla_dias: int | None  # do estado atual no DSL da instância, se configurado
+    log: list[WorkflowTransicaoOut] = []

@@ -7,6 +7,7 @@ Sem portal público nesta etapa.
 """
 import logging
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import Response, StreamingResponse
@@ -106,6 +107,7 @@ from ..schemas.transporte_regulado import (
     OcorrenciaDecidirInput,
     DenunciaCidadaoCreate,
     DenunciaCidadaoOut,
+    WorkflowEntidadeOut,
 )
 from ..services import transporte_regulado as tr_svc
 
@@ -2634,3 +2636,43 @@ async def listar_minhas_denuncias_endpoint(
         db, tenant_id=tenant_id, id_cidadao=cidadao.id,
     )
     return [DenunciaCidadaoOut.model_validate(oc) for oc in ocorrencias]
+
+
+# ============================================================================
+# Painel de workflow (P8 D3, Task 6) — leitura só, entidade polimórfica.
+# ============================================================================
+
+workflow_router = APIRouter(
+    prefix="/transporte-regulado/workflow", tags=["transporte-regulado"]
+)
+
+
+@workflow_router.get(
+    "/{entidade_tipo}/{entidade_id}", response_model=WorkflowEntidadeOut
+)
+async def get_workflow_de_entidade(
+    entidade_tipo: Literal["ocorrencia", "alvara", "convocacao"],
+    entidade_id: int,
+    _: Usuario = Depends(require_permission("transporte_regulado")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> WorkflowEntidadeOut:
+    """Autorização antes de resolver: carrega a entidade (404 cross-tenant/
+    inexistente) ANTES de tocar a `WorkflowInstance` — mesma disciplina do
+    guard de anexo sigiloso, sem o sigilo (ocorrência/alvará/convocação não
+    têm `nivel_sigilo`; tenant+excluido basta)."""
+    if entidade_tipo == "ocorrencia":
+        await tr_svc.obter_ocorrencia(
+            db, tenant_id=tenant_id, ocorrencia_id=entidade_id
+        )
+    elif entidade_tipo == "alvara":
+        await tr_svc.obter_alvara(db, tenant_id=tenant_id, alvara_id=entidade_id)
+    else:
+        await tr_svc.obter_convocacao(
+            db, tenant_id=tenant_id, convocacao_id=entidade_id
+        )
+
+    dados = await tr_svc.obter_workflow_de_entidade(
+        db, tenant_id=tenant_id, entidade_tipo=entidade_tipo, entidade_id=entidade_id,
+    )
+    return WorkflowEntidadeOut(**dados)

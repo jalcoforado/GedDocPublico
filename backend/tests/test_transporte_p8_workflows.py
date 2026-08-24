@@ -1245,3 +1245,105 @@ async def test_indeferir_409_quando_dsl_do_tenant_nao_permite(admin_engine):
         assert e.value.status_code == 409
     finally:
         await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+# ============================================================================
+# Task 6 — GET /transporte-regulado/workflow/{entidade_tipo}/{entidade_id}
+# ============================================================================
+
+async def test_http_get_workflow_ocorrencia_com_instancia_devolve_log_e_estado(admin_engine):
+    """GET de ocorrência com instância (já transicionada uma vez) devolve
+    `estado_atual`, `ativa=True`, `dias_no_estado` inteiro e o log com a
+    transição ordenada — usuário comum com a transação (sem SU)."""
+    t = await _provisionar(admin_engine)
+    try:
+        oc_id = await _ocorrencia(admin_engine, t.id)
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+
+        async with _sm(admin_engine)() as db:
+            await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=oc_id, id_usuario=uid,
+            )
+
+        _as_user(admin_engine, uid, t.id, t.slug)()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                f"/api/v2/transporte-regulado/workflow/ocorrencia/{oc_id}"
+            )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["estado_atual"] == "em_apuracao"
+        assert body["ativa"] is True
+        assert isinstance(body["dias_no_estado"], int)
+        assert len(body["log"]) == 1
+        assert body["log"][0]["estado_de"] == "registrada"
+        assert body["log"][0]["estado_para"] == "em_apuracao"
+    finally:
+        await _limpar_engine(admin_engine, t.id)
+
+
+async def test_http_get_workflow_convocacao_sem_instancia_devolve_estado_none(admin_engine):
+    """Convocação recém-gerada (sem transição alguma ainda) não tem
+    `WorkflowInstance` — GET não cria lazy, devolve estado_atual=None e log
+    vazio ("fluxo ainda não iniciado" na UI)."""
+    t = await _provisionar(admin_engine)
+    try:
+        perm = await _permissionario(admin_engine, t.id, nome="Sem workflow ainda")
+        ciclo = await _ciclo_vencido(admin_engine, t.id)
+        _c, conv = await _convocacao(admin_engine, t.id, perm, ciclo=ciclo)
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+
+        _as_user(admin_engine, uid, t.id, t.slug)()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                f"/api/v2/transporte-regulado/workflow/convocacao/{conv.id}"
+            )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["estado_atual"] is None
+        assert body["ativa"] is None
+        assert body["dias_no_estado"] is None
+        assert body["sla_dias"] is None
+        assert body["log"] == []
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_http_get_workflow_entidade_cross_tenant_404(admin_engine):
+    """Ocorrência de outro tenant — 404, não 403 (autorização antes de
+    resolver: o path nem chega a olhar a WorkflowInstance)."""
+    t1 = await _provisionar(admin_engine)
+    t2 = await _provisionar(admin_engine)
+    try:
+        oc_id = await _ocorrencia(admin_engine, t1.id)
+        uid2 = await _cria_usuario_comum_transporte(admin_engine, t2.id)
+
+        _as_user(admin_engine, uid2, t2.id, t2.slug)()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                f"/api/v2/transporte-regulado/workflow/ocorrencia/{oc_id}"
+            )
+        assert r.status_code == 404
+    finally:
+        await _limpar_engine(admin_engine, t1.id)
+        await _limpar_engine(admin_engine, t2.id)
+
+
+async def test_http_get_workflow_entidade_tipo_invalido_422(admin_engine):
+    """`entidade_tipo` fora de `{ocorrencia,alvara,convocacao}` — 422, sem
+    tocar banco."""
+    t = await _provisionar(admin_engine)
+    try:
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+        _as_user(admin_engine, uid, t.id, t.slug)()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                "/api/v2/transporte-regulado/workflow/processo/1"
+            )
+        assert r.status_code == 422
+    finally:
+        await _limpar_engine(admin_engine, t.id)

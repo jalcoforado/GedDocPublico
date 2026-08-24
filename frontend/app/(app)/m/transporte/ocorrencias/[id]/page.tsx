@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { WorkflowTimeline } from "@/components/transporte/WorkflowTimeline";
 import {
   api,
   type OcorrenciaDecidirInput,
@@ -387,6 +388,8 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
               </CardContent>
             </Card>
           )}
+
+          <WorkflowTimeline entidadeTipo="ocorrencia" entidadeId={ocorrencia.id} />
 
           <Card>
             <CardHeader>
