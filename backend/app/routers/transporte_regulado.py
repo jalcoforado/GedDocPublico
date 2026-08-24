@@ -51,6 +51,7 @@ from ..schemas.transporte_regulado import (
     AlvaraOut,
     AlvaraUpdate,
     AlvaraRenovarInput,
+    AlvaraRevogar,
     PontoCreate,
     PontoOut,
     PontoUpdate,
@@ -999,6 +1000,22 @@ async def renovate_alvara(
 ) -> AlvaraOut:
     """Renova um alvará vencido — cria novo alvará atrelado ao anterior via renovado_de."""
     return await tr_svc.renovar_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id, payload=payload)
+
+
+@alvaras_router.post("/{alvara_id}/revogar", response_model=AlvaraOut)
+async def revogar_alvara(
+    alvara_id: int,
+    payload: AlvaraRevogar,
+    usuario: Usuario = Depends(require_permission("transporte_regulado", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AlvaraOut:
+    """Revoga um alvará vigente (P8 D2) — motivo obrigatório."""
+    a = await tr_svc.revogar_alvara(
+        db, tenant_id=tenant_id, alvara_id=alvara_id,
+        motivo=payload.motivo, usuario_id=usuario.id,
+    )
+    return AlvaraOut.model_validate(a)
 
 
 # ============================ Documentos de Alvarás ==========================

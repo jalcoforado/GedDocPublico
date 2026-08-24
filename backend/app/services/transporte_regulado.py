@@ -1232,14 +1232,32 @@ async def criar_alvara(
             db, tenant_id=tenant_id, permissionario_id=payload.id_permissionario
         )
 
+    # P8 D2 (Task 4): a instância nasce no `estado_inicial` do DSL do tenant
+    # — não hardcoded `"vigente"`. Um tenant que personalizar
+    # `SEMENTES["transporte-alvara"]` com etapas antes de `vigente` faz a
+    # emissão entrar nesse estado, e `situacao` grava o mesmo slug.
+    from . import transporte_workflow as _wf
+
+    wf = await _wf.obter_definicao(db, tenant_id=tenant_id, slug="transporte-alvara")
+    estado_inicial = wf.dsl.get("estado_inicial") or "vigente"
+
     dados = payload.model_dump()
     a = Alvara(
         tenant_id=tenant_id,
         criado_em=datetime.utcnow(),
+        situacao=estado_inicial,
         **dados,
     )
     db.add(a)
-    await db.commit()
+    await db.flush()
+
+    # `obter_ou_criar_instancia` — via `engine.iniciar` — commita a instância
+    # E o INSERT do alvará (ainda só `flush`ado) juntos, no mesmo commit.
+    await _wf.obter_ou_criar_instancia(
+        db, tenant_id=tenant_id, slug="transporte-alvara",
+        entidade_tipo="alvara", entidade_id=a.id,
+        situacao_atual=a.situacao, usuario_id=None,
+    )
     await db.refresh(a)
     return a
 
@@ -1366,6 +1384,27 @@ async def renovar_alvara(
             detail="Alvará não está vencido; renovação só permitida para alvarás expirados.",
         )
 
+    # P8 D2 (Task 4): o gate acima (Fase C, INTACTO) já decidiu se a
+    # renovação pode acontecer. A partir daqui a instância de ORIGEM
+    # transiciona para `renovado` (`transicionar` muta `original.situacao`
+    # antes de chamar o engine, que commita os dois juntos) e o alvará novo
+    # nasce com instância própria no estado inicial do DSL — mesma lógica de
+    # `criar_alvara`.
+    from . import transporte_workflow as _wf
+
+    inst_origem = await _wf.obter_ou_criar_instancia(
+        db, tenant_id=tenant_id, slug="transporte-alvara",
+        entidade_tipo="alvara", entidade_id=original.id,
+        situacao_atual=original.situacao, usuario_id=None,
+    )
+    await _wf.transicionar(
+        db, instancia=inst_origem, para="renovado", usuario_id=None,
+        entidade=original, slug="transporte-alvara",
+    )
+
+    wf = await _wf.obter_definicao(db, tenant_id=tenant_id, slug="transporte-alvara")
+    estado_inicial = wf.dsl.get("estado_inicial") or "vigente"
+
     # Criar novo alvará com mesmos vínculos e número
     novo = Alvara(
         tenant_id=tenant_id,
@@ -1377,12 +1416,49 @@ async def renovar_alvara(
         tipo_servico=original.tipo_servico,
         observacoes=payload.observacoes if payload.observacoes is not None else original.observacoes,
         renovado_de=original.id,
+        situacao=estado_inicial,
         criado_em=datetime.utcnow(),
     )
     db.add(novo)
-    await db.commit()
+    await db.flush()
+
+    await _wf.obter_ou_criar_instancia(
+        db, tenant_id=tenant_id, slug="transporte-alvara",
+        entidade_tipo="alvara", entidade_id=novo.id,
+        situacao_atual=novo.situacao, usuario_id=None,
+    )
     await db.refresh(novo)
     return novo
+
+
+async def revogar_alvara(
+    db: AsyncSession, *, tenant_id: int, alvara_id: int,
+    motivo: str, usuario_id: int | None,
+) -> Alvara:
+    """P8 D2 (Task 4) — revoga alvará vigente (`vigente -> revogado`).
+
+    `motivo` vai para `observacoes` (prefixado `"Revogado: "`, sobrescrevendo
+    a observação anterior — o motivo da revogação é a informação relevante a
+    partir daqui) e para o `contexto_extra` da transição, onde fica visível
+    no `contexto_snapshot` do log."""
+    a = await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
+
+    from . import transporte_workflow as _wf
+
+    inst = await _wf.obter_ou_criar_instancia(
+        db, tenant_id=tenant_id, slug="transporte-alvara",
+        entidade_tipo="alvara", entidade_id=a.id,
+        situacao_atual=a.situacao, usuario_id=usuario_id,
+    )
+    a.observacoes = f"Revogado: {motivo}"
+    a.atualizado_em = datetime.utcnow()
+    await _wf.transicionar(
+        db, instancia=inst, para="revogado", usuario_id=usuario_id,
+        entidade=a, slug="transporte-alvara",
+        contexto_extra={"motivo": motivo},
+    )
+    await db.flush()
+    return a
 
 
 # ============================ AlvaraDocumento ===============================
@@ -4508,7 +4584,7 @@ async def listar_denuncias_do_cidadao(
 
 
 SITUACOES_FINAIS_OCORRENCIA = {"procedente", "improcedente", "arquivada"}
-RESULTADOS_DECISAO = SITUACOES_FINAIS_OCORRENCIA  # o CHECK do banco é a rede
+RESULTADOS_DECISAO = SITUACOES_FINAIS_OCORRENCIA  # a 0096 soltou o CHECK do banco — o DSL é a rede agora
 # Situações que ainda aceitam anotação/vínculo de alvo — o complemento lógico
 # das finais acima. Extraída porque a tupla estava duplicada em
 # `anotar_ocorrencia` e `vincular_alvo_ocorrencia`.

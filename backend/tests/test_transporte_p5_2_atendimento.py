@@ -970,6 +970,16 @@ async def _encerrar_arreio(engine, tenant_id: int) -> None:
     await app_engine.dispose()
     async with _sm(engine)() as s:
         for stmt in (
+            # P8 D2 (Task 4): `criar_alvara`/`renovar_alvara`/`revogar_alvara`
+            # passaram a gravar `workflow_definition`/`workflow_instance`
+            # (slug `transporte-alvara`) — sem apagá-las antes, o DELETE do
+            # tenant no fim desta função esbarra na FK. `alvara` fica de fora
+            # de propósito: quem chama `_encerrar_arreio` depois de criar
+            # alvará já apaga a tabela antes (ver `test_transporte_fase_c.py`).
+            "DELETE FROM aprimora_py.workflow_sla_alerta WHERE tenant_id=:t",
+            "DELETE FROM aprimora_py.workflow_transicao_log WHERE tenant_id=:t",
+            "DELETE FROM aprimora_py.workflow_instance WHERE tenant_id=:t",
+            "DELETE FROM aprimora_py.workflow_definition WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.recadastramento_decisao WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.recadastramento_marca WHERE tenant_id=:t",
             "DELETE FROM transporte_regulado.recadastramento_item WHERE tenant_id=:t",

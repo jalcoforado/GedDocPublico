@@ -291,6 +291,10 @@ class Alvara(Base):
     data_validade: Mapped[date | None] = mapped_column(Date, nullable=True)
     tipo_servico: Mapped[str] = mapped_column(String(30), nullable=False)
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # P8 D2 (Task 4): comandada pelo workflow (`SEMENTES["transporte-alvara"]`
+    # em `services/transporte_workflow.py`) — vigente/renovado/revogado, sem
+    # CHECK (migration 0097; o guardião é o DSL, por tenant).
+    situacao: Mapped[str] = mapped_column(String(30), nullable=False, default="vigente")
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

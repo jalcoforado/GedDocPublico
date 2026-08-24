@@ -7,19 +7,21 @@ ganha `entidade_tipo`/`entidade_id` polimórficos. O engine (`workflow_engine.py
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.main import app
 from app.models import WorkflowDefinition, WorkflowInstance, WorkflowSlaAlerta, WorkflowTransicaoLog
-from app.schemas.transporte_regulado import OcorrenciaCreate
+from app.schemas.transporte_regulado import AlvaraCreate, AlvaraRenovarInput, OcorrenciaCreate
 from app.services import transporte_regulado as tr
 from app.services import transporte_workflow  # noqa: F401 — registra os providers no import
+from app.services.modulos import contratar
 from app.services.workflow_engine import (
     WorkflowEngineError,
     compute_contexto,
@@ -27,7 +29,16 @@ from app.services.workflow_engine import (
     iniciar,
 )
 from app.tasks.verificar_sla_workflows import _processar_tenant
-from tests.test_transporte_p5_2_atendimento import _provisionar, _sm
+from tests.test_transporte_p5_2_atendimento import (
+    _as_user,
+    _convocacao,
+    _cria_usuario_comum_transporte,
+    _permissionario,
+    _provisionar,
+    _sm,
+    _um_usuario,
+)
+from tests.test_transporte_p5_3_atraso import _ciclo_vencido, _parecer
 from tests.test_transporte_p7_ocorrencias import _operadores, _tipo
 
 pytestmark = pytest.mark.asyncio
@@ -677,3 +688,281 @@ async def test_definicao_lazy_criada_com_slug_transporte_ocorrencia(admin_engine
         assert wf.dsl.get("estado_inicial") == "registrada"
     finally:
         await _limpar_engine(admin_engine, t.id)
+
+
+# ============================================================================
+# Task 4 — alvará comandado pelo workflow (semente `transporte-alvara`, P8 D2)
+# ============================================================================
+#
+# `renovar_alvara` (Fase C) segue exigindo `data_validade` vencida — os
+# alvarás de teste aqui nascem sempre vencidos para poderem ser renovados.
+
+HOJE_ALVARA = date.today()
+
+
+async def _alvara(
+    engine, tenant_id: int, *, id_permissionario=None, id_empresa=None,
+    data_validade=None, numero=None,
+):
+    async with _sm(engine)() as db:
+        return await tr.criar_alvara(
+            db,
+            tenant_id=tenant_id,
+            payload=AlvaraCreate(
+                numero_alvara=numero or f"ALV-P8-{uuid.uuid4().hex[:8]}",
+                data_validade=data_validade,
+                tipo_servico="taxi",
+                id_permissionario=id_permissionario,
+                id_empresa=id_empresa,
+            ),
+        )
+
+
+async def _limpar_alvara_e_engine(engine, tenant_id: int) -> None:
+    """`_limpar_engine` (Task 2/3) não conhece `alvara` nem `recadastramento_*`
+    (só o teste (c), com convocação suspensa, usa a segunda) — sem apagá-las
+    antes, o DELETE de permissionario/empresa dentro de `_limpar_engine`
+    esbarra na FK. Apagar tabela sem linha nenhuma é no-op, seguro para os
+    outros testes desta seção."""
+    async with _sm(engine)() as s:
+        for stmt in (
+            "DELETE FROM transporte_regulado.recadastramento_decisao WHERE tenant_id=:t",
+            "DELETE FROM transporte_regulado.recadastramento_marca WHERE tenant_id=:t",
+            "DELETE FROM transporte_regulado.recadastramento_item WHERE tenant_id=:t",
+            "DELETE FROM transporte_regulado.recadastramento_convocacao WHERE tenant_id=:t",
+            "DELETE FROM transporte_regulado.recadastramento_ciclo WHERE tenant_id=:t",
+            "DELETE FROM transporte_regulado.alvara WHERE tenant_id=:t",
+        ):
+            await s.execute(text(stmt), {"t": tenant_id})
+        await s.commit()
+    await _limpar_engine(engine, tenant_id)
+
+
+async def test_criar_alvara_cria_instancia_ativa_em_vigente(admin_engine):
+    """(a) `criar_alvara` cria a instância ativa `('alvara', id)` já em
+    `vigente` — `situacao` do alvará espelha o mesmo slug do DSL."""
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        a = await _alvara(admin_engine, t.id, id_empresa=id_emp)
+        assert a.situacao == "vigente"
+
+        async with _sm(admin_engine)() as db:
+            inst = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "alvara",
+                        WorkflowInstance.entidade_id == a.id,
+                    )
+                )
+            ).scalar_one()
+        assert inst.ativa is True
+        assert inst.estado_atual == "vigente"
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_renovar_alvara_transiciona_origem_e_cria_filho_vigente(admin_engine):
+    """(b) `renovar_alvara` transiciona a instância de ORIGEM para `renovado`
+    (inativa) e cria alvará + instância NOVOS, próprios, em `vigente`."""
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        original = await _alvara(
+            admin_engine, t.id, id_empresa=id_emp,
+            data_validade=HOJE_ALVARA - timedelta(days=1),
+        )
+        async with _sm(admin_engine)() as db:
+            novo = await tr.renovar_alvara(
+                db, tenant_id=t.id, alvara_id=original.id,
+                payload=AlvaraRenovarInput(data_validade=HOJE_ALVARA + timedelta(days=365)),
+            )
+        assert novo.id != original.id
+        assert novo.renovado_de == original.id
+        assert novo.situacao == "vigente"
+
+        async with _sm(admin_engine)() as db:
+            origem_recarregada = await tr.obter_alvara(
+                db, tenant_id=t.id, alvara_id=original.id
+            )
+            inst_origem = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "alvara",
+                        WorkflowInstance.entidade_id == original.id,
+                    )
+                )
+            ).scalar_one()
+            inst_filho = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "alvara",
+                        WorkflowInstance.entidade_id == novo.id,
+                    )
+                )
+            ).scalar_one()
+        assert origem_recarregada.situacao == "renovado"
+        assert inst_origem.ativa is False
+        assert inst_origem.estado_atual == "renovado"
+        assert inst_filho.ativa is True
+        assert inst_filho.estado_atual == "vigente"
+        assert inst_filho.id != inst_origem.id
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_renovar_alvara_titular_suspenso_409_mensagem_fase_c(admin_engine):
+    """(c) Titular com convocação suspensa continua barrado pelo gate da Fase
+    C ANTES da transição — MESMA mensagem ("reativação"), sem edição naquele
+    teste (`tests/test_transporte_fase_c.py`)."""
+    t = await _provisionar(admin_engine)
+    try:
+        perm = await _permissionario(admin_engine, t.id)
+        ciclo = await _ciclo_vencido(admin_engine, t.id)
+        _c, conv = await _convocacao(admin_engine, t.id, perm, ciclo=ciclo)
+        uid = await _um_usuario(admin_engine, t.id)
+        async with _sm(admin_engine)() as db:
+            await tr.suspender_convocacao(
+                db, tenant_id=t.id, convocacao_id=conv.id,
+                payload=_parecer(), usuario_id=uid,
+            )
+
+        alvara = await _alvara(
+            admin_engine, t.id, id_permissionario=perm.id,
+            data_validade=HOJE_ALVARA - timedelta(days=1),
+        )
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.renovar_alvara(
+                    db, tenant_id=t.id, alvara_id=alvara.id,
+                    payload=AlvaraRenovarInput(data_validade=HOJE_ALVARA + timedelta(days=365)),
+                )
+        assert e.value.status_code == 409
+        assert "reativação" in e.value.detail
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_revogar_alvara_com_motivo(admin_engine):
+    """(d) Revoga com motivo: `situacao='revogado'`, instância finalizada, log
+    com o motivo no `contexto_snapshot` — e `observacoes` prefixado."""
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        alvara = await _alvara(admin_engine, t.id, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            revogado = await tr.revogar_alvara(
+                db, tenant_id=t.id, alvara_id=alvara.id,
+                motivo="Irregularidade constatada em vistoria",
+                usuario_id=None,
+            )
+        assert revogado.situacao == "revogado"
+        assert revogado.observacoes == "Revogado: Irregularidade constatada em vistoria"
+
+        async with _sm(admin_engine)() as db:
+            inst = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "alvara",
+                        WorkflowInstance.entidade_id == alvara.id,
+                    )
+                )
+            ).scalar_one()
+            log = (
+                await db.execute(
+                    select(WorkflowTransicaoLog)
+                    .where(WorkflowTransicaoLog.id_workflow_instance == inst.id)
+                    .order_by(WorkflowTransicaoLog.executada_em.desc())
+                )
+            ).scalars().first()
+        assert inst.ativa is False
+        assert inst.estado_atual == "revogado"
+        assert log.contexto_snapshot.get("motivo") == "Irregularidade constatada em vistoria"
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_http_revogar_sem_motivo_422(admin_engine):
+    """(e) Payload sem `motivo` (schema `AlvaraRevogar`, `min_length=1`) →
+    422 — a validação nunca chega ao service."""
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, t.id, ["transporte"])
+            await s.commit()
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        alvara = await _alvara(admin_engine, t.id, id_empresa=id_emp)
+
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+        _as_user(admin_engine, uid, t.id, t.slug)()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.post(
+                f"/api/v2/transporte-regulado/alvaras/{alvara.id}/revogar",
+                json={"motivo": ""},
+            )
+        assert r.status_code == 422, r.text
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_renovar_alvara_revogado_409_dsl(admin_engine):
+    """(f) Alvará já revogado: `revogado -> renovado` não existe no DSL —
+    409 vindo do engine, não do gate da Fase C."""
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        alvara = await _alvara(
+            admin_engine, t.id, id_empresa=id_emp,
+            data_validade=HOJE_ALVARA - timedelta(days=1),
+        )
+        async with _sm(admin_engine)() as db:
+            await tr.revogar_alvara(
+                db, tenant_id=t.id, alvara_id=alvara.id,
+                motivo="Fiscalização", usuario_id=None,
+            )
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.renovar_alvara(
+                    db, tenant_id=t.id, alvara_id=alvara.id,
+                    payload=AlvaraRenovarInput(data_validade=HOJE_ALVARA + timedelta(days=365)),
+                )
+        assert e.value.status_code == 409
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_http_usuario_comum_revoga_alvara_200(admin_engine):
+    """(g) POST `/alvaras/{id}/revogar` com payload de motivo → 200 para
+    usuário comum com a transação `transporte_regulado`."""
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            await contratar(s, t.id, ["transporte"])
+            await s.commit()
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        alvara = await _alvara(admin_engine, t.id, id_empresa=id_emp)
+
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+        _as_user(admin_engine, uid, t.id, t.slug)()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.post(
+                f"/api/v2/transporte-regulado/alvaras/{alvara.id}/revogar",
+                json={"motivo": "Fiscalização flagrou irregularidade"},
+            )
+        assert r.status_code == 200, r.text
+        assert r.json()["situacao"] == "revogado"
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)

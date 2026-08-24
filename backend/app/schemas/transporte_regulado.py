@@ -790,6 +790,7 @@ class AlvaraOut(BaseModel):
     tipo_servico: str
     observacoes: str | None
     renovado_de: int | None = None
+    situacao: str
     criado_em: datetime
     atualizado_em: datetime | None
     excluido: bool
@@ -808,6 +809,13 @@ class AlvaraRenovarInput(BaseModel):
         if self.data_inicio and self.data_validade and self.data_inicio > self.data_validade:
             raise ValueError("data_inicio não pode ser posterior a data_validade.")
         return self
+
+
+class AlvaraRevogar(BaseModel):
+    """Revogação de alvará (P8 D2) — motivo obrigatório, vai para `observacoes`
+    (prefixado `"Revogado: "`) e para o `contexto_extra` da transição."""
+
+    motivo: str = Field(min_length=1)
 
 
 # ============================ AlvaraDocumento ===============================

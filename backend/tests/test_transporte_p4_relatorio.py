@@ -359,6 +359,14 @@ def _as_user(engine, usuario_id: int, tenant_id: int, tenant_slug: str):
 async def _cleanup_tenant_http(engine, tenant_id: int) -> None:
     async with _sm(engine)() as s:
         for stmt in (
+            # P8 D2 (Task 4): `criar_alvara` passou a gravar
+            # `workflow_definition`/`workflow_instance` (slug
+            # `transporte-alvara`) — sem apagá-las antes, o DELETE do tenant
+            # no fim desta função esbarra na FK.
+            "DELETE FROM aprimora_py.workflow_sla_alerta WHERE tenant_id=:t",
+            "DELETE FROM aprimora_py.workflow_transicao_log WHERE tenant_id=:t",
+            "DELETE FROM aprimora_py.workflow_instance WHERE tenant_id=:t",
+            "DELETE FROM aprimora_py.workflow_definition WHERE tenant_id=:t",
             "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
             "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
             "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",

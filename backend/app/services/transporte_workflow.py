@@ -152,6 +152,23 @@ SEMENTES: dict[str, dict] = {
             {"de": "em_apuracao", "para": "arquivada", "label": "arquivar"},
         ],
     },
+    # P8 D2 (Task 4). A condição `not titular_suspenso` é ESPELHO do gate da
+    # Fase C (`titular_tem_convocacao_suspensa`, checado em `renovar_alvara`
+    # ANTES da transição) — nunca a fonte do 409 daquela rota; o 409 da Fase C
+    # continua vindo do gate de serviço, intacto.
+    "transporte-alvara": {
+        "estado_inicial": "vigente",
+        "estados": [
+            {"slug": "vigente", "label": "Vigente"},
+            {"slug": "renovado", "label": "Renovado", "final": True},
+            {"slug": "revogado", "label": "Revogado", "final": True},
+        ],
+        "transicoes": [
+            {"de": "vigente", "para": "renovado", "label": "renovar",
+             "condicao": "not titular_suspenso"},
+            {"de": "vigente", "para": "revogado", "label": "revogar"},
+        ],
+    },
 }
 
 
@@ -238,8 +255,13 @@ async def obter_ou_criar_instancia(
 async def transicionar(
     db: AsyncSession, *, instancia: WorkflowInstance, para: str,
     usuario_id: int | None, entidade: Any, slug: str,
+    contexto_extra: dict[str, Any] | None = None,
 ) -> None:
     """Muta `entidade.situacao = para` e chama `engine.executar_transicao`.
+
+    `contexto_extra`, quando passado, entra no `contexto_snapshot` do log da
+    transição (ex.: `revogar_alvara` grava o motivo ali) — repassado direto
+    para `engine.executar_transicao`, que já o funde ao contexto automático.
 
     `engine.executar_transicao` COMMITA internamente — a mutação da
     entidade e a transição da instância são persistidas juntas nesse mesmo
@@ -257,6 +279,7 @@ async def transicionar(
     try:
         await engine.executar_transicao(
             db, instancia, para=para, usuario_id=usuario_id,
+            contexto_extra=contexto_extra,
         )
     except WorkflowEngineError as exc:
         msg = str(exc)
