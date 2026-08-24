@@ -763,6 +763,40 @@ async def test_criar_alvara_cria_instancia_ativa_em_vigente(admin_engine):
         await _limpar_alvara_e_engine(admin_engine, t.id)
 
 
+async def test_alvara_antigo_sem_situacao_nasce_vigente_pelo_default(admin_engine):
+    """Migration 0097: linha inserida SEM `situacao` (o estoque anterior à
+    coluna) recebe 'vigente' pelo server_default do banco. `criar_alvara`
+    sempre grava `situacao` explícita, então só um INSERT cru exercita o
+    DEFAULT — é o backfill implícito do que já existe em produção."""
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        num = f"ALV-P8-DEF-{uuid.uuid4().hex[:8]}"
+        async with _sm(admin_engine)() as db:
+            await db.execute(
+                text(
+                    "INSERT INTO transporte_regulado.alvara "
+                    "(tenant_id, id_empresa, numero_alvara, tipo_servico, "
+                    " criado_em, excluido) "
+                    "VALUES (:t, :e, :n, 'taxi', now(), false)"
+                ),
+                {"t": t.id, "e": id_emp, "n": num},
+            )
+            await db.commit()
+            situacao = (
+                await db.execute(
+                    text(
+                        "SELECT situacao FROM transporte_regulado.alvara "
+                        "WHERE tenant_id = :t AND numero_alvara = :n"
+                    ),
+                    {"t": t.id, "n": num},
+                )
+            ).scalar_one()
+        assert situacao == "vigente"
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
 async def test_renovar_alvara_transiciona_origem_e_cria_filho_vigente(admin_engine):
     """(b) `renovar_alvara` transiciona a instância de ORIGEM para `renovado`
     (inativa) e cria alvará + instância NOVOS, próprios, em `vigente`."""
