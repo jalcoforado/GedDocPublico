@@ -1,7 +1,15 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCheck, FileUp, Landmark, Link2, ListChecks } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCheck,
+  CheckCircle2,
+  FileUp,
+  Landmark,
+  Link2,
+  ListChecks,
+} from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { BotaoExportarCsv } from "@/components/pagamentos/BotoesExportar";
@@ -22,6 +30,7 @@ import { useToast } from "@/components/ui/toast";
 import {
   api,
   type ExtratoBancario,
+  type ImportarExtratoResultado,
   type LancamentoExtrato,
   type Movimentacao,
 } from "@/lib/api";
@@ -37,14 +46,23 @@ const CHAVES_INVALIDAR = [
 /** Cabeçalho aceito pelo importador do backend (`_parse_csv`). */
 const MODELO_CSV = "data;historico;documento;favorecido;valor;tipo";
 
+type FormatoExtrato = "CSV" | "OFX" | "CNAB240";
+
+const ACCEPT_POR_FORMATO: Record<FormatoExtrato, string> = {
+  CSV: ".csv,text/csv,text/plain",
+  OFX: ".ofx,text/plain,text/xml,application/xml",
+  CNAB240: ".txt,.rem,.ret,text/plain",
+};
+
 interface FormImport {
   id_conta: number | null;
+  formato: FormatoExtrato;
   nome_arquivo: string;
   conteudo: string;
 }
 
 function formVazio(): FormImport {
-  return { id_conta: null, nome_arquivo: "", conteudo: "" };
+  return { id_conta: null, formato: "CSV", nome_arquivo: "", conteudo: "" };
 }
 
 export default function ConciliacaoPage() {
@@ -57,6 +75,7 @@ export default function ConciliacaoPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [form, setForm] = useState<FormImport>(formVazio());
   const [erroImport, setErroImport] = useState<string | null>(null);
+  const [relatoImport, setRelatoImport] = useState<ImportarExtratoResultado | null>(null);
   const [manual, setManual] = useState<LancamentoExtrato | null>(null);
   const [movEscolhida, setMovEscolhida] = useState<number | null>(null);
   const arquivoRef = useRef<HTMLInputElement>(null);
@@ -127,15 +146,14 @@ export default function ConciliacaoPage() {
       api.pagamentos.conciliacao.importar({
         id_conta: form.id_conta!,
         nome_arquivo: form.nome_arquivo.trim(),
+        formato: form.formato,
         conteudo: form.conteudo,
       }),
     onSuccess: (res) => {
-      setImportOpen(false);
-      setForm(formVazio());
       setErroImport(null);
-      setExtratoSel(res.extrato);
+      setRelatoImport(res);
       invalidar();
-      toast.success(`Extrato importado — ${res.extrato.qtd_lancamentos} lançamento(s).`);
+      toast.success(`Extrato importado — ${res.importados} lançamento(s).`);
     },
     onError: (e: unknown) =>
       setErroImport(e instanceof Error ? e.message : "Falha ao importar o extrato."),
@@ -168,9 +186,26 @@ export default function ConciliacaoPage() {
       toast.error(e instanceof Error ? e.message : "Falha ao conciliar."),
   });
 
-  async function lerArquivo(f: File) {
-    const texto = await f.text();
-    setForm((s) => ({ ...s, conteudo: texto, nome_arquivo: s.nome_arquivo || f.name }));
+  function lerArquivo(f: File) {
+    const leitor = new FileReader();
+    leitor.onload = () => {
+      const texto = typeof leitor.result === "string" ? leitor.result : "";
+      setForm((s) => ({ ...s, conteudo: texto, nome_arquivo: s.nome_arquivo || f.name }));
+    };
+    leitor.onerror = () => setErroImport("Não foi possível ler o arquivo selecionado.");
+    leitor.readAsText(f);
+  }
+
+  function fecharDialogoImport() {
+    setImportOpen(false);
+    setForm(formVazio());
+    setErroImport(null);
+    setRelatoImport(null);
+  }
+
+  function verExtratoImportado() {
+    if (relatoImport) setExtratoSel(relatoImport.extrato);
+    fecharDialogoImport();
   }
 
   async function confirmarBaixaAuto() {
@@ -192,7 +227,14 @@ export default function ConciliacaoPage() {
         title="Conciliação bancária"
         description="Importe o extrato da conta e case cada lançamento com o pagamento correspondente. Quando todas as movimentações de um débito pago ficam conciliadas, ele passa a CONCILIADO automaticamente."
         actions={
-          <Button onClick={() => { setForm(formVazio()); setErroImport(null); setImportOpen(true); }}>
+          <Button
+            onClick={() => {
+              setForm(formVazio());
+              setErroImport(null);
+              setRelatoImport(null);
+              setImportOpen(true);
+            }}
+          >
             <FileUp className="mr-2 h-4 w-4" />
             Importar extrato
           </Button>
@@ -422,101 +464,185 @@ export default function ConciliacaoPage() {
 
       <Dialog
         open={importOpen}
-        onClose={() => setImportOpen(false)}
-        title="Importar extrato bancário"
+        onClose={fecharDialogoImport}
+        title={relatoImport ? "Extrato importado" : "Importar extrato bancário"}
         footer={
-          <>
-            <Button variant="ghost" onClick={() => setImportOpen(false)}>
-              Cancelar
+          relatoImport ? (
+            <Button onClick={verExtratoImportado}>
+              <Link2 className="mr-2 h-4 w-4" />
+              Ver extrato
             </Button>
-            <Button
-              onClick={() => importar.mutate()}
-              disabled={
-                importar.isPending ||
-                !form.id_conta ||
-                !form.nome_arquivo.trim() ||
-                !form.conteudo.trim()
-              }
-            >
-              Importar
-            </Button>
-          </>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={fecharDialogoImport}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => importar.mutate()}
+                disabled={
+                  importar.isPending ||
+                  !form.id_conta ||
+                  !form.nome_arquivo.trim() ||
+                  !form.conteudo.trim()
+                }
+              >
+                Importar
+              </Button>
+            </>
+          )
         }
       >
-        <div className="space-y-4">
-          <div>
-            <Label htmlFor="imp-conta">Conta</Label>
-            <Select
-              id="imp-conta"
-              value={form.id_conta ?? ""}
-              onChange={(e) =>
-                setForm((s) => ({
-                  ...s,
-                  id_conta: e.target.value === "" ? null : Number(e.target.value),
-                }))
-              }
-            >
-              <option value="">Selecione…</option>
-              {contas.map((c) => (
-                <option key={c.id_conta} value={c.id_conta}>
-                  {c.nome}
-                </option>
-              ))}
-            </Select>
-          </div>
+        {relatoImport ? (
+          <div className="space-y-4" data-testid="relato-importacao">
+            <div className="flex items-start gap-3 rounded-card border border-success/30 bg-success-soft p-3 text-sm text-success-soft-foreground">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                {relatoImport.total_no_arquivo} linha(s) no arquivo — {relatoImport.importados}{" "}
+                importado(s).
+              </p>
+            </div>
 
-          <div>
-            <Label htmlFor="imp-arquivo">Arquivo CSV</Label>
-            <Input
-              id="imp-arquivo"
-              ref={arquivoRef}
-              type="file"
-              accept=".csv,text/csv,text/plain"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void lerArquivo(f);
-              }}
-            />
-            <p className="mt-1 text-xs text-muted">
-              Colunas: <code>{MODELO_CSV}</code>. Separador <code>;</code> ou{" "}
-              <code>,</code>; cabeçalho opcional; tipo <code>CREDITO</code> ou{" "}
-              <code>DEBITO</code>.
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-card border border-border bg-surface-1 p-3">
+                <dt className="text-xs text-muted">Ignorados por ID externo</dt>
+                <dd className="text-lg font-semibold tabular-nums">
+                  {relatoImport.ignorados_por_id_externo} ignorado(s)
+                </dd>
+              </div>
+              <div className="rounded-card border border-border bg-surface-1 p-3">
+                <dt className="text-xs text-muted">Possíveis duplicatas</dt>
+                <dd className="text-lg font-semibold tabular-nums">
+                  {relatoImport.possiveis_duplicatas} possível duplicata(s)
+                </dd>
+              </div>
+            </dl>
+
+            {relatoImport.possiveis_duplicatas > 0 && (
+              <div className="flex items-start gap-2 rounded-card border border-warning/30 bg-warning-soft p-3 text-xs text-warning-soft-foreground">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <p>
+                  Possível duplicata: já existe lançamento com a mesma data, valor e tipo
+                  nesta conta. Elas <strong>não foram puladas</strong> — dois pagamentos
+                  iguais no mesmo dia podem ser legítimos. Confira antes de conciliar.
+                </p>
+              </div>
+            )}
+
+            {relatoImport.ignorados_por_id_externo > 0 && (
+              <p className="text-xs text-muted">
+                Linhas ignoradas por ID externo já tinham o mesmo identificador do banco
+                (FITID/documento) importado antes nesta conta — não foram duplicadas.
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="imp-conta">Conta</Label>
+              <Select
+                id="imp-conta"
+                value={form.id_conta ?? ""}
+                onChange={(e) =>
+                  setForm((s) => ({
+                    ...s,
+                    id_conta: e.target.value === "" ? null : Number(e.target.value),
+                  }))
+                }
+              >
+                <option value="">Selecione…</option>
+                {contas.map((c) => (
+                  <option key={c.id_conta} value={c.id_conta}>
+                    {c.nome}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            <div>
+              <Label htmlFor="imp-formato">Formato do arquivo</Label>
+              <Select
+                id="imp-formato"
+                value={form.formato}
+                onChange={(e) => {
+                  const formato = e.target.value as FormatoExtrato;
+                  setForm((s) => ({ ...s, formato, conteudo: "", nome_arquivo: "" }));
+                  if (arquivoRef.current) arquivoRef.current.value = "";
+                }}
+              >
+                <option value="CSV">CSV</option>
+                <option value="OFX">OFX</option>
+                <option value="CNAB240">CNAB240</option>
+              </Select>
+            </div>
+
+            <div>
+              <Label htmlFor="imp-arquivo">Arquivo</Label>
+              <Input
+                id="imp-arquivo"
+                ref={arquivoRef}
+                type="file"
+                accept={ACCEPT_POR_FORMATO[form.formato]}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) lerArquivo(f);
+                }}
+              />
+              {form.formato === "CSV" && (
+                <p className="mt-1 text-xs text-muted">
+                  Colunas: <code>{MODELO_CSV}</code>. Separador <code>;</code> ou{" "}
+                  <code>,</code>; cabeçalho opcional; tipo <code>CREDITO</code> ou{" "}
+                  <code>DEBITO</code>.
+                </p>
+              )}
+              {form.formato === "OFX" && (
+                <p className="mt-1 text-xs text-muted">Extrato OFX (versão 1.x SGML ou 2.x XML).</p>
+              )}
+              {form.formato === "CNAB240" && (
+                <p className="mt-1 text-xs text-muted">
+                  Retorno CNAB240 (layout FEBRABAN, registros de 240 posições).
+                </p>
+              )}
+            </div>
+
+            <div>
+              <Label htmlFor="imp-nome">Nome do arquivo</Label>
+              <Input
+                id="imp-nome"
+                value={form.nome_arquivo}
+                onChange={(e) => setForm((s) => ({ ...s, nome_arquivo: e.target.value }))}
+                placeholder="extrato-julho.csv"
+              />
+            </div>
+
+            {form.formato === "CSV" && (
+              <div>
+                <Label htmlFor="imp-conteudo">Conteúdo</Label>
+                <Textarea
+                  id="imp-conteudo"
+                  rows={8}
+                  className="font-mono text-xs"
+                  value={form.conteudo}
+                  onChange={(e) => setForm((s) => ({ ...s, conteudo: e.target.value }))}
+                  placeholder={`${MODELO_CSV}\n01/07/2026;PAGAMENTO FORNECEDOR;DOC123;ACME LTDA;1234,56;DEBITO`}
+                />
+                <p className="mt-1 text-xs text-muted">
+                  Também pode colar o conteúdo aqui em vez de escolher um arquivo.
+                </p>
+              </div>
+            )}
+
+            <p className="text-xs text-muted">
+              Reimportar o mesmo arquivo na mesma conta é recusado — a checagem é por hash
+              do conteúdo.
             </p>
+
+            {erroImport && (
+              <p className="text-sm text-danger" role="alert">
+                {erroImport}
+              </p>
+            )}
           </div>
-
-          <div>
-            <Label htmlFor="imp-nome">Nome do arquivo</Label>
-            <Input
-              id="imp-nome"
-              value={form.nome_arquivo}
-              onChange={(e) => setForm((s) => ({ ...s, nome_arquivo: e.target.value }))}
-              placeholder="extrato-julho.csv"
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="imp-conteudo">Conteúdo</Label>
-            <Textarea
-              id="imp-conteudo"
-              rows={8}
-              className="font-mono text-xs"
-              value={form.conteudo}
-              onChange={(e) => setForm((s) => ({ ...s, conteudo: e.target.value }))}
-              placeholder={`${MODELO_CSV}\n01/07/2026;PAGAMENTO FORNECEDOR;DOC123;ACME LTDA;1234,56;DEBITO`}
-            />
-            <p className="mt-1 text-xs text-muted">
-              Reimportar o mesmo arquivo na mesma conta é recusado — a checagem é por
-              hash do conteúdo.
-            </p>
-          </div>
-
-          {erroImport && (
-            <p className="text-sm text-danger" role="alert">
-              {erroImport}
-            </p>
-          )}
-
-        </div>
+        )}
       </Dialog>
 
       <Dialog

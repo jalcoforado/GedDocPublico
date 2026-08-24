@@ -28,12 +28,12 @@ async def importar_extrato(payload: ImportarExtratoIn,
                            usuario: Usuario = Depends(require_permission("pagamento_pagar")),
                            tenant_id: int = Depends(require_tenant_id),
                            db: AsyncSession = Depends(get_db)):
-    ex = await conc.importar_extrato(db, tenant_id=tenant_id, usuario_id=usuario.id, payload=payload)
+    res = await conc.importar_extrato(db, tenant_id=tenant_id, usuario_id=usuario.id, payload=payload)
     return ImportarExtratoResultadoOut(
-        total_no_arquivo=ex._total_no_arquivo, importados=ex._importados,
-        ignorados_por_id_externo=ex._ignorados_por_id_externo,
-        possiveis_duplicatas=ex._possiveis_duplicatas,
-        extrato=ExtratoOut.model_validate(ex),
+        total_no_arquivo=res.total_no_arquivo, importados=res.importados,
+        ignorados_por_id_externo=res.ignorados_por_id_externo,
+        possiveis_duplicatas=res.possiveis_duplicatas,
+        extrato=ExtratoOut.model_validate(res.extrato),
     )
 
 

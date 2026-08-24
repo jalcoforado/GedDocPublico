@@ -160,8 +160,8 @@ async def test_conciliacao_completa_debito_vira_conciliado(admin_engine):
         uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
         # importa extrato com um débito de R$ 1000 em 2026-08-01
         async with _sm(admin_engine)() as s:
-            ex = await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
-                id_conta=conta.id, nome_arquivo="ext.csv", conteudo=_csv()))
+            ex = (await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
+                id_conta=conta.id, nome_arquivo="ext.csv", conteudo=_csv()))).extrato
         assert ex.qtd_lancamentos == 1 and ex.status_processamento == "PROCESSADO"
         # reimportar o mesmo arquivo → 409
         async with _sm(admin_engine)() as s:
@@ -198,8 +198,8 @@ async def test_conciliar_movimentacao_de_outra_conta_bloqueia_rn11(admin_engine)
         uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
         # extrato importado na CONTA2, mas a movimentação do pagamento é da conta1
         async with _sm(admin_engine)() as s:
-            ex = await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
-                id_conta=conta2.id, nome_arquivo="ext2.csv", conteudo=_csv()))
+            ex = (await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
+                id_conta=conta2.id, nome_arquivo="ext2.csv", conteudo=_csv()))).extrato
             lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
             mov_id = (await s.execute(text(
                 "SELECT id_movimentacao FROM pagamentos.parcela WHERE id=:p"), {"p": p.id})).scalar_one()
@@ -222,8 +222,8 @@ async def test_dupla_baixa_bloqueada_rn14(admin_engine):
         # dois lançamentos iguais no extrato
         csv = (_csv() + "2026-08-01;Pagamento fornecedor;DOC2;Forn;1000.00;DEBITO\n")
         async with _sm(admin_engine)() as s:
-            ex = await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
-                id_conta=conta.id, nome_arquivo="ext.csv", conteudo=csv))
+            ex = (await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
+                id_conta=conta.id, nome_arquivo="ext.csv", conteudo=csv))).extrato
             lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
             mov_id = (await s.execute(text(
                 "SELECT id_movimentacao FROM pagamentos.parcela WHERE id=:p"), {"p": p.id})).scalar_one()

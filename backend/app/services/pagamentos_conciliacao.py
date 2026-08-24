@@ -26,6 +26,24 @@ from .pagamentos_extrato_parsers import Cnab240ParseError, OfxParseError, parse_
 _PROVAVEL_DIAS = 3  # tolerância de data para correspondência provável
 
 
+@dataclasses.dataclass
+class ResultadoImport:
+    """Relato explícito da importação (C2.2). Substitui os atributos
+    não-persistidos que antes pendurávamos no `Extrato` (`_total_no_arquivo`
+    etc.) — aquele padrão exigia que quem lesse soubesse que o objeto
+    devolvido carregava campos fora do mapeamento ORM; aqui o contrato é
+    o tipo. `ignorados_por_id_externo` só se aplica a formato com id de
+    lançamento (OFX/CNAB240) — linha cujo `(id_conta, id_externo)` já existe
+    é pulada. `possiveis_duplicatas` é um AVISO (mesma data/valor/tipo já
+    existentes na conta) e NÃO pula nada — pular por esses campos esconderia
+    lançamento real (dois pagamentos iguais no mesmo dia são legítimos)."""
+    extrato: Extrato
+    total_no_arquivo: int
+    importados: int
+    ignorados_por_id_externo: int
+    possiveis_duplicatas: int
+
+
 def _utcnow() -> datetime:
     return datetime.utcnow()
 
@@ -110,24 +128,21 @@ def _linhas_cnab240(conteudo: str) -> list[dict]:
 
 
 async def importar_extrato(db: AsyncSession, *, tenant_id: int, usuario_id: int | None,
-                           payload: ImportarExtratoIn) -> Extrato:
+                           payload: ImportarExtratoIn) -> ResultadoImport:
     """Importa o extrato, preservando arquivo/hash (RF-EXT-10) e criando os
     lançamentos. Idempotente por (conta, hash) — reimportar o mesmo arquivo
     inteiro 409 (RN da C1).
 
     C2.2: dedupe POR LANÇAMENTO quando o formato dá id (`FITID` do OFX) —
     linha cujo `(id_conta, id_externo)` já existe é pulada e contada em
-    `ex._ignorados_por_id_externo`. Linha sem id_externo (CSV) segue como
+    `ignorados_por_id_externo`. Linha sem id_externo (CSV) segue como
     antes: só o hash do arquivo protege, porque pular por (data, valor)
     esconderia lançamento real (dois pagamentos iguais no mesmo dia são
-    legítimos) — por isso o relato só AVISA em `ex._possiveis_duplicatas`,
+    legítimos) — por isso o relato só AVISA em `possiveis_duplicatas`,
     sem pular.
 
-    O relato fica em atributos não persistidos do `Extrato` devolvido
-    (`_total_no_arquivo`, `_importados`, `_ignorados_por_id_externo`,
-    `_possiveis_duplicatas`) para não quebrar quem já consome o retorno
-    como `Extrato` puro (services e testes anteriores à C2.2); o router
-    monta o `ImportarExtratoResultadoOut` a partir deles."""
+    Devolve `ResultadoImport` (dataclass) com o `Extrato` persistido mais o
+    relato — nada pendurado em atributo não-mapeado do ORM."""
     await _obter_conta(db, tenant_id=tenant_id, conta_id=payload.id_conta)
     if payload.formato == "CSV":
         linhas = _parse_csv(payload.conteudo)
@@ -185,11 +200,10 @@ async def importar_extrato(db: AsyncSession, *, tenant_id: int, usuario_id: int 
 
     ex.qtd_lancamentos = importados
     await db.commit(); await db.refresh(ex)
-    ex._total_no_arquivo = total_no_arquivo
-    ex._importados = importados
-    ex._ignorados_por_id_externo = ignorados_por_id_externo
-    ex._possiveis_duplicatas = possiveis_duplicatas
-    return ex
+    return ResultadoImport(
+        extrato=ex, total_no_arquivo=total_no_arquivo, importados=importados,
+        ignorados_por_id_externo=ignorados_por_id_externo,
+        possiveis_duplicatas=possiveis_duplicatas)
 
 
 async def listar_extratos(db: AsyncSession, *, tenant_id: int, id_conta: int | None = None) -> list[Extrato]:

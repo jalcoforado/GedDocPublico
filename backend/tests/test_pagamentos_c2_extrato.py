@@ -171,10 +171,10 @@ async def test_importar_ofx_cria_lancamentos_com_id_externo(admin_engine):
         uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
         conteudo = (_FIXTURES / "extrato_exemplo.ofx").read_text(encoding="utf-8")
         async with _sm(admin_engine)() as s:
-            ex = await conc.importar_extrato(
+            ex = (await conc.importar_extrato(
                 s, tenant_id=t.id, usuario_id=uid,
                 payload=ImportarExtratoIn(
-                    id_conta=conta.id, nome_arquivo="ext.ofx", formato="OFX", conteudo=conteudo))
+                    id_conta=conta.id, nome_arquivo="ext.ofx", formato="OFX", conteudo=conteudo))).extrato
         assert ex.qtd_lancamentos == 3
         async with _sm(admin_engine)() as s:
             lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
@@ -201,16 +201,16 @@ async def test_importar_ofx_segundo_arquivo_com_fitid_repetido_dedupe(admin_engi
             dict(dtposted="20260809100000", trnamt="-42.00", fitid="F004"),
         ])
         async with _sm(admin_engine)() as s:
-            ex1 = await conc.importar_extrato(
+            ex1 = (await conc.importar_extrato(
                 s, tenant_id=t.id, usuario_id=uid,
                 payload=ImportarExtratoIn(
-                    id_conta=conta.id, nome_arquivo="ext1.ofx", formato="OFX", conteudo=conteudo1))
+                    id_conta=conta.id, nome_arquivo="ext1.ofx", formato="OFX", conteudo=conteudo1))).extrato
         assert ex1.qtd_lancamentos == 2
         async with _sm(admin_engine)() as s:
-            ex2 = await conc.importar_extrato(
+            ex2 = (await conc.importar_extrato(
                 s, tenant_id=t.id, usuario_id=uid,
                 payload=ImportarExtratoIn(
-                    id_conta=conta.id, nome_arquivo="ext2.ofx", formato="OFX", conteudo=conteudo2))
+                    id_conta=conta.id, nome_arquivo="ext2.ofx", formato="OFX", conteudo=conteudo2))).extrato
         # só o F004 é lançamento novo
         assert ex2.qtd_lancamentos == 1
         async with _sm(admin_engine)() as s:
@@ -238,16 +238,16 @@ async def test_mesmo_fitid_em_contas_diferentes_nao_colide(admin_engine):
             dict(dtposted="20260801120000", trnamt="500.00", fitid="DUP-1", trntype="CREDIT"),
         ])
         async with _sm(admin_engine)() as s:
-            ex1 = await conc.importar_extrato(
+            ex1 = (await conc.importar_extrato(
                 s, tenant_id=t.id, usuario_id=uid,
                 payload=ImportarExtratoIn(
-                    id_conta=conta1.id, nome_arquivo="c1.ofx", formato="OFX", conteudo=conteudo))
+                    id_conta=conta1.id, nome_arquivo="c1.ofx", formato="OFX", conteudo=conteudo))).extrato
         assert ex1.qtd_lancamentos == 1
         async with _sm(admin_engine)() as s:
-            ex2 = await conc.importar_extrato(
+            ex2 = (await conc.importar_extrato(
                 s, tenant_id=t.id, usuario_id=uid,
                 payload=ImportarExtratoIn(
-                    id_conta=conta2.id, nome_arquivo="c2.ofx", formato="OFX", conteudo=conteudo))
+                    id_conta=conta2.id, nome_arquivo="c2.ofx", formato="OFX", conteudo=conteudo))).extrato
         assert ex2.qtd_lancamentos == 1  # a conta é diferente, então F001 entra normalmente
     finally:
         await _cleanup(admin_engine, t.id)
@@ -266,9 +266,9 @@ async def test_importar_csv_regressao_id_externo_none(admin_engine):
         conta = await _conta(admin_engine, t.id)
         uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
-            ex = await conc.importar_extrato(
+            ex = (await conc.importar_extrato(
                 s, tenant_id=t.id, usuario_id=uid,
-                payload=ImportarExtratoIn(id_conta=conta.id, nome_arquivo="ext.csv", conteudo=_csv()))
+                payload=ImportarExtratoIn(id_conta=conta.id, nome_arquivo="ext.csv", conteudo=_csv()))).extrato
         assert ex.qtd_lancamentos == 1
         async with _sm(admin_engine)() as s:
             lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
@@ -368,11 +368,11 @@ async def test_importar_cnab240_cria_extrato_e_lancamentos(admin_engine):
         uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
         conteudo = (_FIXTURES / "extrato_exemplo.cnab240.txt").read_text(encoding="utf-8")
         async with _sm(admin_engine)() as s:
-            ex = await conc.importar_extrato(
+            ex = (await conc.importar_extrato(
                 s, tenant_id=t.id, usuario_id=uid,
                 payload=ImportarExtratoIn(
                     id_conta=conta.id, nome_arquivo="ext.cnab240.txt", formato="CNAB240",
-                    conteudo=conteudo))
+                    conteudo=conteudo))).extrato
         assert ex.qtd_lancamentos == 3
         async with _sm(admin_engine)() as s:
             lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)

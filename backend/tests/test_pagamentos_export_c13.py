@@ -94,13 +94,13 @@ async def _cenario(engine):
         await db.commit()
 
     async with _sm(engine)() as db:
-        extrato = await conc_svc.importar_extrato(
+        extrato = (await conc_svc.importar_extrato(
             db, tenant_id=tid, usuario_id=usuario_id,
             payload=ImportarExtratoIn(
                 id_conta=conta.id, formato="CSV", nome_arquivo="extrato.csv",
                 conteudo="data;historico;documento;favorecido;valor;tipo\n"
                          f"{date.today().isoformat()};TED recebida;DOC1;Fulano;1234,56;CREDITO\n",
-            ))
+            ))).extrato
         await db.commit()
 
     return tid, conta.id, extrato.id, tenant.slug

@@ -1175,7 +1175,7 @@ export interface ConciliacaoBancaria {
 export interface ImportarExtratoInput {
   id_conta: number;
   nome_arquivo: string;
-  formato?: "CSV" | "OFX" | "XLSX" | "CNAB";
+  formato?: "CSV" | "OFX" | "XLSX" | "CNAB240";
   conteudo: string;
 }
 

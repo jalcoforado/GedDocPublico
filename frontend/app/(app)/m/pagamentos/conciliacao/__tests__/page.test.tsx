@@ -35,6 +35,7 @@ vi.mock("@/components/ui/confirm", () => ({ useConfirm: () => confirmMock }));
 const painelMock = api.pagamentos.caixa.painel as ReturnType<typeof vi.fn>;
 const movsMock = api.pagamentos.caixa.extrato as ReturnType<typeof vi.fn>;
 const extratosMock = api.pagamentos.conciliacao.extratos as ReturnType<typeof vi.fn>;
+const importarMock = api.pagamentos.conciliacao.importar as ReturnType<typeof vi.fn>;
 const lancamentosMock = api.pagamentos.conciliacao.lancamentos as ReturnType<typeof vi.fn>;
 const sugestoesMock = api.pagamentos.conciliacao.sugestoes as ReturnType<typeof vi.fn>;
 const baixaAutoMock = api.pagamentos.conciliacao.baixaAutomatica as ReturnType<typeof vi.fn>;
@@ -166,5 +167,50 @@ describe("Conciliação bancária", () => {
         id_movimentacao: 55,
       }),
     );
+  });
+});
+
+describe("Importação de extrato — upload e relato (C2.2)", () => {
+  it("seleciona OFX, envia o arquivo lido e exibe o relato com os contadores", async () => {
+    const RELATO = {
+      total_no_arquivo: 5,
+      importados: 3,
+      ignorados_por_id_externo: 1,
+      possiveis_duplicatas: 1,
+      extrato: EXTRATO,
+    };
+    importarMock.mockResolvedValue(RELATO);
+
+    renderPage();
+    fireEvent.click(await screen.findByText("Importar extrato"));
+
+    const dialog = (await screen.findByText("Importar extrato bancário")).closest(
+      "[role=dialog]",
+    ) as HTMLElement;
+
+    fireEvent.change(within(dialog).getByLabelText("Conta"), {
+      target: { value: "7" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/Formato/i), {
+      target: { value: "OFX" },
+    });
+
+    const arquivo = new File(["conteudo-ofx-fake"], "extrato.ofx", { type: "text/plain" });
+    const inputArquivo = screen.getByLabelText("Arquivo") as HTMLInputElement;
+    fireEvent.change(inputArquivo, { target: { files: [arquivo] } });
+
+    await waitFor(() => expect(screen.getByLabelText(/Nome do arquivo/i)).toHaveValue("extrato.ofx"));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Importar$/i }));
+
+    await waitFor(() =>
+      expect(importarMock).toHaveBeenCalledWith(
+        expect.objectContaining({ formato: "OFX", nome_arquivo: "extrato.ofx" }),
+      ),
+    );
+
+    expect(await screen.findByText(/3 importado/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 ignorado/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 possível duplicata/i)).toBeInTheDocument();
   });
 });
