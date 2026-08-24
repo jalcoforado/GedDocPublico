@@ -1316,7 +1316,7 @@ async def listar_alvaras_vencidos(
     return resultado, total
 
 
-async def _titular_tem_convocacao_suspensa(
+async def titular_tem_convocacao_suspensa(
     db: AsyncSession, *, tenant_id: int,
     id_permissionario: int | None, id_empresa: int | None,
 ) -> bool:
@@ -1346,7 +1346,7 @@ async def renovar_alvara(
     # Obter alvará original
     original = await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
 
-    if await _titular_tem_convocacao_suspensa(
+    if await titular_tem_convocacao_suspensa(
         db, tenant_id=tenant_id,
         id_permissionario=original.id_permissionario, id_empresa=original.id_empresa,
     ):

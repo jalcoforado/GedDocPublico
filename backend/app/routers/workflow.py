@@ -436,7 +436,8 @@ async def create_workflow_instance(
             db,
             tenant_id=tenant_id,
             id_workflow_definition=payload.id_workflow_definition,
-            id_processo=payload.id_processo,
+            entidade_tipo="processo",
+            entidade_id=payload.id_processo,
             usuario_id=current.id,
         )
     except WorkflowEngineError as e:

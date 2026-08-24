@@ -105,7 +105,8 @@ async def auto_iniciar_workflow_se_aplicavel(
             db,
             tenant_id=processo.tenant_id,
             id_workflow_definition=wf.id,
-            id_processo=processo.id,
+            entidade_tipo="processo",
+            entidade_id=processo.id,
             usuario_id=usuario_id,
         )
         logger.info(

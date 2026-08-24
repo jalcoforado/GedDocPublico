@@ -123,17 +123,25 @@ async def _processar_tenant(
             # Fase 17 — dispara notificação para os responsáveis pela
             # unidade atual do processo. Falha silenciosa: alerta já existe
             # no banco; notificação é cherry on top.
-            try:
-                await _notificar_alerta_sla(db, inst, sla_dias, dias)
-            except Exception as e:  # noqa: BLE001
-                logger.warning(
-                    "sla_notificacao_falhou",
-                    extra={
-                        "instance_id": inst.id,
-                        "estado": inst.estado_atual,
-                        "erro": str(e),
-                    },
-                )
+            #
+            # P8 D1: `_notificar_alerta_sla` é 100% processo (carrega
+            # `Processo`, resolve unidade pelo processo, grava
+            # `link_url=/m/protocolo/processos/...`) — só chama para
+            # `entidade_tipo == "processo"`. Para as demais entidades o
+            # alerta já foi criado acima; notificação por tipo é trabalho das
+            # Tasks 3–5, não desta guarda.
+            if inst.entidade_tipo == "processo":
+                try:
+                    await _notificar_alerta_sla(db, inst, sla_dias, dias)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        "sla_notificacao_falhou",
+                        extra={
+                            "instance_id": inst.id,
+                            "estado": inst.estado_atual,
+                            "erro": str(e),
+                        },
+                    )
 
     return verificadas, criados
 

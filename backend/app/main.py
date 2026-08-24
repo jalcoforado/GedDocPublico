@@ -7,6 +7,7 @@ from .middleware.request_logging import RequestLoggingMiddleware
 from .middleware.tenant import TenantMiddleware
 from .observability.logging import configure_logging
 from .observability.sentry import init_sentry
+from .services.transporte_workflow import registrar_providers as _registrar_providers_transporte_workflow
 from .routers import (
     admin_tenants,
     anexos,
@@ -60,6 +61,12 @@ init_sentry()
 # levanta — o console de operador desconfigurado não pode derrubar o app
 # municipal —, mas também não passa em silêncio.
 verificar_configuracao_na_inicializacao()
+
+# P8 D1 — registra os providers de contexto do workflow para as entidades de
+# transporte (ocorrencia/alvara/convocacao). O import de `transporte_workflow`
+# já registra sozinho (efeito de import), mas a chamada explícita documenta a
+# dependência aqui e é segura de repetir (registro por dict é idempotente).
+_registrar_providers_transporte_workflow()
 
 app = FastAPI(
     title="Aprimora API",

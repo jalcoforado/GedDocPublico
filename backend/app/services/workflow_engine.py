@@ -17,6 +17,7 @@ Pontos importantes:
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
@@ -90,6 +91,47 @@ async def _load_processo(
     return p
 
 
+async def _contexto_processo(
+    db: AsyncSession, instance: WorkflowInstance
+) -> dict[str, Any]:
+    """Provider de contexto para `entidade_tipo == "processo"` — o único que
+    existia antes da generalização da P8 D1 (extraído de `compute_contexto`
+    sem mudar comportamento).
+
+    Variáveis: dias_aberto, numero_processo, id_assunto, id_manifestante,
+    id_unidade_atual, id_unidade_proprietaria, externo, publico.
+    `estado_atual`/`estado_anterior` são comuns a todo tipo — acrescentados
+    pelo `compute_contexto` depois do provider, não aqui.
+    """
+    processo = await _load_processo(db, instance.id_processo, instance.tenant_id)
+    now = datetime.utcnow()
+    dias_aberto = max(0, (now - processo.data_hora_abertura).days)
+    return {
+        "dias_aberto": dias_aberto,
+        "numero_processo": processo.numero_processo,
+        "id_assunto": processo.id_assunto,
+        "id_manifestante": processo.id_manifestante,
+        "id_unidade_atual": processo.id_local_atual or processo.id_unidade_proprietaria,
+        "id_unidade_proprietaria": processo.id_unidade_proprietaria,
+        "externo": bool(processo.externo),
+        "publico": bool(processo.publico),
+    }
+
+
+ContextProvider = Callable[[AsyncSession, WorkflowInstance], Awaitable[dict[str, Any]]]
+
+# Registro de providers de contexto por `entidade_tipo` — P8 D1. `processo`
+# é o único nato; `transporte_workflow.registrar_providers()` acrescenta
+# `ocorrencia`/`alvara`/`convocacao` no import. Reatribuir a chave é
+# idempotente de propósito (permite reimport em teste sem erro).
+CONTEXT_PROVIDERS: dict[str, ContextProvider] = {"processo": _contexto_processo}
+
+
+def register_context_provider(tipo: str, fn: ContextProvider) -> None:
+    """Registra (ou substitui) o provider de contexto de `tipo`."""
+    CONTEXT_PROVIDERS[tipo] = fn
+
+
 async def compute_contexto(
     db: AsyncSession,
     instance: WorkflowInstance,
@@ -97,17 +139,19 @@ async def compute_contexto(
 ) -> dict[str, Any]:
     """Constrói o contexto disponível para as expressões SAFE.
 
-    Variáveis automáticas:
-      - dias_aberto, numero_processo, id_assunto, id_manifestante,
-        id_unidade_atual, id_unidade_proprietaria, externo, publico,
-        estado_atual, estado_anterior
-    Variáveis em `extra` SOBRESCREVEM auto.
+    Despacha para o provider de `instance.entidade_tipo` em `CONTEXT_PROVIDERS`
+    — tipo sem provider registrado levanta `WorkflowEngineError`. O engine
+    acrescenta `estado_atual`/`estado_anterior` (comuns a todo tipo) depois do
+    provider. Variáveis em `extra` SOBRESCREVEM auto.
     """
-    processo = await _load_processo(db, instance.id_processo, instance.tenant_id)
-    now = datetime.utcnow()
-    dias_aberto = max(0, (now - processo.data_hora_abertura).days)
+    provider = CONTEXT_PROVIDERS.get(instance.entidade_tipo)
+    if provider is None:
+        raise WorkflowEngineError(
+            f"Sem provider de contexto para entidade_tipo={instance.entidade_tipo!r}"
+        )
+    auto = await provider(db, instance)
 
-    # Último estado_de no log (estado anterior)
+    # Último estado_de no log (estado anterior) — comum a todo tipo.
     ultimo_log = (
         await db.execute(
             select(WorkflowTransicaoLog)
@@ -121,18 +165,8 @@ async def compute_contexto(
     ).scalar_one_or_none()
     estado_anterior = ultimo_log.estado_de if ultimo_log else None
 
-    auto: dict[str, Any] = {
-        "dias_aberto": dias_aberto,
-        "numero_processo": processo.numero_processo,
-        "id_assunto": processo.id_assunto,
-        "id_manifestante": processo.id_manifestante,
-        "id_unidade_atual": processo.id_local_atual or processo.id_unidade_proprietaria,
-        "id_unidade_proprietaria": processo.id_unidade_proprietaria,
-        "externo": bool(processo.externo),
-        "publico": bool(processo.publico),
-        "estado_atual": instance.estado_atual,
-        "estado_anterior": estado_anterior,
-    }
+    auto["estado_atual"] = instance.estado_atual
+    auto["estado_anterior"] = estado_anterior
     if extra:
         auto.update(extra)
     return auto
@@ -171,28 +205,40 @@ async def iniciar(
     *,
     tenant_id: int,
     id_workflow_definition: int,
-    id_processo: int,
+    entidade_tipo: str,
+    entidade_id: int,
     usuario_id: int | None,
+    estado_inicial: str | None = None,
 ) -> WorkflowInstance:
-    """Cria uma WorkflowInstance no estado_inicial da definition.
+    """Cria uma WorkflowInstance no estado_inicial da definition (ou em
+    `estado_inicial`, se passado — instanciação lazy no estado corrente da
+    entidade, ex.: uma ocorrência já `em_apuracao` ganhando workflow depois).
 
-    Falha se já existir instance ATIVA para o mesmo processo (regra de
-    negócio + enforcer no índice parcial criado na migration).
+    Falha se já existir instance ATIVA para o mesmo par polimórfico
+    `(entidade_tipo, entidade_id)` (regra de negócio + enforcer no índice
+    parcial da P8 D1). `id_processo` só é preenchido — e só validado contra
+    `Processo` — quando `entidade_tipo == "processo"`; para os demais tipos
+    a existência da entidade é responsabilidade do provider de contexto.
     """
     wf = await _load_definition(db, id_workflow_definition, tenant_id)
     if not wf.ativo:
         raise WorkflowEngineError(
             "WorkflowDefinition inativa — instanciar versão ativa"
         )
-    # Confirma que processo existe no tenant
-    await _load_processo(db, id_processo, tenant_id)
+
+    id_processo: int | None = None
+    if entidade_tipo == "processo":
+        # Confirma que processo existe no tenant
+        await _load_processo(db, entidade_id, tenant_id)
+        id_processo = entidade_id
 
     # Verifica conflito com instance ativa (mensagem amigável; o unique
-    # parcial garante invariante mesmo sob concorrência).
+    # parcial polimórfico garante invariante mesmo sob concorrência).
     existente = (
         await db.execute(
             select(WorkflowInstance).where(
-                WorkflowInstance.id_processo == id_processo,
+                WorkflowInstance.entidade_tipo == entidade_tipo,
+                WorkflowInstance.entidade_id == entidade_id,
                 WorkflowInstance.tenant_id == tenant_id,
                 WorkflowInstance.ativa.is_(True),
             )
@@ -200,18 +246,25 @@ async def iniciar(
     ).scalar_one_or_none()
     if existente is not None:
         raise WorkflowEngineError(
-            f"Processo {id_processo} já tem WorkflowInstance ativa (#{existente.id})"
+            f"{entidade_tipo} {entidade_id} já tem WorkflowInstance ativa "
+            f"(#{existente.id})"
         )
 
-    estado_inicial = wf.dsl.get("estado_inicial")
-    if not estado_inicial:
+    estado = estado_inicial or wf.dsl.get("estado_inicial")
+    if not estado:
         raise WorkflowEngineError("DSL sem estado_inicial")
+    if estado_inicial is not None and _estado_obj(wf.dsl, estado_inicial) is None:
+        raise WorkflowEngineError(
+            f"estado_inicial {estado_inicial!r} não existe no DSL"
+        )
 
     inst = WorkflowInstance(
         tenant_id=tenant_id,
         id_workflow_definition=wf.id,
         id_processo=id_processo,
-        estado_atual=estado_inicial,
+        entidade_tipo=entidade_tipo,
+        entidade_id=entidade_id,
+        estado_atual=estado,
         ativa=True,
         iniciada_em=datetime.utcnow(),
         id_usuario_inicio=usuario_id,
@@ -327,19 +380,22 @@ async def executar_transicao(
 
     # Workflow↔Org fix: se o estado destino tem unidade responsável diferente
     # do local atual, faz auto-encaminhamento (sem prioridade/prazo — o usuário
-    # pode encaminhar manualmente depois se precisar especificar).
-    unid_resp = destino.get("id_unidade_responsavel") if destino else None
-    if unid_resp is not None:
-        processo = await _load_processo(db, instance.id_processo, instance.tenant_id)
-        local_atual = processo.id_local_atual or processo.id_unidade_proprietaria
-        if int(unid_resp) != int(local_atual):
-            await _auto_encaminhar(
-                db,
-                processo=processo,
-                tenant_id=instance.tenant_id,
-                id_unidade_destino=int(unid_resp),
-                usuario_id=usuario_id,
-            )
+    # pode encaminhar manualmente depois se precisar especificar). Só faz
+    # sentido para `processo` — as demais entidades não têm tramitação por
+    # unidade/`Encaminhamento`.
+    if instance.entidade_tipo == "processo":
+        unid_resp = destino.get("id_unidade_responsavel") if destino else None
+        if unid_resp is not None:
+            processo = await _load_processo(db, instance.id_processo, instance.tenant_id)
+            local_atual = processo.id_local_atual or processo.id_unidade_proprietaria
+            if int(unid_resp) != int(local_atual):
+                await _auto_encaminhar(
+                    db,
+                    processo=processo,
+                    tenant_id=instance.tenant_id,
+                    id_unidade_destino=int(unid_resp),
+                    usuario_id=usuario_id,
+                )
 
     await db.commit()
     await db.refresh(instance)
