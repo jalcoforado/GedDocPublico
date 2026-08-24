@@ -42,6 +42,7 @@ from ..models import (
     Transacao,
     Usuario,
     UsuarioGrupo,
+    WorkflowDefinition,
 )
 from ..services.modulos import contratar_modulos_iniciais
 
@@ -197,6 +198,71 @@ async def garantir_contratacao_inicial(db: AsyncSession, tenant_id: int) -> list
     if tem_alguma_linha is not None:
         return []
     return await contratar_modulos_iniciais(db, tenant_id, None)
+
+
+async def garantir_workflows_transporte(db: AsyncSession) -> list[str]:
+    """Cria, para cada tenant com o módulo `transporte` contratado (ativo,
+    não excluído), as `WorkflowDefinition` de `SEMENTES`
+    (`services/transporte_workflow.py`) — SÓ o slug que ainda não existe
+    para aquele tenant. Idempotente por design (roda a cada deploy) e nunca
+    sobrescreve edição do tenant: a checagem é "existe alguma linha desse
+    slug", não "está na versão da semente".
+
+    P8 D1 (Task 3) só declara `transporte-ocorrencia` em `SEMENTES`; as
+    Tasks 4/5 acrescentam `alvara`/`convocacao` só mexendo em `SEMENTES` —
+    este laço já cobre qualquer slug novo sem precisar de outra mudança
+    aqui.
+    """
+    # Import local: `transporte_workflow` importa de `transporte_regulado`
+    # no nível de módulo, então importar no topo deste arquivo criaria um
+    # ciclo se `transporte_regulado` algum dia importasse `seed_bootstrap`
+    # — hoje não importa, mas o padrão do resto do módulo é `from . import
+    # transporte_workflow as _wf` dentro da função, e seguir aqui evita
+    # surpresa se isso mudar.
+    from ..services.transporte_workflow import SEMENTES
+
+    tenant_ids = (
+        await db.execute(
+            select(TenantModulo.tenant_id)
+            .join(Modulo, Modulo.id == TenantModulo.id_modulo)
+            .where(
+                Modulo.slug == "transporte",
+                TenantModulo.ativo.is_(True),
+                TenantModulo.excluido.is_(False),
+            )
+        )
+    ).scalars().all()
+
+    criadas: list[str] = []
+    for tenant_id in tenant_ids:
+        for slug, dsl in SEMENTES.items():
+            existe = (
+                await db.execute(
+                    select(WorkflowDefinition.id)
+                    .where(
+                        WorkflowDefinition.tenant_id == tenant_id,
+                        WorkflowDefinition.slug == slug,
+                    )
+                    .limit(1)
+                )
+            ).first()
+            if existe is not None:
+                continue
+            db.add(
+                WorkflowDefinition(
+                    tenant_id=tenant_id,
+                    slug=slug,
+                    nome=slug.replace("-", " ").title(),
+                    versao=1,
+                    ativo=True,
+                    dsl=dsl,
+                    criado_em=datetime.now(timezone.utc).replace(tzinfo=None),
+                )
+            )
+            criadas.append(f"{tenant_id}:{slug}")
+    if criadas:
+        await db.flush()
+    return criadas
 
 
 async def seed(db: AsyncSession) -> dict:
@@ -365,6 +431,7 @@ async def seed(db: AsyncSession) -> dict:
     vinculos_sistema = await garantir_sistema_transacao(db)
     resultado_modulos = await semear_modulos(db)
     contratados = await garantir_contratacao_inicial(db, tenant_id)
+    workflows_transporte = await garantir_workflows_transporte(db)
 
     return {
         "tenant_id": tenant_id,
@@ -373,6 +440,7 @@ async def seed(db: AsyncSession) -> dict:
         "vinculos_sistema": vinculos_sistema,
         "modulos": resultado_modulos,
         "modulos_contratados": contratados,
+        "workflows_transporte_criados": workflows_transporte,
     }
 
 

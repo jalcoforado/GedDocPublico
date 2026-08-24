@@ -12,10 +12,11 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
+from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Ocorrencia, OcorrenciaAndamento, WorkflowInstance
+from ..models import Ocorrencia, OcorrenciaAndamento, WorkflowDefinition, WorkflowInstance
 from ..models.transporte_regulado import Alvara
 from .transporte_regulado import (
     estado_do_checklist,
@@ -23,6 +24,7 @@ from .transporte_regulado import (
     situacao_vistorias,
     titular_tem_convocacao_suspensa,
 )
+from . import workflow_engine as engine
 from .workflow_engine import WorkflowEngineError, register_context_provider
 
 
@@ -124,6 +126,147 @@ async def _contexto_convocacao(
         # `resultado == "aprovado"`) decide isso; nada aqui reimplementa.
         "tem_vistoria_aprovada": bool(vistorias["satisfeita"]),
     }
+
+
+# ============================================================================
+# Sementes de DSL — Task 3 (piloto: ocorrências). `obter_definicao` cria a
+# `WorkflowDefinition` do tenant lazy a partir daqui na primeira vez que uma
+# fachada precisa dela; edições do tenant DEPOIS disso nunca são
+# sobrescritas — a semente só serve de ponto de partida.
+# ============================================================================
+
+SEMENTES: dict[str, dict] = {
+    "transporte-ocorrencia": {
+        "estado_inicial": "registrada",
+        "estados": [
+            {"slug": "registrada", "label": "Registrada"},
+            {"slug": "em_apuracao", "label": "Em apuração"},
+            {"slug": "procedente", "label": "Procedente", "final": True},
+            {"slug": "improcedente", "label": "Improcedente", "final": True},
+            {"slug": "arquivada", "label": "Arquivada", "final": True},
+        ],
+        "transicoes": [
+            {"de": "registrada", "para": "em_apuracao", "label": "iniciar_apuracao"},
+            {"de": "em_apuracao", "para": "procedente", "label": "decidir_procedente"},
+            {"de": "em_apuracao", "para": "improcedente", "label": "decidir_improcedente"},
+            {"de": "em_apuracao", "para": "arquivada", "label": "arquivar"},
+        ],
+    },
+}
+
+
+async def obter_definicao(
+    db: AsyncSession, *, tenant_id: int, slug: str
+) -> WorkflowDefinition:
+    """Devolve a `WorkflowDefinition` ativa de `slug` para o tenant.
+
+    Se não existir NENHUMA (nem ativa nem inativa) para esse par
+    `(tenant_id, slug)`, cria — lazy — a partir de `SEMENTES[slug]`
+    (`versao=1`, `ativo=True`) e dá `flush` na sessão corrente (não
+    `commit`: quem chama decide quando persistir, geralmente dentro da
+    mesma transação de `engine.iniciar`). Depois de criada, edição do
+    tenant sobre essa linha nunca é sobrescrita — esta função só cria
+    quando não existe nenhuma.
+    """
+    wf = (
+        await db.execute(
+            select(WorkflowDefinition)
+            .where(
+                WorkflowDefinition.tenant_id == tenant_id,
+                WorkflowDefinition.slug == slug,
+                WorkflowDefinition.ativo.is_(True),
+            )
+            .order_by(WorkflowDefinition.versao.desc())
+        )
+    ).scalars().first()
+    if wf is not None:
+        return wf
+
+    if slug not in SEMENTES:
+        raise WorkflowEngineError(f"Sem semente de workflow para slug={slug!r}")
+
+    wf = WorkflowDefinition(
+        tenant_id=tenant_id,
+        slug=slug,
+        nome=slug.replace("-", " ").title(),
+        versao=1,
+        ativo=True,
+        dsl=SEMENTES[slug],
+        criado_em=datetime.utcnow(),
+    )
+    db.add(wf)
+    await db.flush()
+    return wf
+
+
+async def obter_ou_criar_instancia(
+    db: AsyncSession, *, tenant_id: int, slug: str, entidade_tipo: str,
+    entidade_id: int, situacao_atual: str, usuario_id: int | None,
+) -> WorkflowInstance:
+    """Devolve a `WorkflowInstance` ativa de `(entidade_tipo, entidade_id)` —
+    ou a cria lazy no `situacao_atual` da entidade (não no `estado_inicial`
+    do DSL: uma entidade que já existia antes do P8, ou que ganha workflow
+    numa situação que não é a inicial, nasce onde já está).
+
+    ATENÇÃO: `engine.iniciar` COMMITA internamente. Chame esta função ANTES
+    de mutar a entidade — se a criação falhar, nada foi tocado ainda."""
+    inst = (
+        await db.execute(
+            select(WorkflowInstance).where(
+                WorkflowInstance.tenant_id == tenant_id,
+                WorkflowInstance.entidade_tipo == entidade_tipo,
+                WorkflowInstance.entidade_id == entidade_id,
+                WorkflowInstance.ativa.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if inst is not None:
+        return inst
+
+    wf = await obter_definicao(db, tenant_id=tenant_id, slug=slug)
+    return await engine.iniciar(
+        db,
+        tenant_id=tenant_id,
+        id_workflow_definition=wf.id,
+        entidade_tipo=entidade_tipo,
+        entidade_id=entidade_id,
+        usuario_id=usuario_id,
+        estado_inicial=situacao_atual,
+    )
+
+
+async def transicionar(
+    db: AsyncSession, *, instancia: WorkflowInstance, para: str,
+    usuario_id: int | None, entidade: Any, slug: str,
+) -> None:
+    """Muta `entidade.situacao = para` e chama `engine.executar_transicao`.
+
+    `engine.executar_transicao` COMMITA internamente — a mutação da
+    entidade e a transição da instância são persistidas juntas nesse mesmo
+    commit. Se a transição falhar (não existe ou condição bloqueia), NADA
+    foi commitado: a mutação em memória fica pendente e o caller (router
+    dentro de `db.begin()`, ou teste) é quem desfaz com o rollback da
+    transação — o 409 responde sem efeito no banco.
+
+    `WorkflowEngineError` vira `HTTPException(409, ...)`: mensagem própria
+    (citando slug/estado destino/estado de origem) quando a transição não
+    existe no DSL; a mensagem do engine (que já descreve a condição) quando
+    a transição existe mas está bloqueada.
+    """
+    entidade.situacao = para
+    try:
+        await engine.executar_transicao(
+            db, instancia, para=para, usuario_id=usuario_id,
+        )
+    except WorkflowEngineError as exc:
+        msg = str(exc)
+        if "bloqueada pela condição" in msg:
+            raise HTTPException(status.HTTP_409_CONFLICT, msg) from exc
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"O workflow {slug!r} não permite {para!r} a partir de "
+            f"{instancia.estado_atual!r}",
+        ) from exc
 
 
 def registrar_providers() -> None:

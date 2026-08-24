@@ -10,6 +10,7 @@ import uuid
 from datetime import date, datetime
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -207,17 +208,36 @@ async def _ocorrencia(engine, tenant_id: int) -> int:
     tipo = await _tipo(engine, tenant_id)
     id_emp, _id_perm = await _operadores(engine, tenant_id)
     async with _sm(engine)() as db:
-        async with db.begin():
-            oc = await tr.registrar_ocorrencia(
-                db, tenant_id=tenant_id,
-                payload=OcorrenciaCreate(
-                    id_tipo=tipo.id, origem="fiscalizacao",
-                    data_fato=date.today(), descricao="Fato de teste do engine P8",
-                    id_empresa=id_emp,
-                ),
-                id_usuario=None,
-            )
+        oc = await tr.registrar_ocorrencia(
+            db, tenant_id=tenant_id,
+            payload=OcorrenciaCreate(
+                id_tipo=tipo.id, origem="fiscalizacao",
+                data_fato=date.today(), descricao="Fato de teste do engine P8",
+                id_empresa=id_emp,
+            ),
+            id_usuario=None,
+        )
     return oc.id
+
+
+async def _remover_instancia_auto_criada(engine, tenant_id: int, oc_id: int) -> None:
+    """A partir da Task 3, `registrar_ocorrencia` (chamado por `_ocorrencia`
+    acima) já cria a `WorkflowInstance` automaticamente em
+    `transporte-ocorrencia`. Os testes da seção Task 2 abaixo testam o
+    engine genérico com um DSL AD HOC (`_definicao_ocorrencia`) e chamam
+    `iniciar()` à mão — precisam da entidade "limpa" (sem instância prévia),
+    senão `iniciar()` rejeita por já existir instância ativa para o par
+    `('ocorrencia', oc_id)`."""
+    async with _sm(engine)() as db:
+        await db.execute(
+            text(
+                "DELETE FROM aprimora_py.workflow_instance "
+                "WHERE tenant_id = :t AND entidade_tipo = 'ocorrencia' "
+                "AND entidade_id = :id"
+            ),
+            {"t": tenant_id, "id": oc_id},
+        )
+        await db.commit()
 
 
 async def _limpar_engine(engine, tenant_id: int) -> None:
@@ -263,6 +283,7 @@ async def test_compute_contexto_ocorrencia_usa_provider_sem_tocar_processo(admin
     t = await _provisionar(admin_engine)
     try:
         oc_id = await _ocorrencia(admin_engine, t.id)
+        await _remover_instancia_auto_criada(admin_engine, t.id, oc_id)
         wf = await _definicao_ocorrencia(admin_engine, t.id)
         async with _sm(admin_engine)() as db:
             inst = await iniciar(
@@ -290,6 +311,7 @@ async def test_iniciar_com_estado_inicial_explicito_sobrepoe_dsl(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         oc_id = await _ocorrencia(admin_engine, t.id)
+        await _remover_instancia_auto_criada(admin_engine, t.id, oc_id)
         wf = await _definicao_ocorrencia(admin_engine, t.id)
         async with _sm(admin_engine)() as db:
             inst = await iniciar(
@@ -310,6 +332,7 @@ async def test_iniciar_com_estado_inicial_inexistente_falha(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         oc_id = await _ocorrencia(admin_engine, t.id)
+        await _remover_instancia_auto_criada(admin_engine, t.id, oc_id)
         wf = await _definicao_ocorrencia(admin_engine, t.id)
         async with _sm(admin_engine)() as db:
             with pytest.raises(WorkflowEngineError):
@@ -329,6 +352,7 @@ async def test_executar_transicao_em_ocorrencia_transiciona_e_loga(admin_engine)
     t = await _provisionar(admin_engine)
     try:
         oc_id = await _ocorrencia(admin_engine, t.id)
+        await _remover_instancia_auto_criada(admin_engine, t.id, oc_id)
         wf = await _definicao_ocorrencia(admin_engine, t.id)
         async with _sm(admin_engine)() as db:
             inst = await iniciar(
@@ -364,6 +388,7 @@ async def test_sla_ocorrencia_gera_alerta_sem_tocar_processo(admin_engine):
     t = await _provisionar(admin_engine)
     try:
         oc_id = await _ocorrencia(admin_engine, t.id)
+        await _remover_instancia_auto_criada(admin_engine, t.id, oc_id)
         dsl_sla = {
             **DSL_OCORRENCIA,
             "estados": [
@@ -405,5 +430,250 @@ async def test_sla_ocorrencia_gera_alerta_sem_tocar_processo(admin_engine):
             ).scalar_one_or_none()
         assert alerta is not None
         assert alerta.estado == "registrada"
+    finally:
+        await _limpar_engine(admin_engine, t.id)
+
+
+# ============================================================================
+# Task 3 — ocorrências comandadas pelo workflow (sementes + fachadas, piloto)
+# ============================================================================
+#
+# Reaproveita `_ocorrencia`/`_limpar_engine` da Task 2. `_ocorrencia` cria a
+# ocorrência via `tr.registrar_ocorrencia` — que, a partir desta task, já
+# ganha `WorkflowInstance` automaticamente (sem chamar o engine à mão).
+
+
+async def test_registrar_ocorrencia_cria_instancia_ativa_em_registrada(admin_engine):
+    """(a) `registrar_ocorrencia` cria a instância ativa `('ocorrencia', id)`
+    já em `registrada` — sem chamada explícita ao engine."""
+    t = await _provisionar(admin_engine)
+    try:
+        oc_id = await _ocorrencia(admin_engine, t.id)
+        async with _sm(admin_engine)() as db:
+            inst = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "ocorrencia",
+                        WorkflowInstance.entidade_id == oc_id,
+                    )
+                )
+            ).scalar_one()
+        assert inst.ativa is True
+        assert inst.estado_atual == "registrada"
+    finally:
+        await _limpar_engine(admin_engine, t.id)
+
+
+async def test_fluxo_completo_registrar_iniciar_decidir_procedente_sincroniza(admin_engine):
+    """(b) `situacao` da ocorrência e `estado_atual` da instância andam juntos
+    em cada passo; o log acumula as 2 transições; a instância finaliza."""
+    t = await _provisionar(admin_engine)
+    try:
+        oc_id = await _ocorrencia(admin_engine, t.id)
+
+        async with _sm(admin_engine)() as db:
+            inst = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "ocorrencia",
+                        WorkflowInstance.entidade_id == oc_id,
+                    )
+                )
+            ).scalar_one()
+        inst_id = inst.id
+        assert inst.estado_atual == "registrada"
+
+        async with _sm(admin_engine)() as db:
+            oc = await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=oc_id, id_usuario=None,
+            )
+        assert oc.situacao == "em_apuracao"
+        async with _sm(admin_engine)() as db:
+            inst = await db.get(WorkflowInstance, inst_id)
+        assert inst.estado_atual == "em_apuracao"
+
+        async with _sm(admin_engine)() as db:
+            oc = await tr.decidir_ocorrencia(
+                db, tenant_id=t.id, ocorrencia_id=oc_id,
+                resultado="procedente", parecer="Confirmado", id_usuario=None,
+            )
+        assert oc.situacao == "procedente"
+
+        async with _sm(admin_engine)() as db:
+            inst = await db.get(WorkflowInstance, inst_id)
+            logs = (
+                await db.execute(
+                    select(WorkflowTransicaoLog).where(
+                        WorkflowTransicaoLog.id_workflow_instance == inst_id,
+                    )
+                )
+            ).scalars().all()
+        assert inst.estado_atual == "procedente"
+        assert inst.ativa is False
+        assert len(logs) == 2
+    finally:
+        await _limpar_engine(admin_engine, t.id)
+
+
+async def test_ocorrencia_de_estoque_sem_instancia_ganha_workflow_lazy(admin_engine):
+    """(c) Ocorrência criada direto no banco (sem instância — simulando dado
+    de antes do P8) sofre `iniciar_apuracao`: a instância nasce lazy no
+    ESTADO CORRENTE da ocorrência (`registrada`, não algum default do DSL) e
+    já transiciona no mesmo ato — UMA linha de log, estado final
+    `em_apuracao`."""
+    t = await _provisionar(admin_engine)
+    try:
+        tipo = await _tipo(admin_engine, t.id)
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        agora = datetime.utcnow()
+        async with admin_engine.begin() as conn:
+            res = await conn.execute(
+                text(
+                    "INSERT INTO transporte_regulado.ocorrencia "
+                    "(tenant_id, id_tipo, origem, data_fato, descricao, "
+                    " id_empresa, situacao, criado_em, excluido) "
+                    "VALUES (:t, :tipo, 'fiscalizacao', :data, "
+                    " 'Ocorrência de estoque (sem instância)', :emp, "
+                    " 'registrada', :agora, false) RETURNING id"
+                ),
+                {
+                    "t": t.id, "tipo": tipo.id, "data": date.today(),
+                    "emp": id_emp, "agora": agora,
+                },
+            )
+            oc_id = res.scalar_one()
+
+        async with _sm(admin_engine)() as db:
+            nenhuma = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "ocorrencia",
+                        WorkflowInstance.entidade_id == oc_id,
+                    )
+                )
+            ).first()
+        assert nenhuma is None
+
+        async with _sm(admin_engine)() as db:
+            oc = await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=oc_id, id_usuario=None,
+            )
+        assert oc.situacao == "em_apuracao"
+
+        async with _sm(admin_engine)() as db:
+            inst = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "ocorrencia",
+                        WorkflowInstance.entidade_id == oc_id,
+                    )
+                )
+            ).scalar_one()
+            logs = (
+                await db.execute(
+                    select(WorkflowTransicaoLog).where(
+                        WorkflowTransicaoLog.id_workflow_instance == inst.id,
+                    )
+                )
+            ).scalars().all()
+        assert inst.estado_atual == "em_apuracao"
+        assert len(logs) == 1
+        assert logs[0].estado_de == "registrada"
+        assert logs[0].estado_para == "em_apuracao"
+    finally:
+        await _limpar_engine(admin_engine, t.id)
+
+
+async def test_decidir_procedente_409_quando_dsl_do_tenant_nao_permite(admin_engine):
+    """(d) Tenant edita a própria definição removendo a transição
+    `decidir_procedente` — `decidir_ocorrencia` responde 409 com mensagem
+    citando slug, estado destino e estado de origem."""
+    t = await _provisionar(admin_engine)
+    try:
+        oc_id = await _ocorrencia(admin_engine, t.id)
+        async with _sm(admin_engine)() as db:
+            await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=oc_id, id_usuario=None,
+            )
+
+        async with admin_engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE aprimora_py.workflow_definition SET dsl = jsonb_set("
+                    "  dsl, '{transicoes}', "
+                    "  (SELECT jsonb_agg(elem) FROM jsonb_array_elements(dsl->'transicoes') elem "
+                    "   WHERE elem->>'label' != 'decidir_procedente')"
+                    ") WHERE tenant_id = :t AND slug = 'transporte-ocorrencia'"
+                ),
+                {"t": t.id},
+            )
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.decidir_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=oc_id,
+                    resultado="procedente", parecer="Confirmado", id_usuario=None,
+                )
+        assert e.value.status_code == 409
+        msg = str(e.value.detail)
+        assert "transporte-ocorrencia" in msg
+        assert "procedente" in msg
+        assert "em_apuracao" in msg
+    finally:
+        await _limpar_engine(admin_engine, t.id)
+
+
+async def test_decidir_a_partir_de_registrada_409_transicao_nao_existe(admin_engine):
+    """(e) Decidir sem antes iniciar apuração: `registrada -> improcedente`
+    não existe no DSL, 409 vindo do engine (a validação antiga de service
+    `situacao != 'em_apuracao'` saiu)."""
+    t = await _provisionar(admin_engine)
+    try:
+        oc_id = await _ocorrencia(admin_engine, t.id)
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.decidir_ocorrencia(
+                    db, tenant_id=t.id, ocorrencia_id=oc_id,
+                    resultado="improcedente", parecer="Direto", id_usuario=None,
+                )
+        assert e.value.status_code == 409
+    finally:
+        await _limpar_engine(admin_engine, t.id)
+
+
+async def test_definicao_lazy_criada_com_slug_transporte_ocorrencia(admin_engine):
+    """(f) Tenant sem nenhuma definição: o primeiro ato cria uma
+    `WorkflowDefinition` com `slug='transporte-ocorrencia'`, versão 1, ativa."""
+    t = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as db:
+            nenhuma = (
+                await db.execute(
+                    select(WorkflowDefinition).where(
+                        WorkflowDefinition.tenant_id == t.id,
+                        WorkflowDefinition.slug == "transporte-ocorrencia",
+                    )
+                )
+            ).first()
+        assert nenhuma is None
+
+        await _ocorrencia(admin_engine, t.id)
+
+        async with _sm(admin_engine)() as db:
+            wf = (
+                await db.execute(
+                    select(WorkflowDefinition).where(
+                        WorkflowDefinition.tenant_id == t.id,
+                        WorkflowDefinition.slug == "transporte-ocorrencia",
+                    )
+                )
+            ).scalar_one()
+        assert wf.ativo is True
+        assert wf.versao == 1
+        assert wf.dsl.get("estado_inicial") == "registrada"
     finally:
         await _limpar_engine(admin_engine, t.id)

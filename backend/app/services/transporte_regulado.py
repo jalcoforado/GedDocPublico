@@ -4449,6 +4449,19 @@ async def registrar_ocorrencia(
         )
     )
     await db.flush()
+
+    # P8 D1 (Task 3): toda ocorrência nasce com WorkflowInstance ativa em
+    # `registrada` — import local para evitar ciclo (`transporte_workflow`
+    # importa deste módulo no nível de módulo). `id_cidadao` (porta do
+    # portal) passa `id_usuario=None` — mesmo ator que grava o ato "registro"
+    # acima.
+    from . import transporte_workflow as _wf
+
+    await _wf.obter_ou_criar_instancia(
+        db, tenant_id=tenant_id, slug="transporte-ocorrencia",
+        entidade_tipo="ocorrencia", entidade_id=ocorrencia.id,
+        situacao_atual=ocorrencia.situacao, usuario_id=id_usuario,
+    )
     return ocorrencia
 
 
@@ -4518,9 +4531,25 @@ async def iniciar_apuracao(
     oc = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
     if oc.situacao != "registrada":
         raise HTTPException(409, "Só se inicia apuração de ocorrência registrada")
-    oc.situacao = "em_apuracao"
+
+    # P8 D1 (Task 3): lazy ANTES de mutar a entidade (`engine.iniciar` — via
+    # `obter_ou_criar_instancia` — commita internamente quando cria; se a
+    # ocorrência já tem instância ativa, esta chamada só a busca).
+    from . import transporte_workflow as _wf
+
+    inst = await _wf.obter_ou_criar_instancia(
+        db, tenant_id=tenant_id, slug="transporte-ocorrencia",
+        entidade_tipo="ocorrencia", entidade_id=oc.id,
+        situacao_atual=oc.situacao, usuario_id=id_usuario,
+    )
     oc.atualizado_em = datetime.utcnow()
     await _ato(db, oc, ato="inicio_apuracao", parecer=None, id_usuario=id_usuario)
+    # `transicionar` muta `oc.situacao = "em_apuracao"` e chama o engine, que
+    # commita entidade + instância juntos.
+    await _wf.transicionar(
+        db, instancia=inst, para="em_apuracao", usuario_id=id_usuario,
+        entidade=oc, slug="transporte-ocorrencia",
+    )
     await db.flush()
     return oc
 
@@ -4578,17 +4607,30 @@ async def decidir_ocorrencia(
     if not (parecer or "").strip():
         raise HTTPException(422, "A decisão exige parecer")
     oc = await obter_ocorrencia(db, tenant_id=tenant_id, ocorrencia_id=ocorrencia_id)
-    if oc.situacao != "em_apuracao":
-        raise HTTPException(409, "Só se decide ocorrência em apuração")
+    # A checagem `situacao != "em_apuracao"` SAIU daqui — o 409 de origem
+    # inválida agora vem do DSL (`transicionar` abaixo), via
+    # `WorkflowEngineError` — "a transição não existe" é a mesma regra,
+    # movida para o workflow (P8 D1, Task 3).
     if resultado == "procedente" and not (
         oc.id_permissionario or oc.id_empresa or oc.id_veiculo
     ):
         raise HTTPException(
             409, "Procedência exige alvo vinculado — vincule o alvo antes de decidir"
         )
-    oc.situacao = resultado
+
+    from . import transporte_workflow as _wf
+
+    inst = await _wf.obter_ou_criar_instancia(
+        db, tenant_id=tenant_id, slug="transporte-ocorrencia",
+        entidade_tipo="ocorrencia", entidade_id=oc.id,
+        situacao_atual=oc.situacao, usuario_id=id_usuario,
+    )
     oc.atualizado_em = datetime.utcnow()
     await _ato(db, oc, ato="decisao", parecer=parecer, id_usuario=id_usuario)
+    await _wf.transicionar(
+        db, instancia=inst, para=resultado, usuario_id=id_usuario,
+        entidade=oc, slug="transporte-ocorrencia",
+    )
     await db.flush()
     return oc
 

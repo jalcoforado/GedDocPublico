@@ -167,16 +167,15 @@ async def test_excluir_tipo_em_uso_da_409(admin_engine):
         tipo = await _tipo(admin_engine, t.id)
         id_emp, _ = await _operadores(admin_engine, t.id)
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.registrar_ocorrencia(
-                    db, tenant_id=t.id,
-                    payload=OcorrenciaCreate(
-                        id_tipo=tipo.id, origem="fiscalizacao",
-                        data_fato=date.today(), descricao="Fato X",
-                        id_empresa=id_emp,
-                    ),
-                    id_usuario=None,
-                )
+            await tr.registrar_ocorrencia(
+                db, tenant_id=t.id,
+                payload=OcorrenciaCreate(
+                    id_tipo=tipo.id, origem="fiscalizacao",
+                    data_fato=date.today(), descricao="Fato X",
+                    id_empresa=id_emp,
+                ),
+                id_usuario=None,
+            )
 
         async with _sm(admin_engine)() as db:
             with pytest.raises(HTTPException) as e:
@@ -193,16 +192,15 @@ async def test_tipo_inativo_permanece_em_ocorrencia_antiga(admin_engine):
         tipo = await _tipo(admin_engine, t.id, nome="Veículo sem vistoria")
         id_emp, _ = await _operadores(admin_engine, t.id)
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                ocorrencia = await tr.registrar_ocorrencia(
-                    db, tenant_id=t.id,
-                    payload=OcorrenciaCreate(
-                        id_tipo=tipo.id, origem="fiscalizacao",
-                        data_fato=date.today(), descricao="Fato Y",
-                        id_empresa=id_emp,
-                    ),
-                    id_usuario=None,
-                )
+            ocorrencia = await tr.registrar_ocorrencia(
+                db, tenant_id=t.id,
+                payload=OcorrenciaCreate(
+                    id_tipo=tipo.id, origem="fiscalizacao",
+                    data_fato=date.today(), descricao="Fato Y",
+                    id_empresa=id_emp,
+                ),
+                id_usuario=None,
+            )
 
         async with _sm(admin_engine)() as db:
             async with db.begin():
@@ -277,16 +275,15 @@ async def test_registrar_cria_ato_registro_na_trilha(admin_engine):
         tipo = await _tipo(admin_engine, t.id)
         id_emp, _ = await _operadores(admin_engine, t.id)
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                ocorrencia = await tr.registrar_ocorrencia(
-                    db, tenant_id=t.id,
-                    payload=OcorrenciaCreate(
-                        id_tipo=tipo.id, origem="fiscalizacao",
-                        data_fato=date.today(), descricao="Fato Z",
-                        id_empresa=id_emp,
-                    ),
-                    id_usuario=None,
-                )
+            ocorrencia = await tr.registrar_ocorrencia(
+                db, tenant_id=t.id,
+                payload=OcorrenciaCreate(
+                    id_tipo=tipo.id, origem="fiscalizacao",
+                    data_fato=date.today(), descricao="Fato Z",
+                    id_empresa=id_emp,
+                ),
+                id_usuario=None,
+            )
         assert ocorrencia.situacao == "registrada"
 
         async with admin_engine.begin() as conn:
@@ -318,26 +315,24 @@ async def test_listar_ocorrencias_filtros_e_contagem(admin_engine):
         id_emp, _ = await _operadores(admin_engine, t.id)
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                oc_descricao = await tr.registrar_ocorrencia(
-                    db, tenant_id=t.id,
-                    payload=OcorrenciaCreate(
-                        id_tipo=tipo.id, origem="fiscalizacao",
-                        data_fato=date.today(), descricao="Recusa de embarque na praça",
-                        id_empresa=id_emp,
-                    ),
-                    id_usuario=None,
-                )
-            async with db.begin():
-                oc_referencia = await tr.registrar_ocorrencia(
-                    db, tenant_id=t.id,
-                    payload=OcorrenciaCreate(
-                        id_tipo=tipo.id, origem="denuncia",
-                        data_fato=date.today(), descricao="Outro fato qualquer",
-                        referencia_alvo="placa ABC1D23", id_empresa=id_emp,
-                    ),
-                    id_usuario=None,
-                )
+            oc_descricao = await tr.registrar_ocorrencia(
+                db, tenant_id=t.id,
+                payload=OcorrenciaCreate(
+                    id_tipo=tipo.id, origem="fiscalizacao",
+                    data_fato=date.today(), descricao="Recusa de embarque na praça",
+                    id_empresa=id_emp,
+                ),
+                id_usuario=None,
+            )
+            oc_referencia = await tr.registrar_ocorrencia(
+                db, tenant_id=t.id,
+                payload=OcorrenciaCreate(
+                    id_tipo=tipo.id, origem="denuncia",
+                    data_fato=date.today(), descricao="Outro fato qualquer",
+                    referencia_alvo="placa ABC1D23", id_empresa=id_emp,
+                ),
+                id_usuario=None,
+            )
 
         async with _sm(admin_engine)() as db:
             # Casa por DESCRIÇÃO.
@@ -372,16 +367,15 @@ async def test_ocorrencia_de_outro_tenant_da_404(admin_engine):
         tipo_a = await _tipo(admin_engine, a.id)
         id_emp_a, _ = await _operadores(admin_engine, a.id)
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                ocorrencia = await tr.registrar_ocorrencia(
-                    db, tenant_id=a.id,
-                    payload=OcorrenciaCreate(
-                        id_tipo=tipo_a.id, origem="fiscalizacao",
-                        data_fato=date.today(), descricao="Fato do tenant A",
-                        id_empresa=id_emp_a,
-                    ),
-                    id_usuario=None,
-                )
+            ocorrencia = await tr.registrar_ocorrencia(
+                db, tenant_id=a.id,
+                payload=OcorrenciaCreate(
+                    id_tipo=tipo_a.id, origem="fiscalizacao",
+                    data_fato=date.today(), descricao="Fato do tenant A",
+                    id_empresa=id_emp_a,
+                ),
+                id_usuario=None,
+            )
 
         async with _sm(admin_engine)() as db:
             with pytest.raises(HTTPException) as e:
@@ -397,17 +391,16 @@ async def test_ocorrencia_de_outro_tenant_da_404(admin_engine):
 
 async def _registrar(engine, tenant_id: int, tipo, *, id_empresa=None, exigir_alvo=True):
     async with _sm(engine)() as db:
-        async with db.begin():
-            return await tr.registrar_ocorrencia(
-                db, tenant_id=tenant_id,
-                payload=OcorrenciaCreate(
-                    id_tipo=tipo.id, origem="fiscalizacao" if id_empresa else "denuncia",
-                    data_fato=date.today(), descricao="Fato para máquina de estados",
-                    id_empresa=id_empresa,
-                ),
-                id_usuario=None,
-                exigir_alvo=exigir_alvo,
-            )
+        return await tr.registrar_ocorrencia(
+            db, tenant_id=tenant_id,
+            payload=OcorrenciaCreate(
+                id_tipo=tipo.id, origem="fiscalizacao" if id_empresa else "denuncia",
+                data_fato=date.today(), descricao="Fato para máquina de estados",
+                id_empresa=id_empresa,
+            ),
+            id_usuario=None,
+            exigir_alvo=exigir_alvo,
+        )
 
 
 @pytest.mark.asyncio
@@ -419,18 +412,16 @@ async def test_maquina_de_estados_caminho_feliz(admin_engine):
         ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                em_apuracao = await tr.iniciar_apuracao(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
-                )
+            em_apuracao = await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+            )
         assert em_apuracao.situacao == "em_apuracao"
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                decidida = await tr.decidir_ocorrencia(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
-                    resultado="improcedente", parecer="Sem elementos", id_usuario=None,
-                )
+            decidida = await tr.decidir_ocorrencia(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                resultado="improcedente", parecer="Sem elementos", id_usuario=None,
+            )
         assert decidida.situacao == "improcedente"
 
         async with admin_engine.begin() as conn:
@@ -476,16 +467,14 @@ async def test_decidir_duas_vezes_da_409(admin_engine):
         ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.iniciar_apuracao(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
-                )
+            await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+            )
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.decidir_ocorrencia(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
-                    resultado="arquivada", parecer="Primeira decisão", id_usuario=None,
-                )
+            await tr.decidir_ocorrencia(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                resultado="arquivada", parecer="Primeira decisão", id_usuario=None,
+            )
 
         async with _sm(admin_engine)() as db:
             with pytest.raises(HTTPException) as e:
@@ -507,16 +496,14 @@ async def test_anotar_em_situacao_final_da_409(admin_engine):
         ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.iniciar_apuracao(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
-                )
+            await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+            )
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.decidir_ocorrencia(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
-                    resultado="arquivada", parecer="Arquivo", id_usuario=None,
-                )
+            await tr.decidir_ocorrencia(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                resultado="arquivada", parecer="Arquivo", id_usuario=None,
+            )
 
         async with _sm(admin_engine)() as db:
             with pytest.raises(HTTPException) as e:
@@ -538,10 +525,9 @@ async def test_decidir_sem_parecer_da_422(admin_engine):
         ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.iniciar_apuracao(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
-                )
+            await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+            )
 
         async with _sm(admin_engine)() as db:
             with pytest.raises(HTTPException) as e:
@@ -568,10 +554,9 @@ async def test_procedente_sem_alvo_da_409(admin_engine):
         assert ocorrencia.id_empresa is None
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.iniciar_apuracao(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
-                )
+            await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+            )
 
         async with _sm(admin_engine)() as db:
             with pytest.raises(HTTPException) as e:
@@ -590,12 +575,11 @@ async def test_procedente_sem_alvo_da_409(admin_engine):
         assert vinculada.id_permissionario == id_perm
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                decidida = await tr.decidir_ocorrencia(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
-                    resultado="procedente", parecer="Confirmado após vínculo",
-                    id_usuario=None,
-                )
+            decidida = await tr.decidir_ocorrencia(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                resultado="procedente", parecer="Confirmado após vínculo",
+                id_usuario=None,
+            )
         assert decidida.situacao == "procedente"
     finally:
         await _limpar(admin_engine, t.id)
@@ -643,10 +627,9 @@ async def test_excluir_fora_de_registrada_da_409(admin_engine):
         ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.iniciar_apuracao(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
-                )
+            await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+            )
 
         async with _sm(admin_engine)() as db:
             with pytest.raises(HTTPException) as e:
@@ -671,10 +654,9 @@ async def test_alvara_continua_emitindo_com_ocorrencia_procedente(admin_engine):
         )
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.iniciar_apuracao(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
-                )
+            await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+            )
         async with _sm(admin_engine)() as db:
             async with db.begin():
                 await tr.vincular_alvo_ocorrencia(
@@ -682,11 +664,10 @@ async def test_alvara_continua_emitindo_com_ocorrencia_procedente(admin_engine):
                     id_permissionario=id_perm, id_usuario=None,
                 )
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.decidir_ocorrencia(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
-                    resultado="procedente", parecer="Confirmado", id_usuario=None,
-                )
+            await tr.decidir_ocorrencia(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id,
+                resultado="procedente", parecer="Confirmado", id_usuario=None,
+            )
 
         async with _sm(admin_engine)() as db:
             alvara = await tr.criar_alvara(
@@ -826,10 +807,9 @@ async def test_listar_andamentos_ordena_por_criado_em_e_id(admin_engine):
         ocorrencia = await _registrar(admin_engine, t.id, tipo, id_empresa=id_emp)
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.iniciar_apuracao(
-                    db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
-                )
+            await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=ocorrencia.id, id_usuario=None,
+            )
         async with _sm(admin_engine)() as db:
             async with db.begin():
                 await tr.anotar_ocorrencia(
@@ -952,15 +932,14 @@ async def test_cidadao_registra_denuncia_sem_alvo(admin_engine):
         tipo = await _tipo(admin_engine, t.id, nome="Recusa de corrida")
         cid = await _cidadao(admin_engine, t.id)
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                cidadao = await db.get(UsuarioExterno, cid)
-                denuncia = await tr.registrar_denuncia_cidadao(
-                    db, tenant_id=t.id, cidadao=cidadao,
-                    payload=DenunciaCidadaoCreate(
-                        id_tipo=tipo.id, descricao="Motorista recusou a corrida",
-                        referencia_alvo="placa ABC1D23", data_fato=date.today(),
-                    ),
-                )
+            cidadao = await db.get(UsuarioExterno, cid)
+            denuncia = await tr.registrar_denuncia_cidadao(
+                db, tenant_id=t.id, cidadao=cidadao,
+                payload=DenunciaCidadaoCreate(
+                    id_tipo=tipo.id, descricao="Motorista recusou a corrida",
+                    referencia_alvo="placa ABC1D23", data_fato=date.today(),
+                ),
+            )
         assert denuncia.origem == "denuncia"
         assert denuncia.id_cidadao == cid
         assert denuncia.id_permissionario is None
@@ -1002,15 +981,14 @@ async def test_cidadao_so_ve_as_suas(admin_engine):
 
         async def _registrar_denuncia(cid, descricao):
             async with _sm(admin_engine)() as db:
-                async with db.begin():
-                    cidadao = await db.get(UsuarioExterno, cid)
-                    return await tr.registrar_denuncia_cidadao(
-                        db, tenant_id=t.id, cidadao=cidadao,
-                        payload=DenunciaCidadaoCreate(
-                            id_tipo=tipo.id, descricao=descricao,
-                            data_fato=date.today(),
-                        ),
-                    )
+                cidadao = await db.get(UsuarioExterno, cid)
+                return await tr.registrar_denuncia_cidadao(
+                    db, tenant_id=t.id, cidadao=cidadao,
+                    payload=DenunciaCidadaoCreate(
+                        id_tipo=tipo.id, descricao=descricao,
+                        data_fato=date.today(),
+                    ),
+                )
 
         d_a = await _registrar_denuncia(cid_a, "Denúncia de A")
         d_b = await _registrar_denuncia(cid_b, "Denúncia de B")
@@ -1077,21 +1055,19 @@ async def test_decisao_gera_email_neutro_ao_cidadao(admin_engine):
         tipo = await _tipo(admin_engine, t.id)
         cid = await _cidadao(admin_engine, t.id, email="denunciante@ex.com")
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                cidadao = await db.get(UsuarioExterno, cid)
-                denuncia = await tr.registrar_denuncia_cidadao(
-                    db, tenant_id=t.id, cidadao=cidadao,
-                    payload=DenunciaCidadaoCreate(
-                        id_tipo=tipo.id, descricao="Veículo sem vistoria",
-                        data_fato=date.today(),
-                    ),
-                )
+            cidadao = await db.get(UsuarioExterno, cid)
+            denuncia = await tr.registrar_denuncia_cidadao(
+                db, tenant_id=t.id, cidadao=cidadao,
+                payload=DenunciaCidadaoCreate(
+                    id_tipo=tipo.id, descricao="Veículo sem vistoria",
+                    data_fato=date.today(),
+                ),
+            )
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.iniciar_apuracao(
-                    db, tenant_id=t.id, ocorrencia_id=denuncia.id, id_usuario=None,
-                )
+            await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=denuncia.id, id_usuario=None,
+            )
 
         uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
         _as_user(admin_engine, uid, t.id, t.slug)()
@@ -1137,21 +1113,19 @@ async def test_cidadao_sem_email_nao_explode(admin_engine):
         tipo = await _tipo(admin_engine, t.id)
         cid = await _cidadao(admin_engine, t.id, email=None)
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                cidadao = await db.get(UsuarioExterno, cid)
-                denuncia = await tr.registrar_denuncia_cidadao(
-                    db, tenant_id=t.id, cidadao=cidadao,
-                    payload=DenunciaCidadaoCreate(
-                        id_tipo=tipo.id, descricao="Sem e-mail cadastrado",
-                        data_fato=date.today(),
-                    ),
-                )
+            cidadao = await db.get(UsuarioExterno, cid)
+            denuncia = await tr.registrar_denuncia_cidadao(
+                db, tenant_id=t.id, cidadao=cidadao,
+                payload=DenunciaCidadaoCreate(
+                    id_tipo=tipo.id, descricao="Sem e-mail cadastrado",
+                    data_fato=date.today(),
+                ),
+            )
 
         async with _sm(admin_engine)() as db:
-            async with db.begin():
-                await tr.iniciar_apuracao(
-                    db, tenant_id=t.id, ocorrencia_id=denuncia.id, id_usuario=None,
-                )
+            await tr.iniciar_apuracao(
+                db, tenant_id=t.id, ocorrencia_id=denuncia.id, id_usuario=None,
+            )
 
         uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
         _as_user(admin_engine, uid, t.id, t.slug)()
