@@ -869,6 +869,11 @@ Pendências registradas da F2 (menores, nenhuma bloqueante):
 - Bloqueio de reenvio no frontend olha todos os pedidos ABERTOS (não só da etapa) — equivalente
   hoje por invariante do backend; comentar/ajustar se um dia houver ajustes concorrentes de
   etapas diferentes.
+- Do review final: snapshot de `debito_versao.dados` grava Decimal como float (exibição ok,
+  auditoria ideal preservaria a string); `PUT /debitos/{id}` segue sem `lock_version` (corrida
+  edição×reenvio possível — as decisões todas têm lock, a edição não); downgrade da 0106 apaga
+  fisicamente as linhas `REENVIADO`/`APROVACOES_INVALIDADAS` (necessário para restaurar o CHECK,
+  mesmo padrão das 0086/0087).
 - F3 (ordem cronológica), F4 (tesouraria) e F5 (remoção do `status` legado) continuam **não
   autorizadas** — o `status` derivado segue vivo e sincronizado até a F5.
 
