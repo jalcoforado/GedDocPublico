@@ -2,20 +2,27 @@
 from __future__ import annotations
 
 import html as _htmlmod
+import mimetypes
+import urllib.parse
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status,
+)
+from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import require_tenant_id
+from ..auth.deps import require_tenant_id, require_tenant_slug
 from ..auth.perms import require_any_permission, require_permission
+from ..config import resolve_anexo_path
 from ..database import get_db
-from ..models import Usuario
+from ..models import Anexo, Usuario
 from datetime import date
 
 from pydantic import BaseModel, Field
 
 from ..schemas.pagamentos import (
-    AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
+    AnexoDebitoOut, AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
     DebitoHistoricoOut, DebitoOut, DebitoUpdate, DecisaoIn, DecisaoJustificadaIn, FichaFonteOut,
     FilaAutorizacaoFonteGrupo, ChecklistDebitoItemOut, FilaLiberacaoGrupo, FilaTesourariaOut,
     JustificativaIn, LiquidacaoIn, MarcarChecklistIn, MinhaFilaOut, OrdemPagamentoOut,
@@ -24,6 +31,7 @@ from ..schemas.pagamentos import (
     SimulacaoAutorizacaoOut, DebitoVersaoOut,
 )
 from ..services import pagamentos_ajustes as ajustes
+from ..services import pagamentos_anexos as anexos_debito
 from ..services import pagamentos_autorizacao as aut
 from ..services import pagamentos_caixa as caixa
 from ..services import pagamentos_checklist as checklist
@@ -34,6 +42,7 @@ from ..services import pagamentos_excecoes as excecoes
 from ..services import pagamentos_export as export
 from ..services import pagamentos_filas as filas
 from ..services import audit
+from ..services.anexos import AnexoError
 from ..services.html_pdf import html_to_pdf_bytes
 from ..services.permissoes import load_permissions
 
@@ -426,6 +435,112 @@ async def listar_versoes_debito(debito_id: int,
     prova que a versão anterior é recuperável (F2)."""
     await svc.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
     return await svc.listar_versoes(db, tenant_id=tenant_id, debito_id=debito_id)
+
+
+async def _anexos_debito_out(db, tenant_id: int, tenant_slug: str, vinculos) -> list[AnexoDebitoOut]:
+    anexo_ids = {v.id_anexo for v in vinculos}
+    anexos_map = {}
+    if anexo_ids:
+        rows = (await db.execute(select(Anexo).where(Anexo.id.in_(anexo_ids)))).scalars()
+        anexos_map = {a.id: a for a in rows}
+    out = []
+    for v in vinculos:
+        a = anexos_map.get(v.id_anexo)
+        nome = a.descricao if a else None
+        tipo = None
+        tamanho = None
+        if a and a.e_doc:
+            if "." in a.e_doc:
+                tipo = a.e_doc.rsplit(".", 1)[1]
+            p = resolve_anexo_path(tenant_slug, a.e_doc)
+            if p is not None:
+                try:
+                    tamanho = p.stat().st_size
+                except OSError:
+                    tamanho = None
+        out.append(AnexoDebitoOut(
+            id=v.id, id_anexo=v.id_anexo, nome=nome, tamanho=tamanho, tipo=tipo,
+            versao_debito=v.versao_debito, id_pedido_ajuste=v.id_pedido_ajuste,
+            id_usuario=v.id_usuario, criado_em=v.criado_em))
+    return out
+
+
+@debitos_router.post("/{debito_id}/anexos", response_model=AnexoDebitoOut,
+                     status_code=status.HTTP_201_CREATED)
+async def upload_anexo_debito(debito_id: int, request: Request,
+                              file: UploadFile = File(...),
+                              descricao: str | None = Form(None),
+                              id_pedido_ajuste: int | None = Form(None),
+                              usuario: Usuario = Depends(require_permission("pagamento_solicitar")),
+                              tenant_id: int = Depends(require_tenant_id),
+                              tenant_slug: str = Depends(require_tenant_slug),
+                              db: AsyncSession = Depends(get_db)):
+    """Anexa um documento ao débito, reaproveitando o storage de anexos de
+    protocolo. `id_pedido_ajuste` opcional marca que o documento é a resposta
+    a um pedido de ajuste específico (do mesmo débito)."""
+    try:
+        vinculo = await anexos_debito.anexar_ao_debito(
+            db, tenant_id=tenant_id, tenant_slug=tenant_slug, debito_id=debito_id,
+            usuario_id=usuario.id, file=file, descricao=descricao,
+            id_pedido_ajuste=id_pedido_ajuste)
+    except AnexoError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario.id,
+        acao="anexo_debito.incluido", entidade="anexo_debito", id_entidade=vinculo.id,
+        payload={"debito_id": debito_id, "id_anexo": vinculo.id_anexo,
+                 "id_pedido_ajuste": id_pedido_ajuste},
+        request=request)
+    await db.commit(); await db.refresh(vinculo)
+    return (await _anexos_debito_out(db, tenant_id, tenant_slug, [vinculo]))[0]
+
+
+@debitos_router.get("/{debito_id}/anexos", response_model=list[AnexoDebitoOut])
+async def listar_anexos_debito_endpoint(debito_id: int,
+                                        _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                                        tenant_id: int = Depends(require_tenant_id),
+                                        tenant_slug: str = Depends(require_tenant_slug),
+                                        db: AsyncSession = Depends(get_db)):
+    await svc.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    vinculos = await anexos_debito.listar_anexos_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    return await _anexos_debito_out(db, tenant_id, tenant_slug, vinculos)
+
+
+@debitos_router.delete("/{debito_id}/anexos/{anexo_debito_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remover_anexo_debito_endpoint(debito_id: int, anexo_debito_id: int, request: Request,
+                                        usuario: Usuario = Depends(require_permission("pagamento_solicitar")),
+                                        tenant_id: int = Depends(require_tenant_id),
+                                        db: AsyncSession = Depends(get_db)):
+    await anexos_debito.remover_anexo_debito(
+        db, tenant_id=tenant_id, debito_id=debito_id, anexo_debito_id=anexo_debito_id,
+        usuario_id=usuario.id)
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario.id,
+        acao="anexo_debito.removido", entidade="anexo_debito", id_entidade=anexo_debito_id,
+        payload={"debito_id": debito_id}, request=request)
+    await db.commit()
+
+
+# Rota literal `anexos-debito` no `operacoes_router` — não colide com nenhuma
+# paramétrica do mesmo router (o primeiro segmento é distinto de todos os
+# outros: `ordens-pagamento`, `parcelas`, `fontes`, etc.).
+@operacoes_router.get("/anexos-debito/{anexo_debito_id}/download")
+async def download_anexo_debito(anexo_debito_id: int, inline: bool = Query(False),
+                                _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                                tenant_id: int = Depends(require_tenant_id),
+                                tenant_slug: str = Depends(require_tenant_slug),
+                                db: AsyncSession = Depends(get_db)):
+    path, anexo = await anexos_debito.get_anexo_debito_path_autorizado(
+        db, tenant_id=tenant_id, tenant_slug=tenant_slug, anexo_debito_id=anexo_debito_id)
+    download_name = (anexo.descricao or anexo.e_doc or f"anexo-{anexo.id}").strip()
+    if anexo.e_doc and "." in anexo.e_doc and "." not in download_name:
+        download_name += "." + anexo.e_doc.rsplit(".", 1)[1]
+    safe_name = urllib.parse.quote(download_name)
+    disposition = "inline" if inline else "attachment"
+    media_type, _enc = mimetypes.guess_type(anexo.e_doc or "")
+    return FileResponse(
+        path=str(path), media_type=media_type or "application/octet-stream",
+        headers={"Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_name}"})
 
 
 @debitos_router.post("/{debito_id}/responder-ajuste", response_model=DebitoOut)

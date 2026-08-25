@@ -519,6 +519,21 @@ class PedidoAjusteResponderIn(BaseModel):
     resposta: str = Field(min_length=1)
 
 
+class AnexoDebitoOut(BaseModel):
+    """Vínculo débito-anexo (F2, Task 5) — enriquecido com nome/tamanho/tipo
+    do `Anexo` (`protocolos.anexo`) que o vínculo aponta."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    id_anexo: int
+    nome: str | None
+    tamanho: int | None
+    tipo: str | None
+    versao_debito: int
+    id_pedido_ajuste: int | None
+    id_usuario: int | None
+    criado_em: datetime
+
+
 class AutorizarLoteIn(BaseModel):
     grupos: list[GrupoAutorizacaoIn] = Field(min_length=1)
 

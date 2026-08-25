@@ -78,6 +78,65 @@ async def upload_anexo(
     )
 
 
+async def _persistir_arquivo(
+    db: AsyncSession,
+    *,
+    content: bytes,
+    filename: str,
+    tenant_id: int,
+    tenant_slug: str,
+    descricao: str | None,
+    id_tipo_anexo: int | None,
+    publico: bool,
+    usuario_id: int | None,
+    documento_exigido_key: str | None = None,
+) -> Anexo:
+    """Núcleo PURO de persistência: valida extensão, grava o arquivo no storage
+    do tenant e cria a linha `Anexo`. NÃO valida processo, NÃO cria vínculo
+    `AnexoProcesso` — isso é responsabilidade do caller.
+
+    Extraído de `_criar_anexo_from_bytes` (F2 de pagamentos, Task 5) para que o
+    upload ligado a processo e o upload ligado a débito (`services/
+    pagamentos_anexos.py`) usem exatamente o mesmo storage/extensão/paginação
+    sem duplicar a lógica. `_criar_anexo_from_bytes` continua existindo, com o
+    MESMO comportamento de antes, apenas delegando esta parte para cá — não
+    comita, sempre foi o caller (`upload_anexo`/`finalizar_minuta`) quem decide.
+    """
+    ext = _ext_of(filename)
+    if ext not in ALLOWED_EXTS:
+        raise AnexoError(f"Extensão '.{ext}' não permitida")
+
+    qtd_paginas = None
+    if ext == "pdf":
+        try:
+            qtd_paginas = content.count(b"/Type /Page") or None
+        except Exception:
+            qtd_paginas = None
+
+    anexo = Anexo(
+        tenant_id=tenant_id,
+        id_tipo_anexo=id_tipo_anexo,
+        publico=publico,
+        id_usuario=usuario_id,
+        ativo=True,
+        excluido=False,
+        descricao=(descricao or filename)[:512],
+        qtd_paginas=qtd_paginas,
+        documento_exigido_key=documento_exigido_key,
+    )
+    db.add(anexo)
+    await db.flush()
+
+    e_doc = f"{anexo.id}.{ext}"
+    anexo.e_doc = e_doc
+
+    # Storage por tenant (Fase 14).
+    path = tenant_anexos_dir(tenant_slug) / e_doc
+    path.write_bytes(content)
+
+    return anexo
+
+
 async def _criar_anexo_from_bytes(
     db: AsyncSession,
     processo_id: int,
@@ -101,10 +160,6 @@ async def _criar_anexo_from_bytes(
     por tenant e cria o vínculo `AnexoProcesso`. Com `commit=False` o caller
     controla a transação (finalização atômica anexo + minuta).
     """
-    ext = _ext_of(filename)
-    if ext not in ALLOWED_EXTS:
-        raise AnexoError(f"Extensão '.{ext}' não permitida")
-
     processo = (
         await db.execute(
             select(Processo).where(
@@ -147,33 +202,18 @@ async def _criar_anexo_from_bytes(
         if documento_exigido_key not in keys_validas:
             raise AnexoError("Documento exigido inválido para este serviço.")
 
-    qtd_paginas = None
-    if ext == "pdf":
-        try:
-            qtd_paginas = content.count(b"/Type /Page") or None
-        except Exception:
-            qtd_paginas = None
-
-    anexo = Anexo(
+    anexo = await _persistir_arquivo(
+        db,
+        content=content,
+        filename=filename,
         tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        descricao=descricao,
         id_tipo_anexo=id_tipo_anexo,
         publico=publico,
-        id_usuario=usuario_id,
-        ativo=True,
-        excluido=False,
-        descricao=(descricao or filename)[:512],
-        qtd_paginas=qtd_paginas,
+        usuario_id=usuario_id,
         documento_exigido_key=documento_exigido_key,
     )
-    db.add(anexo)
-    await db.flush()
-
-    e_doc = f"{anexo.id}.{ext}"
-    anexo.e_doc = e_doc
-
-    # Storage por tenant (Fase 14).
-    path = tenant_anexos_dir(tenant_slug) / e_doc
-    path.write_bytes(content)
 
     next_ordem = (
         await db.execute(
