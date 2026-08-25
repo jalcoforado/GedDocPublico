@@ -466,7 +466,20 @@ class ExportContabilEvento(Base):
     é a unique `(tenant_id, tipo_evento, id_origem)`: um mesmo evento do
     domínio (débito empenhado, liquidação, pagamento, estorno, cancelamento)
     entra em um único lote, para sempre. `id_origem` referencia a linha real
-    que originou o evento (ver `services/pagamentos_contabil.py`)."""
+    que originou o evento (ver `services/pagamentos_contabil.py`).
+
+    `snapshot` (migration 0104, FIX WAVE — Critical do review final de C2)
+    é o dict COMPLETO da linha do CSV, gravado no momento da geração do lote
+    (`gerar_lote`). Antes dele, `reconstruir_csv` reidratava do domínio
+    ATUAL (`_reidratar`) — uma edição legítima e posterior de cadastro (PUT
+    fornecedor/fonte/conta, ou `atualizar_debito` mudando valor/numero_ne
+    enquanto o débito está em RASCUNHO) alterava o valor recalculado e
+    quebrava a conferência de hash, devolvendo 500 "Corrupção detectada"
+    PERMANENTE para um lote que nunca foi corrompido de verdade. Com o
+    snapshot, `reconstruir_csv` monta EXCLUSIVAMENTE dele — o hash confere
+    porque a reconstrução é, por construção, sempre a mesma; as funções
+    `_montar_de_historico`/`_montar_de_movimentacao` continuam existindo,
+    mas só são usadas na geração, nunca mais na reconstrução."""
     __tablename__ = "export_contabil_evento"
     __table_args__ = {"schema": "pagamentos"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -475,6 +488,7 @@ class ExportContabilEvento(Base):
     tipo_evento: Mapped[str] = mapped_column(String(30), nullable=False)
     id_origem: Mapped[int] = mapped_column(Integer, nullable=False)
     ocorrido_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
 
 class SistemaIntegrado(Base):

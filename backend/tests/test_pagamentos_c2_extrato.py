@@ -307,6 +307,14 @@ async def test_importar_csv_regressao_id_externo_none(admin_engine):
 #   90-240 filler                    (não usado)
 
 def test_parse_cnab240_fixture_tres_lancamentos():
+    """FIX WAVE (Important 1, ruling do review final de C2): `id_externo` do
+    CNAB240 é SEMPRE `None` — a asserção antiga (`id_externo == documento`)
+    foi trocada DELIBERADAMENTE. Nº de documento CNAB tem só 5 dígitos e
+    recicla entre meses; usá-lo como id de dedupe colidia com lançamentos
+    diferentes que compartilham o mesmo número (ver
+    `test_importar_cnab240_mesmo_documento_meses_diferentes_ambos_entram`
+    abaixo). `documento` continua populado — só não migra mais para
+    `id_externo`; ver docstring de `parse_cnab240`."""
     conteudo = (_FIXTURES / "extrato_exemplo.cnab240.txt").read_text(encoding="utf-8")
     lancs = parse_cnab240(conteudo)
     assert len(lancs) == 3
@@ -316,7 +324,7 @@ def test_parse_cnab240_fixture_tres_lancamentos():
     assert a.tipo == "CREDITO"
     assert a.valor == Decimal("1500.00")
     assert a.documento == "1001"
-    assert a.id_externo == "1001"
+    assert a.id_externo is None
     assert a.historico.strip() == "Repasse FPM"
 
     b = lancs[1]
@@ -331,7 +339,7 @@ def test_parse_cnab240_fixture_tres_lancamentos():
     assert c.tipo == "DEBITO"
     assert c.valor == Decimal("89.90")
     assert c.documento == "77"
-    assert c.id_externo == "77"
+    assert c.id_externo is None
 
 
 def test_parse_cnab240_linha_tamanho_errado_levanta_erro_com_numero_da_linha():
@@ -376,7 +384,10 @@ async def test_importar_cnab240_cria_extrato_e_lancamentos(admin_engine):
         assert ex.qtd_lancamentos == 3
         async with _sm(admin_engine)() as s:
             lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
-        assert {l.id_externo for l in lancs} == {"1001", "77", None}
+        # FIX WAVE (Important 1): CNAB240 não popula mais id_externo — ver
+        # docstring de parse_cnab240.
+        assert {l.id_externo for l in lancs} == {None}
+        assert {l.documento for l in lancs} == {"1001", "77", None}
         assert all(l.id_conta == conta.id for l in lancs)
     finally:
         await _cleanup(admin_engine, t.id)
@@ -402,5 +413,77 @@ async def test_importar_cnab240_reimportacao_mesmo_arquivo_409(admin_engine):
                         id_conta=conta.id, nome_arquivo="ext2.cnab240.txt", formato="CNAB240",
                         conteudo=conteudo))
             assert exc.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+def _linha_cnab_cabecalho(tipo_registro: str) -> str:
+    return ("001" + "0001" + tipo_registro).ljust(240)
+
+
+def _linha_cnab_detalhe(*, seq: int, data_ddmmaaaa: str, valor_centavos: int,
+                        sinal: str, documento: str, historico: str) -> str:
+    campo_valor = f"{valor_centavos:015d}"
+    campo_doc = documento.rjust(5, "0")[:5]
+    campo_hist = historico[:40].ljust(40)
+    linha = (
+        "001" + "0001" + "3" + f"{seq:05d}" + "E" + (" " * 6) +
+        data_ddmmaaaa + campo_valor + sinal + campo_doc + campo_hist
+    )
+    return linha.ljust(240)
+
+
+def _arquivo_cnab_um_lancamento(*, data_ddmmaaaa: str, documento: str, historico: str) -> str:
+    linhas = [
+        _linha_cnab_cabecalho("0"),
+        _linha_cnab_cabecalho("1"),
+        _linha_cnab_detalhe(seq=1, data_ddmmaaaa=data_ddmmaaaa, valor_centavos=100000,
+                            sinal="C", documento=documento, historico=historico),
+        _linha_cnab_cabecalho("5"),
+        _linha_cnab_cabecalho("9"),
+    ]
+    return "\r\n".join(linhas)
+
+
+@pytest.mark.asyncio
+async def test_importar_cnab240_mesmo_documento_meses_diferentes_ambos_entram(admin_engine):
+    """FIX WAVE (Important 1): antes desta fatia, `id_externo=documento`
+    fazia o dedupe `(id_conta, id_externo)` de `importar_extrato` descartar o
+    2º lançamento — mesmo sendo um lançamento real de mês diferente, só
+    coincidindo o nº de documento de 5 dígitos (que recicla). Com
+    `id_externo=None` para CNAB, os DOIS lançamentos entram."""
+    t = await _provisionar(admin_engine)
+    try:
+        conta = await _conta(admin_engine, t.id)
+        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+        conteudo_ago = _arquivo_cnab_um_lancamento(
+            data_ddmmaaaa="01082026", documento="1001", historico="Repasse agosto")
+        conteudo_set = _arquivo_cnab_um_lancamento(
+            data_ddmmaaaa="01092026", documento="1001", historico="Repasse setembro")
+
+        async with _sm(admin_engine)() as s:
+            r1 = await conc.importar_extrato(
+                s, tenant_id=t.id, usuario_id=uid,
+                payload=ImportarExtratoIn(
+                    id_conta=conta.id, nome_arquivo="ago.cnab240.txt", formato="CNAB240",
+                    conteudo=conteudo_ago))
+        async with _sm(admin_engine)() as s:
+            r2 = await conc.importar_extrato(
+                s, tenant_id=t.id, usuario_id=uid,
+                payload=ImportarExtratoIn(
+                    id_conta=conta.id, nome_arquivo="set.cnab240.txt", formato="CNAB240",
+                    conteudo=conteudo_set))
+
+        assert r1.importados == 1, r1
+        assert r1.ignorados_por_id_externo == 0, r1
+        assert r2.importados == 1, r2
+        assert r2.ignorados_por_id_externo == 0, r2
+
+        async with _sm(admin_engine)() as s:
+            lancs_ago = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=r1.extrato.id)
+            lancs_set = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=r2.extrato.id)
+        assert len(lancs_ago) == 1 and lancs_ago[0].documento == "1001"
+        assert len(lancs_set) == 1 and lancs_set[0].documento == "1001"
+        assert lancs_ago[0].data != lancs_set[0].data
     finally:
         await _cleanup(admin_engine, t.id)

@@ -49,15 +49,22 @@ abre a sessão já com `session.info["tenant_id"] = sistema.tenant_id`, sem
 tocar em `request.state`. Nenhuma rota M2M deve usar `get_db` puro.
 
 Note: a busca do passo 2 usa a sessão de `get_db` normal (mesmo papel de
-banco de todo o resto da API). Ela só encontra linhas de QUALQUER tenant
-porque hoje (F-12, ver CLAUDE.md) `ged_user` é SUPERUSER/BYPASSRLS e a RLS
-não filtra nada em produção. Quando o rollout `SEC-RLS-ROLLOUT` ligar
-`APP_DATABASE_URL` (papel `aprimora_app`, NOBYPASSRLS), a policy de RLS de
-`sistema_integrado` (`tenant_id = GUC`) vai restringir essa busca ao tenant
-da SESSÃO — que para uma chamada M2M pode não ser nenhum ainda. Esse gap é
-conhecido e fica registrado aqui para quem ligar o rollout: a busca por
-prefixo vai precisar de uma sessão sem tenant fixado (ou de um papel próprio,
-como o de plataforma), não da sessão tenant-scoped comum.
+banco de todo o resto da API). Sob `ged_user` (F-12, ver CLAUDE.md,
+SUPERUSER/BYPASSRLS) a RLS não filtra nada — a busca acha QUALQUER tenant
+por construção do bypass, não por causa da policy. **Isto já está coberto
+para o rollout, não é mais um gap pendente**: a migration `0103`
+(`SEC-RLS-ROLLOUT`) trocou a policy `tenant_isolation_select` de
+`sistema_integrado` de `tenant_id = GUC` para `tenant_id = GUC OR GUC IS
+NULL`. Sob `aprimora_app` (NOBYPASSRLS, papel-alvo do rollout), uma chamada
+M2M cujo `Host` não resolveu tenant nenhum abre a sessão de `get_db` com a
+GUC `app.tenant_id` NULL — e a policy nova permite ver QUALQUER tenant
+exatamente nesse caso, restringindo normalmente (`tenant_id = GUC`) quando a
+sessão já tem tenant fixado. A policy de ESCRITA não mudou: `INSERT`/
+`UPDATE`/`DELETE` continuam exigindo `tenant_id = GUC`, então nada passa a
+escrever sem tenant conhecido. Prova: `tests/test_pagamentos_c2_api.py`
+(seção "correções Task 7") roda sob `app_session` (papel `aprimora_app`) e
+autentica por prefixo com a GUC NULL, depois confere 404 cross-tenant num
+débito de outro tenant — o roteiro de `tests/test_rls_papeis_minimos.py`.
 """
 from __future__ import annotations
 

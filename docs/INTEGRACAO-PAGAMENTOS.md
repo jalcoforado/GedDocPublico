@@ -80,11 +80,17 @@ Contrato de replay (`services/pagamentos_idempotencia.py`):
   retry automático: espere e tente ler o resultado, ou trate como falha
   transitória.
 
+A resposta gravada é a foto do **momento da criação** da chave — um replay
+devolve exatamente aquele corpo, e não reflete alterações ou exclusões
+posteriores ao débito (por exemplo, um cancelamento feito depois pela tela
+administrativa). Para o estado atual, use `GET /debitos` (§3), não o replay
+de uma chave de idempotência antiga.
+
 ### Exemplo — criar débito
 
 ```bash
 curl -X POST https://<tenant>.<host>/api/v2/integracao/pagamentos/debitos \
-  -H "X-Api-Key: aprm_ab12cd34.6f1e9c...segredo" \
+  -H "X-Api-Key: apy_ab12cd34.6f1e9c...segredo" \
   -H "Idempotency-Key: 8f14e45f-ceea-4f1a-8c8e-0a1b2c3d4e5f" \
   -H "Content-Type: application/json" \
   -d '{
@@ -118,7 +124,7 @@ acontecer no fluxo normal — a resposta é **409**.
 
 ```bash
 curl -X POST https://<tenant>.<host>/api/v2/integracao/pagamentos/debitos/42/liquidar \
-  -H "X-Api-Key: aprm_ab12cd34.6f1e9c...segredo" \
+  -H "X-Api-Key: apy_ab12cd34.6f1e9c...segredo" \
   -H "Idempotency-Key: 3b6a9f2e-1111-4c22-9999-abcdef012345" \
   -H "Content-Type: application/json" \
   -d '{}'
@@ -163,7 +169,7 @@ usa `criado_em`).
 CURSOR=""
 while :; do
   RESP=$(curl -s "https://<tenant>.<host>/api/v2/integracao/pagamentos/debitos?limite=100&alterado_desde=2026-08-01T00:00:00${CURSOR:+&cursor=$CURSOR}" \
-    -H "X-Api-Key: aprm_ab12cd34.6f1e9c...segredo")
+    -H "X-Api-Key: apy_ab12cd34.6f1e9c...segredo")
   echo "$RESP" | jq -c '.items[]'
   CURSOR=$(echo "$RESP" | jq -r '.proximo_cursor')
   [ "$CURSOR" = "null" ] && break
@@ -255,6 +261,11 @@ débito/movimentação já foi capturado em algum lote (`null` = ainda não). Pa
 correlacionar com uma linha do CSV, use o par `tipo_evento` + `id_origem` —
 não compare os dois campos `id_evento` diretamente, eles não são a mesma
 grandeza.
+
+**Cruzar um débito entre a API e o CSV**: o `GET /debitos` NÃO expõe
+`id_origem` (só `id_evento`, que é outra grandeza, como acima). O cruzamento
+por débito se faz pela coluna `id_debito` do CSV — presente em toda linha —
+contra o `id` do `DebitoOut` devolvido pela API.
 
 ## 6. Referência rápida de erros
 

@@ -439,6 +439,28 @@ async def test_t7_c_sem_idempotency_key_422(admin_engine):
 
 
 @pytest.mark.asyncio
+async def test_t7_c2_idempotency_key_maior_que_64_chars_422(admin_engine):
+    """FIX WAVE (Important 2): `pagamentos.idempotencia.chave` é `String(64)`
+    — antes desta guarda, uma chave de 65+ chars passava pela validação do
+    router e só estourava no INSERT como 500 (StringDataRightTruncation),
+    em vez de um 422 claro para o integrador."""
+    t = await _provisionar(admin_engine)
+    try:
+        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+        sistema, chave = await _criar_sistema_direto(
+            admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
+        forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
+        payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
+        chave_longa = "x" * 65
+
+        r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
+                            json=payload, headers={"Idempotency-Key": chave_longa})
+        assert r.status_code == 422, r.text[:300]
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
 async def test_t7_d_escopo_leitura_tentando_escrever_403(admin_engine):
     t = await _provisionar(admin_engine)
     try:

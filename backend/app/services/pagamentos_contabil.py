@@ -44,10 +44,26 @@ vir de um campo que já existia antes desta fatia.
 
 ## Imutabilidade
 
-Um lote gerado nunca muda: o CSV é reconstruído sob demanda a partir dos
-`export_contabil_evento` do lote (não recalculado do zero), e o hash gravado
-na criação é conferido contra o hash da reconstrução. Divergência é
+Um lote gerado nunca muda: o CSV é reconstruído sob demanda a partir do
+**snapshot** gravado em cada `export_contabil_evento` na hora da geração
+(nunca recalculado do zero, nunca reidratado do domínio atual), e o hash
+gravado na criação é conferido contra o hash da reconstrução. Divergência é
 corrupção — 500 com log, nunca silenciosa.
+
+**FIX WAVE (Critical, migration 0104) — por que snapshot e não reidratação.**
+Até esta fatia, `reconstruir_csv` reidratava cada evento do domínio ATUAL
+(`_reidratar`, ainda presente no histórico do arquivo para quem ler o blame)
+— refazia o SELECT em `debito`/`fornecedor`/`fonte_recursos`/... a cada
+download. Isso é um bug, não uma feature: uma edição LEGÍTIMA e POSTERIOR de
+cadastro (PUT em fornecedor mudando o nome, PUT em fonte/conta, ou
+`atualizar_debito` alterando valor/numero_ne enquanto o débito ainda está em
+RASCUNHO — nada disso é proibido pelo domínio) mudava o que a reconstrução
+calculava, o hash parava de bater, e o lote — que nunca foi tocado —
+passava a devolver 500 "Corrupção detectada" PARA SEMPRE. `gerar_lote` agora
+grava em cada evento o dict completo da linha do CSV (`snapshot`, JSONB);
+`reconstruir_csv` monta EXCLUSIVAMENTE dos snapshots. `_montar_de_historico`
+e `_montar_de_movimentacao` continuam existindo e são usadas SÓ na geração —
+nunca mais na reconstrução.
 """
 from __future__ import annotations
 
@@ -128,6 +144,58 @@ class EventoContabil:
     @property
     def id_evento(self) -> str:
         return f"{self.tipo_evento}:{self.id_origem}"
+
+
+# ---------------------------------------------------------------------------
+# Snapshot (migration 0104) — a forma persistida e imutável de um evento
+# ---------------------------------------------------------------------------
+
+def _snapshot_de_evento(e: EventoContabil) -> dict:
+    """Serializa `e` para o JSONB gravado em `ExportContabilEvento.snapshot`
+    na hora da geração do lote. `Decimal`/`date`/`datetime` viram string
+    (JSON não tem esses tipos); `_evento_de_snapshot` desfaz."""
+    return {
+        "tipo_evento": e.tipo_evento,
+        "id_origem": e.id_origem,
+        "id_debito": e.id_debito,
+        "ocorrido_em": e.ocorrido_em.isoformat(),
+        "numero_empenho": e.numero_empenho,
+        "fonte": e.fonte,
+        "credor_doc": e.credor_doc,
+        "credor_nome": e.credor_nome,
+        "valor": str(e.valor) if e.valor is not None else None,
+        "vencimento": e.vencimento.isoformat() if e.vencimento is not None else None,
+        "data_liquidacao": e.data_liquidacao.isoformat() if e.data_liquidacao is not None else None,
+        "numero_ordem": e.numero_ordem,
+        "conta": e.conta,
+        "data_pagamento": e.data_pagamento.isoformat() if e.data_pagamento is not None else None,
+        "valor_pago": str(e.valor_pago) if e.valor_pago is not None else None,
+        "excecao_saldo": e.excecao_saldo,
+        "justificativa": e.justificativa,
+        "motivo": e.motivo,
+    }
+
+
+def _evento_de_snapshot(snap: dict) -> EventoContabil:
+    """Inverso de `_snapshot_de_evento` — reconstrói o `EventoContabil` a
+    partir do JSONB gravado, sem tocar em nenhuma tabela de domínio."""
+    return EventoContabil(
+        tipo_evento=snap["tipo_evento"], id_origem=snap["id_origem"], id_debito=snap["id_debito"],
+        ocorrido_em=datetime.fromisoformat(snap["ocorrido_em"]),
+        numero_empenho=snap.get("numero_empenho"), fonte=snap.get("fonte"),
+        credor_doc=snap.get("credor_doc"), credor_nome=snap.get("credor_nome"),
+        valor=Decimal(snap["valor"]) if snap.get("valor") is not None else None,
+        vencimento=(date.fromisoformat(snap["vencimento"])
+                   if snap.get("vencimento") is not None else None),
+        data_liquidacao=(date.fromisoformat(snap["data_liquidacao"])
+                         if snap.get("data_liquidacao") is not None else None),
+        numero_ordem=snap.get("numero_ordem"), conta=snap.get("conta"),
+        data_pagamento=(date.fromisoformat(snap["data_pagamento"])
+                        if snap.get("data_pagamento") is not None else None),
+        valor_pago=Decimal(snap["valor_pago"]) if snap.get("valor_pago") is not None else None,
+        excecao_saldo=snap.get("excecao_saldo"), justificativa=snap.get("justificativa"),
+        motivo=snap.get("motivo"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +465,8 @@ async def gerar_lote(db: AsyncSession, *, tenant_id: int, ate: date,
     for e in eventos:
         db.add(ExportContabilEvento(
             tenant_id=tenant_id, id_lote=lote.id, tipo_evento=e.tipo_evento,
-            id_origem=e.id_origem, ocorrido_em=e.ocorrido_em))
+            id_origem=e.id_origem, ocorrido_em=e.ocorrido_em,
+            snapshot=_snapshot_de_evento(e)))
 
     conteudo = ADAPTERS[lote.formato_versao].gerar(eventos, lote_numero=lote.numero)
     lote.hash_conteudo = hashlib.sha256(conteudo).hexdigest()
@@ -422,71 +491,20 @@ async def listar_lotes(db: AsyncSession, *, tenant_id: int) -> list[ExportContab
         .order_by(ExportContabilLote.numero.desc()))).scalars().all())
 
 
-async def _reidratar(db: AsyncSession, *, tenant_id: int,
-                     registros: list[ExportContabilEvento]) -> list[EventoContabil]:
-    ids_hist = {r.id_origem for r in registros if r.tipo_evento in _ACAO_POR_TIPO}
-    ids_mov = {r.id_origem for r in registros if r.tipo_evento in _ORIGEM_MOV_POR_TIPO}
-
-    historicos: dict[int, tuple[DebitoHistorico, Debito]] = {}
-    if ids_hist:
-        rows = (await db.execute(
-            select(DebitoHistorico, Debito)
-            .join(Debito, Debito.id == DebitoHistorico.id_debito)
-            .where(DebitoHistorico.tenant_id == tenant_id, DebitoHistorico.id.in_(ids_hist))
-        )).all()
-        historicos = {h.id: (h, d) for h, d in rows}
-
-    movimentacoes: dict[int, MovimentacaoConta] = {}
-    if ids_mov:
-        rows = list((await db.execute(select(MovimentacaoConta).where(
-            MovimentacaoConta.tenant_id == tenant_id,
-            MovimentacaoConta.id.in_(ids_mov)))).scalars().all())
-        movimentacoes = {m.id: m for m in rows}
-
-    debitos_ctx = [d for _h, d in historicos.values()]
-    ids_debito_mov = {m.id_debito for m in movimentacoes.values() if m.id_debito is not None}
-    if ids_debito_mov:
-        extras = list((await db.execute(select(Debito).where(
-            Debito.tenant_id == tenant_id, Debito.id.in_(ids_debito_mov)))).scalars().all())
-        debitos_ctx += extras
-    debitos_por_id = {d.id: d for d in debitos_ctx}
-
-    fornecedores, fontes, ordens_por_debito, contas = await _contexto(
-        db, tenant_id, list(debitos_por_id.values()), precisa_ordens=bool(movimentacoes))
-
-    eventos: list[EventoContabil] = []
-    for r in registros:
-        if r.tipo_evento in _ACAO_POR_TIPO:
-            par = historicos.get(r.id_origem)
-            if par is None:
-                raise ExportContabilError(
-                    f"Corrupção: evento {r.tipo_evento}:{r.id_origem} não encontrado na "
-                    "origem (debito_historico).", status.HTTP_500_INTERNAL_SERVER_ERROR)
-            h, d = par
-            eventos.append(_montar_de_historico(h, d, r.tipo_evento,
-                                                fornecedores=fornecedores, fontes=fontes))
-        else:
-            m = movimentacoes.get(r.id_origem)
-            if m is None:
-                raise ExportContabilError(
-                    f"Corrupção: evento {r.tipo_evento}:{r.id_origem} não encontrado na "
-                    "origem (movimentacao_conta).", status.HTTP_500_INTERNAL_SERVER_ERROR)
-            eventos.append(_montar_de_movimentacao(
-                m, r.tipo_evento, fornecedores=fornecedores, fontes=fontes, debitos=debitos_por_id,
-                ordens_por_debito=ordens_por_debito, contas=contas))
-
-    return sorted(eventos, key=lambda e: (e.ocorrido_em, e.tipo_evento, e.id_origem))
-
-
 async def reconstruir_csv(db: AsyncSession, *, tenant_id: int, lote_id: int) -> bytes:
-    """Regenera o CSV do lote a partir dos dados de origem (nunca a partir de
-    uma cópia gravada) e confere contra o hash da criação. Reemissão do
-    mesmo lote sempre devolve o MESMO conteúdo — é a prova de imutabilidade."""
+    """Regenera o CSV do lote EXCLUSIVAMENTE a partir dos `snapshot` gravados
+    em cada `export_contabil_evento` na hora da geração (nunca reidratando o
+    domínio atual — ver a seção "Imutabilidade" no topo do arquivo) e
+    confere contra o hash da criação. Reemissão do mesmo lote sempre devolve
+    o MESMO conteúdo — é a prova de imutabilidade, e agora é estável por
+    construção, não por sorte de nada ter mudado no cadastro."""
     lote = await obter_lote(db, tenant_id=tenant_id, lote_id=lote_id)
     registros = list((await db.execute(select(ExportContabilEvento).where(
         ExportContabilEvento.tenant_id == tenant_id,
         ExportContabilEvento.id_lote == lote.id))).scalars().all())
-    eventos = await _reidratar(db, tenant_id=tenant_id, registros=registros)
+    eventos = sorted(
+        (_evento_de_snapshot(r.snapshot) for r in registros),
+        key=lambda e: (e.ocorrido_em, e.tipo_evento, e.id_origem))
 
     adapter = ADAPTERS.get(lote.formato_versao)
     if adapter is None:

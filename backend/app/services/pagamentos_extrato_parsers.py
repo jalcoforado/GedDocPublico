@@ -202,14 +202,26 @@ def parse_cnab240(conteudo: str) -> list[LancamentoParseado]:
       29-43  valor do lançamento, 15 dígitos, inteiro em centavos (sem sinal)
       44     sinal do valor ('D' débito | 'C' crédito)
       45-49  nº do documento, 5 dígitos zero-padded (zerado/vazio -> sem
-             documento; `documento=None`/`id_externo=None`)
+             documento; `documento=None`)
       50-89  histórico/complemento, 40 chars
       90-240 filler (não usado)
 
     Linha com tamanho != 240 levanta `Cnab240ParseError` citando o nº da
     linha (1-based). Aceita \\r\\n e linha final vazia (trailing newline) sem
     contá-la como violação de tamanho.
-    """
+
+    **`id_externo` é SEMPRE `None` (FIX WAVE, ruling do review final de C2 —
+    Important 1).** O nº de documento tem só 5 dígitos e RECICLA — um CNAB de
+    agosto e um de setembro podem repetir "1001" para lançamentos totalmente
+    diferentes. Usá-lo como `id_externo` colidia com o dedupe de
+    `pagamentos_conciliacao.importar_extrato` (que pula `(id_conta,
+    id_externo)` já visto) e um lançamento legítimo do mês seguinte era
+    descartado em silêncio. O dedupe por id fica exclusivo do OFX, cujo
+    `FITID` é desenhado para ser único; CNAB sobreposto se comporta como o
+    CSV — protegido só pelo hash do arquivo inteiro (reimport do MESMO
+    arquivo é 409) mais o aviso de `possiveis_duplicatas` por
+    (data, valor, tipo). O nº de documento continua no campo `documento`,
+    só não migra mais para `id_externo`."""
     if not conteudo or not conteudo.strip():
         raise Cnab240ParseError("Arquivo CNAB240 vazio")
     linhas = conteudo.splitlines()
@@ -232,7 +244,7 @@ def parse_cnab240(conteudo: str) -> list[LancamentoParseado]:
         historico = (linha[49:89].strip() or "(sem histórico)")[:255]
         lancamentos.append(LancamentoParseado(
             data=data, historico=historico, documento=documento, favorecido=None,
-            valor=valor, tipo=tipo, id_externo=documento))
+            valor=valor, tipo=tipo, id_externo=None))
     if not lancamentos:
         raise Cnab240ParseError("Nenhum lançamento (segmento E) encontrado no arquivo CNAB240")
     return lancamentos

@@ -32,11 +32,15 @@ class ResultadoImport:
     não-persistidos que antes pendurávamos no `Extrato` (`_total_no_arquivo`
     etc.) — aquele padrão exigia que quem lesse soubesse que o objeto
     devolvido carregava campos fora do mapeamento ORM; aqui o contrato é
-    o tipo. `ignorados_por_id_externo` só se aplica a formato com id de
-    lançamento (OFX/CNAB240) — linha cujo `(id_conta, id_externo)` já existe
-    é pulada. `possiveis_duplicatas` é um AVISO (mesma data/valor/tipo já
-    existentes na conta) e NÃO pula nada — pular por esses campos esconderia
-    lançamento real (dois pagamentos iguais no mesmo dia são legítimos)."""
+    o tipo. `ignorados_por_id_externo` só se aplica a OFX (FIX WAVE: CNAB240
+    deixou de preencher `id_externo` — ver docstring de `parse_cnab240`,
+    ruling do review final de C2, Important 1; nº de documento CNAB recicla e
+    colidia com FITID) — linha cujo `(id_conta, id_externo)` já existe é
+    pulada. CNAB240 sobreposto se comporta como o CSV: só o hash do arquivo
+    inteiro protege contra reimportação do MESMO arquivo (409).
+    `possiveis_duplicatas` é um AVISO (mesma data/valor/tipo já existentes na
+    conta) e NÃO pula nada — pular por esses campos esconderia lançamento
+    real (dois pagamentos iguais no mesmo dia são legítimos)."""
     extrato: Extrato
     total_no_arquivo: int
     importados: int

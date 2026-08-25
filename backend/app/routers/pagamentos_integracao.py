@@ -100,6 +100,9 @@ async def _sistema_escrita(
     return sistema
 
 
+_IDEMPOTENCY_KEY_TAM_MAXIMO = 64  # `pagamentos.idempotencia.chave` é String(64) — ver models/pagamentos.py
+
+
 async def _idempotency_key(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> str:
@@ -108,6 +111,14 @@ async def _idempotency_key(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Header Idempotency-Key é obrigatório para esta operação.",
+        )
+    if len(chave) > _IDEMPOTENCY_KEY_TAM_MAXIMO:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Header Idempotency-Key excede o tamanho máximo de "
+                f"{_IDEMPOTENCY_KEY_TAM_MAXIMO} caracteres."
+            ),
         )
     return chave
 

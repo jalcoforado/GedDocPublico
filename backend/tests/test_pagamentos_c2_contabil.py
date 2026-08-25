@@ -37,8 +37,9 @@ from app.auth.deps import get_current_user
 from app.config import get_settings
 from app.main import app
 from app.models import ExportContabilEvento, ExportContabilLote, Usuario
-from app.schemas.pagamentos import GrupoAutorizacaoIn, ParcelaCreate
+from app.schemas.pagamentos import FornecedorUpdate, GrupoAutorizacaoIn, ParcelaCreate
 from app.services import pagamentos_autorizacao as aut
+from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_contabil as svc
 from app.services import pagamentos_debitos as deb
 from tests.conftest import arreio_tenant_http
@@ -130,6 +131,42 @@ async def test_a_debito_empenhado_liquidado_pago_gera_tres_eventos(admin_engine)
             conteudo2 = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
         import hashlib
         assert hashlib.sha256(conteudo1).hexdigest() == hashlib.sha256(conteudo2).hexdigest()
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+# ---------------------------------------------------------------- (crítico)
+
+@pytest.mark.asyncio
+async def test_critico_edicao_de_cadastro_apos_gerar_lote_nao_quebra_reconstrucao(admin_engine):
+    """FIX WAVE (Critical, migration 0104): reconstrução usava dados VIVOS do
+    domínio — uma edição LEGÍTIMA e POSTERIOR de cadastro (aqui, o nome do
+    fornecedor via `atualizar_fornecedor`) mudava o CSV recalculado e
+    quebrava a conferência de hash: 500 "Corrupção detectada" PERMANENTE
+    para um lote que nunca foi corrompido. Com snapshot, o download depois
+    da edição devolve o MESMO CSV byte a byte."""
+    t = await _provisionar(admin_engine)
+    try:
+        d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
+
+        async with _sm(admin_engine)() as s:
+            lote = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
+        async with _sm(admin_engine)() as s:
+            conteudo_antes = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
+
+        # Edição legítima e posterior de cadastro — nada aqui é proibido pelo
+        # domínio, e o débito/pagamento em si não muda.
+        async with _sm(admin_engine)() as s:
+            await cad.atualizar_fornecedor(
+                s, tenant_id=t.id, fornecedor_id=d.id_fornecedor,
+                payload=FornecedorUpdate(nome="Fornecedor Renomeado Depois Do Lote"))
+
+        async with _sm(admin_engine)() as s:
+            conteudo_depois = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
+
+        assert conteudo_depois == conteudo_antes, (
+            "reconstrução tem de ser IMUNE a edição de cadastro posterior — "
+            "o snapshot é gravado na geração, não recalculado do domínio atual")
     finally:
         await _cleanup(admin_engine, t.id)
 
