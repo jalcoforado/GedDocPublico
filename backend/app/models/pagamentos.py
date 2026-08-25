@@ -505,7 +505,15 @@ class Idempotencia(Base):
     chave)` único: a mesma chave de idempotência do mesmo sistema integrado, no
     mesmo tenant, não reexecuta a operação; devolve `status_code`/`corpo_resposta`
     gravados na primeira vez. `hash_payload` permite detectar reuso da mesma
-    chave com um payload diferente (uso incorreto pelo integrador)."""
+    chave com um payload diferente (uso incorreto pelo integrador).
+
+    `status_code`/`corpo_resposta` são NULLABLE (migration 0103) — não porque a
+    resposta seja opcional, mas porque `services/pagamentos_idempotencia.py`
+    insere a linha ANTES de rodar a operação real (placeholder, protegido pelo
+    unique) para que duas requisições concorrentes com a MESMA chave colidam
+    no INSERT em vez de duplicar a execução. Uma linha com as duas colunas
+    NULL significa "em processamento" (ou processo morto no meio do caminho);
+    ver a docstring de `executar_idempotente`."""
     __tablename__ = "idempotencia"
     __table_args__ = {"schema": "pagamentos"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -514,8 +522,8 @@ class Idempotencia(Base):
         ForeignKey("pagamentos.sistema_integrado.id"), nullable=False)
     chave: Mapped[str] = mapped_column(String(64), nullable=False)
     hash_payload: Mapped[str] = mapped_column(String(64), nullable=False)
-    status_code: Mapped[int] = mapped_column(Integer, nullable=False)
-    corpo_resposta: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    corpo_resposta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 

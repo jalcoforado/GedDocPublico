@@ -180,6 +180,21 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     ("POST", "/api/v2/cidadao/processos/{processo_id}/anexos"),
     ("POST", "/api/v2/cidadao/processos/{processo_id}/complementacoes/{complementacao_id}/responder"),
     ("POST", "/api/v2/cidadao/servicos/{slug}/abrir"),
+
+    # -- API M2M de integrações (Pagamentos C2.3, Task 7): outro realm de
+    # autenticação inteiro, por `X-Api-Key` (`get_current_sistema_integrado`),
+    # não por `get_current_user`. `require_permission`/`require_modulo` são
+    # dependencies do realm de USUÁRIO e nem rodam aqui — o CLAUDE.md proíbe
+    # explicitamente `require_permission` de usuário nestas rotas. O
+    # enforcement de módulo existe (`_exigir_modulo_pagamentos` em
+    # `routers/pagamentos_integracao.py`), só não é a closure que esta guarda
+    # reconhece; escopo de leitura/escrita da própria chave
+    # (`require_escopo_leitura/escrita`) é a "permissão" deste realm.
+    ("POST", "/api/v2/integracao/pagamentos/debitos"),
+    ("POST", "/api/v2/integracao/pagamentos/debitos/{debito_id}/liquidar"),
+    ("GET", "/api/v2/integracao/pagamentos/debitos"),
+    ("GET", "/api/v2/integracao/pagamentos/ordens"),
+    ("GET", "/api/v2/integracao/pagamentos/baixas"),
 }
 
 

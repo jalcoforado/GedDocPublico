@@ -36,6 +36,7 @@ from .routers import (
     pagamentos_conciliacao,
     pagamentos_contabil,
     pagamentos_debitos,
+    pagamentos_integracao,
     permissoes,
     processos,
     protocolo,
@@ -156,6 +157,7 @@ app.include_router(pagamentos_conciliacao.router, prefix="/api/v2")
 app.include_router(pagamentos_contabil.contabil_router, prefix="/api/v2")
 app.include_router(pagamentos_debitos.debitos_router, prefix="/api/v2")
 app.include_router(pagamentos_debitos.operacoes_router, prefix="/api/v2")
+app.include_router(pagamentos_integracao.router, prefix="/api/v2")
 app.include_router(minutas.templates_router, prefix="/api/v2")
 app.include_router(minutas.imagens_router, prefix="/api/v2")
 app.include_router(minutas.minutas_router, prefix="/api/v2")
