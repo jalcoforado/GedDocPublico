@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { RitoPagamento } from "@/components/pagamentos/RitoPagamento";
 import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
-import { api, type Debito, type ParcelaFila } from "@/lib/api";
+import { api, type Debito, type ParcelaFila, type PendenciaAjuste } from "@/lib/api";
 
 // Filas podem ter dezenas de itens (massa real): cada card mostra os primeiros e
 // aponta para a lista completa, mantendo a home compacta.
@@ -131,6 +131,43 @@ function CardParcelas({
   );
 }
 
+function CardPendenciasAjuste({ itens }: { itens: PendenciaAjuste[] | null }) {
+  if (itens === null) return null;
+  return (
+    <div className="rounded-lg border border-border bg-surface-1 p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-foreground">Pendências para você responder</h2>
+        <Badge intent={itens.length > 0 ? "warning" : "neutral"}>{itens.length}</Badge>
+      </div>
+      {itens.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nada pendente.</p>
+      ) : (
+        <>
+          <ul className="space-y-1">
+            {itens.slice(0, MAX_ITENS_CARD).map((p) => (
+              <li key={p.id_pedido} className="flex items-center justify-between gap-2 text-sm">
+                <Link
+                  href={`/m/pagamentos/solicitacoes/${p.id_debito}`}
+                  className="min-w-0 flex-1 truncate text-primary hover:underline"
+                  title={p.motivo}
+                >
+                  {p.descricao_debito} — {p.motivo}
+                </Link>
+                {p.prazo && (
+                  <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-foreground-muted">
+                    até {fmtData(p.prazo)}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+          <VerTodas total={itens.length} href="/m/pagamentos/solicitacoes" />
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function PagamentosHomePage() {
   const filaQ = useQuery({
     queryKey: ["pag-fila"],
@@ -195,6 +232,7 @@ export default function PagamentosHomePage() {
             abrirHref="/m/pagamentos/tesouraria"
             abrirLabel="abrir tesouraria"
           />
+          <CardPendenciasAjuste itens={fila.pendencias_ajuste} />
         </div>
       )}
 

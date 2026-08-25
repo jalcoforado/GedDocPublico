@@ -1362,8 +1362,77 @@ export interface DecisaoJustificadaPayload extends DecisaoPayload {
   justificativa: string;
 }
 
-export interface SolicitarAjustePayload extends DecisaoJustificadaPayload {
-  etapa: "GESTOR" | "VALIDACAO" | "AUTORIDADE";
+export type EtapaAjuste = "GESTOR" | "VALIDACAO" | "AUTORIDADE";
+export type TipoAjuste = "MATERIAL" | "NAO_MATERIAL";
+export type SituacaoPedidoAjuste = "ABERTO" | "RESPONDIDO" | "RESOLVIDO" | "CANCELADO";
+
+/** F2 — substitui o `justificativa` solto por um pedido estruturado. */
+export interface SolicitarAjustePayload extends DecisaoPayload {
+  etapa: EtapaAjuste;
+  motivo: string;
+  descricao: string;
+  transacao_responsavel: string;
+  tipo: TipoAjuste;
+  prazo?: string | null;
+  campos_relacionados?: string[] | null;
+}
+
+/** Pedido adicional sobre um débito já em ajuste — etapa vem da situação atual. */
+export interface PedidoAjusteCreatePayload {
+  motivo: string;
+  descricao: string;
+  transacao_responsavel: string;
+  tipo: TipoAjuste;
+  prazo?: string | null;
+  campos_relacionados?: string[] | null;
+}
+
+export interface PedidoAjusteResponderPayload {
+  resposta: string;
+}
+
+export interface PedidoAjuste {
+  id: number;
+  id_debito: number;
+  versao_debito: number;
+  etapa_solicitante: EtapaAjuste;
+  id_usuario_solicitante: number | null;
+  motivo: string;
+  descricao: string;
+  transacao_responsavel: string;
+  tipo: TipoAjuste;
+  prazo: string | null;
+  campos_relacionados: string[] | null;
+  situacao: SituacaoPedidoAjuste;
+  resposta: string | null;
+  id_usuario_resposta: number | null;
+  respondido_em: string | null;
+  resolvido_em: string | null;
+  criado_em: string;
+}
+
+/** Snapshot congelado dos campos materiais do débito antes de uma alteração
+ *  material (F2, `GET /debitos/{id}/versoes`). */
+export interface DebitoVersao {
+  id: number;
+  versao: number;
+  dados: Record<string, unknown>;
+  id_pedido_ajuste: number | null;
+  motivo: string;
+  id_usuario: number | null;
+  criado_em: string;
+}
+
+/** Pedido de ajuste `ABERTO` endereçado a uma transação do usuário (F2) —
+ *  item de `MinhaFila.pendencias_ajuste`. */
+export interface PendenciaAjuste {
+  id_pedido: number;
+  id_debito: number;
+  descricao_debito: string;
+  motivo: string;
+  prazo: string | null;
+  criado_em: string;
+  etapa_solicitante: EtapaAjuste;
 }
 
 export interface OrdemPagamento {
@@ -1409,6 +1478,7 @@ export interface MinhaFila {
   solicitar: Debito[] | null; validar: Debito[] | null;
   encaminhar: Debito[] | null; autorizar: Debito[] | null;
   liberar: ParcelaFila[] | null; pagar: ParcelaFila[] | null;
+  pendencias_ajuste: PendenciaAjuste[] | null;
 }
 
 // ---------- filas agregadas por conta (autorização / liberação / tesouraria) ----------
@@ -4024,9 +4094,25 @@ export const api = {
       solicitarAjuste: (id: number, payload: SolicitarAjustePayload) =>
         request<DebitoOut>(`/pagamentos/debitos/${id}/solicitar-ajuste`, {
           method: "POST", body: JSON.stringify(payload) }),
+      // Reenvio: exige que todos os pedidos ABERTO da etapa tenham sido
+      // respondidos/cancelados — 409 caso contrário.
       responderAjuste: (id: number, payload: DecisaoPayload) =>
         request<DebitoOut>(`/pagamentos/debitos/${id}/responder-ajuste`, {
           method: "POST", body: JSON.stringify(payload) }),
+      // Pedido de ajuste como entidade (F2, Task 3) — vários pedidos por débito.
+      listarPedidosAjuste: (id: number) =>
+        request<PedidoAjuste[]>(`/pagamentos/debitos/${id}/pedidos-ajuste`),
+      criarPedidoAjuste: (id: number, payload: PedidoAjusteCreatePayload) =>
+        request<PedidoAjuste>(`/pagamentos/debitos/${id}/pedidos-ajuste`, {
+          method: "POST", body: JSON.stringify(payload) }),
+      responderPedidoAjuste: (id: number, pedidoId: number, payload: PedidoAjusteResponderPayload) =>
+        request<PedidoAjuste>(`/pagamentos/debitos/${id}/pedidos-ajuste/${pedidoId}/responder`, {
+          method: "POST", body: JSON.stringify(payload) }),
+      cancelarPedidoAjuste: (id: number, pedidoId: number) =>
+        request<PedidoAjuste>(`/pagamentos/debitos/${id}/pedidos-ajuste/${pedidoId}/cancelar`, {
+          method: "POST" }),
+      listarVersoes: (id: number) =>
+        request<DebitoVersao[]>(`/pagamentos/debitos/${id}/versoes`),
 
       // Endpoints de validação e autoridade (4 total)
       validar: (id: number, payload: DecisaoPayload) =>

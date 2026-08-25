@@ -235,6 +235,33 @@ export const ETAPA_INFO: Record<EtapaFluxo, EtapaInfo> = {
   },
 };
 
+/** Transações de pagamentos que podem ser destinatárias de um pedido de
+ *  ajuste (F2) — rótulo em português para o select de "responsável". Espelha
+ *  o catálogo `utils.transacao` usado por `_assert_permissao_dinamica`. */
+export const TRANSACAO_PAGAMENTOS: { value: string; label: string }[] = [
+  { value: "pagamento_solicitar", label: "Unidade solicitante" },
+  { value: "pagamento_gerir", label: "Gestor da pasta" },
+  { value: "pagamento_validar", label: "Validação financeira" },
+  { value: "pagamento_autorizar", label: "Autoridade competente" },
+  { value: "pagamento_pagar", label: "Tesouraria" },
+  { value: "pagamento_cadastro", label: "Administração do fluxo" },
+  { value: "pagamento_auditar", label: "Controle interno" },
+];
+
+export const TRANSACAO_PAGAMENTOS_ROTULO: Record<string, string> =
+  Object.fromEntries(TRANSACAO_PAGAMENTOS.map((t) => [t.value, t.label]));
+
+/** Situação do `PedidoAjuste` (F2) — ícone + texto, nunca só cor. */
+export const PEDIDO_AJUSTE_ROTULO: Record<
+  "ABERTO" | "RESPONDIDO" | "RESOLVIDO" | "CANCELADO",
+  Rotulo
+> = {
+  ABERTO: { label: "Aguardando resposta", intent: "warning", icon: Clock },
+  RESPONDIDO: { label: "Respondido", intent: "info", icon: Reply },
+  RESOLVIDO: { label: "Resolvido", intent: "success", icon: Check },
+  CANCELADO: { label: "Cancelado", intent: "neutral", icon: Ban },
+};
+
 /** Espelha `ETAPA_POR_TRAMITACAO` de `services/pagamentos_estados.py`.
  *  Divergir daqui faz o stepper acender a etapa errada. */
 export const ETAPA_POR_TRAMITACAO: Record<SituacaoTramitacao, EtapaFluxo> = {
