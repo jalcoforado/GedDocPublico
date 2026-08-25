@@ -19,6 +19,8 @@ from typing import Any
 
 from fastapi.encoders import jsonable_encoder
 
+from sqlalchemy import select
+
 from ..models.pagamentos import Debito, DebitoVersao
 
 CAMPOS_MATERIAIS: frozenset[str] = frozenset({
@@ -73,3 +75,12 @@ async def congelar_versao(db, *, debito: Debito, motivo: str, usuario_id: int,
     debito.versao += 1
     await db.flush()
     return versao_congelada
+
+
+async def listar_versoes(db, *, tenant_id: int, debito_id: int) -> list[DebitoVersao]:
+    """Versões congeladas do débito, mais recente primeiro — é o que prova
+    que a versão anterior a uma alteração material é recuperável."""
+    stmt = select(DebitoVersao).where(
+        DebitoVersao.tenant_id == tenant_id, DebitoVersao.id_debito == debito_id,
+    ).order_by(DebitoVersao.versao.desc(), DebitoVersao.id.desc())
+    return list((await db.execute(stmt)).scalars().all())

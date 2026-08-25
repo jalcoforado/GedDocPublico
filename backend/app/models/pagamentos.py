@@ -244,7 +244,7 @@ class DebitoHistorico(Base):
     id_debito: Mapped[int] = mapped_column(ForeignKey("pagamentos.debito.id"), nullable=False)
     status_anterior: Mapped[str | None] = mapped_column(String(25), nullable=True)
     status_novo: Mapped[str] = mapped_column(String(25), nullable=False)
-    acao: Mapped[str] = mapped_column(String(20), nullable=False)
+    acao: Mapped[str] = mapped_column(String(30), nullable=False)
     justificativa: Mapped[str | None] = mapped_column(String(255), nullable=True)
     id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
     ip_origem: Mapped[str | None] = mapped_column(String(45), nullable=True)

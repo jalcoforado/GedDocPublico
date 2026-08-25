@@ -85,6 +85,9 @@ def _registrar_transicao(db, *, debito: Debito, acao: str, usuario_id: int | Non
                 f"Transição inválida: de '{debito.situacao_tramitacao}' "
                 f"não se vai para '{tramitacao}'.", status.HTTP_409_CONFLICT)
     status_anterior = debito.status
+    situacao_tramitacao_anterior = debito.situacao_tramitacao
+    situacao_fila_anterior = debito.situacao_fila
+    situacao_pagamento_anterior = debito.situacao_pagamento
     if tramitacao is not None:
         debito.situacao_tramitacao = tramitacao
     if fila is not None:
@@ -97,7 +100,14 @@ def _registrar_transicao(db, *, debito: Debito, acao: str, usuario_id: int | Non
         tenant_id=debito.tenant_id, id_debito=debito.id,
         status_anterior=status_anterior if acao != "CRIADO" else None,
         status_novo=debito.status, acao=acao, justificativa=justificativa,
-        id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
+        id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow(),
+        versao_debito=debito.versao,
+        situacao_tramitacao_anterior=situacao_tramitacao_anterior,
+        situacao_tramitacao_nova=debito.situacao_tramitacao,
+        situacao_fila_anterior=situacao_fila_anterior,
+        situacao_fila_nova=debito.situacao_fila,
+        situacao_pagamento_anterior=situacao_pagamento_anterior,
+        situacao_pagamento_nova=debito.situacao_pagamento))
 
 
 async def detectar_duplicidade(db, *, tenant_id: int, id_fornecedor: int, numero_nf: str | None,
@@ -208,6 +218,11 @@ async def listar_historico(db: AsyncSession, *, tenant_id: int, debito_id: int) 
     return list((await db.execute(select(DebitoHistorico).where(
         DebitoHistorico.tenant_id == tenant_id, DebitoHistorico.id_debito == debito_id)
         .order_by(DebitoHistorico.criado_em.desc(), DebitoHistorico.id.desc()))).scalars().all())
+
+
+async def listar_versoes(db: AsyncSession, *, tenant_id: int, debito_id: int):
+    """Versões congeladas do débito — `GET /debitos/{id}/versoes` (F2)."""
+    return await pv.listar_versoes(db, tenant_id=tenant_id, debito_id=debito_id)
 
 
 async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
@@ -484,17 +499,62 @@ async def solicitar_ajuste(db: AsyncSession, *, tenant_id: int, debito_id: int,
 async def responder_ajuste(db: AsyncSession, *, tenant_id: int, debito_id: int,
                            usuario_id: int, lock_version: int,
                            ip: str | None = None) -> Debito:
-    """Unidade responde o ajuste; volta à etapa que o pediu."""
+    """Unidade reenvia após responder o(s) pedido(s) de ajuste pendente(s).
+
+    Reenvio (F2, §4.3): exige que TODOS os pedidos `ABERTO` da etapa tenham
+    sido respondidos ou cancelados — 409 caso contrário. O destino depende da
+    materialidade (Ruling 3): se, desde a abertura de algum pedido respondido,
+    o débito ganhou versão nova (`d.versao > menor versao_debito respondida`),
+    as aprovações de gestor e validador são invalidadas e o débito volta ao
+    GESTOR, não à etapa que pediu o ajuste — reabrir o mérito depois de mudar
+    algo material é o ponto central da fatia. Sem alteração material, o
+    retorno é o de sempre: à etapa que abriu o ajuste (`_RETORNO_DO_AJUSTE`).
+    """
     d = await _carregar_para_decisao(db, tenant_id=tenant_id, debito_id=debito_id,
                                      lock_version=lock_version)
-    destino = _RETORNO_DO_AJUSTE.get(d.situacao_tramitacao)
-    if destino is None:
+    etapa = ajustes.ETAPA_POR_SITUACAO.get(d.situacao_tramitacao)
+    if etapa is None:
         raise PagamentoDebitoError(
             f"Esta solicitação não tem ajuste pendente "
             f"(está em '{d.situacao_tramitacao}').", status.HTTP_409_CONFLICT)
-    _registrar_transicao(db, debito=d, acao="AJUSTE_RESPONDIDO", usuario_id=usuario_id,
+    abertos = await ajustes.pedidos_pendentes_da_etapa(
+        db, tenant_id=tenant_id, debito_id=debito_id, etapa=etapa)
+    if abertos:
+        lista = "; ".join(f"#{p.id}: {p.motivo}" for p in abertos)
+        raise PagamentoDebitoError(
+            f"Há pedido(s) de ajuste ainda não respondido(s): {lista}.",
+            status.HTTP_409_CONFLICT)
+    todos = await ajustes.listar_pedidos(db, tenant_id=tenant_id, debito_id=debito_id)
+    respondidos = [p for p in todos
+                   if p.etapa_solicitante == etapa and p.situacao == "RESPONDIDO"]
+    material = bool(respondidos) and d.versao > min(p.versao_debito for p in respondidos)
+    destino = est.AGUARDANDO_GESTOR if material else _RETORNO_DO_AJUSTE[d.situacao_tramitacao]
+    if material:
+        d.id_gestor_decisor = None
+        d.id_validador = None
+        # Linha de histórico própria — NÃO é uma transição do grafo (a
+        # tramitação não muda aqui; a mudança de tramitação é a de
+        # `_registrar_transicao` logo abaixo). INSERT direto de propósito.
+        db.add(DebitoHistorico(
+            tenant_id=tenant_id, id_debito=d.id,
+            status_anterior=d.status, status_novo=d.status,
+            acao="APROVACOES_INVALIDADAS",
+            justificativa=f"Aprovações de gestor e validador invalidadas pela versão {d.versao}.",
+            id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow(),
+            versao_debito=d.versao,
+            situacao_tramitacao_anterior=d.situacao_tramitacao,
+            situacao_tramitacao_nova=d.situacao_tramitacao))
+        await audit.log(
+            db, tenant_id=tenant_id, id_usuario=usuario_id,
+            acao="debito.aprovacoes_invalidadas", entidade="debito", id_entidade=d.id,
+            payload={"versao": d.versao})
+    _registrar_transicao(db, debito=d, acao="REENVIADO", usuario_id=usuario_id,
                          tramitacao=destino, ip=ip)
-    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    agora = _utcnow()
+    for p in respondidos:
+        p.situacao = "RESOLVIDO"
+        p.resolvido_em = agora
+    d.atualizado_em = agora; await db.commit(); await db.refresh(d)
     return d
 
 

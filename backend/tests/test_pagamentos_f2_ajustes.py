@@ -194,6 +194,21 @@ async def _levar_ate_aguardando_validacao(engine, tenant_id, debito, solicitante
     return debito
 
 
+async def _levar_ate_aguardando_autoridade(engine, tenant_id, debito, solicitante_id, gestor_id,
+                                           validador_id):
+    """Fluxo real completo: gestor -> validador confirma liquidação + valida
+    -> AGUARDANDO_AUTORIDADE. Usado pela Task 4 para exercitar AJUSTE_AUTORIDADE."""
+    debito = await _levar_ate_aguardando_validacao(engine, tenant_id, debito, solicitante_id, gestor_id)
+    async with _sm(engine)() as s:
+        debito = await svc.confirmar_liquidacao(
+            s, tenant_id=tenant_id, debito_id=debito.id, usuario_id=validador_id)
+        debito = await svc.validar(
+            s, tenant_id=tenant_id, debito_id=debito.id,
+            usuario_id=validador_id, lock_version=debito.lock_version,
+        )
+    return debito
+
+
 # --------------------------------------------------------------------------
 # Service — criação, pedido adicional, materialização
 # --------------------------------------------------------------------------
@@ -697,5 +712,246 @@ async def test_http_criar_pedido_adicional_sucesso(admin_engine):
             d = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
         assert len(pedidos) == 2
         assert d.situacao_tramitacao == "AJUSTE_VALIDACAO", "pedido adicional não transiciona o débito"
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+# --------------------------------------------------------------------------
+# Task 4 — reenvio com retorno correto + invalidação de aprovações
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reenvio_nao_material_volta_a_etapa_que_pediu(admin_engine):
+    """AJUSTE_VALIDACAO, responder o pedido (sem alterar nada material),
+    reenviar -> volta a AGUARDANDO_VALIDACAO (a etapa que pediu); o pedido
+    fica RESOLVIDO."""
+    tenant, sol, gestor, validador, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_validacao(admin_engine, tenant.id, debito, sol, gestor)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=validador, lock_version=debito.lock_version,
+            etapa="VALIDACAO", motivo="Falta comprovante", descricao="Falta comprovante",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
+        )
+        pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
+        pedido_id = pedidos[0].id
+
+    async with _sm(admin_engine)() as s:
+        await ajustes.responder_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido_id,
+            usuario_id=sol, resposta="Comprovante anexado.")
+        await s.commit()
+
+    async with _sm(admin_engine)() as s:
+        d = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
+        resultado = await svc.responder_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=sol, lock_version=d.lock_version)
+
+    assert resultado.situacao_tramitacao == "AGUARDANDO_VALIDACAO"
+
+    async with _sm(admin_engine)() as s:
+        pedido = await ajustes.obter_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido_id)
+    assert pedido.situacao == "RESOLVIDO"
+    await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_reenvio_com_alteracao_material_volta_ao_gestor(admin_engine):
+    """AJUSTE_AUTORIDADE (débito já passou por gestor+validação): a unidade
+    altera `valor_total` (materialidade -> versiona), responde e reenvia ->
+    volta a AGUARDANDO_GESTOR, NÃO à autoridade que pediu; as aprovações de
+    gestor e validador são invalidadas; histórico ganha a linha
+    APROVACOES_INVALIDADAS citando a versão nova."""
+    tenant, sol, gestor, validador, autoridade = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_autoridade(
+        admin_engine, tenant.id, debito, sol, gestor, validador)
+    assert debito.situacao_tramitacao == "AGUARDANDO_AUTORIDADE"
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=autoridade, lock_version=debito.lock_version,
+            etapa="AUTORIDADE", motivo="Valor divergente", descricao="Confira o valor total",
+            transacao_responsavel="pagamento_solicitar", tipo="MATERIAL",
+        )
+        pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
+        pedido_id = pedidos[0].id
+    assert debito.situacao_tramitacao == "AJUSTE_AUTORIDADE"
+    assert debito.versao == 1
+
+    async with _sm(admin_engine)() as s:
+        from app.schemas.pagamentos import DebitoUpdate
+        d = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
+        d = await svc.atualizar_debito(
+            s, tenant_id=tenant.id, debito_id=d.id, usuario_id=sol,
+            payload=DebitoUpdate(valor_total=Decimal("2000.00"),
+                                 parcelas=[ParcelaCreate(numero=1, valor=Decimal("2000.00"),
+                                                          vencimento="2026-02-01")]))
+    assert d.versao == 2, "alteração material tem de versionar"
+
+    async with _sm(admin_engine)() as s:
+        await ajustes.responder_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido_id,
+            usuario_id=sol, resposta="Valor corrigido.")
+        await s.commit()
+
+    async with _sm(admin_engine)() as s:
+        d = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
+        resultado = await svc.responder_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=sol, lock_version=d.lock_version)
+
+    assert resultado.situacao_tramitacao == "AGUARDANDO_GESTOR"
+    assert resultado.id_gestor_decisor is None
+    assert resultado.id_validador is None
+
+    async with _sm(admin_engine)() as s:
+        hist = await svc.listar_historico(s, tenant_id=tenant.id, debito_id=debito.id)
+    invalidacao = [h for h in hist if h.acao == "APROVACOES_INVALIDADAS"]
+    assert len(invalidacao) == 1
+    assert "invalidadas pela versão 2" in invalidacao[0].justificativa
+    await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_reenvio_com_pedido_aberto_e_409(admin_engine):
+    """Pedido ABERTO ainda não respondido -> responder_ajuste levanta 409 com
+    a lista dos pendentes."""
+    tenant, sol, gestor, validador, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_validacao(admin_engine, tenant.id, debito, sol, gestor)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=validador, lock_version=debito.lock_version,
+            etapa="VALIDACAO", motivo="Falta comprovante", descricao="Falta comprovante",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
+        )
+
+    async with _sm(admin_engine)() as s:
+        d = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
+        with pytest.raises(HTTPException) as exc:
+            await svc.responder_ajuste(
+                s, tenant_id=tenant.id, debito_id=debito.id,
+                usuario_id=sol, lock_version=d.lock_version)
+    assert exc.value.status_code == 409
+    assert "Falta comprovante" in exc.value.detail
+    await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_reenvio_resolve_os_respondidos(admin_engine):
+    """Dois pedidos abertos na mesma etapa: um respondido, outro cancelado.
+    Reenvio passa (o cancelado não bloqueia); o RESPONDIDO vira RESOLVIDO."""
+    tenant, sol, gestor, validador, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_validacao(admin_engine, tenant.id, debito, sol, gestor)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=validador, lock_version=debito.lock_version,
+            etapa="VALIDACAO", motivo="Falta comprovante", descricao="Falta comprovante",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
+        )
+        d = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
+        pedido2 = await ajustes.criar_pedido(
+            s, tenant_id=tenant.id, debito=d, usuario_id=validador, etapa="VALIDACAO",
+            motivo="Falta também a nota", descricao="Segunda pendência.",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
+        )
+        await s.commit()
+        pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
+        pedido1_id = [p.id for p in pedidos if p.id != pedido2.id][0]
+
+    async with _sm(admin_engine)() as s:
+        await ajustes.responder_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido1_id,
+            usuario_id=sol, resposta="Comprovante anexado.")
+        await ajustes.cancelar_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido2.id,
+            usuario_id=validador)
+        await s.commit()
+
+    async with _sm(admin_engine)() as s:
+        d = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
+        resultado = await svc.responder_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=sol, lock_version=d.lock_version)
+    assert resultado.situacao_tramitacao == "AGUARDANDO_VALIDACAO"
+
+    async with _sm(admin_engine)() as s:
+        p1 = await ajustes.obter_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido1_id)
+        p2 = await ajustes.obter_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido2.id)
+    assert p1.situacao == "RESOLVIDO"
+    assert p2.situacao == "CANCELADO"
+    await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_historico_registra_dimensoes_e_versao(admin_engine):
+    """Qualquer transição pós-F2 preenche versao_debito e os pares
+    situacao_*_anterior/nova em DebitoHistorico."""
+    tenant, sol, gestor, validador, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.enviar_para_gestor(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=sol, lock_version=debito.lock_version)
+
+    async with _sm(admin_engine)() as s:
+        hist = await svc.listar_historico(s, tenant_id=tenant.id, debito_id=debito.id)
+    enviado = [h for h in hist if h.acao == "ENVIADO"][0]
+    assert enviado.versao_debito == 1
+    assert enviado.situacao_tramitacao_anterior == "RASCUNHO"
+    assert enviado.situacao_tramitacao_nova == "AGUARDANDO_GESTOR"
+    await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_versao_anterior_recuperavel(admin_engine):
+    """Após uma alteração material: GET /debitos/{id}/versoes devolve a
+    versão 1, com o valor_total antigo, no corpo `dados`."""
+    tenant, sol, gestor, validador, autoridade = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_autoridade(
+        admin_engine, tenant.id, debito, sol, gestor, validador)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=autoridade, lock_version=debito.lock_version,
+            etapa="AUTORIDADE", motivo="Valor divergente", descricao="Confira o valor",
+            transacao_responsavel="pagamento_solicitar", tipo="MATERIAL",
+        )
+
+    async with _sm(admin_engine)() as s:
+        from app.schemas.pagamentos import DebitoUpdate
+        await svc.atualizar_debito(
+            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=sol,
+            payload=DebitoUpdate(valor_total=Decimal("2000.00"),
+                                 parcelas=[ParcelaCreate(numero=1, valor=Decimal("2000.00"),
+                                                          vencimento="2026-02-01")]))
+
+    try:
+        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
+        r = await _get(admin_engine, tenant.id, tenant.slug, uid,
+                       f"/api/v2/pagamentos/debitos/{debito.id}/versoes")
+        assert r.status_code == 200, (r.status_code, r.text[:300])
+        corpo = r.json()
+        assert len(corpo) == 1
+        assert corpo[0]["versao"] == 1
+        assert Decimal(str(corpo[0]["dados"]["valor_total"])) == Decimal("1000.00")
     finally:
         await _cleanup(admin_engine, tenant.id)

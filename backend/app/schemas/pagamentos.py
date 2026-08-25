@@ -502,6 +502,19 @@ class PedidoAjusteOut(BaseModel):
     criado_em: datetime
 
 
+class DebitoVersaoOut(BaseModel):
+    """Snapshot congelado dos campos materiais do débito antes de uma
+    alteração material (F2, `GET /debitos/{id}/versoes`)."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    versao: int
+    dados: dict
+    id_pedido_ajuste: int | None
+    motivo: str
+    id_usuario: int | None
+    criado_em: datetime
+
+
 class PedidoAjusteResponderIn(BaseModel):
     resposta: str = Field(min_length=1)
 

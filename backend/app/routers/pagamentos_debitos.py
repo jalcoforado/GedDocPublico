@@ -21,7 +21,7 @@ from ..schemas.pagamentos import (
     JustificativaIn, LiquidacaoIn, MarcarChecklistIn, MinhaFilaOut, OrdemPagamentoOut,
     PagarParcelaIn, ParcelaFilaOut, ParcelaOut, PedidoAjusteCreate, PedidoAjusteOut,
     PedidoAjusteResponderIn, SolicitarAjusteIn, SimulacaoAutorizacaoIn,
-    SimulacaoAutorizacaoOut,
+    SimulacaoAutorizacaoOut, DebitoVersaoOut,
 )
 from ..services import pagamentos_ajustes as ajustes
 from ..services import pagamentos_autorizacao as aut
@@ -415,6 +415,17 @@ async def cancelar_pedido_ajuste(debito_id: int, pedido_id: int,
         usuario_id=usuario.id)
     await db.commit(); await db.refresh(pedido)
     return pedido
+
+
+@debitos_router.get("/{debito_id}/versoes", response_model=list[DebitoVersaoOut])
+async def listar_versoes_debito(debito_id: int,
+                                _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                                tenant_id: int = Depends(require_tenant_id),
+                                db: AsyncSession = Depends(get_db)):
+    """Versões congeladas do débito antes de cada alteração material —
+    prova que a versão anterior é recuperável (F2)."""
+    await svc.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    return await svc.listar_versoes(db, tenant_id=tenant_id, debito_id=debito_id)
 
 
 @debitos_router.post("/{debito_id}/responder-ajuste", response_model=DebitoOut)

@@ -25,6 +25,7 @@ from app.schemas.pagamentos import (
     DebitoCreate, ParcelaCreate, FonteCreate, FornecedorCreate,
     ContaCreate, NaturezaCreate, ContratoCreate,
 )
+from app.services import pagamentos_ajustes as ajustes
 from app.services import pagamentos_debitos as svc
 from app.services import pagamentos_cadastros as cad
 from app.services.provisioning_tenant import provisionar_tenant
@@ -284,7 +285,11 @@ async def test_solicitar_ajuste_success(admin_engine):
 
 @pytest.mark.asyncio
 async def test_responder_ajuste_success(admin_engine):
-    """Unidade responde ajuste e volta ao estado anterior."""
+    """Unidade responde ajuste e volta ao estado anterior.
+
+    F2 (Task 3/4): `responder_ajuste` (reenvio) agora exige que o
+    `PedidoAjuste` ABERTO da etapa tenha sido respondido primeiro —
+    `svc.responder_ajuste` só faz a transição de tramitação de volta."""
     tenant, solicitante_id, gestor_id, _, _ = await _provisionar(admin_engine)
     debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
 
@@ -302,7 +307,13 @@ async def test_responder_ajuste_success(admin_engine):
             transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
         )
 
-        # Responde ajuste
+        # Responde o pedido de ajuste estruturado (F2) antes do reenvio
+        pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
+        await ajustes.responder_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedidos[0].id,
+            usuario_id=solicitante_id, resposta="Documentos anexados.")
+
+        # Responde ajuste (reenvio)
         result = await svc.responder_ajuste(
             s, tenant_id=tenant.id, debito_id=debito.id,
             usuario_id=solicitante_id, lock_version=debito.lock_version,
