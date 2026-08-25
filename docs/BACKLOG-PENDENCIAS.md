@@ -832,6 +832,46 @@ pagamento, PDF/OCR de extrato, adaptador contábil específico, XLSX (decisão C
   não confundir com o que a Onda C entrega.
 - Contexto: Ondas A e B estão inteiras em produção (migrations 0063→0072).
 
+**F2 do refactor de fluxo entregue em 2026-08-25** (branch `pagamentos/f2-ajustes-versionamento`;
+spec `docs/superpowers/specs/2026-08-06-pagamentos-fluxo-design.md` §4.3/§4.5/§9-F2; plano
+`docs/superpowers/plans/2026-08-25-pagamentos-f2-ajustes-versionamento.md`; migrations **0105-0106**).
+O pedido de ajuste deixou de ser uma string:
+
+- **`pedido_ajuste` como entidade** — motivo, descrição, responsável por **transação RBAC** (não
+  pessoa), tipo MATERIAL/NAO_MATERIAL, prazo, situação ABERTO→RESPONDIDO→RESOLVIDO/CANCELADO.
+  Vários pedidos por etapa; o reenvio exige todos respondidos ou cancelados e os resolve. O
+  backfill da 0105 criou pedido sintético para todo débito que já estava em `AJUSTE_*` (cobrindo
+  o vocabulário da F1, `AJUSTE_SOLICITADO`, e o pré-F1, `DEVOLVIDO`/`SUSPENSO`).
+- **Versionamento material** — `CAMPOS_MATERIAIS` com guarda que obriga classificar coluna nova
+  de `Debito`; alteração material em `AJUSTE_*` congela snapshot em `debito_versao` e incrementa
+  `versao`; no reenvio, materialidade (`versao > versao_debito` do pedido) manda o débito de
+  volta ao **gestor** e **invalida as aprovações** (`id_gestor_decisor`/`id_validador` zerados,
+  histórico `APROVACOES_INVALIDADAS`); não material volta à etapa que pediu. A 0106 alargou
+  `debito_historico.acao` (varchar 30 + CHECK com todas as ações em uso).
+- **`anexo_debito`** — documentos do débito reaproveitando o armazenamento de `protocolos.anexo`
+  (helper de persistência extraído; autorização pelo vínculo do tenant ANTES de resolver o
+  caminho; carregador cru segue proibido em router). Upload/lista/download/remoção no detalhe.
+- **Histórico com as três dimensões** — `debito_historico` ganhou `versao_debito` e os pares
+  `situacao_*_anterior/nova`, preenchidos por `_registrar_transicao`.
+- **UI** — seções Pendências (responder/cancelar, reenvio bloqueado com motivo enquanto houver
+  pedido aberto), Versões e Documentos no detalhe; bloco "Pendências para você responder" na
+  caixa (`minha-fila.pendencias_ajuste`, filtrado pelas transações do usuário).
+
+Pendências registradas da F2 (menores, nenhuma bloqueante):
+
+- Versão criada via edição não amarra `id_pedido_ajuste` (com N pedidos abertos a amarração é
+  ambígua) — decidir vínculo explícito se a tela de responder passar a editar campos.
+- Linha `APROVACOES_INVALIDADAS` não preenche os pares de fila/pagamento (deliberado: não é
+  transição); sem teste dedicado para "todos os pedidos cancelados → retorno padrão" e para
+  pendência de débito excluído (lógica correta por leitura).
+- "Usuário #id" na lista de anexos e afins — os schemas Out não trazem nome do usuário (mesma
+  dívida da tela de lotes da C2); resolver num ajuste de schema único.
+- Bloqueio de reenvio no frontend olha todos os pedidos ABERTOS (não só da etapa) — equivalente
+  hoje por invariante do backend; comentar/ajustar se um dia houver ajustes concorrentes de
+  etapas diferentes.
+- F3 (ordem cronológica), F4 (tesouraria) e F5 (remoção do `status` legado) continuam **não
+  autorizadas** — o `status` derivado segue vivo e sincronizado até a F5.
+
 ### 2.2 Transporte Regulado — P5 a P8
 
 P0–P4 entregues e no ar (permissionário, empresa, veículo, vistorias, alvarás com documentos,
