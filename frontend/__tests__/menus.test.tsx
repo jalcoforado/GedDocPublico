@@ -90,6 +90,7 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/pagamentos/cadastros/contratos": { perm: "pagamento_cadastro" },
   "/m/pagamentos/cadastros/alcadas": { perm: "pagamento_cadastro" },
   "/m/pagamentos/cadastros/checklist": { perm: "pagamento_cadastro" },
+  "/m/pagamentos/cadastros/integracoes": { perm: "pagamento_cadastro" },
   "/m/administracao/usuarios": { perm: "usuario" },
   "/m/administracao/unidades-trabalho": { perm: "unidadeTrabalho" },
   "/m/administracao/organograma": {},
