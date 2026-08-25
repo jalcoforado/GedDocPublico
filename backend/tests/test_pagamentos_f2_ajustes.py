@@ -577,3 +577,125 @@ async def test_http_pedido_cross_tenant_e_404(admin_engine):
     finally:
         await _cleanup(admin_engine, tenant_a.id)
         await _cleanup(admin_engine, tenant_b.id)
+
+
+@pytest.mark.asyncio
+async def test_http_responder_pedido_sucesso_e_403_para_outra_transacao(admin_engine):
+    """Fecha o buraco apontado no review: `responder` e `cancelar` são
+    estruturalmente quase idênticos no router (mesmo padrão de 404 + checagem
+    dinâmica) — só um teste HTTP prova que cada um está checando a
+    permissão CERTA. Aqui: quem tem `transacao_responsavel` do pedido
+    (`pagamento_solicitar`) responde com sucesso; quem só tem OUTRA
+    permissão de pagamentos (`pagamento_gerir`) leva 403."""
+    tenant, sol, gestor, validador, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_validacao(admin_engine, tenant.id, debito, sol, gestor)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=validador, lock_version=debito.lock_version,
+            etapa="VALIDACAO", motivo="Falta comprovante", descricao="Falta comprovante",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
+        )
+        pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
+        pedido_id = pedidos[0].id
+
+    try:
+        # Usuário SEM a transacao_responsavel do pedido (tem só pagamento_gerir,
+        # que passa pelo Depends de leitura mas não é 'pagamento_solicitar') → 403.
+        uid_errado = await _usuario_com(admin_engine, tenant.id, ["pagamento_gerir"])
+        r_403 = await _post(
+            admin_engine, tenant.id, tenant.slug, uid_errado,
+            f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste/{pedido_id}/responder",
+            {"resposta": "Não deveria conseguir."})
+        assert r_403.status_code == 403, (r_403.status_code, r_403.text[:300])
+
+        # Usuário COM a transacao_responsavel do pedido ('pagamento_solicitar') → 200.
+        uid_certo = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
+        r_200 = await _post(
+            admin_engine, tenant.id, tenant.slug, uid_certo,
+            f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste/{pedido_id}/responder",
+            {"resposta": "Comprovante anexado ao processo."})
+        assert r_200.status_code == 200, (r_200.status_code, r_200.text[:300])
+        corpo = r_200.json()
+        assert corpo["situacao"] == "RESPONDIDO"
+        assert corpo["resposta"] == "Comprovante anexado ao processo."
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_http_cancelar_pedido_sucesso_pela_etapa_solicitante(admin_engine):
+    """Par de `test_http_responder_pedido_...`: `cancelar` confere a permissão
+    da etapa SOLICITANTE do pedido (`VALIDACAO` -> `pagamento_validar`), não a
+    `transacao_responsavel` que `responder` usa — são checagens DIFERENTES, e
+    só HTTP prova que o endpoint certo olha para o campo certo."""
+    tenant, sol, gestor, validador, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_validacao(admin_engine, tenant.id, debito, sol, gestor)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=validador, lock_version=debito.lock_version,
+            etapa="VALIDACAO", motivo="Falta comprovante", descricao="Falta comprovante",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
+        )
+        pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
+        pedido_id = pedidos[0].id
+
+    try:
+        # etapa_solicitante do pedido é VALIDACAO -> exige pagamento_validar.
+        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_validar"])
+        r = await _post(
+            admin_engine, tenant.id, tenant.slug, uid,
+            f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste/{pedido_id}/cancelar",
+            {})
+        assert r.status_code == 200, (r.status_code, r.text[:300])
+        corpo = r.json()
+        assert corpo["situacao"] == "CANCELADO"
+        assert corpo["resolvido_em"] is not None
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_http_criar_pedido_adicional_sucesso(admin_engine):
+    """O par positivo de `test_pedido_adicional_de_outra_etapa_e_409`: débito
+    já em AJUSTE_VALIDACAO, POST /pedidos-ajuste via router com usuário que
+    tem a transação da etapa ATUAL do débito (VALIDACAO -> pagamento_validar)
+    → 201, pedido novo ABERTO, sem transicionar o débito."""
+    tenant, sol, gestor, validador, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_validacao(admin_engine, tenant.id, debito, sol, gestor)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=validador, lock_version=debito.lock_version,
+            etapa="VALIDACAO", motivo="Falta comprovante", descricao="Falta comprovante",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
+        )
+
+    try:
+        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_validar"])
+        body = {
+            "motivo": "Falta também a nota", "descricao": "Segunda pendência da validação.",
+            "transacao_responsavel": "pagamento_solicitar", "tipo": "NAO_MATERIAL",
+        }
+        r = await _post(
+            admin_engine, tenant.id, tenant.slug, uid,
+            f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste", body)
+        assert r.status_code == 201, (r.status_code, r.text[:300])
+        corpo = r.json()
+        assert corpo["situacao"] == "ABERTO"
+        assert corpo["etapa_solicitante"] == "VALIDACAO"
+
+        async with _sm(admin_engine)() as s:
+            pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
+            d = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
+        assert len(pedidos) == 2
+        assert d.situacao_tramitacao == "AJUSTE_VALIDACAO", "pedido adicional não transiciona o débito"
+    finally:
+        await _cleanup(admin_engine, tenant.id)
