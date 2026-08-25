@@ -249,6 +249,75 @@ class DebitoHistorico(Base):
     id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
     ip_origem: Mapped[str | None] = mapped_column(String(45), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # --- F2 (migration 0105) — versão do débito e as três situações lado a lado.
+    # Todas nullable: linha antiga não tem essas dimensões, e não há backfill.
+    versao_debito: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    situacao_tramitacao_anterior: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    situacao_tramitacao_nova: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    situacao_fila_anterior: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    situacao_fila_nova: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    situacao_pagamento_anterior: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    situacao_pagamento_nova: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+
+class PedidoAjuste(Base):
+    """Pedido formal de ajuste aberto por uma etapa (GESTOR/VALIDACAO/AUTORIDADE)
+    sobre um débito, antes de decidir (F2, migration 0105)."""
+    __tablename__ = "pedido_ajuste"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_debito: Mapped[int] = mapped_column(ForeignKey("pagamentos.debito.id"), nullable=False)
+    versao_debito: Mapped[int] = mapped_column(Integer, nullable=False)
+    etapa_solicitante: Mapped[str] = mapped_column(String(15), nullable=False)  # GESTOR | VALIDACAO | AUTORIDADE
+    id_usuario_solicitante: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    motivo: Mapped[str] = mapped_column(String(255), nullable=False)
+    descricao: Mapped[str] = mapped_column(Text, nullable=False)
+    transacao_responsavel: Mapped[str] = mapped_column(String(50), nullable=False)
+    tipo: Mapped[str] = mapped_column(String(15), nullable=False)  # MATERIAL | NAO_MATERIAL
+    prazo: Mapped[date | None] = mapped_column(Date, nullable=True)
+    campos_relacionados: Mapped[list | dict | None] = mapped_column(JSONB, nullable=True)
+    situacao: Mapped[str] = mapped_column(String(15), nullable=False)  # ABERTO | RESPONDIDO | RESOLVIDO | CANCELADO
+    resposta: Mapped[str | None] = mapped_column(Text, nullable=True)
+    id_usuario_resposta: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    respondido_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolvido_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class DebitoVersao(Base):
+    """Snapshot append-only dos campos materiais do débito, congelado a cada
+    resposta de ajuste que os altera (F2, migration 0105). `versao` é a
+    versão ANTERIOR à mudança; a corrente vive em `Debito.versao`."""
+    __tablename__ = "debito_versao"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_debito: Mapped[int] = mapped_column(ForeignKey("pagamentos.debito.id"), nullable=False)
+    versao: Mapped[int] = mapped_column(Integer, nullable=False)
+    dados: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    id_pedido_ajuste: Mapped[int | None] = mapped_column(
+        ForeignKey("pagamentos.pedido_ajuste.id"), nullable=True)
+    motivo: Mapped[str] = mapped_column(String(255), nullable=False)
+    id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class AnexoDebito(Base):
+    """Vínculo (soft-delete) entre um débito e um anexo de `protocolos.anexo`,
+    versionado por `versao_debito` (F2, migration 0105)."""
+    __tablename__ = "anexo_debito"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_debito: Mapped[int] = mapped_column(ForeignKey("pagamentos.debito.id"), nullable=False)
+    id_anexo: Mapped[int] = mapped_column(ForeignKey("protocolos.anexo.id"), nullable=False)
+    id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    versao_debito: Mapped[int] = mapped_column(Integer, nullable=False)
+    id_pedido_ajuste: Mapped[int | None] = mapped_column(
+        ForeignKey("pagamentos.pedido_ajuste.id"), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class OrdemPagamento(Base):
