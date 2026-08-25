@@ -761,7 +761,7 @@ ao lado da definição nos quatro arquivos.
 
 ## 2. Módulos com escopo declarado e não implementado
 
-### 2.1 Pagamentos — Onda C — C1 ENTREGUE; C2 continua em aberto
+### 2.1 Pagamentos — Onda C — C1 ENTREGUE; C2 ENTREGUE em 2026-08-24
 
 **Este item afirmou por semanas que "não existe nada", e estava errado desde a C1.1.** A frase
 vinha de um `grep` feito uma vez e nunca refeito; quando a C1.3 foi desenhada, os endpoints da
@@ -781,8 +781,49 @@ O que está no ar:
   faltavam ganharam export: painel de caixa (CSV+PDF), extrato de conta (CSV), lançamentos de
   extrato (CSV) e ordens de pagamento (CSV+PDF) — todas com botão na tela, no mesmo PR.
 
-O que falta — **C2, e continua bloqueado em spec externa**: integração contábil, integração
-bancária e API idempotente. Não há como desenhar sem o contrato do sistema contábil e o do banco.
+~~O que falta — **C2, e continua bloqueado em spec externa**~~ → **C2 entregue em 2026-08-24.** O
+bloqueio caiu por decisão do Jorge: formato próprio + adaptador no lugar de contrato externo. Spec
+em `docs/superpowers/specs/2026-08-24-pagamentos-c2-integracoes-design.md`; contrato público em
+`docs/INTEGRACAO-PAGAMENTOS.md`. O que entrou (migrations 0099–0103):
+
+- **C2.2 — importador de extrato OFX/CNAB240** no pipeline existente de `importar_extrato`
+  (dispatch por `formato`): parser OFX 1.x SGML + 2.x XML (scanner próprio, sem dependência),
+  parser CNAB240 FEBRABAN (fixture como spec executável até chegar arquivo real do banco), dedupe
+  por `(conta, id_externo)` (0099) — sem `id_externo` NUNCA pula: coincidência de data/valor vira
+  AVISO de possível duplicata no relato, decisão do tesoureiro. Upload + relato na tela.
+- **C2.1 — export contábil neutro `neutro-csv-v1`** com lotes imutáveis (0101): 5 tipos de evento
+  do domínio real (`debito_empenhado`, `liquidacao`, `pagamento` com RN-15, `estorno_parcela`,
+  `cancelamento_debito`), `id_evento` estável `tipo:id_origem`, reemissão devolve o mesmo lote
+  (hash conferido), retardatário entra no lote seguinte; `ContabilAdapter` plugável para o dia em
+  que o sistema contábil do piloto for definido. Tela de lotes.
+- **C2.3 — API externa M2M** (0102/0103): realm próprio por API key (`X-Api-Key`, prefixo público
+  + segredo bcrypt, escopos leitura/escrita, tenant DA CHAVE — divergência com o Host → 401),
+  escrita idempotente (`Idempotency-Key`; replay devolve a resposta gravada; payload divergente
+  409), leitura por cursor (`alterado_desde` para ETL), gate de módulo `pagamentos` do tenant,
+  rate limit 120 r/m na borda. **Paridade entre portas é regra**: o liquidar M2M espelha
+  `confirmar_liquidacao` exatamente (RN-01 é de `autorizar_lote`, que o M2M não expõe — um review
+  pegou a porta M2M mais estrita que a interna e ela foi corrigida). Tela de gestão de chaves
+  (segredo mostrado uma única vez).
+
+Pendências registradas da C2:
+
+- **Decisão de design a confirmar com o Jorge se a API crescer**: débito criado via M2M usa
+  `sistema.id_usuario_criador` como solicitante (409 se ausente) — atribuição de autoria por
+  máquina, decidida em implementação.
+- A busca da chave por prefixo usa policy espelhada no precedente de `aprimora_py.tenant`
+  (0103) para sobreviver ao `SEC-RLS-ROLLOUT`; teste sob `aprimora_app` trava o comportamento.
+- Corrida de idempotência (dois requests simultâneos da mesma chave) coberta por unique + leitura
+  de código; sem teste de concorrência real.
+- `_motivo_de_descricao` trunca motivo que contenha ": " (primeira ocorrência); `numero_ne`
+  preenchido depois do export não re-exporta o débito como `debito_empenhado` (limitação
+  documentada no service).
+- Tela de lotes mostra "Usuário #id" (schema sem nome do usuário); GET
+  `/pagamentos/sistemas-integrados/{id}` sem teste HTTP direto.
+- `possiveis_duplicatas` varre o histórico inteiro da conta a cada import — escalabilidade a
+  observar; timing oracle no prefixo inexistente (prefixo é público — revisitar se mudar).
+
+Continua fora (a "3ª etapa" do spec municipal): API bancária/PIX, remessa/retorno CNAB de
+pagamento, PDF/OCR de extrato, adaptador contábil específico, XLSX (decisão C1 mantida).
 
 - **XLSX não foi entregue e é decisão, não esquecimento.** CSV abre no Excel e não adiciona
   dependência; o PDF existe só onde há leitura de conferência (painel e ordens), e é gerado **a
