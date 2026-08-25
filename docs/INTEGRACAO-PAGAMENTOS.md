@@ -187,10 +187,13 @@ done
 
 ## 4. Limites
 
-- **Sem rate limit dedicado** na API M2M hoje — o único limite é o tamanho de
-  página (`limite` ≤ 200, default 50). Não presuma um teto de requisições por
-  segundo; se a prefeitura precisar impor um, isso acontece na borda (nginx),
-  fora deste contrato.
+- **Rate limit na borda (nginx)**: o prefixo `/api/v2/integracao/` é limitado a
+  **120 requisições/minuto por IP de origem**, com tolerância de rajada de 20
+  (`burst=20 nodelay`). Acima disso o nginx responde **503** antes de chegar à
+  aplicação — trate 503 com retry e backoff. O valor é configuração de
+  infraestrutura (`nginx/default.conf`, zona `integracao`) e pode ser ajustado
+  por ambiente sem mudança neste contrato.
+- Tamanho de página: `limite` ≤ 200, default 50.
 - Campos de texto seguem os limites do schema de entrada: `descricao` do
   débito até 255 caracteres, `numero_ne`/`numero_nf` até 30/40,
   `justificativa_urgencia` até 255, `competencia` no formato `AAAA-MM`.
