@@ -503,12 +503,17 @@ async def responder_ajuste(db: AsyncSession, *, tenant_id: int, debito_id: int,
 
     Reenvio (F2, §4.3): exige que TODOS os pedidos `ABERTO` da etapa tenham
     sido respondidos ou cancelados — 409 caso contrário. O destino depende da
-    materialidade (Ruling 3): se, desde a abertura de algum pedido respondido,
-    o débito ganhou versão nova (`d.versao > menor versao_debito respondida`),
-    as aprovações de gestor e validador são invalidadas e o débito volta ao
-    GESTOR, não à etapa que pediu o ajuste — reabrir o mérito depois de mudar
-    algo material é o ponto central da fatia. Sem alteração material, o
-    retorno é o de sempre: à etapa que abriu o ajuste (`_RETORNO_DO_AJUSTE`).
+    materialidade (Ruling 3, revisado no review final): se, desde a abertura
+    do mais antigo pedido AINDA NÃO RESOLVIDO desta rodada — RESPONDIDO ou
+    CANCELADO, não só RESPONDIDO —, o débito ganhou versão nova
+    (`d.versao > menor versao_debito da rodada`), as aprovações de gestor e
+    validador são invalidadas e o débito volta ao GESTOR, não à etapa que
+    pediu o ajuste — reabrir o mérito depois de mudar algo material é o ponto
+    central da fatia. Considerar também os CANCELADOS fecha a fuga em que a
+    validação cancela e reabre o pedido pós-edição: um pedido novo, nascido já
+    na versão editada, não pode "esquecer" que a edição aconteceu. Sem
+    alteração material, o retorno é o de sempre: à etapa que abriu o ajuste
+    (`_RETORNO_DO_AJUSTE`).
     """
     d = await _carregar_para_decisao(db, tenant_id=tenant_id, debito_id=debito_id,
                                      lock_version=lock_version)
@@ -527,7 +532,20 @@ async def responder_ajuste(db: AsyncSession, *, tenant_id: int, debito_id: int,
     todos = await ajustes.listar_pedidos(db, tenant_id=tenant_id, debito_id=debito_id)
     respondidos = [p for p in todos
                    if p.etapa_solicitante == etapa and p.situacao == "RESPONDIDO"]
-    material = bool(respondidos) and d.versao > min(p.versao_debito for p in respondidos)
+    # Materialidade (Ruling do review final): comparar `d.versao` só contra os
+    # RESPONDIDO deixa escapar o caso em que o pedido que testemunhou a edição
+    # foi CANCELADO e substituído por outro, nascido já na versão pós-edição —
+    # o `min` do pedido novo "esquece" a versão antiga e material vira False
+    # incorretamente. A correção usa os pedidos da etapa desta RODADA, isto é,
+    # com `situacao != 'RESOLVIDO'`: como `abertos` já foi conferido vazio
+    # acima, o que sobra é exatamente RESPONDIDO + CANCELADO. `RESOLVIDO` só é
+    # atribuído aqui embaixo, ao final desta própria função — nunca em nenhum
+    # outro ponto do código —, então pedidos RESOLVIDOS pertencem sempre a uma
+    # passagem ANTERIOR por esta etapa (já fechada por um reenvio passado) e
+    # ficam de fora, não reativando materialidade antiga.
+    rodada_atual = [p for p in todos
+                    if p.etapa_solicitante == etapa and p.situacao != "RESOLVIDO"]
+    material = bool(rodada_atual) and d.versao > min(p.versao_debito for p in rodada_atual)
     destino = est.AGUARDANDO_GESTOR if material else _RETORNO_DO_AJUSTE[d.situacao_tramitacao]
     if material:
         d.id_gestor_decisor = None

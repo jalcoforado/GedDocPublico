@@ -822,6 +822,119 @@ async def test_reenvio_com_alteracao_material_volta_ao_gestor(admin_engine):
 
 
 @pytest.mark.asyncio
+async def test_reenvio_material_com_pedido_cancelado_e_reaberto_volta_ao_gestor(admin_engine):
+    """Cenário de fuga do review final: a autoridade abre um pedido (v1); a
+    unidade edita `valor_total` (versiona -> v2); a autoridade CANCELA o
+    pedido original e abre outro, que nasce já em v2; a unidade responde o
+    novo pedido e reenvia. A materialidade não pode "esquecer" a edição só
+    porque o pedido que a testemunhou foi cancelado e substituído — reenvio
+    tem de voltar ao GESTOR com os decisores zerados, exatamente como no
+    caso sem cancelamento (`test_reenvio_com_alteracao_material_volta_ao_gestor`).
+    """
+    tenant, sol, gestor, validador, autoridade = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_autoridade(
+        admin_engine, tenant.id, debito, sol, gestor, validador)
+    assert debito.situacao_tramitacao == "AGUARDANDO_AUTORIDADE"
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=autoridade, lock_version=debito.lock_version,
+            etapa="AUTORIDADE", motivo="Valor divergente", descricao="Confira o valor total",
+            transacao_responsavel="pagamento_solicitar", tipo="MATERIAL",
+        )
+        pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
+        pedido1_id = pedidos[0].id
+    assert debito.versao == 1
+
+    async with _sm(admin_engine)() as s:
+        from app.schemas.pagamentos import DebitoUpdate
+        d = await svc.atualizar_debito(
+            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=sol,
+            payload=DebitoUpdate(valor_total=Decimal("2000.00"),
+                                 parcelas=[ParcelaCreate(numero=1, valor=Decimal("2000.00"),
+                                                          vencimento="2026-02-01")]))
+    assert d.versao == 2, "alteração material tem de versionar"
+
+    async with _sm(admin_engine)() as s:
+        # A validação cancela o pedido que testemunhou a edição e abre outro
+        # — este novo já nasce em versao_debito=2, "pós-edição".
+        await ajustes.cancelar_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido1_id,
+            usuario_id=autoridade)
+        d2 = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
+        pedido2 = await ajustes.criar_pedido(
+            s, tenant_id=tenant.id, debito=d2, usuario_id=autoridade, etapa="AUTORIDADE",
+            motivo="Valor ainda divergente", descricao="Confira de novo o valor total.",
+            transacao_responsavel="pagamento_solicitar", tipo="MATERIAL",
+        )
+        await s.commit()
+    assert pedido2.versao_debito == 2
+
+    async with _sm(admin_engine)() as s:
+        await ajustes.responder_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido2.id,
+            usuario_id=sol, resposta="Valor corrigido de novo.")
+        await s.commit()
+
+    async with _sm(admin_engine)() as s:
+        d = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
+        resultado = await svc.responder_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=sol, lock_version=d.lock_version)
+
+    assert resultado.situacao_tramitacao == "AGUARDANDO_GESTOR", (
+        "a edição material aconteceu antes do reenvio; cancelar e reabrir o "
+        "pedido não pode apagar essa materialidade")
+    assert resultado.id_gestor_decisor is None
+    assert resultado.id_validador is None
+    await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_reenvio_todos_cancelados_sem_alteracao_volta_a_etapa_de_origem(admin_engine):
+    """Todos os pedidos da etapa foram CANCELADOS (nenhum RESPONDIDO) e não
+    houve edição alguma no meio tempo -> reenvio não é material e volta à
+    etapa que pediu o ajuste, como sempre. Cobre o minor deferido da T4:
+    antes só havia teste para "um respondido + um cancelado", nunca para
+    "todos cancelados"."""
+    tenant, sol, gestor, validador, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_validacao(admin_engine, tenant.id, debito, sol, gestor)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=validador, lock_version=debito.lock_version,
+            etapa="VALIDACAO", motivo="Falta comprovante", descricao="Falta comprovante",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
+        )
+        pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
+        pedido_id = pedidos[0].id
+
+    async with _sm(admin_engine)() as s:
+        await ajustes.cancelar_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido_id,
+            usuario_id=validador)
+        await s.commit()
+
+    async with _sm(admin_engine)() as s:
+        d = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
+        resultado = await svc.responder_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=sol, lock_version=d.lock_version)
+
+    assert resultado.situacao_tramitacao == "AGUARDANDO_VALIDACAO"
+
+    async with _sm(admin_engine)() as s:
+        pedido = await ajustes.obter_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido_id)
+    assert pedido.situacao == "CANCELADO", "pedido cancelado não é 'resolvido' pelo reenvio"
+    await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
 async def test_reenvio_com_pedido_aberto_e_409(admin_engine):
     """Pedido ABERTO ainda não respondido -> responder_ajuste levanta 409 com
     a lista dos pendentes."""
