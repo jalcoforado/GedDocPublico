@@ -11,7 +11,7 @@
  *     um ajuste para responder abrindo cada solicitação manualmente.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -136,15 +136,17 @@ vi.mock("@/lib/auth", () => ({
   }),
 }));
 
+const toastErrorMock = vi.fn();
+
 vi.mock("@/components/ui/toast", () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
+  useToast: () => ({ success: vi.fn(), error: toastErrorMock, info: vi.fn(), warning: vi.fn() }),
 }));
 
 function renderComQueryClient(children: React.ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(<QueryClientProvider client={client}>{children}</QueryClientProvider>);
+  return { client, ...render(<QueryClientProvider client={client}>{children}</QueryClientProvider>) };
 }
 
 describe("Detalhe da solicitação — pendências de ajuste (F2)", () => {
@@ -176,6 +178,54 @@ describe("Detalhe da solicitação — pendências de ajuste (F2)", () => {
     await waitFor(() => expect(screen.getByText("Respondido")).toBeInTheDocument());
     const reenviar = screen.getByRole("button", { name: /reenviar para análise/i });
     expect(reenviar).not.toBeDisabled();
+  });
+
+  it("409 no reenvio (pedido ABERTO surgiu entre o carregamento e o clique): mostra o conflito, recarrega os dados e NÃO repete a mutation", async () => {
+    // Tela abriu com o único pedido já RESPONDIDO — botão liberado — mas o
+    // backend recusa com 409 no exato formato que `lib/api.ts` lança para
+    // qualquer resposta HTTP não-ok (ApiError real, não um objeto solto).
+    listarPedidosMock.mockResolvedValueOnce([
+      { ...pedidoAberto, situacao: "RESPONDIDO", resposta: "Nota fiscal anexada." },
+    ]);
+    const { ApiError } = await import("@/lib/api");
+    responderAjusteMock.mockRejectedValueOnce(
+      new ApiError(
+        "Há pedido(s) de ajuste ainda não respondido(s): #55: Falta anexar a nota fiscal.",
+        409,
+      ),
+    );
+
+    const { DetalheDebitoContent } = await import(
+      "@/components/pagamentos/DetalheDebitoContent"
+    );
+    const { client } = renderComQueryClient(<DetalheDebitoContent id={1} />);
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+
+    const reenviar = await screen.findByRole("button", { name: /reenviar para análise/i });
+    expect(reenviar).not.toBeDisabled();
+
+    fireEvent.click(reenviar);
+
+    // Mensagem de conflito visível ao usuário (via toast).
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        expect.stringMatching(/pedido de ajuste em aberto/i),
+      ),
+    );
+
+    // Dados recarregados: as três queries do detalhe são invalidadas.
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ["pag-debito", 1] }),
+    );
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ["pag-pedidos-ajuste", 1] }),
+    );
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ["pag-versoes", 1] }),
+    );
+
+    // A mutation de reenvio NÃO é repetida automaticamente após o 409.
+    expect(responderAjusteMock).toHaveBeenCalledTimes(1);
   });
 });
 
