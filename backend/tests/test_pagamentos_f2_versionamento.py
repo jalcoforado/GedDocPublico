@@ -253,3 +253,186 @@ async def test_debito_em_ajuste_sem_pedido_e_encontrado_como_orfao(admin_engine)
         assert orfaos == 1
     finally:
         await _cleanup(admin_engine, tenant.id)
+
+
+# --------------------------------------------------------------------------
+# Task 2 — CAMPOS_MATERIAIS + versionamento em atualizar_debito
+# --------------------------------------------------------------------------
+
+
+def test_toda_coluna_de_debito_tem_decisao_de_materialidade():
+    """Guarda de materialidade: toda coluna de `Debito` precisa estar
+    classificada em CAMPOS_MATERIAIS, CAMPOS_NAO_MATERIAIS ou CAMPOS_CONTROLE.
+    Coluna nova sem decisão reprova este teste."""
+    from app.models.pagamentos import Debito
+    from app.services import pagamentos_versionamento as pv
+
+    colunas = {c.key for c in Debito.__table__.columns}
+    classificadas = pv.CAMPOS_MATERIAIS | pv.CAMPOS_NAO_MATERIAIS | pv.CAMPOS_CONTROLE
+    assert colunas - classificadas == set(), (
+        f"Colunas sem decisão de materialidade: {colunas - classificadas}. "
+        "Coluna nova em Debito exige classificação explícita em pagamentos_versionamento.py"
+    )
+    assert pv.CAMPOS_MATERIAIS & pv.CAMPOS_NAO_MATERIAIS == set()
+
+
+async def _levar_ate_ajuste_validacao(engine, tenant_id, debito, solicitante_id, gestor_id, validador_id):
+    """Percorre o fluxo real até AJUSTE_VALIDACAO: criar (já feito pelo
+    caller) → enviar ao gestor → gestor autoriza → validador solicita ajuste."""
+    async with _sm(engine)() as s:
+        debito = await svc.enviar_para_gestor(
+            s, tenant_id=tenant_id, debito_id=debito.id,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
+        )
+        debito = await svc.gestor_autorizar(
+            s, tenant_id=tenant_id, debito_id=debito.id,
+            usuario_id=gestor_id, lock_version=debito.lock_version,
+        )
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant_id, debito_id=debito.id,
+            usuario_id=validador_id, lock_version=debito.lock_version,
+            etapa="VALIDACAO", justificativa="Falta comprovante",
+        )
+    return debito
+
+
+@pytest.mark.asyncio
+async def test_alteracao_material_em_ajuste_cria_versao_e_incrementa(admin_engine):
+    """Débito em AJUSTE_VALIDACAO: mudar valor_total (campo material) cria uma
+    DebitoVersao com o valor ANTIGO e incrementa debito.versao."""
+    from decimal import Decimal
+
+    from sqlalchemy import select
+
+    from app.models.pagamentos import DebitoVersao
+    from app.schemas.pagamentos import DebitoUpdate, ParcelaCreate
+
+    tenant, solicitante_id = await _provisionar(admin_engine)
+    gestor_id = await _criar_usuario(admin_engine, tenant.id, "Gestor")
+    validador_id = await _criar_usuario(admin_engine, tenant.id, "Validador")
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
+    valor_antigo = debito.valor_total
+
+    debito = await _levar_ate_ajuste_validacao(
+        admin_engine, tenant.id, debito, solicitante_id, gestor_id, validador_id)
+    assert debito.situacao_tramitacao == "AJUSTE_VALIDACAO"
+    assert debito.versao == 1
+
+    try:
+        async with _sm(admin_engine)() as s:
+            atualizado = await svc.atualizar_debito(
+                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
+                payload=DebitoUpdate(
+                    valor_total=Decimal("1500.00"),
+                    parcelas=[ParcelaCreate(numero=1, valor=Decimal("1500.00"), vencimento="2026-02-01")],
+                ),
+            )
+        assert atualizado.versao == 2
+        assert atualizado.valor_total == Decimal("1500.00")
+
+        async with _sm(admin_engine)() as s:
+            versoes = (await s.execute(select(DebitoVersao).where(
+                DebitoVersao.tenant_id == tenant.id, DebitoVersao.id_debito == debito.id
+            ))).scalars().all()
+        assert len(versoes) == 1
+        assert versoes[0].versao == 1
+        assert Decimal(str(versoes[0].dados["valor_total"])) == valor_antigo
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_alteracao_nao_material_nao_cria_versao(admin_engine):
+    """Mudar criticidade (não-material) em AJUSTE_VALIDACAO não cria versão
+    nem incrementa debito.versao."""
+    from sqlalchemy import select
+
+    from app.models.pagamentos import DebitoVersao
+    from app.schemas.pagamentos import DebitoUpdate
+
+    tenant, solicitante_id = await _provisionar(admin_engine)
+    gestor_id = await _criar_usuario(admin_engine, tenant.id, "Gestor")
+    validador_id = await _criar_usuario(admin_engine, tenant.id, "Validador")
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
+
+    debito = await _levar_ate_ajuste_validacao(
+        admin_engine, tenant.id, debito, solicitante_id, gestor_id, validador_id)
+    assert debito.criticidade != "ALTA"
+
+    try:
+        async with _sm(admin_engine)() as s:
+            atualizado = await svc.atualizar_debito(
+                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
+                payload=DebitoUpdate(criticidade="ALTA"),
+            )
+        assert atualizado.versao == 1
+        assert atualizado.criticidade == "ALTA"
+
+        async with _sm(admin_engine)() as s:
+            versoes = (await s.execute(select(DebitoVersao).where(
+                DebitoVersao.tenant_id == tenant.id, DebitoVersao.id_debito == debito.id
+            ))).scalars().all()
+        assert versoes == []
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_edicao_em_rascunho_nao_versiona(admin_engine):
+    """Débito em RASCUNHO: mudar descricao (material) NÃO versiona —
+    versionamento só existe pós-etapa (em ajuste)."""
+    from sqlalchemy import select
+
+    from app.models.pagamentos import DebitoVersao
+    from app.schemas.pagamentos import DebitoUpdate
+
+    tenant, solicitante_id = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
+    assert debito.situacao_tramitacao == "RASCUNHO"
+
+    try:
+        async with _sm(admin_engine)() as s:
+            atualizado = await svc.atualizar_debito(
+                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
+                payload=DebitoUpdate(descricao="Débito de Teste — revisado"),
+            )
+        assert atualizado.versao == 1
+        assert atualizado.descricao == "Débito de Teste — revisado"
+
+        async with _sm(admin_engine)() as s:
+            versoes = (await s.execute(select(DebitoVersao).where(
+                DebitoVersao.tenant_id == tenant.id, DebitoVersao.id_debito == debito.id
+            ))).scalars().all()
+        assert versoes == []
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_edicao_fora_de_rascunho_e_ajuste_e_409(admin_engine):
+    """Débito AGUARDANDO_GESTOR (nem rascunho, nem ajuste): atualizar_debito
+    devolve 409 — comportamento preservado da F1."""
+    from fastapi import HTTPException
+
+    from app.schemas.pagamentos import DebitoUpdate
+
+    tenant, solicitante_id = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.enviar_para_gestor(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
+        )
+    assert debito.situacao_tramitacao == "AGUARDANDO_GESTOR"
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            async with _sm(admin_engine)() as s:
+                await svc.atualizar_debito(
+                    s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
+                    payload=DebitoUpdate(criticidade="ALTA"),
+                )
+        assert exc_info.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, tenant.id)

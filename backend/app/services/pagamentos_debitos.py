@@ -11,9 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Debito, DebitoHistorico, Fornecedor, Parcela, Usuario
 from ..schemas.pagamentos import DebitoCreate, DebitoUpdate
+from . import audit
 from . import pagamentos_cadastros as cad
 from . import pagamentos_estados as est
 from . import pagamentos_guardas as grd
+from . import pagamentos_versionamento as pv
 
 
 def _utcnow() -> datetime:
@@ -210,9 +212,12 @@ async def listar_historico(db: AsyncSession, *, tenant_id: int, debito_id: int) 
 async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
                            usuario_id: int, payload: DebitoUpdate) -> Debito:
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    if d.status != "RASCUNHO":
-        raise PagamentoDebitoError("Só é possível editar débitos em rascunho.",
-                                   status.HTTP_409_CONFLICT)
+    if d.situacao_tramitacao not in (
+        est.RASCUNHO, est.AJUSTE_GESTOR, est.AJUSTE_VALIDACAO, est.AJUSTE_AUTORIDADE,
+    ):
+        raise PagamentoDebitoError(
+            "Só é possível editar débitos em rascunho ou em ajuste.",
+            status.HTTP_409_CONFLICT)
     dados = payload.model_dump(exclude_unset=True)
     parcelas_novas = dados.pop("parcelas", None)
     valor_total = dados.get("valor_total", d.valor_total)
@@ -234,6 +239,17 @@ async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
         id_contrato = dados.get("id_contrato", d.id_contrato)
         id_unidade = dados.get("id_unidade", d.id_unidade)
     await _validar_refs(db, tenant_id=tenant_id, payload=_Ref)
+    if d.situacao_tramitacao != est.RASCUNHO:
+        alterados = pv.campos_materiais_alterados(d, dados)
+        if alterados:
+            campos = ", ".join(sorted(alterados))
+            await pv.congelar_versao(
+                db, debito=d, motivo=f"Alteração material: {campos}",
+                usuario_id=usuario_id)
+            await audit.log(
+                db, tenant_id=tenant_id, id_usuario=usuario_id,
+                acao="debito.versao_criada", entidade="debito", id_entidade=d.id,
+                payload={"campos_alterados": sorted(alterados), "versao": d.versao})
     for k, v in dados.items():
         setattr(d, k, v)
     if parcelas_novas is not None:

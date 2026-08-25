@@ -172,8 +172,12 @@ async def test_atualizar_debito_fora_de_rascunho_409(admin_engine):
             d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
                 payload=_payload_debito(forn, nat, conta, unidade))
         async with _sm(admin_engine)() as s:
+            # F2: a checagem de edição passou de `status` (legado) para
+            # `situacao_tramitacao` — só RASCUNHO e as três etapas de AJUSTE_*
+            # são editáveis. AGUARDANDO_GESTOR não é nenhuma delas.
             await s.execute(text(
-                "UPDATE pagamentos.debito SET status='EM_VALIDACAO' WHERE id=:i"),
+                "UPDATE pagamentos.debito SET status='EM_VALIDACAO', "
+                "situacao_tramitacao='AGUARDANDO_GESTOR' WHERE id=:i"),
                 {"i": d.id})
             await s.commit()
         async with _sm(admin_engine)() as s:
