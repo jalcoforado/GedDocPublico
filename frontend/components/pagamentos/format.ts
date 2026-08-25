@@ -41,3 +41,12 @@ export function parseDataLocal(v: string): Date {
   const d = new Date(v.length <= 10 ? `${v}T00:00:00` : v);
   return d;
 }
+
+/** Tamanho de arquivo legível (KB/MB) — usado na lista de documentos do débito (F2). */
+export function fmtTamanho(bytes: number | null | undefined): string {
+  if (bytes == null) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}

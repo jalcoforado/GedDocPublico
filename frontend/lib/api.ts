@@ -1423,6 +1423,20 @@ export interface DebitoVersao {
   criado_em: string;
 }
 
+/** Vínculo débito-anexo (F2, Task 5) — documento anexado a uma solicitação
+ *  de pagamento, reaproveitando o storage de anexos de protocolo. */
+export interface AnexoDebitoOut {
+  id: number;
+  id_anexo: number;
+  nome: string | null;
+  tamanho: number | null;
+  tipo: string | null;
+  versao_debito: number;
+  id_pedido_ajuste: number | null;
+  id_usuario: number | null;
+  criado_em: string;
+}
+
 /** Pedido de ajuste `ABERTO` endereçado a uma transação do usuário (F2) —
  *  item de `MinhaFila.pendencias_ajuste`. */
 export interface PendenciaAjuste {
@@ -4113,6 +4127,23 @@ export const api = {
           method: "POST" }),
       listarVersoes: (id: number) =>
         request<DebitoVersao[]>(`/pagamentos/debitos/${id}/versoes`),
+
+      // Documentos do débito (F2, Task 5/8) — anexos vinculados à
+      // solicitação, reaproveitando o storage de anexos de protocolo.
+      listarAnexos: (id: number) =>
+        request<AnexoDebitoOut[]>(`/pagamentos/debitos/${id}/anexos`),
+      uploadAnexo: (id: number, file: File, descricao?: string, idPedidoAjuste?: number | null) => {
+        const fd = new FormData();
+        fd.append("file", file);
+        if (descricao) fd.append("descricao", descricao);
+        if (idPedidoAjuste != null) fd.append("id_pedido_ajuste", String(idPedidoAjuste));
+        return request<AnexoDebitoOut>(`/pagamentos/debitos/${id}/anexos`, {
+          method: "POST", body: fd });
+      },
+      removerAnexo: (id: number, anexoDebitoId: number) =>
+        request<void>(`/pagamentos/debitos/${id}/anexos/${anexoDebitoId}`, { method: "DELETE" }),
+      anexoDownloadUrl: (anexoDebitoId: number) =>
+        `${BROWSER_API_URL}/pagamentos/anexos-debito/${anexoDebitoId}/download`,
 
       // Endpoints de validação e autoridade (4 total)
       validar: (id: number, payload: DecisaoPayload) =>

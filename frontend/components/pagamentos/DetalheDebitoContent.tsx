@@ -1,7 +1,17 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, FileEdit, FileText, History, Layers, Receipt } from "lucide-react";
+import {
+  ClipboardList,
+  Download,
+  FileEdit,
+  FileText,
+  History,
+  Layers,
+  Paperclip,
+  Receipt,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -27,8 +37,15 @@ import {
   TRANSACAO_PAGAMENTOS,
   TRANSACAO_PAGAMENTOS_ROTULO,
 } from "@/components/pagamentos/situacoes";
-import { fmtData, fmtDataHora, fmtMoeda } from "@/components/pagamentos/format";
-import { ApiError, api, type DebitoOut, type EtapaAjuste, type TipoAjuste } from "@/lib/api";
+import { fmtData, fmtDataHora, fmtMoeda, fmtTamanho } from "@/components/pagamentos/format";
+import {
+  ApiError,
+  api,
+  type AnexoDebitoOut,
+  type DebitoOut,
+  type EtapaAjuste,
+  type TipoAjuste,
+} from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 // Etapa que ABRIU o ajuste, a partir da situação atual — espelha
@@ -75,6 +92,12 @@ export function DetalheDebitoContent({ id }: { id: number }) {
   // Resposta a um pedido de ajuste específico
   const [respostaPorPedido, setRespostaPorPedido] = useState<Record<number, string>>({});
 
+  // Documentos do débito (F2, Task 8)
+  const [anexoArquivo, setAnexoArquivo] = useState<File | null>(null);
+  const [anexoDescricao, setAnexoDescricao] = useState("");
+  const [anexoPedidoId, setAnexoPedidoId] = useState<number | "">("");
+  const [confirmRemoverAnexo, setConfirmRemoverAnexo] = useState<AnexoDebitoOut | null>(null);
+
   // Carregar débito
   const debitoQ = useQuery({
     queryKey: ["pag-debito", id],
@@ -94,8 +117,24 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     enabled: !!debito && debito.versao > 1,
   });
 
+  const anexosQ = useQuery({
+    queryKey: ["pag-anexos", id],
+    queryFn: () => api.pagamentos.debitos.listarAnexos(id),
+  });
+  const anexos = anexosQ.data ?? [];
+
   const pedidos = pedidosQ.data ?? [];
   const pedidosAbertos = pedidos.filter((p) => p.situacao === "ABERTO");
+  // Pedidos abertos que ESTE usuário pode responder — "o form de responder
+  // está aberto" para eles (seção "Pendências de ajuste" mais abaixo). O
+  // upload de documento associado carrega o id_pedido_ajuste de um deles.
+  const pedidosRespondiveisPorMim = pedidosAbertos.filter((p) => can(p.transacao_responsavel));
+  const anexoPedidoSelecionado =
+    anexoPedidoId !== ""
+      ? anexoPedidoId
+      : pedidosRespondiveisPorMim.length === 1
+        ? pedidosRespondiveisPorMim[0].id
+        : "";
 
   function resetFormAjuste() {
     setAjusteMotivo("");
@@ -110,6 +149,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     qc.invalidateQueries({ queryKey: ["pag-debito", id] });
     qc.invalidateQueries({ queryKey: ["pag-pedidos-ajuste", id] });
     qc.invalidateQueries({ queryKey: ["pag-versoes", id] });
+    qc.invalidateQueries({ queryKey: ["pag-anexos", id] });
   }
 
   // Mutations para ações
@@ -313,6 +353,36 @@ export function DetalheDebitoContent({ id }: { id: number }) {
       invalidarTudo();
     },
     onError: (err: any) => toast.error(err.message || "Erro ao confirmar liquidação"),
+  });
+
+  const uploadAnexoM = useMutation({
+    mutationFn: () => {
+      if (!anexoArquivo) throw new Error("Selecione um arquivo");
+      return api.pagamentos.debitos.uploadAnexo(
+        id,
+        anexoArquivo,
+        anexoDescricao || undefined,
+        anexoPedidoSelecionado || null,
+      );
+    },
+    onSuccess: () => {
+      toast.success("Documento anexado");
+      setAnexoArquivo(null);
+      setAnexoDescricao("");
+      setAnexoPedidoId("");
+      qc.invalidateQueries({ queryKey: ["pag-anexos", id] });
+    },
+    onError: (err: any) => toast.error(err.message || "Erro ao anexar documento"),
+  });
+
+  const removerAnexoM = useMutation({
+    mutationFn: (anexoDebitoId: number) => api.pagamentos.debitos.removerAnexo(id, anexoDebitoId),
+    onSuccess: () => {
+      toast.success("Documento removido");
+      setConfirmRemoverAnexo(null);
+      qc.invalidateQueries({ queryKey: ["pag-anexos", id] });
+    },
+    onError: (err: any) => toast.error(err.message || "Erro ao remover documento"),
   });
 
   const breadcrumbs = [
@@ -585,6 +655,116 @@ export function DetalheDebitoContent({ id }: { id: number }) {
             )}
           </SectionCard>
 
+          {/* Documentos (F2, Task 8) */}
+          <SectionCard title="Documentos" icon={Paperclip}>
+            <div className="space-y-4">
+              {can("pagamento_solicitar") && (
+                <div className="space-y-3 rounded-lg border border-border p-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <FormField label="Arquivo">
+                      <input
+                        type="file"
+                        onChange={(e) => setAnexoArquivo(e.target.files?.[0] ?? null)}
+                        className="block w-full text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted/80"
+                      />
+                    </FormField>
+                    <FormField label="Descrição" hint="Opcional">
+                      <Input
+                        value={anexoDescricao}
+                        onChange={(e) => setAnexoDescricao(e.target.value)}
+                        placeholder="ex.: Nota fiscal corrigida"
+                      />
+                    </FormField>
+                  </div>
+                  {pedidosRespondiveisPorMim.length > 0 && (
+                    <FormField label="Vincular a pedido de ajuste" hint="Opcional — resposta a um pedido aberto">
+                      <Select
+                        value={anexoPedidoSelecionado === "" ? "" : String(anexoPedidoSelecionado)}
+                        onChange={(e) =>
+                          setAnexoPedidoId(e.target.value ? Number(e.target.value) : "")
+                        }
+                      >
+                        <option value="">Nenhum</option>
+                        {pedidosRespondiveisPorMim.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            #{p.id} — {p.motivo}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormField>
+                  )}
+                  <Button
+                    size="sm"
+                    onClick={() => uploadAnexoM.mutate()}
+                    disabled={!anexoArquivo || uploadAnexoM.isPending}
+                  >
+                    Enviar documento
+                  </Button>
+                </div>
+              )}
+
+              {anexosQ.isLoading ? (
+                <Skeleton className="h-16 w-full" />
+              ) : anexos.length === 0 ? (
+                <p className="text-sm text-foreground-subtle">Nenhum documento anexado.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <THead>
+                      <TR>
+                        <TH>Nome</TH>
+                        <TH>Tamanho</TH>
+                        <TH>Quem</TH>
+                        <TH>Quando</TH>
+                        <TH>Versão</TH>
+                        <TH className="text-right">Ações</TH>
+                      </TR>
+                    </THead>
+                    <TBody>
+                      {anexos.map((a) => (
+                        <TR key={a.id}>
+                          <TD>{a.nome ?? `Anexo #${a.id_anexo}`}</TD>
+                          <TD>{fmtTamanho(a.tamanho)}</TD>
+                          <TD>{a.id_usuario ? `Usuário #${a.id_usuario}` : "—"}</TD>
+                          <TD>{fmtDataHora(a.criado_em)}</TD>
+                          <TD>{a.versao_debito}</TD>
+                          <TD className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                asChild
+                              >
+                                <a
+                                  href={api.pagamentos.debitos.anexoDownloadUrl(a.id)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  aria-label={`Baixar ${a.nome ?? `anexo #${a.id_anexo}`}`}
+                                >
+                                  <Download className="h-4 w-4" />
+                                </a>
+                              </Button>
+                              {can("pagamento_solicitar") && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  aria-label={`Remover ${a.nome ?? `anexo #${a.id_anexo}`}`}
+                                  onClick={() => setConfirmRemoverAnexo(a)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                          </TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          </SectionCard>
+
           {/* Versões (F2) — só quando o débito já sofreu alteração material */}
           {debito.versao > 1 && (
             <SectionCard title="Versões anteriores" icon={Layers}>
@@ -811,6 +991,39 @@ export function DetalheDebitoContent({ id }: { id: number }) {
               />
             </FormField>
           </div>
+        )}
+      </Dialog>
+
+      {/* Remoção de documento — resumo de impacto, não "tem certeza?" (F2, Task 8) */}
+      <Dialog
+        open={!!confirmRemoverAnexo}
+        onClose={() => setConfirmRemoverAnexo(null)}
+        size="sm"
+        title="Remover documento"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmRemoverAnexo(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                if (confirmRemoverAnexo) removerAnexoM.mutate(confirmRemoverAnexo.id);
+              }}
+              disabled={removerAnexoM.isPending}
+            >
+              Remover documento
+            </Button>
+          </>
+        }
+      >
+        {confirmRemoverAnexo && (
+          <p className="text-sm text-foreground">
+            <strong>{confirmRemoverAnexo.nome ?? `Anexo #${confirmRemoverAnexo.id_anexo}`}</strong>{" "}
+            será removido desta solicitação e deixará de aparecer na lista de documentos e no
+            download — inclusive para quem está aguardando essa resposta a um pedido de ajuste.
+            Esta ação não pode ser desfeita pela tela.
+          </p>
         )}
       </Dialog>
     </div>

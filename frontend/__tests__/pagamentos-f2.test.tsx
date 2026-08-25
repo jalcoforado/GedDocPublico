@@ -15,6 +15,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
+  AnexoDebitoOut,
   DebitoOut,
   MinhaFila,
   PedidoAjuste,
@@ -83,6 +84,22 @@ const solicitarAjusteMock = vi.fn();
 const criarPedidoAjusteMock = vi.fn();
 const responderPedidoAjusteMock = vi.fn();
 const cancelarPedidoAjusteMock = vi.fn();
+const listarAnexosMock = vi.fn(() => Promise.resolve([] as AnexoDebitoOut[]));
+const uploadAnexoMock = vi.fn(() =>
+  Promise.resolve({
+    id: 1,
+    id_anexo: 900,
+    nome: "nota.pdf",
+    tamanho: 2048,
+    tipo: "pdf",
+    versao_debito: 1,
+    id_pedido_ajuste: null,
+    id_usuario: 1,
+    criado_em: "2026-08-11T09:00:00Z",
+  }),
+);
+const removerAnexoMock = vi.fn(() => Promise.resolve());
+const anexoDownloadUrlMock = vi.fn((anexoDebitoId: number) => `/api/v2/pagamentos/anexos-debito/${anexoDebitoId}/download`);
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -100,6 +117,10 @@ vi.mock("@/lib/api", async () => {
           responderPedidoAjuste: responderPedidoAjusteMock,
           cancelarPedidoAjuste: cancelarPedidoAjusteMock,
           confirmarLiquidacao: vi.fn(),
+          listarAnexos: listarAnexosMock,
+          uploadAnexo: uploadAnexoMock,
+          removerAnexo: removerAnexoMock,
+          anexoDownloadUrl: anexoDownloadUrlMock,
         },
         caixa: { painel: () => Promise.resolve([]) },
         minhaFila: () =>
@@ -156,7 +177,13 @@ describe("Detalhe da solicitação — pendências de ajuste (F2)", () => {
     );
     renderComQueryClient(<DetalheDebitoContent id={1} />);
 
-    await waitFor(() => expect(screen.getByText(/falta anexar a nota fiscal/i)).toBeInTheDocument());
+    // O motivo também aparece no <option> do seletor "Vincular a pedido de
+    // ajuste" (Task 8) — escopo para o texto do card, não qualquer ocorrência.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/falta anexar a nota fiscal/i, { selector: "div" }),
+      ).toBeInTheDocument(),
+    );
 
     // Situação do pedido é ícone + texto, não só cor.
     expect(screen.getByText("Aguardando resposta")).toBeInTheDocument();
@@ -226,6 +253,97 @@ describe("Detalhe da solicitação — pendências de ajuste (F2)", () => {
 
     // A mutation de reenvio NÃO é repetida automaticamente após o 409.
     expect(responderAjusteMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Detalhe da solicitação — documentos do débito (Task 8)", () => {
+  it("lista os documentos anexados com nome, tamanho, quem e versão", async () => {
+    listarAnexosMock.mockResolvedValueOnce([
+      {
+        id: 7,
+        id_anexo: 900,
+        nome: "nota-fiscal.pdf",
+        tamanho: 20480,
+        tipo: "pdf",
+        versao_debito: 1,
+        id_pedido_ajuste: null,
+        id_usuario: 3,
+        criado_em: "2026-08-11T14:30:00Z",
+      },
+    ]);
+    const { DetalheDebitoContent } = await import(
+      "@/components/pagamentos/DetalheDebitoContent"
+    );
+    renderComQueryClient(<DetalheDebitoContent id={1} />);
+
+    await waitFor(() => expect(screen.getByText("nota-fiscal.pdf")).toBeInTheDocument());
+    expect(screen.getByText("20.0 KB")).toBeInTheDocument();
+    expect(screen.getByText("Usuário #3")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /baixar nota-fiscal.pdf/i })).toHaveAttribute(
+      "href",
+      "/api/v2/pagamentos/anexos-debito/7/download",
+    );
+  });
+
+  it("envia documento vinculando automaticamente o pedido de ajuste aberto que o usuário pode responder", async () => {
+    listarAnexosMock.mockResolvedValueOnce([]);
+    const { DetalheDebitoContent } = await import(
+      "@/components/pagamentos/DetalheDebitoContent"
+    );
+    renderComQueryClient(<DetalheDebitoContent id={1} />);
+
+    // Espera o pedido ABERTO carregar — é ele que popula o seletor de vínculo.
+    await waitFor(() =>
+      expect(screen.getByText("Vincular a pedido de ajuste")).toBeInTheDocument(),
+    );
+
+    const fileInput = screen.getByLabelText("Arquivo") as HTMLInputElement;
+    const arquivo = new File(["conteudo"], "nota.pdf", { type: "application/pdf" });
+    fireEvent.change(fileInput, { target: { files: [arquivo] } });
+
+    const enviar = screen.getByRole("button", { name: /enviar documento/i });
+    expect(enviar).not.toBeDisabled();
+    fireEvent.click(enviar);
+
+    await waitFor(() =>
+      expect(uploadAnexoMock).toHaveBeenCalledWith(1, arquivo, undefined, 55),
+    );
+  });
+
+  it("remoção mostra resumo de impacto antes de confirmar, e só remove no clique de confirmação", async () => {
+    listarAnexosMock.mockResolvedValueOnce([
+      {
+        id: 7,
+        id_anexo: 900,
+        nome: "nota-fiscal.pdf",
+        tamanho: 20480,
+        tipo: "pdf",
+        versao_debito: 1,
+        id_pedido_ajuste: null,
+        id_usuario: 3,
+        criado_em: "2026-08-11T14:30:00Z",
+      },
+    ]);
+    const { DetalheDebitoContent } = await import(
+      "@/components/pagamentos/DetalheDebitoContent"
+    );
+    renderComQueryClient(<DetalheDebitoContent id={1} />);
+
+    const removerLinha = await screen.findByRole("button", { name: /remover nota-fiscal.pdf/i });
+    fireEvent.click(removerLinha);
+
+    expect(removerAnexoMock).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Remover documento" })).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText(/será removido desta solicitação e deixará de aparecer/i),
+    ).toBeInTheDocument();
+
+    const confirmar = screen.getByRole("button", { name: /^remover documento$/i });
+    fireEvent.click(confirmar);
+
+    await waitFor(() => expect(removerAnexoMock).toHaveBeenCalledWith(1, 7));
   });
 });
 
