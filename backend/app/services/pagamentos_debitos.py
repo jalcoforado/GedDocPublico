@@ -2,7 +2,7 @@
 Transições SÓ por aqui; cada uma grava debito_historico na MESMA transação."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import Debito, DebitoHistorico, Fornecedor, Parcela, Usuario
 from ..schemas.pagamentos import DebitoCreate, DebitoUpdate
 from . import audit
+from . import pagamentos_ajustes as ajustes
 from . import pagamentos_cadastros as cad
 from . import pagamentos_estados as est
 from . import pagamentos_guardas as grd
@@ -425,18 +426,17 @@ async def gestor_rejeitar(db: AsyncSession, *, tenant_id: int, debito_id: int,
 
 async def solicitar_ajuste(db: AsyncSession, *, tenant_id: int, debito_id: int,
                            usuario_id: int, lock_version: int, etapa: str,
-                           justificativa: str, ip: str | None = None) -> Debito:
+                           motivo: str, descricao: str, transacao_responsavel: str,
+                           tipo: str, prazo: date | None = None,
+                           campos_relacionados: list[str] | None = None,
+                           ip: str | None = None) -> Debito:
     """Devolve para correção, a partir de qualquer das três etapas decisórias.
 
-    Na F1 o ajuste é só a mudança de estado mais a justificativa no histórico.
-    A entidade `pedido_ajuste` — com responsável designado, prazo, situação e
-    resposta — é a F2.
+    F2: além da transição de estado, abre um `PedidoAjuste` estruturado — com
+    responsável (`transacao_responsavel`), materialidade (`tipo`) e prazo —
+    que é o que a unidade vê e responde. `motivo` dobra também como a
+    justificativa gravada no histórico da transição.
     """
-    justificativa = (justificativa or "").strip()
-    if not justificativa:
-        raise PagamentoDebitoError(
-            "O pedido de ajuste exige que se diga o que precisa ser corrigido.",
-            status.HTTP_422_UNPROCESSABLE_ENTITY)
     destino = _ETAPA_DO_AJUSTE.get(etapa)
     if destino is None:
         raise PagamentoDebitoError(f"Etapa desconhecida: '{etapa}'.",
@@ -461,8 +461,22 @@ async def solicitar_ajuste(db: AsyncSession, *, tenant_id: int, debito_id: int,
         "AUTORIDADE": "AUTORIZAR",
     }
     grd.assert_segregacao(d, usuario_id=usuario_id, ato=ato_por_etapa[etapa])
+    motivo_limpo = (motivo or "").strip()
+    if not motivo_limpo:
+        raise PagamentoDebitoError(
+            "O pedido de ajuste exige que se diga o que precisa ser corrigido.",
+            status.HTTP_422_UNPROCESSABLE_ENTITY)
     _registrar_transicao(db, debito=d, acao="AJUSTE_SOLICITADO", usuario_id=usuario_id,
-                         tramitacao=destino, justificativa=justificativa, ip=ip)
+                         tramitacao=destino, justificativa=motivo_limpo, ip=ip)
+    pedido = await ajustes.criar_pedido(
+        db, tenant_id=tenant_id, debito=d, usuario_id=usuario_id, etapa=etapa,
+        motivo=motivo_limpo, descricao=descricao, transacao_responsavel=transacao_responsavel,
+        tipo=tipo, prazo=prazo, campos_relacionados=campos_relacionados)
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="debito.ajuste_solicitado", entidade="debito", id_entidade=d.id,
+        payload={"pedido_ajuste_id": pedido.id, "etapa": etapa,
+                 "transacao_responsavel": transacao_responsavel, "tipo": tipo})
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
 

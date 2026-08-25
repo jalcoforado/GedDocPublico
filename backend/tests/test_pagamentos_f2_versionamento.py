@@ -291,7 +291,8 @@ async def _levar_ate_ajuste_validacao(engine, tenant_id, debito, solicitante_id,
         debito = await svc.solicitar_ajuste(
             s, tenant_id=tenant_id, debito_id=debito.id,
             usuario_id=validador_id, lock_version=debito.lock_version,
-            etapa="VALIDACAO", justificativa="Falta comprovante",
+            etapa="VALIDACAO", motivo="Falta comprovante", descricao="Falta comprovante",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
         )
     return debito
 

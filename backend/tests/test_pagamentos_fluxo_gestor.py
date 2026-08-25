@@ -78,6 +78,9 @@ async def _provisionar(engine):
 async def _cleanup(engine, tenant_id: int) -> None:
     async with _sm(engine)() as s:
         for stmt in (
+            "DELETE FROM pagamentos.anexo_debito WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.debito_versao WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.pedido_ajuste WHERE tenant_id=:t",
             "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
             "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
@@ -271,7 +274,8 @@ async def test_solicitar_ajuste_success(admin_engine):
         result = await svc.solicitar_ajuste(
             s, tenant_id=tenant.id, debito_id=debito.id,
             usuario_id=gestor_id, lock_version=debito.lock_version,
-            etapa="GESTOR", justificativa="Faltam documentos",
+            etapa="GESTOR", motivo="Faltam documentos", descricao="Faltam documentos",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
         )
 
     assert result.situacao_tramitacao == "AJUSTE_GESTOR"
@@ -294,7 +298,8 @@ async def test_responder_ajuste_success(admin_engine):
         debito = await svc.solicitar_ajuste(
             s, tenant_id=tenant.id, debito_id=debito.id,
             usuario_id=gestor_id, lock_version=debito.lock_version,
-            etapa="GESTOR", justificativa="Faltam documentos",
+            etapa="GESTOR", motivo="Faltam documentos", descricao="Faltam documentos",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
         )
 
         # Responde ajuste

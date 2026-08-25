@@ -19,9 +19,11 @@ from ..schemas.pagamentos import (
     DebitoHistoricoOut, DebitoOut, DebitoUpdate, DecisaoIn, DecisaoJustificadaIn, FichaFonteOut,
     FilaAutorizacaoFonteGrupo, ChecklistDebitoItemOut, FilaLiberacaoGrupo, FilaTesourariaOut,
     JustificativaIn, LiquidacaoIn, MarcarChecklistIn, MinhaFilaOut, OrdemPagamentoOut,
-    PagarParcelaIn, ParcelaFilaOut, ParcelaOut, SolicitarAjusteIn, SimulacaoAutorizacaoIn,
+    PagarParcelaIn, ParcelaFilaOut, ParcelaOut, PedidoAjusteCreate, PedidoAjusteOut,
+    PedidoAjusteResponderIn, SolicitarAjusteIn, SimulacaoAutorizacaoIn,
     SimulacaoAutorizacaoOut,
 )
+from ..services import pagamentos_ajustes as ajustes
 from ..services import pagamentos_autorizacao as aut
 from ..services import pagamentos_caixa as caixa
 from ..services import pagamentos_checklist as checklist
@@ -31,8 +33,35 @@ from ..services import pagamentos_estados as est
 from ..services import pagamentos_excecoes as excecoes
 from ..services import pagamentos_export as export
 from ..services import pagamentos_filas as filas
+from ..services import audit
 from ..services.html_pdf import html_to_pdf_bytes
 from ..services.permissoes import load_permissions
+
+# Etapa do rito -> transação que representa aquela etapa. Compartilhado por
+# `solicitar-ajuste`, pedido adicional, responder e cancelar: em todos, "quem
+# pode agir" é definido pela mesma tabela etapa -> transação.
+CODIGO_POR_ETAPA = {
+    "GESTOR": "pagamento_gerir",
+    "VALIDACAO": "pagamento_validar",
+    "AUTORIDADE": "pagamento_autorizar",
+}
+
+
+async def _assert_permissao_dinamica(db, usuario: Usuario, tenant_id: int, codigo: str,
+                                     mensagem: str) -> None:
+    """Confere se `usuario` tem `codigo` — checagem dinâmica (não amarrada a
+    um `Depends` fixo, porque o código depende de dado carregado em runtime:
+    a etapa do pedido, não a etapa do payload)."""
+    permissoes = await load_permissions(db, usuario.id, tenant_id=tenant_id)
+    autorizado = (
+        codigo not in permissoes.codigos_bloqueados
+        and (
+            permissoes.is_super_usuario
+            or any(item.codigo == codigo for item in permissoes.items)
+        )
+    )
+    if not autorizado:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=mensagem)
 
 
 class LiberarParcelasIn(BaseModel):
@@ -287,30 +316,105 @@ async def solicitar_ajuste(debito_id: int, payload: SolicitarAjusteIn, request: 
                            tenant_id: int = Depends(require_tenant_id),
                            db: AsyncSession = Depends(get_db)):
     """Solicita ajuste na despesa a partir de qualquer etapa decisória."""
-    codigo_por_etapa = {
-        "GESTOR": "pagamento_gerir",
-        "VALIDACAO": "pagamento_validar",
-        "AUTORIDADE": "pagamento_autorizar",
-    }
-    codigo = codigo_por_etapa[payload.etapa]
-    permissoes = await load_permissions(db, usuario.id, tenant_id=tenant_id)
-    autorizado = (
-        codigo not in permissoes.codigos_bloqueados
-        and (
-            permissoes.is_super_usuario
-            or any(item.codigo == codigo for item in permissoes.items)
-        )
-    )
-    if not autorizado:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Sem permissão para solicitar ajuste na etapa '{payload.etapa}'.",
-        )
-    d = await svc.solicitar_ajuste(db, tenant_id=tenant_id, debito_id=debito_id,
-                                   usuario_id=usuario.id, lock_version=payload.lock_version,
-                                   etapa=payload.etapa, justificativa=payload.justificativa,
-                                   ip=_ip(request))
+    codigo = CODIGO_POR_ETAPA[payload.etapa]
+    await _assert_permissao_dinamica(
+        db, usuario, tenant_id, codigo,
+        f"Sem permissão para solicitar ajuste na etapa '{payload.etapa}'.")
+    d = await svc.solicitar_ajuste(
+        db, tenant_id=tenant_id, debito_id=debito_id,
+        usuario_id=usuario.id, lock_version=payload.lock_version,
+        etapa=payload.etapa, motivo=payload.motivo, descricao=payload.descricao,
+        transacao_responsavel=payload.transacao_responsavel, tipo=payload.tipo,
+        prazo=payload.prazo, campos_relacionados=payload.campos_relacionados,
+        ip=_ip(request))
     return (await _out(db, tenant_id, [d]))[0]
+
+
+@debitos_router.get("/{debito_id}/pedidos-ajuste", response_model=list[PedidoAjusteOut])
+async def listar_pedidos_ajuste(debito_id: int,
+                                _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                                tenant_id: int = Depends(require_tenant_id),
+                                db: AsyncSession = Depends(get_db)):
+    await svc.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    return await ajustes.listar_pedidos(db, tenant_id=tenant_id, debito_id=debito_id)
+
+
+@debitos_router.post("/{debito_id}/pedidos-ajuste", response_model=PedidoAjusteOut,
+                     status_code=status.HTTP_201_CREATED)
+async def criar_pedido_ajuste(debito_id: int, payload: PedidoAjusteCreate, request: Request,
+                              usuario: Usuario = Depends(require_any_permission(
+                                  "pagamento_gerir", "pagamento_validar", "pagamento_autorizar")),
+                              tenant_id: int = Depends(require_tenant_id),
+                              db: AsyncSession = Depends(get_db)):
+    """Pedido adicional sobre um débito já em ajuste — não transiciona o
+    débito; a etapa vem da situação ATUAL dele, não do payload."""
+    d = await svc.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    etapa = ajustes.ETAPA_POR_SITUACAO.get(d.situacao_tramitacao)
+    if etapa is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Débito não está em ajuste (está em '{d.situacao_tramitacao}').")
+    codigo = CODIGO_POR_ETAPA[etapa]
+    await _assert_permissao_dinamica(
+        db, usuario, tenant_id, codigo,
+        f"Sem permissão para abrir pedido de ajuste na etapa '{etapa}'.")
+    pedido = await ajustes.criar_pedido(
+        db, tenant_id=tenant_id, debito=d, usuario_id=usuario.id, etapa=etapa,
+        motivo=payload.motivo, descricao=payload.descricao,
+        transacao_responsavel=payload.transacao_responsavel, tipo=payload.tipo,
+        prazo=payload.prazo, campos_relacionados=payload.campos_relacionados)
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario.id,
+        acao="debito.ajuste_solicitado", entidade="debito", id_entidade=d.id,
+        payload={"pedido_ajuste_id": pedido.id, "etapa": etapa,
+                 "transacao_responsavel": payload.transacao_responsavel, "tipo": payload.tipo},
+        request=request)
+    await db.commit(); await db.refresh(pedido)
+    return pedido
+
+
+@debitos_router.post("/{debito_id}/pedidos-ajuste/{pedido_id}/responder",
+                     response_model=PedidoAjusteOut)
+async def responder_pedido_ajuste(debito_id: int, pedido_id: int, payload: PedidoAjusteResponderIn,
+                                  request: Request,
+                                  usuario: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                                  tenant_id: int = Depends(require_tenant_id),
+                                  db: AsyncSession = Depends(get_db)):
+    """Responde ao pedido — só quem tem a `transacao_responsavel` DO PEDIDO."""
+    pedido = await ajustes.obter_pedido(db, tenant_id=tenant_id, debito_id=debito_id,
+                                        pedido_id=pedido_id)
+    await _assert_permissao_dinamica(
+        db, usuario, tenant_id, pedido.transacao_responsavel,
+        "Sem permissão para responder este pedido de ajuste.")
+    pedido = await ajustes.responder_pedido(
+        db, tenant_id=tenant_id, debito_id=debito_id, pedido_id=pedido_id,
+        usuario_id=usuario.id, resposta=payload.resposta)
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario.id,
+        acao="debito.ajuste_respondido", entidade="debito", id_entidade=debito_id,
+        payload={"pedido_ajuste_id": pedido.id}, request=request)
+    await db.commit(); await db.refresh(pedido)
+    return pedido
+
+
+@debitos_router.post("/{debito_id}/pedidos-ajuste/{pedido_id}/cancelar",
+                     response_model=PedidoAjusteOut)
+async def cancelar_pedido_ajuste(debito_id: int, pedido_id: int,
+                                 usuario: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                                 tenant_id: int = Depends(require_tenant_id),
+                                 db: AsyncSession = Depends(get_db)):
+    """Cancela — só quem tem a transação da etapa SOLICITANTE do pedido."""
+    pedido = await ajustes.obter_pedido(db, tenant_id=tenant_id, debito_id=debito_id,
+                                        pedido_id=pedido_id)
+    codigo = CODIGO_POR_ETAPA[pedido.etapa_solicitante]
+    await _assert_permissao_dinamica(
+        db, usuario, tenant_id, codigo,
+        "Sem permissão para cancelar este pedido de ajuste.")
+    pedido = await ajustes.cancelar_pedido(
+        db, tenant_id=tenant_id, debito_id=debito_id, pedido_id=pedido_id,
+        usuario_id=usuario.id)
+    await db.commit(); await db.refresh(pedido)
+    return pedido
 
 
 @debitos_router.post("/{debito_id}/responder-ajuste", response_model=DebitoOut)

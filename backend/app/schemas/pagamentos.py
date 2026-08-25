@@ -455,9 +455,55 @@ class DecisaoJustificadaIn(DecisaoIn):
     justificativa: str = Field(min_length=1, max_length=255)
 
 
-class SolicitarAjusteIn(DecisaoJustificadaIn):
-    """Solicitação de ajuste na despesa, a partir de qualquer etapa decisória."""
+class SolicitarAjusteIn(DecisaoIn):
+    """Solicitação de ajuste na despesa, a partir de qualquer etapa decisória
+    (F2). Substitui o `justificativa` solto da F1 por um pedido estruturado:
+    `motivo` é o resumo curto (também vira a justificativa da transição de
+    estado), `descricao` é o texto livre, `transacao_responsavel` é quem
+    precisa responder e `tipo` distingue alteração material de não material."""
     etapa: Literal["GESTOR", "VALIDACAO", "AUTORIDADE"]
+    motivo: str = Field(min_length=1, max_length=255)
+    descricao: str = Field(min_length=1)
+    transacao_responsavel: str
+    tipo: Literal["MATERIAL", "NAO_MATERIAL"]
+    prazo: date | None = None
+    campos_relacionados: list[str] | None = None
+
+
+class PedidoAjusteCreate(BaseModel):
+    """Pedido adicional sobre um débito já em ajuste — a etapa vem da situação
+    atual do débito, não do payload."""
+    motivo: str = Field(min_length=1, max_length=255)
+    descricao: str = Field(min_length=1)
+    transacao_responsavel: str
+    tipo: Literal["MATERIAL", "NAO_MATERIAL"]
+    prazo: date | None = None
+    campos_relacionados: list[str] | None = None
+
+
+class PedidoAjusteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    id_debito: int
+    versao_debito: int
+    etapa_solicitante: Literal["GESTOR", "VALIDACAO", "AUTORIDADE"]
+    id_usuario_solicitante: int | None
+    motivo: str
+    descricao: str
+    transacao_responsavel: str
+    tipo: Literal["MATERIAL", "NAO_MATERIAL"]
+    prazo: date | None
+    campos_relacionados: list[str] | None
+    situacao: Literal["ABERTO", "RESPONDIDO", "RESOLVIDO", "CANCELADO"]
+    resposta: str | None
+    id_usuario_resposta: int | None
+    respondido_em: datetime | None
+    resolvido_em: datetime | None
+    criado_em: datetime
+
+
+class PedidoAjusteResponderIn(BaseModel):
+    resposta: str = Field(min_length=1)
 
 
 class AutorizarLoteIn(BaseModel):

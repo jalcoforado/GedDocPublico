@@ -97,6 +97,12 @@ async def tenant_ops(admin_engine):
                 "DELETE FROM aprimora_py.workflow_transicao_log WHERE tenant_id = :t",
                 "DELETE FROM aprimora_py.workflow_instance WHERE tenant_id = :t",
                 "DELETE FROM aprimora_py.workflow_definition WHERE tenant_id = :t",
+                # F2 (Task 3): `solicitar_ajuste` passou a gravar `audit.log`
+                # ("debito.ajuste_solicitado"/"ajuste_respondido"), então o
+                # tenant de demonstração acumula linhas em audit_log que
+                # referenciam os usuários — sem apagar antes, o DELETE de
+                # utils.usuario abaixo esbarra em audit_log_id_usuario_fkey.
+                "DELETE FROM aprimora_py.audit_log WHERE tenant_id = :t",
                 "DELETE FROM utils.usuario WHERE tenant_id = :t",
                 "DELETE FROM utils.unidade_trabalho WHERE tenant_id = :t",
                 "DELETE FROM aprimora_py.tenant WHERE id = :t",

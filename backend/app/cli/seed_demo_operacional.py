@@ -761,7 +761,9 @@ async def _levar_ao_estado(
             db, tenant_id=tenant_id, debito_id=debito.id,
             usuario_id=usuarios["secretario"], lock_version=debito.lock_version,
             etapa="GESTOR",
-            justificativa="Nota fiscal ilegível — reenviar digitalização.",
+            motivo="Nota fiscal ilegível — reenviar digitalização.",
+            descricao="Nota fiscal ilegível — reenviar digitalização.",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
         )
         return
 
@@ -784,7 +786,9 @@ async def _levar_ao_estado(
             db, tenant_id=tenant_id, debito_id=debito.id,
             usuario_id=usuarios["autorizador"], lock_version=debito.lock_version,
             etapa="AUTORIDADE",
-            justificativa="Aguardando parecer da controladoria sobre o enquadramento.",
+            motivo="Aguardando parecer da controladoria sobre o enquadramento.",
+            descricao="Aguardando parecer da controladoria sobre o enquadramento.",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
         )
         return
 
@@ -1114,6 +1118,21 @@ RESET_PAGAMENTOS = [
     ("historico_debitos", f"""
         DELETE FROM pagamentos.debito_historico WHERE tenant_id = :t
           AND id_debito IN ({_DEBITOS_DEMO})"""),
+    # F2 (migration 0105): pedido_ajuste/anexo_debito/debito_versao têm FK
+    # para debito.id. `solicitar_ajuste` (Task 3) passou a criar `pedido_ajuste`
+    # de verdade — sem estes três, o DELETE de "debitos" abaixo falha
+    # silenciosamente (savepoint por bloco) e o débito sobrevive ao reset,
+    # o que depois quebra também o DELETE de "usuarios_ops" em RESET_USUARIOS
+    # (debito.id_usuario_solicitante ainda aponta pro usuário).
+    ("anexos_debito", f"""
+        DELETE FROM pagamentos.anexo_debito WHERE tenant_id = :t
+          AND id_debito IN ({_DEBITOS_DEMO})"""),
+    ("versoes_debito", f"""
+        DELETE FROM pagamentos.debito_versao WHERE tenant_id = :t
+          AND id_debito IN ({_DEBITOS_DEMO})"""),
+    ("pedidos_ajuste", f"""
+        DELETE FROM pagamentos.pedido_ajuste WHERE tenant_id = :t
+          AND id_debito IN ({_DEBITOS_DEMO})"""),
     ("ordem_pagamento_debito", f"""
         DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id = :t
           AND id_debito IN ({_DEBITOS_DEMO})"""),
@@ -1218,6 +1237,15 @@ RESET_USUARIOS = [
     ("grupos_demo", """
         DELETE FROM utils.grupo WHERE tenant_id = :t
           AND grupo LIKE 'Demo — %'"""),
+    # F2 (Task 3): `solicitar_ajuste` passou a gravar `audit.log`, e o
+    # ator dos atos da pasta pagamentos é um usuário `@ops.demo.test` — sem
+    # apagar a trilha antes, "usuarios_ops" abaixo esbarra em
+    # audit_log_id_usuario_fkey e falha silenciosamente (savepoint por
+    # bloco), deixando os usuários de demonstração para trás.
+    ("audit_log_demo", """
+        DELETE FROM aprimora_py.audit_log WHERE tenant_id = :t
+          AND id_usuario IN (SELECT id FROM utils.usuario WHERE tenant_id = :t
+                             AND email LIKE '%@ops.demo.test')"""),
     ("usuarios_ops", """
         DELETE FROM utils.usuario WHERE tenant_id = :t
           AND email LIKE '%@ops.demo.test'"""),
