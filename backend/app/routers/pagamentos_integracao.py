@@ -161,18 +161,16 @@ async def liquidar_debito(
     payload_hash = idemsvc.hash_payload(corpo_bruto or b"{}")
 
     async def _executor() -> tuple[int, Any]:
-        d = await debsvc.obter_debito(db, tenant_id=sistema.tenant_id, debito_id=debito_id)
-        # RN-01 (mesma regra e MESMA mensagem de `pagamentos_autorizacao.autorizar_lote`
-        # — número de empenho é pré-requisito antes de liquidar/autorizar; ver
-        # docstring do módulo/brief da Task 7 sobre por que este check mora
-        # aqui e não dentro de `confirmar_liquidacao`: a porta M2M não expõe
-        # `autorizar_lote`, só "liquidar", então é aqui que a regra precisa
-        # valer para não haver caminho paralelo sem ela).
-        if not (d.numero_ne or "").strip():
-            raise debsvc.PagamentoDebitoError(
-                f"Débito {debito_id} não pode ser autorizado sem número de empenho (RN-01).",
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-            )
+        # PARIDADE DELIBERADA com a rota admin `POST /debitos/{id}/confirmar-liquidacao`
+        # (routers/pagamentos_debitos.py): ambas chamam `debsvc.confirmar_liquidacao`
+        # e SÓ isso — sem checar `numero_ne` aqui. RN-01 (empenho obrigatório) é regra
+        # de AUTORIZAÇÃO, vive em `pagamentos_autorizacao.autorizar_lote` e só se aplica
+        # quando alguém tenta autorizar, não quando confirma a liquidação. A porta M2M
+        # não expõe `autorizar_lote` nesta fatia — então "liquidar sem empenho" tem que
+        # dar CERTO pela porta M2M, exatamente como dá certo pela porta admin hoje; um
+        # caminho paralelo mais restritivo aqui seria a própria porta M2M inventando uma
+        # regra de negócio que a admin não tem. Se/quando a autorização for exposta via
+        # M2M, RN-01 continua valendo ali (reusando `autorizar_lote`), não aqui.
         d = await debsvc.confirmar_liquidacao(
             db, tenant_id=sistema.tenant_id, debito_id=debito_id,
             usuario_id=sistema.id_usuario_criador,

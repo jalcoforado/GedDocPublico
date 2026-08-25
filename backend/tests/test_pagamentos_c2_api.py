@@ -46,8 +46,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.auth.sistema_integrado import get_current_sistema_integrado, get_db_m2m
 from app.config import get_settings
 from app.main import app
-from app.models import Debito, Idempotencia, SistemaIntegrado
+from app.models import SistemaIntegrado
 from app.schemas.pagamentos import SistemaIntegradoCreate
+from app.services import modulos as modulos_svc
 from app.services import pagamentos_sistemas as svc
 from tests.conftest import APP_URL, arreio_tenant_http
 from tests.test_pagamentos_autorizacao import _base, _payload_debito, _provisionar, _sm
@@ -524,13 +525,28 @@ async def test_t7_f_alterado_desde_filtra(admin_engine):
 
 
 @pytest.mark.asyncio
-async def test_t7_g_rn01_liquidar_sem_empenho_mesmo_erro_do_realm_admin(admin_engine):
+async def test_t7_g_liquidar_sem_empenho_paridade_com_realm_admin(admin_engine):
+    """Paridade deliberada: a rota M2M `liquidar` espelha
+    `confirmar_liquidacao` EXATAMENTE, mesma regra da rota admin
+    `POST /pagamentos/debitos/{id}/confirmar-liquidacao` — nenhuma das duas
+    exige número de empenho. RN-01 (empenho obrigatório) é regra de
+    AUTORIZAÇÃO (`pagamentos_autorizacao.autorizar_lote`), que o M2M não
+    expõe nesta fatia; inventar um check de RN-01 dentro de `liquidar` seria
+    a porta M2M aplicando uma regra que a porta admin não aplica no mesmo
+    ato — divergência, não paridade. Este teste prova a paridade nos DOIS
+    sentidos: (1) liquidar sem empenho pela porta M2M dá 200 (não 422); (2)
+    o MESMO ato, no MESMO débito tipo, pela porta admin, também dá 200 —
+    então "funciona" não é um acidente da M2M, é o comportamento real que
+    ela está espelhando."""
     t = await _provisionar(admin_engine)
     try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+        uid = await _usuario_com(
+            admin_engine, t.id, ["pagamento_cadastro", "pagamento_validar", "pagamento_solicitar"])
         sistema, chave = await _criar_sistema_direto(
             admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
         forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
+
+        # (1) Porta M2M: cria sem empenho, liquida — tem que dar 200.
         payload = _payload_debito(forn, nat, fonte, conta, unidade_id=unidade_id, valor="100.00")
         payload_dict = payload.model_dump(mode="json")
         payload_dict["numero_ne"] = None  # sem empenho
@@ -543,10 +559,23 @@ async def test_t7_g_rn01_liquidar_sem_empenho_mesmo_erro_do_realm_admin(admin_en
         r_liq = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST",
                                 f"{ROTA_DEBITOS}/{did}/liquidar",
                                 headers={"Idempotency-Key": "chave-g-liquidar"})
-        assert r_liq.status_code == 422, r_liq.text[:300]
-        # MESMA mensagem/regra RN-01 do realm admin (pagamentos_autorizacao.autorizar_lote).
-        assert "RN-01" in r_liq.json()["detail"]
-        assert "número de empenho" in r_liq.json()["detail"]
+        assert r_liq.status_code == 200, r_liq.text[:300]
+        assert r_liq.json()["liquidacao_confirmada"] is True
+        assert r_liq.json()["numero_ne"] is None  # continua sem empenho — ninguém exigiu
+
+        # (2) Porta admin: MESMO cenário (débito sem empenho), mesmo ato
+        # (`confirmar-liquidacao`) — tem que dar 200 também, provando que o
+        # (1) acima não é um caminho paralelo mais frouxo, é o MESMO caminho.
+        r_admin_criar = await _http(admin_engine, t.id, t.slug, uid, "POST",
+                                    "/api/v2/pagamentos/debitos", json=payload_dict)
+        assert r_admin_criar.status_code == 201, r_admin_criar.text[:300]
+        did_admin = r_admin_criar.json()["id"]
+
+        r_admin_liq = await _http(admin_engine, t.id, t.slug, uid, "POST",
+                                  f"/api/v2/pagamentos/debitos/{did_admin}/confirmar-liquidacao",
+                                  json={})
+        assert r_admin_liq.status_code == 200, r_admin_liq.text[:300]
+        assert r_admin_liq.json()["liquidacao_confirmada"] is True
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -577,6 +606,72 @@ async def test_t7_h_cross_tenant_404(admin_engine, two_tenants):
     finally:
         await _cleanup(admin_engine, t.id)
         await _cleanup(admin_engine, t2.id)
+
+
+async def _slugs_contratados_e_contratavel(s, tenant_id: int) -> tuple[set[str], set[str]]:
+    """`(slugs_contratados_hoje, slugs_do_catalogo_contratavel)`.
+
+    `slugs_contratados` inclui os módulos NÃO-contratáveis (hoje só 'comum');
+    `modulos_svc.contratar` só aceita slugs do catálogo `contratavel=True` —
+    devolver 'comum' de volta pra `contratar` faria explodir com "módulo
+    inexistente ou não contratável" (`services/modulos.py`). Este helper
+    isola a interseção segura para (des)contratar sem afetar 'comum'."""
+    from app.models import Modulo
+
+    atuais = await modulos_svc.slugs_contratados(s, tenant_id)
+    catalogo = {
+        m.slug for m in (await s.execute(
+            select(Modulo).where(Modulo.contratavel.is_(True))
+        )).scalars().all()
+    }
+    return atuais, catalogo
+
+
+@pytest.mark.asyncio
+async def test_t7_i_modulo_descontratado_403_via_gate_m2m(admin_engine):
+    """`_exigir_modulo_pagamentos` (routers/pagamentos_integracao.py) é o gate
+    de CONTRATAÇÃO do realm M2M — chave válida, escopo certo, mas tenant sem
+    o módulo `pagamentos` contratado tem que levar 403. Molde de
+    `tests/test_leitura_por_modulo.py`/`test_permissoes_modulo.py`:
+    `services.modulos.contratar` reconcilia a lista de slugs contratados —
+    chamar com uma lista SEM 'pagamentos' descontrata (soft, `excluido=True`
+    em `tenant_modulo`, nunca DELETE).
+
+    RED real (não apenas "rodei e vi 403"): comentando mentalmente o gate — ou
+    seja, provando que ele é a ÚNICA barreira aqui — a mesma chamada com o
+    módulo contratado dá 200 (primeira metade do teste) e SÓ descontratando
+    ele vira 403 (segunda metade); a inversão A/B na mesma chave/mesmo tenant
+    é a prova de que o 403 vem do gate de módulo, não de escopo ou 404."""
+    t = await _provisionar(admin_engine)
+    try:
+        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+        sistema, chave = await _criar_sistema_direto(
+            admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
+
+        # (A) módulo contratado (estado padrão do provisionamento) -> 200.
+        r_com_modulo = await _http_m2m(admin_engine, t.id, t.slug, chave, "GET", ROTA_DEBITOS)
+        assert r_com_modulo.status_code == 200, r_com_modulo.text[:300]
+
+        # Descontrata só 'pagamentos', preservando os demais módulos do tenant.
+        async with _sm(admin_engine)() as s:
+            atuais, catalogo = await _slugs_contratados_e_contratavel(s, t.id)
+            await modulos_svc.contratar(s, t.id, sorted((atuais & catalogo) - {"pagamentos"}))
+            await s.commit()
+
+        # (B) MESMA chave, MESMO tenant, módulo descontratado -> 403 pelo gate.
+        r_sem_modulo = await _http_m2m(admin_engine, t.id, t.slug, chave, "GET", ROTA_DEBITOS)
+        assert r_sem_modulo.status_code == 403, r_sem_modulo.text[:300]
+        assert "pagamentos" in r_sem_modulo.json()["detail"]
+        assert "não contratado" in r_sem_modulo.json()["detail"]
+    finally:
+        # Recontrata antes do teardown: `_cleanup` apaga o tenant inteiro, mas
+        # deixar o vínculo descontratado por trás de um teste que falhou no
+        # meio não deveria depender disso — recontratar é barato e explícito.
+        async with _sm(admin_engine)() as s:
+            atuais, catalogo = await _slugs_contratados_e_contratavel(s, t.id)
+            await modulos_svc.contratar(s, t.id, sorted((atuais & catalogo) | {"pagamentos"}))
+            await s.commit()
+        await _cleanup(admin_engine, t.id)
 
 
 # --------------------------------------------- correções herdadas da Task 6
