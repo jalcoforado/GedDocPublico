@@ -554,6 +554,18 @@ class ParcelaFilaOut(BaseModel):
     nome_fornecedor: str; descricao_debito: str; vencida: bool
 
 
+class PendenciaAjusteOut(BaseModel):
+    """Pedido de ajuste `ABERTO` endereçado a uma transação do usuário
+    (F2, Task 6) — item de `MinhaFilaOut.pendencias_ajuste`."""
+    id_pedido: int
+    id_debito: int
+    descricao_debito: str
+    motivo: str
+    prazo: date | None
+    criado_em: datetime
+    etapa_solicitante: Literal["GESTOR", "VALIDACAO", "AUTORIDADE"]
+
+
 class MinhaFilaOut(BaseModel):
     solicitar: list[DebitoOut] | None = None    # meus RASCUNHO/DEVOLVIDO
     validar: list[DebitoOut] | None = None      # EM_VALIDACAO
@@ -561,6 +573,7 @@ class MinhaFilaOut(BaseModel):
     autorizar: list[DebitoOut] | None = None    # ENVIADO_SECRETARIO/AGUARDANDO_AUTORIZACAO
     liberar: list[ParcelaFilaOut] | None = None  # A_PAGAR de autorizados/tesouraria
     pagar: list[ParcelaFilaOut] | None = None   # LIBERADA
+    pendencias_ajuste: list[PendenciaAjusteOut] | None = None  # pedidos ABERTO da minha transação
 
 
 # ---------- filas agregadas por conta (autorização / liberação / tesouraria) ----------

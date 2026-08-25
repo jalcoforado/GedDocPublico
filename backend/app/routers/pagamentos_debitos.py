@@ -27,7 +27,7 @@ from ..schemas.pagamentos import (
     FilaAutorizacaoFonteGrupo, ChecklistDebitoItemOut, FilaLiberacaoGrupo, FilaTesourariaOut,
     JustificativaIn, LiquidacaoIn, MarcarChecklistIn, MinhaFilaOut, OrdemPagamentoOut,
     PagarParcelaIn, ParcelaFilaOut, ParcelaOut, PedidoAjusteCreate, PedidoAjusteOut,
-    PedidoAjusteResponderIn, SolicitarAjusteIn, SimulacaoAutorizacaoIn,
+    PedidoAjusteResponderIn, PendenciaAjusteOut, SolicitarAjusteIn, SimulacaoAutorizacaoIn,
     SimulacaoAutorizacaoOut, DebitoVersaoOut,
 )
 from ..services import pagamentos_ajustes as ajustes
@@ -832,6 +832,20 @@ async def minha_fila(usuario: Usuario = Depends(require_any_permission(*PERMS_LE
     tem = (lambda c: True) if perms.is_super_usuario else \
         (lambda c: any(p.codigo == c for p in perms.items))
     fila = MinhaFilaOut()
+    transacoes_usuario = (
+        ajustes.TRANSACOES_PAGAMENTOS if perms.is_super_usuario
+        else {p.codigo for p in perms.items} & ajustes.TRANSACOES_PAGAMENTOS
+    )
+    pares = await ajustes.pendencias_do_usuario(
+        db, tenant_id=tenant_id, transacoes=transacoes_usuario)
+    fila.pendencias_ajuste = [
+        PendenciaAjusteOut(
+            id_pedido=pedido.id, id_debito=pedido.id_debito, descricao_debito=descricao,
+            motivo=pedido.motivo, prazo=pedido.prazo, criado_em=pedido.criado_em,
+            etapa_solicitante=pedido.etapa_solicitante,
+        )
+        for pedido, descricao in pares
+    ]
     if tem("pagamento_solicitar"):
         rows = []
         for situacao in (est.RASCUNHO, est.AJUSTE_GESTOR, est.AJUSTE_VALIDACAO,

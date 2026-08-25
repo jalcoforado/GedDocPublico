@@ -13,6 +13,7 @@ copiados de `test_pagamentos_export_c13.py`.
 from __future__ import annotations
 
 import uuid
+from datetime import date as _date
 from decimal import Decimal
 
 import pytest
@@ -953,5 +954,112 @@ async def test_versao_anterior_recuperavel(admin_engine):
         assert len(corpo) == 1
         assert corpo[0]["versao"] == 1
         assert Decimal(str(corpo[0]["dados"]["valor_total"])) == Decimal("1000.00")
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+# --------------------------------------------------------------------------
+# minha-fila — pendências de ajuste endereçadas às transações do usuário (Task 6)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_minha_fila_lista_pendencia_ajuste_da_transacao_do_usuario(admin_engine):
+    """Usuário comum com `pagamento_solicitar` vê, em `minha-fila`, o pedido
+    ABERTO endereçado a essa transação."""
+    tenant, sol, gestor, validador, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_validacao(
+        admin_engine, tenant.id, debito, sol, gestor)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=validador, lock_version=debito.lock_version,
+            etapa="VALIDACAO", motivo="Falta comprovante", descricao="Falta comprovante",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
+            prazo=_date(2026, 9, 1),
+        )
+        pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
+        pedido_id = pedidos[0].id
+
+    try:
+        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
+        r = await _get(admin_engine, tenant.id, tenant.slug, uid,
+                       "/api/v2/pagamentos/minha-fila")
+        assert r.status_code == 200, (r.status_code, r.text[:300])
+        corpo = r.json()
+        pendencias = corpo.get("pendencias_ajuste") or []
+        assert len(pendencias) == 1
+        item = pendencias[0]
+        assert item["id_pedido"] == pedido_id
+        assert item["id_debito"] == debito.id
+        assert item["descricao_debito"] == "Débito de Teste"
+        assert item["motivo"] == "Falta comprovante"
+        assert item["prazo"] == "2026-09-01"
+        assert item["etapa_solicitante"] == "VALIDACAO"
+        assert item["criado_em"]
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_minha_fila_nao_lista_pendencia_de_transacao_que_usuario_nao_tem(admin_engine):
+    """Usuário sem `pagamento_solicitar` (só `pagamento_validar`) não vê o
+    pedido endereçado a `pagamento_solicitar`."""
+    tenant, sol, gestor, validador, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_validacao(
+        admin_engine, tenant.id, debito, sol, gestor)
+
+    async with _sm(admin_engine)() as s:
+        await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=validador, lock_version=debito.lock_version,
+            etapa="VALIDACAO", motivo="Falta comprovante", descricao="Falta comprovante",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
+        )
+
+    try:
+        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_validar"])
+        r = await _get(admin_engine, tenant.id, tenant.slug, uid,
+                       "/api/v2/pagamentos/minha-fila")
+        assert r.status_code == 200, (r.status_code, r.text[:300])
+        corpo = r.json()
+        pendencias = corpo.get("pendencias_ajuste") or []
+        assert len(pendencias) == 0
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_minha_fila_nao_lista_pendencia_respondida(admin_engine):
+    """Pedido `RESPONDIDO` some da lista de pendências."""
+    tenant, sol, gestor, validador, _ = await _provisionar(admin_engine)
+    debito = await _setup_debito(admin_engine, tenant.id, sol)
+    debito = await _levar_ate_aguardando_validacao(
+        admin_engine, tenant.id, debito, sol, gestor)
+
+    async with _sm(admin_engine)() as s:
+        debito = await svc.solicitar_ajuste(
+            s, tenant_id=tenant.id, debito_id=debito.id,
+            usuario_id=validador, lock_version=debito.lock_version,
+            etapa="VALIDACAO", motivo="Falta comprovante", descricao="Falta comprovante",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
+        )
+        pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
+        await ajustes.responder_pedido(
+            s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedidos[0].id,
+            usuario_id=sol, resposta="Comprovante anexado.")
+        await s.commit()
+
+    try:
+        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
+        r = await _get(admin_engine, tenant.id, tenant.slug, uid,
+                       "/api/v2/pagamentos/minha-fila")
+        assert r.status_code == 200, (r.status_code, r.text[:300])
+        corpo = r.json()
+        pendencias = corpo.get("pendencias_ajuste") or []
+        assert len(pendencias) == 0
     finally:
         await _cleanup(admin_engine, tenant.id)

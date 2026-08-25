@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cli.seed_bootstrap import MODULO_TRANSACOES
+from ..database import tenant_filter
 from ..models import Debito
 from ..models.pagamentos import PedidoAjuste
 from . import pagamentos_estados as est
@@ -133,6 +134,32 @@ async def responder_pedido(db: AsyncSession, *, tenant_id: int, debito_id: int, 
     p.respondido_em = _utcnow()
     await db.flush()
     return p
+
+
+async def pendencias_do_usuario(db: AsyncSession, *, tenant_id: int,
+                                transacoes: frozenset[str] | set[str]) -> list[tuple[PedidoAjuste, str]]:
+    """Pedidos `ABERTO` cuja `transacao_responsavel` está entre as transações
+    do usuário (F2, Task 6 — `GET /pagamentos/minha-fila`).
+
+    Devolve pares `(pedido, descricao_debito)`: a descrição vem de `Debito`
+    via join, não de `PedidoAjuste` — o pedido não guarda a descrição do
+    débito, só o motivo/descrição do próprio ajuste. `Debito.excluido` é
+    conferido para não expor pendência de um débito que já foi excluído.
+    """
+    if not transacoes:
+        return []
+    stmt = tenant_filter(
+        select(PedidoAjuste, Debito.descricao).join(
+            Debito, Debito.id == PedidoAjuste.id_debito,
+        ).where(
+            PedidoAjuste.situacao == "ABERTO",
+            PedidoAjuste.transacao_responsavel.in_(transacoes),
+            Debito.excluido.is_(False),
+        ).order_by(PedidoAjuste.criado_em.desc(), PedidoAjuste.id.desc()),
+        PedidoAjuste, tenant_id,
+    )
+    rows = (await db.execute(stmt)).all()
+    return [(row[0], row[1]) for row in rows]
 
 
 async def cancelar_pedido(db: AsyncSession, *, tenant_id: int, debito_id: int, pedido_id: int,
