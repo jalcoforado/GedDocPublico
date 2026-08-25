@@ -16,9 +16,11 @@ from ..schemas.pagamentos import (
     FornecedorCreate, FornecedorDadosBancariosOut, FornecedorOut,
     FornecedorSituacaoHistoricoOut, FornecedorUpdate,
     FonteCreate, FonteOut, FonteUpdate, NaturezaCreate, NaturezaOut, NaturezaUpdate,
+    SistemaIntegradoCreate, SistemaIntegradoCriadoOut, SistemaIntegradoOut,
 )
 from ..services import pagamentos_cadastros as svc
 from ..services import pagamentos_checklist as checklist_svc
+from ..services import pagamentos_sistemas as sistemas_svc
 
 fornecedores_router = APIRouter(prefix="/pagamentos/fornecedores", tags=["pagamentos-cadastros"])
 
@@ -341,6 +343,49 @@ async def delete_checklist_item(item_id: int,
                                 tenant_id: int = Depends(require_tenant_id),
                                 db: AsyncSession = Depends(get_db)):
     await checklist_svc.excluir_item(db, tenant_id=tenant_id, item_id=item_id)
+
+
+sistemas_integrados_router = APIRouter(
+    prefix="/pagamentos/sistemas-integrados", tags=["pagamentos-cadastros"]
+)
+
+
+@sistemas_integrados_router.get("", response_model=list[SistemaIntegradoOut])
+async def list_sistemas_integrados(_: Usuario = Depends(require_permission("pagamento_cadastro")),
+                                   tenant_id: int = Depends(require_tenant_id),
+                                   db: AsyncSession = Depends(get_db)):
+    return [SistemaIntegradoOut.model_validate(r)
+            for r in await sistemas_svc.listar_sistemas(db, tenant_id=tenant_id)]
+
+
+@sistemas_integrados_router.get("/{sistema_id}", response_model=SistemaIntegradoOut)
+async def get_sistema_integrado(sistema_id: int,
+                                _: Usuario = Depends(require_permission("pagamento_cadastro")),
+                                tenant_id: int = Depends(require_tenant_id),
+                                db: AsyncSession = Depends(get_db)):
+    return SistemaIntegradoOut.model_validate(
+        await sistemas_svc.obter_sistema(db, tenant_id=tenant_id, sistema_id=sistema_id))
+
+
+@sistemas_integrados_router.post("", response_model=SistemaIntegradoCriadoOut,
+                                 status_code=status.HTTP_201_CREATED)
+async def create_sistema_integrado(payload: SistemaIntegradoCreate,
+                                   usuario: Usuario = Depends(require_permission("pagamento_cadastro", "inserir")),
+                                   tenant_id: int = Depends(require_tenant_id),
+                                   db: AsyncSession = Depends(get_db)):
+    sistema, chave = await sistemas_svc.criar_sistema(
+        db, tenant_id=tenant_id, payload=payload, usuario_id=usuario.id)
+    return SistemaIntegradoCriadoOut(
+        **SistemaIntegradoOut.model_validate(sistema).model_dump(), chave=chave)
+
+
+@sistemas_integrados_router.post("/{sistema_id}/revogar", response_model=SistemaIntegradoOut)
+async def revogar_sistema_integrado(sistema_id: int,
+                                    _: Usuario = Depends(require_permission("pagamento_cadastro", "atualizar")),
+                                    tenant_id: int = Depends(require_tenant_id),
+                                    db: AsyncSession = Depends(get_db)):
+    return SistemaIntegradoOut.model_validate(
+        await sistemas_svc.revogar_sistema(db, tenant_id=tenant_id, sistema_id=sistema_id))
 
 
 enums_router = APIRouter(prefix="/pagamentos/enums", tags=["pagamentos-cadastros"])

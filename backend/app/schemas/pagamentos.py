@@ -720,3 +720,26 @@ class ExportContabilLoteOut(BaseModel):
     hash_conteudo: str | None
     id_usuario: int | None
     gerado_em: datetime
+
+
+# ---------- sistema integrado (C2.3) ----------
+class SistemaIntegradoCreate(BaseModel):
+    nome: str = Field(min_length=1, max_length=120)
+    escopo_leitura: bool = True
+    escopo_escrita: bool = False
+
+
+class SistemaIntegradoOut(BaseModel):
+    """Gestão — NUNCA carrega segredo nem hash. `revogado_em` presente = revogada."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int; nome: str; prefixo: str
+    escopo_leitura: bool; escopo_escrita: bool
+    ativo: bool
+    criado_em: datetime
+    revogado_em: datetime | None
+    id_usuario_criador: int | None
+
+
+class SistemaIntegradoCriadoOut(SistemaIntegradoOut):
+    """Resposta do POST de criação — única vez em que a chave completa aparece."""
+    chave: str

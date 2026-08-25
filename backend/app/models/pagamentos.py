@@ -477,6 +477,48 @@ class ExportContabilEvento(Base):
     ocorrido_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class SistemaIntegrado(Base):
+    """Credencial de um sistema externo M2M (C2.3) — chave `<prefixo>.<segredo>`
+    enviada no header `X-Api-Key`. `prefixo` é único GLOBAL (cross-tenant): é o
+    índice de busca da autenticação, procurado ANTES de o tenant ser conhecido
+    — não dá pra escopar essa busca por tenant porque o tenant só se descobre
+    DEPOIS de achar a linha. `hash_chave` é bcrypt do segredo (mesmo custo de
+    `auth/password.py::hash_password`), nunca o segredo em claro. Ver
+    `auth/sistema_integrado.py::get_current_sistema_integrado`."""
+    __tablename__ = "sistema_integrado"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    prefixo: Mapped[str] = mapped_column(String(12), nullable=False)
+    hash_chave: Mapped[str] = mapped_column(String(100), nullable=False)
+    escopo_leitura: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    escopo_escrita: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    revogado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    id_usuario_criador: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+
+
+class Idempotencia(Base):
+    """Registro de idempotência por chamada M2M (C2.3) — `(tenant_id, id_sistema,
+    chave)` único: a mesma chave de idempotência do mesmo sistema integrado, no
+    mesmo tenant, não reexecuta a operação; devolve `status_code`/`corpo_resposta`
+    gravados na primeira vez. `hash_payload` permite detectar reuso da mesma
+    chave com um payload diferente (uso incorreto pelo integrador)."""
+    __tablename__ = "idempotencia"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_sistema: Mapped[int] = mapped_column(
+        ForeignKey("pagamentos.sistema_integrado.id"), nullable=False)
+    chave: Mapped[str] = mapped_column(String(64), nullable=False)
+    hash_payload: Mapped[str] = mapped_column(String(64), nullable=False)
+    status_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    corpo_resposta: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class Conciliacao(Base):
     """Correspondência entre um lançamento do extrato e a movimentação da conta
     (RF-EXT-04/05). Uma por lançamento e uma por movimentação (RN-14)."""

@@ -1380,6 +1380,26 @@ export interface ExportContabilLote {
   id_usuario: number | null; gerado_em: string;
 }
 
+// ---------- sistema integrado M2M (Onda C2, C2.3) ----------
+export interface SistemaIntegrado {
+  id: number; nome: string; prefixo: string;
+  escopo_leitura: boolean; escopo_escrita: boolean;
+  ativo: boolean; criado_em: string; revogado_em: string | null;
+  id_usuario_criador: number | null;
+}
+
+/** Só existe UMA vez, na resposta do POST de criação — `chave` (`<prefixo>.<segredo>`)
+ * não é recuperável depois; a listagem devolve `SistemaIntegrado` sem ela. */
+export interface SistemaIntegradoCriado extends SistemaIntegrado {
+  chave: string;
+}
+
+export interface SistemaIntegradoInput {
+  nome: string;
+  escopo_leitura?: boolean;
+  escopo_escrita?: boolean;
+}
+
 export interface ParcelaFila {
   id: number; id_debito: number; numero: number; valor: string; vencimento: string;
   nome_fornecedor: string; descricao_debito: string; vencida: boolean;
@@ -3914,6 +3934,22 @@ export const api = {
       listarLotes: () => request<ExportContabilLote[]>("/pagamentos/contabil/lotes"),
       arquivoUrl: (loteId: number) =>
         `${BROWSER_API_URL}/pagamentos/contabil/lotes/${loteId}/arquivo`,
+    },
+    // Gestão de sistemas integrados M2M (Onda C2, C2.3) — realm admin, não o
+    // realm da chamada M2M em si (aquele é `X-Api-Key`, sem tela). `criar`
+    // devolve a chave completa UMA vez; guarde-a na hora, ela não volta.
+    sistemasIntegrados: {
+      listar: () => request<SistemaIntegrado[]>("/pagamentos/sistemas-integrados"),
+      obter: (id: number) => request<SistemaIntegrado>(`/pagamentos/sistemas-integrados/${id}`),
+      criar: (data: SistemaIntegradoInput) =>
+        request<SistemaIntegradoCriado>("/pagamentos/sistemas-integrados", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      revogar: (id: number) =>
+        request<SistemaIntegrado>(`/pagamentos/sistemas-integrados/${id}/revogar`, {
+          method: "POST",
+        }),
     },
     // Conciliação bancária (Onda B). Escrita exige `pagamento_pagar`; leitura
     // aceita também autorizar/auditar/cadastro.

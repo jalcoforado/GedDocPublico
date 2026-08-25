@@ -71,12 +71,14 @@ from .pagamentos import (
     Criticidade,
     FonteRecursos,
     GrupoDespesa,
+    Idempotencia,
     MovimentacaoConta,
     NaturezaDespesa,
     OrdemPagamento,
     OrdemPagamentoDebito,
     Parcela,
     SaldoHistorico,
+    SistemaIntegrado,
     TagPrioridade,
 )
 from .plataforma import PlatformAuditLog, PlatformPrincipal
