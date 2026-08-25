@@ -8,8 +8,8 @@ Substitui o antigo schema-phase9-bcrypt.sql.
 
 Coluna PARALELA — `utils.usuario.senha` (MD5) permanece intacta durante a
 coexistência com o PHP. Só o Python lê/escreve `senha_bcrypt`. Pós-cutover,
-quando o PHP for desligado, a coluna `senha` pode ser dropada (ver CUTOVER.md
-passo 8).
+quando o PHP for desligado, a coluna `senha` pode ser dropada (ver
+docs/archive/CUTOVER.md passo 8).
 """
 from __future__ import annotations
 
