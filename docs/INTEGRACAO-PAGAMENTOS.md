@@ -137,6 +137,16 @@ etapa de *autorização* (`autorizar_lote`), que a porta M2M não expõe nesta
 fatia; liquidar sem empenho pela API M2M dá certo hoje pelo mesmo motivo que
 dá certo pela tela administrativa.
 
+> **Breaking change (F3 — fila cronológica).** Liquidar um débito **sem
+> contrato** agora exige `categoria` informada na CRIAÇÃO do débito
+> (`POST /debitos`), porque é o que classifica a chave `(id_unidade,
+> id_fonte_recursos, categoria, exercicio)` da fila cronológica quando não há
+> contrato para fornecer essa classificação. Sem `categoria`, `liquidar`
+> devolve **422** apontando o campo. Débito **com** contrato não é afetado —
+> a categoria vem do contrato. Débito sem contrato criado **antes** da F3
+> (sem `categoria` preenchida) precisa ser editado para receber uma
+> categoria válida antes de poder ser liquidado pela API M2M.
+
 ## 3. Leitura por cursor
 
 `GET /debitos`, `GET /ordens` e `GET /baixas` compartilham a mesma

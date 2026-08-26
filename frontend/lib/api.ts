@@ -1402,6 +1402,8 @@ export interface ExcecaoCronologicaOut {
   id_autoridade: number;
   data_autorizacao: string;
   criado_em: string;
+  id_usuario_registro: number | null;
+  documentos: { anexo_debito_ids?: number[] } | null;
 }
 
 export interface ExcecaoCronologicaInput {

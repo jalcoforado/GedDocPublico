@@ -355,19 +355,17 @@ async def _disponivel_ok(db: AsyncSession, *, tenant_id: int, id_conta_pagadora:
                          debito_id: int) -> bool:
     """`saldo_conta().disponivel` já desconta o comprometido de TODOS os
     débitos com reserva ativa na conta — incluindo o próprio `debito_id`
-    (ver `pagamentos_caixa.comprometido_conta`). Exigir `disponivel >=
-    restante` sem somar essa reserva de volta cobraria o mesmo valor duas
-    vezes (ruling do review, Task 4): um débito de valor V exigiria 2V livres
-    para ficar ELEGIVEL. A reserva do próprio débito é exatamente a soma das
-    parcelas dele ainda não pagas — o mesmo filtro que `comprometido_conta`
-    usa (A_PAGAR/LIBERADA)."""
+    (ver `pagamentos_caixa.comprometido_conta`). A condição real é só "a
+    conta não está negativa além das reservas": `disponivel >= restante`
+    somando `restante` (a reserva do próprio débito) de volta antes de
+    comparar é tautológico — `(disponivel + restante) >= restante` equivale
+    a `disponivel >= 0` para qualquer `restante`, então a query de `restante`
+    era morta (MINOR, FIX WAVE F3 item 3). `debito_id` fica no parâmetro só
+    para manter a assinatura estável para os callers."""
     from . import pagamentos_caixa as caixa
 
     saldo = await caixa.saldo_conta(db, tenant_id=tenant_id, conta_id=id_conta_pagadora)
-    restante = (await db.execute(select(func.coalesce(func.sum(Parcela.valor), 0)).where(
-        Parcela.tenant_id == tenant_id, Parcela.id_debito == debito_id,
-        Parcela.excluido.is_(False), Parcela.status.in_(("A_PAGAR", "LIBERADA"))))).scalar_one()
-    return (saldo.disponivel + restante) >= restante
+    return saldo.disponivel >= 0
 
 
 async def _avaliar_fila_atual(db: AsyncSession, *, tenant_id: int, debito) -> tuple[str, str | None]:
@@ -406,16 +404,28 @@ async def _avaliar_fila_atual(db: AsyncSession, *, tenant_id: int, debito) -> tu
 
 
 async def reavaliar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
-                           usuario_id: int | None = None) -> None:
+                           usuario_id: int | None = None,
+                           reabrir_terminal: bool = False) -> None:
     """Recalcula a elegibilidade de UM débito e, se mudou, aplica a transição
     (mesma transação do caller — não comita).
 
     Débito sem posição na fila, ou já em situação terminal (CONCLUIDA/
     RETIRADA), é no-op: a reavaliação só vale enquanto o débito ainda disputa
     a ordem cronológica.
+
+    `reabrir_terminal=True` é a exceção deliberada a esse no-op — hoje usada
+    só pelo estorno (FIX WAVE F3, item 1): reverter um pagamento INTEGRAL
+    (posição CONCLUIDA) tem de reabrir a posição, senão o débito volta a
+    poder ser pago mas a fila continua dizendo que ele já terminou, e quem
+    está atrás na mesma chave nunca mais é preterido por ele. Só destrava
+    CONCLUIDA — RETIRADA nunca reabre por este parâmetro, porque
+    cancelamento é definitivo.
     """
     posicao = await obter_posicao(db, tenant_id=tenant_id, id_debito=debito_id)
-    if posicao is None or posicao.situacao in (est.CONCLUIDA, est.RETIRADA):
+    if posicao is None:
+        return
+    reabre_agora = reabrir_terminal and posicao.situacao == est.CONCLUIDA
+    if posicao.situacao in (est.CONCLUIDA, est.RETIRADA) and not reabre_agora:
         return
 
     from . import pagamentos_debitos as deb
@@ -471,12 +481,29 @@ async def reavaliar_por_conta(db: AsyncSession, *, tenant_id: int, conta_id: int
 # de um débito que fura a fila sem exceção formal registrada.
 
 
+# Débito à frente cuja "vez" já foi cumprida — selecionado em ordem, mesmo
+# que a EXECUÇÃO ainda não tenha acabado — não conta como preterido (FIX
+# WAVE F3, item 2; spec §5.3 "seleciona em ordem"). Complementa a checagem
+# de `Parcela.status == "LIBERADA"`, que cobre o caso de liberação sem
+# execução ainda iniciada.
+_VEZ_CUMPRIDA_PAGAMENTO = frozenset({
+    est.PAGA_PARCIAL, est.EM_PROCESSAMENTO, est.PROGRAMADA, est.ENVIADA_BANCO,
+})
+
+
 async def preteridos(db: AsyncSession, *, tenant_id: int,
                      debito_id: int) -> list[PosicaoFilaItem]:
     """Débitos ELEGIVEL da MESMA chave `(id_unidade, id_fonte_recursos,
     categoria, exercicio)` com posição anterior à do débito informado
     (Ruling 5: `(marco_em, id)` menor). BLOQUEADA e AGUARDANDO_DISPONIBILIDADE
     à frente NÃO contam — só quem já está apto a ser pago fura a ordem.
+
+    Um ELEGIVEL à frente também NÃO conta se a vez dele já foi cumprida:
+    alguma parcela LIBERADA, ou `situacao_pagamento` já em execução
+    (`_VEZ_CUMPRIDA_PAGAMENTO`) — foi selecionado em ordem, então não é ele
+    quem está furando a fila (FIX WAVE F3, item 2). Um único
+    `outerjoin`/`OR` resolve os dois casos numa consulta, em vez de uma
+    query por candidato.
 
     Reaproveita `listar_fila` (mesma numeração de posição exibida na tela) em
     vez de recalcular o `row_number()` sobre um subconjunto filtrado, o que
@@ -498,7 +525,24 @@ async def preteridos(db: AsyncSession, *, tenant_id: int,
     alvo = next((i for i in itens if i.id_debito == debito_id), None)
     if alvo is None:
         return []
-    return [i for i in itens if i.situacao == est.ELEGIVEL and i.posicao < alvo.posicao]
+    candidatos = [i for i in itens if i.situacao == est.ELEGIVEL and i.posicao < alvo.posicao]
+    if not candidatos:
+        return []
+
+    ids_candidatos = [i.id_debito for i in candidatos]
+    stmt_vez_cumprida = (
+        select(Debito.id)
+        .outerjoin(Parcela, (Parcela.id_debito == Debito.id)
+                   & (Parcela.tenant_id == Debito.tenant_id)
+                   & (Parcela.excluido.is_(False))
+                   & (Parcela.status == "LIBERADA"))
+        .where(Debito.tenant_id == tenant_id, Debito.id.in_(ids_candidatos),
+               or_(Debito.situacao_pagamento.in_(_VEZ_CUMPRIDA_PAGAMENTO),
+                   Parcela.id.isnot(None)))
+        .distinct()
+    )
+    vez_cumprida = {row[0] for row in (await db.execute(stmt_vez_cumprida)).all()}
+    return [i for i in candidatos if i.id_debito not in vez_cumprida]
 
 
 async def assert_ordem_respeitada(db: AsyncSession, *, tenant_id: int, debito_id: int) -> None:

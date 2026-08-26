@@ -72,6 +72,8 @@ const excecaoDoDebito11: ExcecaoCronologicaOut = {
   id_autoridade: 5,
   data_autorizacao: "2026-08-02",
   criado_em: "2026-08-02T11:00:00Z",
+  id_usuario_registro: 5,
+  documentos: null,
 };
 
 const fonteFPM: FonteRecursos = {

@@ -30,6 +30,7 @@ from app.schemas.pagamentos import (
 from app.services import pagamentos_autorizacao as aut
 from app.services import pagamentos_caixa as caixa
 from app.services import pagamentos_cadastros as cad
+from app.services import pagamentos_cronologia as cron
 from app.services import pagamentos_debitos as deb
 from app.services.provisioning_tenant import provisionar_tenant
 from tests.fixtures.pagamentos import id_unidade_padrao
@@ -713,5 +714,59 @@ async def test_estornar_parcela_com_justificativa_longa_trunca_descricao(admin_e
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
         assert d2.status == "ESTORNADO"  # reversão integral (v2.0 seção 13)
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+async def test_estornar_parcela_integral_reabre_posicao_na_fila(admin_engine):
+    """FIX WAVE F3 item 1 (IMPORTANT): pagamento integral leva a posição da
+    fila a CONCLUIDA; `reavaliar_debito` normalmente é no-op em terminal. O
+    estorno é a exceção deliberada — tem de REABRIR a posição (via
+    `_avaliar_fila_atual`, mesma precedência de sempre), senão a fila mente
+    que o débito terminou e ele nunca mais é preterido por quem está atrás.
+    """
+    t = await _provisionar(admin_engine)
+    try:
+        base = await _base(admin_engine, t.id)
+        _forn, _nat, fonte, conta, _unidade_id = base
+        # dois débitos na MESMA chave (base compartilhado): d1 autorizado
+        # primeiro, fica na frente da fila; d2 logo atrás.
+        d1, _sol1, _apr1, _aut1, _fonte1, _conta1 = await _debito_autorizado(
+            admin_engine, t.id, valor="1000.00", base=base)
+        d2, _sol2, _apr2, _aut2, _fonte2, _conta2 = await _debito_autorizado(
+            admin_engine, t.id, valor="1000.00", base=base)
+        tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+
+        async with _sm(admin_engine)() as s:
+            parcelas1 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d1.id)
+            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                       parcela_ids=[parcelas1[0].id])
+        async with _sm(admin_engine)() as s:
+            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                    parcela_id=parcelas1[0].id, forma_pagamento="PIX")
+
+        async with _sm(admin_engine)() as s:
+            posicao1 = await cron.obter_posicao(s, tenant_id=t.id, id_debito=d1.id)
+        assert posicao1.situacao == cron.est.CONCLUIDA
+
+        async with _sm(admin_engine)() as s:
+            await aut.estornar_parcela(
+                s, tenant_id=t.id, usuario_id=tesoureiro, parcela_id=parcelas1[0].id,
+                justificativa="Pagamento em duplicidade")
+
+        async with _sm(admin_engine)() as s:
+            posicao1 = await cron.obter_posicao(s, tenant_id=t.id, id_debito=d1.id)
+        assert posicao1.situacao != cron.est.CONCLUIDA
+        assert posicao1.situacao == cron.est.ELEGIVEL
+
+        # d1 reaberto e ELEGIVEL volta a preterir d2, que está atrás na fila.
+        async with _sm(admin_engine)() as s:
+            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                           parcela_ids=[parcelas2[0].id])
+            assert exc.value.status_code == 409
+            assert f"#{d1.id}" in exc.value.detail
     finally:
         await _cleanup(admin_engine, t.id)

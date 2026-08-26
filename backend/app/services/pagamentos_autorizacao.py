@@ -290,20 +290,27 @@ async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     """Liberação de pagamento (2º ato do rito): parcela A_PAGAR de débito
     AUTORIZADO|PAGO_PARCIAL → LIBERADA. Lote all-or-nothing: valida (com lock)
     TODAS as parcelas e débitos antes de mudar qualquer status. Histórico: uma
-    ação LIBERADO por débito envolvido, agrupando os números das parcelas."""
-    pares: list[tuple[Parcela, Debito]] = []
+    ação LIBERADO por débito envolvido, agrupando os números das parcelas.
+
+    A guarda de ordem cronológica (F3, Task 5) é checada DÉBITO A DÉBITO, na
+    ordem de primeira aparição no lote, intercalada com a escrita (com
+    `flush` logo depois de cada um) — não antes de tudo, como as demais
+    validações. É isso que faz a vez de um débito anterior do MESMO lote já
+    contar como cumprida para o próximo (FIX WAVE F3, item 2, teste b:
+    liberar o 1º e o 2º da fila numa chamada só). Se algum débito do meio do
+    lote furar a ordem, nada fica gravado — nunca há `commit` até o fim, e a
+    sessão desfaz o que foi `flush`ado (mesma atomicidade de antes)."""
+    parcelas_por_id: dict[int, Parcela] = {}
     debitos_por_id: dict[int, Debito] = {}
+    ordem_debitos: list[int] = []
     for pid in parcela_ids:
         p = await obter_parcela(db, tenant_id=tenant_id, parcela_id=pid)
+        parcelas_por_id[pid] = p
         d = debitos_por_id.get(p.id_debito)
         if d is None:
             d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito, for_update=True)
             debitos_por_id[d.id] = d
-            # Guarda de ordem cronológica (F3, Task 5) — por débito DISTINTO
-            # das parcelas selecionadas, e ANTES de qualquer escrita do lote
-            # (atomicidade all-or-nothing: nenhuma parcela muda se algum
-            # débito do lote fura a fila sem exceção formal).
-            await cron.assert_ordem_respeitada(db, tenant_id=tenant_id, debito_id=d.id)
+            ordem_debitos.append(d.id)
         if d.status not in (deb.ST_AUTORIZADO, *deb.EM_TESOURARIA, deb.ST_ESTORNADO):
             raise PagamentoDebitoError(
                 f"Débito {d.id} não autorizado para liberação de pagamento (está '{d.status}').",
@@ -311,18 +318,24 @@ async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         if p.status != "A_PAGAR":
             raise PagamentoDebitoError(
                 f"Parcela {pid} não está a pagar (está '{p.status}').", status.HTTP_409_CONFLICT)
-        pares.append((p, d))
 
     numeros_por_debito: dict[int, list[int]] = {}
-    for p, d in pares:
-        p.status = "LIBERADA"; p.data_liberacao = _utcnow().date()
-        p.id_usuario_liberacao = usuario_id; p.data_prevista_pagamento = data_prevista
-        p.atualizado_em = _utcnow()
-        numeros_por_debito.setdefault(d.id, []).append(p.numero)
+    for pid in parcela_ids:
+        p = parcelas_por_id[pid]
+        numeros_por_debito.setdefault(p.id_debito, []).append(p.numero)
 
-    for d_id, numeros in numeros_por_debito.items():
+    for d_id in ordem_debitos:
         d = debitos_por_id[d_id]
-        justificativa = f"Parcelas {', '.join(str(n) for n in sorted(numeros))}"
+        await cron.assert_ordem_respeitada(db, tenant_id=tenant_id, debito_id=d.id)
+        for pid in parcela_ids:
+            p = parcelas_por_id[pid]
+            if p.id_debito != d_id:
+                continue
+            p.status = "LIBERADA"; p.data_liberacao = _utcnow().date()
+            p.id_usuario_liberacao = usuario_id; p.data_prevista_pagamento = data_prevista
+            p.atualizado_em = _utcnow()
+
+        justificativa = f"Parcelas {', '.join(str(n) for n in sorted(numeros_por_debito[d_id]))}"
         if d.status in (deb.ST_AUTORIZADO, deb.ST_ESTORNADO):  # entra na tesouraria
             _registrar_transicao(db, debito=d, acao="ENVIADO_TESOURARIA",
                                  pagamento=est.PROGRAMADA,
@@ -332,11 +345,14 @@ async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                                    status_novo=d.status, acao="LIBERADO", justificativa=justificativa,
                                    id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
         d.atualizado_em = _utcnow()
+        # Torna a liberação deste débito visível para a guarda do PRÓXIMO
+        # débito do lote, dentro da mesma transação (ver docstring).
+        await db.flush()
 
     await db.commit()
-    for p, _d in pares:
-        await db.refresh(p)
-    return [p for p, _d in pares]
+    for pid in parcela_ids:
+        await db.refresh(parcelas_por_id[pid])
+    return [parcelas_por_id[pid] for pid in parcela_ids]
 
 
 async def revogar_liberacao(db: AsyncSession, *, tenant_id: int, usuario_id: int, parcela_id: int,
@@ -453,6 +469,13 @@ async def estornar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     _registrar_transicao(db, debito=d, acao="ESTORNADO", usuario_id=usuario_id,
                          pagamento=pagamento_estado,
                          justificativa=justificativa, ip=ip)
+    # Reversão pode "reviver" o débito na fila cronológica: se ele tinha
+    # posição CONCLUIDA (pagamento integral), a reavaliação normal faz no-op
+    # em terminal — este é o caso deliberado que precisa reabrir (FIX WAVE
+    # F3, item 1). Sem isso a fila mentia que o débito havia terminado e
+    # parava de preterir quem está atrás dele na mesma chave.
+    await cron.reavaliar_debito(db, tenant_id=tenant_id, debito_id=d.id,
+                                usuario_id=usuario_id, reabrir_terminal=True)
     if d.id_conta_pagadora is not None:
         # Estorno devolve saldo à conta — pode reabilitar outros débitos que
         # estavam AGUARDANDO_DISPONIBILIDADE ali.

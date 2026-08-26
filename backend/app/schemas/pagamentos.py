@@ -772,6 +772,8 @@ class ExcecaoCronologicaOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int; justificativa: str; fundamento: str; id_autoridade: int
     data_autorizacao: date; criado_em: datetime
+    id_usuario_registro: int | None = None
+    documentos: dict | None = None
 
 
 class PosicaoDebitoOut(BaseModel):

@@ -589,3 +589,79 @@ async def test_excecao_por_usuario_sem_pagamento_autorizar_e_403(admin_engine, c
         assert r.status_code == 403, r.text
     finally:
         await _cleanup(admin_engine, t.id)
+
+
+# ---------------------------------------------------------------------------
+# FIX WAVE F3 item 2 (IMPORTANT) — débito já selecionado não pretere mais
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_selecionado_com_parcela_liberada_nao_pretere(admin_engine):
+    """1º com parcela LIBERADA (chamada anterior) → liberar e pagar o 2º
+    passam: a vez do 1º foi cumprida ao ser selecionado em ordem."""
+    t = await _provisionar(admin_engine)
+    try:
+        d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
+        usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            parcelas1 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d1.id)
+        async with _sm(admin_engine)() as s:
+            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
+                                       parcela_ids=[parcelas1[0].id])
+
+        async with _sm(admin_engine)() as s:
+            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+        async with _sm(admin_engine)() as s:
+            liberadas2 = await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
+                                                     parcela_ids=[parcelas2[0].id])
+        assert liberadas2[0].status == "LIBERADA"
+
+        async with _sm(admin_engine)() as s:
+            paga2 = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
+                                            parcela_id=parcelas2[0].id, forma_pagamento="PIX")
+        assert paga2.status == "PAGA"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_lote_libera_dois_debitos_numa_chamada(admin_engine):
+    """Lote com o 1º e o 2º da fila NUMA SÓ chamada de `liberar_parcelas` —
+    hoje dá 409, porque o 1º só era escrito depois de checar o 2º; a vez do
+    1º dentro do próprio lote tem de valer imediatamente."""
+    t = await _provisionar(admin_engine)
+    try:
+        d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
+        usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            parcelas1 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d1.id)
+            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+        async with _sm(admin_engine)() as s:
+            liberadas = await aut.liberar_parcelas(
+                s, tenant_id=t.id, usuario_id=usuario,
+                parcela_ids=[parcelas1[0].id, parcelas2[0].id])
+        assert len(liberadas) == 2
+        assert all(p.status == "LIBERADA" for p in liberadas)
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_elegivel_puro_continua_bloqueando_regressao(admin_engine):
+    """Regressão: 1º ELEGIVEL "puro" (nenhuma parcela liberada, pagamento não
+    iniciado) continua preterindo o 2º — o filtro novo só exclui quem já foi
+    selecionado, não quem simplesmente está na frente na fila."""
+    t = await _provisionar(admin_engine)
+    try:
+        d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
+        usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
+                                           parcela_ids=[parcelas2[0].id])
+            assert exc.value.status_code == 409
+            assert f"#{d1.id}" in exc.value.detail
+    finally:
+        await _cleanup(admin_engine, t.id)
