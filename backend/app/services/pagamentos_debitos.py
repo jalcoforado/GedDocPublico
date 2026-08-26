@@ -660,8 +660,13 @@ async def autoridade_aprovar(db: AsyncSession, *, tenant_id: int, debito_id: int
             f"Esta solicitação não está aguardando autorização "
             f"(está em '{d.situacao_tramitacao}').", status.HTTP_409_CONFLICT)
     grd.assert_segregacao(d, usuario_id=usuario_id, ato="AUTORIZAR")
+    # A dimensão fila NÃO muda nesta linha (ruling do review, Task 4): quem
+    # decide o rótulo verdadeiro é `reavaliar_debito`, logo abaixo — senão a
+    # linha AUTORIZADO fica com ELEGIVEL mesmo quando a reavaliação corrige
+    # para AGUARDANDO_DISPONIBILIDADE/BLOQUEADA, e no caminho feliz gera uma
+    # FILA_REAVALIADA redundante (anterior==nova).
     _registrar_transicao(db, debito=d, acao="AUTORIZADO", usuario_id=usuario_id,
-                         tramitacao=est.AUTORIZADA, fila=est.ELEGIVEL, ip=ip)
+                         tramitacao=est.AUTORIZADA, ip=ip)
     await cron.reavaliar_debito(db, tenant_id=tenant_id, debito_id=d.id, usuario_id=usuario_id)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d

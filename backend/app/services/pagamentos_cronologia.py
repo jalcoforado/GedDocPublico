@@ -339,13 +339,21 @@ async def _tem_bloqueio(db: AsyncSession, *, tenant_id: int, id_conta_pagadora: 
 
 async def _disponivel_ok(db: AsyncSession, *, tenant_id: int, id_conta_pagadora: int,
                          debito_id: int) -> bool:
+    """`saldo_conta().disponivel` já desconta o comprometido de TODOS os
+    débitos com reserva ativa na conta — incluindo o próprio `debito_id`
+    (ver `pagamentos_caixa.comprometido_conta`). Exigir `disponivel >=
+    restante` sem somar essa reserva de volta cobraria o mesmo valor duas
+    vezes (ruling do review, Task 4): um débito de valor V exigiria 2V livres
+    para ficar ELEGIVEL. A reserva do próprio débito é exatamente a soma das
+    parcelas dele ainda não pagas — o mesmo filtro que `comprometido_conta`
+    usa (A_PAGAR/LIBERADA)."""
     from . import pagamentos_caixa as caixa
 
     saldo = await caixa.saldo_conta(db, tenant_id=tenant_id, conta_id=id_conta_pagadora)
-    pendente = (await db.execute(select(func.coalesce(func.sum(Parcela.valor), 0)).where(
+    restante = (await db.execute(select(func.coalesce(func.sum(Parcela.valor), 0)).where(
         Parcela.tenant_id == tenant_id, Parcela.id_debito == debito_id,
-        Parcela.excluido.is_(False), Parcela.status != "PAGA"))).scalar_one()
-    return saldo.disponivel >= pendente
+        Parcela.excluido.is_(False), Parcela.status.in_(("A_PAGAR", "LIBERADA"))))).scalar_one()
+    return (saldo.disponivel + restante) >= restante
 
 
 async def reavaliar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,

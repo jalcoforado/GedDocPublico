@@ -331,9 +331,15 @@ async def _debito_autorizado_em_lote(engine, tenant_id, *, valor="9000.00", sald
 
 @pytest.mark.asyncio
 async def test_sem_disponivel_aguarda_disponibilidade(admin_engine):
-    """Autorização em lote com exceção RN-15 (saldo insuficiente) grava
-    ELEGIVEL ingenuamente, mas a reavaliação corrige para
-    AGUARDANDO_DISPONIBILIDADE porque o disponível real não cobre a parcela."""
+    """Autorização em lote com exceção RN-15 (saldo insuficiente): a
+    reavaliação corrige para AGUARDANDO_DISPONIBILIDADE porque o disponível
+    real não cobre a parcela — mesmo somando de volta a reserva do próprio
+    débito (ruling do review: `_disponivel_ok` não pode descontá-la 2x).
+
+    Também prova a trilha de auditoria (ruling do review, item 1): a linha
+    AUTORIZADO não mexe na dimensão fila (fila_anterior==fila_nova==
+    REGISTRADA) — quem grava a fila de verdade é a FILA_REAVALIADA logo
+    depois, e nenhuma linha do histórico chega a ter ELEGIVEL."""
     t = await _provisionar(admin_engine)
     try:
         d, _conta = await _debito_autorizado_em_lote(
@@ -342,6 +348,41 @@ async def test_sem_disponivel_aguarda_disponibilidade(admin_engine):
         posicao = await _posicao(admin_engine, t.id, d.id)
         assert posicao.situacao == est.AGUARDANDO_DISPONIBILIDADE
         assert posicao.motivo_bloqueio == "Saldo disponível insuficiente na conta pagadora."
+
+        async with _sm(admin_engine)() as s:
+            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
+        autorizado = [h for h in hist if h.acao == "AUTORIZADO"]
+        reavaliado = [h for h in hist if h.acao == "FILA_REAVALIADA"]
+        assert len(autorizado) == 1
+        assert autorizado[0].situacao_fila_anterior == est.REGISTRADA
+        assert autorizado[0].situacao_fila_nova == est.REGISTRADA
+        assert len(reavaliado) == 1
+        assert reavaliado[0].situacao_fila_anterior == est.REGISTRADA
+        assert reavaliado[0].situacao_fila_nova == est.AGUARDANDO_DISPONIBILIDADE
+        assert not any(h.situacao_fila_nova == est.ELEGIVEL for h in hist)
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_saldo_exato_apos_reserva_propria_e_elegivel(admin_engine):
+    """Ruling do review (item 2): `saldo_conta().disponivel` já desconta o
+    comprometido do PRÓPRIO débito — exigir `disponivel >= restante` cobra a
+    reserva duas vezes. Conta com saldo == valor do débito fica com
+    disponivel==0 depois da própria reserva, e isso é ELEGIVEL, não
+    AGUARDANDO_DISPONIBILIDADE."""
+    t = await _provisionar(admin_engine)
+    try:
+        d, conta = await _debito_autorizado_em_lote(
+            admin_engine, t.id, valor="1000.00", saldo_inicial="1000.00")
+
+        async with _sm(admin_engine)() as s:
+            from app.services import pagamentos_caixa as caixa
+            saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+        assert saldo.disponivel == Decimal("0.00")
+
+        posicao = await _posicao(admin_engine, t.id, d.id)
+        assert posicao.situacao == est.ELEGIVEL
     finally:
         await _cleanup(admin_engine, t.id)
 

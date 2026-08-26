@@ -235,8 +235,12 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         for d in debitos:
             d.id_conta_pagadora = conta.id
             db.add(OrdemPagamentoDebito(tenant_id=tenant_id, id_ordem=op.id, id_debito=d.id))
+            # A dimensão fila NÃO muda nesta linha (ruling do review, Task 4):
+            # `reavaliar_debito`, logo abaixo, é quem grava o rótulo real —
+            # senão AUTORIZADO carrega ELEGIVEL mesmo quando a conta escolhida
+            # não tem disponível, e o caminho feliz duplica a transição.
             _registrar_transicao(db, debito=d, acao="AUTORIZADO",
-                                 tramitacao=est.AUTORIZADA, fila=est.ELEGIVEL,
+                                 tramitacao=est.AUTORIZADA,
                                  usuario_id=usuario_id, justificativa=justificativa[:255], ip=ip)
             d.atualizado_em = _utcnow()
         for d in debitos:
