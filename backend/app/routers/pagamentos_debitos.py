@@ -28,13 +28,14 @@ from ..schemas.pagamentos import (
     JustificativaIn, LiquidacaoIn, MarcarChecklistIn, MinhaFilaOut, OrdemPagamentoOut,
     PagarParcelaIn, ParcelaFilaOut, ParcelaOut, PedidoAjusteCreate, PedidoAjusteOut,
     PedidoAjusteResponderIn, PendenciaAjusteOut, SolicitarAjusteIn, SimulacaoAutorizacaoIn,
-    SimulacaoAutorizacaoOut, DebitoVersaoOut,
+    SimulacaoAutorizacaoOut, DebitoVersaoOut, FilaCronologicaGrupo, PosicaoDebitoOut,
 )
 from ..services import pagamentos_ajustes as ajustes
 from ..services import pagamentos_anexos as anexos_debito
 from ..services import pagamentos_autorizacao as aut
 from ..services import pagamentos_caixa as caixa
 from ..services import pagamentos_checklist as checklist
+from ..services import pagamentos_cronologia as cronologia
 from ..services import pagamentos_dashboard as dash
 from ..services import pagamentos_debitos as svc
 from ..services import pagamentos_estados as est
@@ -83,6 +84,22 @@ PERMS_LEITURA = ("pagamento_solicitar", "pagamento_gerir", "pagamento_validar",
 
 debitos_router = APIRouter(prefix="/pagamentos/debitos", tags=["pagamentos-debitos"])
 operacoes_router = APIRouter(prefix="/pagamentos", tags=["pagamentos-operacoes"])
+
+
+# Rota literal ANTES de qualquer paramétrica irmã em `operacoes_router` (F3,
+# Task 3) — hoje nenhuma delas casaria `/fila-cronologica`, mas a declaração
+# antecipada é o padrão do módulo (ver `download_anexo_debito` acima) e evita
+# a armadilha de rota engolida se uma paramétrica de primeiro segmento nascer.
+@operacoes_router.get("/fila-cronologica", response_model=list[FilaCronologicaGrupo])
+async def fila_cronologica(id_fonte: int | None = None, id_unidade: int | None = None,
+                           categoria: str | None = None, exercicio: int | None = None,
+                           incluir_concluidas: bool = False,
+                           _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                           tenant_id: int = Depends(require_tenant_id),
+                           db: AsyncSession = Depends(get_db)):
+    return await cronologia.listar_fila(
+        db, tenant_id=tenant_id, id_fonte=id_fonte, id_unidade=id_unidade,
+        categoria=categoria, exercicio=exercicio, incluir_concluidas=incluir_concluidas)
 
 
 def _ip(request: Request) -> str | None:
@@ -159,6 +176,22 @@ async def get_debito(debito_id: int,
         justificativa=h.justificativa, id_usuario=h.id_usuario,
         nome_usuario=nomes_u.get(h.id_usuario), criado_em=h.criado_em) for h in hist]
     return DebitoDetalheOut.model_validate(base)
+
+
+# `/fila` é literal SOB a paramétrica `/{debito_id}` — não colide com ela
+# (segmentos diferentes: `/{debito_id}` casa 1 segmento, `/{debito_id}/fila`
+# casa 2) e por isso não precisa vir antes; a guarda `test_guarda_ordem_rotas`
+# confere isso.
+@debitos_router.get("/{debito_id}/fila", response_model=PosicaoDebitoOut)
+async def fila_do_debito(debito_id: int,
+                         _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                         tenant_id: int = Depends(require_tenant_id),
+                         db: AsyncSession = Depends(get_db)):
+    posicao = await cronologia.posicao_do_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    if posicao is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Débito não tem posição na fila cronológica.")
+    return posicao
 
 
 @debitos_router.post("", response_model=DebitoOut, status_code=status.HTTP_201_CREATED)

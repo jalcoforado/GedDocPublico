@@ -12,19 +12,24 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models import PosicaoCronologica
+from app.auth.deps import get_current_user
+from app.main import app
+from app.models import PosicaoCronologica, Usuario
 from app.schemas.pagamentos import (
     ContaCreate, ContratoCreate, DebitoCreate, DebitoUpdate, FonteCreate,
     FornecedorCreate, NaturezaCreate, ParcelaCreate,
 )
 from app.services import pagamentos_cadastros as cad
+from app.services import pagamentos_cronologia as cronologia
 from app.services import pagamentos_debitos as svc
 from app.services import pagamentos_estados as est
 from app.services.provisioning_tenant import provisionar_tenant
+from tests.conftest import arreio_tenant_http
 
 
 def _sm(engine):
@@ -510,5 +515,340 @@ async def test_edicao_material_de_categoria_atualiza_chave_da_fila(admin_engine)
         assert posicao_depois.categoria == "BENS"
         assert posicao_depois.marco_em == posicao_antes.marco_em
         assert posicao_depois.atualizado_em != posicao_antes.atualizado_em
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — consulta da fila (window function)
+# ---------------------------------------------------------------------------
+
+
+async def _setup_grupo(engine, tenant_id: int):
+    """Fonte + unidade + contrato (categoria SERVICOS) compartilhados por
+    vários débitos, para exercitar o agrupamento real da fila."""
+    async with _sm(engine)() as s:
+        fornecedor = await cad.criar_fornecedor(
+            s, tenant_id=tenant_id,
+            payload=FornecedorCreate(tipo_pessoa="JURIDICA", cnpj_cpf=_doc(), nome="Empresa Grupo LTDA"),
+        )
+        fonte = await cad.criar_fonte(
+            s, tenant_id=tenant_id,
+            payload=FonteCreate(
+                codigo=f"F{uuid.uuid4().hex[:6]}", descricao="Fonte Grupo",
+                grupos_despesa_permitidos=[],
+            ),
+        )
+        await cad.criar_conta(
+            s, tenant_id=tenant_id,
+            payload=ContaCreate(
+                nome="Conta Grupo", banco="001", agencia="1",
+                conta=uuid.uuid4().hex[:8], id_fonte_recursos=fonte.id,
+                grupo_despesa="CUSTEIO", saldo_inicial="10000.00", ativa=True,
+            ),
+        )
+
+        from app.models import TipoUnidadeTrabalho, UnidadeTrabalho
+        stmt = select(UnidadeTrabalho).where(UnidadeTrabalho.tenant_id == tenant_id).limit(1)
+        unidade = (await s.execute(stmt)).scalar()
+        if not unidade:
+            tipo = (await s.execute(select(TipoUnidadeTrabalho).limit(1))).scalar()
+            if not tipo:
+                tipo = TipoUnidadeTrabalho(tenant_id=tenant_id, tipo_unidade_trabalho="Administração")
+                s.add(tipo)
+                await s.flush()
+            unidade = UnidadeTrabalho(
+                tenant_id=tenant_id, id_tipo_unidade_trabalho=tipo.id,
+                unidade_trabalho="Unidade Grupo",
+            )
+            s.add(unidade)
+            await s.flush()
+
+        natureza = await cad.criar_natureza(
+            s, tenant_id=tenant_id,
+            payload=NaturezaCreate(codigo=f"N{uuid.uuid4().hex[:5]}", descricao="Grupo"),
+        )
+        contrato = await cad.criar_contrato(
+            s, tenant_id=tenant_id,
+            payload=ContratoCreate(
+                numero=f"CT-{uuid.uuid4().hex[:8]}", id_fornecedor=fornecedor.id,
+                id_unidade=unidade.id, objeto="Serviços Grupo",
+                vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
+                valor_total=Decimal("5000.00"), categoria="SERVICOS",
+            ),
+        )
+    return fornecedor.id, fonte.id, unidade.id, natureza.id, contrato.id
+
+
+async def _criar_debito_grupo(engine, tenant_id, usuario_id, *, fornecedor_id, natureza_id,
+                              contrato_id, fonte_id, unidade_id, valor="1000.00"):
+    async with _sm(engine)() as s:
+        debito = await svc.criar_debito(
+            s, tenant_id=tenant_id, usuario_id=usuario_id,
+            payload=DebitoCreate(
+                numero_nf=f"NF{uuid.uuid4().hex[:6]}", id_fornecedor=fornecedor_id,
+                id_natureza=natureza_id, id_contrato=contrato_id,
+                id_fonte_recursos=fonte_id, id_unidade=unidade_id,
+                valor_total=Decimal(valor), descricao="Débito do grupo",
+                competencia="2026-01",
+                parcelas=[ParcelaCreate(numero=1, valor=Decimal(valor), vencimento="2026-02-01")],
+            ),
+        )
+    return debito
+
+
+async def _liquidar(engine, tenant_id, debito_id, usuario_id, data_liq: date):
+    async with _sm(engine)() as s:
+        return await svc.confirmar_liquidacao(
+            s, tenant_id=tenant_id, debito_id=debito_id, usuario_id=usuario_id,
+            data_liquidacao=data_liq)
+
+
+async def _usuario_leitura(engine, tenant_id: int) -> int:
+    """Usuário comum com UMA transação de `PERMS_LEITURA` concedida via
+    grupo — o suficiente para `require_any_permission(*PERMS_LEITURA)`."""
+    from app.config import get_settings
+
+    app_name = get_settings().app_name
+    async with _sm(engine)() as s:
+        sistema_id = int((await s.execute(text(
+            "SELECT id FROM utils.sistema WHERE app=:a AND excluido=false LIMIT 1"
+        ), {"a": app_name})).scalar_one())
+        nivel_id = (await s.execute(text(
+            "SELECT id FROM utils.nivel WHERE valor <> 0 AND excluido = false LIMIT 1"
+        ))).scalar_one_or_none()
+        if nivel_id is None:
+            nivel_id = (await s.execute(text(
+                "INSERT INTO utils.nivel (nivel, valor, excluido) "
+                "VALUES ('Operacional', 1, false) RETURNING id"))).scalar_one()
+        uid = int((await s.execute(text("""
+            INSERT INTO utils.usuario (tenant_id, nome, email, senha, cpf, ativo,
+                                       excluido, app, nivel_acesso_sigilo)
+            VALUES (:t, 'Leitor Fila F3', :e, '', :cpf, true, false, :a, 'interno')
+            RETURNING id"""), {"t": tenant_id, "e": f"f3fila-{uuid.uuid4().hex[:8]}@t.local",
+                               "cpf": uuid.uuid4().hex[:11], "a": app_name})).scalar_one())
+        gid = int((await s.execute(text("""
+            INSERT INTO utils.grupo (tenant_id, id_nivel, id_sistema, grupo, excluido)
+            VALUES (:t, :n, :s, :g, false) RETURNING id"""),
+            {"t": tenant_id, "n": nivel_id, "s": sistema_id,
+             "g": f"Leitura Fila {uuid.uuid4().hex[:6]}"})).scalar_one())
+        await s.execute(text("""
+            INSERT INTO utils.usuario_grupo (tenant_id, id_usuario, id_grupo, ativo, excluido, app)
+            VALUES (:t, :u, :g, true, false, :a)"""),
+            {"t": tenant_id, "u": uid, "g": gid, "a": app_name})
+        tr = (await s.execute(text(
+            "SELECT id FROM utils.transacao WHERE codigo=:c AND excluido=false LIMIT 1"
+        ), {"c": "pagamento_solicitar"})).scalar_one()
+        await s.execute(text("""
+            INSERT INTO utils.grupo_transacao
+                (tenant_id, id_grupo, id_transacao, inserir, atualizar, excluir, excluido)
+            VALUES (:t, :g, :tr, false, false, false, false)"""),
+            {"t": tenant_id, "g": gid, "tr": int(tr)})
+        await s.commit()
+    return uid
+
+
+async def _http(engine, tenant_id, slug, usuario_id, metodo, caminho, **kw):
+    async def _get_user():
+        async with _sm(engine)() as s:
+            return (await s.execute(
+                select(Usuario).where(Usuario.id == usuario_id))).scalar_one()
+
+    app.dependency_overrides[get_current_user] = _get_user
+    arreio_tenant_http(tenant_id, slug)
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            return await c.request(metodo, caminho, **kw)
+    finally:
+        app.dependency_overrides.clear()
+        from app.database import engine as app_engine
+        await app_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_fila_agrupa_e_ordena_por_marco_nao_por_criacao(admin_engine):
+    """3 débitos liquidados na MESMA chave em ordem EMBARALHADA (confirmados
+    fora da ordem de criação) saem na fila ordenados por `marco_em`, não por
+    ordem de confirmação nem de criação. Um débito de OUTRA fonte não entra
+    no grupo."""
+    tenant, solicitante_id, _gestor_id, validador_id = await _provisionar(admin_engine)
+    try:
+        forn_id, fonte_id, unidade_id, nat_id, contrato_id = await _setup_grupo(admin_engine, tenant.id)
+
+        d_meio = await _criar_debito_grupo(
+            admin_engine, tenant.id, solicitante_id, fornecedor_id=forn_id,
+            natureza_id=nat_id, contrato_id=contrato_id, fonte_id=fonte_id, unidade_id=unidade_id)
+        d_ultimo = await _criar_debito_grupo(
+            admin_engine, tenant.id, solicitante_id, fornecedor_id=forn_id,
+            natureza_id=nat_id, contrato_id=contrato_id, fonte_id=fonte_id, unidade_id=unidade_id)
+        d_primeiro = await _criar_debito_grupo(
+            admin_engine, tenant.id, solicitante_id, fornecedor_id=forn_id,
+            natureza_id=nat_id, contrato_id=contrato_id, fonte_id=fonte_id, unidade_id=unidade_id)
+
+        # confirmação fora da ordem de criação/marco de propósito
+        await _liquidar(admin_engine, tenant.id, d_ultimo.id, validador_id, date(2026, 3, 20))
+        await _liquidar(admin_engine, tenant.id, d_primeiro.id, validador_id, date(2026, 3, 1))
+        await _liquidar(admin_engine, tenant.id, d_meio.id, validador_id, date(2026, 3, 10))
+
+        # débito de OUTRA fonte, mesma categoria/exercício — não pode entrar no grupo
+        _forn2, fonte2_id, unidade2_id, nat2_id, contrato2_id = await _setup_grupo(admin_engine, tenant.id)
+        d_outra_fonte = await _criar_debito_grupo(
+            admin_engine, tenant.id, solicitante_id, fornecedor_id=_forn2,
+            natureza_id=nat2_id, contrato_id=contrato2_id, fonte_id=fonte2_id, unidade_id=unidade2_id)
+        await _liquidar(admin_engine, tenant.id, d_outra_fonte.id, validador_id, date(2026, 3, 5))
+
+        async with _sm(admin_engine)() as s:
+            grupos = await cronologia.listar_fila(s, tenant_id=tenant.id, id_fonte=fonte_id)
+
+        assert len(grupos) == 1
+        grupo = grupos[0]
+        assert grupo.id_fonte_recursos == fonte_id
+        assert grupo.id_unidade == unidade_id
+        assert [item.id_debito for item in grupo.itens] == [d_primeiro.id, d_meio.id, d_ultimo.id]
+        assert [item.posicao for item in grupo.itens] == [1, 2, 3]
+        assert all(item.id_debito != d_outra_fonte.id for item in grupo.itens)
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_posicao_do_debito_devolve_posicao_e_total_do_grupo(admin_engine):
+    tenant, solicitante_id, _gestor_id, validador_id = await _provisionar(admin_engine)
+    try:
+        forn_id, fonte_id, unidade_id, nat_id, contrato_id = await _setup_grupo(admin_engine, tenant.id)
+
+        d1 = await _criar_debito_grupo(
+            admin_engine, tenant.id, solicitante_id, fornecedor_id=forn_id,
+            natureza_id=nat_id, contrato_id=contrato_id, fonte_id=fonte_id, unidade_id=unidade_id)
+        d2 = await _criar_debito_grupo(
+            admin_engine, tenant.id, solicitante_id, fornecedor_id=forn_id,
+            natureza_id=nat_id, contrato_id=contrato_id, fonte_id=fonte_id, unidade_id=unidade_id)
+        d3 = await _criar_debito_grupo(
+            admin_engine, tenant.id, solicitante_id, fornecedor_id=forn_id,
+            natureza_id=nat_id, contrato_id=contrato_id, fonte_id=fonte_id, unidade_id=unidade_id)
+
+        await _liquidar(admin_engine, tenant.id, d1.id, validador_id, date(2026, 3, 1))
+        await _liquidar(admin_engine, tenant.id, d2.id, validador_id, date(2026, 3, 10))
+        await _liquidar(admin_engine, tenant.id, d3.id, validador_id, date(2026, 3, 20))
+
+        async with _sm(admin_engine)() as s:
+            resultado = await cronologia.posicao_do_debito(s, tenant_id=tenant.id, debito_id=d2.id)
+
+        assert resultado is not None
+        assert resultado.posicao == 2
+        assert resultado.total_grupo == 3
+        assert resultado.situacao == est.REGISTRADA
+        assert resultado.excecoes == []
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_posicao_do_debito_nao_registrado_e_none(admin_engine):
+    tenant, solicitante_id, _gestor_id, _validador_id = await _provisionar(admin_engine)
+    try:
+        debito, _fonte_id, _unidade_id = await _setup_debito(admin_engine, tenant.id, solicitante_id)
+
+        async with _sm(admin_engine)() as s:
+            resultado = await cronologia.posicao_do_debito(s, tenant_id=tenant.id, debito_id=debito.id)
+
+        assert resultado is None
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_http_debito_nao_registrado_e_404(admin_engine):
+    tenant, solicitante_id, _gestor_id, _validador_id = await _provisionar(admin_engine)
+    try:
+        debito, _fonte_id, _unidade_id = await _setup_debito(admin_engine, tenant.id, solicitante_id)
+        uid = await _usuario_leitura(admin_engine, tenant.id)
+
+        r = await _http(admin_engine, tenant.id, tenant.slug, uid, "GET",
+                        f"/api/v2/pagamentos/debitos/{debito.id}/fila")
+
+        assert r.status_code == 404
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_http_usuario_comum_consulta_fila_cronologica(admin_engine):
+    """Usuário comum (não-SU), com UMA transação de `PERMS_LEITURA` concedida
+    por grupo, acessa `GET /pagamentos/fila-cronologica` e
+    `GET /pagamentos/debitos/{id}/fila` por HTTP real — 200 nos dois."""
+    tenant, solicitante_id, _gestor_id, validador_id = await _provisionar(admin_engine)
+    try:
+        forn_id, fonte_id, unidade_id, nat_id, contrato_id = await _setup_grupo(admin_engine, tenant.id)
+        debito = await _criar_debito_grupo(
+            admin_engine, tenant.id, solicitante_id, fornecedor_id=forn_id,
+            natureza_id=nat_id, contrato_id=contrato_id, fonte_id=fonte_id, unidade_id=unidade_id)
+        await _liquidar(admin_engine, tenant.id, debito.id, validador_id, date(2026, 3, 1))
+
+        uid = await _usuario_leitura(admin_engine, tenant.id)
+
+        r1 = await _http(admin_engine, tenant.id, tenant.slug, uid, "GET",
+                         "/api/v2/pagamentos/fila-cronologica", params={"id_fonte": fonte_id})
+        assert r1.status_code == 200, r1.text
+        corpo = r1.json()
+        assert len(corpo) == 1
+        assert corpo[0]["itens"][0]["id_debito"] == debito.id
+        assert corpo[0]["itens"][0]["posicao"] == 1
+        assert corpo[0]["itens"][0]["fornecedor_nome"]
+
+        r2 = await _http(admin_engine, tenant.id, tenant.slug, uid, "GET",
+                         f"/api/v2/pagamentos/debitos/{debito.id}/fila")
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["posicao"] == 1
+        assert r2.json()["total_grupo"] == 1
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_novo_debito_com_data_anterior_vira_posicao_1_sem_update(admin_engine):
+    """Liquidar um 4º débito com `data_liquidacao` ANTERIOR aos 3 já
+    registrados faz ele virar posição 1 sem NENHUM UPDATE de posição — a
+    prova de que a posição não é armazenada, só calculada na consulta."""
+    tenant, solicitante_id, _gestor_id, validador_id = await _provisionar(admin_engine)
+    try:
+        forn_id, fonte_id, unidade_id, nat_id, contrato_id = await _setup_grupo(admin_engine, tenant.id)
+
+        d1 = await _criar_debito_grupo(
+            admin_engine, tenant.id, solicitante_id, fornecedor_id=forn_id,
+            natureza_id=nat_id, contrato_id=contrato_id, fonte_id=fonte_id, unidade_id=unidade_id)
+        d2 = await _criar_debito_grupo(
+            admin_engine, tenant.id, solicitante_id, fornecedor_id=forn_id,
+            natureza_id=nat_id, contrato_id=contrato_id, fonte_id=fonte_id, unidade_id=unidade_id)
+        d3 = await _criar_debito_grupo(
+            admin_engine, tenant.id, solicitante_id, fornecedor_id=forn_id,
+            natureza_id=nat_id, contrato_id=contrato_id, fonte_id=fonte_id, unidade_id=unidade_id)
+
+        await _liquidar(admin_engine, tenant.id, d1.id, validador_id, date(2026, 3, 10))
+        await _liquidar(admin_engine, tenant.id, d2.id, validador_id, date(2026, 3, 15))
+        await _liquidar(admin_engine, tenant.id, d3.id, validador_id, date(2026, 3, 20))
+
+        posicoes_antes = {}
+        for d in (d1, d2, d3):
+            posicoes_antes[d.id] = await _posicao_do_debito(admin_engine, tenant.id, d.id)
+
+        d4 = await _criar_debito_grupo(
+            admin_engine, tenant.id, solicitante_id, fornecedor_id=forn_id,
+            natureza_id=nat_id, contrato_id=contrato_id, fonte_id=fonte_id, unidade_id=unidade_id)
+        await _liquidar(admin_engine, tenant.id, d4.id, validador_id, date(2026, 1, 1))
+
+        # Nenhuma das 3 linhas anteriores foi tocada — nem `atualizado_em`,
+        # nem `marco_em` — só o INSERT do 4º débito.
+        for d in (d1, d2, d3):
+            posicao_depois = await _posicao_do_debito(admin_engine, tenant.id, d.id)
+            assert posicao_depois.marco_em == posicoes_antes[d.id].marco_em
+            assert posicao_depois.atualizado_em == posicoes_antes[d.id].atualizado_em
+
+        async with _sm(admin_engine)() as s:
+            grupos = await cronologia.listar_fila(s, tenant_id=tenant.id, id_fonte=fonte_id)
+        grupo = grupos[0]
+        assert [item.id_debito for item in grupo.itens] == [d4.id, d1.id, d2.id, d3.id]
+        assert [item.posicao for item in grupo.itens] == [1, 2, 3, 4]
     finally:
         await _cleanup(admin_engine, tenant.id)

@@ -17,10 +17,16 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.pagamentos import Contrato, Debito, PosicaoCronologica
+from ..models.pagamentos import (
+    Contrato, Debito, ExcecaoCronologica, FonteRecursos, Fornecedor, PosicaoCronologica,
+)
+from ..models.unidade_trabalho import UnidadeTrabalho
+from ..schemas.pagamentos import (
+    ExcecaoCronologicaOut, FilaCronologicaGrupo, PosicaoDebitoOut, PosicaoFilaItem,
+)
 from . import pagamentos_estados as est
 
 CATEGORIAS = ("BENS", "LOCACOES", "SERVICOS", "OBRAS")
@@ -124,3 +130,125 @@ async def retirar_da_fila(db: AsyncSession, *, tenant_id: int,
     posicao.atualizado_em = _utcnow()
     await db.flush()
     return posicao
+
+
+async def listar_fila(db: AsyncSession, *, tenant_id: int, id_fonte: int | None = None,
+                      id_unidade: int | None = None, categoria: str | None = None,
+                      exercicio: int | None = None,
+                      incluir_concluidas: bool = False) -> list[FilaCronologicaGrupo]:
+    """Fila cronológica agrupada pela chave `(id_unidade, id_fonte_recursos,
+    categoria, exercicio)`. A `posicao` de cada item é calculada por
+    `row_number()` na própria consulta — nunca gravada em tabela: reordenar a
+    fila é só uma questão de `marco_em` mudar, sem UPDATE nenhum de posição.
+
+    Por padrão exclui `RETIRADA`/`CONCLUIDA` (a fila operacional só mostra o
+    que ainda está em jogo); `incluir_concluidas=True` traz tudo, para
+    auditoria.
+    """
+    rn = func.row_number().over(
+        partition_by=(
+            PosicaoCronologica.id_unidade, PosicaoCronologica.id_fonte_recursos,
+            PosicaoCronologica.categoria, PosicaoCronologica.exercicio,
+        ),
+        order_by=(PosicaoCronologica.marco_em, PosicaoCronologica.id),
+    ).label("posicao")
+
+    tem_excecao = (
+        select(func.count(ExcecaoCronologica.id))
+        .where(
+            ExcecaoCronologica.tenant_id == PosicaoCronologica.tenant_id,
+            ExcecaoCronologica.id_debito == PosicaoCronologica.id_debito,
+        )
+        .correlate(PosicaoCronologica)
+        .scalar_subquery()
+    )
+
+    stmt = (
+        select(
+            PosicaoCronologica, rn, Debito.descricao, Debito.valor_total,
+            Fornecedor.nome, UnidadeTrabalho.unidade_trabalho, FonteRecursos.descricao,
+            tem_excecao,
+        )
+        .join(Debito, (Debito.id == PosicaoCronologica.id_debito)
+              & (Debito.tenant_id == PosicaoCronologica.tenant_id))
+        .join(Fornecedor, (Fornecedor.id == Debito.id_fornecedor)
+              & (Fornecedor.tenant_id == Debito.tenant_id))
+        .join(UnidadeTrabalho, (UnidadeTrabalho.id == PosicaoCronologica.id_unidade)
+              & (UnidadeTrabalho.tenant_id == PosicaoCronologica.tenant_id))
+        .join(FonteRecursos, (FonteRecursos.id == PosicaoCronologica.id_fonte_recursos)
+              & (FonteRecursos.tenant_id == PosicaoCronologica.tenant_id))
+        .where(PosicaoCronologica.tenant_id == tenant_id)
+    )
+    if not incluir_concluidas:
+        stmt = stmt.where(PosicaoCronologica.situacao.notin_((est.RETIRADA, est.CONCLUIDA)))
+    if id_fonte is not None:
+        stmt = stmt.where(PosicaoCronologica.id_fonte_recursos == id_fonte)
+    if id_unidade is not None:
+        stmt = stmt.where(PosicaoCronologica.id_unidade == id_unidade)
+    if categoria is not None:
+        stmt = stmt.where(PosicaoCronologica.categoria == categoria)
+    if exercicio is not None:
+        stmt = stmt.where(PosicaoCronologica.exercicio == exercicio)
+
+    stmt = stmt.order_by(
+        PosicaoCronologica.id_unidade, PosicaoCronologica.id_fonte_recursos,
+        PosicaoCronologica.categoria, PosicaoCronologica.exercicio,
+        PosicaoCronologica.marco_em, PosicaoCronologica.id,
+    )
+
+    linhas = (await db.execute(stmt)).all()
+
+    grupos: dict[tuple, FilaCronologicaGrupo] = {}
+    ordem: list[tuple] = []
+    for (posicao, num, descricao, valor_total, fornecedor_nome, unidade_nome,
+         fonte_nome, qtd_excecoes) in linhas:
+        chave = (posicao.id_unidade, posicao.id_fonte_recursos, posicao.categoria,
+                 posicao.exercicio)
+        if chave not in grupos:
+            grupos[chave] = FilaCronologicaGrupo(
+                id_unidade=posicao.id_unidade, unidade_nome=unidade_nome,
+                id_fonte_recursos=posicao.id_fonte_recursos, fonte_nome=fonte_nome,
+                categoria=posicao.categoria, exercicio=posicao.exercicio, itens=[],
+            )
+            ordem.append(chave)
+        grupos[chave].itens.append(PosicaoFilaItem(
+            posicao=num, id_debito=posicao.id_debito, fornecedor_nome=fornecedor_nome,
+            descricao=descricao, valor_total=valor_total, marco_em=posicao.marco_em,
+            situacao=posicao.situacao, motivo_bloqueio=posicao.motivo_bloqueio,
+            previsao_pagamento=posicao.previsao_pagamento, tem_excecao=qtd_excecoes > 0,
+        ))
+    return [grupos[chave] for chave in ordem]
+
+
+async def posicao_do_debito(db: AsyncSession, *, tenant_id: int,
+                            debito_id: int) -> PosicaoDebitoOut | None:
+    """Posição do débito no grupo dele + total do grupo + exceções.
+
+    `None` quando o débito não tem posição registrada (o caller devolve 404 —
+    não é este módulo que decide o código HTTP).
+    """
+    posicao = await obter_posicao(db, tenant_id=tenant_id, id_debito=debito_id)
+    if posicao is None:
+        return None
+
+    incluir_concluidas = posicao.situacao in (est.RETIRADA, est.CONCLUIDA)
+    grupos = await listar_fila(
+        db, tenant_id=tenant_id, id_fonte=posicao.id_fonte_recursos,
+        id_unidade=posicao.id_unidade, categoria=posicao.categoria,
+        exercicio=posicao.exercicio, incluir_concluidas=incluir_concluidas,
+    )
+    grupo = grupos[0] if grupos else None
+    item = next((i for i in grupo.itens if i.id_debito == debito_id), None) if grupo else None
+    if item is None:
+        return None
+
+    excecoes = (await db.execute(select(ExcecaoCronologica).where(
+        ExcecaoCronologica.tenant_id == tenant_id,
+        ExcecaoCronologica.id_debito == debito_id,
+    ).order_by(ExcecaoCronologica.criado_em))).scalars().all()
+
+    return PosicaoDebitoOut(
+        posicao=item.posicao, total_grupo=len(grupo.itens), situacao=item.situacao,
+        motivo_bloqueio=item.motivo_bloqueio, marco_em=item.marco_em,
+        excecoes=[ExcecaoCronologicaOut.model_validate(e) for e in excecoes],
+    )

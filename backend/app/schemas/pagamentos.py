@@ -742,6 +742,36 @@ class FichaFonteOut(BaseModel):
     contas: list[FichaFonteContaItem]
 
 
+class PosicaoFilaItem(BaseModel):
+    """Uma linha da fila cronológica, com a `posicao` calculada por
+    `row_number()` na consulta — nunca armazenada (F3, Task 3)."""
+    posicao: int; id_debito: int; fornecedor_nome: str; descricao: str
+    valor_total: Decimal; marco_em: datetime; situacao: str
+    motivo_bloqueio: str | None; previsao_pagamento: date | None; tem_excecao: bool
+
+
+class FilaCronologicaGrupo(BaseModel):
+    """Débitos da fila cronológica agrupados pela chave `(id_unidade,
+    id_fonte_recursos, categoria, exercicio)`, ordenados por `marco_em, id`."""
+    id_unidade: int; unidade_nome: str | None
+    id_fonte_recursos: int; fonte_nome: str
+    categoria: str; exercicio: int
+    itens: list[PosicaoFilaItem]
+
+
+class ExcecaoCronologicaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; justificativa: str; fundamento: str; id_autoridade: int
+    data_autorizacao: date; criado_em: datetime
+
+
+class PosicaoDebitoOut(BaseModel):
+    """Posição de um débito específico na fila cronológica (F3, Task 3)."""
+    posicao: int; total_grupo: int; situacao: str
+    motivo_bloqueio: str | None; marco_em: datetime
+    excecoes: list[ExcecaoCronologicaOut]
+
+
 class FilaAutorizacaoFonteGrupo(BaseModel):
     """Débitos APROVADO de uma fonte + contas elegíveis para pagá-los (v2.0)."""
     id_fonte: int; codigo_fonte: str; descricao_fonte: str
