@@ -173,14 +173,18 @@ DEBITOS = [
      Decimal("124000.00"), 1, "encaminhado"),
     ("Aquisição de mobiliário escolar", 1, 2, 1, 2, None,
      Decimal("63200.00"), 2, "encaminhado"),
-    ("Serviços gráficos — campanha de vacinação", 5, 1, 2, 3, None,
-     Decimal("8900.00"), 1, "autorizado"),
-    ("Suprimentos de informática — 1º trimestre", 2, 0, 0, 0, 2,
-     Decimal("21700.00"), 1, "autorizado"),
+    # F3 (ordem cronológica): os débitos que vão até "pago" precisam ser
+    # liquidados ANTES dos que param em "autorizado" — senão o autorizado fica
+    # elegível à frente na fila e a guarda de preterição barra a liberação com
+    # 409. O marco vem da liquidação, que aqui é a ordem desta lista.
     ("Material de expediente — reposição", 1, 0, 0, 0, 1,
      Decimal("11250.00"), 1, "pago"),
     ("Manutenção elétrica do prédio da Prefeitura", 2, 1, 0, 0, None,
      Decimal("16480.00"), 1, "pago"),
+    ("Serviços gráficos — campanha de vacinação", 5, 1, 2, 3, None,
+     Decimal("8900.00"), 1, "autorizado"),
+    ("Suprimentos de informática — 1º trimestre", 2, 0, 0, 0, 2,
+     Decimal("21700.00"), 1, "autorizado"),
     ("Aquisição de equipamentos de refrigeração", 0, 2, 2, 3, None,
      Decimal("34900.00"), 1, "suspenso"),
 ]
