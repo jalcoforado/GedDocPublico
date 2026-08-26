@@ -14,6 +14,7 @@ from ..schemas.pagamentos import DebitoCreate, DebitoUpdate
 from . import audit
 from . import pagamentos_ajustes as ajustes
 from . import pagamentos_cadastros as cad
+from . import pagamentos_cronologia as cron
 from . import pagamentos_estados as est
 from . import pagamentos_guardas as grd
 from . import pagamentos_versionamento as pv
@@ -152,7 +153,7 @@ async def criar_debito(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                competencia=payload.competencia, numero_ne=payload.numero_ne,
                numero_nf=payload.numero_nf, criticidade=payload.criticidade,
                urgente=payload.urgente, justificativa_urgencia=payload.justificativa_urgencia,
-               descricao=payload.descricao,
+               descricao=payload.descricao, categoria=payload.categoria,
                situacao_tramitacao=est.RASCUNHO, situacao_fila=est.NAO_REGISTRADA,
                situacao_pagamento=est.NAO_INICIADA, status="RASCUNHO",
                id_unidade=payload.id_unidade,
@@ -266,6 +267,8 @@ async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
                 db, tenant_id=tenant_id, id_usuario=usuario_id,
                 acao="debito.versao_criada", entidade="debito", id_entidade=d.id,
                 payload={"campos_alterados": sorted(alterados), "versao": d.versao})
+    data_liquidacao_mudou = ("data_liquidacao" in dados
+                             and dados["data_liquidacao"] != d.data_liquidacao)
     for k, v in dados.items():
         setattr(d, k, v)
     if parcelas_novas is not None:
@@ -274,6 +277,17 @@ async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
         for p in payload.parcelas:
             db.add(Parcela(tenant_id=tenant_id, id_debito=d.id, numero=p.numero,
                            valor=p.valor, vencimento=p.vencimento, criado_em=_utcnow()))
+    if data_liquidacao_mudou:
+        posicao = await cron.obter_posicao(db, tenant_id=tenant_id, id_debito=d.id)
+        if posicao is not None:
+            await cron.regravar_marco(
+                db, tenant_id=tenant_id, debito=d,
+                data_liquidacao_nova=d.data_liquidacao)
+            db.add(DebitoHistorico(
+                tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
+                status_novo=d.status, acao="MARCO_REGRAVADO",
+                justificativa=f"Marco regravado para {d.data_liquidacao.isoformat()}.",
+                id_usuario=usuario_id, criado_em=_utcnow(), versao_debito=d.versao))
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
 
@@ -670,8 +684,13 @@ async def cancelar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_
             f"Solicitação já encerrada ou autorizada ('{d.situacao_tramitacao}'); "
             "não pode ser cancelada.",
             status.HTTP_409_CONFLICT)
+    tem_posicao = await cron.obter_posicao(db, tenant_id=tenant_id, id_debito=d.id) is not None
     _registrar_transicao(db, debito=d, acao="CANCELADO", usuario_id=usuario_id,
-                         tramitacao=est.CANCELADA, justificativa=justificativa, ip=ip)
+                         tramitacao=est.CANCELADA,
+                         fila=est.RETIRADA if tem_posicao else None,
+                         justificativa=justificativa, ip=ip)
+    if tem_posicao:
+        await cron.retirar_da_fila(db, tenant_id=tenant_id, id_debito=d.id)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
 
@@ -679,15 +698,28 @@ async def cancelar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_
 async def confirmar_liquidacao(db: AsyncSession, *, tenant_id: int, debito_id: int,
                                usuario_id: int, data_liquidacao=None, ip: str | None = None) -> Debito:
     """Confirma a liquidação (recebimento/atesto) — pré-requisito para validar/autorizar
-    (RF-VAL-02/RN-01). Permitido nas etapas pré-validação; não muda o status."""
+    (RF-VAL-02/RN-01). Permitido nas etapas pré-validação; não muda o status.
+
+    F3: também registra o débito na fila cronológica
+    (`pagamentos_cronologia.registrar_na_fila`), exigindo categoria resolvida
+    (do contrato ou do próprio débito) — 422 se nenhuma das duas existir.
+    Idempotente: reliquidar (ou confirmar de novo) não regrava o marco."""
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
     _exigir_status(d, ST_RASCUNHO, ST_DEVOLVIDO, ST_EM_VALIDACAO, ST_VALIDADO)
+    data_liquidacao = data_liquidacao or _utcnow().date()
+
+    contrato = await cron.obter_contrato(db, tenant_id=tenant_id, id_contrato=d.id_contrato)
+    if cron.categoria_do_debito(d, contrato) is None:
+        raise PagamentoDebitoError(
+            "Débito sem contrato precisa de categoria para confirmar a liquidação.",
+            status.HTTP_422_UNPROCESSABLE_ENTITY)
+
     d.liquidacao_confirmada = True
-    d.data_liquidacao = data_liquidacao or _utcnow().date()
-    db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
-                           status_novo=d.status, acao="LIQUIDADO",
-                           justificativa=f"Liquidação em {d.data_liquidacao.isoformat()}",
-                           id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
+    d.data_liquidacao = data_liquidacao
+    await cron.registrar_na_fila(db, tenant_id=tenant_id, debito=d, data_liquidacao=data_liquidacao)
+    _registrar_transicao(db, debito=d, acao="LIQUIDADO", usuario_id=usuario_id,
+                         fila=est.REGISTRADA,
+                         justificativa=f"Liquidação em {d.data_liquidacao.isoformat()}", ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
 
@@ -710,5 +742,6 @@ def debito_out(d: Debito, *, nome_fornecedor: str) -> dict:
         "id_gestor_decisor": d.id_gestor_decisor, "id_validador": d.id_validador,
         "id_usuario_solicitante": d.id_usuario_solicitante,
         "liquidacao_confirmada": d.liquidacao_confirmada, "data_liquidacao": d.data_liquidacao,
+        "categoria": d.categoria,
         "criado_em": d.criado_em, "atualizado_em": d.atualizado_em,
     }

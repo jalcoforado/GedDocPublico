@@ -26,7 +26,7 @@ from ..models.pagamentos import Debito, DebitoVersao
 CAMPOS_MATERIAIS: frozenset[str] = frozenset({
     "id_fornecedor", "valor_total", "numero_nf", "numero_ne",
     "id_fonte_recursos", "id_contrato", "descricao", "data_liquidacao",
-    "id_unidade",
+    "id_unidade", "categoria",
 })
 
 CAMPOS_NAO_MATERIAIS: frozenset[str] = frozenset({

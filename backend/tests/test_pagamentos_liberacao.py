@@ -56,6 +56,8 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
             "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
             "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
             "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
             "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
@@ -99,6 +101,7 @@ def _payload_debito(forn, nat, conta, *, valor="1000.00", parcelas=None):
         id_fonte_recursos=conta.id_fonte_recursos, id_conta=conta.id,
         valor_total=valor, competencia="2026-07", descricao="Compra de material",
         numero_ne="NE-2026-0001",  # empenho obrigatório para autorizar (RN-01)
+        categoria="SERVICOS",  # débito sem contrato: exigida p/ confirmar_liquidacao (F3)
         parcelas=parcelas or [ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
     )
 

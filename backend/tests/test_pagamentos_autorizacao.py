@@ -66,6 +66,8 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
             "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
             "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
             "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
             "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
@@ -119,6 +121,7 @@ def _payload_debito(forn, nat, fonte, conta=None, *, unidade_id: int,
         id_unidade=unidade_id,
         valor_total=valor, competencia="2026-07", descricao="Compra de material",
         numero_ne="NE-2026-0001",  # empenho obrigatório para autorizar (RN-01)
+        categoria="SERVICOS",  # débito sem contrato: exigida p/ confirmar_liquidacao (F3)
         parcelas=parcelas or [ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
     )
 
@@ -177,7 +180,11 @@ async def _debito_aprovado(engine, tenant_id, *, valor="1000.00", saldo_inicial=
             lock_version=d.lock_version)
     if liquidar:  # liquidação → validar (chega à fila da autoridade)
         async with _sm(engine)() as s:
-            await deb.confirmar_liquidacao(s, tenant_id=tenant_id, debito_id=d.id, usuario_id=validador)
+            # F3: confirmar_liquidacao agora passa por `_registrar_transicao`
+            # (fila=REGISTRADA) e incrementa lock_version — precisa capturar
+            # o retorno, senão o `validar` abaixo usa lock_version obsoleto.
+            d = await deb.confirmar_liquidacao(
+                s, tenant_id=tenant_id, debito_id=d.id, usuario_id=validador)
         async with _sm(engine)() as s:
             d = await deb.validar(
                 s, tenant_id=tenant_id, debito_id=d.id, usuario_id=validador,
@@ -368,7 +375,7 @@ async def test_rf_aut_11_fonte_sem_conta_ativa_bloqueia(admin_engine):
                 s, tenant_id=t.id, debito_id=d.id, usuario_id=gestor,
                 lock_version=d.lock_version)
         async with _sm(admin_engine)() as s:
-            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+            d = await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
         async with _sm(admin_engine)() as s:
             d = await deb.validar(
                 s, tenant_id=t.id, debito_id=d.id, usuario_id=val,
@@ -421,7 +428,7 @@ async def test_validar_sem_liquidacao_422(admin_engine):
             assert "liquidação" in exc.value.detail.lower()
         # confirmando a liquidação: validar → autoriza
         async with _sm(admin_engine)() as s:
-            await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+            d = await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
         async with _sm(admin_engine)() as s:
             d = await deb.validar(
                 s, tenant_id=t.id, debito_id=d.id, usuario_id=val,

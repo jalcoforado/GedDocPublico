@@ -209,6 +209,10 @@ class Debito(Base):
     # Liquidação (v2.0 RF-VAL-02/RN-01) — guarda antes de autorizar.
     liquidacao_confirmada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     data_liquidacao: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Categoria da fila cronológica (F3, migration 0108) — só usada quando o
+    # débito NÃO tem contrato; com contrato, `categoria_do_debito` usa a do
+    # contrato e esta coluna fica None.
+    categoria: Mapped[str | None] = mapped_column(String(20), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

@@ -88,6 +88,8 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
             "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
             "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
             "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
             "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
@@ -172,7 +174,7 @@ async def _setup_debito(engine, tenant_id: int, usuario_id: int):
                 numero=f"CT-{uuid.uuid4().hex[:8]}", id_fornecedor=fornecedor.id,
                 id_unidade=unidade.id, objeto="Serviços de Teste",
                 vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
-                valor_total=Decimal("5000.00"),
+                valor_total=Decimal("5000.00"), categoria="SERVICOS",
             ),
         )
 

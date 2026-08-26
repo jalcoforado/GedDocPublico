@@ -58,6 +58,8 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
             "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
             "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
             "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
             "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
@@ -194,6 +196,7 @@ async def test_autorizar_conta_nao_paga_422(admin_engine):
                 id_fornecedor=forn.id, id_natureza=nat.id, id_fonte_recursos=fonte_id,
                 id_unidade=unidade_id,
                 valor_total="100.00", competencia="2026-07", descricao="x",
+                categoria="SERVICOS",  # débito sem contrato: exigida p/ confirmar_liquidacao (F3)
                 parcelas=[ParcelaCreate(numero=1, valor="100.00", vencimento="2026-08-01")]))
         async with _sm(admin_engine)() as s:
             d = await deb.enviar_para_gestor(

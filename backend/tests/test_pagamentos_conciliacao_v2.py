@@ -57,6 +57,8 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
             "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
             "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
             "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
             "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
@@ -114,6 +116,7 @@ async def _debito_pago(engine, tenant_id, forn, nat, fonte, conta, *, valor="100
             id_fornecedor=forn.id, id_natureza=nat.id, id_fonte_recursos=fonte.id,
             id_unidade=fonte._id_unidade_teste,
             valor_total=valor, competencia="2026-07", descricao="x", numero_ne="NE-1",
+            categoria="SERVICOS",  # débito sem contrato: exigida p/ confirmar_liquidacao (F3)
             parcelas=[ParcelaCreate(numero=1, valor=valor, vencimento=venc)]))
     async with _sm(engine)() as s:
         d = await deb.enviar_para_gestor(

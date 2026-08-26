@@ -81,6 +81,8 @@ async def _provisionar(engine):
 async def _cleanup(engine, tenant_id: int) -> None:
     async with _sm(engine)() as s:
         for stmt in (
+            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
+            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
             "DELETE FROM pagamentos.anexo_debito WHERE tenant_id=:t",
             "DELETE FROM pagamentos.debito_versao WHERE tenant_id=:t",
             "DELETE FROM pagamentos.pedido_ajuste WHERE tenant_id=:t",
@@ -163,7 +165,7 @@ async def _setup_debito(engine, tenant_id: int, usuario_id: int):
                 numero=f"CT-{uuid.uuid4().hex[:8]}", id_fornecedor=fornecedor.id,
                 id_unidade=unidade.id, objeto="Serviços de Teste",
                 vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
-                valor_total=Decimal("5000.00"),
+                valor_total=Decimal("5000.00"), categoria="SERVICOS",
             ),
         )
 

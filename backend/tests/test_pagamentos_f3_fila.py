@@ -7,21 +7,23 @@ aceita id fixo).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models import PosicaoCronologica
 from app.schemas.pagamentos import (
-    ContaCreate, ContratoCreate, DebitoCreate, FonteCreate, FornecedorCreate,
-    NaturezaCreate, ParcelaCreate,
+    ContaCreate, ContratoCreate, DebitoCreate, DebitoUpdate, FonteCreate,
+    FornecedorCreate, NaturezaCreate, ParcelaCreate,
 )
 from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_debitos as svc
+from app.services import pagamentos_estados as est
 from app.services.provisioning_tenant import provisionar_tenant
 
 
@@ -58,7 +60,9 @@ async def _provisionar(engine):
             admin_nome="Adm", admin_cpf=uuid.uuid4().hex[:11], plano="basico",
         )
     solicitante_id = await _criar_usuario(engine, tenant.id, "Solicitante")
-    return tenant, solicitante_id
+    gestor_id = await _criar_usuario(engine, tenant.id, "Gestor")
+    validador_id = await _criar_usuario(engine, tenant.id, "Validador")
+    return tenant, solicitante_id, gestor_id, validador_id
 
 
 async def _cleanup(engine, tenant_id: int) -> None:
@@ -97,10 +101,13 @@ async def _cleanup(engine, tenant_id: int) -> None:
         await s.commit()
 
 
-async def _setup_debito(engine, tenant_id: int, usuario_id: int):
+async def _setup_debito(engine, tenant_id: int, usuario_id: int, *,
+                        com_contrato: bool = True, categoria: str | None = None):
     """Cria um débito completo em rascunho com fonte, conta, fornecedor etc.
 
-    Cópia do helper homônimo em `test_pagamentos_f2_ajustes.py`."""
+    Cópia do helper homônimo em `test_pagamentos_f2_ajustes.py`, com
+    `com_contrato`/`categoria` novos (Task 2) para exercitar o débito SEM
+    contrato, que carrega a categoria em si mesmo."""
     async with _sm(engine)() as s:
         fornecedor = await cad.criar_fornecedor(
             s, tenant_id=tenant_id,
@@ -142,24 +149,27 @@ async def _setup_debito(engine, tenant_id: int, usuario_id: int):
             s, tenant_id=tenant_id,
             payload=NaturezaCreate(codigo=f"N{uuid.uuid4().hex[:5]}", descricao="Teste"),
         )
-        contrato = await cad.criar_contrato(
-            s, tenant_id=tenant_id,
-            payload=ContratoCreate(
-                numero=f"CT-{uuid.uuid4().hex[:8]}", id_fornecedor=fornecedor.id,
-                id_unidade=unidade.id, objeto="Serviços de Teste",
-                vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
-                valor_total=Decimal("5000.00"),
-            ),
-        )
+        id_contrato = None
+        if com_contrato:
+            contrato = await cad.criar_contrato(
+                s, tenant_id=tenant_id,
+                payload=ContratoCreate(
+                    numero=f"CT-{uuid.uuid4().hex[:8]}", id_fornecedor=fornecedor.id,
+                    id_unidade=unidade.id, objeto="Serviços de Teste",
+                    vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
+                    valor_total=Decimal("5000.00"), categoria="SERVICOS",
+                ),
+            )
+            id_contrato = contrato.id
 
         debito = await svc.criar_debito(
             s, tenant_id=tenant_id, usuario_id=usuario_id,
             payload=DebitoCreate(
                 numero_nf="NF123456", id_fornecedor=fornecedor.id,
-                id_natureza=natureza.id, id_contrato=contrato.id,
+                id_natureza=natureza.id, id_contrato=id_contrato,
                 id_fonte_recursos=fonte.id, id_unidade=unidade.id,
                 valor_total=Decimal("1000.00"), descricao="Débito de Teste",
-                competencia="2026-01",
+                competencia="2026-01", categoria=categoria,
                 parcelas=[ParcelaCreate(numero=1, valor=Decimal("1000.00"), vencimento="2026-02-01")],
             ),
         )
@@ -182,7 +192,7 @@ async def test_nenhum_contrato_sem_categoria(admin_engine):
 async def test_posicao_e_unica_por_debito(admin_engine):
     """Prova o UNIQUE `(tenant_id, id_debito)` de `posicao_cronologica`:
     inserir uma segunda posição para o mesmo débito estoura IntegrityError."""
-    tenant, solicitante_id = await _provisionar(admin_engine)
+    tenant, solicitante_id, _gestor_id, _validador_id = await _provisionar(admin_engine)
     try:
         debito, fonte_id, unidade_id = await _setup_debito(admin_engine, tenant.id, solicitante_id)
 
@@ -204,5 +214,216 @@ async def test_posicao_e_unica_por_debito(admin_engine):
                     registrado_em=datetime.utcnow(),
                 ))
                 await s.commit()
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — registro do marco na liquidação
+# ---------------------------------------------------------------------------
+
+
+async def _levar_ate_aguardando_validacao(engine, tenant_id, debito, solicitante_id, gestor_id):
+    """Fluxo real: enviar ao gestor -> gestor autoriza -> AGUARDANDO_VALIDACAO.
+
+    Cópia do helper homônimo em `test_pagamentos_f2_ajustes.py`."""
+    async with _sm(engine)() as s:
+        debito = await svc.enviar_para_gestor(
+            s, tenant_id=tenant_id, debito_id=debito.id,
+            usuario_id=solicitante_id, lock_version=debito.lock_version,
+        )
+        debito = await svc.gestor_autorizar(
+            s, tenant_id=tenant_id, debito_id=debito.id,
+            usuario_id=gestor_id, lock_version=debito.lock_version,
+        )
+    return debito
+
+
+async def _posicao_do_debito(engine, tenant_id: int, debito_id: int) -> PosicaoCronologica | None:
+    async with _sm(engine)() as s:
+        return (await s.execute(select(PosicaoCronologica).where(
+            PosicaoCronologica.tenant_id == tenant_id,
+            PosicaoCronologica.id_debito == debito_id,
+        ))).scalar_one_or_none()
+
+
+@pytest.mark.asyncio
+async def test_liquidacao_registra_na_fila(admin_engine):
+    """Débito COM contrato (categoria SERVICOS): `confirmar_liquidacao` cria a
+    posição na fila (situacao REGISTRADA, exercicio=ano, categoria do
+    contrato, marco_em.date()==data_liquidacao) e sincroniza `situacao_fila`."""
+    tenant, solicitante_id, _gestor_id, validador_id = await _provisionar(admin_engine)
+    try:
+        debito, fonte_id, unidade_id = await _setup_debito(admin_engine, tenant.id, solicitante_id)
+        data_liq = date(2026, 3, 10)
+
+        async with _sm(admin_engine)() as s:
+            debito = await svc.confirmar_liquidacao(
+                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=validador_id,
+                data_liquidacao=data_liq)
+
+        assert debito.situacao_fila == est.REGISTRADA
+
+        posicao = await _posicao_do_debito(admin_engine, tenant.id, debito.id)
+        assert posicao is not None
+        assert posicao.situacao == est.REGISTRADA
+        assert posicao.exercicio == 2026
+        assert posicao.categoria == "SERVICOS"
+        assert posicao.id_unidade == unidade_id
+        assert posicao.id_fonte_recursos == fonte_id
+        assert posicao.marco_em.date() == data_liq
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_liquidacao_sem_contrato_usa_categoria_do_debito(admin_engine):
+    """Débito SEM contrato: a categoria vem do próprio débito."""
+    tenant, solicitante_id, _gestor_id, validador_id = await _provisionar(admin_engine)
+    try:
+        debito, _fonte_id, _unidade_id = await _setup_debito(
+            admin_engine, tenant.id, solicitante_id, com_contrato=False, categoria="BENS")
+        data_liq = date(2026, 4, 1)
+
+        async with _sm(admin_engine)() as s:
+            await svc.confirmar_liquidacao(
+                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=validador_id,
+                data_liquidacao=data_liq)
+
+        posicao = await _posicao_do_debito(admin_engine, tenant.id, debito.id)
+        assert posicao is not None
+        assert posicao.categoria == "BENS"
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_liquidacao_sem_contrato_e_sem_categoria_e_422(admin_engine):
+    """Débito SEM contrato E sem categoria própria: 422 — sem categoria não
+    há como entrar na fila cronológica."""
+    tenant, solicitante_id, _gestor_id, validador_id = await _provisionar(admin_engine)
+    try:
+        debito, _fonte_id, _unidade_id = await _setup_debito(
+            admin_engine, tenant.id, solicitante_id, com_contrato=False, categoria=None)
+
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as exc:
+                await svc.confirmar_liquidacao(
+                    s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=validador_id)
+        assert exc.value.status_code == 422
+
+        posicao = await _posicao_do_debito(admin_engine, tenant.id, debito.id)
+        assert posicao is None
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_liquidar_duas_vezes_nao_regrava_marco(admin_engine):
+    """Segunda confirmação de liquidação (re-liquidação) mantém o marco_em
+    original — `registrar_na_fila` é idempotente."""
+    tenant, solicitante_id, _gestor_id, validador_id = await _provisionar(admin_engine)
+    try:
+        debito, _fonte_id, _unidade_id = await _setup_debito(admin_engine, tenant.id, solicitante_id)
+
+        async with _sm(admin_engine)() as s:
+            debito = await svc.confirmar_liquidacao(
+                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=validador_id,
+                data_liquidacao=date(2026, 3, 10))
+        primeira = await _posicao_do_debito(admin_engine, tenant.id, debito.id)
+        marco_original = primeira.marco_em
+
+        async with _sm(admin_engine)() as s:
+            await svc.confirmar_liquidacao(
+                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=validador_id,
+                data_liquidacao=date(2026, 5, 20))
+
+        segunda = await _posicao_do_debito(admin_engine, tenant.id, debito.id)
+        assert segunda.marco_em == marco_original
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_edicao_material_de_data_liquidacao_regrava_marco(admin_engine):
+    """Débito liquidado + em AJUSTE_VALIDACAO: `atualizar_debito` mudando
+    `data_liquidacao` regrava o marco e grava histórico MARCO_REGRAVADO."""
+    tenant, solicitante_id, gestor_id, validador_id = await _provisionar(admin_engine)
+    try:
+        debito, _fonte_id, _unidade_id = await _setup_debito(admin_engine, tenant.id, solicitante_id)
+        debito = await _levar_ate_aguardando_validacao(
+            admin_engine, tenant.id, debito, solicitante_id, gestor_id)
+
+        async with _sm(admin_engine)() as s:
+            debito = await svc.confirmar_liquidacao(
+                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=validador_id,
+                data_liquidacao=date(2026, 3, 10))
+        posicao_antes = await _posicao_do_debito(admin_engine, tenant.id, debito.id)
+
+        async with _sm(admin_engine)() as s:
+            debito = await svc.solicitar_ajuste(
+                s, tenant_id=tenant.id, debito_id=debito.id,
+                usuario_id=validador_id, lock_version=debito.lock_version,
+                etapa="VALIDACAO", motivo="Data de liquidação errada",
+                descricao="A data de liquidação registrada está errada.",
+                transacao_responsavel="pagamento_solicitar", tipo="MATERIAL",
+            )
+        assert debito.situacao_tramitacao == "AJUSTE_VALIDACAO"
+
+        nova_data = date(2026, 6, 15)
+        async with _sm(admin_engine)() as s:
+            debito = await svc.atualizar_debito(
+                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
+                payload=DebitoUpdate(data_liquidacao=nova_data),
+            )
+
+        posicao_depois = await _posicao_do_debito(admin_engine, tenant.id, debito.id)
+        assert posicao_depois.marco_em.date() == nova_data
+        assert posicao_depois.marco_em != posicao_antes.marco_em
+
+        async with _sm(admin_engine)() as s:
+            historico = await svc.listar_historico(s, tenant_id=tenant.id, debito_id=debito.id)
+        assert any(h.acao == "MARCO_REGRAVADO" for h in historico)
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_cancelar_debito_na_fila_vira_retirada(admin_engine):
+    """`cancelar` um débito com posição na fila muda `situacao_fila` para
+    RETIRADA e espelha em `posicao_cronologica.situacao`."""
+    tenant, solicitante_id, gestor_id, validador_id = await _provisionar(admin_engine)
+    try:
+        debito, _fonte_id, _unidade_id = await _setup_debito(admin_engine, tenant.id, solicitante_id)
+        debito = await _levar_ate_aguardando_validacao(
+            admin_engine, tenant.id, debito, solicitante_id, gestor_id)
+
+        async with _sm(admin_engine)() as s:
+            debito = await svc.confirmar_liquidacao(
+                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=validador_id,
+                data_liquidacao=date(2026, 3, 10))
+
+        # AGUARDANDO_VALIDACAO não alcança CANCELADA no grafo de tramitação —
+        # passa por AJUSTE_VALIDACAO, que alcança, para exercitar o
+        # cancelamento com posição já registrada na fila.
+        async with _sm(admin_engine)() as s:
+            debito = await svc.solicitar_ajuste(
+                s, tenant_id=tenant.id, debito_id=debito.id,
+                usuario_id=validador_id, lock_version=debito.lock_version,
+                etapa="VALIDACAO", motivo="Pendência qualquer",
+                descricao="Pendência qualquer antes do cancelamento.",
+                transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
+            )
+
+        async with _sm(admin_engine)() as s:
+            debito = await svc.cancelar(
+                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
+                lock_version=debito.lock_version, justificativa="Erro na solicitação.",
+            )
+
+        assert debito.situacao_fila == est.RETIRADA
+
+        posicao = await _posicao_do_debito(admin_engine, tenant.id, debito.id)
+        assert posicao.situacao == est.RETIRADA
     finally:
         await _cleanup(admin_engine, tenant.id)

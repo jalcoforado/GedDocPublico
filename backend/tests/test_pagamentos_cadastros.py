@@ -473,7 +473,7 @@ async def test_contrato_e_alcada_crud(admin_engine):
                 payload=ContratoCreate(
                     numero="CT-001/2026", id_fornecedor=fornecedor.id, id_unidade=id_unidade,
                     objeto="Fornecimento", vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
-                    valor_total="100000.00",
+                    valor_total="100000.00", categoria="SERVICOS",
                 ),
             )
         assert contrato.numero == "CT-001/2026"
@@ -486,7 +486,7 @@ async def test_contrato_e_alcada_crud(admin_engine):
                     payload=ContratoCreate(
                         numero="CT-001/2026", id_fornecedor=fornecedor.id, id_unidade=id_unidade,
                         objeto="x", vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
-                        valor_total="1.00",
+                        valor_total="1.00", categoria="SERVICOS",
                     ),
                 )
             assert exc.value.status_code == 409
@@ -498,7 +498,7 @@ async def test_contrato_e_alcada_crud(admin_engine):
                     payload=ContratoCreate(
                         numero="CT-002/2026", id_fornecedor=fornecedor.id, id_unidade=999999,
                         objeto="x", vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
-                        valor_total="1.00",
+                        valor_total="1.00", categoria="SERVICOS",
                     ),
                 )
             assert exc.value.status_code == 422

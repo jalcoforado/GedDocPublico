@@ -15,6 +15,7 @@ CriticidadeLit = Literal["URGENTE", "ALTA", "MEDIA", "BAIXA"]
 GrupoDespesaLit = Literal["PESSOAL", "CUSTEIO", "INVESTIMENTO", "DIVIDA", "OUTRAS"]
 SituacaoFonte = Literal["ATIVA", "SUSPENSA", "ENCERRADA"]
 ModoMovimentacao = Literal["PAGA", "RECEBE", "TRANSFERE", "RESTRITA"]
+CategoriaLit = Literal["BENS", "LOCACOES", "SERVICOS", "OBRAS"]
 
 
 # ---------- fornecedor ----------
@@ -185,6 +186,10 @@ class ContratoCreate(BaseModel):
     vigencia_inicio: date
     vigencia_fim: date
     valor_total: Decimal
+    # Categoria da fila cronológica (F3, spec §4.4) — obrigatória desde a
+    # 0107/Task 2: todo contrato novo já nasce classificado, e é dela que
+    # `categoria_do_debito` deriva a categoria dos débitos vinculados.
+    categoria: CategoriaLit
 
 
 class ContratoUpdate(BaseModel):
@@ -195,12 +200,14 @@ class ContratoUpdate(BaseModel):
     vigencia_inicio: date | None = None
     vigencia_fim: date | None = None
     valor_total: Decimal | None = None
+    categoria: CategoriaLit | None = None
 
 
 class ContratoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int; numero: str; id_fornecedor: int; id_unidade: int; objeto: str
     vigencia_inicio: date; vigencia_fim: date; valor_total: Decimal
+    categoria: CategoriaLit | None = None
     criado_em: datetime; atualizado_em: datetime | None
 
 
@@ -363,6 +370,9 @@ class DebitoCreate(BaseModel):
     justificativa_urgencia: str | None = Field(default=None, max_length=255)
     descricao: str = Field(min_length=1, max_length=255)
     parcelas: list[ParcelaCreate] = Field(min_length=1)
+    # Categoria da fila cronológica (F3) — só relevante quando não há
+    # contrato: com contrato, `categoria_do_debito` usa a dele.
+    categoria: CategoriaLit | None = None
 
 
 class DebitoUpdate(BaseModel):
@@ -381,6 +391,10 @@ class DebitoUpdate(BaseModel):
     justificativa_urgencia: str | None = Field(default=None, max_length=255)
     descricao: str | None = Field(default=None, min_length=1, max_length=255)
     parcelas: list[ParcelaCreate] | None = Field(default=None, min_length=1)
+    categoria: CategoriaLit | None = None
+    # Correção da data de liquidação (F3) — material (CAMPOS_MATERIAIS); se o
+    # débito já tem posição na fila cronológica, regrava o marco.
+    data_liquidacao: date | None = None
 
 
 class ParcelaOut(BaseModel):
@@ -411,6 +425,7 @@ class DebitoOut(BaseModel):
     id_validador: int | None = None
     id_usuario_solicitante: int
     liquidacao_confirmada: bool = False; data_liquidacao: date | None = None
+    categoria: CategoriaLit | None = None
     criado_em: datetime; atualizado_em: datetime | None
 
 

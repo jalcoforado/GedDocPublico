@@ -572,6 +572,7 @@ async def _apply_pagamentos(tenant_id: int, contagens: dict[str, int]) -> None:
                     numero=num, id_fornecedor=fornecedores[forn_idx], id_unidade=id_unidade,
                     objeto=objeto, vigencia_inicio=hoje - timedelta(days=60),
                     vigencia_fim=hoje + timedelta(days=30 * meses), valor_total=valor,
+                    categoria="SERVICOS",
                 ),
             )
             contratos.append(c.id)
@@ -655,6 +656,8 @@ async def _apply_pagamentos(tenant_id: int, contagens: dict[str, int]) -> None:
                         numero_ne=f"{DEMO_PREFIX}NE{2026000 + i}",
                         numero_nf=f"{100000 + i * 37}",
                         descricao=desc,
+                        # Sem contrato: categoria própria, exigida p/ confirmar_liquidacao (F3).
+                        categoria=None if ct_idx is not None else "SERVICOS",
                         parcelas=[
                             ParcelaCreate(numero=k + 1, valor=v, vencimento=venc)
                             for k, (v, venc) in enumerate(parcelas)
@@ -746,7 +749,9 @@ async def _levar_ao_estado(
             usuario_id=usuarios["solicitante"], marcado=True,
             observacao="Conferido pelo seed de demonstração.",
         )
-    await deb_svc.confirmar_liquidacao(
+    # F3: confirmar_liquidacao agora passa por _registrar_transicao
+    # (fila=REGISTRADA) e incrementa lock_version — captura o retorno.
+    debito = await deb_svc.confirmar_liquidacao(
         db, tenant_id=tenant_id, debito_id=debito.id, usuario_id=usuarios["solicitante"]
     )
     debito = await deb_svc.enviar_para_gestor(
@@ -1124,6 +1129,16 @@ RESET_PAGAMENTOS = [
     # silenciosamente (savepoint por bloco) e o débito sobrevive ao reset,
     # o que depois quebra também o DELETE de "usuarios_ops" em RESET_USUARIOS
     # (debito.id_usuario_solicitante ainda aponta pro usuário).
+    # F3 (migration 0107): posicao_cronologica/excecao_cronologica também têm
+    # FK para debito.id — `confirmar_liquidacao` (Task 2) passou a criar
+    # `posicao_cronologica` de verdade. Mesma armadilha do comentário acima:
+    # sem isso o DELETE de "debitos" falha em silêncio (savepoint por bloco).
+    ("posicoes_cronologicas", f"""
+        DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id = :t
+          AND id_debito IN ({_DEBITOS_DEMO})"""),
+    ("excecoes_cronologicas", f"""
+        DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id = :t
+          AND id_debito IN ({_DEBITOS_DEMO})"""),
     ("anexos_debito", f"""
         DELETE FROM pagamentos.anexo_debito WHERE tenant_id = :t
           AND id_debito IN ({_DEBITOS_DEMO})"""),

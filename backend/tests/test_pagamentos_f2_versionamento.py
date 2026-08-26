@@ -169,7 +169,7 @@ async def _setup_debito(engine, tenant_id: int, usuario_id: int):
                 numero=f"CT-{uuid.uuid4().hex[:8]}", id_fornecedor=fornecedor.id,
                 id_unidade=unidade.id, objeto="Serviços de Teste",
                 vigencia_inicio="2026-01-01", vigencia_fim="2026-12-31",
-                valor_total=Decimal("5000.00"),
+                valor_total=Decimal("5000.00"), categoria="SERVICOS",
             ),
         )
 

@@ -351,6 +351,10 @@ async def reset_modulo(db: AsyncSession, tenant_id: int) -> None:
         "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
         "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
         "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
+        # F3 (migration 0107): posicao_cronologica/excecao_cronologica têm FK
+        # para debito.id — sem isso o DELETE de debito abaixo falha.
+        "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
+        "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
         "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
         "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
         "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
@@ -415,7 +419,8 @@ async def seed_cadastros(db: AsyncSession, *, tenant_id: int, admin_id: int) -> 
         c = await cad.criar_contrato(db, tenant_id=tenant_id, payload=ContratoCreate(
             numero=f"CT-{2024 + (i % 2)}-{i + 1:03d}", id_fornecedor=forn.id, id_unidade=unidade.id,
             objeto=objeto, vigencia_inicio=add_months(hoje, -18 + i),
-            vigencia_fim=add_months(hoje, 12 + i), valor_total=_q2(random.randint(80_000, 900_000))))
+            vigencia_fim=add_months(hoje, 12 + i), valor_total=_q2(random.randint(80_000, 900_000)),
+            categoria="SERVICOS"))
         contratos.append(c)
     print(f"  {len(contratos)} contratos.")
 
