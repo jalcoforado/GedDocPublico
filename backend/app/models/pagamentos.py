@@ -625,3 +625,44 @@ class Conciliacao(Base):
     tipo_correspondencia: Mapped[str] = mapped_column(String(15), nullable=False)
     id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class PosicaoCronologica(Base):
+    """Uma linha por débito em fila cronológica (F3, spec §4.3) — unique
+    `(tenant_id, id_debito)`. `situacao` espelha `debito.situacao_fila`; a
+    chave de ordenação da fila é `(id_unidade, id_fonte_recursos, categoria,
+    exercicio, marco_em)`, coberta por `ix_posicao_cronologica_fila`
+    (migration 0107)."""
+    __tablename__ = "posicao_cronologica"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_debito: Mapped[int] = mapped_column(ForeignKey("pagamentos.debito.id"), nullable=False)
+    id_unidade: Mapped[int] = mapped_column(ForeignKey("utils.unidade_trabalho.id"), nullable=False)
+    id_fonte_recursos: Mapped[int] = mapped_column(ForeignKey("pagamentos.fonte_recursos.id"), nullable=False)
+    categoria: Mapped[str] = mapped_column(String(20), nullable=False)
+    exercicio: Mapped[int] = mapped_column(Integer, nullable=False)
+    marco_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    situacao: Mapped[str] = mapped_column(String(30), nullable=False)
+    motivo_bloqueio: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    previsao_pagamento: Mapped[date | None] = mapped_column(Date, nullable=True)
+    registrado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ExcecaoCronologica(Base):
+    """Furo de ordem cronológica autorizado (LRF/lei de licitações),
+    append-only — não há UPDATE nem DELETE previstos para o domínio
+    (migration 0107)."""
+    __tablename__ = "excecao_cronologica"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_debito: Mapped[int] = mapped_column(ForeignKey("pagamentos.debito.id"), nullable=False)
+    justificativa: Mapped[str] = mapped_column(Text, nullable=False)
+    fundamento: Mapped[str] = mapped_column(String(255), nullable=False)
+    id_autoridade: Mapped[int] = mapped_column(ForeignKey("utils.usuario.id"), nullable=False)
+    data_autorizacao: Mapped[date] = mapped_column(Date, nullable=False)
+    id_usuario_registro: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    documentos: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
