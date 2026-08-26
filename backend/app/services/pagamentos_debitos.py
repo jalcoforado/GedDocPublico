@@ -518,6 +518,7 @@ async def solicitar_ajuste(db: AsyncSession, *, tenant_id: int, debito_id: int,
             status.HTTP_422_UNPROCESSABLE_ENTITY)
     _registrar_transicao(db, debito=d, acao="AJUSTE_SOLICITADO", usuario_id=usuario_id,
                          tramitacao=destino, justificativa=motivo_limpo, ip=ip)
+    await cron.reavaliar_debito(db, tenant_id=tenant_id, debito_id=d.id, usuario_id=usuario_id)
     pedido = await ajustes.criar_pedido(
         db, tenant_id=tenant_id, debito=d, usuario_id=usuario_id, etapa=etapa,
         motivo=motivo_limpo, descricao=descricao, transacao_responsavel=transacao_responsavel,
@@ -603,6 +604,7 @@ async def responder_ajuste(db: AsyncSession, *, tenant_id: int, debito_id: int,
             payload={"versao": d.versao})
     _registrar_transicao(db, debito=d, acao="REENVIADO", usuario_id=usuario_id,
                          tramitacao=destino, ip=ip)
+    await cron.reavaliar_debito(db, tenant_id=tenant_id, debito_id=d.id, usuario_id=usuario_id)
     agora = _utcnow()
     for p in respondidos:
         p.situacao = "RESOLVIDO"
@@ -660,6 +662,7 @@ async def autoridade_aprovar(db: AsyncSession, *, tenant_id: int, debito_id: int
     grd.assert_segregacao(d, usuario_id=usuario_id, ato="AUTORIZAR")
     _registrar_transicao(db, debito=d, acao="AUTORIZADO", usuario_id=usuario_id,
                          tramitacao=est.AUTORIZADA, fila=est.ELEGIVEL, ip=ip)
+    await cron.reavaliar_debito(db, tenant_id=tenant_id, debito_id=d.id, usuario_id=usuario_id)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
 

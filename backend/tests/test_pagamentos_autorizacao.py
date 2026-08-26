@@ -241,7 +241,12 @@ async def test_autorizar_gera_op_grava_conta_pagadora_e_reserva(admin_engine):
             debs_op = await aut.debitos_da_ordem(s, tenant_id=t.id, ordem_id=op.id)
         assert d2.status == "AUTORIZADO"
         assert d2.id_conta_pagadora == conta.id      # gravada imutável na autorização
-        assert hist[0].acao == "AUTORIZADO"
+        # F3 (Task 4): a reavaliação síncrona da fila roda logo após a
+        # autorização e grava a própria transição (FILA_REAVALIADA),
+        # espelhando a posição — por isso o mais recente do histórico não é
+        # mais necessariamente "AUTORIZADO".
+        assert hist[0].acao == "FILA_REAVALIADA"
+        assert any(h.acao == "AUTORIZADO" for h in hist)
         assert [x.id for x in debs_op] == [d.id]
     finally:
         await _cleanup(admin_engine, t.id)

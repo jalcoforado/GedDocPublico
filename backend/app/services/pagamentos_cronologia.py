@@ -17,11 +17,12 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.pagamentos import (
-    Contrato, Debito, ExcecaoCronologica, FonteRecursos, Fornecedor, PosicaoCronologica,
+    BloqueioSaldo, Contrato, Debito, ExcecaoCronologica, FonteRecursos, Fornecedor, Parcela,
+    PedidoAjuste, PosicaoCronologica,
 )
 from ..models.unidade_trabalho import UnidadeTrabalho
 from ..schemas.pagamentos import (
@@ -127,6 +128,24 @@ async def retirar_da_fila(db: AsyncSession, *, tenant_id: int,
     if posicao is None:
         return None
     posicao.situacao = est.RETIRADA
+    posicao.atualizado_em = _utcnow()
+    await db.flush()
+    return posicao
+
+
+async def concluir_na_fila(db: AsyncSession, *, tenant_id: int,
+                           id_debito: int) -> PosicaoCronologica | None:
+    """Espelha a conclusão do pagamento (parcela integralmente paga) na
+    posição da fila (situacao CONCLUIDA), quando ela existe. Não comita.
+
+    Diferente de `reavaliar_debito`: CONCLUIDA não é um dos rótulos que
+    `avaliar_elegibilidade` produz — é uma dimensão de execução (F4), então
+    quem manda aqui é `pagar_parcela`, não a função pura."""
+    posicao = await obter_posicao(db, tenant_id=tenant_id, id_debito=id_debito)
+    if posicao is None:
+        return None
+    posicao.situacao = est.CONCLUIDA
+    posicao.motivo_bloqueio = None
     posicao.atualizado_em = _utcnow()
     await db.flush()
     return posicao
@@ -252,3 +271,162 @@ async def posicao_do_debito(db: AsyncSession, *, tenant_id: int,
         motivo_bloqueio=item.motivo_bloqueio, marco_em=item.marco_em,
         excecoes=[ExcecaoCronologicaOut.model_validate(e) for e in excecoes],
     )
+
+
+# ------------------------------------------------------------- elegibilidade
+# Task 4 — a fila cronológica não muda só na liquidação (Task 2): qualquer
+# evento que mude tramitação, fornecedor, saldo/bloqueio da conta pagadora ou
+# exceção autorizada pode mudar a elegibilidade de um débito já na fila. Esta
+# seção reavalia isso de forma síncrona, na mesma transação do evento.
+
+
+def avaliar_elegibilidade(*, tramitacao: str, tem_pedido_aberto: bool,
+                          fornecedor_regular: bool, disponivel_ok: bool,
+                          tem_bloqueio: bool, tem_excecao: bool) -> tuple[str, str | None]:
+    """Função PURA (sem IO) — o rótulo de fila que o débito deveria ter.
+
+    Ordem de precedência (RULING F3): tramitação fora de AUTORIZADA vence tudo
+    (a fila é irrelevante enquanto o rito não chegou lá); bloqueio de saldo
+    vence pedido aberto, que vence fornecedor irregular, que vence
+    indisponibilidade de saldo. `tem_excecao` só troca o rótulo de quem já
+    teria chegado a ELEGIVEL — a exceção fura a ORDEM cronológica, não cura
+    bloqueio, fornecedor irregular nem indisponibilidade de saldo.
+    """
+    if tramitacao != est.AUTORIZADA:
+        return est.REGISTRADA, None
+    if tem_bloqueio:
+        return est.BLOQUEADA, "Bloqueio de saldo ativo na conta pagadora."
+    if tem_pedido_aberto:
+        return est.BLOQUEADA, "Pedido de ajuste em aberto sobre o débito."
+    if not fornecedor_regular:
+        return est.BLOQUEADA, "Fornecedor com situação cadastral irregular."
+    if not disponivel_ok:
+        return est.AGUARDANDO_DISPONIBILIDADE, "Saldo disponível insuficiente na conta pagadora."
+    if tem_excecao:
+        return est.EXCECAO_AUTORIZADA, None
+    return est.ELEGIVEL, None
+
+
+async def _tem_pedido_aberto(db: AsyncSession, *, tenant_id: int, debito_id: int) -> bool:
+    stmt = select(func.count(PedidoAjuste.id)).where(
+        PedidoAjuste.tenant_id == tenant_id, PedidoAjuste.id_debito == debito_id,
+        PedidoAjuste.situacao == "ABERTO")
+    return (await db.execute(stmt)).scalar_one() > 0
+
+
+async def _tem_excecao(db: AsyncSession, *, tenant_id: int, debito_id: int) -> bool:
+    stmt = select(func.count(ExcecaoCronologica.id)).where(
+        ExcecaoCronologica.tenant_id == tenant_id, ExcecaoCronologica.id_debito == debito_id)
+    return (await db.execute(stmt)).scalar_one() > 0
+
+
+async def _fornecedor_regular(db: AsyncSession, *, tenant_id: int, fornecedor_id: int) -> bool:
+    forn = (await db.execute(select(Fornecedor.situacao_cadastral).where(
+        Fornecedor.tenant_id == tenant_id, Fornecedor.id == fornecedor_id,
+    ))).scalar_one_or_none()
+    return forn == "REGULAR"
+
+
+async def _tem_bloqueio(db: AsyncSession, *, tenant_id: int, id_conta_pagadora: int) -> bool:
+    hoje = date.today()
+    stmt = select(func.count(BloqueioSaldo.id)).where(
+        BloqueioSaldo.tenant_id == tenant_id, BloqueioSaldo.id_conta == id_conta_pagadora,
+        BloqueioSaldo.ativo.is_(True), BloqueioSaldo.excluido.is_(False),
+        BloqueioSaldo.periodo_inicio <= hoje,
+        or_(BloqueioSaldo.periodo_fim.is_(None), BloqueioSaldo.periodo_fim >= hoje))
+    return (await db.execute(stmt)).scalar_one() > 0
+
+
+async def _disponivel_ok(db: AsyncSession, *, tenant_id: int, id_conta_pagadora: int,
+                         debito_id: int) -> bool:
+    from . import pagamentos_caixa as caixa
+
+    saldo = await caixa.saldo_conta(db, tenant_id=tenant_id, conta_id=id_conta_pagadora)
+    pendente = (await db.execute(select(func.coalesce(func.sum(Parcela.valor), 0)).where(
+        Parcela.tenant_id == tenant_id, Parcela.id_debito == debito_id,
+        Parcela.excluido.is_(False), Parcela.status != "PAGA"))).scalar_one()
+    return saldo.disponivel >= pendente
+
+
+async def reavaliar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
+                           usuario_id: int | None = None) -> None:
+    """Recalcula a elegibilidade de UM débito e, se mudou, aplica a transição
+    (mesma transação do caller — não comita).
+
+    Débito sem posição na fila, ou já em situação terminal (CONCLUIDA/
+    RETIRADA), é no-op: a reavaliação só vale enquanto o débito ainda disputa
+    a ordem cronológica.
+    """
+    posicao = await obter_posicao(db, tenant_id=tenant_id, id_debito=debito_id)
+    if posicao is None or posicao.situacao in (est.CONCLUIDA, est.RETIRADA):
+        return
+
+    from . import pagamentos_debitos as deb
+
+    debito = await deb.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    tramitacao = debito.situacao_tramitacao
+
+    tem_excecao = await _tem_excecao(db, tenant_id=tenant_id, debito_id=debito_id)
+    tem_pedido_aberto = await _tem_pedido_aberto(db, tenant_id=tenant_id, debito_id=debito_id)
+
+    if tramitacao == est.AUTORIZADA:
+        fornecedor_regular = await _fornecedor_regular(
+            db, tenant_id=tenant_id, fornecedor_id=debito.id_fornecedor)
+        if debito.id_conta_pagadora is not None:
+            tem_bloqueio = await _tem_bloqueio(
+                db, tenant_id=tenant_id, id_conta_pagadora=debito.id_conta_pagadora)
+            disponivel_ok = await _disponivel_ok(
+                db, tenant_id=tenant_id, id_conta_pagadora=debito.id_conta_pagadora,
+                debito_id=debito_id)
+        else:
+            # Autorizado sem conta pagadora definida (rito singular, sem lote):
+            # nada a checar de saldo/bloqueio até a conta ser escolhida.
+            tem_bloqueio, disponivel_ok = False, True
+    else:
+        fornecedor_regular, tem_bloqueio, disponivel_ok = True, False, True
+
+    novo_fila, motivo = avaliar_elegibilidade(
+        tramitacao=tramitacao, tem_pedido_aberto=tem_pedido_aberto,
+        fornecedor_regular=fornecedor_regular, disponivel_ok=disponivel_ok,
+        tem_bloqueio=tem_bloqueio, tem_excecao=tem_excecao)
+
+    if novo_fila == posicao.situacao:
+        return
+
+    deb._registrar_transicao(db, debito=debito, acao="FILA_REAVALIADA",
+                             usuario_id=usuario_id, fila=novo_fila, justificativa=motivo)
+    posicao.situacao = novo_fila
+    posicao.motivo_bloqueio = motivo
+    posicao.atualizado_em = _utcnow()
+    await db.flush()
+
+
+async def reavaliar_por_fornecedor(db: AsyncSession, *, tenant_id: int,
+                                   fornecedor_id: int) -> int:
+    """Reavalia todos os débitos NÃO terminais desse fornecedor na fila.
+    Devolve quantos foram considerados (percorridos)."""
+    stmt = (select(PosicaoCronologica.id_debito)
+            .join(Debito, (Debito.id == PosicaoCronologica.id_debito)
+                  & (Debito.tenant_id == PosicaoCronologica.tenant_id))
+            .where(PosicaoCronologica.tenant_id == tenant_id,
+                   Debito.id_fornecedor == fornecedor_id,
+                   PosicaoCronologica.situacao.notin_((est.CONCLUIDA, est.RETIRADA))))
+    ids = [row[0] for row in (await db.execute(stmt)).all()]
+    for debito_id in ids:
+        await reavaliar_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    return len(ids)
+
+
+async def reavaliar_por_conta(db: AsyncSession, *, tenant_id: int, conta_id: int) -> int:
+    """Reavalia todos os débitos NÃO terminais cuja conta pagadora é `conta_id`.
+    Devolve quantos foram considerados (percorridos)."""
+    stmt = (select(PosicaoCronologica.id_debito)
+            .join(Debito, (Debito.id == PosicaoCronologica.id_debito)
+                  & (Debito.tenant_id == PosicaoCronologica.tenant_id))
+            .where(PosicaoCronologica.tenant_id == tenant_id,
+                   Debito.id_conta_pagadora == conta_id,
+                   PosicaoCronologica.situacao.notin_((est.CONCLUIDA, est.RETIRADA))))
+    ids = [row[0] for row in (await db.execute(stmt)).all()]
+    for debito_id in ids:
+        await reavaliar_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    return len(ids)

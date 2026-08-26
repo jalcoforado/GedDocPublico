@@ -13,6 +13,7 @@ from ..models import (
     Alcada, ContaBancaria, ContaFonteHistorico, Contrato, Fornecedor, FornecedorSituacaoHistorico,
     FonteRecursos, NaturezaDespesa, UnidadeTrabalho,
 )
+from . import pagamentos_cronologia as cron
 from ..schemas.pagamentos import (
     AlcadaCreate, AlcadaUpdate,
     ContaCreate, ContaUpdate,
@@ -133,6 +134,10 @@ async def atualizar_fornecedor(db: AsyncSession, *, tenant_id: int, fornecedor_i
     if c.situacao_cadastral != situacao_antiga or c.motivo_pendencia != motivo_antigo:
         _registrar_situacao(db, tenant_id=tenant_id, fornecedor_id=c.id,
                             situacao=c.situacao_cadastral, motivo=c.motivo_pendencia, usuario_id=usuario_id)
+    if c.situacao_cadastral != situacao_antiga:
+        # Fornecedor virou (i)REGULAR: reavalia a elegibilidade de todos os
+        # débitos dele já na fila cronológica (F3, Task 4).
+        await cron.reavaliar_por_fornecedor(db, tenant_id=tenant_id, fornecedor_id=c.id)
     c.atualizado_em = _utcnow(); await db.commit(); await db.refresh(c)
     return c
 

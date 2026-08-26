@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import BloqueioSaldo
 from ..schemas.pagamentos import BloqueioSaldoCreate, BloqueioSaldoUpdate
 from . import pagamentos_cadastros as cad
+from . import pagamentos_cronologia as cron
 
 
 def _utcnow() -> datetime:
@@ -30,7 +31,9 @@ async def criar_bloqueio(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         motivo=payload.motivo, periodo_inicio=payload.periodo_inicio,
         periodo_fim=payload.periodo_fim, id_usuario_responsavel=usuario_id,
         ativo=True, criado_em=_utcnow())
-    db.add(b); await db.commit(); await db.refresh(b)
+    db.add(b); await db.flush()
+    await cron.reavaliar_por_conta(db, tenant_id=tenant_id, conta_id=b.id_conta)
+    await db.commit(); await db.refresh(b)
     return b
 
 
@@ -65,11 +68,14 @@ async def atualizar_bloqueio(db: AsyncSession, *, tenant_id: int, bloqueio_id: i
                             "Período final anterior ao inicial.")
     for k, v in dados.items():
         setattr(b, k, v)
-    b.atualizado_em = _utcnow(); await db.commit(); await db.refresh(b)
+    b.atualizado_em = _utcnow()
+    await cron.reavaliar_por_conta(db, tenant_id=tenant_id, conta_id=b.id_conta)
+    await db.commit(); await db.refresh(b)
     return b
 
 
 async def excluir_bloqueio(db: AsyncSession, *, tenant_id: int, bloqueio_id: int) -> None:
     b = await obter_bloqueio(db, tenant_id=tenant_id, bloqueio_id=bloqueio_id)
     b.excluido = True; b.ativo = False; b.atualizado_em = _utcnow()
+    await cron.reavaliar_por_conta(db, tenant_id=tenant_id, conta_id=b.id_conta)
     await db.commit()

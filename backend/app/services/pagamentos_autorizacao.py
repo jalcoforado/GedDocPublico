@@ -16,6 +16,7 @@ from ..models import (
 from ..schemas.pagamentos import ContaElegivelOut, GrupoAutorizacaoIn
 from . import pagamentos_cadastros as cad
 from . import pagamentos_caixa as caixa
+from . import pagamentos_cronologia as cron
 from . import pagamentos_debitos as deb
 from . import pagamentos_estados as est
 from .pagamentos_debitos import (
@@ -238,6 +239,8 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                                  tramitacao=est.AUTORIZADA, fila=est.ELEGIVEL,
                                  usuario_id=usuario_id, justificativa=justificativa[:255], ip=ip)
             d.atualizado_em = _utcnow()
+        for d in debitos:
+            await cron.reavaliar_debito(db, tenant_id=tenant_id, debito_id=d.id, usuario_id=usuario_id)
         ordens.append(op)
     await db.commit()
     for op in ordens:
@@ -387,6 +390,14 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
                          pagamento=est.PAGA if integral else est.PAGA_PARCIAL,
                          fila=fila_destino,
                          justificativa=f"Parcela {p.numero} — {forma_pagamento}", ip=ip)
+    if integral:
+        # CONCLUIDA não é rótulo que `avaliar_elegibilidade` produz — quem
+        # espelha isso na fila é o pagamento, não a reavaliação (Task 4).
+        await cron.concluir_na_fila(db, tenant_id=tenant_id, id_debito=d.id)
+    elif d.id_conta_pagadora is not None:
+        # Pagar consome comprometido e saldo bancário juntos — o disponível
+        # de outros débitos da MESMA conta pode ter mudado.
+        await cron.reavaliar_por_conta(db, tenant_id=tenant_id, conta_id=d.id_conta_pagadora)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)
     return p
 
@@ -430,5 +441,9 @@ async def estornar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int,
     _registrar_transicao(db, debito=d, acao="ESTORNADO", usuario_id=usuario_id,
                          pagamento=pagamento_estado,
                          justificativa=justificativa, ip=ip)
+    if d.id_conta_pagadora is not None:
+        # Estorno devolve saldo à conta — pode reabilitar outros débitos que
+        # estavam AGUARDANDO_DISPONIBILIDADE ali.
+        await cron.reavaliar_por_conta(db, tenant_id=tenant_id, conta_id=d.id_conta_pagadora)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)
     return p
