@@ -17,6 +17,7 @@ entre dois débitos, para caírem na MESMA chave da fila) e de
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 import pytest
 import pytest_asyncio
@@ -29,6 +30,7 @@ from app.auth.deps import get_current_user
 from app.config import get_settings
 from app.main import app
 from app.models import Usuario
+from app.models.pagamentos import ExcecaoCronologica
 from app.schemas.pagamentos import (
     AlcadaCreate, ContaCreate, DebitoCreate, FonteCreate, FornecedorCreate, FornecedorUpdate,
     GrupoAutorizacaoIn, NaturezaCreate, ParcelaCreate,
@@ -391,6 +393,68 @@ async def test_bloqueado_a_frente_nao_impede(admin_engine):
             p = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
                                         parcela_id=parcelas2[0].id, forma_pagamento="PIX")
         assert p.status == "PAGA"
+    finally:
+        await _cleanup(admin_engine, t.id)
+
+
+@pytest.mark.asyncio
+async def test_excecao_sobre_bloqueada_preserva_motivo(admin_engine):
+    """Review (Important): a exceção fura ORDEM cronológica, não cura
+    elegibilidade. Débito BLOQUEADA por fornecedor irregular continua
+    BLOQUEADA (com o motivo preservado) mesmo depois de registrada a exceção
+    — `tem_excecao` só troca o rótulo de quem JÁ chegaria a ELEGIVEL. Quando
+    o fornecedor regulariza, a reavaliação seguinte pula direto para
+    EXCECAO_AUTORIZADA (nunca passa por ELEGIVEL), porque a exceção já está
+    registrada."""
+    t = await _provisionar(admin_engine)
+    try:
+        nat, fonte, conta, unidade_id = await _base_compartilhado(admin_engine, t.id)
+        forn = await _fornecedor(admin_engine, t.id, nome="Fornecedor Bloqueado Exc LTDA")
+        d = await _debito_autorizado(admin_engine, t.id, forn=forn, nat=nat, fonte=fonte,
+                                     conta=conta, unidade_id=unidade_id)
+        assert await _situacao_fila(admin_engine, t.id, d.id) == cron.est.ELEGIVEL
+
+        async with _sm(admin_engine)() as s:
+            await cad.atualizar_fornecedor(
+                s, tenant_id=t.id, fornecedor_id=forn.id,
+                payload=FornecedorUpdate(situacao_cadastral="IRREGULAR", motivo_pendencia="CND vencida"))
+        assert await _situacao_fila(admin_engine, t.id, d.id) == cron.est.BLOQUEADA
+
+        autoridade = await _novo_usuario(admin_engine, t.id, f"aut{uuid.uuid4().hex[:6]}")
+        async with _sm(admin_engine)() as s:
+            await cron.registrar_excecao(
+                s, tenant_id=t.id, debito_id=d.id, usuario_id=autoridade,
+                justificativa="Urgência de saúde pública.",
+                fundamento="Art. 5º, parágrafo único, Lei 8.666/93",
+                data_autorizacao=date(2026, 8, 26))
+            await s.commit()
+
+        # A exceção FOI criada...
+        async with _sm(admin_engine)() as s:
+            excecoes = (await s.execute(select(ExcecaoCronologica).where(
+                ExcecaoCronologica.tenant_id == t.id, ExcecaoCronologica.id_debito == d.id,
+            ))).scalars().all()
+        assert len(excecoes) == 1
+
+        # ...mas a fila continua BLOQUEADA, com o motivo real preservado —
+        # não mascarado por EXCECAO_AUTORIZADA/motivo=None.
+        async with _sm(admin_engine)() as s:
+            from app.models import PosicaoCronologica
+            posicao = (await s.execute(select(PosicaoCronologica).where(
+                PosicaoCronologica.tenant_id == t.id,
+                PosicaoCronologica.id_debito == d.id,
+            ))).scalar_one()
+        assert posicao.situacao == cron.est.BLOQUEADA
+        assert posicao.motivo_bloqueio == "Fornecedor com situação cadastral irregular."
+
+        # Regulariza o fornecedor: a reavaliação disparada por
+        # `atualizar_fornecedor` já enxerga `tem_excecao=True` e vai DIRETO
+        # para EXCECAO_AUTORIZADA — nunca passa por ELEGIVEL.
+        async with _sm(admin_engine)() as s:
+            await cad.atualizar_fornecedor(
+                s, tenant_id=t.id, fornecedor_id=forn.id,
+                payload=FornecedorUpdate(situacao_cadastral="REGULAR"))
+        assert await _situacao_fila(admin_engine, t.id, d.id) == cron.est.EXCECAO_AUTORIZADA
     finally:
         await _cleanup(admin_engine, t.id)
 

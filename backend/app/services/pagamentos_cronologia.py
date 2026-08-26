@@ -370,22 +370,14 @@ async def _disponivel_ok(db: AsyncSession, *, tenant_id: int, id_conta_pagadora:
     return (saldo.disponivel + restante) >= restante
 
 
-async def reavaliar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
-                           usuario_id: int | None = None) -> None:
-    """Recalcula a elegibilidade de UM débito e, se mudou, aplica a transição
-    (mesma transação do caller — não comita).
-
-    Débito sem posição na fila, ou já em situação terminal (CONCLUIDA/
-    RETIRADA), é no-op: a reavaliação só vale enquanto o débito ainda disputa
-    a ordem cronológica.
-    """
-    posicao = await obter_posicao(db, tenant_id=tenant_id, id_debito=debito_id)
-    if posicao is None or posicao.situacao in (est.CONCLUIDA, est.RETIRADA):
-        return
-
-    from . import pagamentos_debitos as deb
-
-    debito = await deb.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+async def _avaliar_fila_atual(db: AsyncSession, *, tenant_id: int, debito) -> tuple[str, str | None]:
+    """Coleta os fatos correntes do débito (fornecedor, bloqueio, saldo,
+    exceção) e devolve o rótulo de fila honesto via `avaliar_elegibilidade`
+    (função pura). Compartilhado por `reavaliar_debito` e `registrar_excecao`
+    — as duas precisam da MESMA precedência (BLOQUEADA/AGUARDANDO_
+    DISPONIBILIDADE por cima de `tem_excecao`), senão a exceção mascararia um
+    bloqueio real que nada tem a ver com ordem cronológica."""
+    debito_id = debito.id
     tramitacao = debito.situacao_tramitacao
 
     tem_excecao = await _tem_excecao(db, tenant_id=tenant_id, debito_id=debito_id)
@@ -407,10 +399,29 @@ async def reavaliar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
     else:
         fornecedor_regular, tem_bloqueio, disponivel_ok = True, False, True
 
-    novo_fila, motivo = avaliar_elegibilidade(
+    return avaliar_elegibilidade(
         tramitacao=tramitacao, tem_pedido_aberto=tem_pedido_aberto,
         fornecedor_regular=fornecedor_regular, disponivel_ok=disponivel_ok,
         tem_bloqueio=tem_bloqueio, tem_excecao=tem_excecao)
+
+
+async def reavaliar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
+                           usuario_id: int | None = None) -> None:
+    """Recalcula a elegibilidade de UM débito e, se mudou, aplica a transição
+    (mesma transação do caller — não comita).
+
+    Débito sem posição na fila, ou já em situação terminal (CONCLUIDA/
+    RETIRADA), é no-op: a reavaliação só vale enquanto o débito ainda disputa
+    a ordem cronológica.
+    """
+    posicao = await obter_posicao(db, tenant_id=tenant_id, id_debito=debito_id)
+    if posicao is None or posicao.situacao in (est.CONCLUIDA, est.RETIRADA):
+        return
+
+    from . import pagamentos_debitos as deb
+
+    debito = await deb.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    novo_fila, motivo = await _avaliar_fila_atual(db, tenant_id=tenant_id, debito=debito)
 
     if novo_fila == posicao.situacao:
         return
@@ -557,11 +568,19 @@ async def registrar_excecao(db: AsyncSession, *, tenant_id: int, debito_id: int,
     from . import pagamentos_debitos as deb
 
     debito = await deb.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    # A exceção fura ORDEM cronológica, não cura bloqueio de saldo, fornecedor
+    # irregular nem indisponibilidade (mesma precedência de `avaliar_
+    # elegibilidade` — `tem_excecao` só troca o rótulo de quem JÁ chegaria a
+    # ELEGIVEL). Por isso a fila gravada aqui vem de `_avaliar_fila_atual`
+    # (que já enxerga esta exceção recém-criada via `_tem_excecao`), nunca de
+    # `EXCECAO_AUTORIZADA` hardcoded — senão a exceção mascararia um bloqueio
+    # real que nada tem a ver com ordem cronológica.
+    novo_fila, motivo = await _avaliar_fila_atual(db, tenant_id=tenant_id, debito=debito)
     deb._registrar_transicao(
         db, debito=debito, acao="EXCECAO_AUTORIZADA", usuario_id=usuario_id,
-        fila=est.EXCECAO_AUTORIZADA, justificativa=justificativa)
-    posicao.situacao = est.EXCECAO_AUTORIZADA
-    posicao.motivo_bloqueio = None
+        fila=novo_fila, justificativa=justificativa)
+    posicao.situacao = novo_fila
+    posicao.motivo_bloqueio = motivo
     posicao.atualizado_em = agora
     await db.flush()
     return excecao
