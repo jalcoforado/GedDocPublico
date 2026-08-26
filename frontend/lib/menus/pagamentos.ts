@@ -13,6 +13,7 @@ import {
   Landmark,
   Layers,
   ListChecks,
+  ListOrdered,
   Shield,
   ShieldCheck,
   UserCircle,
@@ -47,6 +48,12 @@ export const menuPagamentos: MenuModulo = {
           perm: "pagamento_autorizar" },
         { label: "Tesouraria", href: "/m/pagamentos/tesouraria", icon: Banknote,
           perm: "pagamento_pagar" },
+        // Leitura espelha `PERMS_LEITURA` do router (`pagamentos_debitos.py`)
+        // — o mesmo conjunto que gateia `GET /pagamentos/fila-cronologica`.
+        { label: "Ordem cronológica", href: "/m/pagamentos/fila", icon: ListOrdered,
+          anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar",
+                  "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
+                  "pagamento_cadastro"] },
         { label: "Concluídas", href: "/m/pagamentos/solicitacoes/concluidas", icon: CheckCircle,
           anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar"] },
         // Leitura espelha o `_LEITURA` do router de conciliação; a escrita

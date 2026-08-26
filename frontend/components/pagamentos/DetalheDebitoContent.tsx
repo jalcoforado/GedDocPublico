@@ -6,8 +6,10 @@ import {
   Download,
   FileEdit,
   FileText,
+  Flag,
   History,
   Layers,
+  ListOrdered,
   Paperclip,
   Receipt,
   Trash2,
@@ -32,6 +34,7 @@ import { EtapasFluxo } from "@/components/pagamentos/EtapasFluxo";
 import { ProximaAcao } from "@/components/pagamentos/ProximaAcao";
 import { SituacoesDebito } from "@/components/pagamentos/SituacoesDebito";
 import {
+  FILA_ROTULO,
   PEDIDO_AJUSTE_ROTULO,
   TRAMITACAO_ROTULO,
   TRANSACAO_PAGAMENTOS,
@@ -44,6 +47,7 @@ import {
   type AnexoDebitoOut,
   type DebitoOut,
   type EtapaAjuste,
+  type SituacaoFila,
   type TipoAjuste,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -98,6 +102,12 @@ export function DetalheDebitoContent({ id }: { id: number }) {
   const [anexoPedidoId, setAnexoPedidoId] = useState<number | "">("");
   const [confirmRemoverAnexo, setConfirmRemoverAnexo] = useState<AnexoDebitoOut | null>(null);
 
+  // Exceção formal à ordem cronológica (F3, Task 5/6)
+  const [excecaoOpen, setExcecaoOpen] = useState(false);
+  const [excecaoJustificativa, setExcecaoJustificativa] = useState("");
+  const [excecaoFundamento, setExcecaoFundamento] = useState("");
+  const [excecaoData, setExcecaoData] = useState("");
+
   // Carregar débito
   const debitoQ = useQuery({
     queryKey: ["pag-debito", id],
@@ -122,6 +132,26 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     queryFn: () => api.pagamentos.debitos.listarAnexos(id),
   });
   const anexos = anexosQ.data ?? [];
+
+  // Posição na fila cronológica (F3) — 404 é esperado para débito legado que
+  // ainda não passou pela fase de liquidação (não vira erro na tela).
+  const posicaoFilaQ = useQuery({
+    queryKey: ["pag-posicao-fila", id],
+    queryFn: async () => {
+      try {
+        return await api.pagamentos.debitos.posicaoDebito(id);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      }
+    },
+  });
+
+  const excecoesQ = useQuery({
+    queryKey: ["pag-excecoes", id],
+    queryFn: () => api.pagamentos.debitos.listarExcecoes(id),
+  });
+  const excecoes = excecoesQ.data ?? [];
 
   const pedidos = pedidosQ.data ?? [];
   const pedidosAbertos = pedidos.filter((p) => p.situacao === "ABERTO");
@@ -150,6 +180,8 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     qc.invalidateQueries({ queryKey: ["pag-pedidos-ajuste", id] });
     qc.invalidateQueries({ queryKey: ["pag-versoes", id] });
     qc.invalidateQueries({ queryKey: ["pag-anexos", id] });
+    qc.invalidateQueries({ queryKey: ["pag-posicao-fila", id] });
+    qc.invalidateQueries({ queryKey: ["pag-excecoes", id] });
   }
 
   // Mutations para ações
@@ -385,6 +417,25 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     onError: (err: any) => toast.error(err.message || "Erro ao remover documento"),
   });
 
+  const registrarExcecaoM = useMutation({
+    mutationFn: () =>
+      api.pagamentos.debitos.registrarExcecao(id, {
+        justificativa: excecaoJustificativa,
+        fundamento: excecaoFundamento,
+        data_autorizacao: excecaoData,
+      }),
+    onSuccess: () => {
+      toast.success("Exceção cronológica autorizada");
+      setExcecaoOpen(false);
+      setExcecaoJustificativa("");
+      setExcecaoFundamento("");
+      setExcecaoData("");
+      qc.invalidateQueries({ queryKey: ["pag-posicao-fila", id] });
+      qc.invalidateQueries({ queryKey: ["pag-excecoes", id] });
+    },
+    onError: (err: any) => toast.error(err.message || "Erro ao autorizar exceção"),
+  });
+
   const breadcrumbs = [
     { label: "Pagamentos", href: "/m/pagamentos" },
     { label: "Solicitações", href: "/m/pagamentos/solicitacoes" },
@@ -527,6 +578,80 @@ export function DetalheDebitoContent({ id }: { id: number }) {
               </div>
             ) : (
               <p className="text-sm text-foreground-subtle">Nenhuma parcela cadastrada.</p>
+            )}
+          </SectionCard>
+
+          {/* Fila cronológica (F3, Task 3/5) */}
+          <SectionCard title="Fila cronológica" icon={ListOrdered}>
+            {posicaoFilaQ.isLoading ? (
+              <Skeleton className="h-16 w-full" />
+            ) : !posicaoFilaQ.data ? (
+              <p className="text-sm text-foreground-subtle">
+                Não registrado na fila cronológica — a posição só existe a partir da
+                liquidação da despesa.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {(() => {
+                  const posicaoFila = posicaoFilaQ.data;
+                  const rotuloFila =
+                    FILA_ROTULO[posicaoFila.situacao as SituacaoFila] ??
+                    ({ label: posicaoFila.situacao, intent: "neutral", icon: ListOrdered } as const);
+                  return (
+                    <>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-foreground">
+                          Posição {posicaoFila.posicao} de {posicaoFila.total_grupo} na fila
+                        </span>
+                        <Badge intent={rotuloFila.intent} icon={rotuloFila.icon}>
+                          {rotuloFila.label}
+                        </Badge>
+                      </div>
+                      {posicaoFila.motivo_bloqueio && (
+                        <p className="text-sm text-foreground-muted">
+                          Motivo: {posicaoFila.motivo_bloqueio}
+                        </p>
+                      )}
+                      <p className="text-xs text-foreground-muted">
+                        Marco na fila: {fmtDataHora(posicaoFila.marco_em)}
+                      </p>
+                    </>
+                  );
+                })()}
+
+                {excecoes.length > 0 && (
+                  <div className="space-y-2 border-t border-border pt-3">
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                      <Flag className="h-4 w-4 text-warning-soft-foreground" aria-hidden="true" />
+                      Exceções cronológicas autorizadas
+                    </div>
+                    {excecoes.map((e) => (
+                      <div key={e.id} className="rounded-lg border border-border p-3 text-sm">
+                        <p className="font-medium text-foreground">
+                          {e.fundamento} — autorizada em {fmtData(e.data_autorizacao)}
+                        </p>
+                        <p className="mt-1 text-foreground-muted">{e.justificativa}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {can("pagamento_autorizar") && (
+                  <div className="border-t border-border pt-3">
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setExcecaoJustificativa("");
+                        setExcecaoFundamento("");
+                        setExcecaoData("");
+                        setExcecaoOpen(true);
+                      }}
+                    >
+                      Autorizar exceção cronológica
+                    </Button>
+                  </div>
+                )}
+              </div>
             )}
           </SectionCard>
 
@@ -992,6 +1117,60 @@ export function DetalheDebitoContent({ id }: { id: number }) {
             </FormField>
           </div>
         )}
+      </Dialog>
+
+      {/* Exceção cronológica (F3, Task 5/6) — furo formal de ordem, com
+          justificativa, fundamento legal e data de autorização. */}
+      <Dialog
+        open={excecaoOpen}
+        onClose={() => setExcecaoOpen(false)}
+        title="Autorizar exceção cronológica"
+        description="Registra o furo formal à ordem de pagamento — exigido pela LRF e pela lei de licitações."
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setExcecaoOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => registrarExcecaoM.mutate()}
+              disabled={
+                !excecaoJustificativa.trim() ||
+                !excecaoFundamento.trim() ||
+                !excecaoData ||
+                registrarExcecaoM.isPending
+              }
+            >
+              {registrarExcecaoM.isPending ? "Salvando..." : "Autorizar exceção"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <FormField label="Fundamento legal" required>
+            <Input
+              value={excecaoFundamento}
+              onChange={(e) => setExcecaoFundamento(e.target.value)}
+              placeholder="ex.: art. 5º da Lei 8.666/93"
+              maxLength={255}
+            />
+          </FormField>
+          <FormField label="Justificativa" required>
+            <Textarea
+              value={excecaoJustificativa}
+              onChange={(e) => setExcecaoJustificativa(e.target.value)}
+              placeholder="Explique o motivo da preterição da ordem cronológica..."
+              className="min-h-24"
+            />
+          </FormField>
+          <FormField label="Data da autorização" required>
+            <Input
+              type="date"
+              value={excecaoData}
+              onChange={(e) => setExcecaoData(e.target.value)}
+            />
+          </FormField>
+        </div>
       </Dialog>
 
       {/* Remoção de documento — resumo de impacto, não "tem certeza?" (F2, Task 8) */}

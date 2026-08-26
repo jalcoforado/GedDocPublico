@@ -1246,6 +1246,17 @@ export interface BloqueioSaldoInput {
   periodo_fim?: string | null;
 }
 
+/** Categoria da fila cronológica (F3, spec §4.4) — deriva a categoria dos
+ *  débitos vinculados ao contrato quando não há categoria própria no débito. */
+export type CategoriaContrato = "BENS" | "LOCACOES" | "SERVICOS" | "OBRAS";
+
+export const CATEGORIA_CONTRATO_LABEL: Record<CategoriaContrato, string> = {
+  BENS: "Bens",
+  LOCACOES: "Locações",
+  SERVICOS: "Serviços",
+  OBRAS: "Obras",
+};
+
 export interface Contrato {
   id: number;
   numero: string;
@@ -1255,6 +1266,9 @@ export interface Contrato {
   vigencia_inicio: string;
   vigencia_fim: string;
   valor_total: string;
+  // Obrigatória no `ContratoCreate` do backend desde a 0107/Task 2 — pode vir
+  // `null` num contrato legado que ainda não passou pelo backfill (defensivo).
+  categoria: CategoriaContrato | null;
   criado_em: string;
   atualizado_em: string | null;
 }
@@ -1351,6 +1365,63 @@ export interface DebitoOut extends Debito {
   lock_version: number;
   id_gestor_decisor: number | null;
   id_validador: number | null;
+}
+
+// ---------- Ordem cronológica (F3) ----------
+/** Uma linha da fila, com `posicao` calculada por `row_number()` na consulta
+ *  — nunca armazenada (espelha `PosicaoFilaItem`, backend). */
+export interface PosicaoFilaItem {
+  posicao: number;
+  id_debito: number;
+  fornecedor_nome: string;
+  descricao: string;
+  valor_total: string;
+  marco_em: string;
+  situacao: SituacaoFila;
+  motivo_bloqueio: string | null;
+  previsao_pagamento: string | null;
+  tem_excecao: boolean;
+}
+
+/** Débitos agrupados pela chave `(id_unidade, id_fonte_recursos, categoria,
+ *  exercicio)`, ordenados por `marco_em, id` (espelha `FilaCronologicaGrupo`). */
+export interface FilaCronologicaGrupo {
+  id_unidade: number;
+  unidade_nome: string | null;
+  id_fonte_recursos: number;
+  fonte_nome: string;
+  categoria: string;
+  exercicio: number;
+  itens: PosicaoFilaItem[];
+}
+
+export interface ExcecaoCronologicaOut {
+  id: number;
+  justificativa: string;
+  fundamento: string;
+  id_autoridade: number;
+  data_autorizacao: string;
+  criado_em: string;
+}
+
+export interface ExcecaoCronologicaInput {
+  justificativa: string;
+  fundamento: string;
+  data_autorizacao: string;
+  documentos?: number[] | null;
+}
+
+/** Posição de UM débito na fila (espelha `PosicaoDebitoOut`). ATENÇÃO:
+ *  `total_grupo` muda de semântica quando o débito é terminal (review T3) —
+ *  não comparar lado a lado com a tela `/m/pagamentos/fila`; apresentar como
+ *  "posição N de M na fila". */
+export interface PosicaoDebitoOut {
+  posicao: number;
+  total_grupo: number;
+  situacao: SituacaoFila;
+  motivo_bloqueio: string | null;
+  marco_em: string;
+  excecoes: ExcecaoCronologicaOut[];
 }
 
 // Payloads para as decisões do fluxo
@@ -4158,6 +4229,15 @@ export const api = {
       cancelar: (id: number, payload: DecisaoJustificadaPayload) =>
         request<DebitoOut>(`/pagamentos/debitos/${id}/cancelar`, {
           method: "POST", body: JSON.stringify(payload) }),
+
+      // Ordem cronológica (F3, Tasks 3/5)
+      posicaoDebito: (id: number) =>
+        request<PosicaoDebitoOut>(`/pagamentos/debitos/${id}/fila`),
+      listarExcecoes: (id: number) =>
+        request<ExcecaoCronologicaOut[]>(`/pagamentos/debitos/${id}/excecao-cronologica`),
+      registrarExcecao: (id: number, payload: ExcecaoCronologicaInput) =>
+        request<ExcecaoCronologicaOut>(`/pagamentos/debitos/${id}/excecao-cronologica`, {
+          method: "POST", body: JSON.stringify(payload) }),
     },
     // v2.0: bloqueios administrativos de saldo por conta.
     bloqueios: {
@@ -4218,6 +4298,17 @@ export const api = {
         request<FilaTesourariaOut>("/pagamentos/tesouraria/fila"),
     },
     minhaFila: () => request<MinhaFila>("/pagamentos/minha-fila"),
+    // Ordem cronológica (F3, Task 3) — grupos por (unidade, fonte, categoria,
+    // exercício), cada um com seus itens ordenados por `marco_em`.
+    filaCronologica: (filtros?: {
+      id_fonte?: number; id_unidade?: number; categoria?: string; exercicio?: number;
+      incluir_concluidas?: boolean;
+    }) =>
+      request<FilaCronologicaGrupo[]>(`/pagamentos/fila-cronologica${qs({
+        id_fonte: filtros?.id_fonte, id_unidade: filtros?.id_unidade,
+        categoria: filtros?.categoria, exercicio: filtros?.exercicio,
+        incluir_concluidas: filtros?.incluir_concluidas,
+      })}`),
     dashboard: (meses = 12) =>
       request<PagamentosDashboard>(`/pagamentos/dashboard${qs({ meses })}`),
   },
