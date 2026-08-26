@@ -874,7 +874,35 @@ Pendências registradas da F2 (menores, nenhuma bloqueante):
   edição×reenvio possível — as decisões todas têm lock, a edição não); downgrade da 0106 apaga
   fisicamente as linhas `REENVIADO`/`APROVACOES_INVALIDADAS` (necessário para restaurar o CHECK,
   mesmo padrão das 0086/0087).
-- F3 (ordem cronológica), F4 (tesouraria) e F5 (remoção do `status` legado) continuam **não
+**F3 do refactor de fluxo entregue em 2026-08-26** (branch `pagamentos/f3-ordem-cronologica`;
+spec §4.3/§4.4/§5/§7.5; plano `docs/superpowers/plans/2026-08-26-pagamentos-f3-ordem-cronologica.md`;
+migrations **0107-0111**). A lacuna legal fechou:
+
+- **Fila cronológica** (`posicao_cronologica`): posição ganha na **liquidação** (marco =
+  `data_liquidacao` + hora do registro, imutável — reliquidar com data divergente é 409; mudança
+  legítima só pela edição material, que regrava com `MARCO_REGRAVADO`), apurada por
+  unidade+fonte+categoria+exercício, posição **calculada** por window function (nunca armazenada).
+  `contrato.categoria` backfillada para `SERVICOS` e obrigatória em contrato novo; débito sem
+  contrato informa a categoria na solicitação (0108).
+- **Elegibilidade síncrona** (`avaliar_elegibilidade`, pura + `reavaliar_*`): 5 condições da spec
+  §5.2, reavaliadas em autorização, ajuste, fornecedor, bloqueio de saldo e pagamento/estorno —
+  sem job. Trilha honesta: a linha `AUTORIZADO` não crava fila; quem grava a fila é a reavaliação.
+  Disponibilidade sem dupla contagem (soma de volta a reserva do próprio débito).
+- **409 ao preterir** em liberar E pagar, com a lista dos preteridos; **exceção cronológica**
+  formal (justificativa+fundamento+autoridade+data+documentos, append-only) é o único caminho de
+  furar a ordem — e **não mascara bloqueio real** (a situação sai da avaliação; fornecedor
+  irregular continua visível).
+- **UI**: tela `/m/pagamentos/fila` (menu "Ordem cronológica", leitura para todos os perfis),
+  seção "Fila cronológica" no detalhe com dialog de exceção, categoria na tela de contratos.
+
+Pendências registradas da F3 (menores):
+
+- Guarda de ordem sem teste de concorrência dirigido (pior caso analisado: 409 espúrio,
+  conservador); sem teste do desempate por id no 409; `_tem_bloqueio` duplica a vigência de
+  `bloqueado_conta` (DRY); `total_grupo` do GET /fila muda de semântica para débito terminal;
+  checagem 422 de categoria duplicada (defesa em profundidade).
+- `id_usuario_registro` da exceção = a própria autoridade (um 3º registrante não existe no rito).
+- F4 (tesouraria: lote/retenções/central) e F5 (remoção do `status` legado) continuam **não
   autorizadas** — o `status` derivado segue vivo e sincronizado até a F5.
 
 ### 2.2 Transporte Regulado — P5 a P8
