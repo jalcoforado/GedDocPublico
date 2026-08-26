@@ -17,13 +17,15 @@ from ..auth.perms import require_any_permission, require_permission
 from ..config import resolve_anexo_path
 from ..database import get_db
 from ..models import Anexo, Usuario
+from ..models.pagamentos import ExcecaoCronologica
 from datetime import date
 
 from pydantic import BaseModel, Field
 
 from ..schemas.pagamentos import (
     AnexoDebitoOut, AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
-    DebitoHistoricoOut, DebitoOut, DebitoUpdate, DecisaoIn, DecisaoJustificadaIn, FichaFonteOut,
+    DebitoHistoricoOut, DebitoOut, DebitoUpdate, DecisaoIn, DecisaoJustificadaIn,
+    ExcecaoCronologicaIn, ExcecaoCronologicaOut, FichaFonteOut,
     FilaAutorizacaoFonteGrupo, ChecklistDebitoItemOut, FilaLiberacaoGrupo, FilaTesourariaOut,
     JustificativaIn, LiquidacaoIn, MarcarChecklistIn, MinhaFilaOut, OrdemPagamentoOut,
     PagarParcelaIn, ParcelaFilaOut, ParcelaOut, PedidoAjusteCreate, PedidoAjusteOut,
@@ -192,6 +194,42 @@ async def fila_do_debito(debito_id: int,
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Débito não tem posição na fila cronológica.")
     return posicao
+
+
+# `/excecao-cronologica` é literal SOB a paramétrica `/{debito_id}` — mesmo
+# raciocínio de `/fila` acima: dois segmentos não colidem com o de um só.
+@debitos_router.post("/{debito_id}/excecao-cronologica", response_model=ExcecaoCronologicaOut,
+                     status_code=status.HTTP_201_CREATED)
+async def criar_excecao_cronologica(debito_id: int, payload: ExcecaoCronologicaIn, request: Request,
+                                    usuario: Usuario = Depends(require_permission("pagamento_autorizar")),
+                                    tenant_id: int = Depends(require_tenant_id),
+                                    db: AsyncSession = Depends(get_db)):
+    """Furo formal de ordem cronológica (LRF/lei de licitações, F3 Task 5) —
+    destrava `assert_ordem_respeitada` para este débito."""
+    excecao = await cronologia.registrar_excecao(
+        db, tenant_id=tenant_id, debito_id=debito_id, usuario_id=usuario.id,
+        justificativa=payload.justificativa, fundamento=payload.fundamento,
+        data_autorizacao=payload.data_autorizacao, documentos=payload.documentos)
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario.id,
+        acao="excecao_cronologica.autorizada", entidade="debito", id_entidade=debito_id,
+        payload={"excecao_id": excecao.id, "fundamento": payload.fundamento},
+        request=request)
+    await db.commit(); await db.refresh(excecao)
+    return excecao
+
+
+@debitos_router.get("/{debito_id}/excecao-cronologica", response_model=list[ExcecaoCronologicaOut])
+async def listar_excecao_cronologica(debito_id: int,
+                                     _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                                     tenant_id: int = Depends(require_tenant_id),
+                                     db: AsyncSession = Depends(get_db)):
+    await svc.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    rows = (await db.execute(select(ExcecaoCronologica).where(
+        ExcecaoCronologica.tenant_id == tenant_id,
+        ExcecaoCronologica.id_debito == debito_id,
+    ).order_by(ExcecaoCronologica.criado_em))).scalars().all()
+    return rows
 
 
 @debitos_router.post("", response_model=DebitoOut, status_code=status.HTTP_201_CREATED)

@@ -21,8 +21,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.pagamentos import (
-    BloqueioSaldo, Contrato, Debito, ExcecaoCronologica, FonteRecursos, Fornecedor, Parcela,
-    PedidoAjuste, PosicaoCronologica,
+    AnexoDebito, BloqueioSaldo, Contrato, Debito, ExcecaoCronologica, FonteRecursos, Fornecedor,
+    Parcela, PedidoAjuste, PosicaoCronologica,
 )
 from ..models.unidade_trabalho import UnidadeTrabalho
 from ..schemas.pagamentos import (
@@ -36,6 +36,20 @@ CATEGORIAS = ("BENS", "LOCACOES", "SERVICOS", "OBRAS")
 class PagamentoCronologiaError(HTTPException):
     def __init__(self, detail: str, code: int = status.HTTP_422_UNPROCESSABLE_ENTITY):
         super().__init__(status_code=code, detail=detail)
+
+
+class OrdemCronologicaError(HTTPException):
+    """409 — o débito tem gente na frente na fila cronológica (Ruling 5,
+    F3 Task 5). O `detail` lista quem preteriu, legível para o operador."""
+    def __init__(self, preteridos_: "list[PosicaoFilaItem]"):
+        itens = "; ".join(
+            f"débito #{i.id_debito} (posição {i.posicao}, {i.fornecedor_nome})"
+            for i in preteridos_
+        )
+        super().__init__(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Ordem cronológica não respeitada. À frente na fila: {itens}",
+        )
 
 
 def _utcnow() -> datetime:
@@ -438,3 +452,116 @@ async def reavaliar_por_conta(db: AsyncSession, *, tenant_id: int, conta_id: int
     for debito_id in ids:
         await reavaliar_debito(db, tenant_id=tenant_id, debito_id=debito_id)
     return len(ids)
+
+
+# ---------------------------------------------------------- ordem/exceção (Task 5)
+# A guarda de ordem cronológica entra nos dois atos de seleção (liberar e
+# pagar), ANTES de qualquer escrita: nenhum dos dois pode consumar a seleção
+# de um débito que fura a fila sem exceção formal registrada.
+
+
+async def preteridos(db: AsyncSession, *, tenant_id: int,
+                     debito_id: int) -> list[PosicaoFilaItem]:
+    """Débitos ELEGIVEL da MESMA chave `(id_unidade, id_fonte_recursos,
+    categoria, exercicio)` com posição anterior à do débito informado
+    (Ruling 5: `(marco_em, id)` menor). BLOQUEADA e AGUARDANDO_DISPONIBILIDADE
+    à frente NÃO contam — só quem já está apto a ser pago fura a ordem.
+
+    Reaproveita `listar_fila` (mesma numeração de posição exibida na tela) em
+    vez de recalcular o `row_number()` sobre um subconjunto filtrado, o que
+    daria posições erradas (a posição é relativa ao grupo INTEIRO, não só aos
+    preteridos).
+    """
+    posicao = await obter_posicao(db, tenant_id=tenant_id, id_debito=debito_id)
+    if posicao is None:
+        return []
+
+    grupos = await listar_fila(
+        db, tenant_id=tenant_id, id_fonte=posicao.id_fonte_recursos,
+        id_unidade=posicao.id_unidade, categoria=posicao.categoria,
+        exercicio=posicao.exercicio, incluir_concluidas=False,
+    )
+    if not grupos:
+        return []
+    itens = grupos[0].itens
+    alvo = next((i for i in itens if i.id_debito == debito_id), None)
+    if alvo is None:
+        return []
+    return [i for i in itens if i.situacao == est.ELEGIVEL and i.posicao < alvo.posicao]
+
+
+async def assert_ordem_respeitada(db: AsyncSession, *, tenant_id: int, debito_id: int) -> None:
+    """Guarda de ordem cronológica (F3, Task 5, Ruling 5). Levanta
+    `OrdemCronologicaError` (409) se houver débito ELEGIVEL à frente na
+    mesma fila.
+
+    Dois no-ops DELIBERADOS:
+    - débito SEM posição na fila (legado, nunca liquidado por este fluxo) —
+      a fila só governa quem está nela, não é retroativa;
+    - `EXCECAO_AUTORIZADA` — é o furo formal já registrado por
+      `registrar_excecao`, exatamente o que destrava este caso.
+    """
+    posicao = await obter_posicao(db, tenant_id=tenant_id, id_debito=debito_id)
+    if posicao is None or posicao.situacao == est.EXCECAO_AUTORIZADA:
+        return
+    pretere = await preteridos(db, tenant_id=tenant_id, debito_id=debito_id)
+    if pretere:
+        raise OrdemCronologicaError(pretere)
+
+
+async def registrar_excecao(db: AsyncSession, *, tenant_id: int, debito_id: int,
+                            usuario_id: int, justificativa: str, fundamento: str,
+                            data_autorizacao: date,
+                            documentos: list[int] | None = None) -> ExcecaoCronologica:
+    """Registra o furo formal de ordem cronológica (LRF/lei de licitações),
+    append-only (migration 0107). Espelha `EXCECAO_AUTORIZADA` na posição e no
+    débito (mesmo padrão de `reavaliar_debito`) e grava o histórico. Não
+    comita — participa da transação do caller (o router faz o `audit.log` e
+    o commit).
+
+    `debito_id` sem posição → 404 (não há fila para furar); posição já
+    terminal (`CONCLUIDA`/`RETIRADA`) → 409 (a seleção já aconteceu ou o
+    débito saiu do jogo).
+    """
+    posicao = await obter_posicao(db, tenant_id=tenant_id, id_debito=debito_id)
+    if posicao is None:
+        raise PagamentoCronologiaError(
+            "Débito não tem posição na fila cronológica.", status.HTTP_404_NOT_FOUND)
+    if posicao.situacao in (est.CONCLUIDA, est.RETIRADA):
+        raise PagamentoCronologiaError(
+            f"Débito já está '{posicao.situacao}' — exceção cronológica não se aplica.",
+            status.HTTP_409_CONFLICT)
+
+    if documentos:
+        vinculados = set((await db.execute(select(AnexoDebito.id).where(
+            AnexoDebito.tenant_id == tenant_id, AnexoDebito.id_debito == debito_id,
+            AnexoDebito.id.in_(documentos), AnexoDebito.excluido.is_(False),
+        ))).scalars().all())
+        faltando = sorted(set(documentos) - vinculados)
+        if faltando:
+            raise PagamentoCronologiaError(
+                f"Documento(s) {faltando} não vinculado(s) a este débito.",
+                status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+    agora = _utcnow()
+    excecao = ExcecaoCronologica(
+        tenant_id=tenant_id, id_debito=debito_id, justificativa=justificativa,
+        fundamento=fundamento, id_autoridade=usuario_id, data_autorizacao=data_autorizacao,
+        id_usuario_registro=usuario_id,
+        documentos={"anexo_debito_ids": documentos} if documentos else None,
+        criado_em=agora,
+    )
+    db.add(excecao)
+    await db.flush()
+
+    from . import pagamentos_debitos as deb
+
+    debito = await deb.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    deb._registrar_transicao(
+        db, debito=debito, acao="EXCECAO_AUTORIZADA", usuario_id=usuario_id,
+        fila=est.EXCECAO_AUTORIZADA, justificativa=justificativa)
+    posicao.situacao = est.EXCECAO_AUTORIZADA
+    posicao.motivo_bloqueio = None
+    posicao.atualizado_em = agora
+    await db.flush()
+    return excecao

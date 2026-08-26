@@ -299,6 +299,11 @@ async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         if d is None:
             d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito, for_update=True)
             debitos_por_id[d.id] = d
+            # Guarda de ordem cronológica (F3, Task 5) — por débito DISTINTO
+            # das parcelas selecionadas, e ANTES de qualquer escrita do lote
+            # (atomicidade all-or-nothing: nenhuma parcela muda se algum
+            # débito do lote fura a fila sem exceção formal).
+            await cron.assert_ordem_respeitada(db, tenant_id=tenant_id, debito_id=d.id)
         if d.status not in (deb.ST_AUTORIZADO, *deb.EM_TESOURARIA, deb.ST_ESTORNADO):
             raise PagamentoDebitoError(
                 f"Débito {d.id} não autorizado para liberação de pagamento (está '{d.status}').",
@@ -366,6 +371,9 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
     """Atômico: movimentação SAIDA/PAGAMENTO + parcela PAGA + status do débito, num commit."""
     p = await obter_parcela(db, tenant_id=tenant_id, parcela_id=parcela_id)
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito, for_update=True)
+    # Guarda de ordem cronológica (F3, Task 5) — no início, antes de qualquer
+    # escrita.
+    await cron.assert_ordem_respeitada(db, tenant_id=tenant_id, debito_id=d.id)
     if d.status not in deb.EM_TESOURARIA:
         raise PagamentoDebitoError(
             f"Débito não está na tesouraria para pagamento (está '{d.status}').",

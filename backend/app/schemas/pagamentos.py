@@ -448,6 +448,15 @@ class LiquidacaoIn(BaseModel):
     data_liquidacao: date | None = None  # default = hoje no serviço
 
 
+class ExcecaoCronologicaIn(BaseModel):
+    """Furo formal de ordem cronológica (LRF/lei de licitações, F3 Task 5).
+    `documentos` são ids de `AnexoDebito` já vinculados ao débito."""
+    justificativa: str = Field(min_length=1)
+    fundamento: str = Field(min_length=1, max_length=255)
+    data_autorizacao: date
+    documentos: list[int] | None = None
+
+
 class GrupoAutorizacaoIn(BaseModel):
     """Autorização de um lote de débitos de uma fonte, pagos por uma conta escolhida."""
     id_fonte: int
