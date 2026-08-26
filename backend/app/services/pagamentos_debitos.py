@@ -256,6 +256,7 @@ async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
         id_contrato = dados.get("id_contrato", d.id_contrato)
         id_unidade = dados.get("id_unidade", d.id_unidade)
     await _validar_refs(db, tenant_id=tenant_id, payload=_Ref)
+    alterados: set[str] = set()
     if d.situacao_tramitacao != est.RASCUNHO:
         alterados = pv.campos_materiais_alterados(d, dados)
         if alterados:
@@ -288,6 +289,26 @@ async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
                 status_novo=d.status, acao="MARCO_REGRAVADO",
                 justificativa=f"Marco regravado para {d.data_liquidacao.isoformat()}.",
                 id_usuario=usuario_id, criado_em=_utcnow(), versao_debito=d.versao))
+    if alterados:
+        # A CHAVE da posição (categoria efetiva, unidade, fonte) não é o
+        # marco — não gera MARCO_REGRAVADO nem histórico próprio, só
+        # acompanha a edição material que a moveu. A posição se recoloca
+        # sozinha na ordenação por ser window function sobre esses campos.
+        posicao = await cron.obter_posicao(db, tenant_id=tenant_id, id_debito=d.id)
+        if posicao is not None:
+            contrato_novo = await cron.obter_contrato(
+                db, tenant_id=tenant_id, id_contrato=d.id_contrato)
+            categoria_nova = cron.categoria_do_debito(d, contrato_novo)
+            if categoria_nova is None:
+                raise PagamentoDebitoError(
+                    "Débito sem contrato precisa de categoria para permanecer na fila "
+                    "cronológica.", status.HTTP_422_UNPROCESSABLE_ENTITY)
+            if (categoria_nova, d.id_unidade, d.id_fonte_recursos) != (
+                    posicao.categoria, posicao.id_unidade, posicao.id_fonte_recursos):
+                posicao.categoria = categoria_nova
+                posicao.id_unidade = d.id_unidade
+                posicao.id_fonte_recursos = d.id_fonte_recursos
+                posicao.atualizado_em = _utcnow()
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
 
@@ -703,7 +724,12 @@ async def confirmar_liquidacao(db: AsyncSession, *, tenant_id: int, debito_id: i
     F3: também registra o débito na fila cronológica
     (`pagamentos_cronologia.registrar_na_fila`), exigindo categoria resolvida
     (do contrato ou do próprio débito) — 422 se nenhuma das duas existir.
-    Idempotente: reliquidar (ou confirmar de novo) não regrava o marco."""
+    Idempotente: reliquidar (ou confirmar de novo) com a MESMA data é no-op.
+    Reliquidar com data DIFERENTE do marco já registrado é 409 — o marco é
+    imutável fora do fluxo de ajuste (senão `DebitoOut.data_liquidacao`
+    divergiria silenciosamente da data que ordena a fila); a correção é a
+    edição material de `data_liquidacao` (`atualizar_debito` em AJUSTE_*),
+    que regrava o marco e deixa histórico `MARCO_REGRAVADO`."""
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
     _exigir_status(d, ST_RASCUNHO, ST_DEVOLVIDO, ST_EM_VALIDACAO, ST_VALIDADO)
     data_liquidacao = data_liquidacao or _utcnow().date()
@@ -713,6 +739,13 @@ async def confirmar_liquidacao(db: AsyncSession, *, tenant_id: int, debito_id: i
         raise PagamentoDebitoError(
             "Débito sem contrato precisa de categoria para confirmar a liquidação.",
             status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+    posicao_existente = await cron.obter_posicao(db, tenant_id=tenant_id, id_debito=d.id)
+    if posicao_existente is not None and posicao_existente.marco_em.date() != data_liquidacao:
+        raise PagamentoDebitoError(
+            "O marco da fila cronológica é imutável após o registro; para corrigir a data "
+            "de liquidação, use a edição material do débito (fluxo de ajuste).",
+            status.HTTP_409_CONFLICT)
 
     d.liquidacao_confirmada = True
     d.data_liquidacao = data_liquidacao
