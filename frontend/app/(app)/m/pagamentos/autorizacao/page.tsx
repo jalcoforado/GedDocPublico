@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { useToast } from "@/components/ui/toast";
+import { TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
   api,
@@ -43,56 +44,38 @@ export default function AutorizacaoPagamentosPage() {
   const [tab, setTab] = useState<Tab>(searchParams.get("tab") === "pagamento" ? "pagamento" : "despesa");
 
   return (
-    <div className="space-y-4">
+    // `Tabs` envolve o header E os painéis: a `TabList` viaja como prop até o
+    // `PageHeader`, mas continua DENTRO desta subárvore no React, então o
+    // contexto (ids, aria-controls) alcança os dois lados.
+    <Tabs value={tab} onChange={(v) => setTab(v as Tab)} className="space-y-4">
       <PageHeader
         icon={ShieldCheck}
         title="Autorizações"
         description="Autorize a despesa (gera a Ordem de Pagamento) e depois libere o pagamento para a tesouraria — os dois atos do rito da Lei 4.320/64."
         tabs={
-          <div role="tablist" aria-label="Etapa da autorização" className="flex gap-1 py-2">
-            <TabButton active={tab === "despesa"} onClick={() => setTab("despesa")}>
-              Despesa
-            </TabButton>
-            <TabButton active={tab === "pagamento"} onClick={() => setTab("pagamento")}>
-              Pagamento
-            </TabButton>
-          </div>
+          <TabList
+            aria-label="Etapa da autorização"
+            variant="pill"
+            tabs={[
+              { value: "despesa", label: "Despesa" },
+              { value: "pagamento", label: "Pagamento" },
+            ]}
+          />
         }
       />
 
       <RitoPagamento atual={tab === "despesa" ? "autorizar" : "liberar"} />
 
-      {tab === "despesa" ? <TabDespesa /> : <TabPagamento />}
-    </div>
+      <TabPanel value="despesa">
+        <TabDespesa />
+      </TabPanel>
+      <TabPanel value="pagamento">
+        <TabPagamento />
+      </TabPanel>
+    </Tabs>
   );
 }
 
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-        active
-          ? "bg-brand/12 text-brand dark:bg-brand/25 dark:text-brand-light"
-          : "text-muted-foreground hover:bg-muted hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Tab Despesa — fila APROVADO agrupada por FONTE (v2.0). Por fonte, o autorizador
