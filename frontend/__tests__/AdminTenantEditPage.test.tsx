@@ -87,6 +87,64 @@ describe("edição de tenant — abas", () => {
     expect(frotaDeNovo.checked).toBe(true);
   });
 
+  // --- Semântica ARIA (resíduo 1.0.9 da F2) -------------------------------
+  //
+  // Estes quatro reprovam a implementação anterior, que era `role="tablist"` +
+  // `role="tab"` à mão e mais nada. Para quem usa leitor de tela, aquilo
+  // anunciava "aba" sem painel associado: não dava para saber o que a aba
+  // controla nem pular para o conteúdo. Nada disso quebrava tela, então
+  // nenhum teste existente ficou vermelho por sete meses.
+
+  it("cada tab aponta para o painel que controla, e o painel responde", async () => {
+    renderTabs();
+    const tabs = await waitFor(() => screen.getAllByRole("tab"));
+    expect(tabs.length).toBe(2);
+
+    for (const tab of tabs) {
+      const idPainel = tab.getAttribute("aria-controls");
+      expect(idPainel, `tab "${tab.textContent}" sem aria-controls`).toBeTruthy();
+
+      const painel = document.getElementById(idPainel as string);
+      expect(painel, `aria-controls aponta para id inexistente: ${idPainel}`).toBeTruthy();
+      expect(painel?.getAttribute("role")).toBe("tabpanel");
+      // O vínculo é de mão dupla — sem a volta, o leitor não sabe de qual aba
+      // o painel veio quando o usuário chega nele por outro caminho.
+      expect(painel?.getAttribute("aria-labelledby")).toBe(tab.id);
+    }
+  });
+
+  it("apenas a aba ativa está na ordem de tabulação (roving tabindex)", async () => {
+    renderTabs();
+    const [dados, modulos] = await waitFor(() => screen.getAllByRole("tab"));
+    expect(dados.getAttribute("tabindex")).toBe("0");
+    expect(modulos.getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("seta para a direita troca de aba pelo teclado", async () => {
+    renderTabs();
+    const tablist = await waitFor(() => screen.getByRole("tablist"));
+    const [dados, modulos] = screen.getAllByRole("tab");
+    expect(dados.getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(tablist, { key: "ArrowRight" });
+
+    await waitFor(() => expect(modulos.getAttribute("aria-selected")).toBe("true"));
+    expect(dados.getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("o painel oculto sai da ordem de tabulação", async () => {
+    renderTabs();
+    await waitFor(() => expect(screen.getByDisplayValue("Sobral")).toBeTruthy());
+    const paineis = document.querySelectorAll('[role="tabpanel"]');
+    expect(paineis.length).toBe(2);
+
+    for (const painel of Array.from(paineis)) {
+      const oculto = painel.hasAttribute("hidden");
+      // Painel escondido com tabIndex=0 faria o Tab parar num lugar invisível.
+      expect(painel.getAttribute("tabindex")).toBe(oculto ? "-1" : "0");
+    }
+  });
+
   it("aba inativa fica presente no DOM (hidden), não desmontada", async () => {
     renderTabs();
     // Campo da aba "Dados" (ativa por padrão) e o catálogo de módulos (aba

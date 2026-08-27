@@ -122,18 +122,45 @@ interface TabPanelProps {
   value: string;
   children: React.ReactNode;
   className?: string;
+  /**
+   * Mantém o painel MONTADO quando inativo, apenas escondido.
+   *
+   * O padrão (`false`) desmonta, que é o certo para painel sem estado: não
+   * paga render nem query de aba que ninguém está vendo.
+   *
+   * Ligue quando a aba tiver **estado local que o usuário perde sem aviso**.
+   * O caso que motivou a opção é a edição de tenant: o admin marca módulos, dá
+   * uma olhada em "Dados" e volta achando as marcações perdidas. Não há erro,
+   * não há toast — o trabalho simplesmente sumiu. Preservar exige manter
+   * montado; `key`/lift de estado resolveria também, mas espalha o estado da
+   * aba por quem a hospeda.
+   *
+   * Custo: as queries das abas ocultas disparam junto com a visível. Só ligue
+   * quando montar não tiver efeito colateral (sem toast, sem redirect).
+   */
+  keepMounted?: boolean;
 }
 
-export function TabPanel({ value, children, className }: TabPanelProps) {
+export function TabPanel({ value, children, className, keepMounted }: TabPanelProps) {
   const { value: ativa, idBase } = useTabs("TabPanel");
-  if (value !== ativa) return null;
+  const visivel = value === ativa;
+  if (!visivel && !keepMounted) return null;
   return (
     <div
       role="tabpanel"
       id={`${idBase}-panel-${value}`}
       aria-labelledby={`${idBase}-tab-${value}`}
-      tabIndex={0}
-      className={cn("pt-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", className)}
+      // O atributo `hidden` sozinho é derrotado por qualquer `display:` que o
+      // CSS aplique — daí a classe junto. E painel oculto sai da ordem de
+      // tabulação: `tabIndex={0}` nele deixaria o Tab parar num lugar que o
+      // usuário não vê.
+      hidden={!visivel}
+      tabIndex={visivel ? 0 : -1}
+      className={cn(
+        "pt-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        !visivel && "hidden",
+        className,
+      )}
     >
       {children}
     </div>

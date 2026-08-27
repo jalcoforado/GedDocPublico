@@ -83,3 +83,65 @@ describe("Tabs — teclado", () => {
     expect(screen.getByRole("tab", { name: "Anexos" })).toHaveAttribute("tabindex", "-1");
   });
 });
+
+/**
+ * `keepMounted` — painel inativo continua no DOM, escondido.
+ *
+ * A opção existe porque desmontar apaga o estado local da aba sem nenhum aviso
+ * ao usuário (o caso real: o admin marca módulos na edição de tenant, olha
+ * "Dados" e volta com as marcações perdidas). Um teste que só confirmasse "o
+ * painel some" não distinguiria as duas coisas, então aqui as duas
+ * possibilidades são exercitadas lado a lado.
+ */
+function HarnessKeepMounted() {
+  const [tab, setTab] = React.useState("a");
+  return (
+    <Tabs value={tab} onChange={setTab}>
+      <TabList
+        aria-label="Com estado"
+        tabs={[
+          { value: "a", label: "A" },
+          { value: "b", label: "B" },
+        ]}
+      />
+      <TabPanel value="a" keepMounted>
+        <input aria-label="campo" defaultValue="" />
+      </TabPanel>
+      <TabPanel value="b" keepMounted>
+        Painel B
+      </TabPanel>
+    </Tabs>
+  );
+}
+
+describe("Tabs — keepMounted", () => {
+  it("sem keepMounted, o painel inativo NÃO está no DOM", () => {
+    render(<Harness />);
+    expect(screen.queryByText("Conteúdo de anexos")).toBeNull();
+  });
+
+  it("com keepMounted, o painel inativo fica no DOM porém hidden", async () => {
+    render(<HarnessKeepMounted />);
+    const painelB = screen.getByText("Painel B");
+    expect(painelB).toBeTruthy();
+    expect(painelB.hasAttribute("hidden")).toBe(true);
+
+    await userEvent.click(screen.getByRole("tab", { name: "B" }));
+    expect(painelB.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("o painel oculto sai da ordem de tabulação", () => {
+    render(<HarnessKeepMounted />);
+    const [pa, pb] = screen.getAllByRole("tabpanel", { hidden: true });
+    expect(pa.getAttribute("tabindex")).toBe("0");
+    expect(pb.getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("o estado digitado sobrevive à troca de aba e à volta", async () => {
+    render(<HarnessKeepMounted />);
+    await userEvent.type(screen.getByLabelText("campo"), "rascunho");
+    await userEvent.click(screen.getByRole("tab", { name: "B" }));
+    await userEvent.click(screen.getByRole("tab", { name: "A" }));
+    expect((screen.getByLabelText("campo") as HTMLInputElement).value).toBe("rascunho");
+  });
+});

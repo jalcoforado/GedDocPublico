@@ -4,63 +4,48 @@ import { useState } from "react";
 
 import { TenantEditForm } from "@/components/admin/TenantEditForm";
 import { TenantModulosTab } from "@/components/admin/TenantModulosTab";
-import { cn } from "@/lib/utils";
+import { TabList, TabPanel, Tabs, type TabDef } from "@/components/ui/tabs";
 
-const ABAS = [
-  { id: "dados", label: "Dados" },
-  { id: "modulos", label: "Módulos" },
-] as const;
-type AbaId = (typeof ABAS)[number]["id"];
+const ABAS: TabDef[] = [
+  { value: "dados", label: "Dados" },
+  { value: "modulos", label: "Módulos" },
+];
 
 /**
  * Abas "Dados" / "Módulos" da edição de tenant. Extraído de `page.tsx` (que
  * só pode exportar os nomes que o App Router reconhece — ver comentário lá)
  * para poder ser testado sem a ginástica de `use(params)`/Suspense da rota.
+ *
+ * Usa o primitivo `components/ui/tabs`. Antes reimplementava `role="tablist"`
+ * à mão, **sem** `aria-controls`, sem `role="tabpanel"` e sem navegação por
+ * setas — resíduo 1.0.9 da F2. O sintoma para quem usa leitor de tela: o
+ * componente anuncia "aba" e o leitor não encontra painel associado, então não
+ * há como saber o que aquela aba controla nem pular para o conteúdo.
+ *
+ * O primitivo existia desde a UX-02 (fatia 2.5), com ARIA completo e testado —
+ * e **nenhum consumidor em produção**. Duas implementações do mesmo widget
+ * conviveram, e a pior era a que estava na tela.
+ *
+ * `keepMounted` preserva a decisão original desta tela: as duas abas ficam
+ * montadas o tempo todo, só a visível troca de `hidden`. Desmontar a inativa
+ * faria o admin marcar módulos, olhar "Dados", voltar e achar as marcações
+ * perdidas — sem erro e sem aviso. Nenhuma das duas tem efeito colateral ao
+ * montar (sem toast, sem redirect), então o custo é as duas queries dispararem
+ * um pouco mais cedo.
  */
 export function TenantEditTabs({ tenantId }: { tenantId: number }) {
-  const [aba, setAba] = useState<AbaId>("dados");
+  const [aba, setAba] = useState("dados");
 
   return (
-    <div className="max-w-2xl space-y-4">
-      <div role="tablist" aria-label="Seções do tenant" className="flex gap-1 border-b border-border">
-        {ABAS.map((a) => {
-          const ativa = aba === a.id;
-          return (
-            <button
-              key={a.id}
-              type="button"
-              role="tab"
-              aria-selected={ativa}
-              onClick={() => setAba(a.id)}
-              className={cn(
-                "flex h-11 shrink-0 items-center px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                ativa
-                  ? "border-b-2 border-primary text-primary"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {a.label}
-            </button>
-          );
-        })}
-      </div>
+    <Tabs value={aba} onChange={setAba} className="max-w-2xl space-y-4">
+      <TabList tabs={ABAS} aria-label="Seções do tenant" />
 
-      {/*
-        As duas abas ficam MONTADAS o tempo todo — só a visível troca de
-        `hidden`. Alternativa a isso era condicional (`aba === "dados" ? A : B`),
-        mas essa desmonta a aba inativa: o admin marca módulos, dá uma
-        olhada em "Dados" e volta achando as marcações perdidas, sem
-        nenhum aviso. Manter os dois montados preserva o estado local de
-        cada aba de graça — nenhuma das duas tem efeito colateral ao
-        montar (sem toast, sem redirect), então o custo é só a query de
-        cada uma disparar um pouco mais cedo.
-      */}
-      <div className={cn(aba !== "dados" && "hidden")}>
+      <TabPanel value="dados" keepMounted>
         <TenantEditForm tenantId={tenantId} />
-      </div>
-      <div className={cn(aba !== "modulos" && "hidden")}>
+      </TabPanel>
+      <TabPanel value="modulos" keepMounted>
         <TenantModulosTab tenantId={tenantId} />
-      </div>
-    </div>
+      </TabPanel>
+    </Tabs>
   );
 }
