@@ -219,14 +219,26 @@ jobs:
         # Mesmo seed usado por scripts/bootstrap-db.sh; idempotente.
         run: python -m app.cli.seed_bootstrap
 
-      - name: Run pytest
+      # UMA execução, com cobertura junto. Até 2026-08-16 eram DUAS: este passo
+      # e um "Coverage report" logo abaixo que rodava `pytest tests/` de novo,
+      # inteiro. Medido no run 95111304477: 8 min 49 s a primeira, 10 min 11 s a
+      # segunda (instrumentada) — ou seja, **mais da metade do job era a mesma
+      # suíte rodando outra vez**, e o item 1.0.66 do backlog discutia
+      # `pytest-xdist` e banco por worker sem que ninguém tivesse olhado onde o
+      # tempo ia. O bootstrap inteiro, que parecia o suspeito, leva 35 s.
+      #
+      # Rodar instrumentado é seguro aqui: os dois runs fechavam `1378 passed`,
+      # então o `|| true` do passo antigo não estava mascarando nada. Se um dia
+      # mascarar, é melhor que apareça.
+      #
+      # NÃO reintroduza um segundo `pytest tests/` neste workflow — duplicar a
+      # suíte não quebra nada, só custa, e por isso volta em silêncio.
+      # `tests/test_guarda_suite_unica_no_ci.py` reprova.
+      - name: Run pytest (com cobertura na mesma execução)
         working-directory: backend
-        run: pytest tests/ -v --tb=short
-
-      - name: Coverage report
-        if: always()
-        working-directory: backend
-        run: pytest tests/ --cov=app --cov-report=term-missing --cov-report=xml || true
+        run: >
+          pytest tests/ -v --tb=short
+          --cov=app --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage artifact
         if: always()

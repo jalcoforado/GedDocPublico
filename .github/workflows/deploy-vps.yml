@@ -21,11 +21,19 @@ name: Deploy to VPS
 # é um build de ~5 min desperdiçado num push só de documentação, contra o
 # antigo "meu código não está na VPS e não sei por quê", que é silencioso.
 #
-# LIMITE CONHECIDO, não resolvido aqui: o `deploy.sh` faz `git reset --hard
-# origin/main` na VPS, então o que sobe é o `main` do momento do deploy, não
-# necessariamente o SHA que foi testado. Se um commit novo entrar em `main`
-# entre o fim dos testes e o deploy, é ele que vai. Resolver exige o deploy
-# passar a receber o SHA e o `deploy.sh` fazer checkout dele.
+# ~~LIMITE CONHECIDO~~ **RESOLVIDO em 2026-08-16.** O `deploy.sh` fazia
+# `git reset --hard origin/main` na VPS, então subia o `main` do MOMENTO DO
+# DEPLOY e não o SHA que passou pelos testes: commit que entrasse em `main`
+# entre o fim da suíte e o deploy ia junto, sem nunca ter passado pelo portão.
+# O portão aprovava um SHA e a VPS recebia outro. Agora o `DEPLOY_SHA` é
+# passado ao script e ele faz `reset --hard` nesse commit; sem a variável
+# (invocação manual no servidor) o comportamento antigo continua valendo.
+#
+# ATENÇÃO ao primeiro deploy depois desta mudança: `pull_code` sobrescreve o
+# próprio `deploy.sh` enquanto o bash já o está executando, e o `exec` de
+# re-execução só acontece DEPOIS do pull. Ou seja, a primeira rodada ainda usa
+# o `pull_code` antigo e ignora o `DEPLOY_SHA`. O pinning passa a valer da
+# segunda em diante — é a mesma armadilha registrada no `CLAUDE.md`.
 
 on:
   workflow_run:
@@ -190,6 +198,14 @@ jobs:
             echo "Path: $(pwd)"
 
             DEPLOY_TYPE="${{ github.event.inputs.deploy_type || 'full' }}"
+
+            # O SHA que o portão aprovou. `pull_code` reseta NESTE commit em vez
+            # de em `origin/main`, senão um push que entre entre o fim da suíte
+            # e o deploy sobe sem ter passado pelo portão — o portão aprovaria
+            # um SHA e a VPS receberia outro. Em `workflow_dispatch` não há
+            # `workflow_run`, e aí `github.sha` é o próprio alvo escolhido.
+            export DEPLOY_SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+            echo "SHA aprovado pelo portão: $DEPLOY_SHA"
 
             # Execute deploy command
             if [ "$DEPLOY_TYPE" = "quick" ]; then

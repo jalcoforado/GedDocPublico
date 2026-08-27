@@ -437,12 +437,33 @@ tests/test_permissoes_modulo.py ...F
 
 </details>
 
-### 1.0.66 A suíte de backend cresceu para além do teto do CI
+### 1.0.66 A suíte de backend cresceu para além do teto do CI — METADE ERA DUPLICATA
 
 O job levava 13–14 min contra um teto de 15; os ~40 testes da F1 empurraram por cima e o teto subiu
-para 30 (`c51e8a4`). **Subir de novo não é o conserto** — está escrito no próprio workflow. A suíte é
-serial de propósito: compartilha um único Postgres e os testes de RLS dependem disso. Paralelizar
-exige um banco por worker (`pytest-xdist` + schema/database por processo), ou fatiar o job.
+para 30 (`c51e8a4`). **Subir de novo não é o conserto** — está escrito no próprio workflow.
+
+Este item passou semanas propondo `pytest-xdist` com banco por worker — trabalho grande, arriscado,
+e que mexeria justamente nos testes de RLS, que dependem do Postgres compartilhado. **Ninguém tinha
+medido onde o tempo ia.** Medido em 2026-08-16, job `95111304477`:
+
+| passo | tempo |
+|---|---|
+| bootstrap inteiro (dump + migrations + seeds) | **35 s** |
+| `Run pytest` | 8 min 49 s |
+| `Coverage report` | **10 min 11 s** ← a mesma suíte de novo, instrumentada |
+
+O passo de cobertura rodava `pytest tests/` **inteiro pela segunda vez**. Mais da metade do job era
+duplicata, e o bootstrap — o suspeito óbvio — era 3% dele.
+
+**Fechado em 2026-08-16** juntando cobertura na mesma execução: ~19 min → ~10 min, sem tocar em
+paralelismo. Os dois runs já fechavam `1378 passed`, então o `|| true` do passo antigo não
+mascarava nada. Guarda em `tests/test_guarda_suite_unica_no_ci.py`, com controle para que apagar a
+cobertura não passe verde — duplicar a suíte **não quebra nada**, só custa, e por isso volta em
+silêncio.
+
+**Continua aberto** o crescimento em si: ~10 min contra teto de 30 dá folga por um bom tempo, mas a
+suíte segue serial por dependência real (um Postgres, RLS). Quando voltar a apertar, aí sim vale
+`pytest-xdist` com banco por worker — e a lição aqui é medir os passos antes de escolher o remédio.
 
 ### 1.0.7 As 9 transações da 0074 não estão concedidas a nenhum grupo
 
@@ -632,10 +653,22 @@ Três decisões que não são óbvias ao ler o YAML:
   contra o antigo "meu código não está na VPS e não sei por quê", que é silencioso.
 - **`workflow_dispatch` passa direto pelo portão** — continua sendo o escape manual.
 
-**ABERTO, e é outro problema:** o `deploy.sh` faz `git reset --hard origin/main` na VPS, então o que
-sobe é o `main` **do momento do deploy**, não o SHA que foi testado. Commit novo que entre em `main`
-entre o fim dos testes e o deploy vai junto, sem ter passado pelo portão. Resolver exige o workflow
-passar o SHA e o `deploy.sh` fazer checkout dele.
+~~**ABERTO, e é outro problema:**~~ **FECHADO em 2026-08-16.** O `deploy.sh` fazia
+`git reset --hard origin/main` na VPS, então subia o `main` **do momento do deploy**, não o SHA
+testado: commit que entrasse em `main` entre o fim da suíte e o deploy ia junto, sem ter passado
+pelo portão. Dito de outro modo, **o portão aprovava um SHA e a VPS recebia outro** — e o deploy
+ficava verde nos dois casos.
+
+- O workflow passa `DEPLOY_SHA` (o `head_sha` do run que abriu o portão) e o `pull_code` reseta
+  nesse commit. Sem a variável — invocação manual no servidor — o comportamento antigo continua.
+- Guarda nas **duas** pontas (`test_guarda_portao_de_deploy.py`): quem passa e quem consome.
+  Remover qualquer uma reabre o buraco, e nenhuma das duas remoções teria sintoma.
+- **A primeira rodada depois desta mudança ainda ignora o `DEPLOY_SHA`**, e isso não é bug: o
+  `pull_code` sobrescreve o próprio `deploy.sh` enquanto o bash já o executa, e o `exec` de
+  re-execução só vem depois do pull. O pinning vale da segunda rodada em diante — mesma armadilha
+  já registrada no `CLAUDE.md`.
+- **Não verificado em execução real**, porque verificar exige um deploy. A prova aqui é estrutural
+  (guarda invertida) mais `bash -n` e validação do YAML.
 
 ### ~~1.1.4 21 testes de RLS vermelhos só na máquina — deriva de GRANT~~ — FECHADO em 2026-08-14
 

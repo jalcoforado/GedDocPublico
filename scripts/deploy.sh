@@ -43,11 +43,37 @@ check_requirements() {
   log "✓ Requirements OK"
 }
 
-# Pull latest code
+# Traz o código do SHA que passou pelos testes.
+#
+# `DEPLOY_SHA` é o `head_sha` do run que abriu o portão, passado pelo
+# `deploy-vps.yml`. Sem ele — deploy manual, ou script invocado à mão no
+# servidor — cai em `origin/main`, o comportamento antigo.
+#
+# POR QUE ISTO IMPORTA: o portão de deploy (item 1.0.95) confere que os três
+# workflows fecharam verdes **naquele SHA**, e o `git reset --hard origin/main`
+# jogava essa conferência fora — commit que entrasse em `main` entre o fim da
+# suíte e o deploy subia junto, sem nunca ter passado pelo portão. O portão
+# aprovava um SHA e a VPS recebia outro.
 pull_code() {
-  log "Pulling latest code from origin/main..."
+  local alvo="${DEPLOY_SHA:-}"
   git fetch origin main
-  git reset --hard origin/main
+  if [ -n "$alvo" ]; then
+    # O SHA aprovado normalmente é `main` ou um ancestral dele, então o fetch
+    # acima já o trouxe. `cat-file -e` confirma antes de resetar: um SHA
+    # inalcançável (branch que sumiu, force-push) faria o `reset` abortar com
+    # uma mensagem de git, e é melhor dizer o que aconteceu e seguir para
+    # `origin/main` do que deixar o deploy morrer pela metade.
+    if git cat-file -e "${alvo}^{commit}" 2>/dev/null; then
+      log "Trazendo o SHA aprovado pelo portão: $alvo"
+      git reset --hard "$alvo"
+    else
+      log "AVISO: DEPLOY_SHA=$alvo não é alcançável aqui; caindo em origin/main."
+      git reset --hard origin/main
+    fi
+  else
+    log "DEPLOY_SHA não informado — usando origin/main (invocação manual)."
+    git reset --hard origin/main
+  fi
   GIT_COMMIT=$(git rev-parse --short HEAD)
   log "✓ Code updated to commit: $GIT_COMMIT"
 }
