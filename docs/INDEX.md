@@ -101,8 +101,19 @@ Quando a documentação e uma destas discordarem, a guarda está certa:
 | `test_guarda_md5.py` | Nada volta a **gravar** MD5. |
 | `test_guarda_contrato_paginado.py` | Tipo do `api.ts` casa com o `response_model`. |
 | `test_rls_papeis_minimos.py` | Nenhum papel de runtime ganha `BYPASSRLS`. |
+| `test_guarda_suite_unica_no_ci.py` | O CI roda a suíte **uma** vez, com cobertura junto. |
+| `test_guarda_backup.py` | Os scripts de backup da VPS. |
+| `test_guarda_chave_ia.py` | A chave do LLM não ganha passthrough vazio no compose. |
+| `test_guarda_reparar_grants.py` | O reparo de GRANTs bate com as revogações das migrations. |
+| `test_guarda_status_legado.py` | `Debito.status` é sempre derivado, nunca escrito direto. |
 | `frontend/__tests__/rotas-modulo.test.ts` | Prefixo `/m/`, 308s, página órfã. |
 | `frontend/__tests__/menus.test.tsx` | Permissão esperada por item de menu. |
+
+Esta tabela é **completa e travada por teste**: `test_guarda_links_docs.py`
+reprova guarda que exista em `backend/tests/` e não apareça aqui. A primeira
+versão listava 12 de 16 e se apresentava como a lista — exatamente a
+cobertura-parcial-vendida-como-varredura que este repositório já pagou três
+vezes. Guarda nova entra aqui no mesmo commit.
 
 ## Como manter isto
 

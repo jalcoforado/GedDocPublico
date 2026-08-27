@@ -177,3 +177,36 @@ def test_todo_link_relativo_em_doc_vivo_existe():
         "link relativo em documento vivo aponta para caminho inexistente:\n  "
         + "\n  ".join(sorted(quebrados))
     )
+
+
+def test_toda_guarda_do_backend_aparece_no_indice():
+    """`docs/INDEX.md` promete listar o que é mantido por teste. Que liste tudo.
+
+    A tabela de guardas é o único lugar onde alguém procura "isto já está
+    travado por teste?". Uma guarda ausente dali é pior que nenhuma tabela: quem
+    consulta conclui que a propriedade não está coberta e escreve a segunda
+    guarda, ou — pior — supõe que pode mexer à vontade.
+
+    A primeira versão da tabela listava **12 de 16** e se apresentava como a
+    lista. Não por descuido de digitação: por eu ter varrido de memória em vez
+    de varrer o diretório. É a mesma cobertura-parcial-vendida-como-varredura
+    que já custou caro aqui três vezes — no test plan do arquivamento, no meu
+    varredor de links que só olhava markdown, e agora nisto.
+
+    Esta guarda não confere o texto da linha, só a presença do nome. Descrição
+    errada passa; guarda esquecida, não.
+    """
+    indice = (RAIZ / "docs" / "INDEX.md").read_text(encoding="utf-8")
+    guardas = sorted(
+        p.name for p in (RAIZ / "backend" / "tests").glob("test_guarda_*.py")
+    )
+    assert len(guardas) >= 10, (
+        f"só {len(guardas)} guardas encontradas — o glob provavelmente quebrou"
+    )
+    faltando = [g for g in guardas if g not in indice]
+    assert not faltando, (
+        "guarda existe mas nao esta listada em docs/INDEX.md: "
+        + ", ".join(faltando)
+        + " -- guarda nova entra na tabela no mesmo commit: quem consulta o "
+        "indice para saber o que ja esta travado precisa ver tudo que esta."
+    )
