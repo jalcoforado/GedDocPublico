@@ -6,7 +6,7 @@
 > Documento de planejamento estratégico que registra as frentes que faltam para o
 > `aprimora-py` aproximar-se de soluções maduras como SEI/PEN e plataformas de
 > protocolo/GED de mercado. Complementa a análise técnica em
-> [docs/analise-arquitetural-protocolo-prefeituras.md](analise-arquitetural-protocolo-prefeituras.md).
+> [docs/archive/analise-arquitetural-protocolo-prefeituras.md](archive/analise-arquitetural-protocolo-prefeituras.md).
 
 ---
 
@@ -14,7 +14,7 @@
 
 - **Foco atual:** concluir o **SEC-1** — `must_change_password` e hardening de
   senha temporária. Plano em
-  [docs/sec-pr1-must-change-password-escopo-implementavel.md](sec-pr1-must-change-password-escopo-implementavel.md).
+  [docs/archive/sec-pr1-must-change-password-escopo-implementavel.md](archive/sec-pr1-must-change-password-escopo-implementavel.md).
 - **Estado do SEC-1:** Commit 1 (schema/modelo) commitado; Commit 2 (guard +
   whitelist) implementado e testado, aguardando autorização para commit. Faltam
   os Commits 3–8 do plano (provisionamento, reset, login flag, frontend,
