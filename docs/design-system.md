@@ -1,5 +1,10 @@
 # Design System — Aprimora v3 (Institucional Refinado)
 
+> **Status:** vivo · **Autoridade sobre:** Tokens, componentes e padrões de UI.
+> **Última verificação:** 2026-08-20 (último commit que tocou este arquivo).
+> Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
+
+
 Doc curto e vivo. Fonte de verdade executável: `frontend/app/globals.css` (tokens),
 `frontend/tailwind.config.ts` (mapeamento para classes) e as guardas
 (`design-check.mjs`, `contrast-check.mjs`, `tokens-mortos.test.ts`,

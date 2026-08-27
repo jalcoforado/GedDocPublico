@@ -1,5 +1,13 @@
 # Usuários e senhas — ambiente LOCAL / DEV
 
+> **Status:** PARADO · **Autoridade sobre:** nada — ver docs/acessos-teste-local.md, que é mantido.
+> **Última verificação:** 2026-07-18 (último commit que tocou este arquivo).
+> Índice: [docs/INDEX.md](docs/INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
+
+> **Não use como referência do estado atual.** Sem alteração desde a data
+> acima; o sistema mudou bastante desde então. Fica por valor histórico.
+
+
 > ⚠️ **AMBIENTE LOCAL / DEV — NÃO USAR EM PRODUÇÃO.**
 > Todas as credenciais abaixo são *seeds* de desenvolvimento versionados no
 > repositório (`backend/app/cli/seed_demo.py`, `docs/acessos-teste-local.md`).

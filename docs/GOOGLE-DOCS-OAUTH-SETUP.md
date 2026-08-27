@@ -1,5 +1,10 @@
 # Google Docs OAuth Setup Guide
 
+> **Status:** vivo · **Autoridade sobre:** Setup do OAuth do Google Docs para minutas.
+> **Última verificação:** 2026-07-21 (último commit que tocou este arquivo).
+> Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
+
+
 ## Overview
 
 This guide covers setting up Google Docs OAuth2 authentication for Aprimora-py. Users can authorize their Google account to create and edit documents directly in Google Docs from the platform.

@@ -1,5 +1,13 @@
 # Roteiro de demonstração comercial — Aprimora SaaS
 
+> **Status:** PARADO · **Autoridade sobre:** nada — roteiro de demonstração, não descreve o sistema atual.
+> **Última verificação:** 2026-06-07 (último commit que tocou este arquivo).
+> Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
+
+> **Não use como referência do estado atual.** Sem alteração desde a data
+> acima; o sistema mudou bastante desde então. Fica por valor histórico.
+
+
 Três versões aninhadas (5 / 15 / 30 minutos). Pegue a versão certa para o
 público; cada bloco maior **inclui** os blocos da versão menor.
 

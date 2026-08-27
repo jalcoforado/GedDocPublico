@@ -433,6 +433,32 @@ CI (`.github/workflows/`): `backend-tests.yml` carrega `ci/legacy-schema.sql`, f
 
 ## Docs de referência
 
-`README.md` (arquitetura, tabela completa de migrations, decisões registradas), `RUNBOOK.md` (onboarding de tenant, `must_change_password`/SEC-1, backup por tenant, observabilidade, incidentes comuns), `docs/design-system.md`, `docs/INTEGRACAO-PAGAMENTOS.md`, `docs/runbooks/platform-operator-bootstrap.md`, `docs/GOOGLE-DOCS-OAUTH-SETUP.md`, `docs/BACKLOG-PENDENCIAS.md` (fonte viva de pendências).
+**Comece por [`docs/INDEX.md`](docs/INDEX.md).** Ele roteia por *tarefa* — "vou
+escrever uma migration", "vou gatear um endpoint", "vou fazer deploy" — e diz o
+que ler antes de cada uma. Foi criado em 2026-08-27 porque não existia ponto de
+entrada: a lista de arquivos que ficava aqui dizia *quais* docs existem, nunca
+*quando* abrir cada um.
+
+Cada documento vivo declara no topo o próprio **status**, a **última
+verificação** e sobre o que tem **autoridade**. Documento sem autoridade
+declarada é anotação, não contrato.
+
+Os de leitura frequente: `RUNBOOK.md` (onboarding de tenant,
+`must_change_password`/SEC-1, backup, firewall, observabilidade, incidentes),
+`docs/BACKLOG-PENDENCIAS.md` (fonte viva do que falta),
+`docs/design-system.md`, `docs/INTEGRACAO-PAGAMENTOS.md`,
+`docs/runbooks/platform-operator-bootstrap.md`, `docs/GOOGLE-DOCS-OAUTH-SETUP.md`.
+
+**Não procure a tabela de migrations no `README.md`.** Ela existiu ali e cobria
+**22 de 105** revisões, anunciando-se como "migrations atuais" — uma tabela de
+migrations num README envelhece em silêncio. O estado real vem de
+`alembic history`; as regras para escrever uma estão neste arquivo, §Migrations;
+a narrativa das 22 primeiras foi para `docs/HISTORICO-FASES.md`.
+
+**Ponteiro para doc é testado.** `tests/test_guarda_links_docs.py` reprova
+caminho `.md` inexistente citado em código (inclusive docstring de migration,
+onde o spec é a autoridade da decisão) e link relativo quebrado em doc vivo.
+Mover documento é mudar ponteiro — quando esta guarda nasceu, havia 4 caminhos
+mortos citados por 7 arquivos, um deles quebrado desde o primeiro commit.
 
 `docs/archive/` guarda escopo de PR já mesclado, plano pontual já executado e recap de sessão — histórico, não referência corrente. `CUTOVER.md`/`CUTOVER-INVENTORY.md`, `PROTOCOLO-PLAN.md`, `DEPLOY-PLAN.md`/`DEPLOY-SETUP.md` e `CHATBOT-PLAN.md` foram pra lá em 2026-08-25 (auditoria de docs) — o `CHATBOT-PLAN.md` já se declarava obsoleto, apontando pra `docs/superpowers/specs/2026-08-07-ia-1-assistente-do-processo-design.md` como fonte atual.
