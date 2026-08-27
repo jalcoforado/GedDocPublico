@@ -3,7 +3,7 @@
 Reúne num só lugar os estados que merecem olho humano. Nenhuma regra nova é
 inventada aqui: cada exceção corresponde a algo que o modelo JÁ registra —
 é justamente por isso que esta fatia pôde ser escrita sem a spec municipal
-(ver `docs/pagamentos-onda-c-escopo.md`).
+(ver `docs/archive/pagamentos-onda-c-escopo.md`).
 
 Cada regra devolve as linhas em falta e um total. O relatório inteiro é uma
 foto do agora; não há persistência nem snapshot.

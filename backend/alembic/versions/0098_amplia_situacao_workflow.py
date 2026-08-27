@@ -5,7 +5,7 @@ Revision ID: 0098
 Revises: 0097
 Create Date: 2026-08-24
 
-Spec: `docs/superpowers/specs/2026-08-23-transporte-p8-workflows-master.md`
+Spec: `docs/superpowers/specs/2026-08-23-transporte-p8-workflows-design.md`
 (review final, Important 1).
 
 `workflow_instance.estado_atual` é `varchar(50)` (migration 0095), mas as

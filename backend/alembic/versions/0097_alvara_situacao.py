@@ -4,7 +4,7 @@ Revision ID: 0097
 Revises: 0096
 Create Date: 2026-08-23
 
-Spec: `docs/superpowers/specs/2026-08-23-transporte-p8-workflows-master.md`
+Spec: `docs/superpowers/specs/2026-08-23-transporte-p8-workflows-design.md`
 (fase D, task 4, §Alvará).
 
 `transporte_regulado.alvara.situacao` nasce `varchar(30) NOT NULL DEFAULT

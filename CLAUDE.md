@@ -433,4 +433,6 @@ CI (`.github/workflows/`): `backend-tests.yml` carrega `ci/legacy-schema.sql`, f
 
 ## Docs de referência
 
-`README.md` (arquitetura, tabela completa de migrations, decisões registradas), `RUNBOOK.md` (onboarding de tenant, `must_change_password`/SEC-1, backup por tenant, observabilidade, incidentes comuns), `CUTOVER.md`/`CUTOVER-INVENTORY.md`, `PROTOCOLO-PLAN.md`, `DEPLOY-PLAN.md`/`DEPLOY-SETUP.md`, `CHATBOT-PLAN.md`.
+`README.md` (arquitetura, tabela completa de migrations, decisões registradas), `RUNBOOK.md` (onboarding de tenant, `must_change_password`/SEC-1, backup por tenant, observabilidade, incidentes comuns), `docs/design-system.md`, `docs/INTEGRACAO-PAGAMENTOS.md`, `docs/runbooks/platform-operator-bootstrap.md`, `docs/GOOGLE-DOCS-OAUTH-SETUP.md`, `docs/BACKLOG-PENDENCIAS.md` (fonte viva de pendências).
+
+`docs/archive/` guarda escopo de PR já mesclado, plano pontual já executado e recap de sessão — histórico, não referência corrente. `CUTOVER.md`/`CUTOVER-INVENTORY.md`, `PROTOCOLO-PLAN.md`, `DEPLOY-PLAN.md`/`DEPLOY-SETUP.md` e `CHATBOT-PLAN.md` foram pra lá em 2026-08-25 (auditoria de docs) — o `CHATBOT-PLAN.md` já se declarava obsoleto, apontando pra `docs/superpowers/specs/2026-08-07-ia-1-assistente-do-processo-design.md` como fonte atual.

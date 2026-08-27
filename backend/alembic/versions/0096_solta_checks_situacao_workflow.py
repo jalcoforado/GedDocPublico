@@ -4,7 +4,7 @@ Revision ID: 0096
 Revises: 0095
 Create Date: 2026-08-23
 
-Spec: `docs/superpowers/specs/2026-08-23-transporte-p8-workflows-master.md`
+Spec: `docs/superpowers/specs/2026-08-23-transporte-p8-workflows-design.md`
 (fase D, task 3, §Situação↔estado).
 
 Até aqui `transporte_regulado.ocorrencia.situacao` tinha um CHECK

@@ -4,7 +4,7 @@
 
 Substituição gradual do monolito PHP `aprimora/` (porta 8081) por stack moderna (FastAPI + Next.js), via **Strangler Fig**. Roda em paralelo ao PHP — o nginx entry point decide rota a rota qual servidor responde.
 
-**Status:** todas as fases do plano concluídas. Resta o cutover propriamente dito (ver [CUTOVER.md](CUTOVER.md)).
+**Status:** todas as fases do plano concluídas. Resta o cutover propriamente dito (ver [CUTOVER.md](docs/archive/CUTOVER.md)).
 
 ## Arquitetura
 
@@ -278,7 +278,7 @@ A tabela `alembic_version` mora em `aprimora_py` (não em `public`) pra isolamen
 
 ## Cutover
 
-Quando estiver pronto para aposentar o PHP, ver [CUTOVER.md](CUTOVER.md) — checklist passo a passo.
+Quando estiver pronto para aposentar o PHP, ver [CUTOVER.md](docs/archive/CUTOVER.md) — checklist passo a passo.
 
 ## Decisões pendentes
 

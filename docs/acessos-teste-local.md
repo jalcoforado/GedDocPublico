@@ -290,7 +290,7 @@ usa assuntos já existentes do seed e cria processos novos a cada execução.
   administrativo em produção) **não devem ser registradas aqui** — devem
   ser transmitidas uma única vez pelo canal seguro institucional.
 - **Após o PR SEC-1** (escopo em
-  [docs/sec-pr1-must-change-password-escopo-implementavel.md](sec-pr1-must-change-password-escopo-implementavel.md))
+  [docs/archive/sec-pr1-must-change-password-escopo-implementavel.md](archive/sec-pr1-must-change-password-escopo-implementavel.md))
   novos usuários e admins iniciais nascerão com `must_change_password=true`
   e serão obrigados a passar pela tela `/alterar-senha-obrigatoria` no
   primeiro acesso. Este documento precisará ser revisitado quando isso entrar.
@@ -315,6 +315,6 @@ usa assuntos já existentes do seed e cria processos novos a cada execução.
   commit `f1f0d17`).
 - **Vitest (frontend):** **215/215 passando** no último relatório.
 - **SEC-1 (must_change_password):** escopo aprovado com ajustes
-  ([docs/sec-pr1-must-change-password-escopo-implementavel.md](sec-pr1-must-change-password-escopo-implementavel.md)).
+  ([docs/archive/sec-pr1-must-change-password-escopo-implementavel.md](archive/sec-pr1-must-change-password-escopo-implementavel.md)).
   **Implementação ainda não iniciada** — aguarda autorização explícita
   para o Commit 1.

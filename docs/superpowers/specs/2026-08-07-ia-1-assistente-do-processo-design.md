@@ -14,7 +14,7 @@
 **Status:** aprovado · **Data:** 2026-08-07 · **Decisões:** Jorge
 
 Primeira fatia do assistente conversacional. Substitui, para o MVP, o C1+C2 do
-[`CHATBOT-PLAN.md`](../../../CHATBOT-PLAN.md) — que continua válido como destino, não como
+[`CHATBOT-PLAN.md`](../../archive/CHATBOT-PLAN.md) — que continua válido como destino, não como
 próximo passo.
 
 ## 1. O que muda em relação ao plano de maio
