@@ -226,3 +226,62 @@ def test_script_de_deploy_usa_o_sha_recebido():
         "O `reset` no SHA alvo sumiu de `pull_code`. Só sobrou o fallback, que "
         "é o comportamento antigo."
     )
+
+
+# ---------------------------------------------------------------------------
+# Autenticação do deploy (2026-08-27)
+#
+# O login root por senha na porta 22 é o vetor provável do minerador instalado
+# em 25/08. O workflow passou a preferir CHAVE, com senha só enquanto o secret
+# `VPS_SSH_KEY` não existir — shim transitório, para que fechar a senha no
+# servidor e trocar o workflow não precisem acontecer no mesmo minuto.
+#
+# As duas propriedades abaixo somem sem sintoma: o deploy continua verde nos
+# dois casos, e o que se perde é invisível de fora.
+# ---------------------------------------------------------------------------
+def test_a_senha_do_vps_nao_e_interpolada_no_script():
+    """`$VPS_PASSWORD` vem do ambiente, nunca de `${{ env.VPS_PASSWORD }}`.
+
+    A diferença não é estilo. `${{ }}` é substituído pelo Actions ANTES de o
+    shell existir, então a senha passa a fazer parte do texto do script — ela
+    aparece em `set -x`, em mensagem de erro do bash e em qualquer eco acidental
+    do comando. Lida do ambiente, o mascaramento de segredo do runner continua
+    valendo.
+    """
+    _exige_workflows()
+    doc = _carrega(DEPLOY)
+    # SÓ o corpo dos `run:`. A ligação `VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}`
+    # no bloco `env:` é a forma CERTA de trazer o segredo e não pode ser
+    # confundida com o defeito — a primeira versão deste teste varria o arquivo
+    # inteiro e reprovava exatamente a linha correta.
+    scripts = [
+        passo["run"]
+        for job in doc["jobs"].values()
+        for passo in job.get("steps", [])
+        if isinstance(passo, dict) and "run" in passo
+    ]
+    assert scripts, "nenhum `run:` encontrado — a varredura ficaria vácua"
+    for script in scripts:
+        for forma in ("${{ env.VPS_PASSWORD }}", "${{ secrets.VPS_PASSWORD }}"):
+            assert forma not in script, (
+                f"A senha do VPS é interpolada no corpo de um `run:` via {forma}. "
+                "Use `$VPS_PASSWORD` (variável de ambiente), que o runner mascara."
+            )
+
+
+def test_deploy_prefere_chave_e_avisa_quando_cai_na_senha():
+    """O caminho de chave existe E a queda para senha é BARULHENTA.
+
+    Sem o aviso, o shim vira permanente por inércia: o deploy funciona, ninguém
+    olha, e a porta 22 segue aberta a senha por meses. O `::warning::` põe isso
+    no resumo de cada execução.
+    """
+    _exige_workflows()
+    texto = DEPLOY.read_text(encoding="utf-8")
+    assert "secrets.VPS_SSH_KEY" in texto, (
+        "o caminho de autenticação por chave sumiu do deploy"
+    )
+    assert "::warning::VPS_SSH_KEY ausente" in texto, (
+        "a queda para senha ficou silenciosa — é assim que um shim transitório "
+        "vira permanente"
+    )

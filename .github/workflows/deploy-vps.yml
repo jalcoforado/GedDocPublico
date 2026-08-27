@@ -162,33 +162,74 @@ jobs:
 
       - name: Deploy to VPS
         run: |
-          # Install SSH client
+          # Autenticação: CHAVE quando `VPS_SSH_KEY` existe, senha enquanto não
+          # existir. A dupla via é TRANSITÓRIA e tem uma razão de ordem:
+          #
+          # O login root por senha na 22 é o vetor provável do minerador de
+          # 25/08 (ver RUNBOOK, incidente). Fechá-lo exige `PermitRootLogin
+          # prohibit-password` no servidor — e no minuto em que isso valer, um
+          # workflow que só sabe autenticar por senha PARA DE DEPLOYAR. Trocar
+          # os dois ao mesmo tempo, um no servidor e outro aqui, é o tipo de
+          # coordenação que falha no pior momento.
+          #
+          # Com o shim a ordem deixa de importar: publique a chave em
+          # `~root/.ssh/authorized_keys`, crie o secret `VPS_SSH_KEY`, confirme
+          # num deploy que o log diz "chave", e SÓ ENTÃO feche a senha no
+          # servidor. Depois disso, apague este bloco e o secret `VPS_PASSWORD`.
+          #
+          # Medido em 2026-08-27: o secret `VPS_SSH_KEY` **não existe** (há
+          # VPS_HOST, VPS_PASSWORD, VPS_PORT, VPS_USER). É por isso que o
+          # caminho de senha continua aqui em vez de ser removido de uma vez.
           sudo apt-get update -qq
           sudo apt-get install -y openssh-client sshpass
 
-          # Create SSH config
           mkdir -p ~/.ssh
-          cat > ~/.ssh/config << EOF
-          Host vps
-            HostName ${{ env.VPS_HOST }}
-            User ${{ env.VPS_USER }}
-            Port ${{ env.VPS_PORT }}
-            StrictHostKeyChecking no
-            UserKnownHostsFile=/dev/null
-            PasswordAuthentication yes
-            PubkeyAuthentication no
-          EOF
+
+          # A chave decide o caminho pelo TAMANHO DO ARQUIVO, não por comparar
+          # o secret como string: secret ausente vira string vazia, e um
+          # `id_deploy` de zero byte com `PubkeyAuthentication yes` faria o ssh
+          # falhar de um jeito que não diz o que houve.
+          printf '%s' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+
+          {
+            echo "Host vps"
+            echo "  HostName ${{ env.VPS_HOST }}"
+            echo "  User ${{ env.VPS_USER }}"
+            echo "  Port ${{ env.VPS_PORT }}"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile=/dev/null"
+          } > ~/.ssh/config
+
+          if [ -s ~/.ssh/id_deploy ]; then
+            echo "::notice::Autenticando na VPS por CHAVE (VPS_SSH_KEY)."
+            {
+              echo "  IdentityFile ~/.ssh/id_deploy"
+              echo "  IdentitiesOnly yes"
+              echo "  PubkeyAuthentication yes"
+              echo "  PasswordAuthentication no"
+            } >> ~/.ssh/config
+            ssh_vps() { ssh -v vps "$@"; }
+          else
+            rm -f ~/.ssh/id_deploy
+            echo "::warning::VPS_SSH_KEY ausente — autenticando por SENHA. Isso exige login root por senha na porta 22, vetor provável do minerador de 25/08. Crie o secret para fechar essa porta."
+            {
+              echo "  PubkeyAuthentication no"
+              echo "  PasswordAuthentication yes"
+            } >> ~/.ssh/config
+            ssh_vps() { sshpass -p "$VPS_PASSWORD" ssh -v vps "$@"; }
+          fi
 
           chmod 600 ~/.ssh/config
 
           # Ensure deploy path exists
-          sshpass -p "${{ env.VPS_PASSWORD }}" ssh -v vps "mkdir -p ${{ env.DEPLOY_PATH }} && chown -R ${{ env.VPS_USER }}:${{ env.VPS_USER }} ${{ env.DEPLOY_PATH }} || true"
+          ssh_vps "mkdir -p ${{ env.DEPLOY_PATH }} && chown -R ${{ env.VPS_USER }}:${{ env.VPS_USER }} ${{ env.DEPLOY_PATH }} || true"
 
           # Check if repo exists, clone if not
-          sshpass -p "${{ env.VPS_PASSWORD }}" ssh -v vps "[ -d ${{ env.DEPLOY_PATH }}/.git ] || git clone https://github.com/jalcoforado/GedDocPublico.git ${{ env.DEPLOY_PATH }}"
+          ssh_vps "[ -d ${{ env.DEPLOY_PATH }}/.git ] || git clone https://github.com/jalcoforado/GedDocPublico.git ${{ env.DEPLOY_PATH }}"
 
           # Execute deploy script
-          sshpass -p "${{ env.VPS_PASSWORD }}" ssh -v vps << 'DEPLOY_SCRIPT'
+          ssh_vps << 'DEPLOY_SCRIPT'
             set -e
             cd ${{ env.DEPLOY_PATH }}
 
