@@ -7,7 +7,7 @@ Create Date: 2026-06-05
 Adiciona `utils.usuario.must_change_password` (BOOLEAN NOT NULL DEFAULT false)
 para suportar a obrigação de troca de senha no primeiro acesso (SEC-1).
 
-Decisões travadas no escopo (docs/sec-pr1-must-change-password-escopo-implementavel.md):
+Decisões travadas no escopo (docs/archive/sec-pr1-must-change-password-escopo-implementavel.md):
 - D-COLUNA-LOCAL: a flag mora em `utils.usuario`, não em tabela separada.
 - D-BACKFILL: usuários EXISTENTES nascem com false — não são forçados a trocar
   senha retroativamente. Apenas novos usuários provisionados após o Commit X

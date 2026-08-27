@@ -1,7 +1,7 @@
 """Modelo `ComplementacaoDocumental` — PR 4d.
 
 Solicitação formal de complementação documental do servidor ao cidadão
-(ver `docs/servicos-pr4d-complementacao-documental-escopo-implementavel.md`).
+(ver `docs/archive/servicos-pr4d-complementacao-documental-escopo-implementavel.md`).
 """
 from datetime import datetime
 from typing import Any
