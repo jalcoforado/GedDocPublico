@@ -1,5 +1,10 @@
 # Integração de sistemas com o módulo Pagamentos
 
+> **Status:** vivo · **Autoridade sobre:** Contrato de arrecadação e conciliação.
+> **Última verificação:** 2026-08-26 (último commit que tocou este arquivo).
+> Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
+
+
 Este documento é o contrato que a prefeitura entrega a um sistema externo (ERP
 financeiro, sistema contábil, folha de pagamento etc.) que precisa **ler ou
 escrever** dados de pagamentos do Aprimora por API, sem passar pela tela de

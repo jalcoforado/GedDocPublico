@@ -1,5 +1,13 @@
 # Assinatura v2 — Operação e Testes
 
+> **Status:** PARADO · **Autoridade sobre:** nada — não é conferido contra o código desde a data abaixo.
+> **Última verificação:** 2026-05-28 (último commit que tocou este arquivo).
+> Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
+
+> **Não use como referência do estado atual.** Sem alteração desde a data
+> acima; o sistema mudou bastante desde então. Fica por valor histórico.
+
+
 Guia operacional dos testes e fluxos da Assinatura v2 (PR2a/2b/2c).
 
 ## Testes backend (pytest)

@@ -1,5 +1,10 @@
 # Runbook operacional — Aprimora SaaS
 
+> **Status:** vivo · **Autoridade sobre:** Operação: onboarding de tenant, backup, firewall, observabilidade, incidentes.
+> **Última verificação:** 2026-08-12 (último commit que tocou este arquivo).
+> Índice: [docs/INDEX.md](docs/INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
+
+
 Procedimentos para operações de produção. Tudo executável como `docker exec aprimora-py-backend ...`.
 
 ---

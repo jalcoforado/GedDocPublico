@@ -1,5 +1,10 @@
 # Inventário do bypass de RLS no runtime (achado F-12)
 
+> **Status:** vivo · **Autoridade sobre:** Medição do bypass de RLS no runtime (achado F-12).
+> **Última verificação:** 2026-08-02 (último commit que tocou este arquivo).
+> Índice: [docs/INDEX.md](../../INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
+
+
 **PR:** `SEC-RLS-00A` · **Data da medição:** 2026-08-01 · **Estado:** caracterização, sem correção.
 
 Este documento **mede**; não conserta. Ele existe porque a ordem acordada em

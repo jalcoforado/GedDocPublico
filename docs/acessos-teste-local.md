@@ -1,5 +1,10 @@
 # Acessos para teste manual
 
+> **Status:** vivo · **Autoridade sobre:** Credenciais e atalhos do ambiente local.
+> **Última verificação:** 2026-08-27 (último commit que tocou este arquivo).
+> Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
+
+
 > # AMBIENTE LOCAL / DEV — NÃO USAR EM PRODUÇÃO
 >
 > **Escopo:** apenas a stack `docker compose` do projeto `aprimora-py` rodando
@@ -272,7 +277,7 @@ sido criados pelo Smoke E2E e são recriados a cada execução do Playwright
 ### 6.3 `ux1-smoke-servico`
 
 **Não existe** um serviço com slug/nome `ux1-smoke-servico` no banco
-local. O smoke UX-1 ([tests-e2e/specs/ux1-smoke.spec.ts](tests-e2e/specs/ux1-smoke.spec.ts))
+local. O smoke UX-1 ([tests-e2e/specs/ux1-smoke.spec.ts](../tests-e2e/specs/ux1-smoke.spec.ts))
 usa assuntos já existentes do seed e cria processos novos a cada execução.
 
 ---
