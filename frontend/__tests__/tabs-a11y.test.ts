@@ -1,13 +1,13 @@
 /**
- * Guarda das abas: `role="tablist"` à mão não cresce mais.
+ * Guarda das abas: `role="tablist"` só existe no primitivo.
  *
  * O primitivo `components/ui/tabs.tsx` existe desde a UX-02 (fatia 2.5) com
  * ARIA completo — `aria-controls`/`aria-labelledby` de mão dupla, `role=
- * "tabpanel"`, roving tabindex, setas/Home/End — e cinco testes cobrindo isso.
+ * "tabpanel"`, roving tabindex, setas/Home/End.
  *
- * Ele tinha **zero consumidores em produção**. Enquanto isso, seis telas
- * reimplementaram abas à mão, e as seis pararam no mesmo lugar: `role="tablist"`
- * + `role="tab"` e nada mais. Medição de 2026-08-27:
+ * Ele passou meses com **zero consumidores em produção**. Enquanto isso, seis
+ * telas reimplementaram abas à mão, e as seis pararam no mesmo lugar:
+ * `role="tablist"` + `role="tab"` e nada mais. Medição de 2026-08-27:
  *
  *   tela                                  aria-controls  tabpanel  setas
  *   admin/tenants/[id] (TenantEditTabs)         0            0        0
@@ -17,21 +17,25 @@
  *   m/protocolo/processos/[id]                  0            0        0
  *   components/RelatoriosNav                    0            0        0
  *
- * O que isso custa a quem usa leitor de tela: o widget anuncia "aba" e o leitor
- * não encontra painel associado. Não dá para saber o que a aba controla, nem
- * pular para o conteúdo dela, nem trocar de aba pelo teclado da forma que o
- * padrão manda. Nada disso quebra tela, nenhum teste fica vermelho, nenhum erro
- * aparece no console — foi por isso que atravessou sete meses.
+ * O que custava a quem usa leitor de tela: o widget anunciava "aba" e o leitor
+ * não encontrava painel associado. Não dava para saber o que a aba controla,
+ * nem pular para o conteúdo, nem trocar de aba pelo teclado. Nada quebrava
+ * tela, nenhum teste ficava vermelho, nenhum erro no console — foi por isso que
+ * atravessou sete meses.
  *
- * O backlog registrava isto como resíduo de UMA tela (item 1.0.9 da F2). Eram
- * seis, incluindo o detalhe do processo. Um item que subestima o próprio
- * tamanho é pior que nenhum item: quem o lê acha que é conserto de quinze
- * minutos e adia.
+ * As seis foram resolvidas, mas **não da mesma forma**, e a diferença é o que
+ * vale registrar:
  *
- * **Esta guarda não conserta as cinco restantes.** Ela impede a sétima. A lista
- * `PENDENTES` abaixo só pode ENCOLHER: migrar uma tela para o primitivo remove
- * a linha correspondente; acrescentar linha aqui exige decisão escrita, do
- * mesmo jeito que `TRANSVERSAIS` em `rotas-modulo.test.ts`.
+ *   - Cinco eram abas de verdade (painéis na mesma página) e migraram para o
+ *     primitivo.
+ *   - `RelatoriosNav` **não era aba nenhuma**: três `<Link>` para três rotas
+ *     distintas. Não havia painel porque não havia painel. Ali o conserto foi o
+ *     OPOSTO — tirar `role="tab"`, que o APG não admite em link que navega, e
+ *     ficar com `<nav>` + `aria-current="page"`. Migrar teria piorado.
+ *
+ * Esta guarda não distingue os dois casos: ela só vê `role="tablist"` escrito
+ * fora do primitivo. Quem for adicionar abas precisa decidir qual dos dois tem
+ * em mãos — a pergunta é "o conteúdo troca NESTA página?".
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -46,20 +50,15 @@ const IGNORAR = new Set(["node_modules", ".next", "__tests__"]);
 const PRIMITIVO = join("components", "ui", "tabs.tsx");
 
 /**
- * Telas que ainda reimplementam abas à mão, medidas em 2026-08-27.
+ * Telas que ainda reimplementam abas à mão. **Vazia desde 2026-08-27.**
  *
- * Cada linha é uma tela onde quem usa leitor de tela não consegue navegar as
- * abas. Migrar para `components/ui/tabs` remove a linha. **Só encolhe.**
+ * Mantida (em vez de apagada junto com a última entrada) porque o dia em que
+ * alguém precisar de uma exceção legítima, o lugar de registrá-la — com a
+ * razão ao lado — já existe. Lista vazia é a afirmação mais forte que este
+ * arquivo pode fazer, e o teste abaixo garante que ela não volte a crescer em
+ * silêncio.
  */
-const PENDENTES = new Set(
-  [
-    "app/(app)/m/administracao/jobs/page.tsx",
-    "app/(app)/m/pagamentos/autorizacao/page.tsx",
-    "app/(app)/m/pagamentos/tesouraria/page.tsx",
-    "app/(app)/m/protocolo/processos/[id]/page.tsx",
-    "components/RelatoriosNav.tsx",
-  ].map((p) => p.split("/").join("/")),
-);
+const PENDENTES = new Set<string>([]);
 
 function arquivos(dir: string): string[] {
   const achados: string[] = [];
@@ -77,63 +76,81 @@ function arquivos(dir: string): string[] {
  * guarda foi o `TenantEditTabs` — que **menciona** `role="tablist"` no
  * docstring, justamente para explicar que deixou de usá-lo. Menção em prosa
  * não é implementação, e ficar verde de outro jeito exigiria apagar a
- * explicação. (A guarda de links da documentação tropeçou no mesmo espelho
- * no mesmo dia: `backend/tests/test_guarda_links_docs.py`.)
+ * explicação. (A guarda de links da documentação tropeçou no mesmo espelho no
+ * mesmo dia: `backend/tests/test_guarda_links_docs.py`.)
  *
- * A remoção é textual, não um parser: string contendo `//` ou `/*` viraria
- * ruído. Nenhuma das telas varridas tem isso, e o controle de vacuidade no
- * fim do arquivo pega o dia em que a heurística começar a comer código.
+ * A remoção é textual, não um parser: string contendo `//` viraria ruído.
+ * Nenhuma das telas varridas tem isso, e os controles de vacuidade no fim do
+ * arquivo pegam o dia em que a heurística começar a comer código.
  */
 function semComentarios(fonte: string): string {
-  return fonte
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "")
-    .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "");
+  return fonte.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 }
 
-function comTablistNaMao(): string[] {
-  const achados: string[] = [];
+function varredura(): { arquivosLidos: number; comTablist: string[] } {
+  const comTablist: string[] = [];
+  let arquivosLidos = 0;
   for (const base of VARRER) {
     for (const caminho of arquivos(join(RAIZ, base))) {
-      const rel = relative(RAIZ, caminho);
-      if (rel === PRIMITIVO) continue;
+      arquivosLidos += 1;
+      const rel = relative(RAIZ, caminho).split("\\").join("/");
+      if (rel === PRIMITIVO.split("\\").join("/")) continue;
       if (semComentarios(readFileSync(caminho, "utf8")).includes('role="tablist"')) {
-        achados.push(rel.split("\\").join("/"));
+        comTablist.push(rel);
       }
     }
   }
-  return achados.sort();
+  return { arquivosLidos, comTablist: comTablist.sort() };
 }
 
 describe("abas — ARIA", () => {
-  it("nenhuma tela NOVA reimplementa `role=\"tablist\"` à mão", () => {
-    const achados = comTablistNaMao();
-    const novas = achados.filter((a) => !PENDENTES.has(a));
+  it('nenhuma tela reimplementa `role="tablist"` à mão', () => {
+    const { comTablist } = varredura();
+    const novas = comTablist.filter((a) => !PENDENTES.has(a));
 
     expect(
       novas,
-      'tela com `role="tablist"` escrito à mão. Use `components/ui/tabs` — ele já ' +
-        "traz aria-controls/aria-labelledby, role=tabpanel, roving tabindex e " +
-        "navegação por setas. Se o painel precisar preservar estado local ao " +
-        "trocar de aba, passe `keepMounted` ao `<TabPanel>`.",
+      'tela com `role="tablist"` escrito à mão. Duas saídas, e a escolha depende ' +
+        'de uma pergunta: "o conteúdo troca NESTA página?".\n' +
+        "  SIM  -> use `components/ui/tabs` (aria-controls, role=tabpanel, roving " +
+        "tabindex, setas). Se o painel precisar preservar estado local ao trocar " +
+        "de aba, passe `keepMounted`. Se o visual for de botão arredondado, " +
+        '`variant="pill"`.\n' +
+        '  NÃO  -> não são abas, são links. Use `<nav>` + `aria-current="page"`, ' +
+        "como `components/RelatoriosNav.tsx`.",
     ).toEqual([]);
   });
 
-  it("a lista de pendentes só encolhe — nenhuma entrada dela já foi migrada", () => {
-    const achados = new Set(comTablistNaMao());
-    const jaMigradas = [...PENDENTES].filter((p) => !achados.has(p));
+  it("a lista de pendentes só encolhe — nenhuma entrada dela já foi resolvida", () => {
+    const { comTablist } = varredura();
+    const achados = new Set(comTablist);
+    const jaResolvidas = [...PENDENTES].filter((p) => !achados.has(p));
 
     expect(
-      jaMigradas,
+      jaResolvidas,
       "estas telas não têm mais `role=\"tablist\"` à mão — apague a linha " +
         "correspondente de `PENDENTES` neste arquivo. Isenção que sobrevive à " +
         "própria causa vira permissão silenciosa.",
     ).toEqual([]);
   });
 
-  it("a varredura enxerga alguma coisa (controle de vacuidade)", () => {
-    // Sem isto, um erro no caminho ou no glob deixaria as duas asserções acima
-    // verdes para sempre, comparando lista vazia com lista vazia.
-    expect(comTablistNaMao().length).toBeGreaterThanOrEqual(PENDENTES.size);
+  // --- Controles de vacuidade -------------------------------------------
+  //
+  // Com `PENDENTES` vazia, as duas asserções acima comparam lista vazia com
+  // lista vazia. Elas passariam para sempre se a varredura parasse de varrer —
+  // caminho errado, glob quebrado, `semComentarios` engolindo código. Estes
+  // dois testes existem só para que isso não aconteça em silêncio.
+
+  it("a varredura realmente percorre a árvore", () => {
+    const { arquivosLidos } = varredura();
+    expect(arquivosLidos).toBeGreaterThan(150);
+  });
+
+  it("a varredura enxergaria o primitivo, se ele não fosse isento", () => {
+    // Prova positiva: existe pelo menos UM arquivo onde a busca casa. Sem isto,
+    // um `semComentarios` guloso demais (ou um regex quebrado) zeraria todos os
+    // achados e a guarda ficaria verde por não enxergar nada.
+    const fonte = readFileSync(join(RAIZ, PRIMITIVO), "utf8");
+    expect(semComentarios(fonte)).toContain('role="tablist"');
   });
 });

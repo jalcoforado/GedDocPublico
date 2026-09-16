@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+import { TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 type TabId = "visao" | "movimentacoes" | "documentos" | "relacionados";
@@ -463,57 +464,26 @@ export default function ProcessoDetailPage() {
         }
       />
 
-      <div
-        role="tablist"
-        aria-label="Seções do processo"
-        className="flex gap-1 overflow-x-auto border-b border-border"
-      >
-        {(
-          [
-            { id: "visao", label: "Visão geral" },
+      <Tabs value={activeTab} onChange={(v) => setTab(v as TabId)}>
+        <TabList
+          aria-label="Seções do processo"
+          className="overflow-x-auto"
+          tabs={[
+            { value: "visao", label: "Visão geral" },
             {
-              id: "movimentacoes",
-              label: "Movimentações",
-              count: p.movimentacoes.length,
+              value: "movimentacoes",
+              label: <ComContagem rotulo="Movimentações" n={p.movimentacoes.length} />,
+              nomeAcessivel: `Movimentações (${p.movimentacoes.length})`,
             },
-            { id: "documentos", label: "Documentos", count: p.anexos.length },
-            { id: "relacionados", label: "Relacionados" },
-          ] as const
-        ).map((t) => {
-          const active = activeTab === t.id;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setTab(t.id)}
-              className={cn(
-                "flex h-11 shrink-0 items-center gap-2 px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                active
-                  ? "border-b-2 border-primary text-primary"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {t.label}
-              {"count" in t && t.count != null && (
-                <span
-                  className={cn(
-                    "rounded-full px-1.5 text-xs tabular-nums",
-                    active
-                      ? "bg-primary/10 text-primary"
-                      : "bg-muted text-muted-foreground",
-                  )}
-                >
-                  {t.count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {activeTab === "visao" && (
+            {
+              value: "documentos",
+              label: <ComContagem rotulo="Documentos" n={p.anexos.length} />,
+              nomeAcessivel: `Documentos (${p.anexos.length})`,
+            },
+            { value: "relacionados", label: "Relacionados" },
+          ]}
+        />
+        <TabPanel value="visao">
         <div className="space-y-6">
           <Card>
             <CardHeader>
@@ -615,9 +585,8 @@ export default function ProcessoDetailPage() {
               Some sozinho quando não há chave de LLM configurada. */}
           <AssistenteProcesso processoId={p.id} />
         </div>
-      )}
-
-      {activeTab === "movimentacoes" && (
+        </TabPanel>
+        <TabPanel value="movimentacoes">
         <div className="space-y-6">
           <Card>
             <CardHeader>
@@ -654,9 +623,8 @@ export default function ProcessoDetailPage() {
             </CardContent>
           </Card>
         </div>
-      )}
-
-      {activeTab === "documentos" && (
+        </TabPanel>
+        <TabPanel value="documentos">
         <div className="space-y-6">
           {/* PR 4d — Bloco de complementação documental.
               PR 4d-fix: enquanto o histórico ainda carrega, NÃO oferece
@@ -746,9 +714,8 @@ export default function ProcessoDetailPage() {
             </CardContent>
           </Card>
         </div>
-      )}
-
-      {activeTab === "relacionados" && (
+        </TabPanel>
+        <TabPanel value="relacionados">
         <div className="space-y-6">
           <ProcessoApensados
             processoId={p.id}
@@ -757,7 +724,8 @@ export default function ProcessoDetailPage() {
           />
           <ProcessoVolumes processoId={p.id} />
         </div>
-      )}
+        </TabPanel>
+      </Tabs>
 
       {viewer && (
         <PdfViewerDialog
@@ -769,5 +737,28 @@ export default function ProcessoDetailPage() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Rótulo de aba com contador ("Documentos [3]").
+ *
+ * O número é decorativo para quem enxerga — repete algo que a lista abaixo já
+ * mostra. Por isso o `aria-hidden`: sem ele o leitor de tela anuncia
+ * "Documentos 3", e o `nomeAcessivel` do `TabDef` já diz "Documentos (3)" de
+ * forma legível. As classes vêm da implementação anterior, para a aparência
+ * não mudar junto com a correção de acessibilidade.
+ */
+function ComContagem({ rotulo, n }: { rotulo: string; n: number }) {
+  return (
+    <span className="flex items-center gap-2">
+      {rotulo}
+      <span
+        aria-hidden
+        className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground group-aria-selected:bg-primary/10"
+      >
+        {n}
+      </span>
+    </span>
   );
 }

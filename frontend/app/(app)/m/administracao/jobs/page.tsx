@@ -13,6 +13,7 @@ import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, jobResultadoUrl, type JobOut, type JobStatus } from "@/lib/api";
+import { TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 function fmtDateTime(s: string | null) {
@@ -67,31 +68,21 @@ export default function JobsPage() {
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-primary">Jobs em background</h1>
 
-      <div
-        role="tablist"
-        aria-label="Tipos de jobs"
-        className="flex gap-1 border-b border-border"
-      >
-        {(["execucoes", "agendados"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            type="button"
-            role="tab"
-            aria-selected={tab === t}
-            onClick={() => setTab(t)}
-            className={cn(
-              "h-11 px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              tab === t
-                ? "border-b-2 border-primary text-primary"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {t === "execucoes" ? "Execuções" : "Agendados"}
-          </button>
-        ))}
-      </div>
-
-      {tab === "execucoes" ? <ExecucoesTab /> : <AgendadosTab />}
+      <Tabs value={tab} onChange={(v) => setTab(v as Tab)}>
+        <TabList
+          aria-label="Tipos de jobs"
+          tabs={[
+            { value: "execucoes", label: "Execuções" },
+            { value: "agendados", label: "Agendados" },
+          ]}
+        />
+        <TabPanel value="execucoes">
+          <ExecucoesTab />
+        </TabPanel>
+        <TabPanel value="agendados">
+          <AgendadosTab />
+        </TabPanel>
+      </Tabs>
     </div>
   );
 }

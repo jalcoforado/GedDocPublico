@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import { TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { api, type ParcelaTesourariaItem } from "@/lib/api";
 import { BotoesExportar } from "@/components/pagamentos/BotoesExportar";
@@ -57,61 +58,42 @@ export default function TesourariaPage() {
   const [tab, setTab] = useState<TabId>("pagar");
 
   return (
-    <div className="space-y-4">
+    // `Tabs` envolve o header E os painéis: a `TabList` viaja como prop até o
+    // `PageHeader`, mas continua DENTRO desta subárvore no React, então o
+    // contexto (ids, aria-controls) alcança os dois lados.
+    <Tabs value={tab} onChange={(v) => setTab(v as TabId)} className="space-y-4">
       <PageHeader
         icon={Banknote}
         title="Tesouraria"
         description="Execute os pagamentos das parcelas liberadas pelo ordenador — o último ato do rito da Lei 4.320/64."
         tabs={
-          <div role="tablist" aria-label="Seção da tesouraria" className="flex gap-1 py-2">
-            <TabButton active={tab === "pagar"} onClick={() => setTab("pagar")}>
-              A pagar
-            </TabButton>
-            <TabButton active={tab === "ops"} onClick={() => setTab("ops")}>
-              OPs emitidas
-            </TabButton>
-            <TabButton active={tab === "pagas"} onClick={() => setTab("pagas")}>
-              Pagas recentemente
-            </TabButton>
-          </div>
+          <TabList
+            aria-label="Seção da tesouraria"
+            variant="pill"
+            tabs={[
+              { value: "pagar", label: "A pagar" },
+              { value: "ops", label: "OPs emitidas" },
+              { value: "pagas", label: "Pagas recentemente" },
+            ]}
+          />
         }
       />
 
       <RitoPagamento atual="pagar" />
 
-      {tab === "pagar" && <TabAPagar />}
-      {tab === "ops" && <TabOps />}
-      {tab === "pagas" && <TabPagas />}
-    </div>
+      <TabPanel value="pagar">
+        <TabAPagar />
+      </TabPanel>
+      <TabPanel value="ops">
+        <TabOps />
+      </TabPanel>
+      <TabPanel value="pagas">
+        <TabPagas />
+      </TabPanel>
+    </Tabs>
   );
 }
 
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-        active
-          ? "bg-brand/12 text-brand dark:bg-brand/25 dark:text-brand-light"
-          : "text-muted-foreground hover:bg-muted hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Tab "A pagar" — parcelas LIBERADAS, agrupadas por urgência temporal.
