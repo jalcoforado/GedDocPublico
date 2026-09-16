@@ -1,9 +1,9 @@
 # Specs e planos — índice por evidência
 
 > **Status:** vivo (gerado a partir de evidência mensurável) · **Autoridade
-> sobre:** nada. **Última verificação:** 2026-08-27.
+> sobre:** nada. **Última verificação:** 2026-09-16.
 
-27 specs e 26 planos, de 2026-07-13 a 2026-08-24. São
+28 specs e 27 planos, de 2026-07-13 a 2026-09-16. São
 **registro de decisão**, não descrição do presente: cada um descreve o que se
 pretendia no dia em que foi escrito.
 
@@ -58,6 +58,7 @@ Para saber se algo está de pé, a resposta está no código e em
 | [`2026-08-23-transporte-p5-pendencias-design.md`](specs/2026-08-23-transporte-p5-pendencias-design.md) | 2026-08-23 | [plano](plans/2026-08-23-transporte-p5-pendencias.md) | — |
 | [`2026-08-23-transporte-p8-workflows-design.md`](specs/2026-08-23-transporte-p8-workflows-design.md) | 2026-08-23 | [plano](plans/2026-08-23-transporte-p8-workflows.md) | — |
 | [`2026-08-24-pagamentos-c2-integracoes-design.md`](specs/2026-08-24-pagamentos-c2-integracoes-design.md) | 2026-08-24 | [plano](plans/2026-08-24-pagamentos-c2-integracoes.md) | — |
+| [`2026-08-28-reuniao-as-is-to-be-design.md`](specs/2026-08-28-reuniao-as-is-to-be-design.md) | 2026-09-16 | — | — |
 
 ## Planos sem spec pareado
 
@@ -71,6 +72,7 @@ Para saber se algo está de pé, a resposta está no código e em
 - [`2026-08-06-pagamentos-f1-fundacao.md`](plans/2026-08-06-pagamentos-f1-fundacao.md)
 - [`2026-08-25-pagamentos-f2-ajustes-versionamento.md`](plans/2026-08-25-pagamentos-f2-ajustes-versionamento.md)
 - [`2026-08-26-pagamentos-f3-ordem-cronologica.md`](plans/2026-08-26-pagamentos-f3-ordem-cronologica.md)
+- [`2026-09-16-aproveitamento-suite.md`](plans/2026-09-16-aproveitamento-suite.md)
 
 ## Convenção
 
