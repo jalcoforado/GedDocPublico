@@ -300,6 +300,33 @@ export interface DespachoOut {
   usuario: string | null;
 }
 
+/**
+ * F1 — natureza do tempo de um nó da linha do tempo.
+ *
+ * `espera` = encaminhado, aguardando alguém receber (gargalo de fila).
+ * `analise` = nas mãos de alguém (gargalo de trabalho).
+ * `encerrado` = trecho posterior ao arquivamento; não entra no total ativo.
+ */
+export type NaturezaPermanencia = "espera" | "analise" | "encerrado";
+
+/** F1 — quanto tempo o processo ficou NESTE nó. Sempre presente. */
+export interface PermanenciaNo {
+  segundos: number;
+  natureza: NaturezaPermanencia;
+  /** Sem nó posterior: este tempo ainda está correndo. */
+  aberto: boolean;
+}
+
+/** F1 — agregado do processo. Sempre presente, como `prazo`. */
+export interface PermanenciaProcesso {
+  /** Espera + análise. NÃO é abertura->agora: exclui o trecho arquivado. */
+  total_ativo_segundos: number;
+  espera_segundos: number;
+  analise_segundos: number;
+  tramitacoes: number;
+  em_curso: boolean;
+}
+
 export interface MovimentacaoItem {
   id: number;
   data_hora_movimentacao: string;
@@ -311,6 +338,8 @@ export interface MovimentacaoItem {
   usuario: string | null;
   despacho: DespachoOut | null;
   encaminhamento: EncaminhamentoOut | null;
+  /** F1 — sempre presente. */
+  permanencia: PermanenciaNo;
 }
 
 /** PR 5b — status admin do prazo end-to-end do processo. */
@@ -351,6 +380,8 @@ export interface ProcessoDetail extends ProcessoListItem {
   anexos: AnexoNoProcesso[];
   /** PR 5b — sempre presente. status='sem_prazo' em legado ou sem snapshot. */
   prazo: PrazoInfo;
+  /** F1 — sempre presente; zerado em processo sem movimentação. */
+  permanencia: PermanenciaProcesso;
 }
 
 export interface ClassificarSigiloInput {

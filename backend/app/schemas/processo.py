@@ -113,6 +113,35 @@ class DespachoOut(BaseModel):
     usuario: str | None
 
 
+class PermanenciaNo(BaseModel):
+    """Quanto tempo o processo ficou NESTE nó da linha do tempo.
+
+    `natureza` separa fila de trabalho: `espera` é o processo encaminhado
+    aguardando alguém receber, `analise` é o processo nas mãos de alguém,
+    `encerrado` é o trecho posterior ao arquivamento — que não é nenhum dos
+    dois e não entra no total ativo. A regra vive em `services/permanencia.py`.
+
+    Segundos, e não `timedelta`: Pydantic serializa `timedelta` como duração
+    ISO-8601 (`P1DT2H`), que o front teria de reparsear para formatar.
+    """
+
+    segundos: int
+    natureza: Literal["espera", "analise", "encerrado"]
+    # `aberto` = não há nó posterior; este tempo ainda está correndo.
+    aberto: bool
+
+
+class PermanenciaProcesso(BaseModel):
+    """O agregado do processo. Sempre presente, como `prazo`."""
+
+    # Espera + análise. NÃO é abertura->agora: ver `PermanenciaNo.natureza`.
+    total_ativo_segundos: int
+    espera_segundos: int
+    analise_segundos: int
+    tramitacoes: int
+    em_curso: bool
+
+
 class MovimentacaoItem(BaseModel):
     """Item da timeline — agrega acao + despacho + encaminhamento opcionais."""
     id: int
@@ -125,6 +154,7 @@ class MovimentacaoItem(BaseModel):
     usuario: str | None
     despacho: DespachoOut | None = None
     encaminhamento: EncaminhamentoOut | None = None
+    permanencia: PermanenciaNo
 
 
 class PrazoInfo(BaseModel):
@@ -171,3 +201,7 @@ class ProcessoDetail(ProcessoListItem):
     # PR 5b — bloco de prazo end-to-end (sempre presente; status='sem_prazo'
     # em processos legados ou sem prazo definido no serviço).
     prazo: PrazoInfo
+
+    # F1 — permanência agregada. Sempre presente; zerada em processo sem
+    # movimentação (que não existe no fluxo normal, mas existe em base migrada).
+    permanencia: PermanenciaProcesso

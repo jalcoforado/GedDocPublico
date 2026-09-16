@@ -39,6 +39,7 @@ import { ProcessoApensados } from "@/components/ProcessoApensados";
 import { ProcessoVolumes } from "@/components/ProcessoVolumes";
 import { AssinaturasProcesso } from "@/components/AssinaturasProcesso";
 import { AssistenteProcesso } from "@/components/AssistenteProcesso";
+import { PermanenciaNoBadge, PermanenciaResumo } from "@/components/Permanencia";
 import { ProcessoTrail } from "@/components/ProcessoTrail";
 import { ProcessoWorkflowPanel } from "@/components/ProcessoWorkflowPanel";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
@@ -121,6 +122,7 @@ function MovimentacaoCard({
         <span className="text-xs text-muted-foreground tabular-nums">
           {fmtDateTime(m.data_hora_movimentacao)}
         </span>
+        <PermanenciaNoBadge p={m.permanencia} />
       </div>
       <div className="text-sm">
         <span className="text-muted-foreground">por</span>{" "}
@@ -596,6 +598,7 @@ export default function ProcessoDetailPage() {
                   ({p.movimentacoes.length})
                 </span>
               </CardTitle>
+              <PermanenciaResumo p={p.permanencia} className="mt-2" />
             </CardHeader>
             <CardContent>
               {p.movimentacoes.length === 0 ? (

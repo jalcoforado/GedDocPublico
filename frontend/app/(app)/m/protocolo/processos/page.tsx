@@ -19,6 +19,7 @@ import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { api, NIVEL_SIGILO_LABEL, type ProcessoListFilters } from "@/lib/api";
 import { useAssuntosAll } from "@/lib/assuntos";
+import { decorridoDesde } from "@/lib/duracao";
 
 const PAGE_SIZE = 20;
 
@@ -268,7 +269,16 @@ export default function ProcessosPage() {
                   p.numero_processo
                 )}
               </TD>
-              <TD className="text-xs tabular-nums">{fmtDate(p.data_hora_abertura)}</TD>
+              <TD className="text-xs tabular-nums">
+                {fmtDate(p.data_hora_abertura)}
+                {/* F1 — a data sozinha obriga quem lê a fazer a conta de
+                    cabeça para saber se o processo é de ontem ou do ano
+                    passado. O decorrido é calculado no cliente: a lista não
+                    carrega o bloco de permanência, que só existe no detalhe. */}
+                <span className="block text-muted-foreground">
+                  {decorridoDesde(p.data_hora_abertura)}
+                </span>
+              </TD>
               <TD>
                 <div className="text-sm text-foreground">{p.manifestante ?? "—"}</div>
                 <div className="text-xs text-muted-foreground">

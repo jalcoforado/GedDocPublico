@@ -34,10 +34,14 @@ from ..schemas.processo import (
     DespachoOut,
     EncaminhamentoOut,
     MovimentacaoItem,
+    PermanenciaNo,
+    PermanenciaProcesso,
     PrazoInfo,
     ProcessoDetail,
     ProcessoListItem,
 )
+from .permanencia import No as NoDaLinha
+from .permanencia import calcular as calcular_permanencia
 from .prazos import calcular_prazo
 
 
@@ -172,7 +176,7 @@ async def get_processo_detail(
         return None
     p: Processo = row[0]
     base_item = _row_to_list(row)
-    movimentacoes = await _load_movimentacoes(db, processo_id, tenant_id)
+    movimentacoes, permanencia = await _load_movimentacoes(db, processo_id, tenant_id)
     anexos = await _load_anexos(db, processo_id, tenant_id)
 
     # PR 5b — bloco prazo end-to-end. `data_conclusao` = data da última
@@ -222,12 +226,20 @@ async def get_processo_detail(
         movimentacoes=movimentacoes,
         anexos=anexos,
         prazo=prazo,
+        permanencia=permanencia,
     )
 
 
 async def _load_movimentacoes(
     db: AsyncSession, processo_id: int, tenant_id: int
-) -> list[MovimentacaoItem]:
+) -> tuple[list[MovimentacaoItem], PermanenciaProcesso]:
+    """Timeline do processo e a permanência agregada.
+
+    Devolve as duas juntas porque saem da MESMA consulta: a permanência de um
+    nó é a distância até o nó seguinte, então calculá-la exige a lista inteira.
+    Uma segunda função que recarregasse as movimentações para somar tempos
+    pagaria a consulta duas vezes e poderia divergir da timeline exibida.
+    """
     UnidadeResp = aliased(UnidadeTrabalho, name="u_resp")
     stmt = (
         select(Movimentacao, Acao, UnidadeResp, Usuario)
@@ -291,6 +303,22 @@ async def _load_movimentacoes(
         ).all()
         users_by_id = {uid: nome for uid, nome in urows}
 
+    # `datetime.now()` para casar com o resto deste arquivo (ver `calcular_prazo`
+    # logo acima) e com `acoes_processo`, que carimba as movimentações. O
+    # container roda em UTC, então hoje `now()` e `utcnow()` coincidem — o
+    # comentário existe para o dia em que alguém definir `TZ`.
+    permanencias, resumo = calcular_permanencia(
+        [
+            NoDaLinha(
+                id=mov.id,
+                momento=mov.data_hora_movimentacao,
+                status_movimentacao=acao.status_movimentacao,
+            )
+            for mov, acao, _, _ in rows
+        ],
+        agora=datetime.now(),
+    )
+
     items: list[MovimentacaoItem] = []
     for mov, acao, unidade, user in rows:
         desp_out: DespachoOut | None = None
@@ -330,9 +358,20 @@ async def _load_movimentacoes(
                 usuario=user.nome if user else None,
                 despacho=desp_out,
                 encaminhamento=enc_out,
+                permanencia=PermanenciaNo(
+                    segundos=permanencias[mov.id].segundos,
+                    natureza=permanencias[mov.id].natureza,
+                    aberto=permanencias[mov.id].aberto,
+                ),
             )
         )
-    return items
+    return items, PermanenciaProcesso(
+        total_ativo_segundos=resumo.total_ativo_segundos,
+        espera_segundos=resumo.espera_segundos,
+        analise_segundos=resumo.analise_segundos,
+        tramitacoes=resumo.tramitacoes,
+        em_curso=resumo.em_curso,
+    )
 
 
 async def _load_anexos(
