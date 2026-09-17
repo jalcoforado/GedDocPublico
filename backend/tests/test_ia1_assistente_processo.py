@@ -279,7 +279,7 @@ def _detalhe_sintetico(*, anexos: list):
     cenário por acaso tem — foi assim que a primeira versão deste teste passou
     pelo galho "nenhum anexo" e não provou nada sobre o galho que importa.
     """
-    from app.schemas.processo import PrazoInfo, ProcessoDetail
+    from app.schemas.processo import PermanenciaProcesso, PrazoInfo, ProcessoDetail
 
     return ProcessoDetail(
         id=1, numero_processo="TST-000001", nup=None, numero_origem=None,
@@ -297,6 +297,13 @@ def _detalhe_sintetico(*, anexos: list):
             status="sem_prazo", prazo_servico_dias_snapshot=None,
             prazo_previsto_em=None, dias_restantes=None, dias_atraso=None,
             concluido_em=None, origem=None,
+        ),
+        # F1 — obrigatório como `prazo`, e de propósito: com default, um
+        # chamador que esquecesse de calcular exibiria zeros plausíveis em vez
+        # de estourar. Aqui `movimentacoes=[]`, então zero é o valor correto.
+        permanencia=PermanenciaProcesso(
+            total_ativo_segundos=0, espera_segundos=0, analise_segundos=0,
+            tramitacoes=0, em_curso=False,
         ),
     )
 

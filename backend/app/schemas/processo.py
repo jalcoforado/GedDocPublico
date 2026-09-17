@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -82,6 +83,60 @@ class ProcessoListItem(BaseModel):
     unidade_proprietaria: str | None
     local_atual: str | None
 
+    # F2 — responsável-pessoa. `None` NÃO é ausência de dado: é o estado
+    # "pendente de designação", que a tela mostra como tal. Default nos dois
+    # para não quebrar quem monta o schema à mão (testes, fixtures), já que o
+    # valor correto nesse caso é justamente "sem responsável".
+    id_usuario_responsavel: int | None = None
+    responsavel: str | None = None
+
+
+class EscopoProcesso(str, Enum):
+    """Recorte da lista por responsabilidade. Ausente = sem recorte (tudo).
+
+    `unidade` e `unidade_e_subordinadas` recortam pelo LOCAL ATUAL do processo,
+    não pela unidade proprietária: o que interessa a quem opera é o que está na
+    sua mesa agora, não o que nasceu ali e já saiu.
+    """
+
+    meus = "meus"
+    unidade = "unidade"
+    unidade_e_subordinadas = "unidade_e_subordinadas"
+
+
+class ArquivarRequest(BaseModel):
+    """F4 — encerramento do processo por arquivamento.
+
+    `motivo` é obrigatório pelo mesmo princípio de `apensamento.motivo`: ato que
+    encerra o processo tem de dizer por quê, e campo opcional vira campo vazio.
+
+    `observacao` não é coluna de `protocolos.arquivamento` — vira um `Despacho`
+    ligado à movimentação, que é o mecanismo que a linha do tempo já renderiza.
+    Criar coluna nova para texto livre duplicaria o que existe.
+
+    Os campos de endereçamento físico (`local`, `estante`, `prateleira`,
+    `caixa`, `pasta`) são colunas da tabela legada e ficam opcionais: processo
+    virtual não tem prateleira.
+    """
+
+    motivo: str = Field(min_length=3, max_length=255)
+    observacao: str | None = Field(default=None, max_length=10000)
+    local: str | None = Field(default=None, max_length=255)
+    estante: str | None = Field(default=None, max_length=255)
+    prateleira: str | None = Field(default=None, max_length=255)
+    caixa: str | None = Field(default=None, max_length=255)
+    pasta: str | None = Field(default=None, max_length=255)
+    permanente: bool = False
+    # Workflow strict: arquivar fora de estado final é bloqueado; super-usuário
+    # passa informando motivo, que é auditado. Mesmo contrato de `encaminhar`.
+    override_motivo: str | None = Field(default=None, max_length=500)
+
+
+class AtribuirResponsavelRequest(BaseModel):
+    """`id_usuario=None` desatribui — volta ao estado pendente de designação."""
+
+    id_usuario: int | None = None
+
 
 class AnexoNoProcesso(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -113,6 +168,35 @@ class DespachoOut(BaseModel):
     usuario: str | None
 
 
+class PermanenciaNo(BaseModel):
+    """Quanto tempo o processo ficou NESTE nó da linha do tempo.
+
+    `natureza` separa fila de trabalho: `espera` é o processo encaminhado
+    aguardando alguém receber, `analise` é o processo nas mãos de alguém,
+    `encerrado` é o trecho posterior ao arquivamento — que não é nenhum dos
+    dois e não entra no total ativo. A regra vive em `services/permanencia.py`.
+
+    Segundos, e não `timedelta`: Pydantic serializa `timedelta` como duração
+    ISO-8601 (`P1DT2H`), que o front teria de reparsear para formatar.
+    """
+
+    segundos: int
+    natureza: Literal["espera", "analise", "encerrado"]
+    # `aberto` = não há nó posterior; este tempo ainda está correndo.
+    aberto: bool
+
+
+class PermanenciaProcesso(BaseModel):
+    """O agregado do processo. Sempre presente, como `prazo`."""
+
+    # Espera + análise. NÃO é abertura->agora: ver `PermanenciaNo.natureza`.
+    total_ativo_segundos: int
+    espera_segundos: int
+    analise_segundos: int
+    tramitacoes: int
+    em_curso: bool
+
+
 class MovimentacaoItem(BaseModel):
     """Item da timeline — agrega acao + despacho + encaminhamento opcionais."""
     id: int
@@ -125,6 +209,7 @@ class MovimentacaoItem(BaseModel):
     usuario: str | None
     despacho: DespachoOut | None = None
     encaminhamento: EncaminhamentoOut | None = None
+    permanencia: PermanenciaNo
 
 
 class PrazoInfo(BaseModel):
@@ -171,3 +256,7 @@ class ProcessoDetail(ProcessoListItem):
     # PR 5b — bloco de prazo end-to-end (sempre presente; status='sem_prazo'
     # em processos legados ou sem prazo definido no serviço).
     prazo: PrazoInfo
+
+    # F1 — permanência agregada. Sempre presente; zerada em processo sem
+    # movimentação (que não existe no fluxo normal, mas existe em base migrada).
+    permanencia: PermanenciaProcesso

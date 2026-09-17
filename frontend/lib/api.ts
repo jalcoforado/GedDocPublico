@@ -239,6 +239,9 @@ export interface ProcessoListItem {
   manifestante_cpf_cnpj: string | null;
   unidade_proprietaria: string | null;
   local_atual: string | null;
+  /** F2 — `null` é o estado "pendente de designação", não ausência de dado. */
+  id_usuario_responsavel: number | null;
+  responsavel: string | null;
 }
 
 export type NivelSigilo =
@@ -300,6 +303,33 @@ export interface DespachoOut {
   usuario: string | null;
 }
 
+/**
+ * F1 — natureza do tempo de um nó da linha do tempo.
+ *
+ * `espera` = encaminhado, aguardando alguém receber (gargalo de fila).
+ * `analise` = nas mãos de alguém (gargalo de trabalho).
+ * `encerrado` = trecho posterior ao arquivamento; não entra no total ativo.
+ */
+export type NaturezaPermanencia = "espera" | "analise" | "encerrado";
+
+/** F1 — quanto tempo o processo ficou NESTE nó. Sempre presente. */
+export interface PermanenciaNo {
+  segundos: number;
+  natureza: NaturezaPermanencia;
+  /** Sem nó posterior: este tempo ainda está correndo. */
+  aberto: boolean;
+}
+
+/** F1 — agregado do processo. Sempre presente, como `prazo`. */
+export interface PermanenciaProcesso {
+  /** Espera + análise. NÃO é abertura->agora: exclui o trecho arquivado. */
+  total_ativo_segundos: number;
+  espera_segundos: number;
+  analise_segundos: number;
+  tramitacoes: number;
+  em_curso: boolean;
+}
+
 export interface MovimentacaoItem {
   id: number;
   data_hora_movimentacao: string;
@@ -311,6 +341,8 @@ export interface MovimentacaoItem {
   usuario: string | null;
   despacho: DespachoOut | null;
   encaminhamento: EncaminhamentoOut | null;
+  /** F1 — sempre presente. */
+  permanencia: PermanenciaNo;
 }
 
 /** PR 5b — status admin do prazo end-to-end do processo. */
@@ -351,6 +383,27 @@ export interface ProcessoDetail extends ProcessoListItem {
   anexos: AnexoNoProcesso[];
   /** PR 5b — sempre presente. status='sem_prazo' em legado ou sem snapshot. */
   prazo: PrazoInfo;
+  /** F1 — sempre presente; zerado em processo sem movimentação. */
+  permanencia: PermanenciaProcesso;
+}
+
+/**
+ * F4 — arquivamento.
+ *
+ * `motivo` é obrigatório: ato que encerra o processo tem de dizer por quê. Os
+ * campos de endereçamento físico são da tabela legada e só fazem sentido em
+ * processo não virtual.
+ */
+export interface ArquivarInput {
+  motivo: string;
+  observacao?: string | null;
+  local?: string | null;
+  estante?: string | null;
+  prateleira?: string | null;
+  caixa?: string | null;
+  pasta?: string | null;
+  permanente?: boolean;
+  override_motivo?: string | null;
 }
 
 export interface ClassificarSigiloInput {
@@ -359,6 +412,15 @@ export interface ClassificarSigiloInput {
   autoridade?: string | null;
   prazo_anos?: number | null;
 }
+
+/**
+ * F2 — recorte da lista por responsabilidade.
+ *
+ * `unidade` e `unidade_e_subordinadas` recortam pelo LOCAL ATUAL do processo,
+ * não pela unidade proprietária: interessa o que está na mesa agora, não o que
+ * nasceu ali e já saiu. `unidade` INCLUI os processos sem responsável.
+ */
+export type EscopoProcesso = "meus" | "unidade" | "unidade_e_subordinadas";
 
 export interface ProcessoListFilters {
   page?: number;
@@ -370,6 +432,8 @@ export interface ProcessoListFilters {
   apenas_ativos?: boolean;
   desde?: string;
   ate?: string;
+  /** Ausente = sem recorte. */
+  escopo?: EscopoProcesso;
 }
 
 export interface ProcessoCreateInput {
@@ -4336,6 +4400,18 @@ export const api = {
       }),
     receber: (id: number) =>
       request<ProcessoDetail>(`/processos/${id}/receber`, { method: "POST" }),
+    /** F4 — encerra o processo. NÃO é idempotente: a segunda chamada dá 400. */
+    arquivar: (id: number, data: ArquivarInput) =>
+      request<ProcessoDetail>(`/processos/${id}/arquivar`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    /** F2 — `idUsuario: null` desatribui. PUT: idempotente por desenho. */
+    atribuirResponsavel: (id: number, idUsuario: number | null) =>
+      request<ProcessoDetail>(`/processos/${id}/responsavel`, {
+        method: "PUT",
+        body: JSON.stringify({ id_usuario: idUsuario }),
+      }),
     classificarSigilo: (id: number, data: ClassificarSigiloInput) =>
       request<ProcessoDetail>(`/processos/${id}/classificar-sigilo`, {
         method: "POST",

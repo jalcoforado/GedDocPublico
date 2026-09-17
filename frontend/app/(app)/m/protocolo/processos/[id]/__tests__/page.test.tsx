@@ -170,6 +170,9 @@ function processo(overrides: Partial<ProcessoDetail> = {}): ProcessoDetail {
     sigilo_data_desclassificacao: null,
     movimentacoes: [],
     anexos: [],
+    // F2 — sem responsável é o estado inicial de todo processo.
+    id_usuario_responsavel: null,
+    responsavel: null,
     prazo: {
       status: "sem_prazo",
       prazo_servico_dias_snapshot: null,
@@ -178,6 +181,15 @@ function processo(overrides: Partial<ProcessoDetail> = {}): ProcessoDetail {
       dias_atraso: null,
       concluido_em: null,
       origem: null,
+    },
+    // F1 — obrigatório como `prazo`. Zerado porque `movimentacoes: []`; os
+    // testes que montam timeline passam o bloco por `overrides`.
+    permanencia: {
+      total_ativo_segundos: 0,
+      espera_segundos: 0,
+      analise_segundos: 0,
+      tramitacoes: 0,
+      em_curso: false,
     },
     ...overrides,
   };

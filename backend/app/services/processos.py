@@ -8,7 +8,7 @@ Fase 13a: todas as funções recebem `tenant_id` e filtram pelo escopo.
 """
 from datetime import datetime
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -32,17 +32,25 @@ from ..models import (
 from ..schemas.processo import (
     AnexoNoProcesso,
     DespachoOut,
+    EscopoProcesso,
     EncaminhamentoOut,
     MovimentacaoItem,
+    PermanenciaNo,
+    PermanenciaProcesso,
     PrazoInfo,
     ProcessoDetail,
     ProcessoListItem,
 )
+from .permanencia import No as NoDaLinha
+from .permanencia import calcular as calcular_permanencia
 from .prazos import calcular_prazo
 
 
 def _base_select(tenant_id: int):
     LocalAtual = aliased(UnidadeTrabalho, name="local_atual")
+    # F2 — alias próprio para o responsável: `Usuario` entra noutras junções
+    # deste módulo, e reusar a entidade crua faria o SQLAlchemy colapsar as duas.
+    Responsavel = aliased(Usuario, name="usuario_responsavel")
     stmt = (
         select(
             Processo,
@@ -52,6 +60,7 @@ def _base_select(tenant_id: int):
             Manifestante.cpf_cnpj.label("manifestante_cpf"),
             UnidadeTrabalho.unidade_trabalho.label("unidade_propr"),
             LocalAtual.unidade_trabalho.label("local_atual_nome"),
+            Responsavel.nome.label("responsavel_nome"),
         )
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
@@ -62,9 +71,44 @@ def _base_select(tenant_id: int):
             isouter=True,
         )
         .join(LocalAtual, LocalAtual.id == Processo.id_local_atual, isouter=True)
+        .join(
+            Responsavel,
+            Responsavel.id == Processo.id_usuario_responsavel,
+            isouter=True,
+        )
         .where(Processo.excluido.is_(False))
     )
     return tenant_filter(stmt, Processo, tenant_id)
+
+
+def _ids_unidade_e_subordinadas(tenant_id: int, raiz: int):
+    """Subselect com a unidade `raiz` e toda a sua descendência.
+
+    `UNION`, e não `UNION ALL`, de propósito. `routers/unidades.py` impede criar
+    ciclo novo ao reparentar, mas TOLERA ciclo pré-existente por decisão
+    explícita ("Estrutura já tinha ciclo — aborta walk e aceita"). Com
+    `UNION ALL`, uma unidade que seja ancestral de si mesma faria esta recursiva
+    girar até estourar memória — derrubando a listagem inteira, não só o filtro.
+    `UNION` deduplica a cada passo e por isso termina mesmo com ciclo.
+    """
+    raiz_cte = (
+        select(UnidadeTrabalho.id)
+        .where(
+            UnidadeTrabalho.id == raiz,
+            UnidadeTrabalho.tenant_id == tenant_id,
+            UnidadeTrabalho.excluido.is_(False),
+        )
+        .cte(name="unidades_do_escopo", recursive=True)
+    )
+    filho = aliased(UnidadeTrabalho, name="unidade_filha")
+    raiz_cte = raiz_cte.union(
+        select(filho.id).where(
+            filho.id_unidade_pai == raiz_cte.c.id,
+            filho.tenant_id == tenant_id,
+            filho.excluido.is_(False),
+        )
+    )
+    return select(raiz_cte.c.id)
 
 
 async def list_processos(
@@ -81,6 +125,9 @@ async def list_processos(
     desde: datetime | None = None,
     ate: datetime | None = None,
     niveis_permitidos: list[str] | None = None,
+    escopo: EscopoProcesso | None = None,
+    id_usuario_contexto: int | None = None,
+    id_unidade_contexto: int | None = None,
 ) -> tuple[list[ProcessoListItem], int]:
     base = _base_select(tenant_id)
 
@@ -88,6 +135,42 @@ async def list_processos(
     # níveis que a credencial do servidor alcança.
     if niveis_permitidos is not None:
         base = base.where(Processo.nivel_sigilo.in_(niveis_permitidos))
+
+    # F2 — recorte por responsabilidade. Some-se ao filtro de sigilo, nunca o
+    # substitui: escopo diz "o que é meu", sigilo diz "o que posso ver", e um
+    # não afrouxa o outro.
+    if escopo is not None:
+        # Contexto ausente devolve NADA, nunca "tudo" nem "os com campo nulo".
+        #
+        # Não é zelo excessivo: `coluna == None` no SQLAlchemy compila para
+        # `IS NULL`. Escrito ingenuamente, um usuário sem lotação pedindo
+        # "minha unidade" receberia todos os processos SEM local, e pedindo
+        # "meus" receberia todos os SEM responsável — em ambos os casos uma
+        # lista cheia sob um rótulo que promete o contrário. Lista vazia é
+        # errada de um jeito que a pessoa percebe na hora.
+        if escopo is EscopoProcesso.meus:
+            base = (
+                base.where(Processo.id_usuario_responsavel == id_usuario_contexto)
+                if id_usuario_contexto is not None
+                else base.where(false())
+            )
+        elif escopo is EscopoProcesso.unidade:
+            # INCLUI os sem responsável: são justamente os que precisam de alguém.
+            base = (
+                base.where(Processo.id_local_atual == id_unidade_contexto)
+                if id_unidade_contexto is not None
+                else base.where(false())
+            )
+        elif escopo is EscopoProcesso.unidade_e_subordinadas:
+            base = (
+                base.where(
+                    Processo.id_local_atual.in_(
+                        _ids_unidade_e_subordinadas(tenant_id, id_unidade_contexto)
+                    )
+                )
+                if id_unidade_contexto is not None
+                else base.where(false())
+            )
 
     if q:
         like = f"%{q.lower()}%"
@@ -152,6 +235,8 @@ def _row_to_list(r) -> ProcessoListItem:
         manifestante_cpf_cnpj=r.manifestante_cpf,
         unidade_proprietaria=r.unidade_propr,
         local_atual=r.local_atual_nome,
+        id_usuario_responsavel=p.id_usuario_responsavel,
+        responsavel=r.responsavel_nome,
     )
 
 
@@ -172,7 +257,7 @@ async def get_processo_detail(
         return None
     p: Processo = row[0]
     base_item = _row_to_list(row)
-    movimentacoes = await _load_movimentacoes(db, processo_id, tenant_id)
+    movimentacoes, permanencia = await _load_movimentacoes(db, processo_id, tenant_id)
     anexos = await _load_anexos(db, processo_id, tenant_id)
 
     # PR 5b — bloco prazo end-to-end. `data_conclusao` = data da última
@@ -222,12 +307,20 @@ async def get_processo_detail(
         movimentacoes=movimentacoes,
         anexos=anexos,
         prazo=prazo,
+        permanencia=permanencia,
     )
 
 
 async def _load_movimentacoes(
     db: AsyncSession, processo_id: int, tenant_id: int
-) -> list[MovimentacaoItem]:
+) -> tuple[list[MovimentacaoItem], PermanenciaProcesso]:
+    """Timeline do processo e a permanência agregada.
+
+    Devolve as duas juntas porque saem da MESMA consulta: a permanência de um
+    nó é a distância até o nó seguinte, então calculá-la exige a lista inteira.
+    Uma segunda função que recarregasse as movimentações para somar tempos
+    pagaria a consulta duas vezes e poderia divergir da timeline exibida.
+    """
     UnidadeResp = aliased(UnidadeTrabalho, name="u_resp")
     stmt = (
         select(Movimentacao, Acao, UnidadeResp, Usuario)
@@ -291,6 +384,22 @@ async def _load_movimentacoes(
         ).all()
         users_by_id = {uid: nome for uid, nome in urows}
 
+    # `datetime.now()` para casar com o resto deste arquivo (ver `calcular_prazo`
+    # logo acima) e com `acoes_processo`, que carimba as movimentações. O
+    # container roda em UTC, então hoje `now()` e `utcnow()` coincidem — o
+    # comentário existe para o dia em que alguém definir `TZ`.
+    permanencias, resumo = calcular_permanencia(
+        [
+            NoDaLinha(
+                id=mov.id,
+                momento=mov.data_hora_movimentacao,
+                status_movimentacao=acao.status_movimentacao,
+            )
+            for mov, acao, _, _ in rows
+        ],
+        agora=datetime.now(),
+    )
+
     items: list[MovimentacaoItem] = []
     for mov, acao, unidade, user in rows:
         desp_out: DespachoOut | None = None
@@ -330,9 +439,20 @@ async def _load_movimentacoes(
                 usuario=user.nome if user else None,
                 despacho=desp_out,
                 encaminhamento=enc_out,
+                permanencia=PermanenciaNo(
+                    segundos=permanencias[mov.id].segundos,
+                    natureza=permanencias[mov.id].natureza,
+                    aberto=permanencias[mov.id].aberto,
+                ),
             )
         )
-    return items
+    return items, PermanenciaProcesso(
+        total_ativo_segundos=resumo.total_ativo_segundos,
+        espera_segundos=resumo.espera_segundos,
+        analise_segundos=resumo.analise_segundos,
+        tramitacoes=resumo.tramitacoes,
+        em_curso=resumo.em_curso,
+    )
 
 
 async def _load_anexos(

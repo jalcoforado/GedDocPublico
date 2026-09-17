@@ -21,9 +21,12 @@ from ..schemas.complementacao_documental import (
     SolicitarComplementacaoRequest,
 )
 from ..schemas.processo import (
+    ArquivarRequest,
+    AtribuirResponsavelRequest,
     CancelarEncaminhamentoRequest,
     ClassificarSigiloRequest,
     EncaminharRequest,
+    EscopoProcesso,
     EncaminhamentoOut as _EncaminhamentoOut,
     ProcessoCreate,
     ProcessoDetail,
@@ -32,6 +35,8 @@ from ..schemas.processo import (
 from ..services.abertura_processo import AberturaError, abrir_processo
 from ..services.acoes_processo import (
     AcaoError,
+    arquivar,
+    atribuir_responsavel,
     cancelar_encaminhamento,
     encaminhar,
     receber,
@@ -158,6 +163,10 @@ async def list_endpoint(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    # F2 — o escopo precisa de QUEM está perguntando, então esta rota passa a
+    # depender do usuário. Continua sem gate novo: `require_permission` acima é
+    # o mesmo de antes, e o recorte não concede acesso a nada — só reduz.
+    usuario: Usuario = Depends(get_current_user),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     q: str | None = Query(None, description="Busca em número, manifestante, assunto"),
@@ -167,6 +176,13 @@ async def list_endpoint(
     apenas_ativos: bool = False,
     desde: datetime | None = None,
     ate: datetime | None = None,
+    escopo: EscopoProcesso | None = Query(
+        None,
+        description=(
+            "Recorte por responsabilidade: meus | unidade | "
+            "unidade_e_subordinadas. Ausente = sem recorte."
+        ),
+    ),
 ) -> Paginated[ProcessoListItem]:
     items, total = await list_processos(
         db,
@@ -181,6 +197,18 @@ async def list_endpoint(
         desde=desde,
         ate=ate,
         niveis_permitidos=niveis,
+        escopo=escopo,
+        id_usuario_contexto=usuario.id,
+        # A lotação PRINCIPAL. Lotação neste sistema tem duas representações
+        # simultâneas — esta e a N:N `utils.usuario_unidade_trabalho` —, então
+        # "minha unidade" é ambíguo para quem atua em dois setores.
+        #
+        # Escolher a principal é o padrão conservador: mantém o significado que
+        # a expressão já tem hoje. Somar todas as lotações mudaria o que o
+        # filtro quer dizer, e a decisão certa depende de existir um seletor de
+        # contexto ativo (o "alterar setor" do SUiTE), que ainda não existe
+        # aqui. Não resolver em silêncio é deliberado.
+        id_unidade_contexto=usuario.id_unidade_trabalho,
     )
     return Paginated(items=items, total=total, page=page, page_size=page_size)
 
@@ -387,6 +415,85 @@ async def temporalidade_endpoint(
         return await calcular_temporalidade(db, processo_id, tenant_id=tenant_id)
     except ValueError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+
+
+@router.post(
+    "/{processo_id}/arquivar",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def arquivar_endpoint(
+    processo_id: int,
+    payload: ArquivarRequest,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """F4 — encerra o processo por arquivamento.
+
+    `POST` e não `PUT`: não é idempotente por desenho. Arquivar duas vezes
+    criaria dois eventos de conclusão, e o "tempo médio de conclusão" do
+    dashboard contaria o mesmo processo duas vezes — o service recusa a
+    segunda com 400.
+    """
+    is_super = await _is_super(db, current, tenant_id)
+    try:
+        await arquivar(
+            db,
+            processo_id,
+            payload,
+            tenant_id=tenant_id,
+            usuario_id=current.id,
+            is_super_usuario=is_super,
+        )
+    except AcaoError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
+        )
+    return detail
+
+
+@router.put(
+    "/{processo_id}/responsavel",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def atribuir_responsavel_endpoint(
+    processo_id: int,
+    payload: AtribuirResponsavelRequest,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """F2 — designa quem responde pelo processo. `id_usuario=null` desdesigna.
+
+    `PUT` e não `PATCH`: o corpo carrega o estado completo do recurso (há um só
+    campo), e a operação é idempotente — mandar o mesmo responsável duas vezes
+    deixa o sistema no mesmo lugar, sem segunda entrada de auditoria.
+
+    `require_acesso_processo` vem junto porque designar é ler o processo antes
+    de escrever nele: sem o guard de sigilo, quem não pode ver o processo
+    descobriria a existência dele pela resposta.
+    """
+    try:
+        await atribuir_responsavel(
+            db,
+            processo_id,
+            tenant_id=tenant_id,
+            id_usuario=payload.id_usuario,
+            usuario_id=current.id,
+        )
+    except AcaoError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
+        )
+    return detail
 
 
 @router.post(
