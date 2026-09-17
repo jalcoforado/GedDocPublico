@@ -283,6 +283,12 @@ export interface AnexoNoProcesso {
   e_doc: string | null;
   tipo_anexo: string | null;
   ordem: number | null;
+  /** F8 — posição entre todos os anexos (PDF ou não), 1-based. */
+  documento_numero: number | null;
+  /** F8 — página final cumulativa no PDF consolidado (capa + PDFs
+   * anteriores + este); `null` quando não é PDF ou a contagem de página
+   * não foi calculada no upload. */
+  pagina_processo: number | null;
 }
 
 export interface EncaminhamentoOut {
