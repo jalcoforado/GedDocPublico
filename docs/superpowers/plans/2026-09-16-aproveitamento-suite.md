@@ -196,16 +196,52 @@ registrado.
 filtra; `test_guarda_ordem_rotas.py` (declarar a literal antes da paramétrica);
 **teste HTTP com usuário não-SU**.
 
-### F4 — `arquivar`: fechar o contrato que mente `sem migration`
+### F4 — `arquivar` `sem migration` — **DECIDIDA: implementar** (Jorge, 2026-09-16)
 
-`validar_acao_strict` (`workflow_integration.py:148`) aceita `"arquivar"` e não
-existe `def arquivar`. Implementar com **motivo de catálogo + observação +
-anexo justificativo**, como o SUiTE, ou remover do contrato. Já estava na spec
-de 28/08 como P1; as capturas agora dizem qual é o formulário.
+> **Medido em 2026-09-16, e é maior do que esta seção dizia.** O problema não é
+> um contrato que mente: é uma **funcionalidade com o lado da leitura inteiro
+> construído e o lado da escrita inexistente**.
+>
+> Existem: o modelo `Arquivamento`, a coluna `movimentacao.id_arquivamento`, a
+> ação `ARQUIVAMENTO` no catálogo (id 23), as tabelas
+> `protocolos.arquivamento` e `protocolos.status_arquivamento`.
+>
+> **Nada escreve nenhum deles.** `grep` por `id_arquivamento=` / `Arquivamento(`
+> no `backend/app/` inteiro não retorna uma única escrita, e o banco de dev tem
+> 0 linhas nas duas tabelas.
+>
+> Mas a leitura está em produção e em toda parte:
+>
+> - `services/dashboard.py` conta arquivados em **6 lugares** (123, 131, 160,
+>   544, 589, 778);
+> - `services/cidadao_processos.py:236-245` usa o mesmo critério para dizer
+>   "concluído" ao cidadão;
+> - `services/processos.py` deriva `data_conclusao` dali, o que torna os status
+>   `concluido_no_prazo` e `concluido_atrasado` de `PrazoInfo`
+>   **inalcançáveis**;
+> - a F1 (permanência) depende disso para `em_curso` algum dia virar `false`.
+>
+> Ou seja: o KPI "arquivados" do dashboard não está zerado por falta de dado —
+> está zerado **por construção**, e continuará assim enquanto ninguém puder
+> arquivar. A pista estava à vista: `test_pr5b_prazos.py::_arquivar` simula o
+> arquivamento com SQL cru porque não há service para chamar.
 
-*Custo:* service + endpoint + `ARQUIVAMENTO` em `protocolos.acao` via seed —
-**e em `ci/seed-e2e.sql`**, porque o `e2e-assinatura.yml` não roda o
-`seed_bootstrap`. Nenhuma migration: `protocolos.acao` é tabela legada.
+**Desenho.** `arquivar()` em `services/acoes_processo.py`, ao lado de
+`encaminhar`/`receber`: cria a linha `Arquivamento` e a `Movimentacao` com
+`id_acao=ARQUIVAMENTO` e `id_arquivamento` preenchido — que é o formato que os
+seis leitores já esperam. Reaproveita `motivo`, `local` e `arquivo`, colunas que
+a tabela legada já tem; **não** nasce catálogo de motivos (seria tabela nova
+para o que o campo existente resolve). `validar_acao_strict` já aceita
+`"arquivar"` e passa a ser chamado de verdade.
+
+*Custo:* service + endpoint + `ARQUIVAMENTO` e uma linha de
+`status_arquivamento` garantidos pelo `seed_bootstrap` — **e em
+`ci/seed-e2e.sql`**, porque o `e2e-assinatura.yml` não roda o seed. Nenhuma
+migration: as duas tabelas são legadas e já existem.
+
+*A conferir ao implementar:* `protocolos.status_arquivamentos` (plural) existe,
+está vazia e **não** é alvo da FK — a FK aponta para a singular. Vestígio
+legado; não usar.
 
 ### F5 — Favoritos e marcadores `2 tabelas`
 
@@ -264,36 +300,54 @@ substituindo a `categoria` livre; e as duas tags que o SUiTE tem e nós não:
 
 ## 5. Mudanças estruturais propostas
 
-### E1 — Multi-lotação com perfil por lotação
+### E1 — Multi-lotação com perfil por lotação — ~~ESTRUTURAL~~ **REVISADA**
 
-**(a) O que trava.** `models/usuario.py:20` — `id_unidade_trabalho` é **uma**
-coluna nullable. Um usuário existe em exatamente uma unidade. A ata pede troca
-de lotação "para comissões específicas" (§41) e a captura 38 mostra o desenho:
-uma principal e N secundárias, cada uma com seu conjunto de perfis. Com uma
-coluna, participar de comitê exige apagar a lotação de origem.
+> **Esta proposta estava errada, e a correção encolhe a fatia.** Descoberto em
+> 2026-09-16, ao implementar a F2: **`utils.usuario_unidade_trabalho` já
+> existe** — vínculo N:N usuário↔unidade, lido em
+> `routers/usuarios.py::_load_links`, exposto em `UsuarioDetail.unidades` e
+> editável por `PUT /usuarios/{id}/unidades`. Somada à
+> `usuario.id_unidade_trabalho` singular, é exatamente o par "Lotação Principal
+> + Secundárias" da captura 38.
+>
+> Ou seja: **não há mudança estrutural de lotação a fazer.** A tabela nova que
+> esta seção propunha (`aprimora_py.usuario_lotacao`) duplicaria uma que existe
+> — o erro que o próprio prompt desta tarefa proibia, cometido por eu ter lido
+> `models/usuario.py` e parado ali.
+>
+> A lição é a mesma da §1.1: leitura parcial produz conclusão confiante e
+> errada. Ali foram 17 de 44 capturas; aqui foi uma coluna sem procurar a
+> tabela de vínculo ao lado.
 
-**(b) Desenho.** `aprimora_py.usuario_lotacao(tenant_id, id_usuario,
-id_unidade, principal bool, habilitada bool, cargo, vinculo)`, com índice
-parcial único garantindo **uma principal por usuário**. A concessão de
-permissão passa a ser por `(usuario, lotação)` — o que casa com nosso
-`UsuarioGrupo`, que já é uma tabela de vínculo e hoje só não tem a unidade.
+**O que sobra, e é real:**
 
-**(c) Migração.** Cada `usuario.id_unidade_trabalho` não-nulo vira uma linha
-`usuario_lotacao` com `principal=true`. A coluna **permanece** durante a
-transição, mantida em sincronia com a lotação principal por trigger ou pelo
-service — ninguém é obrigado a migrar de leitura no mesmo PR.
+**(a) O que trava.** Não é a lotação — é o **perfil por lotação**. `UsuarioGrupo`
+concede permissão por usuário e não sabe de unidade, então o mesmo servidor tem
+o mesmo poder em toda lotação. E não há **seletor de contexto ativo**: com duas
+lotações, o sistema não pergunta nem sabe em qual delas a pessoa está operando
+agora. A F2 esbarrou nisso — `escopo=unidade` teve de escolher a lotação
+principal por falta de contexto (`routers/processos.py`, comentário no
+`id_unidade_contexto`).
 
-**(d) O que quebra.** Todo lugar que lê `usuario.id_unidade_trabalho`. Como a
-coluna sobrevive espelhando a principal, o comportamento atual não muda até que
-cada chamador seja migrado deliberadamente.
+**(b) Desenho.** `UsuarioGrupo` ganha `id_unidade_trabalho` **nullable**: nulo =
+vínculo global (o de hoje), preenchido = vale só naquela lotação. Mais um
+contexto ativo por sessão. Não nasce tabela nova.
 
-**(e) Reversão.** Enquanto a coluna existir e estiver sincronizada, reverter é
-parar de escrever em `usuario_lotacao` e apagar a tabela. Depois que algum
-caminho passar a depender de lotação secundária, não é mais reversível sem
-perda — **e esse é o degrau a declarar no PR que o cruzar**.
+**(c) Migração.** Nenhuma linha muda: toda concessão existente fica com a coluna
+nula e continua global. O backfill é vazio por desenho, e é isso que torna a
+fatia segura — ninguém perde acesso no dia do deploy.
 
-> Pré-requisito de negócio: Q1 da §6. Sem saber se permissão é por lotação ou
-> global, a tabela nasce com a coluna errada.
+**(d) O que quebra.** `load_permissions` passa a depender da lotação ativa.
+Enquanto o contexto não existir, ela ignora a coluna e o comportamento é o
+atual, byte a byte.
+
+**(e) Reversão.** Parar de gravar a coluna e voltar a ignorá-la na leitura. Só
+deixa de ser reversível quando alguma concessão existir **apenas** por lotação —
+degrau a declarar no PR que o cruzar.
+
+> **Q1 respondida (§6): pelos dois eixos.** O desenho acima é o que decorre
+> disso: o eixo por usuário é a coluna nula, o eixo por lotação é a coluna
+> preenchida, e o efetivo é a união.
 
 ### E2 — Assunto hierárquico
 
@@ -353,12 +407,20 @@ rascunhos gravados, voltar significa numerá-los ou apagá-los.
 
 ## 6. Decisões de negócio pendentes
 
-**Q1 — Permissão é por lotação ou por usuário?** No SUiTE, cada lotação carrega
-seu conjunto de perfis: o mesmo usuário é "Administrador de Unidade" no comitê
-e não na origem. Nosso `UsuarioGrupo` é por usuário. *Pergunta:* o vínculo de
-grupo passa a levar a unidade, ou o perfil segue global e só a lotação ativa
-muda o que se vê? **Decide a chave de E1 e o desenho de qualquer trabalho no
-item 1.0.7.**
+**Q1 — Permissão é por lotação ou por usuário?** **RESPONDIDA em 2026-09-16
+(Jorge): pelos DOIS.** O usuário mantém as permissões que já tem hoje, por
+`UsuarioGrupo`, e ganha um segundo eixo por lotação — como no SUiTE, onde o
+mesmo servidor é "Administrador de Unidade" no comitê e não na origem.
+
+Duas consequências que decorrem disso e ainda precisam de definição na hora de
+implementar, registradas para não serem resolvidas em silêncio:
+
+- **União ou interseção?** A leitura natural é união (o que é meu *mais* o que
+  a lotação concede), e é a que este plano assume. Interseção transformaria o
+  eixo novo em restrição, que é comportamento oposto.
+- **E sem lotação ativa?** Enquanto não existir o seletor de contexto, só o
+  eixo por usuário tem valor definido. Um usuário sem lotação não pode perder
+  acesso que tem hoje — senão a fatia entra quebrando quem já trabalha.
 
 **Q2 — Catálogo global de assuntos: herança ou cópia?** Hoje o padrão chega ao
 tenant por cópia no provisionamento, e padrão novo não alcança tenant
