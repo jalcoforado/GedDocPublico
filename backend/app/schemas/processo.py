@@ -148,6 +148,14 @@ class AnexoNoProcesso(BaseModel):
     e_doc: str | None
     tipo_anexo: str | None = None
     ordem: int | None = None
+    # F8 (benchmark SUiTE) — posição no processo, pra citar "fls. 70" sem
+    # gerar o PDF completo antes. `documento_numero` é a posição sequencial
+    # entre TODOS os anexos (PDF ou não); `pagina_processo` é a página final
+    # cumulativa (capa + anexos PDF anteriores + este) — só definida para
+    # anexo PDF com `qtd_paginas` conhecido, porque é estimativa sobre esse
+    # cache, não uma releitura do arquivo a cada listagem.
+    documento_numero: int | None = None
+    pagina_processo: int | None = None
 
 
 class EncaminhamentoOut(BaseModel):

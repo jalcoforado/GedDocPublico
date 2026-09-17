@@ -116,6 +116,8 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
                 <div className="truncate text-xs text-muted-foreground">
                   {tipoNome(a)} · {a.qtd_paginas ?? "?"} pág
                   {a.e_doc ? ` · ${a.e_doc}` : ""}
+                  {a.documento_numero != null ? ` · Doc. nº ${a.documento_numero}` : ""}
+                  {a.pagina_processo != null ? ` · fls. ${a.pagina_processo}` : ""}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-1 sm:shrink-0 sm:justify-end">
