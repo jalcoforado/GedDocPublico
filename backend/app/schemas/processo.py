@@ -104,6 +104,18 @@ class EscopoProcesso(str, Enum):
     unidade_e_subordinadas = "unidade_e_subordinadas"
 
 
+class DestinosPermitidosOut(BaseModel):
+    """F3 — unidades que o workflow ativo permite como próximo destino.
+
+    `restrito=False` é o comportamento de hoje (nenhuma restrição — a tela
+    oferece todas as unidades); `ids_unidade=None` só ocorre junto disso.
+    """
+
+    restrito: bool
+    ids_unidade: list[int] | None = None
+    motivo: str | None = None
+
+
 class ArquivarRequest(BaseModel):
     """F4 — encerramento do processo por arquivamento.
 
