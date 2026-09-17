@@ -276,6 +276,10 @@ class Anexo(Base):
     e_doc: Mapped[str | None] = mapped_column(String(25), nullable=True)
     descricao: Mapped[str | None] = mapped_column(String(512), nullable=True)
     qtd_paginas: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # F6 (benchmark SUiTE) — tamanho em bytes, capturado no upload
+    # (`services/anexos.py::_persistir_arquivo`). NULL para anexo anterior a
+    # esta coluna; `cota_anexacao.usado_bytes` trata isso como 0.
+    tamanho_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # PR 4c — vínculo com item de `servico.documentos_exigidos` (soft-link;
     # null = anexo geral, não vinculado a documento exigido).
     documento_exigido_key: Mapped[str | None] = mapped_column(String(120), nullable=True)

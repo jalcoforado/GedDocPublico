@@ -31,6 +31,7 @@ from ..models import (
 )
 from ..schemas.processo import (
     AnexoNoProcesso,
+    CotaAnexacaoOut,
     DespachoOut,
     EscopoProcesso,
     EncaminhamentoOut,
@@ -41,6 +42,7 @@ from ..schemas.processo import (
     ProcessoDetail,
     ProcessoListItem,
 )
+from . import cota_anexacao
 from .permanencia import No as NoDaLinha
 from .permanencia import calcular as calcular_permanencia
 from .prazos import calcular_prazo
@@ -259,6 +261,11 @@ async def get_processo_detail(
     base_item = _row_to_list(row)
     movimentacoes, permanencia = await _load_movimentacoes(db, processo_id, tenant_id)
     anexos = await _load_anexos(db, processo_id, tenant_id)
+    cota = CotaAnexacaoOut(
+        usado_bytes=await cota_anexacao.usado_bytes(db, processo_id, tenant_id),
+        limite_bytes=cota_anexacao.limite_bytes(p.nivel_sigilo),
+        nivel_sigilo=p.nivel_sigilo,
+    )
 
     # PR 5b — bloco prazo end-to-end. `data_conclusao` = data da última
     # Movimentacao ativa com id_arquivamento NOT NULL.
@@ -308,6 +315,7 @@ async def get_processo_detail(
         anexos=anexos,
         prazo=prazo,
         permanencia=permanencia,
+        cota_anexacao=cota,
     )
 
 

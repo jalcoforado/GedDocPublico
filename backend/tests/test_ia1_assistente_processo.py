@@ -279,7 +279,12 @@ def _detalhe_sintetico(*, anexos: list):
     cenário por acaso tem — foi assim que a primeira versão deste teste passou
     pelo galho "nenhum anexo" e não provou nada sobre o galho que importa.
     """
-    from app.schemas.processo import PermanenciaProcesso, PrazoInfo, ProcessoDetail
+    from app.schemas.processo import (
+        CotaAnexacaoOut,
+        PermanenciaProcesso,
+        PrazoInfo,
+        ProcessoDetail,
+    )
 
     return ProcessoDetail(
         id=1, numero_processo="TST-000001", nup=None, numero_origem=None,
@@ -304,6 +309,10 @@ def _detalhe_sintetico(*, anexos: list):
         permanencia=PermanenciaProcesso(
             total_ativo_segundos=0, espera_segundos=0, analise_segundos=0,
             tramitacoes=0, em_curso=False,
+        ),
+        # F6 — obrigatório como `permanencia`, mesmo motivo.
+        cota_anexacao=CotaAnexacaoOut(
+            usado_bytes=0, limite_bytes=200 * 1024 * 1024, nivel_sigilo="ostensivo",
         ),
     )
 

@@ -104,6 +104,15 @@ class EscopoProcesso(str, Enum):
     unidade_e_subordinadas = "unidade_e_subordinadas"
 
 
+class CotaAnexacaoOut(BaseModel):
+    """F6 — orçamento de anexação do processo, mostrado ANTES de tentar
+    anexar (barra de progresso), não só quando o upload já falhou."""
+
+    usado_bytes: int
+    limite_bytes: int
+    nivel_sigilo: str
+
+
 class DestinosPermitidosOut(BaseModel):
     """F3 — unidades que o workflow ativo permite como próximo destino.
 
@@ -280,3 +289,6 @@ class ProcessoDetail(ProcessoListItem):
     # F1 — permanência agregada. Sempre presente; zerada em processo sem
     # movimentação (que não existe no fluxo normal, mas existe em base migrada).
     permanencia: PermanenciaProcesso
+
+    # F6 — orçamento de anexação, sempre presente.
+    cota_anexacao: CotaAnexacaoOut
