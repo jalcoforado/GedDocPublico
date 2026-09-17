@@ -23,6 +23,7 @@ import {
   anexoInlineUrl,
   api,
   type AnexoNoProcesso,
+  type CotaAnexacaoOut,
   type ProcessoDetail,
 } from "@/lib/api";
 
@@ -195,6 +196,7 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
         open={openUpload}
         onClose={() => setOpenUpload(false)}
         processoId={processo.id}
+        cota={processo.cota_anexacao}
         onDone={() => qc.invalidateQueries({ queryKey: ["processo", processo.id] })}
       />
 
@@ -211,15 +213,53 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
   );
 }
 
+/** F6 — orçamento do processo, mostrado ANTES de tentar anexar. */
+function CotaAnexacaoBar({
+  cota,
+  arquivoBytes,
+}: {
+  cota: CotaAnexacaoOut;
+  arquivoBytes: number;
+}) {
+  const mb = (b: number) => (b / (1024 * 1024)).toFixed(1);
+  const projetado = cota.usado_bytes + arquivoBytes;
+  const pct = Math.min(100, (projetado / cota.limite_bytes) * 100);
+  const excede = projetado > cota.limite_bytes;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>Espaço do processo ({cota.nivel_sigilo})</span>
+        <span>
+          {mb(projetado)} / {mb(cota.limite_bytes)} MB
+        </span>
+      </div>
+      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className={excede ? "h-full bg-danger" : "h-full bg-brand"}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {excede && (
+        <p className="mt-1 text-xs text-danger">
+          Este arquivo ultrapassa a cota do processo.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function UploadDialog({
   open,
   onClose,
   processoId,
+  cota,
   onDone,
 }: {
   open: boolean;
   onClose: () => void;
   processoId: number;
+  cota: CotaAnexacaoOut;
   onDone: () => void;
 }) {
   const tiposQ = useQuery({
@@ -295,6 +335,7 @@ function UploadDialog({
       }
     >
       <form onSubmit={submit} className="space-y-3">
+        <CotaAnexacaoBar cota={cota} arquivoBytes={file?.size ?? 0} />
         <div>
           <Label htmlFor="file">Arquivo *</Label>
           <input

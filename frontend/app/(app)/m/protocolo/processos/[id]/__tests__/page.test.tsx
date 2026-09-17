@@ -191,6 +191,12 @@ function processo(overrides: Partial<ProcessoDetail> = {}): ProcessoDetail {
       tramitacoes: 0,
       em_curso: false,
     },
+    // F6 — obrigatório como `permanencia`.
+    cota_anexacao: {
+      usado_bytes: 0,
+      limite_bytes: 200 * 1024 * 1024,
+      nivel_sigilo: "ostensivo",
+    },
     ...overrides,
   };
 }

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings, resolve_anexo_path, tenant_anexos_dir
 from ..models import Anexo, AnexoProcesso, AssinaturaAnexo, Minuta, Processo, Servico
+from . import cota_anexacao
 from .sigilo import SigiloAcessoError, assert_acesso_processo
 
 
@@ -122,6 +123,7 @@ async def _persistir_arquivo(
         excluido=False,
         descricao=(descricao or filename)[:512],
         qtd_paginas=qtd_paginas,
+        tamanho_bytes=len(content),
         documento_exigido_key=documento_exigido_key,
     )
     db.add(anexo)
@@ -175,6 +177,19 @@ async def _criar_anexo_from_bytes(
         raise AnexoError("Processo inativo — não permite anexos")
     if processo.id_ultima_movimentacao is None:
         raise AnexoError("Processo sem movimentação — abra-o antes de anexar")
+
+    # F6 (benchmark SUiTE) — cota de anexação por processo, por sigilo.
+    # Checa ANTES de gravar no storage: recusar depois de escrever o arquivo
+    # deixaria bytes órfãos no disco sem linha nenhuma apontando pra eles.
+    limite = cota_anexacao.limite_bytes(processo.nivel_sigilo)
+    usado = await cota_anexacao.usado_bytes(db, processo_id, tenant_id)
+    if usado + len(content) > limite:
+        limite_mb = limite // (1024 * 1024)
+        usado_mb = usado / (1024 * 1024)
+        raise AnexoError(
+            f"Cota de anexação do processo excedida: {usado_mb:.1f} MB usados de "
+            f"{limite_mb} MB (nível '{processo.nivel_sigilo}')."
+        )
 
     # PR 4c — vínculo a item de documento exigido: a key precisa existir em
     # `servico.documentos_exigidos` do serviço vinculado ao processo.

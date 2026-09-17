@@ -385,6 +385,15 @@ export interface ProcessoDetail extends ProcessoListItem {
   prazo: PrazoInfo;
   /** F1 — sempre presente; zerado em processo sem movimentação. */
   permanencia: PermanenciaProcesso;
+  /** F6 — orçamento de anexação, sempre presente. */
+  cota_anexacao: CotaAnexacaoOut;
+}
+
+/** F6 — mostrado ANTES de tentar anexar, não só quando o upload já falhou. */
+export interface CotaAnexacaoOut {
+  usado_bytes: number;
+  limite_bytes: number;
+  nivel_sigilo: string;
 }
 
 /**
