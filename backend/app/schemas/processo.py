@@ -113,6 +113,18 @@ class CotaAnexacaoOut(BaseModel):
     nivel_sigilo: str
 
 
+class DestinosPermitidosOut(BaseModel):
+    """F3 — unidades que o workflow ativo permite como próximo destino.
+
+    `restrito=False` é o comportamento de hoje (nenhuma restrição — a tela
+    oferece todas as unidades); `ids_unidade=None` só ocorre junto disso.
+    """
+
+    restrito: bool
+    ids_unidade: list[int] | None = None
+    motivo: str | None = None
+
+
 class ArquivarRequest(BaseModel):
     """F4 — encerramento do processo por arquivamento.
 
@@ -157,6 +169,14 @@ class AnexoNoProcesso(BaseModel):
     e_doc: str | None
     tipo_anexo: str | None = None
     ordem: int | None = None
+    # F8 (benchmark SUiTE) — posição no processo, pra citar "fls. 70" sem
+    # gerar o PDF completo antes. `documento_numero` é a posição sequencial
+    # entre TODOS os anexos (PDF ou não); `pagina_processo` é a página final
+    # cumulativa (capa + anexos PDF anteriores + este) — só definida para
+    # anexo PDF com `qtd_paginas` conhecido, porque é estimativa sobre esse
+    # cache, não uma releitura do arquivo a cada listagem.
+    documento_numero: int | None = None
+    pagina_processo: int | None = None
 
 
 class EncaminhamentoOut(BaseModel):

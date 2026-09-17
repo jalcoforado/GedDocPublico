@@ -136,6 +136,99 @@ async def auto_iniciar_workflow_se_aplicavel(
         return None
 
 
+async def _instance_strict_ativa(
+    db: AsyncSession, processo: Processo
+) -> tuple[WorkflowInstance, dict[str, Any]] | tuple[None, None]:
+    """Carrega `(instance, dsl)` só quando há workflow ATIVO e STRICT.
+
+    `(None, None)` nos dois casos que liberam por definição — sem instance
+    ativa, ou definição não-strict — que é o mesmo critério que
+    `validar_acao_strict` e `destinos_permitidos` compartilham. Extraído para
+    as duas funções não divergirem silenciosamente sobre o que "sem
+    restrição" significa.
+    """
+    inst = (
+        await db.execute(
+            select(WorkflowInstance).where(
+                WorkflowInstance.id_processo == processo.id,
+                WorkflowInstance.tenant_id == processo.tenant_id,
+                WorkflowInstance.ativa.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if inst is None:
+        return None, None
+
+    wf = (
+        await db.execute(
+            select(WorkflowDefinition).where(
+                WorkflowDefinition.id == inst.id_workflow_definition,
+                WorkflowDefinition.tenant_id == processo.tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if wf is None or not wf.dsl.get("strict", False):
+        return None, None
+    return inst, wf.dsl
+
+
+async def destinos_permitidos(
+    db: AsyncSession, processo: Processo
+) -> tuple[list[int] | None, str | None]:
+    """Unidades que o workflow ativo permite como destino do próximo
+    encaminhamento — pra UI não oferecer opção que `validar_acao_strict` vai
+    recusar depois (F3, `docs/superpowers/specs/2026-08-28-reuniao-as-is-to-be-design.md` §7.2).
+
+    Reaproveita a MESMA regra de `validar_acao_strict(acao="encaminhar")` em
+    vez de duplicá-la: aqui, em vez de checar um `id_unidade_destino`
+    específico, ela é percorrida pra juntar o conjunto de unidades que
+    passariam.
+
+    `(None, None)` — sem restrição (sem instance ativa, workflow não-strict,
+    ou alguma transição candidata libera qualquer destino). `([], motivo)` —
+    o estado atual não tem nenhuma transição de encaminhamento aplicável;
+    nada é permitido. `(ids, motivo)` — só essas unidades.
+    """
+    inst, dsl = await _instance_strict_ativa(db, processo)
+    if inst is None:
+        return None, None
+
+    estado_atual = inst.estado_atual
+    estados = {e["slug"]: e for e in dsl.get("estados", [])}
+    candidatas = [
+        t
+        for t in dsl.get("transicoes", [])
+        if t.get("de") == estado_atual
+        and t.get("evento", "manual") in ("manual", "encaminhamento")
+    ]
+    if not candidatas:
+        return [], (
+            f"O fluxo do processo não tem encaminhamento manual a partir do "
+            f"estado '{estado_atual}'."
+        )
+
+    unidades: set[int] = set()
+    for t in candidatas:
+        dest_estado = estados.get(t.get("para", ""))
+        if dest_estado is None:
+            continue
+        unid = dest_estado.get("id_unidade_responsavel")
+        if unid is None:
+            # Transição sem unidade fixa — mesmo critério de
+            # `validar_acao_strict`, libera qualquer destino.
+            return None, None
+        unidades.add(int(unid))
+    if not unidades:
+        return [], (
+            f"O fluxo do processo não tem encaminhamento manual a partir do "
+            f"estado '{estado_atual}'."
+        )
+    return sorted(unidades), (
+        f"O fluxo do processo, no estado atual, só permite encaminhar para "
+        f"{len(unidades)} unidade(s) específica(s)."
+    )
+
+
 async def validar_acao_strict(
     db: AsyncSession,
     processo: Processo,
@@ -162,32 +255,13 @@ async def validar_acao_strict(
     Retorna `(ok, motivo_bloqueio)`. Quando ok=False, `motivo` é a mensagem
     pra incluir no HTTP 400.
     """
-    inst = (
-        await db.execute(
-            select(WorkflowInstance).where(
-                WorkflowInstance.id_processo == processo.id,
-                WorkflowInstance.tenant_id == processo.tenant_id,
-                WorkflowInstance.ativa.is_(True),
-            )
-        )
-    ).scalar_one_or_none()
+    inst, dsl = await _instance_strict_ativa(db, processo)
     if inst is None:
         return True, None
 
-    wf = (
-        await db.execute(
-            select(WorkflowDefinition).where(
-                WorkflowDefinition.id == inst.id_workflow_definition,
-                WorkflowDefinition.tenant_id == processo.tenant_id,
-            )
-        )
-    ).scalar_one_or_none()
-    if wf is None or not wf.dsl.get("strict", False):
-        return True, None
-
     estado_atual = inst.estado_atual
-    estados = {e["slug"]: e for e in wf.dsl.get("estados", [])}
-    transicoes = wf.dsl.get("transicoes", [])
+    estados = {e["slug"]: e for e in dsl.get("estados", [])}
+    transicoes = dsl.get("transicoes", [])
 
     if acao == "encaminhar":
         # Procura transição manual/encaminhamento saindo do estado atual

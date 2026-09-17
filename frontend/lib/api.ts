@@ -283,6 +283,12 @@ export interface AnexoNoProcesso {
   e_doc: string | null;
   tipo_anexo: string | null;
   ordem: number | null;
+  /** F8 — posição entre todos os anexos (PDF ou não), 1-based. */
+  documento_numero: number | null;
+  /** F8 — página final cumulativa no PDF consolidado (capa + PDFs
+   * anteriores + este); `null` quando não é PDF ou a contagem de página
+   * não foi calculada no upload. */
+  pagina_processo: number | null;
 }
 
 export interface EncaminhamentoOut {
@@ -467,6 +473,13 @@ export interface EncaminharInput {
   quantidade_folhas?: number;
   data_prazo?: string | null;
   despacho?: string | null;
+}
+
+/** F3 — `restrito=false` é o comportamento de hoje (todas as unidades). */
+export interface DestinosPermitidosOut {
+  restrito: boolean;
+  ids_unidade: number[] | null;
+  motivo: string | null;
 }
 
 export interface CancelarEncaminhamentoInput {
@@ -4407,6 +4420,9 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+    /** F3 — unidades que o workflow ativo aceita como próximo destino. */
+    destinosPermitidos: (id: number) =>
+      request<DestinosPermitidosOut>(`/processos/${id}/destinos-permitidos`),
     receber: (id: number) =>
       request<ProcessoDetail>(`/processos/${id}/receber`, { method: "POST" }),
     /** F4 — encerra o processo. NÃO é idempotente: a segunda chamada dá 400. */

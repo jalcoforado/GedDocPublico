@@ -481,16 +481,34 @@ async def _load_anexos(
         .order_by(AnexoProcesso.ordem.nulls_last(), Anexo.id)
     )
     rows = (await db.execute(stmt)).all()
-    return [
-        AnexoNoProcesso(
-            id=a.id,
-            id_anexo_processo=ap.id,
-            descricao=a.descricao,
-            publico=a.publico,
-            qtd_paginas=a.qtd_paginas,
-            e_doc=a.e_doc,
-            tipo_anexo=tipo_anexo_nome,
-            ordem=ap.ordem,
+
+    # F8 — numeração cumulativa. `PAGINAS_CAPA` é a página fixa que
+    # `pdf_capa.py` sempre gera (um `showPage()` só). Mesmo filtro de
+    # "conta no PDF consolidado" que `pdf_montagem.py` usa (extensão .pdf);
+    # anexo PDF sem `qtd_paginas` conhecido (upload que falhou o cálculo) não
+    # avança o total — a estimativa fica pra trás do real nesse caso raro,
+    # em vez de inventar um número.
+    PAGINAS_CAPA = 1
+    pagina_atual = PAGINAS_CAPA
+    resultado: list[AnexoNoProcesso] = []
+    for idx, (a, ap, tipo_anexo_nome) in enumerate(rows, start=1):
+        pagina_processo = None
+        eh_pdf = bool(a.e_doc) and a.e_doc.lower().endswith(".pdf")
+        if eh_pdf and a.qtd_paginas:
+            pagina_atual += a.qtd_paginas
+            pagina_processo = pagina_atual
+        resultado.append(
+            AnexoNoProcesso(
+                id=a.id,
+                id_anexo_processo=ap.id,
+                descricao=a.descricao,
+                publico=a.publico,
+                qtd_paginas=a.qtd_paginas,
+                e_doc=a.e_doc,
+                tipo_anexo=tipo_anexo_nome,
+                ordem=ap.ordem,
+                documento_numero=idx,
+                pagina_processo=pagina_processo,
+            )
         )
-        for a, ap, tipo_anexo_nome in rows
-    ]
+    return resultado
