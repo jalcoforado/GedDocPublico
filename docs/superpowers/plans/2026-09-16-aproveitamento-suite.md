@@ -428,25 +428,54 @@ existente. *Pergunta:* (a) cópia basta, (b) precisa de "aplicar padrão a este
 tenant", ou (c) precisa de *fallback* em leitura? Recomendo (b): (c) faz toda
 query de catálogo ganhar dois níveis.
 
+**RESPONDIDA em 2026-09-17 (Jorge): herança.** O tenant enxerga o catálogo
+global por referência, não por cópia no provisionamento; customização local
+vira linha própria (`origem='local'`), no mesmo desenho que a §5/E2 já
+descrevia. Falta escopar o mecanismo exato de leitura (query com dois níveis,
+como (c) cogitava) na hora de detalhar a fatia.
+
 **Q3 — "Rascunho" é processo sem número ou documento em edição?** Ver E3. A ata
 admite as duas leituras e a diferença de custo é de uma ordem de grandeza.
+
+**RESPONDIDA em 2026-09-17 (Jorge): processo sem número.** Confirma a leitura
+do E3, **contra a recomendação de adiar** que a §5/E3 registrava — é a fatia de
+maior superfície das três (PDFs, notificações, `link_url`, busca, guarda de
+NUP). Nenhum desenho de migração foi feito ainda; escopar antes de implementar.
 
 **Q4 — A cota de anexação é por quê?** As capturas mostram 800 MB e 1.2 GB em
 contextos diferentes e **não consegui determinar a regra**. *Pergunta:* o limite
 é por processo, por tipo de processo, por nível de acesso, ou por órgão?
+
+**RESPONDIDA em 2026-09-17 (Jorge): por sigilo.** O limite varia pelo
+`nivel_sigilo` do processo (não por tipo de processo nem por órgão) — mesma
+dimensão do item F6.
 
 **Q5 — "Dar ciência" é ato registrável?** O SUiTE tem o botão e o evento
 correspondente nas notificações ("Dado ciência", "Dado ciência ao processo").
 *Pergunta:* é ato jurídico com efeito (inicia prazo? vincula?) ou só marca de
 leitura? Se tiver efeito, não é UI — é regra.
 
+**RESPONDIDA em 2026-09-17 (Jorge): tem efeito jurídico.** Não é UI, é regra —
+falta definir o efeito exato (inicia prazo? vincula alguma outra ação?) na hora
+de escopar a fatia.
+
 **Q6 — Referência legal vincula o nível de sigilo?** No SUiTE, "Restrito" vem
 com "Lei 12.527/2011 - Art. 7, §3°". *Pergunta:* a hipótese legal é obrigatória
 ao restringir, e o catálogo é global ou por tenant?
 
+**RESPONDIDA em 2026-09-17 (Jorge): sim, obrigatória; catálogo global.** Um só
+catálogo de hipóteses legais compartilhado entre tenants — leis federais de
+acesso à informação são as mesmas para todo município; nenhum tenant edita o
+catálogo dos outros.
+
 **Q7 — Marcador é por unidade, por tenant, ou por usuário?** A administração é
 setorial na captura 40, mas os marcadores aparecem em processos de outras
 unidades na captura 07.
+
+**RESPONDIDA em 2026-09-17 (Jorge): por tenant, por unidade.** O catálogo de
+marcadores é do tenant (visível em processo de qualquer unidade, como a
+captura 07 mostra); a administração do catálogo é setorial (captura 40) — as
+duas leituras coexistem, uma não substitui a outra.
 
 ---
 
