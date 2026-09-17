@@ -177,7 +177,18 @@ async def _shift_abertura(engine, processo_id: int, dias_atras: int) -> None:
 
 
 async def _arquivar(engine, tenant_id: int, processo_id: int, dias_atras: int) -> None:
-    """Simula conclusão por arquivamento (Movimentacao ativa com id_arquivamento)."""
+    """Simula conclusão por arquivamento (Movimentacao ativa com id_arquivamento).
+
+    **Desde a fatia F4 existe o service de verdade:**
+    `services/acoes_processo.py::arquivar`. Este helper permanece porque precisa
+    carimbar o arquivamento `dias_atras` no passado, e o service usa `now()` —
+    reescrevê-lo exigiria um segundo UPDATE em cada um dos testes que o chamam,
+    sem cobrir nada de novo.
+
+    O que NÃO se deve concluir daqui é que não há service. A existência deste
+    helper foi durante meses a única pista de que o arquivamento tinha leitura
+    sem escrita, e ninguém a seguiu.
+    """
     async with _sm(engine)() as s:
         unidade_id = await _unidade_id(engine, tenant_id)
         # protocolos.acao é catálogo GLOBAL e o seed só garante ABERTURA — em

@@ -21,6 +21,7 @@ from ..schemas.complementacao_documental import (
     SolicitarComplementacaoRequest,
 )
 from ..schemas.processo import (
+    ArquivarRequest,
     AtribuirResponsavelRequest,
     CancelarEncaminhamentoRequest,
     ClassificarSigiloRequest,
@@ -34,6 +35,7 @@ from ..schemas.processo import (
 from ..services.abertura_processo import AberturaError, abrir_processo
 from ..services.acoes_processo import (
     AcaoError,
+    arquivar,
     atribuir_responsavel,
     cancelar_encaminhamento,
     encaminhar,
@@ -413,6 +415,45 @@ async def temporalidade_endpoint(
         return await calcular_temporalidade(db, processo_id, tenant_id=tenant_id)
     except ValueError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+
+
+@router.post(
+    "/{processo_id}/arquivar",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def arquivar_endpoint(
+    processo_id: int,
+    payload: ArquivarRequest,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """F4 — encerra o processo por arquivamento.
+
+    `POST` e não `PUT`: não é idempotente por desenho. Arquivar duas vezes
+    criaria dois eventos de conclusão, e o "tempo médio de conclusão" do
+    dashboard contaria o mesmo processo duas vezes — o service recusa a
+    segunda com 400.
+    """
+    is_super = await _is_super(db, current, tenant_id)
+    try:
+        await arquivar(
+            db,
+            processo_id,
+            payload,
+            tenant_id=tenant_id,
+            usuario_id=current.id,
+            is_super_usuario=is_super,
+        )
+    except AcaoError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
+        )
+    return detail
 
 
 @router.put(

@@ -104,6 +104,34 @@ class EscopoProcesso(str, Enum):
     unidade_e_subordinadas = "unidade_e_subordinadas"
 
 
+class ArquivarRequest(BaseModel):
+    """F4 — encerramento do processo por arquivamento.
+
+    `motivo` é obrigatório pelo mesmo princípio de `apensamento.motivo`: ato que
+    encerra o processo tem de dizer por quê, e campo opcional vira campo vazio.
+
+    `observacao` não é coluna de `protocolos.arquivamento` — vira um `Despacho`
+    ligado à movimentação, que é o mecanismo que a linha do tempo já renderiza.
+    Criar coluna nova para texto livre duplicaria o que existe.
+
+    Os campos de endereçamento físico (`local`, `estante`, `prateleira`,
+    `caixa`, `pasta`) são colunas da tabela legada e ficam opcionais: processo
+    virtual não tem prateleira.
+    """
+
+    motivo: str = Field(min_length=3, max_length=255)
+    observacao: str | None = Field(default=None, max_length=10000)
+    local: str | None = Field(default=None, max_length=255)
+    estante: str | None = Field(default=None, max_length=255)
+    prateleira: str | None = Field(default=None, max_length=255)
+    caixa: str | None = Field(default=None, max_length=255)
+    pasta: str | None = Field(default=None, max_length=255)
+    permanente: bool = False
+    # Workflow strict: arquivar fora de estado final é bloqueado; super-usuário
+    # passa informando motivo, que é auditado. Mesmo contrato de `encaminhar`.
+    override_motivo: str | None = Field(default=None, max_length=500)
+
+
 class AtribuirResponsavelRequest(BaseModel):
     """`id_usuario=None` desatribui — volta ao estado pendente de designação."""
 

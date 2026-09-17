@@ -387,6 +387,25 @@ export interface ProcessoDetail extends ProcessoListItem {
   permanencia: PermanenciaProcesso;
 }
 
+/**
+ * F4 — arquivamento.
+ *
+ * `motivo` é obrigatório: ato que encerra o processo tem de dizer por quê. Os
+ * campos de endereçamento físico são da tabela legada e só fazem sentido em
+ * processo não virtual.
+ */
+export interface ArquivarInput {
+  motivo: string;
+  observacao?: string | null;
+  local?: string | null;
+  estante?: string | null;
+  prateleira?: string | null;
+  caixa?: string | null;
+  pasta?: string | null;
+  permanente?: boolean;
+  override_motivo?: string | null;
+}
+
 export interface ClassificarSigiloInput {
   nivel: NivelSigilo;
   fundamento_legal?: string | null;
@@ -4381,6 +4400,12 @@ export const api = {
       }),
     receber: (id: number) =>
       request<ProcessoDetail>(`/processos/${id}/receber`, { method: "POST" }),
+    /** F4 — encerra o processo. NÃO é idempotente: a segunda chamada dá 400. */
+    arquivar: (id: number, data: ArquivarInput) =>
+      request<ProcessoDetail>(`/processos/${id}/arquivar`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
     /** F2 — `idUsuario: null` desatribui. PUT: idempotente por desenho. */
     atribuirResponsavel: (id: number, idUsuario: number | null) =>
       request<ProcessoDetail>(`/processos/${id}/responsavel`, {

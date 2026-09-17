@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { ArquivarDialog } from "@/components/ArquivarDialog";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +16,7 @@ import {
   type ProcessoDetail,
 } from "@/lib/api";
 
-type ModalKind = null | "encaminhar" | "receber" | "cancelar";
+type ModalKind = null | "encaminhar" | "receber" | "cancelar" | "arquivar";
 
 export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
   const qc = useQueryClient();
@@ -33,6 +34,16 @@ export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
     );
     return mov?.encaminhamento ?? null;
   }, [processo.movimentacoes]);
+
+  // F4 — já arquivado não arquiva de novo. A fonte é a linha do tempo e não
+  // `processo.ativo`: arquivar NÃO mexe naquele campo (decisão registrada em
+  // `services/acoes_processo.py::arquivar`), então usá-lo aqui daria sempre
+  // "pode arquivar".
+  const jaArquivado = useMemo(
+    () => processo.movimentacoes.some((m) => m.acao_flag === "ARQUIVAMENTO"),
+    [processo.movimentacoes],
+  );
+  const podeArquivar = !jaArquivado && !encaminhamentoPendente;
 
   const podeEncaminhar = processo.ativo && !encaminhamentoPendente;
   const podeReceber = !!encaminhamentoPendente && processo.ativo;
@@ -84,6 +95,16 @@ export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
         >
           Cancelar encaminhamento
         </Button>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setErr(null);
+            setModal("arquivar");
+          }}
+          disabled={!podeArquivar}
+        >
+          Arquivar
+        </Button>
 
         {encaminhamentoPendente && (
           <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-warning-soft px-2 py-0.5 text-xs font-semibold text-warning-soft-foreground">
@@ -91,6 +112,12 @@ export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
           </span>
         )}
       </div>
+
+      <ArquivarDialog
+        open={modal === "arquivar"}
+        onClose={() => setModal(null)}
+        processo={processo}
+      />
 
       <EncaminharDialog
         open={modal === "encaminhar"}

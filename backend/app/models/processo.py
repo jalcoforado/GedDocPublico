@@ -205,6 +205,24 @@ class Encaminhamento(Base):
     id_movimentacao: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class StatusArquivamento(Base):
+    """Catálogo GLOBAL de status de arquivamento (sem `tenant_id`), como `Acao`.
+
+    Cuidado com o vizinho: existe também `protocolos.status_arquivamentos`, no
+    PLURAL, vazia e sem nenhuma FK apontando para ela — vestígio do legado. A FK
+    de `protocolos.arquivamento.id_status_arquivamento` aponta para ESTA, no
+    singular.
+    """
+
+    __tablename__ = "status_arquivamento"
+    __table_args__ = {"schema": "protocolos"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    status_arquivamento: Mapped[str] = mapped_column(String(255), nullable=False)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
 class Arquivamento(Base):
     __tablename__ = "arquivamento"
     __table_args__ = {"schema": "protocolos"}
@@ -213,10 +231,24 @@ class Arquivamento(Base):
     tenant_id: Mapped[int] = mapped_column(
         ForeignKey("aprimora_py.tenant.id"), nullable=False
     )
-    id_status_arquivamento: Mapped[int] = mapped_column(Integer, nullable=False)
+    id_status_arquivamento: Mapped[int] = mapped_column(
+        ForeignKey("protocolos.status_arquivamento.id"), nullable=False
+    )
     motivo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     local: Mapped[str | None] = mapped_column(String(255), nullable=True)
     arquivo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # F4 — endereçamento físico. Existiam na tabela legada desde sempre e não
+    # estavam mapeados: o modelo cobria 9 das 15 colunas, e ninguém percebeu
+    # porque nenhum caminho escrevia aqui.
+    estante: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    prateleira: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    caixa: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pasta: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    permanente: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Vínculo de volta para a movimentação. A ida é
+    # `movimentacao.id_arquivamento`, que é por onde os seis leitores do
+    # dashboard filtram; esta é a volta, para quem parte do arquivamento.
+    movimentacao_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     id_usuario: Mapped[int] = mapped_column(
         ForeignKey("utils.usuario.id"), nullable=False
     )

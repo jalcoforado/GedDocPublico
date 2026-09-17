@@ -18,14 +18,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
     Acao,
+    Arquivamento,
     Despacho,
     Encaminhamento,
     Movimentacao,
     Processo,
+    StatusArquivamento,
     Usuario,
     UsuarioUnidadeTrabalho,
 )
-from ..schemas.processo import CancelarEncaminhamentoRequest, EncaminharRequest
+from ..schemas.processo import (
+    ArquivarRequest,
+    CancelarEncaminhamentoRequest,
+    EncaminharRequest,
+)
 
 
 class AcaoError(Exception):
@@ -463,3 +469,163 @@ async def atribuir_responsavel(
     await db.commit()
     await db.refresh(processo)
     return processo
+
+
+async def arquivar(
+    db: AsyncSession,
+    processo_id: int,
+    payload: ArquivarRequest,
+    *,
+    tenant_id: int,
+    usuario_id: int,
+    is_super_usuario: bool = False,
+) -> Arquivamento:
+    """Encerra o processo por arquivamento. Fatia F4.
+
+    Por que isto faltava, e o que destrava
+    --------------------------------------
+    O lado da LEITURA já estava inteiro e em produção; o da escrita nunca
+    existiu. Seis lugares de `services/dashboard.py` contam arquivados,
+    `services/cidadao_processos.py` diz "concluído" ao cidadão e
+    `services/processos.py` deriva `data_conclusao` — todos por
+    `Movimentacao.id_arquivamento IS NOT NULL`, que nenhum caminho preenchia.
+
+    Consequência medida em 2026-09-16: 0 linhas em `protocolos.arquivamento`, o
+    KPI "arquivados" zerado **por construção**, o "tempo médio de conclusão"
+    sempre nulo, e os status `concluido_no_prazo`/`concluido_atrasado` de
+    `PrazoInfo` inalcançáveis. A F1 (permanência) só consegue fechar um
+    processo — `em_curso=false` — depois disto existir.
+
+    O formato gravado aqui é exatamente o que aqueles seis leitores esperam:
+    uma `Movimentacao` com `id_acao=ARQUIVAMENTO` e `id_arquivamento` apontando
+    para a linha nova. Nada nos leitores muda.
+
+    O que NÃO faz
+    -------------
+    **Não mexe em `processo.ativo`.** Nada no app escreve esse campo (as 3
+    linhas `false` no banco vêm de seed/legado), e o filtro `apenas_ativos` da
+    lista o consulta. Acoplá-lo ao arquivamento mudaria em silêncio o que as
+    listas existentes mostram, apoiado numa suposição sobre o que `ativo`
+    significa. É pergunta de negócio, não detalhe de implementação.
+
+    **Não desarquiva.** Não é esquecimento: os leitores filtram por
+    `id_arquivamento IS NOT NULL` **sem** olhar `Movimentacao.excluido`, então
+    "desarquivar" por soft-delete não desfaria nada nas contagens. Fazer
+    direito exige decidir antes se aqueles seis lugares passam a filtrar
+    `excluido` — mudança de comportamento em métrica existente, que não cabe
+    nesta fatia.
+    """
+    processo = await _get_processo(db, processo_id, tenant_id)
+
+    ja_arquivado = (
+        await db.execute(
+            select(Movimentacao.id).where(
+                Movimentacao.id_processo == processo_id,
+                Movimentacao.tenant_id == tenant_id,
+                Movimentacao.id_arquivamento.is_not(None),
+                Movimentacao.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if ja_arquivado is not None:
+        # Não é idempotente de propósito: arquivar duas vezes criaria dois
+        # eventos de conclusão, e o "tempo médio de conclusão" do dashboard
+        # passaria a contar o mesmo processo duas vezes com datas diferentes.
+        raise AcaoError("Processo já está arquivado")
+
+    from .workflow_integration import validar_acao_strict
+
+    ok, bloqueio = await validar_acao_strict(db, processo, acao="arquivar")
+    if not ok and not (is_super_usuario and payload.override_motivo):
+        raise WorkflowStrictBlock(
+            bloqueio or "Workflow strict bloqueou o arquivamento."
+        )
+
+    acao = await _get_acao(db, "ARQUIVAMENTO")
+    status_id = (
+        await db.execute(
+            select(StatusArquivamento.id).where(
+                StatusArquivamento.ativo.is_(True),
+                StatusArquivamento.excluido.is_(False),
+            ).order_by(StatusArquivamento.id).limit(1)
+        )
+    ).scalar_one_or_none()
+    if status_id is None:
+        # Catálogo global garantido pelo `seed_bootstrap`. Mensagem explícita
+        # porque a alternativa é um `IntegrityError` cru de FK, que não diz o
+        # que fazer.
+        raise AcaoError(
+            "Catálogo `protocolos.status_arquivamento` vazio — rode "
+            "`python -m app.cli.seed_bootstrap`"
+        )
+
+    now = datetime.now()
+
+    arquivamento = Arquivamento(
+        tenant_id=tenant_id,
+        id_status_arquivamento=status_id,
+        motivo=payload.motivo,
+        local=payload.local,
+        estante=payload.estante,
+        prateleira=payload.prateleira,
+        caixa=payload.caixa,
+        pasta=payload.pasta,
+        permanente=payload.permanente,
+        id_usuario=usuario_id,
+        ativo=True,
+        excluido=False,
+    )
+    db.add(arquivamento)
+    await db.flush()
+
+    movimentacao = Movimentacao(
+        tenant_id=tenant_id,
+        id_processo=processo_id,
+        id_unidade_responsavel=processo.id_local_atual
+        or processo.id_unidade_proprietaria,
+        id_acao=acao.id,
+        id_usuario=usuario_id,
+        id_arquivamento=arquivamento.id,
+        data_hora_movimentacao=now,
+        ativo=True,
+        excluido=False,
+    )
+    db.add(movimentacao)
+    await db.flush()
+
+    arquivamento.movimentacao_id = movimentacao.id
+    processo.id_ultima_movimentacao = movimentacao.id
+
+    if payload.observacao:
+        db.add(
+            Despacho(
+                tenant_id=tenant_id,
+                id_processo=processo_id,
+                despacho=payload.observacao,
+                id_usuario=usuario_id,
+                id_movimentacao=movimentacao.id,
+                ativo=True,
+                excluido=False,
+            )
+        )
+
+    from .audit import log as audit_log
+
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="processo.arquivado",
+        entidade="processo",
+        id_entidade=processo_id,
+        payload={
+            "id_arquivamento": arquivamento.id,
+            "motivo": payload.motivo,
+            "permanente": payload.permanente,
+            "override_motivo": payload.override_motivo,
+        },
+    )
+
+    await db.commit()
+    await db.refresh(arquivamento)
+    return arquivamento

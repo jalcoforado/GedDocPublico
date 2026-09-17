@@ -403,15 +403,26 @@ async def seed(db: AsyncSession) -> dict:
     # deploy não tinha equivalente.
     #
     # A tabela é catálogo GLOBAL (não tem tenant_id), então o escopo é este
-    # seed e não o provisionamento de tenant. `status_acao`/`status_movimentacao`
-    # são descritivos — só aparecem na listagem de movimentações; o código usa
-    # apenas `acao.id`.
+    # seed e não o provisionamento de tenant.
+    #
+    # `status_movimentacao` DEIXOU DE SER DESCRITIVO. Este comentário dizia "só
+    # aparece na listagem; o código usa apenas `acao.id`", e era verdade até a
+    # fatia F1 (permanência): `services/permanencia.py` classifica cada trecho
+    # da linha do tempo por este campo — `encaminhado` é tempo de fila,
+    # `final` encerra a contagem, o resto é tempo de análise. Mudar o valor de
+    # uma linha aqui muda número em tela.
     for flag, nome, status_acao, status_mov, texto in [
         ("ABERTURA", "Abertura", "aberto", "inicial", "Processo aberto"),
         ("ENCAMINHAMENTO", "Encaminhamento", "aberto", "encaminhado",
          "Processo encaminhado"),
         ("RECEBIMENTO", "Recebimento", "aberto", "recebido",
          "Processo recebido"),
+        # F4 — sem esta linha não se arquiva, e sem arquivar o KPI "arquivados"
+        # do dashboard e os status `concluido_*` de `PrazoInfo` são
+        # inalcançáveis. Faltava desde sempre: `test_pr5b_prazos.py` a criava à
+        # mão porque o seed não a garantia.
+        ("ARQUIVAMENTO", "Arquivamento", "arquivado", "final",
+         "Processo arquivado"),
     ]:
         existe = (
             await db.execute(
@@ -433,6 +444,30 @@ async def seed(db: AsyncSession) -> dict:
                 {"f": flag, "n": nome, "sa": status_acao, "sm": status_mov,
                  "t": texto},
             )
+
+    # F4 — `protocolos.arquivamento.id_status_arquivamento` é NOT NULL com FK
+    # para `protocolos.status_arquivamento`, que também é catálogo global e
+    # nasce vazio. Sem pelo menos uma linha, arquivar estoura por FK.
+    #
+    # Atenção ao vizinho: existe `protocolos.status_arquivamentos` (PLURAL),
+    # vazia e sem nenhuma FK apontando para ela. É vestígio do legado — não é
+    # esta.
+    existe_status = (
+        await db.execute(
+            text(
+                "SELECT 1 FROM protocolos.status_arquivamento "
+                "WHERE excluido = false AND ativo = true LIMIT 1"
+            )
+        )
+    ).first()
+    if existe_status is None:
+        await db.execute(
+            text(
+                "INSERT INTO protocolos.status_arquivamento "
+                "(status_arquivamento, ativo, excluido) "
+                "VALUES ('Arquivado', true, false)"
+            )
+        )
 
     vinculos_sistema = await garantir_sistema_transacao(db)
     resultado_modulos = await semear_modulos(db)
