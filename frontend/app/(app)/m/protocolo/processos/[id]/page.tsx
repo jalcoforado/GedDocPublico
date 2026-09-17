@@ -40,6 +40,7 @@ import { ProcessoVolumes } from "@/components/ProcessoVolumes";
 import { AssinaturasProcesso } from "@/components/AssinaturasProcesso";
 import { AssistenteProcesso } from "@/components/AssistenteProcesso";
 import { PermanenciaNoBadge, PermanenciaResumo } from "@/components/Permanencia";
+import { ResponsavelProcesso } from "@/components/ResponsavelProcesso";
 import { ProcessoTrail } from "@/components/ProcessoTrail";
 import { ProcessoWorkflowPanel } from "@/components/ProcessoWorkflowPanel";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
@@ -222,7 +223,7 @@ export default function ProcessoDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const processoId = Number(params.id);
   const [viewer, setViewer] = useState<ViewerState | null>(null);
 
@@ -394,6 +395,12 @@ export default function ProcessoDetailPage() {
               {/* PR 5b — badge de prazo (null em sem_prazo). */}
               <PrazoBadge prazo={p.prazo} />
             </div>
+            {/* F2 — responsável-pessoa. Fica no cabeçalho, junto dos badges de
+                estado, porque "quem responde por isto" é estado do processo e
+                não uma ação escondida numa aba. */}
+            {can("processo", "atualizar") && (
+              <ResponsavelProcesso processo={p} usuarioAtualId={user?.id ?? null} />
+            )}
             {/* Acoes — D-PRINT-MENU: impressoes/relatorios agrupadas
                 num ActionsMenu "Imprimir". URLs/handlers e permissoes
                 preservados byte-a-byte. PDF completo segue visivel como

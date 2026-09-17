@@ -170,6 +170,9 @@ function processo(overrides: Partial<ProcessoDetail> = {}): ProcessoDetail {
     sigilo_data_desclassificacao: null,
     movimentacoes: [],
     anexos: [],
+    // F2 — sem responsável é o estado inicial de todo processo.
+    id_usuario_responsavel: null,
+    responsavel: null,
     prazo: {
       status: "sem_prazo",
       prazo_servico_dias_snapshot: null,

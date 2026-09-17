@@ -239,6 +239,9 @@ export interface ProcessoListItem {
   manifestante_cpf_cnpj: string | null;
   unidade_proprietaria: string | null;
   local_atual: string | null;
+  /** F2 — `null` é o estado "pendente de designação", não ausência de dado. */
+  id_usuario_responsavel: number | null;
+  responsavel: string | null;
 }
 
 export type NivelSigilo =
@@ -391,6 +394,15 @@ export interface ClassificarSigiloInput {
   prazo_anos?: number | null;
 }
 
+/**
+ * F2 — recorte da lista por responsabilidade.
+ *
+ * `unidade` e `unidade_e_subordinadas` recortam pelo LOCAL ATUAL do processo,
+ * não pela unidade proprietária: interessa o que está na mesa agora, não o que
+ * nasceu ali e já saiu. `unidade` INCLUI os processos sem responsável.
+ */
+export type EscopoProcesso = "meus" | "unidade" | "unidade_e_subordinadas";
+
 export interface ProcessoListFilters {
   page?: number;
   page_size?: number;
@@ -401,6 +413,8 @@ export interface ProcessoListFilters {
   apenas_ativos?: boolean;
   desde?: string;
   ate?: string;
+  /** Ausente = sem recorte. */
+  escopo?: EscopoProcesso;
 }
 
 export interface ProcessoCreateInput {
@@ -4367,6 +4381,12 @@ export const api = {
       }),
     receber: (id: number) =>
       request<ProcessoDetail>(`/processos/${id}/receber`, { method: "POST" }),
+    /** F2 — `idUsuario: null` desatribui. PUT: idempotente por desenho. */
+    atribuirResponsavel: (id: number, idUsuario: number | null) =>
+      request<ProcessoDetail>(`/processos/${id}/responsavel`, {
+        method: "PUT",
+        body: JSON.stringify({ id_usuario: idUsuario }),
+      }),
     classificarSigilo: (id: number, data: ClassificarSigiloInput) =>
       request<ProcessoDetail>(`/processos/${id}/classificar-sigilo`, {
         method: "POST",

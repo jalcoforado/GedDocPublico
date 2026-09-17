@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import type { EscopoProcesso } from "@/lib/api";
 import { api, NIVEL_SIGILO_LABEL, type ProcessoListFilters } from "@/lib/api";
 import { useAssuntosAll } from "@/lib/assuntos";
 import { decorridoDesde } from "@/lib/duracao";
@@ -27,6 +28,21 @@ const PAGE_SIZE = 20;
 // e back/forward preservem a listagem. `ativos` ausente cai no default da
 // página (apenas ativos); links externos como `?id_unidade=` da home herdam
 // esse default sem precisar declará-lo.
+/**
+ * F2 — os recortes por responsabilidade, na ordem em que aparecem na tela.
+ *
+ * "Da minha unidade" inclui os processos SEM responsável de propósito: são
+ * justamente os que precisam que alguém os assuma, e escondê-los num filtro de
+ * unidade seria esconder o trabalho que ninguém pegou.
+ */
+const ESCOPOS: EscopoProcesso[] = ["meus", "unidade", "unidade_e_subordinadas"];
+
+const ESCOPO_LABEL: Record<EscopoProcesso, string> = {
+  meus: "Meus",
+  unidade: "Da minha unidade",
+  unidade_e_subordinadas: "Unidade e subordinadas",
+};
+
 function filtrosDaUrl(sp: URLSearchParams): ProcessoListFilters {
   const num = (k: string) => {
     const n = Number(sp.get(k));
@@ -41,6 +57,12 @@ function filtrosDaUrl(sp: URLSearchParams): ProcessoListFilters {
     desde: desde ? `${desde}T00:00:00` : undefined,
     ate: ate ? `${ate}T23:59:59` : undefined,
     apenas_ativos: sp.has("ativos") ? sp.get("ativos") === "1" : true,
+    // F2 — só aceita valor do enum. Um `escopo` inventado na URL vira
+    // `undefined` (sem recorte) em vez de ir ao backend e tomar 422: a URL é
+    // editável pelo usuário, e travar a tela por causa disso seria hostil.
+    escopo: ESCOPOS.includes(sp.get("escopo") as EscopoProcesso)
+      ? (sp.get("escopo") as EscopoProcesso)
+      : undefined,
   };
 }
 
@@ -48,6 +70,7 @@ function urlDosFiltros(f: ProcessoListFilters, page: number): string {
   const sp = new URLSearchParams();
   if (f.q) sp.set("q", f.q);
   if (f.id_assunto) sp.set("id_assunto", String(f.id_assunto));
+  if (f.escopo) sp.set("escopo", f.escopo);
   if (f.id_unidade) sp.set("id_unidade", String(f.id_unidade));
   if (f.desde) sp.set("desde", f.desde.slice(0, 10));
   if (f.ate) sp.set("ate", f.ate.slice(0, 10));
@@ -208,6 +231,35 @@ export default function ProcessosPage() {
                 }
               />
             </div>
+            <div>
+              <Label htmlFor="escopo">Escopo</Label>
+              {/* F2 — o recorte por responsabilidade. "Da minha unidade"
+                  INCLUI os processos sem responsável: são os que precisam que
+                  alguém os assuma, e escondê-los seria esconder o trabalho que
+                  ninguém pegou. A unidade usada é a LOTAÇÃO PRINCIPAL de quem
+                  está logado; com lotação secundária ainda não há como
+                  escolher qual delas vale (depende do seletor de contexto). */}
+              <select
+                id="escopo"
+                value={draft.escopo ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    escopo: (e.target.value || undefined) as
+                      | EscopoProcesso
+                      | undefined,
+                  })
+                }
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Todos</option>
+                {ESCOPOS.map((e) => (
+                  <option key={e} value={e}>
+                    {ESCOPO_LABEL[e]}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="flex items-center gap-2">
               <Checkbox
                 id="ativos"
@@ -236,6 +288,7 @@ export default function ProcessosPage() {
             <TH>Manifestante</TH>
             <TH>Assunto</TH>
             <TH>Local atual</TH>
+            <TH>Responsável</TH>
             <TH>Status</TH>
             <TH className="text-right">Ações</TH>
           </TR>
@@ -245,7 +298,7 @@ export default function ProcessosPage() {
             Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} cols={7} />)}
           {!processosQ.isLoading && (processosQ.data?.items.length ?? 0) === 0 && (
             <TR>
-              <TD colSpan={7} className="p-0">
+              <TD colSpan={8} className="p-0">
                 <EmptyState
                   icon={SearchX}
                   title="Nenhum processo encontrado"
@@ -290,6 +343,15 @@ export default function ProcessosPage() {
                 <div className="text-xs text-muted-foreground">{p.tipo_processo ?? ""}</div>
               </TD>
               <TD className="text-sm">{p.local_atual ?? "—"}</TD>
+              <TD className="text-sm">
+                {p.responsavel ?? (
+                  // Não é "—": sem responsável é um ESTADO, e a tela tem de
+                  // dizer qual. Travessão leria como "dado faltando".
+                  <span className="text-warning-soft-foreground">
+                    Sem responsável
+                  </span>
+                )}
+              </TD>
               <TD>
                 <div className="flex flex-wrap gap-1">
                   {p.ativo ? (

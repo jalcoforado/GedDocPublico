@@ -88,7 +88,13 @@ class Processo(Base):
     externo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     id_local_atual: Mapped[int | None] = mapped_column(Integer, nullable=True)
     id_ultima_movimentacao: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Quem ABRIU. Carimbo histórico: não muda com a tramitação.
     id_usuario: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
+    # F2 — quem RESPONDE por ele agora. NULL é o estado "pendente de
+    # designação", de primeira classe: não significa "faltou preencher".
+    id_usuario_responsavel: Mapped[int | None] = mapped_column(
         ForeignKey("utils.usuario.id"), nullable=True
     )
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

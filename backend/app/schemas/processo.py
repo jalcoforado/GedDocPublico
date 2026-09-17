@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -81,6 +82,32 @@ class ProcessoListItem(BaseModel):
     manifestante_cpf_cnpj: str | None
     unidade_proprietaria: str | None
     local_atual: str | None
+
+    # F2 — responsável-pessoa. `None` NÃO é ausência de dado: é o estado
+    # "pendente de designação", que a tela mostra como tal. Default nos dois
+    # para não quebrar quem monta o schema à mão (testes, fixtures), já que o
+    # valor correto nesse caso é justamente "sem responsável".
+    id_usuario_responsavel: int | None = None
+    responsavel: str | None = None
+
+
+class EscopoProcesso(str, Enum):
+    """Recorte da lista por responsabilidade. Ausente = sem recorte (tudo).
+
+    `unidade` e `unidade_e_subordinadas` recortam pelo LOCAL ATUAL do processo,
+    não pela unidade proprietária: o que interessa a quem opera é o que está na
+    sua mesa agora, não o que nasceu ali e já saiu.
+    """
+
+    meus = "meus"
+    unidade = "unidade"
+    unidade_e_subordinadas = "unidade_e_subordinadas"
+
+
+class AtribuirResponsavelRequest(BaseModel):
+    """`id_usuario=None` desatribui — volta ao estado pendente de designação."""
+
+    id_usuario: int | None = None
 
 
 class AnexoNoProcesso(BaseModel):
