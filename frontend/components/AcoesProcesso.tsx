@@ -199,6 +199,19 @@ function EncaminharDialog({
     queryKey: ["prioridades"],
     queryFn: () => api.prioridades(),
   });
+  // F3 — quando o workflow ativo restringe o próximo destino, o combo só
+  // oferece o que `encaminhar` vai aceitar (em vez de deixar escolher e
+  // barrar depois, exigindo excluir o rascunho e recomeçar).
+  const destinosQ = useQuery({
+    queryKey: ["destinos-permitidos", processo.id],
+    queryFn: () => api.processos.destinosPermitidos(processo.id),
+  });
+  const unidadesOptions =
+    destinosQ.data?.restrito && destinosQ.data.ids_unidade
+      ? (unidadesQ.data?.items ?? []).filter((u) =>
+          destinosQ.data!.ids_unidade!.includes(u.id),
+        )
+      : (unidadesQ.data?.items ?? []);
 
   const [form, setForm] = useState<EncaminharInput>({
     id_unidade_destino: 0,
@@ -282,7 +295,7 @@ function EncaminharDialog({
             required
           >
             <option value="">—</option>
-            {unidadesQ.data?.items.map((u) => (
+            {unidadesOptions.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.unidade_trabalho}
               </option>
@@ -291,6 +304,11 @@ function EncaminharDialog({
           <p className="mt-1 text-xs text-muted-foreground">
             Origem: {processo.local_atual ?? processo.unidade_proprietaria ?? "—"}
           </p>
+          {destinosQ.data?.restrito && (
+            <p className="mt-1 text-xs text-warning-soft-foreground">
+              {destinosQ.data.motivo}
+            </p>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>

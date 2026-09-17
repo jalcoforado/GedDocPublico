@@ -25,6 +25,7 @@ from ..schemas.processo import (
     AtribuirResponsavelRequest,
     CancelarEncaminhamentoRequest,
     ClassificarSigiloRequest,
+    DestinosPermitidosOut,
     EncaminharRequest,
     EscopoProcesso,
     EncaminhamentoOut as _EncaminhamentoOut,
@@ -35,12 +36,14 @@ from ..schemas.processo import (
 from ..services.abertura_processo import AberturaError, abrir_processo
 from ..services.acoes_processo import (
     AcaoError,
+    _get_processo,
     arquivar,
     atribuir_responsavel,
     cancelar_encaminhamento,
     encaminhar,
     receber,
 )
+from ..services.workflow_integration import destinos_permitidos as _destinos_permitidos
 from ..services.pdf_capa import gerar_capa_pdf
 from ..services.pdf_comprovante import gerar_comprovante_pdf
 from ..services.pdf_etiqueta import gerar_etiqueta_pdf
@@ -415,6 +418,32 @@ async def temporalidade_endpoint(
         return await calcular_temporalidade(db, processo_id, tenant_id=tenant_id)
     except ValueError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+
+
+@router.get(
+    "/{processo_id}/destinos-permitidos",
+    response_model=DestinosPermitidosOut,
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
+)
+async def destinos_permitidos_endpoint(
+    processo_id: int,
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> DestinosPermitidosOut:
+    """F3 — unidades que o workflow ativo permite como destino do próximo
+    encaminhamento, pra UI não oferecer opção que `encaminhar` vai recusar
+    depois (`docs/superpowers/specs/2026-08-28-reuniao-as-is-to-be-design.md` §7.2).
+
+    Sem workflow ativo/strict — a maioria dos processos — devolve
+    `restrito=False`, e o combo continua mostrando todas as unidades, exatamente
+    como hoje.
+    """
+    try:
+        processo = await _get_processo(db, processo_id, tenant_id)
+    except AcaoError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    ids, motivo = await _destinos_permitidos(db, processo)
+    return DestinosPermitidosOut(restrito=ids is not None, ids_unidade=ids, motivo=motivo)
 
 
 @router.post(

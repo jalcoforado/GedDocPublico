@@ -466,6 +466,13 @@ export interface EncaminharInput {
   despacho?: string | null;
 }
 
+/** F3 — `restrito=false` é o comportamento de hoje (todas as unidades). */
+export interface DestinosPermitidosOut {
+  restrito: boolean;
+  ids_unidade: number[] | null;
+  motivo: string | null;
+}
+
 export interface CancelarEncaminhamentoInput {
   despacho?: string | null;
 }
@@ -4404,6 +4411,9 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+    /** F3 — unidades que o workflow ativo aceita como próximo destino. */
+    destinosPermitidos: (id: number) =>
+      request<DestinosPermitidosOut>(`/processos/${id}/destinos-permitidos`),
     receber: (id: number) =>
       request<ProcessoDetail>(`/processos/${id}/receber`, { method: "POST" }),
     /** F4 — encerra o processo. NÃO é idempotente: a segunda chamada dá 400. */
