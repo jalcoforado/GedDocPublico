@@ -11,6 +11,9 @@ interface AuthContextValue {
   loading: boolean;
   logout: () => void;
   can: (codigo: string, action?: "inserir" | "atualizar" | "excluir") => boolean;
+  /** E1 (benchmark SUiTE) — troca a lotação ativa ("alterar setor" do
+   * SUiTE). Atualiza `user`/`perms` com a resposta, sem round-trip extra. */
+  trocarLotacao: (idUnidadeTrabalho: number) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -63,8 +66,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return p[action];
   }
 
+  async function trocarLotacao(idUnidadeTrabalho: number) {
+    const atualizado = await api.trocarLotacaoAtiva(idUnidadeTrabalho);
+    setUser(atualizado);
+    setPerms(atualizado);
+  }
+
   return (
-    <AuthContext.Provider value={{ user, perms, loading, logout, can }}>
+    <AuthContext.Provider
+      value={{ user, perms, loading, logout, can, trocarLotacao }}
+    >
       {children}
     </AuthContext.Provider>
   );

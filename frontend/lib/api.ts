@@ -37,6 +37,17 @@ export interface MeResponse {
   must_change_password: boolean;
   is_super_usuario: boolean;
   permissoes: PermissaoItem[];
+  /** E1 (benchmark SUiTE) — lotação ATIVA da sessão (pode divergir de
+   * `id_unidade_trabalho` depois de um "alterar setor"). */
+  unidade_contexto_id: number | null;
+  /** Lotações que o usuário pode ativar: principal + secundárias. */
+  lotacoes: LotacaoOut[];
+}
+
+export interface LotacaoOut {
+  id: number;
+  nome: string;
+  principal: boolean;
 }
 
 export interface PermissaoItem {
@@ -3006,6 +3017,14 @@ export const api = {
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   me: (token?: string) => request<MeResponse>("/auth/me", {}, token),
+  // E1 (benchmark SUiTE) — "alterar setor": troca a lotação ativa da sessão.
+  // O backend já devolve o MeResponse recalculado; não precisa de uma
+  // segunda chamada a /auth/me.
+  trocarLotacaoAtiva: (id_unidade_trabalho: number) =>
+    request<MeResponse>("/auth/lotacao-ativa", {
+      method: "POST",
+      body: JSON.stringify({ id_unidade_trabalho }),
+    }),
   alterarSenha: (senha_atual: string, nova_senha: string) =>
     request<void>("/auth/alterar-senha", {
       method: "POST",

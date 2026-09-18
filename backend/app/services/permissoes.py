@@ -14,7 +14,7 @@ bypass de SU, não depois.
 """
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -25,7 +25,9 @@ from ..models import (
     Sistema,
     SistemaTransacao,
     Transacao,
+    Usuario,
     UsuarioGrupo,
+    UsuarioUnidadeTrabalho,
 )
 from .modulos import codigos_bloqueados
 
@@ -51,14 +53,35 @@ class UserPermissions:
 
 
 async def load_permissions(
-    db: AsyncSession, usuario_id: int, *, tenant_id: int
+    db: AsyncSession,
+    usuario_id: int,
+    *,
+    tenant_id: int,
+    id_unidade_contexto: int | None = None,
 ) -> UserPermissions:
+    """`id_unidade_contexto` é a lotação ATIVA da sessão (E1, benchmark SUiTE).
+
+    Vínculo `UsuarioGrupo` com `id_unidade_trabalho` nulo é global (conta
+    sempre); com a coluna preenchida, só conta quando bater com
+    `id_unidade_contexto`. É união dos dois eixos, não interseção — decidido
+    em `docs/superpowers/plans/2026-09-16-aproveitamento-suite.md` §6 Q1.
+    `id_unidade_contexto=None` (default) devolve só o que sempre existiu:
+    nenhuma chamada existente precisa mudar para continuar byte a byte igual.
+    """
     settings = get_settings()
     app = settings.app_name
 
     # Set RLS context for this transaction
     from sqlalchemy import text
     await db.execute(text(f"SET LOCAL app.tenant_id = {int(tenant_id)}"))
+
+    if id_unidade_contexto is not None:
+        escopo_lotacao = or_(
+            UsuarioGrupo.id_unidade_trabalho.is_(None),
+            UsuarioGrupo.id_unidade_trabalho == id_unidade_contexto,
+        )
+    else:
+        escopo_lotacao = UsuarioGrupo.id_unidade_trabalho.is_(None)
 
     grupos_stmt = (
         select(Grupo, Nivel, Sistema)
@@ -70,6 +93,7 @@ async def load_permissions(
             UsuarioGrupo.tenant_id == tenant_id,
             UsuarioGrupo.excluido.is_(False),
             UsuarioGrupo.ativo.is_(True),
+            escopo_lotacao,
             Grupo.tenant_id == tenant_id,
             Grupo.excluido.is_(False),
             Sistema.excluido.is_(False),
@@ -151,3 +175,54 @@ async def load_permissions(
         items=items,
         codigos_bloqueados=frozenset(bloqueados),
     )
+
+
+@dataclass
+class LotacaoItem:
+    id: int
+    nome: str
+    principal: bool
+
+
+async def listar_lotacoes(
+    db: AsyncSession, *, tenant_id: int, usuario: Usuario
+) -> list[LotacaoItem]:
+    """Lotação principal + secundárias do usuário — o par que a captura 38 do
+    SUiTE mostra (E1, benchmark SUiTE). Alimenta o seletor de contexto ativo
+    ("alterar setor"): `POST /auth/lotacao-ativa` só aceita trocar para uma
+    lotação desta lista.
+
+    `usuario.id_unidade_trabalho` é a principal (fixa, cadastral);
+    `utils.usuario_unidade_trabalho` são as secundárias (N:N, já existente —
+    não duplicada aqui). Unidade excluída/de outro tenant nunca aparece.
+    """
+    from ..models import UnidadeTrabalho
+
+    ids_ordem: list[tuple[int, bool]] = []
+    if usuario.id_unidade_trabalho is not None:
+        ids_ordem.append((usuario.id_unidade_trabalho, True))
+
+    secundarias_stmt = select(UsuarioUnidadeTrabalho.id_unidade_trabalho).where(
+        UsuarioUnidadeTrabalho.id_usuario == usuario.id,
+        UsuarioUnidadeTrabalho.tenant_id == tenant_id,
+        UsuarioUnidadeTrabalho.excluido.is_(False),
+    )
+    for uid in (await db.execute(secundarias_stmt)).scalars().all():
+        if uid != usuario.id_unidade_trabalho:
+            ids_ordem.append((uid, False))
+
+    if not ids_ordem:
+        return []
+
+    nomes_stmt = select(UnidadeTrabalho.id, UnidadeTrabalho.unidade_trabalho).where(
+        UnidadeTrabalho.id.in_([uid for uid, _ in ids_ordem]),
+        UnidadeTrabalho.tenant_id == tenant_id,
+        UnidadeTrabalho.excluido.is_(False),
+    )
+    nomes = dict((await db.execute(nomes_stmt)).all())
+
+    return [
+        LotacaoItem(id=uid, nome=nomes[uid], principal=principal)
+        for uid, principal in ids_ordem
+        if uid in nomes
+    ]

@@ -167,6 +167,42 @@ async def get_current_user_no_password_gate(
     return user
 
 
+async def ler_unidade_contexto(
+    request: Request | None, db: AsyncSession
+) -> int | None:
+    """Lotação ATIVA da sessão (E1, benchmark SUiTE) — lê a claim
+    `unidade_contexto_id` direto do token, SEM reforçar autenticação (isso já
+    é papel de `get_current_user`/`_resolve_current_user`, resolvidos à parte
+    pela mesma rota). Token ausente ou inválido aqui nunca vira 401 — só
+    significa "sem contexto definido", e `load_permissions` trata isso como
+    o comportamento de sempre (só vínculo global).
+
+    Não depende de `_resolve_current_user` nem de `get_current_user` de
+    propósito: boa parte da suíte chama `require_permission(...)`'s `_check`
+    e os endpoints de `/auth` DIRETO, fora do ciclo de DI do FastAPI (mesmo
+    padrão de `test_pr4d_http_gates.py`) — uma dependência caberia mal ali.
+    `request=None` é exatamente esse caso: devolve None, não estoura.
+    """
+    if request is None:
+        return None
+    token: str | None = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = request.cookies.get("aprimora_token")
+    if not token:
+        return None
+    try:
+        secret = await get_jwt_secret(db)
+    except RuntimeError:
+        return None
+    payload = decode_token(token, secret)
+    if not payload:
+        return None
+    return payload.get("unidade_contexto_id")
+
+
 # `require_platform_admin` NÃO MORA MAIS AQUI (SEC-01A / ADR-016).
 #
 # Ele comparava `current.email` contra a allowlist `PLATFORM_ADMIN_EMAILS` — e,

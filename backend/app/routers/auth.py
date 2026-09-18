@@ -4,7 +4,12 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user, get_current_user_no_password_gate, require_tenant_id
+from ..auth.deps import (
+    get_current_user,
+    get_current_user_no_password_gate,
+    ler_unidade_contexto,
+    require_tenant_id,
+)
 from ..auth.jwt import build_payload, encode_token, get_jwt_secret
 from ..auth.password import hash_password, verify_password
 from ..auth.perms import require_permission
@@ -15,12 +20,15 @@ from ..schemas.auth import (
     AlterarSenhaRequest,
     LoginRequest,
     LoginResponse,
+    LotacaoOut,
     MeResponse,
     PermissaoItem,
+    TrocarLotacaoRequest,
 )
 from ..services.conta import ContaError, alterar_senha
 from ..services.google_oauth_flow import GoogleOAuthFlow
 from ..services.minutas import criar_google_doc_para_minuta
+from ..services.permissoes import listar_lotacoes, load_permissions
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 _settings = get_settings()
@@ -77,7 +85,11 @@ async def login(
         await db.commit()
 
     secret = await get_jwt_secret(db)
-    jwt_payload = build_payload(user.id, user.email, tenant_id=tenant_id)
+    # E1 — a lotação ativa nasce na principal; "alterar setor" troca depois.
+    jwt_payload = build_payload(
+        user.id, user.email, tenant_id=tenant_id,
+        unidade_contexto_id=user.id_unidade_trabalho,
+    )
     token = encode_token(jwt_payload, secret)
 
     response.set_cookie(
@@ -109,13 +121,16 @@ async def logout() -> Response:
 
 @router.get("/me", response_model=MeResponse)
 async def me(
+    request: Request,
     user: Usuario = Depends(get_current_user_no_password_gate),
     db: AsyncSession = Depends(get_db),
     tenant_id: int = Depends(require_tenant_id),
 ) -> MeResponse:
-    from ..services.permissoes import load_permissions
-
-    perms = await load_permissions(db, user.id, tenant_id=tenant_id)
+    unidade_contexto = await ler_unidade_contexto(request, db)
+    perms = await load_permissions(
+        db, user.id, tenant_id=tenant_id, id_unidade_contexto=unidade_contexto
+    )
+    lotacoes = await listar_lotacoes(db, tenant_id=tenant_id, usuario=user)
 
     return MeResponse(
         id=user.id,
@@ -135,6 +150,72 @@ async def me(
             )
             for item in perms.items
         ],
+        unidade_contexto_id=unidade_contexto,
+        lotacoes=[LotacaoOut(id=l.id, nome=l.nome, principal=l.principal) for l in lotacoes],
+    )
+
+
+@router.post("/lotacao-ativa", response_model=MeResponse)
+async def trocar_lotacao_ativa(
+    payload: TrocarLotacaoRequest,
+    response: Response,
+    user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(require_tenant_id),
+) -> MeResponse:
+    """E1 (benchmark SUiTE) — o "alterar setor" do SUiTE: troca a lotação
+    ATIVA da sessão entre as que o usuário tem (principal ou secundária).
+
+    JWT é stateless — reemite o token com a claim nova e troca o cookie,
+    igual ao login. Devolve `MeResponse` já recalculado no novo contexto,
+    então o frontend não precisa de uma segunda chamada a `/auth/me`.
+    """
+    lotacoes = await listar_lotacoes(db, tenant_id=tenant_id, usuario=user)
+    if payload.id_unidade_trabalho not in {l.id for l in lotacoes}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Lotação não pertence a este usuário",
+        )
+
+    secret = await get_jwt_secret(db)
+    jwt_payload = build_payload(
+        user.id, user.email, tenant_id=tenant_id,
+        unidade_contexto_id=payload.id_unidade_trabalho,
+    )
+    token = encode_token(jwt_payload, secret)
+    response.set_cookie(
+        key="aprimora_token",
+        value=token,
+        max_age=_settings.jwt_ttl_seconds,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+
+    perms = await load_permissions(
+        db, user.id, tenant_id=tenant_id,
+        id_unidade_contexto=payload.id_unidade_trabalho,
+    )
+    return MeResponse(
+        id=user.id,
+        nome=user.nome,
+        email=user.email,
+        cargo=user.cargo,
+        id_unidade_trabalho=user.id_unidade_trabalho,
+        must_change_password=user.must_change_password,
+        is_super_usuario=perms.is_super_usuario,
+        permissoes=[
+            PermissaoItem(
+                codigo=item.codigo,
+                transacao=item.transacao,
+                inserir=item.inserir,
+                atualizar=item.atualizar,
+                excluir=item.excluir,
+            )
+            for item in perms.items
+        ],
+        unidade_contexto_id=payload.id_unidade_trabalho,
+        lotacoes=[LotacaoOut(id=l.id, nome=l.nome, principal=l.principal) for l in lotacoes],
     )
 
 

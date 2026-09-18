@@ -77,6 +77,16 @@ class UsuarioGrupo(Base):
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     app: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # E1 (benchmark SUiTE) — coluna LEGADA (já existia em ci/legacy-schema.sql,
+    # com auditoria própria no PHP; nunca usada neste piloto — 0 de 104 linhas
+    # preenchidas). Migration 0117 só acrescenta FK + índice, não a cria.
+    # Nulo = vínculo global (concede em qualquer lotação, comportamento de
+    # sempre); preenchido = só vale quando a lotação ATIVA da sessão for
+    # esta. Os dois eixos se somam por união, nunca por interseção — ver
+    # services/permissoes.py::load_permissions.
+    id_unidade_trabalho: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.unidade_trabalho.id"), nullable=True
+    )
 
 
 class UsuarioUnidadeTrabalho(Base):
