@@ -244,7 +244,7 @@ export default function NovoProcessoPage() {
     return (templatesQ.data ?? []).map((t) => ({
       value: t.id,
       label: t.nome,
-      hint: t.categoria ?? undefined,
+      hint: t.descricao ?? undefined,
     }));
   }, [templatesQ.data]);
 

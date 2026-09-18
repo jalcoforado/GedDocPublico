@@ -1091,7 +1091,10 @@ export interface TemplateDocumento {
   id: number;
   nome: string;
   descricao: string | null;
-  categoria: string | null;
+  // F10 — substitui a antiga `categoria` (texto livre).
+  id_especie_documental: number | null;
+  /** Quem ADMINISTRA o template (setorial) — não é precedência/visibilidade. */
+  id_unidade_trabalho: number | null;
   corpo_html: string;
   placeholders_utilizados: string[] | null;
   ativo: boolean;
@@ -1103,7 +1106,8 @@ export interface TemplateDocumento {
 export interface TemplateDocumentoInput {
   nome: string;
   descricao?: string | null;
-  categoria?: string | null;
+  id_especie_documental?: number | null;
+  id_unidade_trabalho?: number | null;
   corpo_html: string;
   ativo?: boolean;
 }
@@ -1113,6 +1117,8 @@ export interface Minuta {
   id_processo: number;
   id_template_origem: number | null;
   titulo: string;
+  /** F10 — alimenta `{{destinatario.nome}}`; sem fonte automática. */
+  destinatario: string | null;
   origem: MinutaOrigem;
   status: MinutaStatus;
   versao: number;
@@ -1817,11 +1823,15 @@ export interface MinutaCreateInput {
   origem?: MinutaOrigem;
   id_template_origem?: number | null;
   corpo_html?: string | null;
+  /** F10 — resolve `{{destinatario.nome}}` no INSTANTE da criação (mail-merge
+   * é snapshot; preencher depois não re-resolve o template). */
+  destinatario?: string | null;
 }
 
 export interface MinutaUpdateInput {
   titulo?: string;
   corpo_html?: string | null;
+  destinatario?: string | null;
   versao?: number;
 }
 
@@ -4019,7 +4029,11 @@ export const api = {
 
   // Templates de documento (admin) + placeholders disponíveis
   templatesDocumento: {
-    list: (params?: { categoria?: string; apenas_ativos?: boolean }) =>
+    list: (params?: {
+      id_especie_documental?: number;
+      id_unidade_trabalho?: number;
+      apenas_ativos?: boolean;
+    }) =>
       request<TemplateDocumento[]>(
         `/templates-documento${qs((params ?? {}) as Record<string, QsValue>)}`,
       ),
@@ -4036,6 +4050,11 @@ export const api = {
       }),
     remove: (id: number) =>
       request<void>(`/templates-documento/${id}`, { method: "DELETE" }),
+    /** F10 — clonar como ato de primeira classe (dedupe de nome no servidor). */
+    clonar: (id: number) =>
+      request<TemplateDocumento>(`/templates-documento/${id}/clonar`, {
+        method: "POST",
+      }),
     placeholders: () =>
       request<PlaceholderInfo[]>("/templates-documento/placeholders-disponiveis"),
   },

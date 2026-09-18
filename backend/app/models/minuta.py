@@ -44,7 +44,16 @@ class TemplateDocumento(Base):
     )
     nome: Mapped[str] = mapped_column(String(150), nullable=False)
     descricao: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    categoria: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # F10 — substitui a antiga `categoria` (texto livre) pelo catálogo real.
+    id_especie_documental: Mapped[int | None] = mapped_column(
+        ForeignKey("protocolos.especie_documental.id"), nullable=True
+    )
+    # F10 — quem ADMINISTRA o template, mesmo padrão de `Marcador.
+    # id_unidade_trabalho` (F5): administração é setorial, visibilidade
+    # continua por tenant inteiro — NÃO é precedência/cascata.
+    id_unidade_trabalho: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.unidade_trabalho.id"), nullable=True
+    )
     corpo_html: Mapped[str] = mapped_column(Text, nullable=False)
     placeholders_utilizados: Mapped[list[Any] | None] = mapped_column(
         JSONB, nullable=True
@@ -99,6 +108,10 @@ class Minuta(Base):
         ForeignKey("protocolos.template_documento.id"), nullable=True
     )
     titulo: Mapped[str] = mapped_column(String(255), nullable=False)
+    # F10 — texto livre; alimenta o placeholder `{{destinatario.nome}}`.
+    # Sem fonte automática: processo não tem campo "endereçado a" (o
+    # `manifestante` é quem REQUER, direção oposta).
+    destinatario: Mapped[str | None] = mapped_column(String(300), nullable=True)
     origem: Mapped[str] = mapped_column(String(20), nullable=False, default="interno")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="rascunho")
     versao: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

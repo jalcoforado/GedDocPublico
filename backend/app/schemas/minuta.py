@@ -19,7 +19,8 @@ MinutaStatus = Literal["rascunho", "finalizada", "cancelada"]
 class TemplateDocumentoCreate(BaseModel):
     nome: str = Field(min_length=1, max_length=150)
     descricao: str | None = Field(default=None, max_length=300)
-    categoria: str | None = Field(default=None, max_length=80)
+    id_especie_documental: int | None = None
+    id_unidade_trabalho: int | None = None
     corpo_html: str = Field(min_length=1)
     ativo: bool = True
 
@@ -27,7 +28,8 @@ class TemplateDocumentoCreate(BaseModel):
 class TemplateDocumentoUpdate(BaseModel):
     nome: str | None = Field(default=None, min_length=1, max_length=150)
     descricao: str | None = Field(default=None, max_length=300)
-    categoria: str | None = Field(default=None, max_length=80)
+    id_especie_documental: int | None = None
+    id_unidade_trabalho: int | None = None
     corpo_html: str | None = Field(default=None, min_length=1)
     ativo: bool | None = None
 
@@ -38,7 +40,8 @@ class TemplateDocumentoOut(BaseModel):
     id: int
     nome: str
     descricao: str | None
-    categoria: str | None
+    id_especie_documental: int | None
+    id_unidade_trabalho: int | None
     corpo_html: str
     placeholders_utilizados: list | None
     ativo: bool
@@ -60,11 +63,15 @@ class MinutaCreate(BaseModel):
     # corpo_html só para origem="interno" sem template (documento em branco). Quando
     # um template é informado, o corpo é gerado pela resolução de placeholders.
     corpo_html: str | None = None
+    # F10 — alimenta {{destinatario.nome}} ANTES de resolver o template (mail-merge
+    # é no instante da criação, não há como preencher depois e re-resolver).
+    destinatario: str | None = Field(default=None, max_length=300)
 
 
 class MinutaUpdate(BaseModel):
     titulo: str | None = Field(default=None, min_length=1, max_length=255)
     corpo_html: str | None = None
+    destinatario: str | None = Field(default=None, max_length=300)
     # Lock otimista: versão que o cliente carregou. Se divergir da atual → 409.
     versao: int | None = None
 
@@ -76,6 +83,7 @@ class MinutaOut(BaseModel):
     id_processo: int
     id_template_origem: int | None
     titulo: str
+    destinatario: str | None
     origem: MinutaOrigem
     status: MinutaStatus
     versao: int

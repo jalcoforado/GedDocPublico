@@ -40,6 +40,7 @@ export function RedigirDocumentoDialog({
 
   const [minutaAtualId, setMinutaAtualId] = useState<number | undefined>(minutaId);
   const [titulo, setTitulo] = useState("");
+  const [destinatario, setDestinatario] = useState("");
   const [origem, setOrigem] = useState<"interno" | "google">("interno");
   const [templateId, setTemplateId] = useState<string>("");
   const [corpo, setCorpo] = useState("");
@@ -58,6 +59,7 @@ export function RedigirDocumentoDialog({
     if (open) {
       setMinutaAtualId(minutaId);
       setTitulo("");
+      setDestinatario("");
       setOrigem("interno");
       setTemplateId("");
       setCorpo("");
@@ -80,6 +82,7 @@ export function RedigirDocumentoDialog({
   useEffect(() => {
     if (minutaQ.data) {
       setTitulo(minutaQ.data.titulo);
+      setDestinatario(minutaQ.data.destinatario ?? "");
       setCorpo(minutaQ.data.corpo_html ?? "");
       setVersao(minutaQ.data.versao);
     }
@@ -89,6 +92,7 @@ export function RedigirDocumentoDialog({
     mutationFn: () =>
       api.minutas.create(processoId, {
         titulo: titulo.trim(),
+        destinatario: destinatario.trim() || null,
         origem: origem,
         id_template_origem: origem === "interno" ? (templateId ? Number(templateId) : null) : null,
       }),
@@ -130,6 +134,7 @@ export function RedigirDocumentoDialog({
     mutationFn: () =>
       api.minutas.update(minutaAtualId as number, {
         titulo: titulo.trim(),
+        destinatario: destinatario.trim() || null,
         corpo_html: corpo,
         versao,
       }),
@@ -215,6 +220,18 @@ export function RedigirDocumentoDialog({
             />
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="minuta-destinatario">Destinatário (opcional)</Label>
+            <Input
+              id="minuta-destinatario"
+              value={destinatario}
+              onChange={(e) => setDestinatario(e.target.value)}
+              placeholder="Ex.: Secretaria de Obras"
+            />
+            <p className="text-xs text-muted-foreground">
+              Preenche o campo automático {"{{"}destinatario.nome{"}}"} do modelo, se houver.
+            </p>
+          </div>
+          <div className="space-y-1.5">
             <Label>Plataforma de redação</Label>
             <div className="space-y-2">
               <label className="flex items-center gap-2 cursor-pointer">
@@ -265,7 +282,6 @@ export function RedigirDocumentoDialog({
                 <option value="">Documento em branco</option>
                 {(templatesQ.data ?? []).map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.categoria ? `[${t.categoria}] ` : ""}
                     {t.nome}
                   </option>
                 ))}
@@ -297,6 +313,15 @@ export function RedigirDocumentoDialog({
               id="minuta-titulo-edit"
               value={titulo}
               onChange={(e) => setTitulo(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="minuta-destinatario-edit">Destinatário (opcional)</Label>
+            <Input
+              id="minuta-destinatario-edit"
+              value={destinatario}
+              onChange={(e) => setDestinatario(e.target.value)}
+              placeholder="Ex.: Secretaria de Obras"
             />
           </div>
           <div className="space-y-1.5">
