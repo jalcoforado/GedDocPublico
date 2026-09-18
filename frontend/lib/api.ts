@@ -242,6 +242,33 @@ export interface ProcessoListItem {
   /** F2 — `null` é o estado "pendente de designação", não ausência de dado. */
   id_usuario_responsavel: number | null;
   responsavel: string | null;
+  /** F5 — acompanhamento pessoal de quem consultou. Default false: schema
+   * montado à mão (teste, fixture) sem favorito é o normal. */
+  favorito: boolean;
+  marcadores: MarcadorMini[];
+}
+
+/** F5 — só o que a listagem/badge precisa, sem o catálogo inteiro. */
+export interface MarcadorMini {
+  id: number;
+  nome: string;
+  cor: string;
+}
+
+/** F5 — item do catálogo de marcadores (tela de administração). */
+export interface MarcadorOut {
+  id: number;
+  id_unidade_trabalho: number | null;
+  nome: string;
+  cor: string;
+  ativo: boolean;
+}
+
+export interface MarcadorInput {
+  id_unidade_trabalho?: number | null;
+  nome: string;
+  cor: string;
+  ativo?: boolean;
 }
 
 export type NivelSigilo =
@@ -449,6 +476,10 @@ export interface ProcessoListFilters {
   ate?: string;
   /** Ausente = sem recorte. */
   escopo?: EscopoProcesso;
+  /** F5 — só os favoritados por mim. */
+  favoritos?: boolean;
+  /** F5 — filtra por marcador. */
+  id_marcador?: number;
 }
 
 export interface ProcessoCreateInput {
@@ -3148,6 +3179,21 @@ export const api = {
       request<void>(`/tipos-manifestante/${id}`, { method: "DELETE" }),
   },
   manifestantes: crud<Manifestante>("/manifestantes"),
+  // F5 — catálogo de marcadores (tags coloridas), por tenant.
+  marcadores: {
+    list: () => request<MarcadorOut[]>("/marcadores"),
+    create: (data: MarcadorInput) =>
+      request<MarcadorOut>("/marcadores", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<MarcadorInput>) =>
+      request<MarcadorOut>(`/marcadores/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) => request<void>(`/marcadores/${id}`, { method: "DELETE" }),
+  },
   tiposProcesso: {
     list: () => request<TipoProcesso[]>("/tipos-processo"),
     create: (data: Omit<TipoProcesso, "id">) =>
@@ -4436,6 +4482,17 @@ export const api = {
       request<ProcessoDetail>(`/processos/${id}/responsavel`, {
         method: "PUT",
         body: JSON.stringify({ id_usuario: idUsuario }),
+      }),
+    /** F5 — acompanhamento pessoal. Idempotente: favoritar 2x não erra. */
+    favoritar: (id: number) =>
+      request<ProcessoDetail>(`/processos/${id}/favorito`, { method: "PUT" }),
+    desfavoritar: (id: number) =>
+      request<ProcessoDetail>(`/processos/${id}/favorito`, { method: "DELETE" }),
+    /** F5 — substitui o conjunto INTEIRO de marcadores do processo. */
+    definirMarcadores: (id: number, idsMarcador: number[]) =>
+      request<ProcessoDetail>(`/processos/${id}/marcadores`, {
+        method: "PUT",
+        body: JSON.stringify({ ids_marcador: idsMarcador }),
       }),
     classificarSigilo: (id: number, data: ClassificarSigiloInput) =>
       request<ProcessoDetail>(`/processos/${id}/classificar-sigilo`, {

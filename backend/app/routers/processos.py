@@ -33,6 +33,8 @@ from ..schemas.processo import (
     ProcessoDetail,
     ProcessoListItem,
 )
+from ..schemas.marcador import DefinirMarcadoresRequest
+from ..services.marcadores import MarcadorError, definir_marcadores, desfavoritar, favoritar
 from ..services.abertura_processo import AberturaError, abrir_processo
 from ..services.acoes_processo import (
     AcaoError,
@@ -186,6 +188,9 @@ async def list_endpoint(
             "unidade_e_subordinadas. Ausente = sem recorte."
         ),
     ),
+    # F5 — favoritos e marcadores.
+    favoritos: bool = Query(False, description="Só os favoritados por mim"),
+    id_marcador: int | None = Query(None, description="Filtra por marcador"),
 ) -> Paginated[ProcessoListItem]:
     items, total = await list_processos(
         db,
@@ -201,6 +206,8 @@ async def list_endpoint(
         ate=ate,
         niveis_permitidos=niveis,
         escopo=escopo,
+        favoritos=favoritos,
+        id_marcador=id_marcador,
         id_usuario_contexto=usuario.id,
         # A lotação PRINCIPAL. Lotação neste sistema tem duas representações
         # simultâneas — esta e a N:N `utils.usuario_unidade_trabalho` —, então
@@ -223,12 +230,13 @@ async def list_endpoint(
 )
 async def detail_endpoint(
     processo_id: int,
+    user: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
 ) -> ProcessoDetail:
     detail = await get_processo_detail(
-        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis, usuario_id=user.id
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -360,7 +368,7 @@ async def classificar_sigilo_endpoint(
         )
     except SigiloError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     return detail
@@ -377,7 +385,7 @@ async def create_endpoint(
         processo = await abrir_processo(db, payload, tenant_id=tenant_id, usuario_id=current.id)
     except AberturaError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    detail = await get_processo_detail(db, processo.id, tenant_id=tenant_id)
+    detail = await get_processo_detail(db, processo.id, tenant_id=tenant_id, usuario_id=current.id)
     if detail is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Processo criado mas não recuperado")
     return detail
@@ -477,7 +485,7 @@ async def arquivar_endpoint(
         )
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
     if detail is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
@@ -517,11 +525,84 @@ async def atribuir_responsavel_endpoint(
         )
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
     if detail is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
         )
+    return detail
+
+
+@router.put(
+    "/{processo_id}/favorito",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+)
+async def favoritar_endpoint(
+    processo_id: int,
+    current: Usuario = Depends(require_permission("processo")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """F5 — acompanhamento pessoal, sobrevive à tramitação para outro setor.
+
+    `require_permission("processo")` sem `action`: favoritar é preferência de
+    quem está lendo, não uma escrita no processo — qualquer um com acesso de
+    LEITURA (não precisa de "atualizar") pode. Mas precisa de algum acesso —
+    guarda de gate obrigatório (`test_nenhum_endpoint_novo_sem_permissao`) não
+    aceita módulo sozinho em rota de escrita.
+    """
+    await favoritar(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    return detail
+
+
+@router.delete(
+    "/{processo_id}/favorito",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+)
+async def desfavoritar_endpoint(
+    processo_id: int,
+    current: Usuario = Depends(require_permission("processo")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    await desfavoritar(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    return detail
+
+
+@router.put(
+    "/{processo_id}/marcadores",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+)
+async def definir_marcadores_endpoint(
+    processo_id: int,
+    payload: DefinirMarcadoresRequest,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """F5 — substitui o conjunto inteiro de marcadores do processo."""
+    try:
+        await definir_marcadores(
+            db,
+            processo_id,
+            tenant_id=tenant_id,
+            ids_marcador=payload.ids_marcador,
+            usuario_id=current.id,
+        )
+    except MarcadorError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     return detail
 
 
@@ -549,7 +630,7 @@ async def encaminhar_endpoint(
         )
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     return detail
@@ -579,7 +660,7 @@ async def receber_endpoint(
         )
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     return detail
@@ -755,7 +836,7 @@ async def cancelar_encaminhamento_endpoint(
         )
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    detail = await get_processo_detail(db, enc.id_processo, tenant_id=tenant_id)
+    detail = await get_processo_detail(db, enc.id_processo, tenant_id=tenant_id, usuario_id=current.id)
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     return detail

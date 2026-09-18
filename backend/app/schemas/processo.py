@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .marcador import MarcadorMini
+
 
 class ProcessoCreate(BaseModel):
     id_assunto: int
@@ -89,6 +91,12 @@ class ProcessoListItem(BaseModel):
     # valor correto nesse caso é justamente "sem responsável".
     id_usuario_responsavel: int | None = None
     responsavel: str | None = None
+
+    # F5 — acompanhamento pessoal e classificação, ambos independentes de
+    # unidade/responsável. Default `False`/`[]` pelo mesmo motivo do bloco
+    # acima: schema montado à mão (teste, fixture) sem favorito é o normal.
+    favorito: bool = False
+    marcadores: list[MarcadorMini] = Field(default_factory=list)
 
 
 class EscopoProcesso(str, Enum):

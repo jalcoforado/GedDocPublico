@@ -197,6 +197,9 @@ function processo(overrides: Partial<ProcessoDetail> = {}): ProcessoDetail {
       limite_bytes: 200 * 1024 * 1024,
       nivel_sigilo: "ostensivo",
     },
+    // F5 — sem favorito/marcador é o estado inicial de todo processo.
+    favorito: false,
+    marcadores: [],
     ...overrides,
   };
 }
