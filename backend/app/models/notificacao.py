@@ -1,4 +1,4 @@
-"""Modelos `Notificacao` + `NotificacaoPreferencia` — Fase 17/17b."""
+"""Modelos `Notificacao` + `NotificacaoPreferenciaEvento` — Fase 17/17b, F9."""
 from datetime import datetime
 from typing import Any
 
@@ -34,14 +34,20 @@ class Notificacao(Base):
     erro: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class NotificacaoPreferencia(Base):
-    """Preferências de canal por usuário (Fase 17b).
+class NotificacaoPreferenciaEvento(Base):
+    """Preferências de canal por usuário, por EVENTO (F9, benchmark SUiTE).
 
-    1 row por usuário do tenant (unique). Se a row não existir, o motor
-    de notificações assume defaults: in_app=true, email=true, whatsapp=false.
+    N rows por usuário do tenant — uma por `evento` (mesmo valor de
+    `Notificacao.tipo`), unique em (tenant_id, id_usuario, evento). Se a row
+    não existir pro (usuário, evento), o motor assume defaults: in_app=true,
+    email=true, whatsapp=false (`services/notificacoes.py::DEFAULT_PREFS`).
+
+    O catálogo de eventos válidos vive em código
+    (`services/notificacoes.py::EVENTOS_NOTIFICACAO`), não aqui — a coluna
+    `evento` não tem FK porque não há tabela de catálogo, só o dict.
     """
 
-    __tablename__ = "notificacao_preferencia"
+    __tablename__ = "notificacao_preferencia_evento"
     __table_args__ = {"schema": "aprimora_py"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -51,6 +57,7 @@ class NotificacaoPreferencia(Base):
     id_usuario: Mapped[int] = mapped_column(
         ForeignKey("utils.usuario.id"), nullable=False
     )
+    evento: Mapped[str] = mapped_column(String(60), nullable=False)
     canal_in_app: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     canal_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     canal_whatsapp: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

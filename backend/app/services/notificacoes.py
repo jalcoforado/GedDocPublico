@@ -28,17 +28,42 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
-from ..models import Notificacao, NotificacaoPreferencia, Usuario
+from ..models import Notificacao, NotificacaoPreferenciaEvento, Usuario
 
 logger = logging.getLogger("notificacoes")
 
 CANAIS_VALIDOS = ("in_app", "email", "whatsapp")
 
-# Defaults quando o usuário não tem row de preferência ainda
+# Defaults quando o usuário não tem row de preferência ainda pro evento
 DEFAULT_PREFS = {
     "in_app": True,
     "email": True,
     "whatsapp": False,
+}
+
+# F9 (benchmark SUiTE) — catálogo de eventos com preferência POR USUÁRIO
+# INTERNO. Não é todo `Notificacao.tipo` que existe no sistema: só entra aqui
+# quem é endereçado a `utils.usuario` (`Destinatario(id_usuario=...)`) — é
+# esse o único caso em que "preferência do usuário" significa algo. Os demais
+# tipos em uso hoje (`recadastramento.notificacao`, `recadastramento.suspensao`,
+# `recadastramento.reativacao`, `recadastramento.faltoso`, `denuncia_decidida`)
+# notificam o REGULADO ou o denunciante — gente de fora, sem `id_usuario` nem
+# linha de preferência possível; `_canal_permitido` já os ignora (bloco
+# `if uid is None`). `teste_whatsapp` também fica de fora: usa
+# `ignorar_preferencias=True` de propósito (é o próprio usuário testando o
+# canal, não teria sentido a preferência bloquear o teste da preferência).
+#
+# Evento novo que notifique usuário interno entra aqui com a tupla dos canais
+# que ele de fato usa — é isso que faz uma coluna virar "Não se aplica" na
+# tela de preferências em vez de um toggle que não muda nada.
+EVENTOS_NOTIFICACAO: dict[str, tuple[str, ...]] = {
+    "sla_estourado": ("in_app", "email", "whatsapp"),
+}
+
+# Rótulo pra tela de preferências. Chave ausente cai no próprio código do
+# evento (feio, mas visível — melhor que quebrar por evento novo sem rótulo).
+EVENTO_LABEL: dict[str, str] = {
+    "sla_estourado": "SLA de workflow estourado",
 }
 
 
@@ -118,16 +143,18 @@ async def enviar(
             if tel:
                 telefones_por_uid[uid] = tel
 
-    # Fase 17b — preferências por usuário interno. Email livre não tem
+    # F9 — preferências por usuário interno, POR EVENTO (`tipo` é fixo nesta
+    # chamada — um `enviar()` é sempre um evento só). Email livre não tem
     # preferência (assume tudo true). Buscar todas as prefs num único query.
-    prefs_por_uid: dict[int, NotificacaoPreferencia] = {}
+    prefs_por_uid: dict[int, NotificacaoPreferenciaEvento] = {}
     uids_internos = [d.id_usuario for d in destinatarios if d.id_usuario is not None]
     if uids_internos:
         prefs_rows = (
             await db.execute(
-                select(NotificacaoPreferencia).where(
-                    NotificacaoPreferencia.tenant_id == tenant_id,
-                    NotificacaoPreferencia.id_usuario.in_(uids_internos),
+                select(NotificacaoPreferenciaEvento).where(
+                    NotificacaoPreferenciaEvento.tenant_id == tenant_id,
+                    NotificacaoPreferenciaEvento.id_usuario.in_(uids_internos),
+                    NotificacaoPreferenciaEvento.evento == tipo,
                 )
             )
         ).scalars().all()
@@ -135,7 +162,8 @@ async def enviar(
 
     def _canal_permitido(uid: int | None, canal: str) -> bool:
         """Email livre (sem uid) sempre permite todos os canais. Usuário
-        interno consulta preferência (default se não tem row)."""
+        interno consulta preferência do EVENTO desta chamada (default se não
+        tem row)."""
         if uid is None or ignorar_preferencias:
             return True
         pref = prefs_por_uid.get(uid)
@@ -355,51 +383,84 @@ async def _whatsapp_driver(n: Notificacao) -> None:
     )
 
 
-# Helpers de preferência usados pelos endpoints
-async def get_preferencia(
+# Helpers de preferência usados pelos endpoints (F9 — por evento)
+async def listar_preferencias(
     db: AsyncSession, *, tenant_id: int, id_usuario: int
-) -> dict[str, bool]:
-    """Devolve preferências atuais (defaults se sem row)."""
-    pref = (
+) -> list[dict[str, Any]]:
+    """Uma linha por evento CATALOGADO (`EVENTOS_NOTIFICACAO`), não por row
+    no banco: evento sem row do usuário ainda aparece com os defaults, e é
+    exatamente isso que faz a matriz da tela nascer completa mesmo pro
+    usuário que nunca abriu a página antes.
+
+    Cada linha: `evento`, `label`, `canal_in_app`/`canal_email`/
+    `canal_whatsapp` (`bool | None` — `None` = "não se aplica", canal fora da
+    tupla do catálogo pra este evento)."""
+    prefs_rows = (
         await db.execute(
-            select(NotificacaoPreferencia).where(
-                NotificacaoPreferencia.tenant_id == tenant_id,
-                NotificacaoPreferencia.id_usuario == id_usuario,
+            select(NotificacaoPreferenciaEvento).where(
+                NotificacaoPreferenciaEvento.tenant_id == tenant_id,
+                NotificacaoPreferenciaEvento.id_usuario == id_usuario,
             )
         )
-    ).scalar_one_or_none()
-    if pref is None:
-        return dict(DEFAULT_PREFS)
-    return {
-        "in_app": pref.canal_in_app,
-        "email": pref.canal_email,
-        "whatsapp": pref.canal_whatsapp,
-    }
+    ).scalars().all()
+    prefs_por_evento = {p.evento: p for p in prefs_rows}
+
+    resultado: list[dict[str, Any]] = []
+    for evento, canais_aplicaveis in EVENTOS_NOTIFICACAO.items():
+        pref = prefs_por_evento.get(evento)
+        linha: dict[str, Any] = {"evento": evento, "label": EVENTO_LABEL.get(evento, evento)}
+        for canal in CANAIS_VALIDOS:
+            if canal not in canais_aplicaveis:
+                linha[canal] = None
+            elif pref is not None:
+                linha[canal] = {
+                    "in_app": pref.canal_in_app,
+                    "email": pref.canal_email,
+                    "whatsapp": pref.canal_whatsapp,
+                }[canal]
+            else:
+                linha[canal] = DEFAULT_PREFS[canal]
+        resultado.append(linha)
+    return resultado
 
 
-async def set_preferencia(
+class EventoDesconhecidoError(Exception):
+    pass
+
+
+async def set_preferencia_evento(
     db: AsyncSession,
     *,
     tenant_id: int,
     id_usuario: int,
+    evento: str,
     in_app: bool | None = None,
     email: bool | None = None,
     whatsapp: bool | None = None,
-) -> dict[str, bool]:
-    """Upsert das preferências. Campos None mantêm valor atual (ou default)."""
+) -> dict[str, Any]:
+    """Upsert da preferência de UM evento. Campos `None` mantêm valor atual
+    (ou default). Levanta `EventoDesconhecidoError` pra evento fora do
+    catálogo — não silenciosamente ignorado, senão o usuário acharia que
+    salvou."""
+    canais_aplicaveis = EVENTOS_NOTIFICACAO.get(evento)
+    if canais_aplicaveis is None:
+        raise EventoDesconhecidoError(f"Evento desconhecido: {evento!r}")
+
     pref = (
         await db.execute(
-            select(NotificacaoPreferencia).where(
-                NotificacaoPreferencia.tenant_id == tenant_id,
-                NotificacaoPreferencia.id_usuario == id_usuario,
+            select(NotificacaoPreferenciaEvento).where(
+                NotificacaoPreferenciaEvento.tenant_id == tenant_id,
+                NotificacaoPreferenciaEvento.id_usuario == id_usuario,
+                NotificacaoPreferenciaEvento.evento == evento,
             )
         )
     ).scalar_one_or_none()
     now = datetime.utcnow()
     if pref is None:
-        pref = NotificacaoPreferencia(
+        pref = NotificacaoPreferenciaEvento(
             tenant_id=tenant_id,
             id_usuario=id_usuario,
+            evento=evento,
             canal_in_app=in_app if in_app is not None else DEFAULT_PREFS["in_app"],
             canal_email=email if email is not None else DEFAULT_PREFS["email"],
             canal_whatsapp=whatsapp
@@ -418,11 +479,19 @@ async def set_preferencia(
         pref.atualizado_em = now
     await db.commit()
     await db.refresh(pref)
-    return {
-        "in_app": pref.canal_in_app,
-        "email": pref.canal_email,
-        "whatsapp": pref.canal_whatsapp,
-    }
+
+    linha: dict[str, Any] = {"evento": evento, "label": EVENTO_LABEL.get(evento, evento)}
+    for canal in CANAIS_VALIDOS:
+        linha[canal] = (
+            {
+                "in_app": pref.canal_in_app,
+                "email": pref.canal_email,
+                "whatsapp": pref.canal_whatsapp,
+            }[canal]
+            if canal in canais_aplicaveis
+            else None
+        )
+    return linha
 
 
 async def contar_nao_lidas(

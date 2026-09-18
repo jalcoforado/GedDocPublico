@@ -33,14 +33,19 @@ class MarcarLidasResponse(BaseModel):
     atualizadas: int
 
 
-# Fase 17b — preferências
-class PreferenciaResponse(BaseModel):
-    in_app: bool
-    email: bool
-    whatsapp: bool
+# F9 (benchmark SUiTE) — preferências por evento. `None` num canal = "não se
+# aplica" (o evento nunca usa aquele canal — `services/notificacoes.py::
+# EVENTOS_NOTIFICACAO`), não "desligado": a tela não deve oferecer toggle
+# nesse caso.
+class PreferenciaEventoOut(BaseModel):
+    evento: str
+    label: str
+    in_app: bool | None
+    email: bool | None
+    whatsapp: bool | None
 
 
-class PreferenciaUpdate(BaseModel):
+class PreferenciaEventoUpdate(BaseModel):
     in_app: bool | None = None
     email: bool | None = None
     whatsapp: bool | None = None

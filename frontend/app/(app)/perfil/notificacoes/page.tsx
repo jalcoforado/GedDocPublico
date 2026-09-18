@@ -16,31 +16,63 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toast";
-import { notificacoesApi, type NotificacaoPreferencias } from "@/lib/api";
+import {
+  notificacoesApi,
+  type NotificacaoPreferenciaEvento,
+} from "@/lib/api";
 
-interface ToggleRowProps {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  hint: string;
+const CANAL_ICON: Record<"in_app" | "email" | "whatsapp", React.ComponentType<{ className?: string }>> = {
+  in_app: Bell,
+  email: Mail,
+  whatsapp: MessageCircle,
+};
+
+const CANAL_LABEL: Record<"in_app" | "email" | "whatsapp", string> = {
+  in_app: "No app",
+  email: "Email",
+  whatsapp: "WhatsApp",
+};
+
+/**
+ * F9 — uma célula da matriz evento × canal. `valor === null` é "não se
+ * aplica" (o evento nunca usa este canal): mostra travessão em vez de
+ * checkbox, porque oferecer um toggle que não muda nada é pior que não
+ * oferecer nada — a pessoa clicaria e nada aconteceria, sem explicação.
+ */
+function CelulaCanal({
+  canal,
+  valor,
+  disabled,
+  onChange,
+}: {
+  canal: "in_app" | "email" | "whatsapp";
+  valor: boolean | null;
   disabled?: boolean;
-  checked: boolean;
   onChange: (v: boolean) => void;
-}
-
-function ToggleRow({ icon: Icon, label, hint, disabled, checked, onChange }: ToggleRowProps) {
+}) {
+  const Icon = CANAL_ICON[canal];
+  if (valor === null) {
+    return (
+      <div
+        className="flex flex-col items-center gap-1 px-3 py-2 text-muted-foreground/50"
+        title={`${CANAL_LABEL[canal]}: não se aplica a este evento`}
+      >
+        <Icon className="h-4 w-4" aria-hidden="true" />
+        <span className="text-xs">—</span>
+      </div>
+    );
+  }
   return (
-    <label className="flex items-start gap-3 rounded-md border border-border bg-card p-4 cursor-pointer hover:bg-muted/40">
+    <label
+      className="flex cursor-pointer flex-col items-center gap-1 rounded-md px-3 py-2 hover:bg-muted/40"
+      title={CANAL_LABEL[canal]}
+    >
+      <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
       <Checkbox
-        checked={checked}
+        checked={valor}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-1"
       />
-      <Icon className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <div className="flex-1">
-        <div className="font-medium">{label}</div>
-        <div className="text-xs text-muted-foreground">{hint}</div>
-      </div>
     </label>
   );
 }
@@ -65,10 +97,19 @@ export default function PreferenciasNotificacoesPage() {
   }, [telQ.data]);
 
   const updatePref = useMutation({
-    mutationFn: (p: Partial<NotificacaoPreferencias>) =>
-      notificacoesApi.setPreferencias(p),
-    onSuccess: (data) => {
-      qc.setQueryData(["notificacoes", "preferencias"], data);
+    mutationFn: ({
+      evento,
+      patch,
+    }: {
+      evento: string;
+      patch: { in_app?: boolean; email?: boolean; whatsapp?: boolean };
+    }) => notificacoesApi.setPreferenciaEvento(evento, patch),
+    onSuccess: (linha) => {
+      qc.setQueryData<NotificacaoPreferenciaEvento[]>(
+        ["notificacoes", "preferencias"],
+        (atual) =>
+          atual?.map((l) => (l.evento === linha.evento ? linha : l)) ?? [linha],
+      );
       toast.success("Preferência salva.");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -126,41 +167,58 @@ export default function PreferenciasNotificacoesPage() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Canais
+          Por evento
         </h2>
         <p className="text-sm text-muted-foreground">
-          Escolha por quais canais você quer receber notificações. Você sempre
-          verá os alertas no app — outros canais são complementares.
+          Escolha por quais canais você quer receber cada tipo de aviso. Uma
+          célula marcada com <strong>—</strong> significa que este evento não
+          usa aquele canal — não é um toggle desligado, é uma combinação que
+          não existe no sistema.
         </p>
 
-        <div className="space-y-2">
-          <ToggleRow
-            icon={Bell}
-            label="No app (Bell icon)"
-            hint="Notificações no sininho do topo da tela."
-            checked={p.in_app}
-            onChange={(v) => updatePref.mutate({ in_app: v })}
-          />
-          <ToggleRow
-            icon={Mail}
-            label="Email"
-            hint="Mandamos um email com link pro processo. Precisa de SMTP configurado no servidor."
-            checked={p.email}
-            onChange={(v) => updatePref.mutate({ email: v })}
-          />
-          <ToggleRow
-            icon={MessageCircle}
-            label="WhatsApp"
-            hint={
-              telSalvo
-                ? `Será enviado para ${telSalvo}.`
-                : "Adicione seu telefone abaixo para receber via WhatsApp."
-            }
-            disabled={!telSalvo}
-            checked={p.whatsapp}
-            onChange={(v) => updatePref.mutate({ whatsapp: v })}
-          />
+        <div className="overflow-hidden rounded-md border border-border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/30">
+                <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                  Evento
+                </th>
+                {(["in_app", "email", "whatsapp"] as const).map((canal) => (
+                  <th key={canal} className="px-3 py-2 text-center font-medium text-muted-foreground">
+                    {CANAL_LABEL[canal]}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {p.map((linha) => (
+                <tr key={linha.evento} className="border-b border-border last:border-0">
+                  <td className="px-3 py-2 font-medium">{linha.label}</td>
+                  {(["in_app", "email", "whatsapp"] as const).map((canal) => (
+                    <td key={canal} className="text-center">
+                      <CelulaCanal
+                        canal={canal}
+                        valor={linha[canal]}
+                        disabled={canal === "whatsapp" && !telSalvo}
+                        onChange={(v) =>
+                          updatePref.mutate({
+                            evento: linha.evento,
+                            patch: { [canal]: v },
+                          })
+                        }
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+        {p.some((l) => l.whatsapp !== null) && !telSalvo && (
+          <p className="text-xs text-muted-foreground">
+            Adicione seu telefone abaixo para poder ligar o canal WhatsApp.
+          </p>
+        )}
       </section>
 
       <section className="space-y-3">
