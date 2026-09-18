@@ -125,7 +125,7 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     # protocolo é o mesmo sujeito que recebe de pagamentos.
     ("GET", "/api/v2/notificacoes/me"),
     ("GET", "/api/v2/notificacoes/preferencias"),
-    ("PUT", "/api/v2/notificacoes/preferencias"),
+    ("PUT", "/api/v2/notificacoes/preferencias/{evento}"),
     ("GET", "/api/v2/notificacoes/telefone"),
     ("PUT", "/api/v2/notificacoes/telefone"),
     ("POST", "/api/v2/notificacoes/marcar-todas-lidas"),

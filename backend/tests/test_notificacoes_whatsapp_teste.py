@@ -113,7 +113,7 @@ async def _cleanup(engine, tenant_id: int) -> None:
     async with _sm(engine)() as s:
         for stmt in (
             "DELETE FROM aprimora_py.notificacao WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.notificacao_preferencia WHERE tenant_id=:t",
+            "DELETE FROM aprimora_py.notificacao_preferencia_evento WHERE tenant_id=:t",
             "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
             "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
             "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",

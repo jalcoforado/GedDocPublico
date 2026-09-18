@@ -51,7 +51,7 @@ from .modulo import (
     ModuloTransacao,
     TenantModulo,
 )
-from .notificacao import Notificacao, NotificacaoPreferencia
+from .notificacao import Notificacao, NotificacaoPreferenciaEvento
 from .pagamentos import (
     Alcada,
     AnexoDebito,
@@ -194,7 +194,7 @@ __all__ = [
     "NaturezaDespesa",
     "Nivel",
     "Notificacao",
-    "NotificacaoPreferencia",
+    "NotificacaoPreferenciaEvento",
     "Ocorrencia",
     "OcorrenciaAndamento",
     "OcorrenciaTipo",

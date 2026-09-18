@@ -5760,10 +5760,24 @@ export const processosApi = {
     request<TrailStep[]>(`/processos/${processoId}/trail`),
 };
 
-export interface NotificacaoPreferencias {
-  in_app: boolean;
-  email: boolean;
-  whatsapp: boolean;
+/**
+ * F9 (benchmark SUiTE) — preferência por EVENTO, não mais um único bloco
+ * global. `null` num canal é "não se aplica" (o evento nunca usa aquele
+ * canal — backend `EVENTOS_NOTIFICACAO`), não "desligado": a tela não deve
+ * oferecer toggle nesse caso.
+ */
+export interface NotificacaoPreferenciaEvento {
+  evento: string;
+  label: string;
+  in_app: boolean | null;
+  email: boolean | null;
+  whatsapp: boolean | null;
+}
+
+export interface NotificacaoPreferenciaEventoInput {
+  in_app?: boolean;
+  email?: boolean;
+  whatsapp?: boolean;
 }
 
 export const notificacoesApi = {
@@ -5776,12 +5790,12 @@ export const notificacoesApi = {
       method: "POST",
     }),
   getPreferencias: () =>
-    request<NotificacaoPreferencias>(`/notificacoes/preferencias`),
-  setPreferencias: (p: Partial<NotificacaoPreferencias>) =>
-    request<NotificacaoPreferencias>(`/notificacoes/preferencias`, {
-      method: "PUT",
-      body: JSON.stringify(p),
-    }),
+    request<NotificacaoPreferenciaEvento[]>(`/notificacoes/preferencias`),
+  setPreferenciaEvento: (evento: string, p: NotificacaoPreferenciaEventoInput) =>
+    request<NotificacaoPreferenciaEvento>(
+      `/notificacoes/preferencias/${encodeURIComponent(evento)}`,
+      { method: "PUT", body: JSON.stringify(p) },
+    ),
   // Fase 16 — telefone do usuário corrente
   getTelefone: () => request<{ telefone: string | null }>(`/notificacoes/telefone`),
   setTelefone: (telefone: string | null) =>

@@ -17,8 +17,8 @@ from ..schemas.notificacao import (
     MarcarLidasResponse,
     NotificacaoListResponse,
     NotificacaoOut,
-    PreferenciaResponse,
-    PreferenciaUpdate,
+    PreferenciaEventoOut,
+    PreferenciaEventoUpdate,
     TelefoneResponse,
     TelefoneUpdate,
     WhatsAppTestRequest,
@@ -26,10 +26,11 @@ from ..schemas.notificacao import (
 )
 from ..services.notificacoes import (
     Destinatario,
+    EventoDesconhecidoError,
     contar_nao_lidas,
     enviar as enviar_notif,
-    get_preferencia,
-    set_preferencia,
+    listar_preferencias,
+    set_preferencia_evento,
 )
 
 router = APIRouter(prefix="/notificacoes", tags=["notificacoes"])
@@ -117,33 +118,38 @@ async def marcar_todas_lidas(
     return MarcarLidasResponse(atualizadas=result.rowcount or 0)
 
 
-# Fase 17b — preferências do usuário corrente
-@router.get("/preferencias", response_model=PreferenciaResponse)
+# F9 (benchmark SUiTE) — preferências do usuário corrente, por evento
+@router.get("/preferencias", response_model=list[PreferenciaEventoOut])
 async def get_preferencias(
     current: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    p = await get_preferencia(db, tenant_id=tenant_id, id_usuario=current.id)
-    return PreferenciaResponse(**p)
+    linhas = await listar_preferencias(db, tenant_id=tenant_id, id_usuario=current.id)
+    return [PreferenciaEventoOut(**linha) for linha in linhas]
 
 
-@router.put("/preferencias", response_model=PreferenciaResponse)
-async def put_preferencias(
-    payload: PreferenciaUpdate,
+@router.put("/preferencias/{evento}", response_model=PreferenciaEventoOut)
+async def put_preferencia_evento(
+    evento: str,
+    payload: PreferenciaEventoUpdate,
     current: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    p = await set_preferencia(
-        db,
-        tenant_id=tenant_id,
-        id_usuario=current.id,
-        in_app=payload.in_app,
-        email=payload.email,
-        whatsapp=payload.whatsapp,
-    )
-    return PreferenciaResponse(**p)
+    try:
+        linha = await set_preferencia_evento(
+            db,
+            tenant_id=tenant_id,
+            id_usuario=current.id,
+            evento=evento,
+            in_app=payload.in_app,
+            email=payload.email,
+            whatsapp=payload.whatsapp,
+        )
+    except EventoDesconhecidoError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return PreferenciaEventoOut(**linha)
 
 
 # Fase 16 — telefone do usuário corrente
