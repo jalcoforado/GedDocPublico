@@ -85,7 +85,10 @@ def _get_public_key() -> str | None:
 
 
 def build_payload(
-    usuario_id: int, usuario_email: str, tenant_id: int | None = None
+    usuario_id: int,
+    usuario_email: str,
+    tenant_id: int | None = None,
+    unidade_contexto_id: int | None = None,
 ) -> dict[str, Any]:
     now = int(time.time())
     payload: dict[str, Any] = {
@@ -100,6 +103,10 @@ def build_payload(
     }
     if tenant_id is not None:
         payload["tenant_id"] = tenant_id
+    # E1 (benchmark SUiTE) — lotação ATIVA da sessão. Ausente = sem contexto
+    # (comportamento anterior a esta fatia, só vínculos globais contam).
+    if unidade_contexto_id is not None:
+        payload["unidade_contexto_id"] = unidade_contexto_id
     return payload
 
 

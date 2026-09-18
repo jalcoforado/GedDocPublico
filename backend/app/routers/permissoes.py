@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user_no_password_gate, require_tenant_id
+from ..auth.deps import get_current_user_no_password_gate, ler_unidade_contexto, require_tenant_id
 from ..database import get_db
 from ..models import Usuario
 from ..schemas.permissao import PermissaoItem, PermissaoMeResponse
@@ -12,13 +12,18 @@ router = APIRouter(prefix="/permissoes", tags=["permissoes"])
 
 @router.get("/me", response_model=PermissaoMeResponse)
 async def me(
+    request: Request,
     # SEC-1 whitelist: o frontend lê o mapa de permissões para montar o menu
     # logo após o login, antes de redirecionar para a troca obrigatória.
     user: Usuario = Depends(get_current_user_no_password_gate),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> PermissaoMeResponse:
-    perms = await load_permissions(db, user.id, tenant_id=tenant_id)
+    # E1 — mesma lotação ativa que /auth/me usa; as duas não podem divergir.
+    unidade_contexto = await ler_unidade_contexto(request, db)
+    perms = await load_permissions(
+        db, user.id, tenant_id=tenant_id, id_unidade_contexto=unidade_contexto
+    )
     return PermissaoMeResponse(
         usuario_id=user.id,
         is_super_usuario=perms.is_super_usuario,

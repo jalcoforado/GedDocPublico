@@ -325,7 +325,7 @@ def _fake_user(uid: int = 7) -> Usuario:
 
 
 def _patch_load(monkeypatch, perms: UserPermissions) -> None:
-    async def fake_load(db, user_id, *, tenant_id):
+    async def fake_load(db, user_id, *, tenant_id, id_unidade_contexto=None):
         return perms
 
     monkeypatch.setattr("app.auth.perms.load_permissions", fake_load)

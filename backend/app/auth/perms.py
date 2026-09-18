@@ -21,13 +21,13 @@ Or to also receive the user:
 """
 from typing import Literal
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models import Usuario
 from ..services.permissoes import load_permissions
-from .deps import get_current_user, require_tenant_id
+from .deps import get_current_user, ler_unidade_contexto, require_tenant_id
 
 Action = Literal["inserir", "atualizar", "excluir"]
 
@@ -43,8 +43,18 @@ def require_permission(codigo: str, action: Action | None = None):
         user: Usuario = Depends(get_current_user),
         tenant_id: int = Depends(require_tenant_id),
         db: AsyncSession = Depends(get_db),
+        # Anotação SEM `| None` de propósito: FastAPI só reconhece o
+        # parâmetro especial `Request` (injeção automática, sem Depends())
+        # pelo tipo exato — Optional quebraria com "Invalid args for
+        # response field". O default None é só para as MUITAS chamadas
+        # diretas de `_check(...)` na suíte, fora do ciclo do FastAPI, que
+        # nunca passam `request` (mesmo padrão de test_pr4d_http_gates.py).
+        request: Request = None,
     ) -> Usuario:
-        perms = await load_permissions(db, user.id, tenant_id=tenant_id)
+        unidade_contexto = await ler_unidade_contexto(request, db)
+        perms = await load_permissions(
+            db, user.id, tenant_id=tenant_id, id_unidade_contexto=unidade_contexto
+        )
         if codigo in perms.codigos_bloqueados:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -75,8 +85,18 @@ def require_any_permission(*codigos: str):
         user: Usuario = Depends(get_current_user),
         tenant_id: int = Depends(require_tenant_id),
         db: AsyncSession = Depends(get_db),
+        # Anotação SEM `| None` de propósito: FastAPI só reconhece o
+        # parâmetro especial `Request` (injeção automática, sem Depends())
+        # pelo tipo exato — Optional quebraria com "Invalid args for
+        # response field". O default None é só para as MUITAS chamadas
+        # diretas de `_check(...)` na suíte, fora do ciclo do FastAPI, que
+        # nunca passam `request` (mesmo padrão de test_pr4d_http_gates.py).
+        request: Request = None,
     ) -> Usuario:
-        perms = await load_permissions(db, user.id, tenant_id=tenant_id)
+        unidade_contexto = await ler_unidade_contexto(request, db)
+        perms = await load_permissions(
+            db, user.id, tenant_id=tenant_id, id_unidade_contexto=unidade_contexto
+        )
         disponiveis = [c for c in codigos if c not in perms.codigos_bloqueados]
         if not disponiveis:
             raise HTTPException(

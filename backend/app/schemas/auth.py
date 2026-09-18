@@ -29,6 +29,17 @@ class PermissaoItem(BaseModel):
     excluir: bool
 
 
+class LotacaoOut(BaseModel):
+    """Uma lotação (principal ou secundária) que o usuário pode ativar.
+
+    E1 (benchmark SUiTE) — ver `services/permissoes.py::listar_lotacoes`.
+    """
+
+    id: int
+    nome: str
+    principal: bool
+
+
 class MeResponse(BaseModel):
     id: int
     nome: str
@@ -38,6 +49,20 @@ class MeResponse(BaseModel):
     must_change_password: bool = False
     is_super_usuario: bool
     permissoes: list[PermissaoItem]
+    # E1 — lotação ATIVA da sessão (claim do JWT) e o cardápio de lotações
+    # (principal + secundárias) que o usuário pode escolher no "alterar
+    # setor". `unidade_contexto_id` pode divergir de `id_unidade_trabalho`
+    # quando o usuário trocou para uma secundária.
+    unidade_contexto_id: int | None = None
+    lotacoes: list[LotacaoOut] = []
+
+
+class TrocarLotacaoRequest(BaseModel):
+    """E1 — corpo de `POST /auth/lotacao-ativa`. O alvo tem de estar entre as
+    lotações do próprio usuário (`listar_lotacoes`); outro valor é 403, não
+    404 — não há dado sensível a esconder aqui, é só um contexto de sessão."""
+
+    id_unidade_trabalho: int
 
 
 class AlterarSenhaRequest(BaseModel):

@@ -101,6 +101,10 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     # justamente para trocar a senha; gatear por módulo o prenderia fora.
     ("POST", "/api/v2/auth/alterar-senha"),
     ("GET", "/api/v2/auth/me"),
+    # E1 (benchmark SUiTE) — trocar a PRÓPRIA lotação ativa é contexto de
+    # sessão, não mutação de dado de negócio; o alvo já é validado contra a
+    # lista de lotações do próprio usuário (403 se não pertencer a ele).
+    ("POST", "/api/v2/auth/lotacao-ativa"),
     # OAuth do Google: vincula a conta pessoal do próprio usuário. A credencial
     # é do usuário, não do módulo que a consome depois (minutas).
     ("GET", "/api/v2/auth/google"),
