@@ -34,6 +34,9 @@ vi.mock("@/lib/api", async (importOriginal) => {
     etiquetaDuplaUrl: vi.fn((id: number, inline = true) =>
       `/api/v2/processos/${id}/etiqueta-dupla.pdf?inline=${inline}`,
     ),
+    folhaOcorrenciasUrl: vi.fn((id: number, inline = true) =>
+      `/api/v2/processos/${id}/folha-ocorrencias.pdf?inline=${inline}`,
+    ),
     processoCompletoUrl: vi.fn((id: number, inline = true) =>
       `/api/v2/processos/${id}/completo.pdf?inline=${inline}`,
     ),
@@ -131,7 +134,7 @@ vi.mock("@/components/ui/rich-text-editor", () => ({
 
 // Imports DEPOIS dos mocks — pra obter os mocks resolvidos.
 import { api, processoCapaUrl, etiquetaUnicaUrl, etiquetaDuplaUrl,
-         processoCompletoUrl } from "@/lib/api";
+         folhaOcorrenciasUrl, processoCompletoUrl } from "@/lib/api";
 
 const getMock = api.processos.get as ReturnType<typeof vi.fn>;
 const checklistMock = api.processos.checklistDocumentos as ReturnType<typeof vi.fn>;
@@ -285,7 +288,7 @@ describe("Detalhe servidor — PageHeader", () => {
     expect(screen.queryByRole("button", { name: /^Em fila$/i })).toBeNull();
   });
 
-  it("ActionsMenu abre e expõe 4 itens (Capa / Etiqueta / Etiqueta dupla / Gerar PDF em background)", async () => {
+  it("ActionsMenu abre e expõe 5 itens (Capa / Etiqueta / Etiqueta dupla / Folha de ocorrências / Gerar PDF em background)", async () => {
     getMock.mockResolvedValue(processo());
     renderPage();
     await userEvent.click(
@@ -301,8 +304,27 @@ describe("Detalhe servidor — PageHeader", () => {
       screen.getByRole("menuitem", { name: /^Etiqueta dupla$/i }),
     ).toBeInTheDocument();
     expect(
+      screen.getByRole("menuitem", { name: /^Folha de ocorrências$/i }),
+    ).toBeInTheDocument();
+    expect(
       screen.getByRole("menuitem", { name: /Gerar PDF em background/i }),
     ).toBeInTheDocument();
+  });
+
+  it("clicar em 'Folha de ocorrências' dispara setViewer com folhaOcorrenciasUrl(42, …)", async () => {
+    getMock.mockResolvedValue(processo());
+    renderPage();
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^Imprimir/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /^Folha de ocorrências$/i }),
+    );
+    expect(folhaOcorrenciasUrl).toHaveBeenCalledWith(42);
+    expect(folhaOcorrenciasUrl).toHaveBeenCalledWith(42, false);
+    expect(await screen.findByTestId("pdf-viewer-title")).toHaveTextContent(
+      /Folha de ocorrências — P000042\/2026/i,
+    );
   });
 
   it("clicar em 'Capa' dispara setViewer com processoCapaUrl(42, …)", async () => {

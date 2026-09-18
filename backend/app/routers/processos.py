@@ -49,6 +49,7 @@ from ..services.workflow_integration import destinos_permitidos as _destinos_per
 from ..services.pdf_capa import gerar_capa_pdf
 from ..services.pdf_comprovante import gerar_comprovante_pdf
 from ..services.pdf_etiqueta import gerar_etiqueta_pdf
+from ..services.pdf_folha_ocorrencias import gerar_folha_ocorrencias_pdf
 from ..services.pdf_montagem import gerar_processo_completo_pdf
 from ..services.checklist_documentos import calcular_checklist
 from ..services import complementacao_documental as _comp_svc
@@ -693,6 +694,28 @@ async def capa_pdf_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     pdf_bytes = gerar_capa_pdf(detail)
     fname = f"capa-{detail.numero_processo.replace('/', '_')}.pdf"
+    return _pdf_response(pdf_bytes, inline=inline, fname=fname)
+
+
+@router.get(
+    "/{processo_id}/folha-ocorrencias.pdf",
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
+)
+async def folha_ocorrencias_pdf_endpoint(
+    processo_id: int,
+    inline: bool = Query(True),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
+):
+    """F7 — PDF legível da trilha do processo, pra anexar a um procedimento."""
+    detail = await get_processo_detail(
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+    )
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    pdf_bytes = gerar_folha_ocorrencias_pdf(detail)
+    fname = f"folha-ocorrencias-{detail.numero_processo.replace('/', '_')}.pdf"
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
 
 

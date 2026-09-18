@@ -997,6 +997,11 @@ export function etiquetaDuplaUrl(processoId: number, inline = true): string {
   return `${BROWSER_API_URL}/processos/${processoId}/etiqueta-dupla.pdf${inline ? "" : "?inline=false"}`;
 }
 
+/** F7 — folha de ocorrências: Data/Hora · Ocorrência · Usuário/Unidade · Observação. */
+export function folhaOcorrenciasUrl(processoId: number, inline = true): string {
+  return `${BROWSER_API_URL}/processos/${processoId}/folha-ocorrencias.pdf${inline ? "" : "?inline=false"}`;
+}
+
 export function comprovanteUrl(
   encaminhamentoId: number,
   tipo: "envio" | "recebimento",
