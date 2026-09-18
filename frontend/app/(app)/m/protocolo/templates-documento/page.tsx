@@ -11,11 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { useToast } from "@/components/ui/toast";
-import { api, type TemplateDocumento } from "@/lib/api";
+import { api, protocoloApi, type TemplateDocumento } from "@/lib/api";
 
 interface FormState {
   nome: string;
-  categoria: string;
+  id_especie_documental: number | null;
+  id_unidade_trabalho: number | null;
   descricao: string;
   corpo_html: string;
   ativo: boolean;
@@ -23,7 +24,8 @@ interface FormState {
 
 const EMPTY: FormState = {
   nome: "",
-  categoria: "",
+  id_especie_documental: null,
+  id_unidade_trabalho: null,
   descricao: "",
   corpo_html: "",
   ativo: true,
@@ -47,6 +49,18 @@ export default function TemplatesDocumentoPage() {
     queryFn: () => api.templatesDocumento.placeholders(),
     enabled: open,
   });
+  const especiesQ = useQuery({
+    queryKey: ["especies-documentais"],
+    queryFn: () => protocoloApi.listEspecies(),
+  });
+  const unidadesQ = useQuery({
+    queryKey: ["unidades-all"],
+    queryFn: () => api.unidades.list({ page_size: 200 }),
+  });
+  const especiePorId = new Map((especiesQ.data ?? []).map((e) => [e.id, e.nome]));
+  const unidadePorId = new Map(
+    (unidadesQ.data?.items ?? []).map((u) => [u.id, u.unidade_trabalho]),
+  );
 
   function abrirNovo() {
     setEditId(null);
@@ -59,7 +73,8 @@ export default function TemplatesDocumentoPage() {
     setEditId(id);
     setForm({
       nome: t.nome,
-      categoria: t.categoria ?? "",
+      id_especie_documental: t.id_especie_documental,
+      id_unidade_trabalho: t.id_unidade_trabalho,
       descricao: t.descricao ?? "",
       corpo_html: t.corpo_html,
       ativo: t.ativo,
@@ -71,7 +86,8 @@ export default function TemplatesDocumentoPage() {
     mutationFn: () => {
       const payload = {
         nome: form.nome.trim(),
-        categoria: form.categoria.trim() || null,
+        id_especie_documental: form.id_especie_documental,
+        id_unidade_trabalho: form.id_unidade_trabalho,
         descricao: form.descricao.trim() || null,
         corpo_html: form.corpo_html,
         ativo: form.ativo,
@@ -93,6 +109,15 @@ export default function TemplatesDocumentoPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["templates-documento"] });
       toast.success("Template excluído.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const clonarM = useMutation({
+    mutationFn: (id: number) => api.templatesDocumento.clonar(id),
+    onSuccess: (clone) => {
+      qc.invalidateQueries({ queryKey: ["templates-documento"] });
+      toast.success(`Clonado como "${clone.nome}".`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -154,7 +179,11 @@ export default function TemplatesDocumentoPage() {
                   )}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {t.categoria ?? "sem categoria"}
+                  {t.id_especie_documental !== null
+                    ? especiePorId.get(t.id_especie_documental) ?? "espécie desconhecida"
+                    : "sem espécie documental"}
+                  {t.id_unidade_trabalho !== null &&
+                    ` · ${unidadePorId.get(t.id_unidade_trabalho) ?? "unidade desconhecida"}`}
                   {t.placeholders_utilizados?.length
                     ? ` · ${t.placeholders_utilizados.length} campo(s) automático(s)`
                     : ""}
@@ -163,6 +192,14 @@ export default function TemplatesDocumentoPage() {
               <div className="flex items-center gap-2">
                 <Button variant="secondary" size="sm" onClick={() => abrirEdicao(t.id)}>
                   Editar
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => clonarM.mutate(t.id)}
+                  disabled={clonarM.isPending}
+                >
+                  Clonar
                 </Button>
                 <Button
                   variant="secondary"
@@ -206,14 +243,50 @@ export default function TemplatesDocumentoPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="tpl-cat">Categoria</Label>
-              <Input
-                id="tpl-cat"
-                value={form.categoria}
-                onChange={(e) => setForm({ ...form, categoria: e.target.value })}
-                placeholder="Ex.: Despacho, Ofício, Certidão"
-              />
+              <Label htmlFor="tpl-especie">Espécie documental</Label>
+              <select
+                id="tpl-especie"
+                value={form.id_especie_documental ?? ""}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    id_especie_documental: e.target.value ? Number(e.target.value) : null,
+                  })
+                }
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Sem espécie</option>
+                {(especiesQ.data ?? []).map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.nome}
+                  </option>
+                ))}
+              </select>
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="tpl-unidade">Setor administrador</Label>
+            <select
+              id="tpl-unidade"
+              value={form.id_unidade_trabalho ?? ""}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  id_unidade_trabalho: e.target.value ? Number(e.target.value) : null,
+                })
+              }
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">Todo o tenant (sem setor específico)</option>
+              {(unidadesQ.data?.items ?? []).map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.unidade_trabalho}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Só define quem administra o modelo — todos no tenant continuam podendo usá-lo.
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="tpl-desc">Descrição</Label>

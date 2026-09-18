@@ -43,14 +43,19 @@ async def list_placeholders(
 
 @templates_router.get("", response_model=list[TemplateDocumentoOut])
 async def list_templates(
-    categoria: str | None = None,
+    id_especie_documental: int | None = None,
+    id_unidade_trabalho: int | None = None,
     apenas_ativos: bool = False,
     _: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[TemplateDocumentoOut]:
     rows = await svc.listar_templates(
-        db, tenant_id=tenant_id, categoria=categoria, apenas_ativos=apenas_ativos
+        db,
+        tenant_id=tenant_id,
+        id_especie_documental=id_especie_documental,
+        id_unidade_trabalho=id_unidade_trabalho,
+        apenas_ativos=apenas_ativos,
     )
     return [TemplateDocumentoOut.model_validate(r) for r in rows]
 
@@ -91,6 +96,24 @@ async def update_template(
 ) -> TemplateDocumentoOut:
     t = await svc.atualizar_template(
         db, tenant_id=tenant_id, template_id=template_id, payload=payload
+    )
+    return TemplateDocumentoOut.model_validate(t)
+
+
+@templates_router.post(
+    "/{template_id}/clonar",
+    response_model=TemplateDocumentoOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def clonar_template(
+    template_id: int,
+    usuario: Usuario = Depends(require_permission("minuta_template", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> TemplateDocumentoOut:
+    """F10 — clonar como botão de primeira classe."""
+    t = await svc.clonar_template(
+        db, tenant_id=tenant_id, template_id=template_id, usuario_id=usuario.id
     )
     return TemplateDocumentoOut.model_validate(t)
 

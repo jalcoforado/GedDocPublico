@@ -85,15 +85,18 @@ async def listar_templates(
     db: AsyncSession,
     *,
     tenant_id: int,
-    categoria: str | None = None,
+    id_especie_documental: int | None = None,
+    id_unidade_trabalho: int | None = None,
     apenas_ativos: bool = False,
 ) -> list[TemplateDocumento]:
     stmt = select(TemplateDocumento).where(
         TemplateDocumento.tenant_id == tenant_id,
         TemplateDocumento.excluido.is_(False),
     )
-    if categoria is not None:
-        stmt = stmt.where(TemplateDocumento.categoria == categoria)
+    if id_especie_documental is not None:
+        stmt = stmt.where(TemplateDocumento.id_especie_documental == id_especie_documental)
+    if id_unidade_trabalho is not None:
+        stmt = stmt.where(TemplateDocumento.id_unidade_trabalho == id_unidade_trabalho)
     if apenas_ativos:
         stmt = stmt.where(TemplateDocumento.ativo.is_(True))
     stmt = stmt.order_by(TemplateDocumento.nome)
@@ -116,7 +119,8 @@ async def criar_template(
         tenant_id=tenant_id,
         nome=payload.nome,
         descricao=payload.descricao,
-        categoria=payload.categoria,
+        id_especie_documental=payload.id_especie_documental,
+        id_unidade_trabalho=payload.id_unidade_trabalho,
         corpo_html=payload.corpo_html,
         placeholders_utilizados=_detectar_placeholders(payload.corpo_html),
         ativo=payload.ativo,
@@ -127,6 +131,47 @@ async def criar_template(
     await db.commit()
     await db.refresh(t)
     return t
+
+
+async def clonar_template(
+    db: AsyncSession, *, tenant_id: int, template_id: int, usuario_id: int
+) -> TemplateDocumento:
+    """F10 — clonar como ato de primeira classe, não "criar de novo copiando à
+    mão". Nome dedupe automático: "<nome> (cópia)", "<nome> (cópia 2)"... —
+    `_validar_nome_template_unico` já existe; só falta tentar até achar um
+    nome livre, porque clonar duas vezes o mesmo template é o caso comum
+    (rascunho de variação), não um erro do usuário."""
+    original = await obter_template(db, tenant_id=tenant_id, template_id=template_id)
+
+    candidato = f"{original.nome} (cópia)"
+    sufixo = 2
+    while True:
+        stmt = select(TemplateDocumento.id).where(
+            TemplateDocumento.tenant_id == tenant_id,
+            TemplateDocumento.nome == candidato,
+            TemplateDocumento.excluido.is_(False),
+        )
+        if (await db.execute(stmt)).scalar_one_or_none() is None:
+            break
+        candidato = f"{original.nome} (cópia {sufixo})"
+        sufixo += 1
+
+    clone = TemplateDocumento(
+        tenant_id=tenant_id,
+        nome=candidato,
+        descricao=original.descricao,
+        id_especie_documental=original.id_especie_documental,
+        id_unidade_trabalho=original.id_unidade_trabalho,
+        corpo_html=original.corpo_html,
+        placeholders_utilizados=original.placeholders_utilizados,
+        ativo=original.ativo,
+        id_usuario_criacao=usuario_id,
+        criado_em=_utcnow(),
+    )
+    db.add(clone)
+    await db.commit()
+    await db.refresh(clone)
+    return clone
 
 
 async def atualizar_template(
@@ -248,7 +293,8 @@ async def criar_minuta(
             db, tenant_id=tenant_id, template_id=payload.id_template_origem
         )
         contexto = await ph.build_context(
-            db, tenant_id=tenant_id, processo=processo, usuario=usuario
+            db, tenant_id=tenant_id, processo=processo, usuario=usuario,
+            destinatario=payload.destinatario,
         )
         corpo_html = ph.resolve(template.corpo_html, contexto)
         corpo_html = sanitizar_html(corpo_html)
@@ -262,6 +308,7 @@ async def criar_minuta(
         id_processo=processo_id,
         id_template_origem=payload.id_template_origem,
         titulo=payload.titulo,
+        destinatario=payload.destinatario,
         origem=payload.origem,
         status="rascunho",
         versao=1,
@@ -327,6 +374,8 @@ async def atualizar_minuta(
 
     if "titulo" in dados:
         m.titulo = dados["titulo"]
+    if "destinatario" in dados:
+        m.destinatario = dados["destinatario"]
     if "corpo_html" in dados:
         m.corpo_html = sanitizar_html(dados["corpo_html"])
 

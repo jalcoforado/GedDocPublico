@@ -14,10 +14,12 @@ import html
 import re
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
+    Anexo,
+    AnexoProcesso,
     Assunto,
     Manifestante,
     Processo,
@@ -47,6 +49,13 @@ PLACEHOLDERS_DISPONIVEIS: list[dict[str, str]] = [
     {"chave": "data_hoje", "descricao": "Data de hoje (dd/mm/aaaa)"},
     {"chave": "usuario.nome", "descricao": "Nome do redator (usuário atual)"},
     {"chave": "tenant.nome", "descricao": "Nome da prefeitura/tenant"},
+    # F10 (benchmark SUiTE) — TO-CAPACITY e NUM-CI.
+    {"chave": "destinatario.nome", "descricao": "Destinatário do documento (digitado ao redigir)"},
+    {
+        "chave": "documento.numero",
+        "descricao": "Posição estimada deste documento entre os anexos do processo "
+        "(pode mudar se outro anexo entrar antes da finalização)",
+    },
 ]
 
 
@@ -55,12 +64,23 @@ def _fmt_data(dt: datetime | None) -> str:
 
 
 async def build_context(
-    db: AsyncSession, *, tenant_id: int, processo: Processo, usuario: Usuario
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    processo: Processo,
+    usuario: Usuario,
+    destinatario: str | None = None,
 ) -> dict[str, str]:
     """Monta o dicionário de valores dos placeholders a partir do processo.
 
     Faz as cargas relacionadas (assunto, requerente, unidade, serviço, tenant)
     filtrando por `tenant_id` — coerência de tenant garantida.
+
+    `destinatario` (F10) não tem fonte no processo — vem de quem chama
+    (digitado na criação da minuta). `documento.numero` é a contagem de
+    anexos ATIVOS do processo + 1: uma ESTIMATIVA de posição no momento da
+    redação, não recalculada na finalização — mesmo espírito do
+    `pagina_processo` do F8 (estimativa sobre cache, não uma nova leitura).
     """
 
     async def _scalar(model, pk):  # type: ignore[no-untyped-def]
@@ -79,6 +99,20 @@ async def build_context(
     tenant = (
         await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     ).scalar_one_or_none()
+    qtd_anexos_ativos = (
+        await db.execute(
+            select(func.count(AnexoProcesso.id))
+            .select_from(AnexoProcesso)
+            .join(Anexo, Anexo.id == AnexoProcesso.id_anexo)
+            .where(
+                AnexoProcesso.id_processo == processo.id,
+                AnexoProcesso.tenant_id == tenant_id,
+                AnexoProcesso.desentranhado_em.is_(None),
+                Anexo.excluido.is_(False),
+                Anexo.ativo.is_(True),
+            )
+        )
+    ).scalar_one()
 
     telefone = ""
     if manifestante is not None:
@@ -104,6 +138,8 @@ async def build_context(
         "data_hoje": _fmt_data(datetime.now()),
         "usuario.nome": usuario.nome or "",
         "tenant.nome": (tenant.nome if tenant else "") or "",
+        "destinatario.nome": destinatario or "",
+        "documento.numero": str(qtd_anexos_ativos + 1),
     }
 
 
