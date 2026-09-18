@@ -60,6 +60,7 @@ import {
   comprovanteUrl,
   etiquetaDuplaUrl,
   etiquetaUnicaUrl,
+  folhaOcorrenciasUrl,
   processoCapaUrl,
   processoCompletoUrl,
   NIVEL_SIGILO_LABEL,
@@ -459,6 +460,16 @@ export default function ProcessoDetailPage() {
                         title: `Etiquetas (dupla) — ${p.numero_processo}`,
                         src: etiquetaDuplaUrl(p.id),
                         downloadUrl: etiquetaDuplaUrl(p.id, false),
+                      }),
+                  },
+                  {
+                    label: "Folha de ocorrências",
+                    icon: FileText,
+                    onClick: () =>
+                      setViewer({
+                        title: `Folha de ocorrências — ${p.numero_processo}`,
+                        src: folhaOcorrenciasUrl(p.id),
+                        downloadUrl: folhaOcorrenciasUrl(p.id, false),
                       }),
                   },
                   {
