@@ -24,11 +24,13 @@ from ..models import (
     Movimentacao,
     Prioridade,
     Processo,
+    ProcessoFavorito,
     TipoAnexo,
     TipoProcesso,
     UnidadeTrabalho,
     Usuario,
 )
+from ..schemas.marcador import MarcadorMini
 from ..schemas.processo import (
     AnexoNoProcesso,
     CotaAnexacaoOut,
@@ -48,11 +50,25 @@ from .permanencia import calcular as calcular_permanencia
 from .prazos import calcular_prazo
 
 
-def _base_select(tenant_id: int):
+def _base_select(tenant_id: int, *, usuario_id: int | None = None):
     LocalAtual = aliased(UnidadeTrabalho, name="local_atual")
     # F2 — alias próprio para o responsável: `Usuario` entra noutras junções
     # deste módulo, e reusar a entidade crua faria o SQLAlchemy colapsar as duas.
     Responsavel = aliased(Usuario, name="usuario_responsavel")
+    # F5 — EXISTS correlacionado, não JOIN: um favorito é no máximo 1 linha
+    # por (usuário, processo) — mas um JOIN exigiria essa garantia do lado do
+    # banco pra não duplicar processo na listagem, e EXISTS não depende dela.
+    favorito_expr = (
+        select(ProcessoFavorito.id)
+        .where(
+            ProcessoFavorito.tenant_id == tenant_id,
+            ProcessoFavorito.id_processo == Processo.id,
+            ProcessoFavorito.id_usuario == usuario_id,
+        )
+        .exists()
+        if usuario_id is not None
+        else false()
+    ).label("favorito")
     stmt = (
         select(
             Processo,
@@ -63,6 +79,7 @@ def _base_select(tenant_id: int):
             UnidadeTrabalho.unidade_trabalho.label("unidade_propr"),
             LocalAtual.unidade_trabalho.label("local_atual_nome"),
             Responsavel.nome.label("responsavel_nome"),
+            favorito_expr,
         )
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
@@ -81,6 +98,34 @@ def _base_select(tenant_id: int):
         .where(Processo.excluido.is_(False))
     )
     return tenant_filter(stmt, Processo, tenant_id)
+
+
+async def _marcadores_por_processo(
+    db: AsyncSession, tenant_id: int, ids_processo: list[int]
+) -> dict[int, list[MarcadorMini]]:
+    """Uma consulta batelada pra N processos — evita N+1 na listagem."""
+    if not ids_processo:
+        return {}
+    from ..models import Marcador, ProcessoMarcador
+
+    rows = (
+        await db.execute(
+            select(ProcessoMarcador.id_processo, Marcador.id, Marcador.nome, Marcador.cor)
+            .join(Marcador, Marcador.id == ProcessoMarcador.id_marcador)
+            .where(
+                ProcessoMarcador.tenant_id == tenant_id,
+                ProcessoMarcador.id_processo.in_(ids_processo),
+                Marcador.excluido.is_(False),
+            )
+            .order_by(Marcador.nome)
+        )
+    ).all()
+    por_processo: dict[int, list[MarcadorMini]] = {}
+    for id_processo, id_marcador, nome, cor in rows:
+        por_processo.setdefault(id_processo, []).append(
+            MarcadorMini(id=id_marcador, nome=nome, cor=cor)
+        )
+    return por_processo
 
 
 def _ids_unidade_e_subordinadas(tenant_id: int, raiz: int):
@@ -130,8 +175,10 @@ async def list_processos(
     escopo: EscopoProcesso | None = None,
     id_usuario_contexto: int | None = None,
     id_unidade_contexto: int | None = None,
+    favoritos: bool = False,
+    id_marcador: int | None = None,
 ) -> tuple[list[ProcessoListItem], int]:
-    base = _base_select(tenant_id)
+    base = _base_select(tenant_id, usuario_id=id_usuario_contexto)
 
     # Sigilo gradual — None = sem restrição (super-usuário); senão filtra pelos
     # níveis que a credencial do servidor alcança.
@@ -196,6 +243,34 @@ async def list_processos(
                 Processo.id_local_atual == id_unidade,
             )
         )
+    if favoritos:
+        # Sem usuário de contexto, "só favoritos" não tem o que responder —
+        # NADA, nunca "tudo" (mesmo critério do bloco de escopo acima).
+        base = (
+            base.where(
+                select(ProcessoFavorito.id)
+                .where(
+                    ProcessoFavorito.tenant_id == tenant_id,
+                    ProcessoFavorito.id_processo == Processo.id,
+                    ProcessoFavorito.id_usuario == id_usuario_contexto,
+                )
+                .exists()
+            )
+            if id_usuario_contexto is not None
+            else base.where(false())
+        )
+    if id_marcador:
+        from ..models import ProcessoMarcador
+
+        base = base.where(
+            select(ProcessoMarcador.id)
+            .where(
+                ProcessoMarcador.tenant_id == tenant_id,
+                ProcessoMarcador.id_processo == Processo.id,
+                ProcessoMarcador.id_marcador == id_marcador,
+            )
+            .exists()
+        )
     if apenas_ativos:
         base = base.where(Processo.ativo.is_(True))
     if desde:
@@ -215,6 +290,11 @@ async def list_processos(
     ).all()
 
     items = [_row_to_list(r) for r in rows]
+    marcadores_por_processo = await _marcadores_por_processo(
+        db, tenant_id, [i.id for i in items]
+    )
+    for item in items:
+        item.marcadores = marcadores_por_processo.get(item.id, [])
     return items, total
 
 
@@ -239,6 +319,7 @@ def _row_to_list(r) -> ProcessoListItem:
         local_atual=r.local_atual_nome,
         id_usuario_responsavel=p.id_usuario_responsavel,
         responsavel=r.responsavel_nome,
+        favorito=bool(r.favorito),
     )
 
 
@@ -248,8 +329,9 @@ async def get_processo_detail(
     *,
     tenant_id: int,
     niveis_permitidos: list[str] | None = None,
+    usuario_id: int | None = None,
 ) -> ProcessoDetail | None:
-    stmt = _base_select(tenant_id).where(Processo.id == processo_id)
+    stmt = _base_select(tenant_id, usuario_id=usuario_id).where(Processo.id == processo_id)
     # Sigilo gradual — fora dos níveis acessíveis retorna None (404), sem
     # vazar a existência do processo sigiloso.
     if niveis_permitidos is not None:
@@ -259,6 +341,9 @@ async def get_processo_detail(
         return None
     p: Processo = row[0]
     base_item = _row_to_list(row)
+    base_item.marcadores = (
+        await _marcadores_por_processo(db, tenant_id, [processo_id])
+    ).get(processo_id, [])
     movimentacoes, permanencia = await _load_movimentacoes(db, processo_id, tenant_id)
     anexos = await _load_anexos(db, processo_id, tenant_id)
     cota = CotaAnexacaoOut(

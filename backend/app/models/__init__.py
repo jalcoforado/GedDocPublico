@@ -113,6 +113,7 @@ from .transporte_regulado import (
     VeiculoDocumento as VeiculoDocumentoRegulado,
     VeiculoAvaliacao,
 )
+from .marcador import Marcador, ProcessoFavorito, ProcessoMarcador
 from .unidade_trabalho import TipoUnidadeTrabalho, UnidadeTrabalho
 from .usuario import Usuario
 from .usuario_externo import UsuarioExterno
@@ -157,6 +158,8 @@ __all__ = [
     "Prioridade",
     "Processo",
     "ProcessoApensamento",
+    "ProcessoFavorito",
+    "ProcessoMarcador",
     "ProcessoVolume",
     "SolicitacaoAssinatura",
     "TipoAssinatura",
@@ -181,6 +184,7 @@ __all__ = [
     "LinhaHorario",
     "LinhaParada",
     "Manifestante",
+    "Marcador",
     "Minuta",
     "MinutaHistorico",
     "Modulo",

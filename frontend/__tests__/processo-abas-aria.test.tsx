@@ -81,6 +81,10 @@ const PROCESSO = {
   id_processo_pai: null,
   movimentacoes: [],
   anexos: [],
+  // F5 — `MarcadoresProcesso` faz `.marcadores.map` sem defesa: mock sem este
+  // campo derruba a página com "Cannot read properties of undefined".
+  favorito: false,
+  marcadores: [],
 };
 
 /**

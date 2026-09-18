@@ -33,6 +33,8 @@ import { CancelarComplementacaoDialog } from "@/components/CancelarComplementaca
 import { ChecklistDocumentosCard } from "@/components/ChecklistDocumentosCard";
 import { ClassificarSigiloDialog } from "@/components/ClassificarSigiloDialog";
 import { ComplementacaoAbertaCard } from "@/components/ComplementacaoAbertaCard";
+import { FavoritoStar } from "@/components/FavoritoStar";
+import { MarcadoresProcesso } from "@/components/MarcadoresProcesso";
 import { ComplementacoesHistoricoLista } from "@/components/ComplementacoesHistoricoLista";
 import { SolicitarComplementacaoDialog } from "@/components/SolicitarComplementacaoDialog";
 import { ProcessoApensados } from "@/components/ProcessoApensados";
@@ -395,6 +397,11 @@ export default function ProcessoDetailPage() {
               {/* PR 5b — badge de prazo (null em sem_prazo). */}
               <PrazoBadge prazo={p.prazo} />
             </div>
+            {/* F5 — favorito e marcadores. Favoritar é preferência de leitura
+                (visível a qualquer um com acesso à página); marcadores só
+                editáveis por quem pode atualizar o processo. */}
+            <FavoritoStar processo={p} />
+            <MarcadoresProcesso processo={p} podeEditar={can("processo", "atualizar")} />
             {/* F2 — responsável-pessoa. Fica no cabeçalho, junto dos badges de
                 estado, porque "quem responde por isto" é estado do processo e
                 não uma ação escondida numa aba. */}

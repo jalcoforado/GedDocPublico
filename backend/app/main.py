@@ -27,6 +27,7 @@ from .routers import (
     jobs,
     localizacao,
     manifestantes,
+    marcadores,
     minutas,
     modulos,
     notificacoes,
@@ -103,6 +104,7 @@ app.include_router(unidades.router, prefix="/api/v2")
 app.include_router(grupos.router, prefix="/api/v2")
 app.include_router(localizacao.router, prefix="/api/v2")
 app.include_router(manifestantes.router, prefix="/api/v2")
+app.include_router(marcadores.router, prefix="/api/v2")
 app.include_router(assuntos.router, prefix="/api/v2")
 app.include_router(processos.router, prefix="/api/v2")
 app.include_router(protocolo.router, prefix="/api/v2")

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { FavoritoStar } from "@/components/FavoritoStar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -63,6 +64,7 @@ function filtrosDaUrl(sp: URLSearchParams): ProcessoListFilters {
     escopo: ESCOPOS.includes(sp.get("escopo") as EscopoProcesso)
       ? (sp.get("escopo") as EscopoProcesso)
       : undefined,
+    favoritos: sp.get("favoritos") === "1" ? true : undefined,
   };
 }
 
@@ -75,6 +77,7 @@ function urlDosFiltros(f: ProcessoListFilters, page: number): string {
   if (f.desde) sp.set("desde", f.desde.slice(0, 10));
   if (f.ate) sp.set("ate", f.ate.slice(0, 10));
   sp.set("ativos", f.apenas_ativos ? "1" : "0");
+  if (f.favoritos) sp.set("favoritos", "1");
   if (page > 1) sp.set("page", String(page));
   return sp.toString();
 }
@@ -270,6 +273,18 @@ export default function ProcessosPage() {
                 Apenas ativos
               </Label>
             </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="favoritos"
+                checked={!!draft.favoritos}
+                onChange={(e) =>
+                  setDraft({ ...draft, favoritos: e.target.checked || undefined })
+                }
+              />
+              <Label htmlFor="favoritos" className="!mb-0">
+                Só favoritos
+              </Label>
+            </div>
             <div className="flex flex-wrap items-end gap-2">
               <Button onClick={applyFilters}>Filtrar</Button>
               <Button variant="ghost" onClick={clearFilters}>
@@ -311,15 +326,33 @@ export default function ProcessosPage() {
           {processosQ.data?.items.map((p) => (
             <TR key={p.id}>
               <TD className="font-mono text-xs tabular-nums">
-                {p.nup ? (
-                  <>
-                    <div>{p.nup}</div>
-                    <div className="text-[10px] text-foreground-muted">
-                      {p.numero_processo}
-                    </div>
-                  </>
-                ) : (
-                  p.numero_processo
+                <div className="flex items-center gap-1">
+                  <FavoritoStar processo={p} size="sm" />
+                  <div>
+                    {p.nup ? (
+                      <>
+                        <div>{p.nup}</div>
+                        <div className="text-[10px] text-foreground-muted">
+                          {p.numero_processo}
+                        </div>
+                      </>
+                    ) : (
+                      p.numero_processo
+                    )}
+                  </div>
+                </div>
+                {p.marcadores.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {p.marcadores.map((mk) => (
+                      <Badge
+                        key={mk.id}
+                        style={{ backgroundColor: `${mk.cor}22`, color: mk.cor }}
+                        className="font-sans font-normal normal-case"
+                      >
+                        {mk.nome}
+                      </Badge>
+                    ))}
+                  </div>
                 )}
               </TD>
               <TD className="text-xs tabular-nums">
