@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,6 +86,44 @@ async def delete_tipo_processo(
 
 
 # --- Assunto ------------------------------------------------------------------
+async def _resolver_nivel_pai(
+    db: AsyncSession,
+    tenant_id: int,
+    id_assunto_pai: int | None,
+    *,
+    assunto_id_atual: int | None = None,
+) -> int:
+    """Valida `id_assunto_pai` (mesmo tenant, 404 senão — nunca 403, é
+    catálogo interno) e devolve o `nivel` correspondente (raiz = 1, cliente
+    nunca escolhe). Em UPDATE (`assunto_id_atual` setado), barra ciclo: o pai
+    escolhido não pode ser o próprio nó nem descender dele.
+    """
+    if id_assunto_pai is None:
+        return 1
+    if id_assunto_pai == assunto_id_atual:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Um assunto não pode ser pai de si mesmo",
+        )
+    pai = await get_or_404(db, Assunto, id_assunto_pai, tenant_id=tenant_id, label="Assunto pai")
+    if assunto_id_atual is not None:
+        cursor = pai
+        visitados: set[int] = {pai.id}
+        while cursor.id_assunto_pai is not None:
+            if cursor.id_assunto_pai == assunto_id_atual:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Isso criaria um ciclo na hierarquia de assuntos",
+                )
+            if cursor.id_assunto_pai in visitados:
+                break  # ciclo pré-existente (não deveria haver); não gira pra sempre
+            visitados.add(cursor.id_assunto_pai)
+            cursor = await get_or_404(
+                db, Assunto, cursor.id_assunto_pai, tenant_id=tenant_id, label="Assunto pai"
+            )
+    return pai.nivel + 1
+
+
 @router.get(
     "/assuntos",
     response_model=Paginated[AssuntoOut],
@@ -99,8 +137,21 @@ async def list_assuntos(
     page_size: int = Query(20, ge=1, le=200),
     q: str | None = None,
     id_tipo_processo: int | None = None,
+    id_assunto_pai: int | None = None,
+    apenas_raiz: bool = False,
 ):
+    """`id_assunto_pai` filtra os filhos DIRETOS de um ramo; `apenas_raiz`
+    lista só o nível 1. Combinar os dois não faz sentido — `id_assunto_pai`
+    prevalece."""
     extra = Assunto.id_tipo_processo == id_tipo_processo if id_tipo_processo else None
+    if id_assunto_pai is not None:
+        filtro_pai = Assunto.id_assunto_pai == id_assunto_pai
+    elif apenas_raiz:
+        filtro_pai = Assunto.id_assunto_pai.is_(None)
+    else:
+        filtro_pai = None
+    if filtro_pai is not None:
+        extra = filtro_pai if extra is None else (extra & filtro_pai)
     return await paginated_list(
         db,
         Assunto,
@@ -122,7 +173,8 @@ async def create_assunto(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    a = Assunto(**payload.model_dump(), tenant_id=tenant_id, excluido=False)
+    nivel = await _resolver_nivel_pai(db, tenant_id, payload.id_assunto_pai)
+    a = Assunto(**payload.model_dump(), tenant_id=tenant_id, excluido=False, nivel=nivel)
     db.add(a)
     await db.commit()
     await db.refresh(a)
@@ -138,7 +190,12 @@ async def update_assunto(
     db: AsyncSession = Depends(get_db),
 ):
     a = await get_or_404(db, Assunto, assunto_id, tenant_id=tenant_id, label="Assunto")
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    dados = payload.model_dump(exclude_unset=True)
+    if "id_assunto_pai" in dados:
+        dados["nivel"] = await _resolver_nivel_pai(
+            db, tenant_id, dados["id_assunto_pai"], assunto_id_atual=assunto_id,
+        )
+    for k, v in dados.items():
         setattr(a, k, v)
     await db.commit()
     await db.refresh(a)
