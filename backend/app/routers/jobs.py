@@ -5,6 +5,7 @@ import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
@@ -12,7 +13,7 @@ from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..config import get_settings
 from ..database import get_db
-from ..models import Usuario
+from ..models import Processo, Usuario
 from ..schemas.job import (
     AgendaItem,
     DispararCarimbarAnexosRequest,
@@ -119,6 +120,22 @@ async def disparar_processo_completo(
 ) -> JobOut:
     from ..tasks.processo_completo import run as run_task
 
+    # E3 — rascunho não tem numero_processo; a task quebraria em
+    # `.replace('/', '_')` bem mais adiante (worker), sem contexto de HTTP
+    # pra devolver erro claro. Recusa aqui, antes de enfileirar.
+    situacao = (
+        await db.execute(
+            select(Processo.situacao).where(
+                Processo.id == payload.id_processo, Processo.tenant_id == tenant_id
+            )
+        )
+    ).scalar_one_or_none()
+    if situacao == "rascunho":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Processo ainda é rascunho — tramite para gerar o número antes de emitir este documento.",
+        )
+
     job = await criar_job_processo_completo(
         db, tenant_id=tenant_id, processo_id=payload.id_processo, usuario_id=current.id
     )
@@ -142,6 +159,21 @@ async def disparar_carimbar_anexos(
     db: AsyncSession = Depends(get_db),
 ) -> JobOut:
     from ..tasks.carimbar_anexos import run as run_task
+
+    # E3 — mesmo risco do processo-completo acima: pdf_carimbo.py carimba
+    # numero_processo em cada página, e rascunho não tem um.
+    situacao = (
+        await db.execute(
+            select(Processo.situacao).where(
+                Processo.id == payload.id_processo, Processo.tenant_id == tenant_id
+            )
+        )
+    ).scalar_one_or_none()
+    if situacao == "rascunho":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Processo ainda é rascunho — tramite para gerar o número antes de emitir este documento.",
+        )
 
     job = await criar_job_carimbar_anexos(
         db, tenant_id=tenant_id, processo_id=payload.id_processo, usuario_id=current.id

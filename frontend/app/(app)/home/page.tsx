@@ -482,7 +482,8 @@ function ActionCard({
 
 interface ProcessoMin {
   id: number;
-  numero_processo: string;
+  /** E3 — null enquanto o processo é rascunho (lista já exclui por padrão) */
+  numero_processo: string | null;
   nup?: string | null;
   data_hora_abertura: string;
   manifestante: string | null;
@@ -582,7 +583,7 @@ function UnidadeSection({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-xs font-semibold text-primary group-hover:underline">
-                        {p.nup ?? p.numero_processo}
+                        {p.nup ?? p.numero_processo ?? "Rascunho"}
                       </span>
                       {p.nup && (
                         <span className="font-mono text-[10px] text-foreground-subtle">

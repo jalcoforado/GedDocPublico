@@ -89,7 +89,7 @@ class TemporalidadeOut(BaseModel):
     """Resultado do cálculo de temporalidade pra um processo específico."""
 
     id_processo: int
-    numero_processo: str
+    numero_processo: str | None  # E3 — None se processo ainda é rascunho
     id_ccd_classe: int | None
     classe_codigo: str | None
     classe_nome: str | None

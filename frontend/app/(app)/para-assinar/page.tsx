@@ -111,7 +111,7 @@ export default function ParaAssinarPage() {
                   href={`/m/protocolo/processos/${p.id_processo}`}
                   className="font-mono text-xs text-primary hover:underline"
                 >
-                  {p.numero_processo}
+                  {p.numero_processo ?? "Rascunho"}
                 </Link>
               </TD>
               <TD className="text-sm">{p.anexo_descricao ?? `Anexo #${p.id_anexo}`}</TD>
@@ -191,7 +191,7 @@ export default function ParaAssinarPage() {
         <p className="text-sm">
           Confirme sua senha para registrar a assinatura do anexo{" "}
           <b>{assinando?.anexo_descricao}</b> no processo{" "}
-          <b className="font-mono">{assinando?.numero_processo}</b>.
+          <b className="font-mono">{assinando?.numero_processo ?? "Rascunho"}</b>.
         </p>
         <form
           onSubmit={(e) => {

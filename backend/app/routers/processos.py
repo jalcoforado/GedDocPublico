@@ -192,6 +192,10 @@ async def list_endpoint(
     # F5 — favoritos e marcadores.
     favoritos: bool = Query(False, description="Só os favoritados por mim"),
     id_marcador: int | None = Query(None, description="Filtra por marcador"),
+    situacao: str | None = Query(
+        None,
+        description="rascunho | protocolado | todos. Ausente = exclui rascunho (E3).",
+    ),
 ) -> Paginated[ProcessoListItem]:
     items, total = await list_processos(
         db,
@@ -209,6 +213,7 @@ async def list_endpoint(
         escopo=escopo,
         favoritos=favoritos,
         id_marcador=id_marcador,
+        situacao=situacao,
         id_usuario_contexto=usuario.id,
         # A lotação PRINCIPAL. Lotação neste sistema tem duas representações
         # simultâneas — esta e a N:N `utils.usuario_unidade_trabalho` —, então
@@ -676,6 +681,16 @@ def _pdf_response(pdf_bytes: bytes, *, inline: bool, fname: str) -> Response:
     )
 
 
+def _recusar_pdf_se_rascunho(detail) -> None:
+    """E3 — rascunho não tem numero_processo; documento oficial numerado
+    não existe ainda. Tramite (encaminhe) para gerar o número."""
+    if detail.situacao == "rascunho":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Processo ainda é rascunho — tramite para gerar o número antes de emitir este documento.",
+        )
+
+
 @router.get(
     "/{processo_id}/capa.pdf",
     dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
@@ -692,6 +707,7 @@ async def capa_pdf_endpoint(
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    _recusar_pdf_se_rascunho(detail)
     pdf_bytes = gerar_capa_pdf(detail)
     fname = f"capa-{detail.numero_processo.replace('/', '_')}.pdf"
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
@@ -714,6 +730,7 @@ async def folha_ocorrencias_pdf_endpoint(
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    _recusar_pdf_se_rascunho(detail)
     pdf_bytes = gerar_folha_ocorrencias_pdf(detail)
     fname = f"folha-ocorrencias-{detail.numero_processo.replace('/', '_')}.pdf"
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
@@ -735,6 +752,7 @@ async def etiqueta_unica_pdf(
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    _recusar_pdf_se_rascunho(detail)
     pdf_bytes = gerar_etiqueta_pdf(detail, dupla=False)
     fname = f"etiqueta-{detail.numero_processo.replace('/', '_')}.pdf"
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
@@ -757,6 +775,7 @@ async def completo_pdf_endpoint(
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    _recusar_pdf_se_rascunho(detail)
     pdf_bytes = gerar_processo_completo_pdf(detail, tenant_slug=tenant_slug)
     fname = f"processo-completo-{detail.numero_processo.replace('/', '_')}.pdf"
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
@@ -778,6 +797,7 @@ async def etiqueta_dupla_pdf(
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    _recusar_pdf_se_rascunho(detail)
     pdf_bytes = gerar_etiqueta_pdf(detail, dupla=True)
     fname = f"etiquetas-{detail.numero_processo.replace('/', '_')}.pdf"
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)

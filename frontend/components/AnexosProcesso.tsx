@@ -64,7 +64,9 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const temPdf = processo.anexos.some(isPdf);
+  // E3 — carimbo grava numero_processo em cada página; rascunho não tem um
+  // ainda (backend recusa com 409).
+  const temPdf = processo.anexos.some(isPdf) && processo.situacao !== "rascunho";
 
   function tipoNome(a: AnexoNoProcesso) {
     return a.tipo_anexo ?? "—";

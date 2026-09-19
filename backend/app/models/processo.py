@@ -54,7 +54,14 @@ class Processo(Base):
     virtual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     data_hora_abertura: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     numero_origem: Mapped[str | None] = mapped_column(Text, nullable=True)
-    numero_processo: Mapped[str] = mapped_column(String(255), nullable=False)
+    # E3 — nullable desde a 0119: rascunho (situacao='rascunho') nasce sem
+    # número; a emissão migra para o primeiro encaminhar(). CHECK
+    # ck_processo_situacao_numero garante a correspondência no banco.
+    numero_processo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # E3 — 'rascunho' | 'protocolado'. Default 'protocolado' preserva o
+    # comportamento de hoje para todo processo existente e para abertura
+    # sem o flag `rascunho` explícito.
+    situacao: Mapped[str] = mapped_column(String(20), nullable=False, default="protocolado")
     observacao: Mapped[str | None] = mapped_column(Text, nullable=True)
     id_unidade_proprietaria: Mapped[int] = mapped_column(
         ForeignKey("utils.unidade_trabalho.id"), nullable=False

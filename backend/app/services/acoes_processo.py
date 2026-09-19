@@ -24,6 +24,7 @@ from ..models import (
     Movimentacao,
     Processo,
     StatusArquivamento,
+    Tenant,
     Usuario,
     UsuarioUnidadeTrabalho,
 )
@@ -89,6 +90,36 @@ async def encaminhar(
     is_super_usuario: bool = False,
 ) -> Encaminhamento:
     processo = await _get_processo(db, processo_id, tenant_id)
+
+    # E3 (benchmark SUiTE) — primeira tramitação de um rascunho emite o
+    # número (+ NUP, se opt-in) e marca situacao='protocolado'. Workflow só
+    # é instanciado aqui, não na criação (ver abertura_processo.py) — pra
+    # fins de BPM o processo "nasce" agora, não quando era rascunho.
+    era_rascunho = processo.situacao == "rascunho"
+    if era_rascunho:
+        from .audit import log as audit_log
+        from .numeracao_processo import emitir_numero
+
+        tenant = (
+            await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+        ).scalar_one_or_none()
+        if tenant is None:
+            raise AcaoError("Tenant não encontrado")
+
+        await emitir_numero(
+            db, processo, tenant=tenant, usuario_id=usuario_id, now=datetime.now()
+        )
+        processo.situacao = "protocolado"
+
+        await audit_log(
+            db,
+            tenant_id=tenant_id,
+            id_usuario=usuario_id,
+            acao="processo.numerado_na_tramitacao",
+            entidade="processo",
+            id_entidade=processo.id,
+            payload={"numero_processo": processo.numero_processo},
+        )
 
     # Workflow strict: valida se o encaminhamento respeita o fluxo.
     from .workflow_integration import validar_acao_strict
@@ -193,10 +224,19 @@ async def encaminhar(
     await db.commit()
     await db.refresh(encaminhamento)
 
-    # (Fase 20b) Dispara evento de workflow, se houver instance ativa
-    from .workflow_integration import disparar_evento
+    if era_rascunho:
+        # Processo acabou de ganhar número — instancia workflow agora
+        # (mesma chamada que abertura_processo.py faz pra processo
+        # não-rascunho), não dispara "encaminhamento" contra instance que
+        # acabou de nascer no estado inicial.
+        from .workflow_integration import auto_iniciar_workflow_se_aplicavel
 
-    await disparar_evento(db, processo, "encaminhamento", usuario_id)
+        await auto_iniciar_workflow_se_aplicavel(db, processo, usuario_id)
+    else:
+        # (Fase 20b) Dispara evento de workflow, se houver instance ativa
+        from .workflow_integration import disparar_evento
+
+        await disparar_evento(db, processo, "encaminhamento", usuario_id)
 
     return encaminhamento
 

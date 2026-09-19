@@ -26,6 +26,10 @@ class ProcessoCreate(BaseModel):
     # programático. Ver `CanalEntrada` em schemas/protocolo.py para o
     # domínio completo da coluna.
     canal_entrada: Literal["interno", "email"] = "interno"
+    # E3 (benchmark SUiTE) — processo nasce sem número, situacao='rascunho'.
+    # Emitido no primeiro encaminhar(). Exige os mesmos campos obrigatórios
+    # de hoje (assunto/manifestante/unidade) — só o número falta.
+    rascunho: bool = False
 
 
 class ClassificarSigiloRequest(BaseModel):
@@ -68,9 +72,12 @@ class PrioridadeOut(BaseModel):
 class ProcessoListItem(BaseModel):
     """Visão para listagem — campos enriquecidos com nomes via JOIN."""
     id: int
-    numero_processo: str
+    # E3 — None enquanto situacao='rascunho' (numerado só no primeiro
+    # encaminhar()).
+    numero_processo: str | None
     nup: str | None = None  # Fase P2 — NUP federal (preenchido só se tenant tem flag)
     numero_origem: str | None
+    situacao: str = "protocolado"
     data_hora_abertura: datetime
     ativo: bool
     publico: bool

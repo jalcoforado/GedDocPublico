@@ -9,6 +9,7 @@ import {
   Hourglass,
   Inbox,
   Lock,
+  Pencil,
   Printer,
   Tags,
 } from "lucide-react";
@@ -350,11 +351,11 @@ export default function ProcessoDetailPage() {
         icon={FileText}
         breadcrumbs={[
           { label: "Processos", href: "/m/protocolo/processos" },
-          { label: p.numero_processo },
+          { label: p.numero_processo ?? "Rascunho" },
         ]}
         title={
           <span className="font-mono">
-            {p.nup ?? p.numero_processo}
+            {p.nup ?? p.numero_processo ?? "Rascunho"}
           </span>
         }
         description={
@@ -376,6 +377,13 @@ export default function ProcessoDetailPage() {
                 "Encerrado" no modo servidor — alinha com contexto cidadao
                 e evita ambiguidade do antigo "Inativo". */}
             <div className="flex flex-wrap gap-1">
+              {/* E3 — rascunho ainda não tem número; badge separado do eixo
+                  ativo/encerrado (statusProcessoBadge), que é outro estado. */}
+              {p.situacao === "rascunho" && (
+                <Badge intent="warning" icon={Pencil}>
+                  Rascunho
+                </Badge>
+              )}
               {(() => {
                 const s = statusProcessoBadge(p, "servidor");
                 const StatusIcon = s.icon;
@@ -414,74 +422,85 @@ export default function ProcessoDetailPage() {
                 preservados byte-a-byte. PDF completo segue visivel como
                 primario; ClassificarSigilo segue como dialog separado. */}
             <div className="flex flex-wrap items-center gap-1.5">
-              <Button
-                size="sm"
-                onClick={() =>
-                  setViewer({
-                    title: `Processo completo — ${p.numero_processo}`,
-                    src: processoCompletoUrl(p.id),
-                    downloadUrl: processoCompletoUrl(p.id, false),
-                  })
-                }
-                title="PDF do processo completo"
-              >
-                <FileText className="h-4 w-4" aria-hidden="true" />
-                PDF completo
-              </Button>
-              <ActionsMenu
-                label="Imprimir"
-                icon={Printer}
-                items={[
-                  {
-                    label: "Capa",
-                    icon: FileText,
-                    onClick: () =>
+              {/* E3 — todo documento aqui carrega numero_processo; rascunho
+                  não tem um (backend recusa com 409). Some em vez de
+                  oferecer um botão que sempre falha. */}
+              {p.situacao === "rascunho" ? (
+                <span className="text-xs text-foreground-subtle">
+                  Tramite o processo para habilitar a impressão.
+                </span>
+              ) : (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() =>
                       setViewer({
-                        title: `Capa — ${p.numero_processo}`,
-                        src: processoCapaUrl(p.id),
-                        downloadUrl: processoCapaUrl(p.id, false),
-                      }),
-                  },
-                  {
-                    label: "Etiqueta",
-                    icon: Tags,
-                    onClick: () =>
-                      setViewer({
-                        title: `Etiqueta — ${p.numero_processo}`,
-                        src: etiquetaUnicaUrl(p.id),
-                        downloadUrl: etiquetaUnicaUrl(p.id, false),
-                      }),
-                  },
-                  {
-                    label: "Etiqueta dupla",
-                    icon: Tags,
-                    onClick: () =>
-                      setViewer({
-                        title: `Etiquetas (dupla) — ${p.numero_processo}`,
-                        src: etiquetaDuplaUrl(p.id),
-                        downloadUrl: etiquetaDuplaUrl(p.id, false),
-                      }),
-                  },
-                  {
-                    label: "Folha de ocorrências",
-                    icon: FileText,
-                    onClick: () =>
-                      setViewer({
-                        title: `Folha de ocorrências — ${p.numero_processo}`,
-                        src: folhaOcorrenciasUrl(p.id),
-                        downloadUrl: folhaOcorrenciasUrl(p.id, false),
-                      }),
-                  },
-                  {
-                    label: gerarBg.isPending
-                      ? "Enfileirando…"
-                      : "Gerar PDF em background",
-                    icon: Hourglass,
-                    onClick: () => gerarBg.mutate(),
-                    disabled: gerarBg.isPending,
-                  },
-                ]}
-              />
+                        title: `Processo completo — ${p.numero_processo}`,
+                        src: processoCompletoUrl(p.id),
+                        downloadUrl: processoCompletoUrl(p.id, false),
+                      })
+                    }
+                    title="PDF do processo completo"
+                  >
+                    <FileText className="h-4 w-4" aria-hidden="true" />
+                    PDF completo
+                  </Button>
+                  <ActionsMenu
+                    label="Imprimir"
+                    icon={Printer}
+                    items={[
+                      {
+                        label: "Capa",
+                        icon: FileText,
+                        onClick: () =>
+                          setViewer({
+                            title: `Capa — ${p.numero_processo}`,
+                            src: processoCapaUrl(p.id),
+                            downloadUrl: processoCapaUrl(p.id, false),
+                          }),
+                      },
+                      {
+                        label: "Etiqueta",
+                        icon: Tags,
+                        onClick: () =>
+                          setViewer({
+                            title: `Etiqueta — ${p.numero_processo}`,
+                            src: etiquetaUnicaUrl(p.id),
+                            downloadUrl: etiquetaUnicaUrl(p.id, false),
+                          }),
+                      },
+                      {
+                        label: "Etiqueta dupla",
+                        icon: Tags,
+                        onClick: () =>
+                          setViewer({
+                            title: `Etiquetas (dupla) — ${p.numero_processo}`,
+                            src: etiquetaDuplaUrl(p.id),
+                            downloadUrl: etiquetaDuplaUrl(p.id, false),
+                          }),
+                      },
+                      {
+                        label: "Folha de ocorrências",
+                        icon: FileText,
+                        onClick: () =>
+                          setViewer({
+                            title: `Folha de ocorrências — ${p.numero_processo}`,
+                            src: folhaOcorrenciasUrl(p.id),
+                            downloadUrl: folhaOcorrenciasUrl(p.id, false),
+                          }),
+                      },
+                      {
+                        label: gerarBg.isPending
+                          ? "Enfileirando…"
+                          : "Gerar PDF em background",
+                        icon: Hourglass,
+                        onClick: () => gerarBg.mutate(),
+                        disabled: gerarBg.isPending,
+                      },
+                    ]}
+                  />
+                </>
+              )}
               <ClassificarSigiloDialog
                 processo={p}
                 onClassified={() => q.refetch()}
