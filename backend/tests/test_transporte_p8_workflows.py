@@ -1560,6 +1560,76 @@ async def test_http_get_workflow_ocorrencia_com_instancia_devolve_log_e_estado(a
         await _limpar_engine(admin_engine, t.id)
 
 
+async def test_http_get_workflow_alvara_com_instancia_devolve_log_e_estado(admin_engine):
+    """Alvará revogado tem WorkflowInstance finalizada — GET devolve
+    `estado_atual='revogado'`, `ativa=False` e o log com a transição.
+    Item de dívida técnica do P8: cobertura existia só para ocorrência."""
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        alvara = await _alvara(admin_engine, t.id, id_empresa=id_emp)
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+
+        async with _sm(admin_engine)() as db:
+            await tr.revogar_alvara(
+                db, tenant_id=t.id, alvara_id=alvara.id,
+                motivo="Irregularidade constatada em vistoria", usuario_id=uid,
+            )
+
+        _as_user(admin_engine, uid, t.id, t.slug)()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                f"/api/v2/transporte-regulado/workflow/alvara/{alvara.id}"
+            )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["estado_atual"] == "revogado"
+        assert body["ativa"] is False
+        assert len(body["log"]) == 1
+        assert body["log"][0]["estado_de"] == "vigente"
+        assert body["log"][0]["estado_para"] == "revogado"
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
+async def test_http_get_workflow_convocacao_com_instancia_devolve_log_e_estado(admin_engine):
+    """Convocação indeferida tem WorkflowInstance finalizada — GET devolve
+    `estado_atual='indeferido'`, `ativa=False` e o log com as duas
+    transições (hop `convocado`→`em_analise` + decisão →`indeferido`).
+    Item de dívida técnica do P8: cobertura existia só para ocorrência."""
+    t = await _provisionar(admin_engine)
+    try:
+        perm = await _permissionario(admin_engine, t.id, nome="Com workflow decidido")
+        ciclo = await _ciclo_vencido(admin_engine, t.id)
+        _c, conv = await _convocacao(admin_engine, t.id, perm, ciclo=ciclo)
+        uid = await _cria_usuario_comum_transporte(admin_engine, t.id)
+
+        async with _sm(admin_engine)() as db:
+            await tr.decidir_recadastramento(
+                db, tenant_id=t.id, convocacao_id=conv.id, tipo="indeferimento",
+                payload=_parecer("Faltou documento."), usuario_id=uid,
+            )
+
+        _as_user(admin_engine, uid, t.id, t.slug)()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                f"/api/v2/transporte-regulado/workflow/convocacao/{conv.id}"
+            )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["estado_atual"] == "indeferido"
+        assert body["ativa"] is False
+        assert len(body["log"]) == 2
+        assert body["log"][0]["estado_de"] == "convocado"
+        assert body["log"][0]["estado_para"] == "em_analise"
+        assert body["log"][1]["estado_de"] == "em_analise"
+        assert body["log"][1]["estado_para"] == "indeferido"
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)
+
+
 async def test_http_get_workflow_convocacao_sem_instancia_devolve_estado_none(admin_engine):
     """Convocação recém-gerada (sem transição alguma ainda) não tem
     `WorkflowInstance` — GET não cria lazy, devolve estado_atual=None e log
@@ -1624,3 +1694,149 @@ async def test_http_get_workflow_entidade_tipo_invalido_422(admin_engine):
         assert r.status_code == 422
     finally:
         await _limpar_engine(admin_engine, t.id)
+
+
+async def test_obter_workflow_de_entidade_com_multiplas_instancias_usa_a_mais_recente(
+    admin_engine,
+):
+    """Duas `WorkflowInstance` para a mesma entidade — cenário real de
+    `reabrir_recadastramento` (dívida técnica registrada no P8: grava
+    `situacao` sem tocar a instância finalizada; o self-heal lazy do ato
+    seguinte cria uma instância NOVA, deixando duas linhas para o mesmo par
+    `entidade_tipo`/`entidade_id`). `obter_workflow_de_entidade` não tinha
+    teste garantindo que a leitura usa a mais recente por `iniciada_em`, e
+    não por engano a primeira criada (ordem de PK/insert)."""
+    t = await _provisionar(admin_engine)
+    try:
+        oc_id = await _ocorrencia(admin_engine, t.id)
+
+        async with _sm(admin_engine)() as db:
+            antiga = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "ocorrencia",
+                        WorkflowInstance.entidade_id == oc_id,
+                    )
+                )
+            ).scalar_one()
+            antiga.ativa = False
+            antiga.iniciada_em = datetime.utcnow() - timedelta(days=10)
+            nova = WorkflowInstance(
+                tenant_id=t.id,
+                id_workflow_definition=antiga.id_workflow_definition,
+                entidade_tipo="ocorrencia",
+                entidade_id=oc_id,
+                estado_atual="em_apuracao",
+                ativa=True,
+                iniciada_em=datetime.utcnow(),
+            )
+            db.add(nova)
+            await db.commit()
+
+        async with _sm(admin_engine)() as db:
+            resultado = await tr.obter_workflow_de_entidade(
+                db, tenant_id=t.id, entidade_tipo="ocorrencia", entidade_id=oc_id,
+            )
+        assert resultado["estado_atual"] == "em_apuracao"
+        assert resultado["ativa"] is True
+    finally:
+        await _limpar_engine(admin_engine, t.id)
+
+
+# ============================================================================
+# Dívida técnica do P8 — soft-delete não finalizava a WorkflowInstance
+# ============================================================================
+
+async def test_excluir_ocorrencia_encerra_a_instancia_de_workflow(admin_engine):
+    """Antes deste conserto, `excluir_ocorrencia` (soft-delete) deixava a
+    `WorkflowInstance` `ativa=True` apontando pra uma ocorrência excluída —
+    o beat de SLA (`verificar_sla_workflows`) seguiria alertando um registro
+    que não existe mais. Agora a exclusão encerra a instância no mesmo ato
+    (`ativa=False`, `finalizada_em` preenchido) e resolve qualquer alerta de
+    SLA pendente daquele estado."""
+    t = await _provisionar(admin_engine)
+    try:
+        oc_id = await _ocorrencia(admin_engine, t.id)
+
+        async with _sm(admin_engine)() as db:
+            inst = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "ocorrencia",
+                        WorkflowInstance.entidade_id == oc_id,
+                    )
+                )
+            ).scalar_one()
+            assert inst.ativa is True
+            db.add(
+                WorkflowSlaAlerta(
+                    tenant_id=t.id, id_workflow_instance=inst.id,
+                    estado=inst.estado_atual, sla_dias=1, dias_no_estado=5,
+                    criado_em=datetime.utcnow(),
+                )
+            )
+            await db.commit()
+            inst_id = inst.id
+
+        async with _sm(admin_engine)() as db:
+            await tr.excluir_ocorrencia(db, tenant_id=t.id, ocorrencia_id=oc_id)
+            await db.commit()
+
+        async with _sm(admin_engine)() as db:
+            inst2 = (
+                await db.execute(
+                    select(WorkflowInstance).where(WorkflowInstance.id == inst_id)
+                )
+            ).scalar_one()
+            assert inst2.ativa is False
+            assert inst2.finalizada_em is not None
+
+            alerta2 = (
+                await db.execute(
+                    select(WorkflowSlaAlerta).where(
+                        WorkflowSlaAlerta.id_workflow_instance == inst_id
+                    )
+                )
+            ).scalar_one()
+            assert alerta2.resolvido_em is not None
+            assert alerta2.resolucao == "excluido"
+    finally:
+        await _limpar_engine(admin_engine, t.id)
+
+
+async def test_excluir_alvara_encerra_a_instancia_de_workflow(admin_engine):
+    """Mesmo defeito e mesmo conserto de `excluir_ocorrencia`, para alvará —
+    `excluir_alvara` também soft-deletava sem tocar a `WorkflowInstance`."""
+    t = await _provisionar(admin_engine)
+    try:
+        id_emp, _id_perm = await _operadores(admin_engine, t.id)
+        alvara = await _alvara(admin_engine, t.id, id_empresa=id_emp)
+
+        async with _sm(admin_engine)() as db:
+            inst = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == t.id,
+                        WorkflowInstance.entidade_tipo == "alvara",
+                        WorkflowInstance.entidade_id == alvara.id,
+                    )
+                )
+            ).scalar_one()
+            assert inst.ativa is True
+            inst_id = inst.id
+
+        async with _sm(admin_engine)() as db:
+            await tr.excluir_alvara(db, tenant_id=t.id, alvara_id=alvara.id)
+
+        async with _sm(admin_engine)() as db:
+            inst2 = (
+                await db.execute(
+                    select(WorkflowInstance).where(WorkflowInstance.id == inst_id)
+                )
+            ).scalar_one()
+            assert inst2.ativa is False
+            assert inst2.finalizada_em is not None
+    finally:
+        await _limpar_alvara_e_engine(admin_engine, t.id)

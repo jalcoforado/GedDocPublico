@@ -847,10 +847,13 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   painel mostra é só o "(excedido)" derivado por comparação de data, não o alerta gravado.
 > - `reabrir_recadastramento` grava `situacao` direto sem tocar a instância (`workflow_instance`);
 >   self-heal lazy acontece no ato seguinte — candidata a fachada futura, para ser explícita.
-> - Cobertura HTTP do GET de workflow "com instância" existe só para ocorrência; o endpoint é
->   type-agnostic e o risco é baixo, mas um caso HTTP para alvará ou convocação fecharia barato.
-> - Seleção da instância mais recente (quando existem múltiplas) usa `ORDER BY iniciada_em DESC`
->   sem teste multi-instância.
+> - ~~Cobertura HTTP do GET de workflow "com instância" existe só para ocorrência~~ **FECHADO em
+>   2026-09-19**: casos HTTP novos para alvará (revogado) e convocação (indeferida) em
+>   `test_transporte_p8_workflows.py`.
+> - ~~Seleção da instância mais recente (quando existem múltiplas) usa `ORDER BY iniciada_em DESC`
+>   sem teste multi-instância.~~ **FECHADO em 2026-09-19** — teste cria duas `WorkflowInstance` para
+>   a mesma entidade (cenário real do item `reabrir_recadastramento` logo abaixo) e confere que a
+>   leitura usa a mais recente por `iniciada_em`, não a primeira por PK/insert.
 > - Índice antigo `ix_workflow_instance_processo_ativa` (0008) coexiste com o novo único
 >   polimórfico; aposentá-lo é fatia futura (docstring da 0095).
 > - `SITUACOES_ABERTAS_OCORRENCIA`/`SITUACOES_ABERTAS` seguem hardcoded no service — entidade num
@@ -861,9 +864,17 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   instância ativa de uma entidade em estoque fica presa à versão velha — um alvará `vigente` pode
 >   viver anos sem nunca migrar. Alcançar esse estoque exige `migrar_instance`, que hoje mora no
 >   router de workflow (módulo protocolo), não em transporte.
-> - Soft-delete de entidade não finaliza a instância de workflow (`excluir_ocorrencia` deixa a
+> - ~~Soft-delete de entidade não finaliza a instância de workflow (`excluir_ocorrencia` deixa a
 >   instância ativa); com `sla_dias` configurado no estado, o beat de SLA segue alertando uma
->   ocorrência já excluída — falta encerrar (ou pausar) a instância no mesmo ato do soft-delete.
+>   ocorrência já excluída — falta encerrar (ou pausar) a instância no mesmo ato do soft-delete.~~
+>   **FECHADO em 2026-09-19.** `workflow_engine.encerrar_instance` (novo) finaliza a instância fora
+>   do fluxo de transição do DSL — `ativa=False`, `finalizada_em`, log sintético
+>   (`estado_de == estado_para`, label "ENCERRAMENTO") e os alertas de SLA pendentes do estado
+>   resolvidos com `resolucao="excluido"`. `transporte_workflow.encerrar_instancia_de_entidade`
+>   resolve a instância ativa (se houver — no-op se não) e chama o engine; commita internamente,
+>   mesma convenção de `iniciar`/`executar_transicao`, para persistir junto com a mutação da
+>   entidade no mesmo ato. Corrigido também em `excluir_alvara`, que tinha o mesmo defeito e não
+>   estava citado no item original — mesma causa raiz, mesmo conserto.
 
 > **Atualizado em 2026-08-01, pela fatia de costura de navegação** (spec e plano em
 > `docs/superpowers/`). "Entregues e no ar" era verdade só para o backend. Três coisas mudaram, e a

@@ -298,6 +298,36 @@ async def obter_ou_criar_instancia(
     )
 
 
+async def encerrar_instancia_de_entidade(
+    db: AsyncSession, *, tenant_id: int, entidade_tipo: str, entidade_id: int,
+    motivo: str, usuario_id: int | None,
+) -> WorkflowInstance | None:
+    """Encerra a instância ATIVA de `(entidade_tipo, entidade_id)`, se houver
+    — caso de uso: soft-delete da entidade (`excluir_ocorrencia`,
+    `excluir_alvara`). Sem instância ativa (entidade nunca teve workflow, ou
+    já estava finalizada), é no-op: devolve `None` sem erro — soft-delete não
+    deve falhar por causa de um artefato de workflow que nem existe.
+
+    `engine.encerrar_instance` COMMITA internamente — chame isto DEPOIS de
+    mutar a entidade (`entidade.excluido = True`, ainda não commitado): o
+    commit aqui dentro persiste as duas mudanças juntas, no mesmo ato."""
+    inst = (
+        await db.execute(
+            select(WorkflowInstance).where(
+                WorkflowInstance.tenant_id == tenant_id,
+                WorkflowInstance.entidade_tipo == entidade_tipo,
+                WorkflowInstance.entidade_id == entidade_id,
+                WorkflowInstance.ativa.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if inst is None:
+        return None
+    return await engine.encerrar_instance(
+        db, inst, motivo=motivo, usuario_id=usuario_id,
+    )
+
+
 async def transicionar(
     db: AsyncSession, *, instancia: WorkflowInstance, para: str,
     usuario_id: int | None, entidade: Any, slug: str,
