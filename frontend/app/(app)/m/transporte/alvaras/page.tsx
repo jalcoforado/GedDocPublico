@@ -42,6 +42,7 @@ const TIPOS: { value: TipoServico; label: string }[] = [
   { value: "aplicativo", label: "Aplicativo" },
   { value: "outro", label: "Outro" },
 ];
+const PAGE_SIZE = 50;
 const TIPO_LABEL: Record<string, string> = Object.fromEntries(TIPOS.map((t) => [t.value, t.label]));
 
 interface AlvaraForm {
@@ -119,6 +120,9 @@ export default function AlvarasPage() {
   const [empresaFiltro, setEmpresaFiltro] = useState("");
   const [permFiltro, setPermFiltro] = useState("");
   const [busca, setBusca] = useState("");
+  // Truncava em 50 sem aviso (backend já pagina desde 2026-07-20; a UI nunca
+  // ganhou controle). Reseta pra 1 a cada troca de filtro/busca.
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Alvara | null>(null);
   const [form, setForm] = useState<AlvaraForm>(EMPTY);
@@ -144,12 +148,15 @@ export default function AlvarasPage() {
   // termo vai para o servidor, então sem debounce seria uma consulta por tecla.
   const [buscaAplicada, setBuscaAplicada] = useState("");
   useEffect(() => {
-    const t = setTimeout(() => setBuscaAplicada(busca.trim()), 300);
+    const t = setTimeout(() => {
+      setBuscaAplicada(busca.trim());
+      setPage(1);
+    }, 300);
     return () => clearTimeout(t);
   }, [busca]);
 
   const listaQ = useQuery({
-    queryKey: ["tr-alvaras", empresaFiltro, permFiltro, buscaAplicada],
+    queryKey: ["tr-alvaras", empresaFiltro, permFiltro, buscaAplicada, page],
     queryFn: () =>
       api.alvaras.list({
         empresa_id: empresaFiltro ? Number(empresaFiltro) : undefined,
@@ -158,8 +165,11 @@ export default function AlvarasPage() {
         // truncada em `page_size`, então número fora da primeira página
         // desaparecia e a tela afirmava que o alvará não existe.
         q: buscaAplicada || undefined,
+        page,
+        page_size: PAGE_SIZE,
       }),
   });
+  const totalPages = Math.max(1, Math.ceil((listaQ.data?.total ?? 0) / PAGE_SIZE));
 
   const empresasQ = useQuery({
     queryKey: ["tr-empresas-list"],
@@ -486,7 +496,14 @@ export default function AlvarasPage() {
       <div className="flex flex-wrap gap-3">
         <div>
           <Label htmlFor="f_emp">Empresa</Label>
-          <Select id="f_emp" value={empresaFiltro} onChange={(e) => setEmpresaFiltro(e.target.value)}>
+          <Select
+            id="f_emp"
+            value={empresaFiltro}
+            onChange={(e) => {
+              setEmpresaFiltro(e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="">Todas</option>
             {empresasQ.data?.items.map((e: Empresa) => (
               <option key={e.id} value={String(e.id)}>
@@ -497,7 +514,14 @@ export default function AlvarasPage() {
         </div>
         <div>
           <Label htmlFor="f_perm">Permissionário</Label>
-          <Select id="f_perm" value={permFiltro} onChange={(e) => setPermFiltro(e.target.value)}>
+          <Select
+            id="f_perm"
+            value={permFiltro}
+            onChange={(e) => {
+              setPermFiltro(e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="">Todos</option>
             {permsQ.data?.items.map((p: Permissionario) => (
               <option key={p.id} value={String(p.id)}>
@@ -630,6 +654,32 @@ export default function AlvarasPage() {
             ))}
           </TBody>
         </Table>
+      )}
+
+      {listaQ.data && listaQ.data.total > 0 && (
+        <div className="flex flex-col items-start justify-between gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center">
+          <span className="tabular-nums">
+            {listaQ.data.total} alvarás — página {page} de {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page === 1}
+              onClick={() => setPage(page - 1)}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              Próxima
+            </Button>
+          </div>
+        </div>
       )}
 
       <Dialog

@@ -62,6 +62,7 @@ const COMBUSTIVEIS: { value: TipoCombustivel; label: string }[] = [
   { value: "hibrido", label: "Híbrido" },
   { value: "outro", label: "Outro" },
 ];
+const PAGE_SIZE = 50;
 const TIPO_LABEL: Record<string, string> = Object.fromEntries(TIPOS.map((t) => [t.value, t.label]));
 const SIT_LABEL: Record<string, string> = Object.fromEntries(SITUACOES.map((s) => [s.value, s.label]));
 const SIT_INTENT: Record<string, "success" | "warning" | "info" | "danger" | "neutral"> = {
@@ -139,20 +140,26 @@ export default function VeiculosReguladosPage() {
   const [situacaoFiltro, setSituacaoFiltro] = useState("");
   const [tipoFiltro, setTipoFiltro] = useState("");
   const [busca, setBusca] = useState("");
+  // Truncava em 50 sem aviso (backend já pagina desde 2026-07-20; a UI nunca
+  // ganhou controle). Reseta pra 1 a cada troca de filtro/busca.
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<VeiculoRegulado | null>(null);
   const [form, setForm] = useState<VeiculoForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
 
   const listaQ = useQuery({
-    queryKey: ["tr-veiculos", situacaoFiltro, tipoFiltro, busca],
+    queryKey: ["tr-veiculos", situacaoFiltro, tipoFiltro, busca, page],
     queryFn: () =>
       api.veiculosRegulados.list({
         situacao: situacaoFiltro || undefined,
         tipo_servico: tipoFiltro || undefined,
         q: busca.trim() || undefined,
+        page,
+        page_size: PAGE_SIZE,
       }),
   });
+  const totalPages = Math.max(1, Math.ceil((listaQ.data?.total ?? 0) / PAGE_SIZE));
 
   // Vínculos para os selects (permissionário / empresa).
   const permsQ = useQuery({
@@ -317,7 +324,14 @@ export default function VeiculosReguladosPage() {
       <div className="flex flex-wrap gap-3">
         <div>
           <Label htmlFor="f_sit">Situação</Label>
-          <Select id="f_sit" value={situacaoFiltro} onChange={(e) => setSituacaoFiltro(e.target.value)}>
+          <Select
+            id="f_sit"
+            value={situacaoFiltro}
+            onChange={(e) => {
+              setSituacaoFiltro(e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="">Todas</option>
             {SITUACOES.map((s) => (
               <option key={s.value} value={s.value}>
@@ -328,7 +342,14 @@ export default function VeiculosReguladosPage() {
         </div>
         <div>
           <Label htmlFor="f_tipo">Tipo de serviço</Label>
-          <Select id="f_tipo" value={tipoFiltro} onChange={(e) => setTipoFiltro(e.target.value)}>
+          <Select
+            id="f_tipo"
+            value={tipoFiltro}
+            onChange={(e) => {
+              setTipoFiltro(e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="">Todos</option>
             {TIPOS.map((t) => (
               <option key={t.value} value={t.value}>
@@ -342,7 +363,10 @@ export default function VeiculosReguladosPage() {
           <Input
             id="f_q"
             value={busca}
-            onChange={(e) => setBusca(e.target.value)}
+            onChange={(e) => {
+              setBusca(e.target.value);
+              setPage(1);
+            }}
             placeholder="Placa, marca, modelo, RENAVAM ou chassi"
           />
         </div>
@@ -469,6 +493,32 @@ export default function VeiculosReguladosPage() {
             ))}
           </TBody>
         </Table>
+      )}
+
+      {listaQ.data && listaQ.data.total > 0 && (
+        <div className="flex flex-col items-start justify-between gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center">
+          <span className="tabular-nums">
+            {listaQ.data.total} veículos — página {page} de {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page === 1}
+              onClick={() => setPage(page - 1)}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              Próxima
+            </Button>
+          </div>
+        </div>
       )}
 
       <Dialog

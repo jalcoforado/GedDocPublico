@@ -40,6 +40,7 @@ const SITUACOES: { value: EmpresaSituacao; label: string }[] = [
   { value: "cassada", label: "Cassada" },
   { value: "inativa", label: "Inativa" },
 ];
+const PAGE_SIZE = 50;
 const TIPO_LABEL: Record<string, string> = Object.fromEntries(TIPOS.map((t) => [t.value, t.label]));
 const SIT_LABEL: Record<string, string> = Object.fromEntries(SITUACOES.map((s) => [s.value, s.label]));
 const SIT_INTENT: Record<string, "success" | "warning" | "info" | "danger" | "neutral"> = {
@@ -115,20 +116,26 @@ export default function EmpresasPage() {
   const [situacaoFiltro, setSituacaoFiltro] = useState("");
   const [tipoFiltro, setTipoFiltro] = useState("");
   const [busca, setBusca] = useState("");
+  // Truncava em 50 sem aviso (backend já pagina desde 2026-07-20; a UI nunca
+  // ganhou controle). Reseta pra 1 a cada troca de filtro/busca.
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Empresa | null>(null);
   const [form, setForm] = useState<EmpresaForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
 
   const listaQ = useQuery({
-    queryKey: ["tr-empresas", situacaoFiltro, tipoFiltro, busca],
+    queryKey: ["tr-empresas", situacaoFiltro, tipoFiltro, busca, page],
     queryFn: () =>
       api.empresas.list({
         situacao: situacaoFiltro || undefined,
         tipo_servico: tipoFiltro || undefined,
         q: busca.trim() || undefined,
+        page,
+        page_size: PAGE_SIZE,
       }),
   });
+  const totalPages = Math.max(1, Math.ceil((listaQ.data?.total ?? 0) / PAGE_SIZE));
 
   // Permissionários para o select de representante (opcional).
   const permsQ = useQuery({
@@ -279,7 +286,14 @@ export default function EmpresasPage() {
       <div className="flex flex-wrap gap-3">
         <div>
           <Label htmlFor="f_sit">Situação</Label>
-          <Select id="f_sit" value={situacaoFiltro} onChange={(e) => setSituacaoFiltro(e.target.value)}>
+          <Select
+            id="f_sit"
+            value={situacaoFiltro}
+            onChange={(e) => {
+              setSituacaoFiltro(e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="">Todas</option>
             {SITUACOES.map((s) => (
               <option key={s.value} value={s.value}>
@@ -290,7 +304,14 @@ export default function EmpresasPage() {
         </div>
         <div>
           <Label htmlFor="f_tipo">Tipo de serviço</Label>
-          <Select id="f_tipo" value={tipoFiltro} onChange={(e) => setTipoFiltro(e.target.value)}>
+          <Select
+            id="f_tipo"
+            value={tipoFiltro}
+            onChange={(e) => {
+              setTipoFiltro(e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="">Todos</option>
             {TIPOS.map((t) => (
               <option key={t.value} value={t.value}>
@@ -304,7 +325,10 @@ export default function EmpresasPage() {
           <Input
             id="f_q"
             value={busca}
-            onChange={(e) => setBusca(e.target.value)}
+            onChange={(e) => {
+              setBusca(e.target.value);
+              setPage(1);
+            }}
             placeholder="Razão social, nome fantasia ou CNPJ"
           />
         </div>
@@ -418,6 +442,32 @@ export default function EmpresasPage() {
             ))}
           </TBody>
         </Table>
+      )}
+
+      {listaQ.data && listaQ.data.total > 0 && (
+        <div className="flex flex-col items-start justify-between gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center">
+          <span className="tabular-nums">
+            {listaQ.data.total} empresas — página {page} de {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page === 1}
+              onClick={() => setPage(page - 1)}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              Próxima
+            </Button>
+          </div>
+        </div>
       )}
 
       <Dialog

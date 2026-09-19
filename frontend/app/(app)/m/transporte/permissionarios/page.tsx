@@ -41,6 +41,7 @@ const SITUACOES: { value: PermissionarioSituacao; label: string }[] = [
   { value: "inativo", label: "Inativo" },
 ];
 const CNH_CATS = ["A", "B", "AB", "C", "D", "E", "AC", "AD", "AE"];
+const PAGE_SIZE = 50;
 const TIPO_LABEL: Record<string, string> = Object.fromEntries(TIPOS.map((t) => [t.value, t.label]));
 const SIT_LABEL: Record<string, string> = Object.fromEntries(SITUACOES.map((s) => [s.value, s.label]));
 const SIT_INTENT: Record<string, "success" | "warning" | "info" | "danger" | "neutral"> = {
@@ -103,19 +104,26 @@ export default function PermissionariosPage() {
 
   const [situacaoFiltro, setSituacaoFiltro] = useState("");
   const [tipoFiltro, setTipoFiltro] = useState("");
+  // Truncava em 50 sem aviso (backend já pagina desde 2026-07-20; a UI nunca
+  // ganhou controle). Reseta pra 1 a cada troca de filtro — senão a página 3
+  // de "Todas" pode não existir mais sob "Ativo".
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Permissionario | null>(null);
   const [form, setForm] = useState<PermForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
 
   const listaQ = useQuery({
-    queryKey: ["tr-permissionarios", situacaoFiltro, tipoFiltro],
+    queryKey: ["tr-permissionarios", situacaoFiltro, tipoFiltro, page],
     queryFn: () =>
       api.permissionarios.list({
         situacao: situacaoFiltro || undefined,
         tipo_servico: tipoFiltro || undefined,
+        page,
+        page_size: PAGE_SIZE,
       }),
   });
+  const totalPages = Math.max(1, Math.ceil((listaQ.data?.total ?? 0) / PAGE_SIZE));
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["tr-permissionarios"] });
 
@@ -241,7 +249,14 @@ export default function PermissionariosPage() {
       <div className="flex flex-wrap gap-3">
         <div>
           <Label htmlFor="f_sit">Situação</Label>
-          <Select id="f_sit" value={situacaoFiltro} onChange={(e) => setSituacaoFiltro(e.target.value)}>
+          <Select
+            id="f_sit"
+            value={situacaoFiltro}
+            onChange={(e) => {
+              setSituacaoFiltro(e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="">Todas</option>
             {SITUACOES.map((s) => (
               <option key={s.value} value={s.value}>
@@ -252,7 +267,14 @@ export default function PermissionariosPage() {
         </div>
         <div>
           <Label htmlFor="f_tipo">Tipo de serviço</Label>
-          <Select id="f_tipo" value={tipoFiltro} onChange={(e) => setTipoFiltro(e.target.value)}>
+          <Select
+            id="f_tipo"
+            value={tipoFiltro}
+            onChange={(e) => {
+              setTipoFiltro(e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="">Todos</option>
             {TIPOS.map((t) => (
               <option key={t.value} value={t.value}>
@@ -366,6 +388,32 @@ export default function PermissionariosPage() {
             ))}
           </TBody>
         </Table>
+      )}
+
+      {listaQ.data && listaQ.data.total > 0 && (
+        <div className="flex flex-col items-start justify-between gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center">
+          <span className="tabular-nums">
+            {listaQ.data.total} permissionários — página {page} de {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page === 1}
+              onClick={() => setPage(page - 1)}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              Próxima
+            </Button>
+          </div>
+        </div>
       )}
 
       <Dialog
