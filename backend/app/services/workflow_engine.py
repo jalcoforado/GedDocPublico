@@ -601,6 +601,64 @@ async def migrar_instance(
     return instance
 
 
+async def encerrar_instance(
+    db: AsyncSession,
+    instance: WorkflowInstance,
+    *,
+    motivo: str,
+    usuario_id: int | None,
+) -> WorkflowInstance:
+    """Encerra `instance` fora do fluxo normal de transição do DSL.
+
+    Caso de uso: soft-delete da entidade dona (ocorrência, alvará, convocação)
+    — a instância não pode continuar `ativa` apontando para uma entidade que
+    não existe mais, senão o beat de SLA (`verificar_sla_workflows`) segue
+    alertando um registro excluído. Idempotente: instância já finalizada
+    não é reaberta nem duplica log/alertas.
+
+    Resolve os alertas de SLA pendentes do estado atual (mesmo bloco de
+    `executar_transicao`) e grava um `WorkflowTransicaoLog` sintético
+    (`estado_de == estado_para`) para a trilha não ficar muda sobre por que
+    a instância parou. COMMITA internamente — mesma convenção de
+    `iniciar`/`executar_transicao`: quem chama muta a entidade ANTES
+    (`oc.excluido = True`, ainda não commitado) e deixa este commit
+    persistir tudo junto, no mesmo ato.
+    """
+    if not instance.ativa:
+        return instance
+
+    estado = instance.estado_atual
+    log = WorkflowTransicaoLog(
+        tenant_id=instance.tenant_id,
+        id_workflow_instance=instance.id,
+        estado_de=estado,
+        estado_para=estado,
+        transicao_label=f"ENCERRAMENTO ({motivo})",
+        id_usuario=usuario_id,
+        contexto_snapshot={"encerramento": True, "motivo": motivo},
+        executada_em=datetime.utcnow(),
+    )
+    db.add(log)
+
+    instance.ativa = False
+    instance.finalizada_em = datetime.utcnow()
+
+    await db.execute(
+        update(WorkflowSlaAlerta)
+        .where(
+            WorkflowSlaAlerta.id_workflow_instance == instance.id,
+            WorkflowSlaAlerta.tenant_id == instance.tenant_id,
+            WorkflowSlaAlerta.estado == estado,
+            WorkflowSlaAlerta.resolvido_em.is_(None),
+        )
+        .values(resolvido_em=datetime.utcnow(), resolucao=motivo)
+    )
+
+    await db.commit()
+    await db.refresh(instance)
+    return instance
+
+
 async def carregar_log(
     db: AsyncSession, instance_id: int, tenant_id: int
 ) -> list[WorkflowTransicaoLog]:

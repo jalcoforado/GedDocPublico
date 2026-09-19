@@ -1310,6 +1310,13 @@ async def excluir_alvara(
     a = await obter_alvara(db, tenant_id=tenant_id, alvara_id=alvara_id)
     a.excluido = True
     a.atualizado_em = datetime.utcnow()
+
+    from . import transporte_workflow as _wf
+
+    await _wf.encerrar_instancia_de_entidade(
+        db, tenant_id=tenant_id, entidade_tipo="alvara", entidade_id=a.id,
+        motivo="excluido", usuario_id=None,
+    )
     await db.commit()
 
 
@@ -4840,6 +4847,13 @@ async def excluir_ocorrencia(
         raise HTTPException(409, "Só se exclui ocorrência ainda registrada")
     oc.excluido = True
     oc.atualizado_em = datetime.utcnow()
+
+    from . import transporte_workflow as _wf
+
+    await _wf.encerrar_instancia_de_entidade(
+        db, tenant_id=tenant_id, entidade_tipo="ocorrencia", entidade_id=oc.id,
+        motivo="excluido", usuario_id=None,
+    )
     await db.flush()
 
 
