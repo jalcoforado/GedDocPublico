@@ -27,10 +27,13 @@ class AssuntoBase(BaseModel):
     id_tipo_processo: int
     exige_processo_pai: bool = False
     ativo: bool = True
+    codigo: str | None = Field(default=None, max_length=50)
 
 
 class AssuntoCreate(AssuntoBase):
-    pass
+    # E2 (benchmark SUiTE) — `nivel` NÃO entra aqui: é calculada no router a
+    # partir do pai (raiz = 1), nunca recebida do cliente.
+    id_assunto_pai: int | None = None
 
 
 class AssuntoUpdate(BaseModel):
@@ -38,11 +41,18 @@ class AssuntoUpdate(BaseModel):
     id_tipo_processo: int | None = None
     exige_processo_pai: bool | None = None
     ativo: bool | None = None
+    codigo: str | None = Field(default=None, max_length=50)
+    # `exclude_unset=True` no router já distingue "campo ausente" (não
+    # mexe no pai) de "id_assunto_pai: null" (torna raiz) — não precisa de
+    # flag extra.
+    id_assunto_pai: int | None = None
 
 
 class AssuntoOut(AssuntoBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    id_assunto_pai: int | None = None
+    nivel: int
 
 
 class TipoAnexoBase(BaseModel):

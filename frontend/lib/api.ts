@@ -216,6 +216,11 @@ export interface Assunto {
   id_tipo_processo: number;
   exige_processo_pai: boolean;
   ativo: boolean;
+  /** E2 (benchmark SUiTE) — hierarquia local por tenant. Raiz = 1; sempre
+   * calculada pelo backend a partir do pai, nunca enviada em create/update. */
+  id_assunto_pai: number | null;
+  nivel: number;
+  codigo: string | null;
 }
 export interface TipoAnexo {
   id: number;

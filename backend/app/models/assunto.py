@@ -33,6 +33,15 @@ class Assunto(Base):
     exige_processo_pai: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # E2 (benchmark SUiTE) — hierarquia local (por tenant), autoreferente.
+    # `nivel` é sempre calculada no service a partir do pai (raiz = 1), nunca
+    # recebida do cliente. Sem coluna `origem`: essa fatia não tem catálogo
+    # global (ver docstring da migration 0118) — nada para contrastar ainda.
+    id_assunto_pai: Mapped[int | None] = mapped_column(
+        ForeignKey("protocolos.assunto.id"), nullable=True
+    )
+    nivel: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    codigo: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
 class TipoAnexo(Base):
