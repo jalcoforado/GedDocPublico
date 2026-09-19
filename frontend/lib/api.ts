@@ -3448,8 +3448,13 @@ export const api = {
       request<void>(`/transporte-regulado/permissionarios/${id}`, { method: "DELETE" }),
   },
   empresas: {
-    list: (params?: { situacao?: string; tipo_servico?: string; q?: string }) =>
-      request<Paginated<Empresa>>(`/transporte-regulado/empresas${qs(params ?? {})}`),
+    list: (params?: {
+      situacao?: string;
+      tipo_servico?: string;
+      q?: string;
+      page?: number;
+      page_size?: number;
+    }) => request<Paginated<Empresa>>(`/transporte-regulado/empresas${qs(params ?? {})}`),
     get: (id: number) => request<Empresa>(`/transporte-regulado/empresas/${id}`),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     create: (data: any) =>
@@ -3485,6 +3490,8 @@ export const api = {
       id_permissionario?: number;
       id_empresa?: number;
       q?: string;
+      page?: number;
+      page_size?: number;
     }) => request<Paginated<VeiculoRegulado>>(`/transporte-regulado/veiculos${qs(params ?? {})}`),
     get: (id: number) => request<VeiculoRegulado>(`/transporte-regulado/veiculos/${id}`),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

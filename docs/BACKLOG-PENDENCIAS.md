@@ -878,14 +878,22 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   primeiro e devolvia 422. Consertadas, e agora travadas por
 >   `tests/test_guarda_ordem_rotas.py`, que varre a aplicação inteira. Na primeira execução a guarda
 >   acusou **zero** rotas sombreadas fora do transporte — a dívida estava contida aqui.
-> - **ABERTO — teto de 50 registros nas telas do transporte.** O commit `628ca34` (2026-07-20) passou
->   13 endpoints a devolver `Paginated`, e o `lib/api.ts` seguiu declarando array por onze dias. Como
->   `request<T>()` faz cast sem validar, o `tsc` ficava verde e o navegador estourava com
->   `TypeError: ….map is not a function` — e, onde o código fazia `data?.length`, a tela dizia
->   "nenhum registro" com registros no banco. Os 12 métodos agora declaram `Paginated<T>` e as telas
->   consomem `.items`. **Consequência que não foi resolvida:** essas telas não têm UI de paginação e o
->   `page_size` padrão é 50, então exibem no máximo 50 registros. Não é regressão (antes exibiam zero
->   ou estouravam), mas é teto real. Resolver exige decidir UI de paginação — decisão de produto.
+> - ~~**ABERTO — teto de 50 registros nas telas do transporte.**~~ **FECHADO em 2026-09-19**, nas
+>   4 telas de maior risco real (permissionários, empresas, veículos, alvarás — as que escalam com o
+>   tamanho do município). O commit `628ca34` (2026-07-20) passou 13 endpoints a devolver `Paginated`,
+>   e o `lib/api.ts` seguiu declarando array por onze dias — consertado à parte. A UI, porém, nunca
+>   ganhou controle de página: `page_size` padrão 50, `.items` renderizado cru, sem aviso de que
+>   podia haver mais. Decisão de produto (Jorge): reaproveitar o padrão manual Anterior/Próxima já
+>   validado em `processos/page.tsx`, não estrear o componente `<Pagination>` (pronto desde ago/2026,
+>   mas nunca usado em produção nenhuma) nesta fatia. Cada tela ganhou `page` em estado local (reseta
+>   para 1 a cada troca de filtro/busca — senão a página 3 de "Todas" pode não existir mais sob um
+>   filtro que devolve menos linhas) e o rodapé "{total} — página {page} de {totalPages}".
+>   **Deliberadamente fora desta fatia:** as sub-listas por registro (documentos/avaliações/vistorias
+>   de um veículo; documentos/responsáveis/veículos de um alvará) — 7 telas/modais a mais, todas sem
+>   `page`/`page_size` sequer na assinatura do `api.ts`, e o risco prático de estourar 50 num recurso
+>   de UM veículo/alvará é bem menor que numa listagem do município inteiro. O 13º endpoint do commit
+>   `628ca34` (`listar_alvaras_veiculo`) segue sem nenhum consumidor no frontend — achado no
+>   levantamento, não deste PR.
 > - ~~**ABERTO — a busca de alvarás é client-side sobre a lista já truncada.**~~ **FECHADO em
 >   2026-08-04.** `GET /transporte-regulado/alvaras` passou a aceitar `q` (substring em
 >   `numero_alvara`, `lower(...) LIKE lower(...)`, idioma de `routers/_crud.py`), e a tela manda o
