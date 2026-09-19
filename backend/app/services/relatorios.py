@@ -27,7 +27,13 @@ from ..schemas.relatorio import (
 
 
 def _apply_filters(stmt, f: RelatorioFiltro, tenant_id: int):
-    stmt = stmt.where(Processo.excluido.is_(False), Processo.tenant_id == tenant_id)
+    # E3 — rascunho não tem numero_processo; relatório é documento numerado
+    # (PDF/CSV), então fica fora por padrão, mesma política de list_processos.
+    stmt = stmt.where(
+        Processo.excluido.is_(False),
+        Processo.tenant_id == tenant_id,
+        Processo.situacao != "rascunho",
+    )
     if f.id_unidade:
         stmt = stmt.where(
             (Processo.id_unidade_proprietaria == f.id_unidade)

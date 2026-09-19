@@ -150,6 +150,7 @@ function processo(overrides: Partial<ProcessoDetail> = {}): ProcessoDetail {
     numero_processo: "P000042/2026",
     nup: null,
     numero_origem: null,
+    situacao: "protocolado",
     data_hora_abertura: "2026-05-01T12:00:00",
     ativo: true,
     publico: true,

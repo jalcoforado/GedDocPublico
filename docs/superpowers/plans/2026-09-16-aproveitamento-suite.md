@@ -403,6 +403,14 @@ rascunhos gravados, voltar significa numerá-los ou apagá-los.
 > mexer na numeração do protocolo, vale confirmar qual das duas coisas o
 > usuário quer. Q3 da §6.
 
+> **2026-09-19 — escopada.** Jorge respondeu Q3 contra a recomendação acima
+> (§6). O desenho completo — migration, ponto de emissão do número, o que
+> cada PDF/busca/listagem faz com rascunho, e o que ficou deliberadamente
+> fora — está em
+> [`docs/superpowers/specs/2026-09-19-e3-rascunho-sem-numero-design.md`](../specs/2026-09-19-e3-rascunho-sem-numero-design.md).
+> Esta seção continua valendo como motivação; aquele documento é a fonte
+> sobre o *como*.
+
 ---
 
 ## 6. Decisões de negócio pendentes

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, FileText, Lock, Pause, Plus, SearchX } from "lucide-react";
+import { CheckCircle2, FileText, Lock, Pause, Pencil, Plus, SearchX } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -65,6 +65,11 @@ function filtrosDaUrl(sp: URLSearchParams): ProcessoListFilters {
       ? (sp.get("escopo") as EscopoProcesso)
       : undefined,
     favoritos: sp.get("favoritos") === "1" ? true : undefined,
+    // E3 — ausente = exclui rascunho (default do backend). Mesmo cuidado do
+    // `escopo` acima: valor fora do enum vira `undefined`, não 422.
+    situacao: ["rascunho", "protocolado", "todos"].includes(sp.get("situacao") ?? "")
+      ? (sp.get("situacao") as ProcessoListFilters["situacao"])
+      : undefined,
   };
 }
 
@@ -78,6 +83,7 @@ function urlDosFiltros(f: ProcessoListFilters, page: number): string {
   if (f.ate) sp.set("ate", f.ate.slice(0, 10));
   sp.set("ativos", f.apenas_ativos ? "1" : "0");
   if (f.favoritos) sp.set("favoritos", "1");
+  if (f.situacao) sp.set("situacao", f.situacao);
   if (page > 1) sp.set("page", String(page));
   return sp.toString();
 }
@@ -263,6 +269,28 @@ export default function ProcessosPage() {
                 ))}
               </select>
             </div>
+            <div>
+              <Label htmlFor="situacao">Situação</Label>
+              {/* E3 — ausente = protocolados (comportamento de hoje). Rascunho
+                  é workflow interno: não some da tela, só não entra na conta
+                  padrão de "processos" que o resto do sistema já espera. */}
+              <select
+                id="situacao"
+                value={draft.situacao ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    situacao: (e.target.value || undefined) as
+                      | ProcessoListFilters["situacao"],
+                  })
+                }
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Protocolados (padrão)</option>
+                <option value="rascunho">Rascunhos</option>
+                <option value="todos">Todos</option>
+              </select>
+            </div>
             <div className="flex items-center gap-2">
               <Checkbox
                 id="ativos"
@@ -329,7 +357,11 @@ export default function ProcessosPage() {
                 <div className="flex items-center gap-1">
                   <FavoritoStar processo={p} size="sm" />
                   <div>
-                    {p.nup ? (
+                    {p.situacao === "rascunho" ? (
+                      <span className="font-sans italic text-muted-foreground">
+                        Rascunho
+                      </span>
+                    ) : p.nup ? (
                       <>
                         <div>{p.nup}</div>
                         <div className="text-[10px] text-foreground-muted">
@@ -387,6 +419,11 @@ export default function ProcessosPage() {
               </TD>
               <TD>
                 <div className="flex flex-wrap gap-1">
+                  {p.situacao === "rascunho" && (
+                    <Badge intent="warning" icon={Pencil}>
+                      Rascunho
+                    </Badge>
+                  )}
                   {p.ativo ? (
                     <Badge intent="success" icon={CheckCircle2}>
                       Ativo

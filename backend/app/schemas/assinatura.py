@@ -133,6 +133,6 @@ class PendenciaAssinatura(BaseModel):
     anexo_descricao: str | None
     id_solicitacao: int
     id_processo: int
-    numero_processo: str
+    numero_processo: str | None  # E3 — None se processo ainda é rascunho
     nome_solicitante: str | None
     dt_inicio: datetime

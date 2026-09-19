@@ -177,6 +177,9 @@ async def list_processos(
     id_unidade_contexto: int | None = None,
     favoritos: bool = False,
     id_marcador: int | None = None,
+    # E3 — None (default) exclui rascunho, mesmo espírito de apenas_raiz em
+    # E2: oculto até pedir. "rascunho" só rascunhos. "todos" sem filtro.
+    situacao: str | None = None,
 ) -> tuple[list[ProcessoListItem], int]:
     base = _base_select(tenant_id, usuario_id=id_usuario_contexto)
 
@@ -271,6 +274,10 @@ async def list_processos(
             )
             .exists()
         )
+    if situacao is None:
+        base = base.where(Processo.situacao != "rascunho")
+    elif situacao != "todos":
+        base = base.where(Processo.situacao == situacao)
     if apenas_ativos:
         base = base.where(Processo.ativo.is_(True))
     if desde:
@@ -305,6 +312,7 @@ def _row_to_list(r) -> ProcessoListItem:
         numero_processo=p.numero_processo,
         nup=p.nup,
         numero_origem=p.numero_origem,
+        situacao=p.situacao,
         data_hora_abertura=p.data_hora_abertura,
         ativo=p.ativo,
         publico=p.publico,

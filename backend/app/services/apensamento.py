@@ -93,6 +93,13 @@ async def apensar(
         db, id_processo_principal, tenant_id, rotulo="Processo principal"
     )
 
+    # E3 — rascunho ainda não é uma peça protocolada; não pode ser apensado
+    # nem receber apensamento.
+    if filho.situacao == "rascunho" or pai.situacao == "rascunho":
+        raise ApensamentoError(
+            "Processo em rascunho não pode ser apensado — tramite para gerar o número antes."
+        )
+
     if filho.id_processo_pai is not None:
         raise ApensamentoError(
             "Processo já está apensado. Desapense antes de apensar a outro."

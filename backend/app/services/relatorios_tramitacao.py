@@ -38,7 +38,13 @@ from ..schemas.relatorio_tramitacao import (
 
 
 def _filter_processos(stmt, f: RelatorioFiltro, tenant_id: int):
-    stmt = stmt.where(Processo.excluido.is_(False), Processo.tenant_id == tenant_id)
+    # E3 — rascunho não tramitou (só tem a movimentação de ABERTURA) e não
+    # tem numero_processo; fora do relatório de tramitação por padrão.
+    stmt = stmt.where(
+        Processo.excluido.is_(False),
+        Processo.tenant_id == tenant_id,
+        Processo.situacao != "rascunho",
+    )
     if f.id_unidade:
         stmt = stmt.where(
             (Processo.id_unidade_proprietaria == f.id_unidade)

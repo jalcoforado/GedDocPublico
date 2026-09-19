@@ -238,10 +238,13 @@ export interface AssuntoTipoAnexo {
 // Fase 3
 export interface ProcessoListItem {
   id: number;
-  numero_processo: string;
+  /** E3 — null enquanto situacao='rascunho' (numerado só no primeiro encaminhamento) */
+  numero_processo: string | null;
   /** Fase P2 — NUP federal, só preenchido quando tenant tem usar_nup_federal=true */
   nup?: string | null;
   numero_origem: string | null;
+  /** E3 — 'rascunho' | 'protocolado' */
+  situacao: "rascunho" | "protocolado";
   data_hora_abertura: string;
   ativo: boolean;
   publico: boolean;
@@ -496,6 +499,8 @@ export interface ProcessoListFilters {
   favoritos?: boolean;
   /** F5 — filtra por marcador. */
   id_marcador?: number;
+  /** E3 — "rascunho" | "protocolado" | "todos". Ausente = exclui rascunho. */
+  situacao?: "rascunho" | "protocolado" | "todos";
 }
 
 export interface ProcessoCreateInput {
@@ -512,6 +517,8 @@ export interface ProcessoCreateInput {
   virtual?: boolean;
   /** "balcao"/"portal" vêm dos fluxos dedicados; aqui só interno|email */
   canal_entrada?: "interno" | "email";
+  /** E3 — nasce sem número (situacao='rascunho'); emitido no 1º encaminhamento */
+  rascunho?: boolean;
 }
 
 export interface EncaminharInput {
@@ -5153,7 +5160,8 @@ export interface PendenciaAssinatura {
   anexo_descricao: string | null;
   id_solicitacao: number;
   id_processo: number;
-  numero_processo: string;
+  /** E3 — null se o processo ainda é rascunho */
+  numero_processo: string | null;
   nome_solicitante: string;
   dt_inicio: string;
 }
@@ -5722,7 +5730,8 @@ export interface SugestaoCcd {
 
 export interface Temporalidade {
   id_processo: number;
-  numero_processo: string;
+  /** E3 — null se o processo ainda é rascunho */
+  numero_processo: string | null;
   id_ccd_classe: number | null;
   classe_codigo: string | null;
   classe_nome: string | null;

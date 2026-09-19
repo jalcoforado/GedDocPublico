@@ -41,12 +41,18 @@ function fmtDateTime(s: string | null) {
 
 interface Props {
   processoId: number;
-  numeroProcesso: string;
+  /** E3 — null se o processo ainda é rascunho (backend recusa apensar) */
+  numeroProcesso: string | null;
   /** id_processo_pai vindo do detail (null se não está apensado) */
   idProcessoPai: number | null;
 }
 
-export function ProcessoApensados({ processoId, numeroProcesso, idProcessoPai }: Props) {
+export function ProcessoApensados({
+  processoId,
+  numeroProcesso: numeroProcessoRaw,
+  idProcessoPai,
+}: Props) {
+  const numeroProcesso = numeroProcessoRaw ?? "Rascunho";
   const qc = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
@@ -371,7 +377,9 @@ function ApensarDialog({
       .filter((p) => p.id !== processoId)
       .map((p) => ({
         value: p.id,
-        label: p.nup ?? p.numero_processo,
+        // A lista já exclui rascunho por padrão (sem `situacao` no filtro);
+        // o fallback é só para o tsc, nunca deveria disparar em runtime.
+        label: p.nup ?? p.numero_processo ?? "Rascunho",
         hint: p.manifestante ?? undefined,
       }));
   }, [processosQ.data, processoId]);

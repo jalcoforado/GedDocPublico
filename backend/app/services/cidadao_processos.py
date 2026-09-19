@@ -71,7 +71,15 @@ def _base_select(tenant_id: int):
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
         .join(LocalAtual, LocalAtual.id == Processo.id_local_atual, isouter=True)
-        .where(Processo.excluido.is_(False), Processo.tenant_id == tenant_id)
+        .where(
+            Processo.excluido.is_(False),
+            Processo.tenant_id == tenant_id,
+            # E3 — rascunho é workflow interno; um processo aberto por
+            # servidor para o mesmo manifestante nunca aparece pro cidadão
+            # antes de tramitar (mesmo achado a corrigir aqui: o join é por
+            # cpf_cnpj do manifestante, não por quem abriu).
+            Processo.situacao != "rascunho",
+        )
     )
 
 

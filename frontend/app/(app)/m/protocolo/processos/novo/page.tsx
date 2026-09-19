@@ -300,7 +300,12 @@ export default function NovoProcessoPage() {
       } catch {
         // ignore
       }
-      toast.success(`Processo ${p.numero_processo} criado.`);
+      // E3 — rascunho nasce sem número; a mensagem não pode prometer um.
+      toast.success(
+        p.numero_processo
+          ? `Processo ${p.numero_processo} criado.`
+          : "Processo salvo como rascunho — sem número ainda.",
+      );
       router.push(`/m/protocolo/processos/${p.id}`);
     },
     onError: (e: Error) => {
@@ -309,15 +314,17 @@ export default function NovoProcessoPage() {
     },
   });
 
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setErr(null);
+  function validar(): boolean {
     if (!form.id_assunto || !form.id_manifestante || !form.id_unidade_proprietaria) {
       setErr("Preencha manifestante, assunto e unidade proprietária.");
       window.scrollTo({ top: 0, behavior: "smooth" });
-      return;
+      return false;
     }
-    createM.mutate({
+    return true;
+  }
+
+  function montarPayload(rascunho: boolean): ProcessoCreateInput {
+    return {
       id_assunto: Number(form.id_assunto),
       id_manifestante: Number(form.id_manifestante),
       id_unidade_proprietaria: Number(form.id_unidade_proprietaria),
@@ -328,7 +335,24 @@ export default function NovoProcessoPage() {
       externo: form.externo,
       canal_entrada: form.canal_entrada,
       virtual: true,
-    });
+      rascunho,
+    };
+  }
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    if (!validar()) return;
+    createM.mutate(montarPayload(false));
+  }
+
+  // E3 (benchmark SUiTE) — distinto do rascunho LOCAL acima (autosave no
+  // navegador, `DRAFT_KEY`): este cria o processo de verdade no backend,
+  // só sem número ainda. O número só é emitido no primeiro encaminhamento.
+  function salvarComoRascunho() {
+    setErr(null);
+    if (!validar()) return;
+    createM.mutate(montarPayload(true));
   }
 
   function descartarRascunho() {
@@ -639,6 +663,16 @@ export default function NovoProcessoPage() {
                 Cancelar
               </Button>
             </Link>
+            <Button
+              type="button"
+              variant="secondary"
+              size="md"
+              disabled={createM.isPending}
+              onClick={salvarComoRascunho}
+              title="Cria o processo sem número — o número é emitido só quando alguém tramitar pela primeira vez."
+            >
+              Salvar como rascunho
+            </Button>
             <Button type="submit" disabled={createM.isPending} size="md">
               {createM.isPending ? (
                 <>

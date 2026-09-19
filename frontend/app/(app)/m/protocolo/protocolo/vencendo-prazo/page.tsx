@@ -127,7 +127,7 @@ export default function VencendoPrazoPage() {
                         href={`/m/protocolo/processos/${t.id_processo}`}
                         className="font-mono font-semibold text-primary hover:underline"
                       >
-                        {t.numero_processo}
+                        {t.numero_processo ?? "Rascunho"}
                       </Link>
                     </td>
                     <td className="px-3 py-2">
