@@ -250,7 +250,8 @@ async def test_excluir_debito_fora_de_status_permitido_409(admin_engine):
                 payload=_payload_debito(forn, nat, conta, unidade))
         async with _sm(admin_engine)() as s:
             await s.execute(text(
-                "UPDATE pagamentos.debito SET status='VALIDADO' WHERE id=:i"), {"i": d.id})
+                "UPDATE pagamentos.debito SET situacao_tramitacao='AGUARDANDO_GESTOR' WHERE id=:i"),
+                {"i": d.id})
             await s.commit()
         async with _sm(admin_engine)() as s:
             with pytest.raises(HTTPException) as exc:

@@ -116,7 +116,7 @@ async def _out(db, tenant_id: int, debitos) -> list[DebitoOut]:
 
 
 @debitos_router.get("", response_model=list[DebitoOut])
-async def list_debitos(status_f: str | None = None, situacao_tramitacao: str | None = None,
+async def list_debitos(situacao_tramitacao: str | None = None,
                        meus: bool = False,
                        id_fonte: int | None = None, id_natureza: int | None = None,
                        id_fornecedor: int | None = None, id_contrato: int | None = None,
@@ -125,7 +125,7 @@ async def list_debitos(status_f: str | None = None, situacao_tramitacao: str | N
                        tenant_id: int = Depends(require_tenant_id),
                        db: AsyncSession = Depends(get_db)):
     rows = await svc.listar_debitos(
-        db, tenant_id=tenant_id, status_f=status_f, tramitacao_f=situacao_tramitacao,
+        db, tenant_id=tenant_id, tramitacao_f=situacao_tramitacao,
         solicitante_id=usuario.id if meus else None, id_fonte=id_fonte, id_natureza=id_natureza,
         id_fornecedor=id_fornecedor, id_contrato=id_contrato, urgente=urgente, competencia=competencia)
     return await _out(db, tenant_id, rows)
@@ -134,7 +134,7 @@ async def list_debitos(status_f: str | None = None, situacao_tramitacao: str | N
 # Onda C (C1.1). Precisa vir ANTES de `/{debito_id}`: registrada depois, a rota
 # dinâmica capturaria "exportar.csv" e devolveria 422 ao tentar convertê-la em int.
 @debitos_router.get("/exportar.csv")
-async def exportar_debitos_csv(status_f: str | None = None, meus: bool = False,
+async def exportar_debitos_csv(meus: bool = False,
                                id_fonte: int | None = None, id_natureza: int | None = None,
                                id_fornecedor: int | None = None, id_contrato: int | None = None,
                                urgente: bool | None = None, competencia: str | None = None,
@@ -148,12 +148,12 @@ async def exportar_debitos_csv(status_f: str | None = None, meus: bool = False,
     pt-BR (ver `services/pagamentos_export`).
     """
     filtros = dict(
-        status_f=status_f, solicitante_id=usuario.id if meus else None,
+        solicitante_id=usuario.id if meus else None,
         id_fonte=id_fonte, id_natureza=id_natureza, id_fornecedor=id_fornecedor,
         id_contrato=id_contrato, urgente=urgente, competencia=competencia,
     )
     conteudo = await export.csv_debitos(db, tenant_id=tenant_id, **filtros)
-    nome = export.nome_arquivo_debitos(status_f=status_f, competencia=competencia)
+    nome = export.nome_arquivo_debitos(competencia=competencia)
     return Response(
         content=conteudo,
         media_type="text/csv; charset=utf-8",
@@ -938,9 +938,13 @@ async def minha_fila(usuario: Usuario = Depends(require_any_permission(*PERMS_LE
             db, tenant_id=tenant_id, tramitacao_f=est.AGUARDANDO_AUTORIDADE)
         fila.autorizar = await _out(db, tenant_id, rows)
     if tem("pagamento_autorizar") or tem("pagamento_pagar"):
-        debitos_ativos = []
-        for st in (svc.ST_AUTORIZADO, *svc.EM_TESOURARIA):
-            debitos_ativos.extend(await svc.listar_debitos(db, tenant_id=tenant_id, status_f=st))
+        # Autorizado, mas ainda não pago por completo — mesmo recorte de
+        # (ST_AUTORIZADO, *EM_TESOURARIA) do status legado, agora como UMA
+        # query com filtro client-side em vez de N queries por valor legado.
+        _EM_ANDAMENTO = (est.NAO_INICIADA, est.PROGRAMADA, est.EM_PROCESSAMENTO, est.PAGA_PARCIAL)
+        candidatos = await svc.listar_debitos(
+            db, tenant_id=tenant_id, tramitacao_f=est.AUTORIZADA)
+        debitos_ativos = [d for d in candidatos if d.situacao_pagamento in _EM_ANDAMENTO]
         nomes = await svc.nomes_fornecedores(db, tenant_id=tenant_id,
                                              ids={d.id_fornecedor for d in debitos_ativos})
 

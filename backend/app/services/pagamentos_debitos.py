@@ -124,7 +124,8 @@ async def detectar_duplicidade(db, *, tenant_id: int, id_fornecedor: int, numero
         Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
         Debito.id_fornecedor == id_fornecedor, Debito.numero_nf == numero_nf,
         Debito.valor_total == valor_total, Debito.competencia == competencia,
-        Debito.status.notin_(("REJEITADO", "CANCELADO")))
+        Debito.situacao_tramitacao.notin_((est.REJEITADA_GESTOR, est.INDEFERIDA_AUTORIDADE,
+                                           est.CANCELADA)))
     if numero_ne:
         stmt = stmt.where(Debito.numero_ne == numero_ne)
     if id_contrato is not None:
@@ -179,17 +180,15 @@ async def obter_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
     return d
 
 
-async def listar_debitos(db: AsyncSession, *, tenant_id: int, status_f: str | None = None,
+async def listar_debitos(db: AsyncSession, *, tenant_id: int,
                          tramitacao_f: str | None = None,
                          solicitante_id: int | None = None, id_fonte: int | None = None,
                          id_natureza: int | None = None, id_fornecedor: int | None = None,
                          id_contrato: int | None = None, urgente: bool | None = None,
                          competencia: str | None = None) -> list[Debito]:
     """Lista débitos com filtros do painel (RF-PNL-02): fonte, categoria (natureza),
-    credor, contrato, status, urgência e competência."""
+    credor, contrato, tramitação, urgência e competência."""
     stmt = select(Debito).where(Debito.tenant_id == tenant_id, Debito.excluido.is_(False))
-    if status_f:
-        stmt = stmt.where(Debito.status == status_f)
     if tramitacao_f:
         stmt = stmt.where(Debito.situacao_tramitacao == tramitacao_f)
     if solicitante_id is not None:
@@ -315,7 +314,9 @@ async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
 
 async def excluir_debito(db: AsyncSession, *, tenant_id: int, debito_id: int) -> None:
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    if d.status not in ("RASCUNHO", "REJEITADO", "CANCELADO"):
+    if d.situacao_tramitacao not in (
+        est.RASCUNHO, est.REJEITADA_GESTOR, est.INDEFERIDA_AUTORIDADE, est.CANCELADA,
+    ):
         raise PagamentoDebitoError("Só é possível excluir rascunhos/rejeitados/cancelados.",
                                    status.HTTP_409_CONFLICT)
     d.excluido = True; d.atualizado_em = _utcnow(); await db.commit()
@@ -371,10 +372,17 @@ EM_TESOURARIA = (ST_ENVIADO_TESOURARIA, ST_EM_PROCESSAMENTO, ST_PAGO_PARCIAL)  #
 COM_RESERVA = (ST_AUTORIZADO, *EM_TESOURARIA, ST_ESTORNADO)
 
 
-def _exigir_status(d: Debito, *esperados: str) -> None:
-    if d.status not in esperados:
+def _exigir_pre_autorizacao(d: Debito) -> None:
+    """`confirmar_liquidacao` é permitida em qualquer etapa pré-autorização e
+    não-terminal — equivalente aos 4 status legados que a versão anterior
+    desta guarda listava (`RASCUNHO/DEVOLVIDO/EM_VALIDACAO/VALIDADO`), só que
+    por tramitação em vez de status: o `not in (TERMINAIS ∪ {AUTORIZADA})`
+    cobre exatamente RASCUNHO + os 3 AJUSTE_* + os 3 AGUARDANDO_* — os mesmos
+    7 estados que os 4 valores legados mapeavam (§4.5)."""
+    if d.situacao_tramitacao in est.TERMINAIS or d.situacao_tramitacao == est.AUTORIZADA:
         raise PagamentoDebitoError(
-            f"Transição inválida: débito está '{d.status}' (esperado: {', '.join(esperados)}).",
+            f"Transição inválida: débito está em '{d.situacao_tramitacao}' "
+            "(a liquidação só pode ser confirmada antes da autorização).",
             status.HTTP_409_CONFLICT)
 
 
@@ -739,7 +747,7 @@ async def confirmar_liquidacao(db: AsyncSession, *, tenant_id: int, debito_id: i
     edição material de `data_liquidacao` (`atualizar_debito` em AJUSTE_*),
     que regrava o marco e deixa histórico `MARCO_REGRAVADO`."""
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    _exigir_status(d, ST_RASCUNHO, ST_DEVOLVIDO, ST_EM_VALIDACAO, ST_VALIDADO)
+    _exigir_pre_autorizacao(d)
     data_liquidacao = data_liquidacao or _utcnow().date()
 
     contrato = await cron.obter_contrato(db, tenant_id=tenant_id, id_contrato=d.id_contrato)
