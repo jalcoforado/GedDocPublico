@@ -19,7 +19,8 @@ from ..schemas.pagamentos import (
 )
 from . import pagamentos_autorizacao as aut
 from . import pagamentos_caixa as caixa
-from .pagamentos_debitos import AUTORIZAVEIS, EM_TESOURARIA, ST_AUTORIZADO, ST_ESTORNADO, nomes_fornecedores, nomes_usuarios
+from . import pagamentos_estados as est
+from .pagamentos_debitos import nomes_fornecedores, nomes_usuarios
 
 
 async def _contas_by_id(db, *, tenant_id: int, ids: set[int]) -> dict[int, ContaBancaria]:
@@ -109,7 +110,7 @@ async def fila_autorizacao(db: AsyncSession, *, tenant_id: int) -> list[FilaAuto
     urgentes primeiro, depois competência asc, valor desc."""
     debitos = list((await db.execute(select(Debito).where(
         Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
-        Debito.status.in_(AUTORIZAVEIS)))).scalars().all())
+        Debito.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE))).scalars().all())
     if not debitos:
         return []
 
@@ -151,9 +152,12 @@ async def fila_autorizacao(db: AsyncSession, *, tenant_id: int) -> list[FilaAuto
 async def fila_liberacao(db: AsyncSession, *, tenant_id: int) -> list[FilaLiberacaoGrupo]:
     """Parcelas A_PAGAR de débitos autorizados/na tesouraria, agrupadas por conta
     (nome asc); dentro do grupo, vencimento asc."""
+    # "Tem reserva" (mesmo predicado de pagamentos_autorizacao.py): AUTORIZADA
+    # e ainda não PAGA — não é sobre fila, é sobre a reserva na conta pagadora.
     debitos = list((await db.execute(select(Debito).where(
         Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
-        Debito.status.in_((ST_AUTORIZADO, ST_ESTORNADO, *EM_TESOURARIA))))).scalars().all())
+        Debito.situacao_tramitacao == est.AUTORIZADA,
+        Debito.situacao_pagamento != est.PAGA))).scalars().all())
     if not debitos:
         return []
     debitos_por_id = {d.id: d for d in debitos}
