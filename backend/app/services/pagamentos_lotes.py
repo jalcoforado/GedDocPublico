@@ -16,7 +16,7 @@ estorno) — o lote é o caminho recomendado, não o único fisicamente possíve
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import status
@@ -25,7 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import ContaBancaria, Debito, DebitoHistorico, LotePagamento, LotePagamentoParcela, Parcela
 from . import pagamentos_cronologia as cron
-from .pagamentos_debitos import PagamentoDebitoError, obter_debito
+from . import pagamentos_estados as est
+from .pagamentos_debitos import PagamentoDebitoError, _registrar_transicao, obter_debito
+from .pagamentos_guardas import SegregacaoError, assert_segregacao
 
 
 def _utcnow() -> datetime:
@@ -238,6 +240,20 @@ async def remover_parcela(db: AsyncSession, *, tenant_id: int, lote_id: int,
     return lote
 
 
+async def _debitos_do_lote(db: AsyncSession, *, tenant_id: int,
+                           vinculos: list[LotePagamentoParcela]) -> dict[int, Debito]:
+    """Débitos ÚNICOS por trás das parcelas de um lote, com lock — ordem de
+    primeira aparição preservada (`dict` em Python 3 é ordenado)."""
+    debitos: dict[int, Debito] = {}
+    for v in vinculos:
+        parcela = (await db.execute(select(Parcela).where(
+            Parcela.id == v.id_parcela))).scalar_one()
+        if parcela.id_debito not in debitos:
+            debitos[parcela.id_debito] = await obter_debito(
+                db, tenant_id=tenant_id, debito_id=parcela.id_debito, for_update=True)
+    return debitos
+
+
 async def cancelar_lote(db: AsyncSession, *, tenant_id: int, lote_id: int,
                         usuario_id: int) -> LotePagamento:
     """Só de `RASCUNHO`/`PROGRAMADO` (não de `ENVIADO` — depois de enviado ao
@@ -248,19 +264,76 @@ async def cancelar_lote(db: AsyncSession, *, tenant_id: int, lote_id: int,
         raise PagamentoDebitoError(
             f"Lote '{lote.situacao}' não pode ser cancelado.", status.HTTP_409_CONFLICT)
     vinculos = await parcelas_do_lote(db, tenant_id=tenant_id, lote_id=lote_id)
-    debitos_afetados: dict[int, Debito] = {}
+    debitos_afetados = await _debitos_do_lote(db, tenant_id=tenant_id, vinculos=vinculos)
     for v in vinculos:
-        parcela = (await db.execute(select(Parcela).where(
-            Parcela.id == v.id_parcela))).scalar_one()
-        if parcela.id_debito not in debitos_afetados:
-            debitos_afetados[parcela.id_debito] = await obter_debito(
-                db, tenant_id=tenant_id, debito_id=parcela.id_debito, for_update=True)
         await db.delete(v)
     lote.situacao = "CANCELADO"
     lote.atualizado_em = _utcnow()
     for d in debitos_afetados.values():
         _registrar_evento_lote(db, debito=d, acao="LOTE_CANCELADO", usuario_id=usuario_id,
                                justificativa=f"Lote {lote.numero} cancelado")
+    await db.commit()
+    await db.refresh(lote)
+    return lote
+
+
+async def programar_lote(db: AsyncSession, *, tenant_id: int, lote_id: int,
+                         data_programada: date, usuario_id: int) -> LotePagamento:
+    """`RASCUNHO -> PROGRAMADO`. Não muda `situacao_pagamento` do débito — já
+    é `PROGRAMADA` desde a liberação (F1); o que `enviar_lote` faz é levá-la a
+    `ENVIADA_BANCO`."""
+    lote = await obter_lote(db, tenant_id=tenant_id, lote_id=lote_id, for_update=True)
+    if lote.situacao != "RASCUNHO":
+        raise PagamentoDebitoError(
+            f"Lote '{lote.situacao}' não pode ser programado.", status.HTTP_409_CONFLICT)
+    vinculos = await parcelas_do_lote(db, tenant_id=tenant_id, lote_id=lote_id)
+    if not vinculos:
+        raise PagamentoDebitoError("Lote vazio não pode ser programado.", status.HTTP_409_CONFLICT)
+    debitos_afetados = await _debitos_do_lote(db, tenant_id=tenant_id, vinculos=vinculos)
+    lote.situacao = "PROGRAMADO"
+    lote.data_programada = data_programada
+    lote.atualizado_em = _utcnow()
+    for d in debitos_afetados.values():
+        _registrar_evento_lote(db, debito=d, acao="LOTE_PROGRAMADO", usuario_id=usuario_id,
+                               justificativa=f"Lote {lote.numero} programado para {data_programada}")
+    await db.commit()
+    await db.refresh(lote)
+    return lote
+
+
+async def enviar_lote(db: AsyncSession, *, tenant_id: int, lote_id: int,
+                      usuario_id: int) -> LotePagamento:
+    """`PROGRAMADO -> ENVIADO`. Fecha o gap de segregação de funções da F1
+    (spec §6.2, premissa 6): quem executa o pagamento não pode ter sido
+    solicitante, gestor decisor nem validador de NENHUM débito do lote — nem
+    super-usuário faz bypass. Checa TODOS antes de gravar qualquer coisa
+    (all-or-nothing); se algum falhar, nada muda e o 403 lista quais."""
+    lote = await obter_lote(db, tenant_id=tenant_id, lote_id=lote_id, for_update=True)
+    if lote.situacao != "PROGRAMADO":
+        raise PagamentoDebitoError(
+            f"Lote '{lote.situacao}' não pode ser enviado.", status.HTTP_409_CONFLICT)
+    vinculos = await parcelas_do_lote(db, tenant_id=tenant_id, lote_id=lote_id)
+    debitos_afetados = await _debitos_do_lote(db, tenant_id=tenant_id, vinculos=vinculos)
+
+    problemas: list[str] = []
+    for d in debitos_afetados.values():
+        try:
+            assert_segregacao(d, usuario_id=usuario_id, ato="PAGAR")
+        except SegregacaoError as e:
+            problemas.append(f"débito {d.id} ({e.detail})")
+    if problemas:
+        raise PagamentoDebitoError(
+            "Segregação de funções barra o envio deste lote: "
+            + "; ".join(problemas), status.HTTP_403_FORBIDDEN)
+
+    lote.situacao = "ENVIADO"
+    lote.enviado_em = _utcnow()
+    lote.id_usuario_envio = usuario_id
+    lote.atualizado_em = _utcnow()
+    for d in debitos_afetados.values():
+        _registrar_transicao(db, debito=d, acao="LOTE_ENVIADO", pagamento=est.ENVIADA_BANCO,
+                             usuario_id=usuario_id, justificativa=f"Lote {lote.numero} enviado")
+        d.atualizado_em = _utcnow()
     await db.commit()
     await db.refresh(lote)
     return lote

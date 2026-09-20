@@ -558,3 +558,120 @@ async def test_cancelar_lote_libera_parcelas(admin_engine):
             assert e.value.status_code == 409
     finally:
         await _cleanup(admin_engine, tenant.id)
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — programar, enviar, segregação de funções
+# ---------------------------------------------------------------------------
+
+
+async def _lote_de_um(admin_engine, tenant_id, *, nome_forn="Forn Envio"):
+    """Monta fonte/conta/natureza/unidade + 1 débito LIBERADO + o lote
+    RASCUNHO já criado. Devolve (lote, debito, id_parcela, conta)."""
+    async with _sm(admin_engine)() as s:
+        nat = await cad.criar_natureza(s, tenant_id=tenant_id, payload=NaturezaCreate(
+            codigo=f"N{uuid.uuid4().hex[:6]}", descricao="Material"))
+    async with _sm(admin_engine)() as s:
+        unidade_id = await id_unidade_padrao(s, tenant_id)
+    fonte, conta = await _fonte_conta(admin_engine, tenant_id)
+    forn = await _fornecedor2(admin_engine, tenant_id, nome=nome_forn)
+    d1, p1 = await _debito_liberado(admin_engine, tenant_id, forn=forn, nat=nat,
+                                    fonte=fonte, conta=conta, unidade_id=unidade_id)
+    async with _sm(admin_engine)() as s:
+        lote = await lot.criar_lote(s, tenant_id=tenant_id, id_conta_pagadora=conta.id,
+                                    parcela_ids=[p1], usuario_id=d1.id_usuario_solicitante)
+    return lote, d1, p1, conta
+
+
+@pytest.mark.asyncio
+async def test_programar_lote_vazio_e_409(admin_engine):
+    tenant, _sol = await _provisionar(admin_engine)
+    try:
+        lote, d1, p1, _conta = await _lote_de_um(admin_engine, tenant.id)
+        async with _sm(admin_engine)() as s:
+            await lot.remover_parcela(s, tenant_id=tenant.id, lote_id=lote.id, parcela_id=p1)
+
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as e:
+                await lot.programar_lote(s, tenant_id=tenant.id, lote_id=lote.id,
+                                         data_programada=date(2026, 9, 25),
+                                         usuario_id=d1.id_usuario_solicitante)
+            assert e.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_enviar_lote_nao_programado_e_409(admin_engine):
+    tenant, _sol = await _provisionar(admin_engine)
+    try:
+        lote, d1, _p1, _conta = await _lote_de_um(admin_engine, tenant.id)
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as e:
+                await lot.enviar_lote(s, tenant_id=tenant.id, lote_id=lote.id,
+                                      usuario_id=d1.id_usuario_solicitante)
+            assert e.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_programar_enviar_feliz(admin_engine):
+    """Fluxo completo: envio move `situacao_pagamento` de PROGRAMADA (já
+    gravada na liberação, F1) para ENVIADA_BANCO."""
+    tenant, _sol = await _provisionar(admin_engine)
+    try:
+        lote, d1, _p1, _conta = await _lote_de_um(admin_engine, tenant.id)
+        async with _sm(admin_engine)() as s:
+            antes = await deb.obter_debito(s, tenant_id=tenant.id, debito_id=d1.id)
+        assert antes.situacao_pagamento == "PROGRAMADA"
+
+        async with _sm(admin_engine)() as s:
+            lote = await lot.programar_lote(s, tenant_id=tenant.id, lote_id=lote.id,
+                                            data_programada=date(2026, 9, 25),
+                                            usuario_id=d1.id_usuario_solicitante)
+        assert lote.situacao == "PROGRAMADO"
+        assert lote.data_programada == date(2026, 9, 25)
+
+        # Um usuário que NÃO participou do rito deste débito pode enviar.
+        enviador = await _criar_usuario(admin_engine, tenant.id, "Enviador")
+        async with _sm(admin_engine)() as s:
+            lote = await lot.enviar_lote(s, tenant_id=tenant.id, lote_id=lote.id,
+                                         usuario_id=enviador)
+        assert lote.situacao == "ENVIADO"
+        assert lote.enviado_em is not None
+        assert lote.id_usuario_envio == enviador
+
+        async with _sm(admin_engine)() as s:
+            depois = await deb.obter_debito(s, tenant_id=tenant.id, debito_id=d1.id)
+        assert depois.situacao_pagamento == "ENVIADA_BANCO"
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_enviar_lote_segregacao_barra(admin_engine):
+    """O solicitante do débito não pode enviar o lote que o contém — nem
+    lote nem débito mudam de situação (all-or-nothing)."""
+    tenant, _sol = await _provisionar(admin_engine)
+    try:
+        lote, d1, _p1, _conta = await _lote_de_um(admin_engine, tenant.id)
+        async with _sm(admin_engine)() as s:
+            lote = await lot.programar_lote(s, tenant_id=tenant.id, lote_id=lote.id,
+                                            data_programada=date(2026, 9, 25),
+                                            usuario_id=d1.id_usuario_solicitante)
+
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as e:
+                await lot.enviar_lote(s, tenant_id=tenant.id, lote_id=lote.id,
+                                      usuario_id=d1.id_usuario_solicitante)
+            assert e.value.status_code == 403
+
+        async with _sm(admin_engine)() as s:
+            intacto = await lot.obter_lote(s, tenant_id=tenant.id, lote_id=lote.id)
+        assert intacto.situacao == "PROGRAMADO"
+        async with _sm(admin_engine)() as s:
+            debito_intacto = await deb.obter_debito(s, tenant_id=tenant.id, debito_id=d1.id)
+        assert debito_intacto.situacao_pagamento == "PROGRAMADA"
+    finally:
+        await _cleanup(admin_engine, tenant.id)

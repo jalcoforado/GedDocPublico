@@ -10,7 +10,7 @@ from ..database import get_db
 from ..models import Usuario
 from ..schemas.pagamentos import (
     LoteCriarIn, LoteDetalheOut, LoteParcelaIn, LotePagamentoOut, LotePagamentoParcelaOut,
-    ParcelaOut,
+    LoteProgramarIn, ParcelaOut,
 )
 from ..services import pagamentos_lotes as lotes
 
@@ -86,3 +86,21 @@ async def cancelar_lote(lote_id: int,
                         tenant_id: int = Depends(require_tenant_id),
                         db: AsyncSession = Depends(get_db)):
     return await lotes.cancelar_lote(db, tenant_id=tenant_id, lote_id=lote_id, usuario_id=usuario.id)
+
+
+@router.post("/lotes/{lote_id}/programar", response_model=LotePagamentoOut)
+async def programar_lote(lote_id: int, payload: LoteProgramarIn,
+                         usuario: Usuario = Depends(require_permission("pagamento_pagar")),
+                         tenant_id: int = Depends(require_tenant_id),
+                         db: AsyncSession = Depends(get_db)):
+    return await lotes.programar_lote(
+        db, tenant_id=tenant_id, lote_id=lote_id,
+        data_programada=payload.data_programada, usuario_id=usuario.id)
+
+
+@router.post("/lotes/{lote_id}/enviar", response_model=LotePagamentoOut)
+async def enviar_lote(lote_id: int,
+                      usuario: Usuario = Depends(require_permission("pagamento_pagar")),
+                      tenant_id: int = Depends(require_tenant_id),
+                      db: AsyncSession = Depends(get_db)):
+    return await lotes.enviar_lote(db, tenant_id=tenant_id, lote_id=lote_id, usuario_id=usuario.id)
