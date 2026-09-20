@@ -197,7 +197,15 @@ async def fila_liberacao(db: AsyncSession, *, tenant_id: int) -> list[FilaLibera
 
 async def fila_tesouraria(db: AsyncSession, *, tenant_id: int) -> FilaTesourariaOut:
     """Parcelas LIBERADAS (ordenadas por data prevista ?? vencimento) e as
-    últimas 15 pagas (data_pagamento desc)."""
+    últimas 15 pagas (data_pagamento desc).
+
+    **Órfã de rota desde a F4** — `GET /pagamentos/tesouraria/fila` agora
+    devolve 410, substituído pela Central da tesouraria
+    (`pagamentos_lotes.parcelas_elegiveis_para_lote` + `listar_lotes`).
+    Mantida (função e teste) por não valer o risco de tocar
+    `_ops_recentes`/`_qtd_parcelas_por_debito`, compartilhados com
+    `fila_liberacao`, sem revisão dedicada — remover é trabalho de uma fatia
+    própria de limpeza, não deste PR."""
     liberadas = list((await db.execute(select(Parcela).where(
         Parcela.tenant_id == tenant_id, Parcela.excluido.is_(False),
         Parcela.status == "LIBERADA"))).scalars().all())

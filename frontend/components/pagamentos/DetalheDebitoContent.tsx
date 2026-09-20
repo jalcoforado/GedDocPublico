@@ -11,6 +11,7 @@ import {
   Layers,
   ListOrdered,
   Paperclip,
+  Percent,
   Receipt,
   Trash2,
 } from "lucide-react";
@@ -47,8 +48,10 @@ import {
   type AnexoDebitoOut,
   type DebitoOut,
   type EtapaAjuste,
+  type RetencaoInput,
   type SituacaoFila,
   type TipoAjuste,
+  type TipoRetencao,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
@@ -108,6 +111,15 @@ export function DetalheDebitoContent({ id }: { id: number }) {
   const [excecaoFundamento, setExcecaoFundamento] = useState("");
   const [excecaoData, setExcecaoData] = useState("");
 
+  // Retenções (F4) — CRUD travado pelo backend (409) enquanto a parcela
+  // estiver engajada num lote de pagamento.
+  const [retencaoOpen, setRetencaoOpen] = useState(false);
+  const [retencaoTipo, setRetencaoTipo] = useState<TipoRetencao>("IRRF");
+  const [retencaoDescricao, setRetencaoDescricao] = useState("");
+  const [retencaoBase, setRetencaoBase] = useState("");
+  const [retencaoAliquota, setRetencaoAliquota] = useState("");
+  const [retencaoValor, setRetencaoValor] = useState("");
+
   // Carregar débito
   const debitoQ = useQuery({
     queryKey: ["pag-debito", id],
@@ -132,6 +144,13 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     queryFn: () => api.pagamentos.debitos.listarAnexos(id),
   });
   const anexos = anexosQ.data ?? [];
+
+  // Retenções (F4)
+  const retencoesQ = useQuery({
+    queryKey: ["pag-retencoes", id],
+    queryFn: () => api.pagamentos.retencoes.listarDoDebito(id),
+  });
+  const retencoes = retencoesQ.data?.retencoes ?? [];
 
   // Posição na fila cronológica (F3) — 404 é esperado para débito legado que
   // ainda não passou pela fase de liquidação (não vira erro na tela).
@@ -417,6 +436,35 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     onError: (err: any) => toast.error(err.message || "Erro ao remover documento"),
   });
 
+  const criarRetencaoM = useMutation({
+    mutationFn: () => {
+      const payload: RetencaoInput = {
+        tipo: retencaoTipo,
+        descricao: retencaoDescricao || undefined,
+        base_calculo: retencaoBase,
+        aliquota: retencaoAliquota || undefined,
+        valor: retencaoValor,
+      };
+      return api.pagamentos.retencoes.criar(id, payload);
+    },
+    onSuccess: () => {
+      toast.success("Retenção lançada");
+      setRetencaoOpen(false);
+      setRetencaoDescricao(""); setRetencaoBase(""); setRetencaoAliquota(""); setRetencaoValor("");
+      qc.invalidateQueries({ queryKey: ["pag-retencoes", id] });
+    },
+    onError: (err: any) => toast.error(err.message || "Erro ao lançar retenção"),
+  });
+
+  const excluirRetencaoM = useMutation({
+    mutationFn: (retencaoId: number) => api.pagamentos.retencoes.excluir(retencaoId),
+    onSuccess: () => {
+      toast.success("Retenção removida");
+      qc.invalidateQueries({ queryKey: ["pag-retencoes", id] });
+    },
+    onError: (err: any) => toast.error(err.message || "Erro ao remover retenção"),
+  });
+
   const registrarExcecaoM = useMutation({
     mutationFn: () =>
       api.pagamentos.debitos.registrarExcecao(id, {
@@ -579,6 +627,80 @@ export function DetalheDebitoContent({ id }: { id: number }) {
             ) : (
               <p className="text-sm text-foreground-subtle">Nenhuma parcela cadastrada.</p>
             )}
+          </SectionCard>
+
+          {/* Retenções (F4) */}
+          <SectionCard title="Retenções" icon={Percent}>
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-foreground-subtle">
+                  Bruto <span className="font-semibold tabular-nums text-foreground">
+                    {fmtMoeda(retencoesQ.data?.valor_bruto ?? debito?.valor_total ?? "0")}
+                  </span>
+                  {" · "}Líquido <span className="font-semibold tabular-nums text-foreground">
+                    {fmtMoeda(retencoesQ.data?.valor_liquido ?? debito?.valor_total ?? "0")}
+                  </span>
+                </p>
+                {can("pagamento_pagar") && (
+                  <Button size="sm" variant="secondary" onClick={() => setRetencaoOpen(true)}>
+                    Lançar retenção
+                  </Button>
+                )}
+              </div>
+
+              {retencoesQ.isLoading ? (
+                <Skeleton className="h-16 w-full" />
+              ) : retencoes.length === 0 ? (
+                <p className="text-sm text-foreground-subtle">Nenhuma retenção lançada.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <THead>
+                      <TR>
+                        <TH>Tipo</TH>
+                        <TH>Descrição</TH>
+                        <TH className="text-right">Base</TH>
+                        <TH className="text-right">Alíquota</TH>
+                        <TH className="text-right">Valor</TH>
+                        <TH>Recolhimento</TH>
+                        <TH className="text-right">Ações</TH>
+                      </TR>
+                    </THead>
+                    <TBody>
+                      {retencoes.map((r) => (
+                        <TR key={r.id}>
+                          <TD>{r.tipo}</TD>
+                          <TD className="max-w-[16rem] truncate">{r.descricao ?? "—"}</TD>
+                          <TD className="text-right tabular-nums">{fmtMoeda(r.base_calculo)}</TD>
+                          <TD className="text-right tabular-nums">{r.aliquota ? `${r.aliquota}%` : "—"}</TD>
+                          <TD className="text-right tabular-nums">{fmtMoeda(r.valor)}</TD>
+                          <TD>
+                            {r.recolhido ? (
+                              <Badge intent="success">recolhida em {fmtData(r.data_recolhimento)}</Badge>
+                            ) : (
+                              <Badge intent="neutral">pendente</Badge>
+                            )}
+                          </TD>
+                          <TD className="text-right">
+                            {can("pagamento_pagar") && !r.recolhido && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                aria-label={`Remover retenção ${r.tipo}`}
+                                onClick={() => excluirRetencaoM.mutate(r.id)}
+                                disabled={excluirRetencaoM.isPending}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                </div>
+              )}
+            </div>
           </SectionCard>
 
           {/* Fila cronológica (F3, Task 3/5) */}
@@ -1117,6 +1239,74 @@ export function DetalheDebitoContent({ id }: { id: number }) {
             </FormField>
           </div>
         )}
+      </Dialog>
+
+      {/* Lançar retenção (F4) — trava (409) enquanto a parcela estiver
+          engajada num lote de pagamento; a mensagem do backend vira o toast. */}
+      <Dialog
+        open={retencaoOpen}
+        onClose={() => setRetencaoOpen(false)}
+        title="Lançar retenção"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRetencaoOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => criarRetencaoM.mutate()}
+              disabled={!retencaoBase || !retencaoValor || criarRetencaoM.isPending}
+            >
+              {criarRetencaoM.isPending ? "Salvando..." : "Lançar"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <FormField label="Tipo" required>
+            <Select
+              value={retencaoTipo}
+              onChange={(e) => setRetencaoTipo(e.target.value as TipoRetencao)}
+            >
+              <option value="IRRF">IRRF</option>
+              <option value="INSS">INSS</option>
+              <option value="ISS">ISS</option>
+              <option value="PIS_COFINS_CSLL">PIS/COFINS/CSLL</option>
+              <option value="OUTRAS">Outras</option>
+            </Select>
+          </FormField>
+          <FormField label="Base de cálculo" required>
+            <Input
+              inputMode="decimal"
+              value={retencaoBase}
+              onChange={(e) => setRetencaoBase(e.target.value)}
+              placeholder="0,00"
+            />
+          </FormField>
+          <FormField label="Alíquota (%)" hint="Opcional">
+            <Input
+              inputMode="decimal"
+              value={retencaoAliquota}
+              onChange={(e) => setRetencaoAliquota(e.target.value)}
+              placeholder="ex.: 1,5"
+            />
+          </FormField>
+          <FormField label="Valor" required>
+            <Input
+              inputMode="decimal"
+              value={retencaoValor}
+              onChange={(e) => setRetencaoValor(e.target.value)}
+              placeholder="0,00"
+            />
+          </FormField>
+          <FormField label="Descrição" hint="Opcional">
+            <Input
+              value={retencaoDescricao}
+              onChange={(e) => setRetencaoDescricao(e.target.value)}
+              maxLength={150}
+            />
+          </FormField>
+        </div>
       </Dialog>
 
       {/* Exceção cronológica (F3, Task 5/6) — furo formal de ordem, com
