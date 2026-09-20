@@ -296,9 +296,9 @@ async def _talvez_conciliar_debito(db: AsyncSession, *, tenant_id: int, id_parce
         Parcela.id == id_parcela, Parcela.tenant_id == tenant_id))).scalar_one_or_none()
     if parc is None:
         return
-    from .pagamentos_debitos import ST_PAGO, _registrar_transicao, obter_debito
+    from .pagamentos_debitos import _registrar_transicao, obter_debito
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=parc.id_debito, for_update=True)
-    if d.status != ST_PAGO:
+    if d.situacao_pagamento != est.PAGA:
         return
     movs = (await db.execute(select(MovimentacaoConta.id).join(
         Parcela, Parcela.id_movimentacao == MovimentacaoConta.id).where(

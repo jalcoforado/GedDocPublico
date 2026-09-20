@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import ContaBancaria, Debito, FonteRecursos, MovimentacaoConta, NaturezaDespesa, Parcela
@@ -16,9 +16,18 @@ from ..schemas.pagamentos import (
 )
 from . import pagamentos_caixa as caixa
 from . import pagamentos_debitos as deb
+from . import pagamentos_estados as est
 
-_STATUS_COMPROMETIDO = deb.COM_RESERVA
-_STATUS_MAIORES = (deb.ST_EM_VALIDACAO, deb.ST_VALIDADO, *deb.AUTORIZAVEIS, *deb.COM_RESERVA)
+# Traduções de status legado (§4.5) para as três dimensões — F5.
+# "Tem reserva na conta pagadora": autorizada e ainda não paga (mesmo
+# predicado de pagamentos_autorizacao.py/pagamentos_filas.py) — inclui
+# ESTORNADA de propósito (ex-COM_RESERVA continha ST_ESTORNADO).
+_TEM_RESERVA = and_(Debito.situacao_tramitacao == est.AUTORIZADA,
+                    Debito.situacao_pagamento != est.PAGA)
+# Pré-autorização em curso (ex-ST_EM_VALIDACAO/ST_VALIDADO/AUTORIZAVEIS).
+_PRE_AUTORIZACAO_EM_CURSO = Debito.situacao_tramitacao.in_(
+    (est.AGUARDANDO_GESTOR, est.AGUARDANDO_VALIDACAO, est.AGUARDANDO_AUTORIDADE))
+_CONDICAO_MAIORES = _PRE_AUTORIZACAO_EM_CURSO | _TEM_RESERVA
 _TOP_NATUREZA_FONTE = 6
 
 
@@ -98,7 +107,7 @@ async def _kpis(db, *, tenant_id: int, hoje: date) -> DashboardKpis:
                 .join(Debito, Debito.id == Parcela.id_debito)
                 .where(Parcela.tenant_id == tenant_id, Parcela.excluido.is_(False),
                        Parcela.status.in_(("A_PAGAR", "LIBERADA")), Debito.excluido.is_(False),
-                       Debito.status.in_(_STATUS_COMPROMETIDO), *extra))
+                       _TEM_RESERVA, *extra))
 
     # prospectivo: só parcelas ainda não vencidas (vencidas têm KPI próprio)
     a_pagar_30d, _qtd_30d = (await db.execute(
@@ -110,10 +119,12 @@ async def _kpis(db, *, tenant_id: int, hoje: date) -> DashboardKpis:
 
     aguardando_aprovacao_qtd = (await db.execute(select(func.count(Debito.id)).where(
         Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
-        Debito.status == deb.ST_EM_VALIDACAO))).scalar_one()
+        Debito.situacao_tramitacao.in_((est.AGUARDANDO_GESTOR, est.AGUARDANDO_VALIDACAO)),
+    ))).scalar_one()
     aguardando_autorizacao_qtd = (await db.execute(select(func.count(Debito.id)).where(
         Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
-        Debito.status.in_(deb.AUTORIZAVEIS)))).scalar_one()
+        Debito.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE,
+    ))).scalar_one()
 
     return DashboardKpis(
         saldo_total=saldo_total, disponivel_total=disponivel_total,
@@ -170,14 +181,17 @@ async def _composicao_fonte(db, *, tenant_id: int, inicio: date) -> list[Composi
 
 async def _maiores_debitos(db, *, tenant_id: int, limite: int = 10) -> list[DebitoResumoItem]:
     stmt = (select(Debito).where(Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
-                                 Debito.status.in_(_STATUS_MAIORES))
+                                 _CONDICAO_MAIORES)
             .order_by(Debito.valor_total.desc()).limit(limite))
     debitos = list((await db.execute(stmt)).scalars().all())
     nomes = await deb.nomes_fornecedores(db, tenant_id=tenant_id,
                                          ids={d.id_fornecedor for d in debitos})
-    return [DebitoResumoItem(id=d.id, nome_fornecedor=nomes.get(d.id_fornecedor, "?"),
-                             descricao=d.descricao, valor_total=d.valor_total,
-                             status=d.status, competencia=d.competencia) for d in debitos]
+    return [DebitoResumoItem(
+        id=d.id, nome_fornecedor=nomes.get(d.id_fornecedor, "?"),
+        descricao=d.descricao, valor_total=d.valor_total,
+        # Calculado, não lido de coluna (F5) — mesmo valor que o legado dava.
+        status=est.status_legado(d.situacao_tramitacao, d.situacao_fila, d.situacao_pagamento),
+        competencia=d.competencia) for d in debitos]
 
 
 async def _alertas(db, *, tenant_id: int, hoje: date, limite: int = 10) -> DashboardAlertas:
@@ -185,7 +199,7 @@ async def _alertas(db, *, tenant_id: int, hoje: date, limite: int = 10) -> Dashb
             .join(Debito, Debito.id == Parcela.id_debito)
             .where(Parcela.tenant_id == tenant_id, Parcela.excluido.is_(False),
                    Parcela.status.in_(("A_PAGAR", "LIBERADA")), Debito.excluido.is_(False),
-                   Debito.status.in_(_STATUS_COMPROMETIDO)))
+                   _TEM_RESERVA))
 
     vencidas_rows = (await db.execute(base.where(Parcela.vencimento < hoje)
         .order_by(Parcela.vencimento).limit(limite))).all()
