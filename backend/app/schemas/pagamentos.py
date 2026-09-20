@@ -326,10 +326,6 @@ class ContaSaldoPainel(BaseModel):
 
 
 # ---------- débito / parcelas / ordem de pagamento (R2) ----------
-StatusDebito = Literal["RASCUNHO", "EM_VALIDACAO", "DEVOLVIDO", "VALIDADO",
-                       "ENVIADO_SECRETARIO", "AGUARDANDO_AUTORIZACAO", "AUTORIZADO",
-                       "ENVIADO_TESOURARIA", "EM_PROCESSAMENTO", "PAGO_PARCIAL", "PAGO",
-                       "CONCILIADO", "REJEITADO", "SUSPENSO", "CANCELADO", "ESTORNADO"]
 StatusParcela = Literal["A_PAGAR", "LIBERADA", "PAGA", "CANCELADA"]
 FormaPagamento = Literal["PIX", "TED", "BOLETO", "DINHEIRO", "OUTRO"]
 
@@ -413,8 +409,6 @@ class DebitoOut(BaseModel):
     id_contrato: int | None; valor_total: Decimal; competencia: str
     numero_ne: str | None; numero_nf: str | None; criticidade: CriticidadeLit
     urgente: bool; justificativa_urgencia: str | None; descricao: str
-    status: StatusDebito
-    # `status` acima é legado e derivado; estes três são a verdade (F1).
     situacao_tramitacao: SituacaoTramitacao
     situacao_fila: SituacaoFila
     situacao_pagamento: SituacaoPagamento
@@ -817,7 +811,11 @@ class ComposicaoItem(BaseModel):
 
 class DebitoResumoItem(BaseModel):
     id: int; nome_fornecedor: str; descricao: str; valor_total: Decimal
-    status: StatusDebito; competencia: str
+    # `status`: valor legado calculado (não lido de coluna, F5) — mantido para
+    # não quebrar o payload; a verdade são as duas colunas abaixo (F1).
+    status: str; competencia: str
+    situacao_tramitacao: SituacaoTramitacao
+    situacao_pagamento: SituacaoPagamento
 
 
 class ParcelaAlertaItem(BaseModel):

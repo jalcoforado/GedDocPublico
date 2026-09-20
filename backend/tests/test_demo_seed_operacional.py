@@ -143,19 +143,25 @@ async def test_debitos_percorrem_o_rito(admin_engine, tenant_ops):
     slug, tid = tenant_ops
     await _apply(_ns(slug, modulo="pagamentos"))
 
+    from app.services import pagamentos_estados as est
+
     async with _sm(admin_engine)() as s:
         await s.execute(text(f"SET LOCAL app.tenant_id = {int(tid)}"))
-        status = dict(
-            (
-                await s.execute(
-                    text(
-                        "SELECT status, count(*) FROM pagamentos.debito "
-                        "WHERE tenant_id=:t AND excluido=false GROUP BY status"
-                    ),
-                    {"t": tid},
-                )
-            ).all()
-        )
+        # F5: a coluna `status` legada não existe mais — o valor equivalente é
+        # calculado a partir das três dimensões (mesma função que a alimentava).
+        linhas = (
+            await s.execute(
+                text(
+                    "SELECT situacao_tramitacao, situacao_fila, situacao_pagamento "
+                    "FROM pagamentos.debito WHERE tenant_id=:t AND excluido=false"
+                ),
+                {"t": tid},
+            )
+        ).all()
+        status: dict[str, int] = {}
+        for tramitacao, fila, pagamento in linhas:
+            legado = est.status_legado(tramitacao, fila, pagamento)
+            status[legado] = status.get(legado, 0) + 1
         historico = (
             await s.execute(
                 text(

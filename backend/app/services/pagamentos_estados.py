@@ -10,11 +10,13 @@ Este módulo não toca banco e não importa SQLAlchemy de propósito: é a únic
 parte do fluxo que dá para exercitar sem arreio, e é onde as regras que não
 podem se perder ficam legíveis.
 
-`status_legado()` deriva o valor antigo das três dimensões. A coluna `status`
-continua existindo e mantida em sincronia até a F5, porque
-`pagamentos_conciliacao`, `pagamentos_excecoes`, `pagamentos_caixa`,
-`pagamentos_export`, `pagamentos_filas` e o frontend inteiro a leem. Migrar
-todos na mesma fatia daria um diff que ninguém revisa com atenção.
+`status_legado()` deriva o valor antigo das três dimensões. A coluna `Debito.
+status` que ela alimentava foi removida na F5 (migration 0121) — todo
+consumidor migrou para as três dimensões. A função em si SOBREVIVE
+PERMANENTEMENTE: `debito_historico.status_anterior/novo` (trilha de auditoria,
+`NOT NULL`) e a coluna `status` do CSV de exportação continuam existindo,
+calculados na hora a partir das três dimensões, nunca persistidos fora do
+próprio histórico.
 """
 from __future__ import annotations
 
@@ -143,7 +145,8 @@ _LEGADO_PAGAMENTO = {
 
 
 def status_legado(tramitacao: str, fila: str, pagamento: str) -> str:
-    """Valor de `Debito.status` correspondente às três dimensões.
+    """Valor que a extinta coluna `Debito.status` (removida na F5) guardaria
+    para estas três dimensões.
 
     Precedência: cancelamento > execução iniciada > bloqueio de fila >
     tramitação. Cancelamento vem primeiro porque `CANCELADO` é o único estado

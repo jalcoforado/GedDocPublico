@@ -23,6 +23,7 @@ from app.schemas.pagamentos import (
 )
 from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_debitos as svc
+from app.services import pagamentos_estados as est
 from app.services.provisioning_tenant import provisionar_tenant
 
 
@@ -136,7 +137,7 @@ async def test_criar_debito_com_parcelas(admin_engine):
                     ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-01"),
                     ParcelaCreate(numero=2, valor="400.00", vencimento="2026-09-01"),
                 ]))
-        assert d.status == "RASCUNHO"
+        assert d.situacao_tramitacao == est.RASCUNHO
         async with _sm(admin_engine)() as s:
             parcelas = await svc.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
             hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
@@ -172,13 +173,13 @@ async def test_atualizar_debito_fora_de_rascunho_409(admin_engine):
             d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
                 payload=_payload_debito(forn, nat, conta, unidade))
         async with _sm(admin_engine)() as s:
-            # F2: a checagem de edição passou de `status` (legado) para
-            # `situacao_tramitacao` — só RASCUNHO e as três etapas de AJUSTE_*
-            # são editáveis. AGUARDANDO_GESTOR não é nenhuma delas.
+            # F2: a checagem de edição passou de `status` (legado, coluna
+            # removida na F5) para `situacao_tramitacao` — só RASCUNHO e as
+            # três etapas de AJUSTE_* são editáveis. AGUARDANDO_GESTOR não é
+            # nenhuma delas.
             await s.execute(text(
-                "UPDATE pagamentos.debito SET status='EM_VALIDACAO', "
-                "situacao_tramitacao='AGUARDANDO_GESTOR' WHERE id=:i"),
-                {"i": d.id})
+                "UPDATE pagamentos.debito SET situacao_tramitacao='AGUARDANDO_GESTOR' "
+                "WHERE id=:i"), {"i": d.id})
             await s.commit()
         async with _sm(admin_engine)() as s:
             with pytest.raises(HTTPException) as exc:
@@ -297,7 +298,7 @@ async def test_criar_debito_sem_conta_sugerida_ok(admin_engine):
                 id_fonte_recursos=conta.id_fonte_recursos, id_conta=None, id_unidade=unidade.id,
                 valor_total="1000.00", competencia="2026-07", descricao="Sem conta sugerida",
                 parcelas=[ParcelaCreate(numero=1, valor="1000.00", vencimento="2026-08-01")]))
-        assert d.status == "RASCUNHO"
+        assert d.situacao_tramitacao == est.RASCUNHO
         assert d.id_conta is None
         assert d.id_fonte_recursos == conta.id_fonte_recursos
         assert d.id_conta_pagadora is None

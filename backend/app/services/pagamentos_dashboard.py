@@ -191,7 +191,8 @@ async def _maiores_debitos(db, *, tenant_id: int, limite: int = 10) -> list[Debi
         descricao=d.descricao, valor_total=d.valor_total,
         # Calculado, não lido de coluna (F5) — mesmo valor que o legado dava.
         status=est.status_legado(d.situacao_tramitacao, d.situacao_fila, d.situacao_pagamento),
-        competencia=d.competencia) for d in debitos]
+        competencia=d.competencia, situacao_tramitacao=d.situacao_tramitacao,
+        situacao_pagamento=d.situacao_pagamento) for d in debitos]
 
 
 async def _alertas(db, *, tenant_id: int, hoje: date, limite: int = 10) -> DashboardAlertas:

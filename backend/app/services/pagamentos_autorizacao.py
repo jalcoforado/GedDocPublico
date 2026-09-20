@@ -357,8 +357,10 @@ async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                                  pagamento=est.PROGRAMADA,
                                  usuario_id=usuario_id, justificativa=justificativa, ip=ip)
         else:  # já em tesouraria: apenas registra a liberação adicional
-            db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
-                                   status_novo=d.status, acao="LIBERADO", justificativa=justificativa,
+            status_atual = est.status_legado(d.situacao_tramitacao, d.situacao_fila,
+                                             d.situacao_pagamento)
+            db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=status_atual,
+                                   status_novo=status_atual, acao="LIBERADO", justificativa=justificativa,
                                    id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
         d.atualizado_em = _utcnow()
         # Torna a liberação deste débito visível para a guarda do PRÓXIMO
@@ -383,8 +385,9 @@ async def revogar_liberacao(db: AsyncSession, *, tenant_id: int, usuario_id: int
     p.status = "A_PAGAR"; p.data_liberacao = None
     p.id_usuario_liberacao = None; p.data_prevista_pagamento = None
     p.atualizado_em = _utcnow()
-    db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
-                           status_novo=d.status, acao="LIBERACAO_REVOGADA", justificativa=justificativa,
+    status_atual = est.status_legado(d.situacao_tramitacao, d.situacao_fila, d.situacao_pagamento)
+    db.add(DebitoHistorico(tenant_id=tenant_id, id_debito=d.id, status_anterior=status_atual,
+                           status_novo=status_atual, acao="LIBERACAO_REVOGADA", justificativa=justificativa,
                            id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
     # sem parcelas liberadas e nada pago → volta da tesouraria para AUTORIZADO
     todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)

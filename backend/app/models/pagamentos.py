@@ -182,12 +182,10 @@ class Debito(Base):
     urgente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     justificativa_urgencia: Mapped[str | None] = mapped_column(String(255), nullable=True)
     descricao: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[str] = mapped_column(String(25), nullable=False, default="RASCUNHO")
     # --- as três dimensões (F1, spec §4.1) ---------------------------------
-    # `status` acima passa a ser DERIVADO destas três
-    # (services/pagamentos_estados.status_legado) e sobrevive só até a F5,
-    # porque conciliação, exceções, caixa, export, filas e o frontend inteiro
-    # ainda o leem.
+    # Até a F5 existia um `status` legado de 16 valores, DERIVADO destas três
+    # (services/pagamentos_estados.status_legado). A coluna foi removida
+    # (migration 0122); quem precisa do valor legado calcula na hora.
     situacao_tramitacao: Mapped[str] = mapped_column(
         String(30), nullable=False, default="RASCUNHO")
     situacao_fila: Mapped[str] = mapped_column(

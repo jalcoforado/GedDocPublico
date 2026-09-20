@@ -142,10 +142,10 @@ Cada constante/gate atual e sua tradução exata para as três dimensões:
 | `backend/app/routers/pagamentos_debitos.py` | Modify: remove `status_f` de `list_debitos`/`exportar_debitos_csv`; `minha_fila` troca `status_f=st` por filtro de dimensão |
 | `backend/app/schemas/pagamentos.py` | Modify: `DebitoOut.status` removido; `DebitoHistoricoOut.status_anterior/novo` viram `str \| None`/`str` sem o `StatusDebito` Literal (valor histórico livre, não mais validado contra enum ativo); `StatusDebito` Literal removido se nada mais o referenciar |
 | `backend/app/models/pagamentos.py` | Modify: remove `status` de `Debito` |
-| `backend/alembic/versions/0122_pagamentos_remove_status_legado.py` | Create: DROP INDEX/CONSTRAINT/COLUMN |
+| `backend/alembic/versions/0122_pagamentos_remove_status_legado.py` | Create: DROP INDEX/CONSTRAINT/COLUMN. Ficou 0122 mesmo, como o texto original deste plano assumia — mas por um motivo diferente do previsto: `alembic heads` no branch mostrou `0120` como head (a F4/PR #68 usa "0121" e ainda não mesclou em `main`), então a primeira tentativa numerou esta migration como 0121 — e colidiu EM RUNTIME com o "0121" da F4 no banco de dev compartilhado (F4 tinha sido testada nele antes, neste mesmo dia). `docker exec` roda contra o mesmo Postgres não importa qual branch está com checkout no host; o Alembic resolve migration por STRING de revisão, não por conteúdo do arquivo, então viu "0121" já aplicado (pela F4) e concluiu — errado — que esta migration também já tinha rodado. Diagnosticado, revertido (downgrade real da F4 usando o arquivo dela, temporariamente restaurado) e esta migration renumerada para 0122 para não colidir de novo. Ver docstring da própria migration para o aviso a quem mesclar a F4 depois. |
 | `backend/tests/test_guarda_status_legado.py` | Delete (guarda protegia escrita numa coluna que não existe mais) |
 | `backend/tests/test_pagamentos_status_derivado.py` | Delete (testa `_sincronizar_status_legado`, que não existe mais) |
-| `backend/tests/test_pagamentos_migration_0085.py` | Delete (testa o contrato `status_legado()`/`MAPA_BACKFILL` da migration original — a migration em si NÃO muda, é histórica; só o teste que a amarra ao `status` atual perde sentido) |
+| `backend/tests/test_pagamentos_migration_0085.py` | **Desvio do plano original**: NÃO apagado. Só 1 dos 6 testes (`test_mapa_cobre_os_dezesseis_status_legados`) dependia de `StatusDebito`; os outros 5 (`test_mapa_do_teste_bate_com_a_migration`, `test_toda_combinacao_do_mapa_e_valida`, `test_backfill_nao_perde_informacao`, `test_colunas_existem_e_sao_not_null`, `test_transacao_pagamento_gerir_existe`) continuam testando coisa real e viva (`status_legado()`, as três colunas NOT NULL, a transação `pagamento_gerir`) — apagar o arquivo inteiro jogaria fora cobertura de regressão que nada tem a ver com a coluna removida. Corrigido só o teste quebrado: a lista de 16 valores virou uma constante pinada no próprio teste (a migration é histórica e imutável, então o conjunto que ela cobre também é). |
 | `backend/tests/test_pagamentos_autorizacao.py`, `test_pagamentos_f3_pretericao.py`, `test_pagamentos_liberacao.py`, `test_pagamentos_debitos.py`, `test_pagamentos_dashboard.py`, `test_pagamentos_conciliacao_v2.py`, `test_pagamentos_validacoes_v2.py` | Modify: troca `assert d.status == "X"` por asserções nas três dimensões, arquivo por arquivo, na mesma task que migra o serviço correspondente |
 | `frontend/lib/api.ts` | Modify: remove `status`/`StatusDebito` de `Debito`/`DebitoOut`/`DebitoResumoItem`; remove `status` de `debitos.list()` params |
 | `frontend/components/pagamentos/statusDebito.ts` | Delete (código morto confirmado — `DEBITO_STATUS_TABS` sem importador; `DEBITO_STATUS_BADGE` só usado pelo dashboard, que migra para `situacoes.ts` na Task 7) |
@@ -244,23 +244,35 @@ Cada constante/gate atual e sua tradução exata para as três dimensões:
 ### Task 7: Schemas + migration + guarda + testes órfãos
 
 **Files:** `backend/app/schemas/pagamentos.py`, `backend/app/models/pagamentos.py`,
-`backend/alembic/versions/0122_*.py`, `backend/tests/test_guarda_status_legado.py` (delete),
+`backend/alembic/versions/0122_pagamentos_remove_status_legado.py`,
+`backend/tests/test_guarda_status_legado.py` (delete),
 `backend/tests/test_pagamentos_status_derivado.py` (delete),
-`backend/tests/test_pagamentos_migration_0085.py` (delete)
+`backend/tests/test_pagamentos_migration_0085.py` (mantido, 1 teste corrigido — ver tabela acima)
 
-- [ ] `DebitoOut.status` removido; `StatusDebito` Literal removido (conferir que nada mais o usa —
-  `DebitoResumoItem.status` vira `str`, populado por `status_legado()`, não precisa do Literal
-  fechado porque não é mais gravado/validado contra CHECK nenhum).
-- [ ] `models/pagamentos.py`: remove `status: Mapped[str]` de `Debito`.
-- [ ] Migration 0122: `alembic heads` primeiro para confirmar `down_revision` (não assumir 0121 —
-  conferir se algo mesclou depois). `DROP INDEX ix_debito_tenant_status` → `DROP CONSTRAINT
-  ck_debito_status` → `DROP COLUMN status`. `downgrade()`: recria a coluna nullable, sem backfill,
-  docstring explicando por quê (mesmo padrão da 0107 para dado que não dá pra reconstruir).
+- [x] `DebitoOut.status` removido; `StatusDebito` Literal removido (só tinha 2 usos vivos:
+  `DebitoOut.status` e `DebitoResumoItem.status` — este virou `str`, populado por
+  `status_legado()`). Aproveitado para acrescentar `situacao_tramitacao`/`situacao_pagamento` a
+  `DebitoResumoItem` (faltavam para a Task 8 ter dado real, não só o string legado, para montar o
+  badge do dashboard — a Task 6 não tinha adicionado por não ser sua responsabilidade original).
+- [x] `models/pagamentos.py`: remove `status: Mapped[str]` de `Debito`.
+- [x] Migration: numerada 0122 (`down_revision="0120"`). Primeira tentativa usou "0121" — colidiu
+  em runtime com o "0121" da F4 (mesmo ID, testado antes no mesmo banco de dev compartilhado; ver
+  nota na tabela de arquivos acima e a docstring da própria migration). `DROP INDEX
+  ix_debito_tenant_status` → `DROP CONSTRAINT ck_debito_status` → `DROP COLUMN status`.
+  `downgrade()`: recria a coluna nullable, sem backfill, docstring explicando por quê.
+- [x] `pagamentos_debitos.py`: `_registrar_transicao` para de ler/escrever `debito.status`
+  (ruling 11) e `_sincronizar_status_legado` foi removida. Achados fora do inventário original do
+  ruling 11: mais 2 inserts diretos de `DebitoHistorico` em `pagamentos_autorizacao.py`
+  (`liberar_parcelas`/`revogar_liberacao`, além dos 3 já previstos) também liam `d.status` — mesma
+  correção (`est.status_legado(...)` calculado inline). `ST_*`/`EDITAVEIS`/`AUTORIZAVEIS`/
+  `EM_TESOURARIA`/`COM_RESERVA` **apagados** (não viraram funções compartilhadas): levantamento
+  confirmou zero importador desses nomes em lugar nenhum — cada consumidor (Tasks 3-6, mais os
+  gaps `pagamentos_caixa.py`/`seed_pagamentos_demo.py`) já tinha feito tradução própria inline, sem
+  nunca chegar a importar essas constantes. Manter funções sem chamador seria só código morto.
 - [ ] `docker exec aprimora-py-backend alembic upgrade head` / `downgrade -1` / `upgrade head`.
-- [ ] Deleta os 3 arquivos de teste órfãos.
-- [ ] `pytest tests/test_rls_papeis_minimos.py tests/test_pagamentos_estados.py -q` (o segundo
-  ainda testa `status_legado()` como função pura — sobrevive, só perde os testes de
-  `_sincronizar_status_legado` se houver algum lá; conferir ao chegar).
+- [x] Deleta os 2 arquivos de teste totalmente órfãos; corrige o 1 teste quebrado de
+  `test_pagamentos_migration_0085.py` (ver tabela acima) em vez de apagar o arquivo.
+- [ ] `pytest tests/test_rls_papeis_minimos.py tests/test_pagamentos_estados.py tests/test_pagamentos_migration_0085.py tests/test_pagamentos_debitos.py tests/test_pagamentos_autorizacao.py -q`
 - [ ] Commit `feat(pagamentos): migration 0122 — remove a coluna status legada (F5)`
 
 ### Task 8: Frontend
