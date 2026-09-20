@@ -269,11 +269,20 @@ Cada constante/gate atual e sua tradução exata para as três dimensões:
   confirmou zero importador desses nomes em lugar nenhum — cada consumidor (Tasks 3-6, mais os
   gaps `pagamentos_caixa.py`/`seed_pagamentos_demo.py`) já tinha feito tradução própria inline, sem
   nunca chegar a importar essas constantes. Manter funções sem chamador seria só código morto.
-- [ ] `docker exec aprimora-py-backend alembic upgrade head` / `downgrade -1` / `upgrade head`.
+- [x] `docker exec aprimora-py-backend alembic upgrade head` / `downgrade -1` / `upgrade head`. Achou
+  a colisão de ID com a F4 na primeira tentativa (ver acima) — depois de renumerar para 0122, o
+  ciclo completo rodou limpo (DROP confirmado por query direta, downgrade recria, upgrade repete).
 - [x] Deleta os 2 arquivos de teste totalmente órfãos; corrige o 1 teste quebrado de
   `test_pagamentos_migration_0085.py` (ver tabela acima) em vez de apagar o arquivo.
-- [ ] `pytest tests/test_rls_papeis_minimos.py tests/test_pagamentos_estados.py tests/test_pagamentos_migration_0085.py tests/test_pagamentos_debitos.py tests/test_pagamentos_autorizacao.py -q`
-- [ ] Commit `feat(pagamentos): migration 0122 — remove a coluna status legada (F5)`
+- [x] `pytest tests/test_rls_papeis_minimos.py tests/test_pagamentos_estados.py tests/test_pagamentos_migration_0085.py tests/test_pagamentos_debitos.py tests/test_pagamentos_autorizacao.py -q` —
+  achou mais 2 classes de quebra fora do inventário original: `criar_debito` ainda passava
+  `status="RASCUNHO"` pro construtor do ORM (kwarg, não `.status` — os greps anteriores não
+  pegavam), e 6 asserções `d.status == "X"` espalhadas por `test_pagamentos_debitos.py`/
+  `test_pagamentos_autorizacao.py`/`test_pagamentos_conciliacao_v2.py`/
+  `test_pagamentos_validacoes_v2.py`/`test_demo_seed_operacional.py` que só quebravam quando a
+  coluna sumisse de verdade (não antes, quando ela só ficava sem consumidor). 119 testes passando
+  na varredura ampliada (núcleo + dashboard/export/f3-pretericao/liberacao/guarda-modularizacao).
+- [x] Commit `feat(pagamentos): migration 0122 — remove a coluna status legada (F5)` (`41e827a`)
 
 ### Task 8: Frontend
 
@@ -281,22 +290,22 @@ Cada constante/gate atual e sua tradução exata para as três dimensões:
 `frontend/app/(app)/m/pagamentos/dashboard/page.tsx`,
 `frontend/__tests__/pagamentos-f2.test.tsx`, `pagamentos-f3.test.tsx`, `pagamentos-f4.test.tsx`
 
-- [ ] `api.ts`: remove `status`/`StatusDebito` de `Debito`/`DebitoOut`; `DebitoResumoItem.status`
+- [x] `api.ts`: remove `status`/`StatusDebito` de `Debito`/`DebitoOut`; `DebitoResumoItem.status`
   vira `string` simples (ainda existe no payload, calculado no backend). Remove `status` dos
   params de `debitos.list()`.
-- [ ] `dashboard/page.tsx`: troca `DEBITO_STATUS_BADGE[deb.status]` por um rótulo/cor derivado de
-  `situacao_tramitacao`/`situacao_pagamento` via `situacoes.ts` (reaproveitar
-  `TRAMITACAO_ROTULO`/`TRANSACAO_PAGAMENTOS_ROTULO` já existentes, não inventar rótulo novo) — mas
-  `DebitoResumoItem` não tem essas duas colunas no schema atual (`schemas/pagamentos.py` — conferir
-  ao chegar na task; se não tiver, é um campo a acrescentar em `DebitoResumoItem` na Task 6, senão
-  esta task fica sem dado pra trabalhar).
-- [ ] Deleta `statusDebito.ts` (confirmar de novo, no momento da task, que nada passou a importar
-  `DEBITO_STATUS_TABS` nas tasks anteriores).
-- [ ] `frontend/__tests__/pagamentos-f2/f3/f4.test.tsx`: remove `status: "..."` dos fixtures — é
-  erro de compilação TS, não teste vermelho (confirmado no levantamento).
-- [ ] `npx tsc --noEmit` limpo; `npx vitest run` sem regressão; teste manual não é possível nesta
-  sessão (sem ferramenta de browser) — registrar isso no PR como já feito em F4.
-- [ ] Commit `refactor(pagamentos): frontend larga status legado — dashboard usa três dimensões (F5)`
+- [x] `DebitoResumoItem` NÃO tinha `situacao_tramitacao`/`situacao_pagamento` no schema — exatamente
+  o risco que esta linha do plano previu. Como a Task 6 já estava commitada, o campo foi acrescentado
+  retroativamente na Task 7 (backend), junto com o resto do schema.
+- [x] `dashboard/page.tsx`: troca `DEBITO_STATUS_BADGE[deb.status]` por `TRAMITACAO_ROTULO`/
+  `PAGAMENTO_ROTULO` de `situacoes.ts` (o nome real, não `TRANSACAO_PAGAMENTOS_ROTULO` como este
+  plano cogitou) — antes de `AUTORIZADA` mostra a tramitação, depois mostra a execução do pagamento.
+- [x] Deleta `statusDebito.ts` (confirmado: zero importador restante).
+- [x] `frontend/__tests__/pagamentos-f2/f3.test.tsx`: remove `status: "..."` dos fixtures.
+  `pagamentos-f4.test.tsx` não existe nesta branch (F4/#68 não mesclou) — fica para a Task 9.
+- [x] `npx tsc --noEmit` limpo; `npx vitest run` completo: 90 arquivos / 661 testes passando (não só
+  os afetados — rede de segurança ampla, já que `api.ts` é consumido por toda a área de pagamentos).
+  Teste manual não foi possível nesta sessão (sem ferramenta de browser) — registrado no PR.
+- [x] Commit `refactor(pagamentos): frontend larga status legado — dashboard usa três dimensões (F5)` (`51294c5`)
 
 ### Task 9 (fora deste branch — PR separado, depois que #68 mesclar): `pagamentos_lotes.py`
 
@@ -308,23 +317,31 @@ plano próprio, só not-forget.
 
 ### Task 10: Suíte completa + fechamento
 
-- [ ] `pytest -q` sem filtro — comparar contra a baseline conhecida desta sessão (1727 passed / 45
-  skipped / 3 failed pré-existentes de `test_guarda_links_docs.py`, não relacionadas). Qualquer
-  novo vermelho fora desses 3 é bug desta fatia, não pré-existente.
-- [ ] Atualiza `docs/BACKLOG-PENDENCIAS.md`: item de F5 fecha (só a parte de remoção do status); a
+- [x] `pytest -q` sem filtro — 1698 passed / 45 skipped / 3 failed (os mesmos 3 pré-existentes de
+  `test_guarda_links_docs.py`, confirmados por nome E por causa raiz — `FileNotFoundError` num
+  caminho absoluto `/docs/INDEX.md` que não existe no container, bug do próprio teste, nada a ver
+  com F5). A baseline "1727 passed" citada aqui era uma referência de memória de sessão anterior,
+  não uma medição desta branch — não bate com a contagem real, mas o critério que importa (zero
+  vermelho NOVO) está satisfeito.
+- [x] Atualiza `docs/BACKLOG-PENDENCIAS.md`: item de F5 fecha (só a parte de remoção do status); a
   parte de UI/a11y/23 cenários continua registrada como não feita, com a mesma nota sobre o
   documento original ausente.
-- [ ] Commit de fechamento.
+- [ ] Commit de fechamento (próximo passo).
 
 ---
 
 ## Aceite da fatia
 
-- [ ] `SELECT status FROM pagamentos.debito` falha (coluna não existe).
-- [ ] Nenhum arquivo de serviço/router/schema/model cita `Debito.status`, `ST_*`, `StatusDebito`
-  (grep de confirmação antes do PR).
-- [ ] `debito_historico.status_anterior/novo` continuam `NOT NULL` e corretos em toda transição
+- [x] `SELECT status FROM pagamentos.debito` falha (coluna não existe) — confirmado por query direta
+  antes E depois do ciclo upgrade/downgrade/upgrade da migration 0122.
+- [x] Nenhum arquivo de serviço/router/schema/model cita `Debito.status`, `ST_*`, `StatusDebito`
+  (varredura grep repetida várias vezes ao longo das Tasks 6-8, cada vez achando mais alguma coisa
+  fora do inventário original — `pagamentos_caixa.py`, `scripts/seed_pagamentos_demo.py`, 2 inserts
+  de `DebitoHistorico` em `pagamentos_autorizacao.py`, o kwarg `status=` de `criar_debito` — até a
+  varredura final ficar limpa).
+- [x] `debito_historico.status_anterior/novo` continuam `NOT NULL` e corretos em toda transição
   nova, calculados sem depender de coluna nenhuma.
-- [ ] `GET /pagamentos/debitos/exportar.csv` continua com a coluna `status` no arquivo (contrato
-  externo preservado), valor calculado.
-- [ ] Suíte completa verde nos dois papéis de banco, nas mesmas condições da F4.
+- [x] `GET /pagamentos/debitos/exportar.csv` continua com a coluna `status` no arquivo (contrato
+  externo preservado), valor calculado via `status_legado()`.
+- [x] Suíte completa verde: backend (1698 passed, só os 3 pré-existentes vermelhos) + frontend
+  (`tsc --noEmit` limpo, 661 testes vitest passando).
