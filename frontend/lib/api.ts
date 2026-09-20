@@ -1434,12 +1434,6 @@ export interface Alcada {
 }
 
 // ---------- Pagamentos (R2) — débitos, parcelas, autorização, OP ----------
-export type StatusDebito =
-  | "RASCUNHO" | "EM_VALIDACAO" | "DEVOLVIDO" | "VALIDADO"
-  | "ENVIADO_SECRETARIO" | "AGUARDANDO_AUTORIZACAO" | "AUTORIZADO"
-  | "ENVIADO_TESOURARIA" | "EM_PROCESSAMENTO" | "PAGO_PARCIAL" | "PAGO"
-  | "CONCILIADO" | "REJEITADO" | "SUSPENSO" | "CANCELADO" | "ESTORNADO";
-
 export type StatusParcela = "A_PAGAR" | "LIBERADA" | "PAGA" | "CANCELADA";
 
 export interface Parcela {
@@ -1455,7 +1449,7 @@ export interface Debito {
   id_fonte_recursos: number; id_conta: number | null; id_conta_pagadora: number | null;
   id_contrato: number | null; valor_total: string; competencia: string;
   numero_ne: string | null; numero_nf: string | null; criticidade: string; urgente: boolean;
-  justificativa_urgencia: string | null; descricao: string; status: StatusDebito;
+  justificativa_urgencia: string | null; descricao: string;
   id_usuario_solicitante: number;
   liquidacao_confirmada: boolean; data_liquidacao: string | null;
   criado_em: string; atualizado_em: string | null;
@@ -1814,7 +1808,11 @@ export interface ComposicaoItem {
 
 export interface DebitoResumoItem {
   id: number; nome_fornecedor: string; descricao: string; valor_total: string;
-  status: StatusDebito; competencia: string;
+  // `status`: valor legado calculado no backend (F5) — mantido no payload;
+  // a verdade são as duas colunas abaixo.
+  status: string; competencia: string;
+  situacao_tramitacao: SituacaoTramitacao;
+  situacao_pagamento: SituacaoPagamento;
 }
 
 export interface ParcelaAlertaItem {
@@ -4332,12 +4330,12 @@ export const api = {
     },
     debitos: {
       list: (params?: {
-        status?: string; situacao_tramitacao?: SituacaoTramitacao; meus?: boolean;
+        situacao_tramitacao?: SituacaoTramitacao; meus?: boolean;
         id_fonte?: number; id_natureza?: number;
         id_fornecedor?: number; id_contrato?: number; urgente?: boolean; competencia?: string;
       }) =>
         request<Debito[]>(`/pagamentos/debitos${qs({
-          status_f: params?.status, situacao_tramitacao: params?.situacao_tramitacao,
+          situacao_tramitacao: params?.situacao_tramitacao,
           meus: params?.meus, id_fonte: params?.id_fonte,
           id_natureza: params?.id_natureza, id_fornecedor: params?.id_fornecedor,
           id_contrato: params?.id_contrato, urgente: params?.urgente,

@@ -121,7 +121,6 @@ const debitoBase = {
   urgente: false,
   justificativa_urgencia: null,
   descricao: "Manutenção predial",
-  status: "ativo" as any,
   id_usuario_solicitante: 1,
   liquidacao_confirmada: true,
   data_liquidacao: "2026-08-02",
