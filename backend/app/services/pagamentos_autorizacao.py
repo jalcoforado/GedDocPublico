@@ -17,12 +17,19 @@ from ..schemas.pagamentos import ContaElegivelOut, GrupoAutorizacaoIn
 from . import pagamentos_cadastros as cad
 from . import pagamentos_caixa as caixa
 from . import pagamentos_cronologia as cron
-from . import pagamentos_debitos as deb
 from . import pagamentos_estados as est
 from .pagamentos_debitos import (
-    AUTORIZAVEIS, PagamentoDebitoError, _registrar_transicao, listar_parcelas, obter_debito,
+    PagamentoDebitoError, _registrar_transicao, listar_parcelas, obter_debito,
     validadores_do_debito,
 )
+
+# Traduções de status legado (§4.5) para as três dimensões — F5. Só o que
+# este arquivo precisa; não viraram funções compartilhadas em
+# pagamentos_debitos.py de propósito, para não reabrir esse módulo enquanto
+# outros consumidores (filas, excecoes, conciliacao, export, dashboard)
+# ainda não migraram (ver plano da F5, ruling de sequenciamento).
+_EM_TESOURARIA = (est.PROGRAMADA, est.ENVIADA_BANCO, est.EM_PROCESSAMENTO, est.PAGA_PARCIAL,
+                  est.FALHOU)
 
 
 def _mascarar_conta(conta: str) -> str:
@@ -150,9 +157,10 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                     f"Débito {did} informado em mais de um grupo.", status.HTTP_409_CONFLICT)
             vistos.add(did)
             d = await obter_debito(db, tenant_id=tenant_id, debito_id=did, for_update=True)
-            if d.status not in AUTORIZAVEIS:
+            if d.situacao_tramitacao != est.AGUARDANDO_AUTORIDADE:
                 raise PagamentoDebitoError(
-                    f"Débito {did} não está aguardando autorização (está '{d.status}').",
+                    f"Débito {did} não está aguardando autorização "
+                    f"(está em '{d.situacao_tramitacao}').",
                     status.HTTP_409_CONFLICT)
             if d.id_fonte_recursos != g.id_fonte:
                 raise PagamentoDebitoError(
@@ -311,9 +319,17 @@ async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
             d = await obter_debito(db, tenant_id=tenant_id, debito_id=p.id_debito, for_update=True)
             debitos_por_id[d.id] = d
             ordem_debitos.append(d.id)
-        if d.status not in (deb.ST_AUTORIZADO, *deb.EM_TESOURARIA, deb.ST_ESTORNADO):
+        # "Tem reserva" é sobre a dimensão PAGAMENTO, não FILA — a fila pode
+        # estar BLOQUEADA/EXCECAO_AUTORIZADA/AGUARDANDO_DISPONIBILIDADE sem
+        # que a reserva na conta pagadora deixe de existir; só PAGA consome a
+        # reserva de verdade (mesmo domínio do ST_PAGO/ST_CONCILIADO ausentes
+        # de COM_RESERVA no legado).
+        tem_reserva = (d.situacao_tramitacao == est.AUTORIZADA
+                      and d.situacao_pagamento != est.PAGA)
+        if not tem_reserva:
             raise PagamentoDebitoError(
-                f"Débito {d.id} não autorizado para liberação de pagamento (está '{d.status}').",
+                f"Débito {d.id} não autorizado para liberação de pagamento "
+                f"(tramitação '{d.situacao_tramitacao}').",
                 status.HTTP_409_CONFLICT)
         if p.status != "A_PAGAR":
             raise PagamentoDebitoError(
@@ -336,7 +352,7 @@ async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
             p.atualizado_em = _utcnow()
 
         justificativa = f"Parcelas {', '.join(str(n) for n in sorted(numeros_por_debito[d_id]))}"
-        if d.status in (deb.ST_AUTORIZADO, deb.ST_ESTORNADO):  # entra na tesouraria
+        if d.situacao_pagamento in (est.NAO_INICIADA, est.ESTORNADA):  # entra na tesouraria
             _registrar_transicao(db, debito=d, acao="ENVIADO_TESOURARIA",
                                  pagamento=est.PROGRAMADA,
                                  usuario_id=usuario_id, justificativa=justificativa, ip=ip)
@@ -372,7 +388,7 @@ async def revogar_liberacao(db: AsyncSession, *, tenant_id: int, usuario_id: int
                            id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow()))
     # sem parcelas liberadas e nada pago → volta da tesouraria para AUTORIZADO
     todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
-    if (d.status == deb.ST_ENVIADO_TESOURARIA
+    if (d.situacao_pagamento == est.PROGRAMADA
             and not any(x.status in ("LIBERADA", "PAGA") for x in todas)):
         _registrar_transicao(db, debito=d, acao="REVOGADO",
                              tramitacao=est.AUTORIZADA, pagamento=est.NAO_INICIADA,
@@ -390,9 +406,10 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
     # Guarda de ordem cronológica (F3, Task 5) — no início, antes de qualquer
     # escrita.
     await cron.assert_ordem_respeitada(db, tenant_id=tenant_id, debito_id=d.id)
-    if d.status not in deb.EM_TESOURARIA:
+    if d.situacao_pagamento not in _EM_TESOURARIA:
         raise PagamentoDebitoError(
-            f"Débito não está na tesouraria para pagamento (está '{d.status}').",
+            f"Débito não está na tesouraria para pagamento "
+            f"(pagamento '{d.situacao_pagamento}').",
             status.HTTP_409_CONFLICT)
     if p.status != "LIBERADA":
         raise PagamentoDebitoError(
@@ -435,9 +452,10 @@ async def marcar_em_processamento(db: AsyncSession, *, tenant_id: int, usuario_i
     """Tesouraria marca o pagamento como despachado ao banco, aguardando confirmação
     (ENVIADO_TESOURARIA → EM_PROCESSAMENTO). Etapa opcional antes de dar baixa."""
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id, for_update=True)
-    if d.status != deb.ST_ENVIADO_TESOURARIA:
+    if d.situacao_pagamento != est.PROGRAMADA:
         raise PagamentoDebitoError(
-            f"Débito não está pronto para processamento (está '{d.status}').",
+            f"Débito não está pronto para processamento "
+            f"(pagamento '{d.situacao_pagamento}').",
             status.HTTP_409_CONFLICT)
     _registrar_transicao(db, debito=d, acao="PROCESSANDO",
                          pagamento=est.EM_PROCESSAMENTO,

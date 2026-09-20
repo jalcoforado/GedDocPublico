@@ -86,12 +86,12 @@ Cada constante/gate atual e sua tradução exata para as três dimensões:
    `FALHOU` ainda está "na tesouraria" no sentido operacional (precisa de um lote novo), mesmo sem
    entrada na tabela de mapeamento original. Ponto de julgamento registrado aqui de propósito.
 4. **`COM_RESERVA = (ST_AUTORIZADO, *EM_TESOURARIA, ST_ESTORNADO)`** →
-   `situacao_tramitacao == AUTORIZADA and situacao_pagamento != NAO_INICIADA` **OU**
-   `situacao_pagamento in (..., ESTORNADA)`. Mais simples: `situacao_tramitacao == AUTORIZADA and
-   situacao_fila == ELEGIVEL` cobre TODOS os casos de `COM_RESERVA` pela própria tabela §4.5 (toda
-   linha de `AUTORIZADO` até `ESTORNADO` tem `situacao_fila = ELEGIVEL` OU `CONCLUIDA` — checar:
-   `PAGO`/`CONCILIADO` têm fila `CONCLUIDA`, não `ELEGIVEL`!). Tradução correta:
-   `situacao_tramitacao == AUTORIZADA and situacao_fila in (ELEGIVEL, CONCLUIDA)`.
+   `situacao_tramitacao == AUTORIZADA and situacao_pagamento != PAGA`. **Correção feita durante a
+   Task 3** (a versão original deste ruling usava `situacao_fila`, e quebrou
+   `test_excecao_destrava_e_fica_visivel`): "tem reserva" é sobre a dimensão PAGAMENTO, não FILA —
+   um débito pode estar `BLOQUEADA`/`EXCECAO_AUTORIZADA`/`AGUARDANDO_DISPONIBILIDADE` na fila sem
+   que a reserva na conta pagadora deixe de existir; só `PAGA` consome a reserva de fato (mesmo
+   domínio do `ST_PAGO`/`ST_CONCILIADO`, ausentes de `COM_RESERVA` no legado).
 5. **`d.status != ST_PAGO`** (conciliação, gate de estorno) → `d.situacao_pagamento != PAGA`.
 6. **`d.status not in (RASCUNHO, REJEITADO, CANCELADO)`** (`excluir_debito`) →
    `d.situacao_tramitacao not in (RASCUNHO, REJEITADA_GESTOR, INDEFERIDA_AUTORIDADE, CANCELADA)`.
