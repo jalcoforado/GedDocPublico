@@ -9,7 +9,7 @@ import { ArrowRight } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { MENUS } from "@/lib/menus";
+import { primeiraRotaVisivel } from "@/lib/menus";
 import { descricaoDoModulo, iconeDoModulo } from "@/lib/modulos";
 
 /**
@@ -29,7 +29,7 @@ import { descricaoDoModulo, iconeDoModulo } from "@/lib/modulos";
  */
 export default function Launcher() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const {
     data,
     isLoading,
@@ -45,8 +45,7 @@ export default function Launcher() {
 
   useEffect(() => {
     if (!moduloUnico) return;
-    const raiz = MENUS[ordenados[0].slug]?.raiz ?? "/home";
-    router.replace(raiz);
+    router.replace(primeiraRotaVisivel(ordenados[0].slug, can));
     // Roda só quando o veredito "módulo único" muda — não a cada re-render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moduloUnico]);
@@ -108,8 +107,10 @@ export default function Launcher() {
           // Módulo cujo slug não está em MENUS não some da tela: cai em
           // /home com ícone genérico (fail-open desta camada, coerente com
           // D8) — evita que um módulo novo no catálogo desapareça do
-          // launcher antes de a UI dele existir.
-          const raiz = MENUS[m.slug]?.raiz ?? "/home";
+          // launcher antes de a UI dele existir. Dentre os que existem, vai
+          // para o primeiro item que o usuário PODE ver, não a raiz fixa do
+          // módulo (item 1.0.9 do backlog).
+          const raiz = primeiraRotaVisivel(m.slug, can);
           return (
             <Link
               key={m.slug}

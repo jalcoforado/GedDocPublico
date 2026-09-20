@@ -13,28 +13,29 @@ no nível da dependency, onde ela continua verdadeira, e
 `test_usuario_sem_permissao_agora_leva_403` registra o que mudou. Trocar a
 política sem deixar as duas escritas teria apagado a memória do porquê.
 
-Fixtures espelham tests/test_permissoes_modulo.py::test_http_su_sem_modulo_recebe_403
-(``_as_user``/``_cleanup_tenant_http``): dependency_overrides de
-``get_current_user``/``require_tenant_id``/``require_tenant_slug`` sobre o app real,
-não um token JWT — é o padrão já validado neste repo para bater endpoints de
-negócio via HTTP com identidade fixada.
+Fixtures usam os helpers compartilhados de ``tests/conftest.py``
+(``provisionar_tenant_de_teste``/``admin_id_do_tenant``/``as_user_dependency``,
+item 1.0.9 do backlog — este arquivo era a quarta cópia manual do padrão) para
+montar dependency_overrides de ``get_current_user``/``require_tenant_id``/
+``require_tenant_slug`` sobre o app real, não um token JWT — é o padrão já
+validado neste repo para bater endpoints de negócio via HTTP com identidade
+fixada. Sem limpeza manual de tenant no ``finally``: ``_limpa_tenants_do_modulo``
+(``conftest.py``, autouse de escopo de módulo) já apaga tudo que este arquivo
+cria, ao fim do módulo — o que os `finally` de cada fixture ainda fazem
+(`dependency_overrides.clear()` + `dispose()` do engine da app) é isolamento
+ENTRE testes, não limpeza de banco.
 """
-import uuid
-
 import pytest
 import pytest_asyncio
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.deps import get_current_user
 from app.config import get_settings
 from app.main import app
-from app.models import Usuario
 from app.services.modulos import contratar
-from app.services.provisioning_tenant import provisionar_tenant
-from tests.conftest import arreio_tenant_http
+from tests.conftest import admin_id_do_tenant, as_user_dependency, provisionar_tenant_de_teste
 
 APP = get_settings().app_name
 
@@ -70,51 +71,6 @@ ROTAS_ADMINISTRACAO = [
 
 def _sm(engine):
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-
-
-def _slug(prefixo: str) -> str:
-    return f"{prefixo}{uuid.uuid4().hex[:8]}"
-
-
-async def _cleanup_tenant(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
-async def _provisiona(engine, prefixo: str):
-    slug = _slug(prefixo)
-    async with _sm(engine)() as s:
-        tenant, _ = await provisionar_tenant(
-            s,
-            slug=slug,
-            nome=f"Pref {prefixo}",
-            admin_email=f"{slug}@e2e.test",
-            admin_nome="Adm",
-            admin_cpf=uuid.uuid4().hex[:11],
-            plano="basico",
-        )
-    return tenant
-
-
-async def _su_id(engine, tenant_id: int) -> int:
-    async with _sm(engine)() as s:
-        return int((await s.execute(
-            text("SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"),
-            {"t": tenant_id},
-        )).scalar_one())
 
 
 async def _cria_usuario_nu(engine, tenant_id: int) -> int:
@@ -156,103 +112,81 @@ async def _cria_usuario_nu(engine, tenant_id: int) -> int:
         return uid
 
 
-def _as_user(engine, usuario_id: int, tenant_id: int, tenant_slug: str):
-    """Builder de dependency_overrides — mesmo padrão de
-    test_permissoes_modulo.py::_as_user."""
-
-    async def _get_user():
-        async with _sm(engine)() as s:
-            return (
-                await s.execute(select(Usuario).where(Usuario.id == usuario_id))
-            ).scalar_one()
-
-    def _setup():
-        app.dependency_overrides[get_current_user] = _get_user
-        arreio_tenant_http(tenant_id, tenant_slug)
-
-    return _setup
-
-
 @pytest_asyncio.fixture
 async def tenant_sem_protocolo(admin_engine):
-    tenant = await _provisiona(admin_engine, "leitura-sem-")
+    tenant = await provisionar_tenant_de_teste(admin_engine, "leitura-sem-")
     async with _sm(admin_engine)() as s:
         await contratar(s, tenant.id, ["administracao"])  # sem protocolo
         await s.commit()
-    su_id = await _su_id(admin_engine, tenant.id)
+    su_id = await admin_id_do_tenant(admin_engine, tenant.id)
     try:
-        yield _as_user(admin_engine, su_id, tenant.id, tenant.slug)
+        yield as_user_dependency(admin_engine, su_id, tenant.id, tenant.slug)
     finally:
         app.dependency_overrides.clear()
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup_tenant(admin_engine, tenant.id)
 
 
 @pytest_asyncio.fixture
 async def tenant_com_protocolo(admin_engine):
-    tenant = await _provisiona(admin_engine, "leitura-com-")
+    tenant = await provisionar_tenant_de_teste(admin_engine, "leitura-com-")
     async with _sm(admin_engine)() as s:
         await contratar(s, tenant.id, ["protocolo"])
         await s.commit()
-    su_id = await _su_id(admin_engine, tenant.id)
+    su_id = await admin_id_do_tenant(admin_engine, tenant.id)
     try:
-        yield _as_user(admin_engine, su_id, tenant.id, tenant.slug)
+        yield as_user_dependency(admin_engine, su_id, tenant.id, tenant.slug)
     finally:
         app.dependency_overrides.clear()
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup_tenant(admin_engine, tenant.id)
 
 
 @pytest_asyncio.fixture
 async def tenant_sem_administracao(admin_engine):
     # Contrata `protocolo`, não nenhum — prova que o gate é específico do
     # slug "administracao", não um "tenant sem módulo nenhum" genérico.
-    tenant = await _provisiona(admin_engine, "leitura-sem-adm-")
+    tenant = await provisionar_tenant_de_teste(admin_engine, "leitura-sem-adm-")
     async with _sm(admin_engine)() as s:
         await contratar(s, tenant.id, ["protocolo"])  # sem administracao
         await s.commit()
-    su_id = await _su_id(admin_engine, tenant.id)
+    su_id = await admin_id_do_tenant(admin_engine, tenant.id)
     try:
-        yield _as_user(admin_engine, su_id, tenant.id, tenant.slug)
+        yield as_user_dependency(admin_engine, su_id, tenant.id, tenant.slug)
     finally:
         app.dependency_overrides.clear()
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup_tenant(admin_engine, tenant.id)
 
 
 @pytest_asyncio.fixture
 async def tenant_com_administracao(admin_engine):
-    tenant = await _provisiona(admin_engine, "leitura-com-adm-")
+    tenant = await provisionar_tenant_de_teste(admin_engine, "leitura-com-adm-")
     async with _sm(admin_engine)() as s:
         await contratar(s, tenant.id, ["administracao"])
         await s.commit()
-    su_id = await _su_id(admin_engine, tenant.id)
+    su_id = await admin_id_do_tenant(admin_engine, tenant.id)
     try:
-        yield _as_user(admin_engine, su_id, tenant.id, tenant.slug)
+        yield as_user_dependency(admin_engine, su_id, tenant.id, tenant.slug)
     finally:
         app.dependency_overrides.clear()
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup_tenant(admin_engine, tenant.id)
 
 
 @pytest_asyncio.fixture
 async def tenant_com_protocolo_usuario_nu(admin_engine):
-    tenant = await _provisiona(admin_engine, "leitura-nu-")
+    tenant = await provisionar_tenant_de_teste(admin_engine, "leitura-nu-")
     async with _sm(admin_engine)() as s:
         await contratar(s, tenant.id, ["protocolo"])
         await s.commit()
     uid = await _cria_usuario_nu(admin_engine, tenant.id)
     try:
-        yield _as_user(admin_engine, uid, tenant.id, tenant.slug)
+        yield as_user_dependency(admin_engine, uid, tenant.id, tenant.slug)
     finally:
         app.dependency_overrides.clear()
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup_tenant(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio

@@ -3129,18 +3129,18 @@ export const api = {
         request<AdminTenant>(`/admin/tenants/${id}/ativar`, { method: "POST" }),
       desativar: (id: number) =>
         request<AdminTenant>(`/admin/tenants/${id}/desativar`, { method: "POST" }),
+      // F2 Task 7 — GET devolve o catálogo contratável com o estado do tenant;
+      // PUT RECONCILIA (envia a lista completa do estado final, não um delta —
+      // o que não vier na lista é descontratado). Ver services/modulos.py::contratar.
+      modulos: (id: number) =>
+        request<AdminTenantModulo[]>(`/admin/tenants/${id}/modulos`),
+      definirModulos: (id: number, slugs: string[]) =>
+        request<AdminTenantModulo[]>(`/admin/tenants/${id}/modulos`, {
+          method: "PUT",
+          body: JSON.stringify({ slugs }),
+        }),
     },
   },
-  // F2 Task 7 — GET devolve o catálogo contratável com o estado do tenant;
-  // PUT RECONCILIA (envia a lista completa do estado final, não um delta —
-  // o que não vier na lista é descontratado). Ver services/modulos.py::contratar.
-  adminTenantModulos: (id: number) =>
-    request<AdminTenantModulo[]>(`/admin/tenants/${id}/modulos`),
-  adminTenantContratarModulos: (id: number, slugs: string[]) =>
-    request<AdminTenantModulo[]>(`/admin/tenants/${id}/modulos`, {
-      method: "PUT",
-      body: JSON.stringify({ slugs }),
-    }),
 
   usuarios: {
     list: (params?: { page?: number; page_size?: number; q?: string }) =>
