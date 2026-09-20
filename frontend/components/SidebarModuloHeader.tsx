@@ -6,7 +6,8 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { api } from "@/lib/api";
-import { MENUS } from "@/lib/menus";
+import { useAuth } from "@/lib/auth";
+import { primeiraRotaVisivel } from "@/lib/menus";
 import { iconeDoModulo } from "@/lib/modulos";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +47,7 @@ interface Props {
  * com "você só tem um módulo".
  */
 export function SidebarModuloHeader({ modulo, collapsed }: Props) {
+  const { can } = useAuth();
   const { data, isLoading, isError, refetch, isRefetching } = useQuery({
     queryKey: ["modulos-me"],
     queryFn: api.modulos,
@@ -131,8 +133,7 @@ export function SidebarModuloHeader({ modulo, collapsed }: Props) {
         >
           {outros.map((m) => {
             const Icone = iconeDoModulo(m.icone);
-            // Mesmo fail-open do launcher: slug fora de MENUS cai em /home.
-            const raiz = MENUS[m.slug]?.raiz ?? "/home";
+            const raiz = primeiraRotaVisivel(m.slug, can);
             return (
               <Link
                 key={m.slug}

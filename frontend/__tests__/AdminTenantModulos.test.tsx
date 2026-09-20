@@ -23,13 +23,17 @@ import { describe, expect, it, vi } from "vitest";
 const salvar = vi.fn((_id: number, _slugs: string[]) => Promise.resolve());
 vi.mock("@/lib/api", () => ({
   api: {
-    adminTenantModulos: () =>
-      Promise.resolve([
-        { slug: "protocolo", nome: "Protocolo", contratado: true, ativo: true, ordem: 1 },
-        { slug: "frota", nome: "Frota", contratado: false, ativo: true, ordem: 3 },
-        { slug: "transporte", nome: "Transporte Regulado", contratado: true, ativo: false, ordem: 4 },
-      ]),
-    adminTenantContratarModulos: (id: number, slugs: string[]) => salvar(id, slugs),
+    admin: {
+      tenants: {
+        modulos: () =>
+          Promise.resolve([
+            { slug: "protocolo", nome: "Protocolo", contratado: true, ativo: true, ordem: 1 },
+            { slug: "frota", nome: "Frota", contratado: false, ativo: true, ordem: 3 },
+            { slug: "transporte", nome: "Transporte Regulado", contratado: true, ativo: false, ordem: 4 },
+          ]),
+        definirModulos: (id: number, slugs: string[]) => salvar(id, slugs),
+      },
+    },
   },
 }));
 

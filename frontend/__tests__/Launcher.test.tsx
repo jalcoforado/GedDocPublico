@@ -13,7 +13,9 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace: push }) }
 
 const modulos = vi.fn();
 vi.mock("@/lib/api", () => ({ api: { modulos: () => modulos() } }));
-vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: { nome: "Teste" }, loading: false }) }));
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ user: { nome: "Teste" }, loading: false, can: () => true }),
+}));
 
 import Launcher from "@/app/(launcher)/modulos/page";
 import { descricaoDoModulo } from "@/lib/modulos";

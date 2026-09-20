@@ -2,6 +2,7 @@ import { menuAdministracao } from "./administracao";
 import { menuComum } from "./comum";
 import { menuFrota } from "./frota";
 import { menuPagamentos } from "./pagamentos";
+import { canSeeItem } from "./permissoes";
 import { menuProtocolo } from "./protocolo";
 import { menuTransporte } from "./transporte";
 import type { MenuModulo, NavItem } from "./tipos";
@@ -47,4 +48,23 @@ export function itensNavegaveis(): ItemComModulo[] {
   return Object.values(MENUS).flatMap((menu) =>
     folhas(menu.grupos.flatMap((g) => g.items)).map((item) => ({ item, moduloSlug: menu.slug })),
   );
+}
+
+/**
+ * Para onde o launcher/switcher deve mandar o usuário ao entrar num módulo:
+ * o primeiro item navegável, na ordem declarada de grupos/itens, que ELE
+ * pode ver — não `MENUS[slug].raiz` fixo (achado do review da F2, item
+ * 1.0.9: a raiz fixa podia ser uma tela fora do menu daquele usuário, sem
+ * dar 403 porque leitura não é gateada por permissão, só incoerente).
+ * Cai em `raiz` só se o módulo não tiver nenhum item visível — módulo
+ * contratado sem nenhuma permissão concedida ainda —, para nunca deixar de
+ * navegar.
+ */
+export function primeiraRotaVisivel(slug: string, can: (perm: string) => boolean): string {
+  const menu = MENUS[slug];
+  if (!menu) return "/home";
+  const primeiro = itensNavegaveis().find(
+    (x) => x.moduloSlug === slug && canSeeItem(x.item, can),
+  );
+  return primeiro?.item.href ?? menu.raiz;
 }

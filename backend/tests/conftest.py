@@ -491,6 +491,87 @@ def arreio_tenant_http(tenant_id: int, tenant_slug: str | None = None) -> None:
         app.dependency_overrides[require_tenant_slug] = lambda: tenant_slug
 
 
+# ---------------------------------------------------------------------------
+# Provisionamento + identidade de teste — item 1.0.9 do backlog ("Fixtures
+# duplicadas nos testes de backend"). `_provisionar`/`_su_id`/`_as_user` (ou
+# variações do mesmo nome) eram copiados arquivo a arquivo; estes três cobrem
+# a parte REALMENTE genérica do padrão (provisionar tenant de teste, achar o
+# super-usuário que `provisionar_tenant` cria, montar o dependency_overrides
+# de "logar como" — a mesma função que `arreio_tenant_http` já fatorava).
+#
+# O que ficou de fora, de propósito: criar usuário SEM permissão (varia por
+# arquivo — nível, transações, grupo) e limpar o tenant no teardown. A
+# limpeza manual por arquivo (`_cleanup_tenant`/`_limpar_engine` e primos) é
+# hoje redundante — `_limpa_tenants_do_modulo` (acima) já apaga tudo que o
+# módulo criou, tabela por tabela, ao fim do módulo —, mas retirá-la dos
+# ~60 arquivos que ainda a chamam é um refactor maior, deliberadamente fora
+# desta fatia (ver docs/BACKLOG-PENDENCIAS.md §1.0.9).
+# ---------------------------------------------------------------------------
+
+
+async def provisionar_tenant_de_teste(engine, prefixo: str, *, plano: str = "basico"):
+    """Provisiona um tenant de teste com slug único (`prefixo` + uuid4[:8]).
+
+    Wrapper fino sobre `provisionar_tenant` — mesma chamada que praticamente
+    todo arquivo de teste HTTP já fazia à mão."""
+    from app.services.provisioning_tenant import provisionar_tenant
+
+    slug = f"{prefixo}{uuid.uuid4().hex[:8]}"
+    sm = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with sm() as s:
+        tenant, _ = await provisionar_tenant(
+            s,
+            slug=slug,
+            nome=f"Tenant {slug}",
+            admin_email=f"{slug}@e2e.test",
+            admin_nome="Admin",
+            admin_cpf=uuid.uuid4().hex[:11],
+            plano=plano,
+        )
+    return tenant
+
+
+async def admin_id_do_tenant(engine, tenant_id: int) -> int:
+    """Id do usuário administrador que `provisionar_tenant` já criou."""
+    sm = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with sm() as s:
+        return int(
+            (
+                await s.execute(
+                    text("SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"),
+                    {"t": tenant_id},
+                )
+            ).scalar_one()
+        )
+
+
+def as_user_dependency(engine, usuario_id: int, tenant_id: int, tenant_slug: str):
+    """Builder de dependency_overrides: `get_current_user` devolve
+    `usuario_id`, e `arreio_tenant_http` cuida do resto (`get_db`,
+    `require_tenant_id`/`require_tenant_slug`). Chame o retorno para
+    instalar os overrides — mesmo padrão que `test_permissoes_modulo.py`
+    e vários outros arquivos já reimplementavam."""
+    sm = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+    async def _get_user():
+        from app.models import Usuario
+        from sqlalchemy import select
+
+        async with sm() as s:
+            return (
+                await s.execute(select(Usuario).where(Usuario.id == usuario_id))
+            ).scalar_one()
+
+    def _setup():
+        from app.auth.deps import get_current_user
+        from app.main import app
+
+        app.dependency_overrides[get_current_user] = _get_user
+        arreio_tenant_http(tenant_id, tenant_slug)
+
+    return _setup
+
+
 @pytest_asyncio.fixture(scope="function")
 async def two_tenants(admin_engine) -> AsyncIterator[tuple[int, int]]:
     """Cria 2 tenants temporários, retorna ``(id_a, id_b)``, limpa no teardown.

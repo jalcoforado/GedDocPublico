@@ -18,6 +18,13 @@ vi.mock("@/lib/api", () => ({
   api: { modulos: () => modulosMock() },
 }));
 
+// `can: () => true` — este arquivo testa o comportamento de navegação do
+// switcher (ir direto à raiz do módulo, sem passar pelo launcher), não a
+// poda por permissão (coberta em __tests__/menus.test.tsx). Com tudo
+// visível, `primeiraRotaVisivel` cai no primeiro item de cada módulo, que
+// é a própria raiz — preserva as asserções existentes.
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ can: () => true }) }));
+
 import { ModuloSwitcher } from "@/components/ModuloSwitcher";
 
 // O componente herda o QueryClient da árvore (`Providers`, mesmo padrão do

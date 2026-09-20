@@ -21,9 +21,13 @@ const tenantModulos = vi.fn();
 const salvarModulos = vi.fn((_id: number, _slugs: string[]) => Promise.resolve());
 vi.mock("@/lib/api", () => ({
   api: {
-    admin: { tenants: { detalhe: (id: number) => tenantDetalhe(id) } },
-    adminTenantModulos: (id: number) => tenantModulos(id),
-    adminTenantContratarModulos: (id: number, slugs: string[]) => salvarModulos(id, slugs),
+    admin: {
+      tenants: {
+        detalhe: (id: number) => tenantDetalhe(id),
+        modulos: (id: number) => tenantModulos(id),
+        definirModulos: (id: number, slugs: string[]) => salvarModulos(id, slugs),
+      },
+    },
   },
 }));
 

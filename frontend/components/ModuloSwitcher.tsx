@@ -7,7 +7,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { Popover } from "@/components/ui/popover";
 import { api, type ModuloOut } from "@/lib/api";
-import { MENUS } from "@/lib/menus";
+import { useAuth } from "@/lib/auth";
+import { primeiraRotaVisivel } from "@/lib/menus";
 import { iconeDoModulo, moduloDoPathname } from "@/lib/modulos";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,7 @@ import { cn } from "@/lib/utils";
 export function ModuloSwitcher() {
   const router = useRouter();
   const pathname = usePathname();
+  const { can } = useAuth();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -97,7 +99,7 @@ export function ModuloSwitcher() {
 
   function irPara(slug: string) {
     setOpen(false);
-    router.push(MENUS[slug]?.raiz ?? "/home");
+    router.push(primeiraRotaVisivel(slug, can));
   }
 
   function irParaLauncher() {

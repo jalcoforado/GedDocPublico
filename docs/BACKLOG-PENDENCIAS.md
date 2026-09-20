@@ -339,18 +339,36 @@ por esquecimento. Agrupados aqui para não se perderem.)*
   por `/login`, **perdendo o destino original** — nunca houve `next=`. Quem tentava abrir
   `/frotas/veiculos` sem sessão ia parar no launcher. **Não era regressão** (antes ia parar em
   `/home`), mas incomoda mais agora que a porta de entrada é a tela de escolha.
-- **`api.adminTenantModulos` / `api.adminTenantContratarModulos` ficaram na raiz** do objeto `api`,
+- ~~**`api.adminTenantModulos` / `api.adminTenantContratarModulos` ficaram na raiz** do objeto `api`,
   em vez de `api.admin.tenants.modulos` / `.definirModulos`, onde já vivem `detalhe`/`editar`/
-  `ativar`/`desativar` do mesmo recurso.
-- **Abas do admin de tenant sem semântica completa:** `role="tablist"`/`role="tab"` sem
+  `ativar`/`desativar` do mesmo recurso.~~ **FECHADO em 2026-09-19** — movidos para dentro de
+  `api.admin.tenants`, consumidores (`TenantModulosTab.tsx`, os dois testes que mockam `@/lib/api`)
+  atualizados.
+- ~~**Abas do admin de tenant sem semântica completa:** `role="tablist"`/`role="tab"` sem
   `aria-controls`, sem `role="tabpanel"` no conteúdo, sem navegação por setas nem roving tabindex.
-  Leitor de tela anuncia "aba" e não encontra painel associado.
-- **O card do launcher aponta para a `raiz` fixa do módulo**, que pode ser uma tela fora do menu
+  Leitor de tela anuncia "aba" e não encontra painel associado.~~ **FECHADO em 2026-08-27**, antes
+  desta fatia — commit `e4a41ee` ("abas do admin de tenant ganham semântica ARIA; guarda impede a
+  sétima", #49). Este bullet ficou desatualizado no doc; corrigido junto por não ter sido apagado
+  quando o commit entrou.
+- ~~**O card do launcher aponta para a `raiz` fixa do módulo**, que pode ser uma tela fora do menu
   daquele usuário — `administracao` leva a `/usuarios` (`perm: usuario`), `protocolo` a `/processos`
-  (`perm: processo`). Não dá 403 (leitura não é gateada por permissão — ver 1.0.8), mas é incoerente.
-  Alternativa: `raiz` = primeiro item visível do menu daquele módulo para aquele usuário.
-- **Fixtures duplicadas nos testes de backend:** `tests/test_leitura_por_modulo.py` é a quarta cópia
-  do padrão de provisionamento+token+cleanup do diretório. Pede um `conftest`.
+  (`perm: processo`). Não dá 403 (leitura não é gateada por permissão — ver 1.0.8), mas é
+  incoerente.~~ **FECHADO em 2026-09-19** — `lib/menus/index.ts::primeiraRotaVisivel(slug, can)`
+  resolve o primeiro item navegável que o usuário PODE ver (reaproveita `itensNavegaveis`/
+  `canSeeItem`), com fallback para `raiz` só se nenhum item for visível. Substituído nos três
+  consumidores de `MENUS[slug].raiz` (launcher, `ModuloSwitcher`, `SidebarModuloHeader`).
+- ~~**Fixtures duplicadas nos testes de backend:** `tests/test_leitura_por_modulo.py` é a quarta
+  cópia do padrão de provisionamento+token+cleanup do diretório. Pede um `conftest`.~~ **FECHADO em
+  2026-09-19** para o arquivo citado — `provisionar_tenant_de_teste`/`admin_id_do_tenant`/
+  `as_user_dependency`, novos em `tests/conftest.py`, cobrem a parte genérica (provisionar +
+  impersonar); `test_leitura_por_modulo.py` migrou e perdeu as 4 cópias locais. A parte de
+  **limpeza** ficou de fora de propósito — não generalizada, porque já é redundante: descoberto
+  nesta fatia que `_limpa_tenants_do_modulo` (autouse de escopo de módulo, item 1.1.6, entregue em
+  2026-08-16) já apaga tudo que qualquer módulo de teste cria, tabela por tabela, dinamicamente. Os
+  `_cleanup_tenant`/`_limpar_engine`/primos que ainda existem em dezenas de arquivos (a contagem real
+  é maior que "quarta cópia" sugeria — a nota é de antes da explosão de arquivos de transporte/
+  pagamentos) são hoje trabalho morto, não incorreção. Removê-los é um refactor maior e de baixo
+  risco funcional, deliberadamente fora desta fatia: mecânico, mas toca ~60 arquivos.
 
 ### 1.1.6 A suíte deixa tenants para trás — 4.032 no banco local em uma semana
 

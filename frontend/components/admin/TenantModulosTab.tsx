@@ -29,7 +29,7 @@ export function TenantModulosTab({ tenantId }: { tenantId: number }) {
 
   const q = useQuery({
     queryKey: ["admin-tenant-modulos", tenantId],
-    queryFn: () => api.adminTenantModulos(tenantId),
+    queryFn: () => api.admin.tenants.modulos(tenantId),
   });
 
   // Estado local de edição: slugs marcados. Inicializa a partir do que veio
@@ -62,7 +62,7 @@ export function TenantModulosTab({ tenantId }: { tenantId: number }) {
   }
 
   const salvar = useMutation({
-    mutationFn: (slugs: string[]) => api.adminTenantContratarModulos(tenantId, slugs),
+    mutationFn: (slugs: string[]) => api.admin.tenants.definirModulos(tenantId, slugs),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-tenant-modulos", tenantId] });
       toast.success("Contratação de módulos atualizada.");
