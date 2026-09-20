@@ -347,6 +347,12 @@ SituacaoPagamento = Literal[
 CategoriaContrato = Literal["BENS", "LOCACOES", "SERVICOS", "OBRAS"]
 # ----------------------------------------------------------------------------
 
+# --- F4: lote de pagamento e retenções (spec §4.3) --------------------------
+TipoRetencaoLit = Literal["IRRF", "INSS", "ISS", "PIS_COFINS_CSLL", "OUTRAS"]
+SituacaoLoteLit = Literal["RASCUNHO", "PROGRAMADO", "ENVIADO", "PROCESSADO", "CANCELADO"]
+SituacaoLoteParcelaLit = Literal["PENDENTE", "PAGA", "FALHOU"]
+# ----------------------------------------------------------------------------
+
 
 class ParcelaCreate(BaseModel):
     numero: int = Field(ge=1)
@@ -886,3 +892,42 @@ class SistemaIntegradoOut(BaseModel):
 class SistemaIntegradoCriadoOut(SistemaIntegradoOut):
     """Resposta do POST de criação — única vez em que a chave completa aparece."""
     chave: str
+
+
+# ---------- F4: retenções (spec §4.3) ----------
+class RetencaoCreate(BaseModel):
+    tipo: TipoRetencaoLit
+    descricao: str | None = Field(default=None, max_length=150)
+    base_calculo: Decimal = Field(gt=0)
+    aliquota: Decimal | None = Field(default=None, ge=0)
+    valor: Decimal = Field(gt=0)
+
+
+class RetencaoUpdate(BaseModel):
+    tipo: TipoRetencaoLit | None = None
+    descricao: str | None = Field(default=None, max_length=150)
+    base_calculo: Decimal | None = Field(default=None, gt=0)
+    aliquota: Decimal | None = Field(default=None, ge=0)
+    valor: Decimal | None = Field(default=None, gt=0)
+
+
+class RetencaoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; id_debito: int; tipo: TipoRetencaoLit
+    descricao: str | None; base_calculo: Decimal; aliquota: Decimal | None
+    valor: Decimal; recolhido: bool
+    data_recolhimento: date | None; documento_recolhimento: str | None
+    criado_em: datetime; atualizado_em: datetime | None
+
+
+class RetencaoRecolherIn(BaseModel):
+    data_recolhimento: date
+    documento_recolhimento: str = Field(min_length=1, max_length=50)
+
+
+class RetencoesDebitoOut(BaseModel):
+    """Lista de retenções do débito + o líquido resultante — sempre calculado,
+    nunca uma coluna (spec §4.3)."""
+    valor_bruto: Decimal
+    valor_liquido: Decimal
+    retencoes: list[RetencaoOut]
