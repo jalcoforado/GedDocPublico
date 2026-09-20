@@ -931,3 +931,40 @@ class RetencoesDebitoOut(BaseModel):
     valor_bruto: Decimal
     valor_liquido: Decimal
     retencoes: list[RetencaoOut]
+
+
+# ---------- F4: lote de pagamento (spec §4.3, §7.6) ----------
+class LoteCriarIn(BaseModel):
+    id_conta_pagadora: int
+    parcela_ids: list[int] = Field(min_length=1)
+
+
+class LoteParcelaIn(BaseModel):
+    parcela_id: int
+
+
+class LotePagamentoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; numero: str; id_conta_pagadora: int
+    situacao: SituacaoLoteLit
+    data_programada: date | None; valor_total: Decimal
+    id_anexo_comprovante: int | None
+    id_usuario: int; id_usuario_envio: int | None
+    enviado_em: datetime | None; processado_em: datetime | None
+    criado_em: datetime; atualizado_em: datetime | None
+
+
+class LotePagamentoParcelaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; id_lote: int; id_parcela: int
+    situacao: SituacaoLoteParcelaLit
+    motivo_falha: str | None
+    criado_em: datetime; atualizado_em: datetime | None
+
+
+class LoteDetalheOut(LotePagamentoOut):
+    parcelas: list[LotePagamentoParcelaOut]
+
+
+class LoteProgramarIn(BaseModel):
+    data_programada: date
