@@ -18,15 +18,23 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 
-from fastapi import status
+from fastapi import UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import ContaBancaria, Debito, DebitoHistorico, LotePagamento, LotePagamentoParcela, Parcela
+from ..config import get_settings
+from ..models import (
+    Anexo, ContaBancaria, Debito, DebitoHistorico, LotePagamento, LotePagamentoParcela,
+    MovimentacaoConta, Parcela,
+)
+from ..schemas.pagamentos import RetornoParcelaIn
 from . import pagamentos_cronologia as cron
 from . import pagamentos_estados as est
-from .pagamentos_debitos import PagamentoDebitoError, _registrar_transicao, obter_debito
+from . import pagamentos_retencoes as ret
+from .anexos import ALLOWED_EXTS, AnexoError, _ext_of, _persistir_arquivo, get_anexo_path
+from .pagamentos_debitos import PagamentoDebitoError, _registrar_transicao, listar_parcelas, obter_debito
 from .pagamentos_guardas import SegregacaoError, assert_segregacao
 
 
@@ -337,3 +345,171 @@ async def enviar_lote(db: AsyncSession, *, tenant_id: int, lote_id: int,
     await db.commit()
     await db.refresh(lote)
     return lote
+
+
+async def processar_retorno(db: AsyncSession, *, tenant_id: int, lote_id: int,
+                            retornos: list[RetornoParcelaIn], usuario_id: int) -> LotePagamento:
+    """`ENVIADO -> PROCESSADO` (ou continua `ENVIADO`, se o retorno vier em
+    ondas — só vira `PROCESSADO` quando toda parcela `PENDENTE` do lote foi
+    resolvida). `retornos` é uma lista de `RetornoParcelaIn`.
+
+    **Retenção, ruling documentado (F4 Task 5)**: como retenção é do DÉBITO,
+    não da parcela, e um débito pode ter várias parcelas em lotes diferentes,
+    o líquido só é conhecido no PAGAMENTO INTEGRAL do débito (nenhuma parcela
+    ainda `A_PAGAR`/`LIBERADA` depois deste retorno) — é aí, e só aí, que a
+    soma das retenções é descontada da `MovimentacaoConta` da parcela que
+    completa o débito. Pagamento parcial anterior sai pelo valor cheio da
+    parcela. Se a retenção acumulada exceder o valor dessa última parcela, a
+    conta não fecha sozinha — 409 explícito em vez de `MovimentacaoConta`
+    negativa; resolver manualmente (redistribuir parcelas ou a retenção) é
+    decisão de quem opera, não do sistema."""
+    lote = await obter_lote(db, tenant_id=tenant_id, lote_id=lote_id, for_update=True)
+    if lote.situacao != "ENVIADO":
+        raise PagamentoDebitoError(
+            f"Lote '{lote.situacao}' não está aguardando retorno.", status.HTTP_409_CONFLICT)
+
+    vinculos_por_parcela: dict[int, LotePagamentoParcela] = {
+        v.id_parcela: v for v in await parcelas_do_lote(db, tenant_id=tenant_id, lote_id=lote_id)
+    }
+    for r in retornos:
+        v = vinculos_por_parcela.get(r.parcela_id)
+        if v is None:
+            raise PagamentoDebitoError(
+                f"Parcela {r.parcela_id} não está neste lote.", status.HTTP_404_NOT_FOUND)
+        if v.situacao != "PENDENTE":
+            raise PagamentoDebitoError(
+                f"Parcela {r.parcela_id} já teve retorno processado (está '{v.situacao}').",
+                status.HTTP_409_CONFLICT)
+        if r.resultado == "FALHOU" and not (r.motivo_falha or "").strip():
+            raise PagamentoDebitoError(
+                f"Parcela {r.parcela_id}: falha exige motivo.",
+                status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+    debitos_tocados: dict[int, Debito] = {}
+    for r in retornos:
+        v = vinculos_por_parcela[r.parcela_id]
+        parcela = (await db.execute(select(Parcela).where(
+            Parcela.id == r.parcela_id).with_for_update())).scalar_one()
+        d = debitos_tocados.get(parcela.id_debito)
+        if d is None:
+            d = await obter_debito(db, tenant_id=tenant_id, debito_id=parcela.id_debito,
+                                   for_update=True)
+            debitos_tocados[d.id] = d
+
+        if r.resultado == "FALHOU":
+            v.situacao = "FALHOU"
+            v.motivo_falha = r.motivo_falha
+            v.atualizado_em = _utcnow()
+            continue  # Parcela.status permanece LIBERADA — reelegível num lote novo.
+
+        quando = r.data_pagamento or _utcnow().date()
+        todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
+        integral = not any(x.id != parcela.id and x.status not in ("PAGA", "CANCELADA") for x in todas)
+        valor_mov = parcela.valor
+        if integral:
+            bruto, liquido, _retencoes = await ret.resumo_retencoes(
+                db, tenant_id=tenant_id, debito_id=d.id)
+            desconto = bruto - liquido
+            if desconto > 0:
+                if desconto > parcela.valor:
+                    raise PagamentoDebitoError(
+                        f"Retenções do débito {d.id} (R$ {desconto}) excedem o valor da "
+                        f"parcela final (R$ {parcela.valor}) — ajuste manual necessário.",
+                        status.HTTP_409_CONFLICT)
+                valor_mov = parcela.valor - desconto
+
+        mov = MovimentacaoConta(
+            tenant_id=tenant_id, id_conta=lote.id_conta_pagadora, tipo="SAIDA",
+            valor=valor_mov, origem="PAGAMENTO", id_debito=d.id, id_parcela=parcela.id,
+            data=quando, id_usuario=usuario_id,
+            descricao=f"Pagamento parcela {parcela.numero} — lote {lote.numero}"[:255],
+            criado_em=_utcnow(),
+        )
+        db.add(mov)
+        await db.flush()
+        parcela.status = "PAGA"; parcela.data_pagamento = quando
+        parcela.forma_pagamento = "TED"; parcela.id_movimentacao = mov.id
+        parcela.atualizado_em = _utcnow()
+        v.situacao = "PAGA"
+        v.atualizado_em = _utcnow()
+
+    # Situação de PAGAMENTO por débito, igual ao pagamento avulso
+    # (`pagamentos_autorizacao.pagar_parcela`): integral -> PAGA + fila
+    # CONCLUIDA; algum pago sem estar tudo pago -> PAGA_PARCIAL; nenhum pago
+    # e este retorno trouxe falha -> FALHOU.
+    for d in debitos_tocados.values():
+        todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
+        pagas = [x for x in todas if x.status == "PAGA"]
+        pendentes = [x for x in todas if x.status not in ("PAGA", "CANCELADA")]
+        if not pendentes:
+            pagamento_destino, acao = est.PAGA, "PAGAMENTO_CONFIRMADO"
+        elif pagas:
+            pagamento_destino, acao = est.PAGA_PARCIAL, "PAGAMENTO_CONFIRMADO"
+        else:
+            pagamento_destino, acao = est.FALHOU, "PAGAMENTO_FALHOU"
+        # `fila=CONCLUIDA` no pagamento integral: CONCLUIDA não é rótulo que
+        # `avaliar_elegibilidade` produz — quem espelha isso é o pagamento
+        # (mesmo comentário/padrão de `pagar_parcela`).
+        fila_destino = est.CONCLUIDA if pagamento_destino == est.PAGA else None
+        _registrar_transicao(db, debito=d, acao=acao, pagamento=pagamento_destino,
+                             fila=fila_destino,
+                             usuario_id=usuario_id, justificativa=f"Retorno do lote {lote.numero}")
+        d.atualizado_em = _utcnow()
+        if pagamento_destino == est.PAGA:
+            await cron.concluir_na_fila(db, tenant_id=tenant_id, id_debito=d.id)
+
+    if all(v.situacao != "PENDENTE" for v in vinculos_por_parcela.values()):
+        lote.situacao = "PROCESSADO"
+        lote.processado_em = _utcnow()
+    lote.atualizado_em = _utcnow()
+    await db.commit()
+    await db.refresh(lote)
+    return lote
+
+
+async def anexar_comprovante(db: AsyncSession, *, tenant_id: int, tenant_slug: str,
+                             lote_id: int, usuario_id: int, file: UploadFile,
+                             descricao: str | None = None) -> LotePagamento:
+    """Um único comprovante por lote (ruling 7 do plano da F4) — arquivo da
+    remessa confirmada pelo banco. Reaproveita `protocolos.anexo` via
+    `_persistir_arquivo`, sem tabela de vínculo (FK direta em
+    `lote_pagamento.id_anexo_comprovante`)."""
+    lote = await obter_lote(db, tenant_id=tenant_id, lote_id=lote_id, for_update=True)
+    if not file.filename:
+        raise PagamentoDebitoError("Arquivo sem nome.", status.HTTP_400_BAD_REQUEST)
+    ext = _ext_of(file.filename)
+    if ext not in ALLOWED_EXTS:
+        raise PagamentoDebitoError(f"Extensão '.{ext}' não permitida.", status.HTTP_400_BAD_REQUEST)
+    settings = get_settings()
+    max_bytes = settings.max_upload_size_mb * 1024 * 1024
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise PagamentoDebitoError(
+            f"Arquivo excede {settings.max_upload_size_mb} MB.", status.HTTP_400_BAD_REQUEST)
+
+    anexo = await _persistir_arquivo(
+        db, content=content, filename=file.filename, tenant_id=tenant_id,
+        tenant_slug=tenant_slug, descricao=descricao, id_tipo_anexo=None,
+        publico=False, usuario_id=usuario_id,
+    )
+    lote.id_anexo_comprovante = anexo.id
+    lote.atualizado_em = _utcnow()
+    await db.commit()
+    await db.refresh(lote)
+    return lote
+
+
+async def get_comprovante_path_autorizado(db: AsyncSession, *, tenant_id: int,
+                                          tenant_slug: str, lote_id: int) -> tuple[Path, Anexo]:
+    """Autorização ANTES de resolver o caminho (mesmo padrão de
+    `get_anexo_debito_path_autorizado`): o vínculo é o próprio lote pertencer
+    ao tenant do caller e ter um comprovante anexado."""
+    lote = await obter_lote(db, tenant_id=tenant_id, lote_id=lote_id)
+    if lote.id_anexo_comprovante is None:
+        raise PagamentoDebitoError("Lote não tem comprovante anexado.", status.HTTP_404_NOT_FOUND)
+    try:
+        anexo, path = await get_anexo_path(
+            db, lote.id_anexo_comprovante, tenant_id=tenant_id, tenant_slug=tenant_slug)
+    except AnexoError as e:
+        raise PagamentoDebitoError(str(e), status.HTTP_404_NOT_FOUND)
+    return path, anexo

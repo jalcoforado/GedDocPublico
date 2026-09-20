@@ -968,3 +968,14 @@ class LoteDetalheOut(LotePagamentoOut):
 
 class LoteProgramarIn(BaseModel):
     data_programada: date
+
+
+class RetornoParcelaIn(BaseModel):
+    parcela_id: int
+    resultado: Literal["PAGA", "FALHOU"]
+    motivo_falha: str | None = Field(default=None, max_length=255)
+    data_pagamento: date | None = None
+
+
+class RetornoLoteIn(BaseModel):
+    retornos: list[RetornoParcelaIn] = Field(min_length=1)

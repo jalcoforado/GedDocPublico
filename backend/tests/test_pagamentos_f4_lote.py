@@ -33,10 +33,11 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models import LotePagamento, LotePagamentoParcela, Parcela
+from app.models import LotePagamento, LotePagamentoParcela, MovimentacaoConta, Parcela
 from app.schemas.pagamentos import (
     AlcadaCreate, ContaCreate, ContratoCreate, DebitoCreate, FonteCreate,
-    FornecedorCreate, GrupoAutorizacaoIn, NaturezaCreate, ParcelaCreate,
+    FornecedorCreate, GrupoAutorizacaoIn, NaturezaCreate, ParcelaCreate, RetencaoCreate,
+    RetornoParcelaIn,
 )
 from app.services import pagamentos_autorizacao as aut
 from app.services import pagamentos_cadastros as cad
@@ -108,6 +109,7 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
             "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
             "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
+            "DELETE FROM protocolos.anexo WHERE tenant_id=:t",
             "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
             "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
             "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
@@ -673,5 +675,246 @@ async def test_enviar_lote_segregacao_barra(admin_engine):
         async with _sm(admin_engine)() as s:
             debito_intacto = await deb.obter_debito(s, tenant_id=tenant.id, debito_id=d1.id)
         assert debito_intacto.situacao_pagamento == "PROGRAMADA"
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — processar retorno (pago/falha/reprocesso), comprovante
+# ---------------------------------------------------------------------------
+
+
+async def _lote_ate_enviado(admin_engine, tenant_id, *, nome_forn="Forn Retorno", valor="1000.00"):
+    """`_lote_de_um` + programar + enviar (com um 3º usuário neutro, sem
+    papel no rito do débito, para não colidir com a segregação de funções).
+    Devolve (lote, debito, id_parcela, conta)."""
+    async with _sm(admin_engine)() as s:
+        nat = await cad.criar_natureza(s, tenant_id=tenant_id, payload=NaturezaCreate(
+            codigo=f"N{uuid.uuid4().hex[:6]}", descricao="Material"))
+    async with _sm(admin_engine)() as s:
+        unidade_id = await id_unidade_padrao(s, tenant_id)
+    fonte, conta = await _fonte_conta(admin_engine, tenant_id)
+    forn = await _fornecedor2(admin_engine, tenant_id, nome=nome_forn)
+    d1, p1 = await _debito_liberado(admin_engine, tenant_id, forn=forn, nat=nat,
+                                    fonte=fonte, conta=conta, unidade_id=unidade_id, valor=valor)
+    async with _sm(admin_engine)() as s:
+        lote = await lot.criar_lote(s, tenant_id=tenant_id, id_conta_pagadora=conta.id,
+                                    parcela_ids=[p1], usuario_id=d1.id_usuario_solicitante)
+    async with _sm(admin_engine)() as s:
+        lote = await lot.programar_lote(s, tenant_id=tenant_id, lote_id=lote.id,
+                                        data_programada=date(2026, 9, 25),
+                                        usuario_id=d1.id_usuario_solicitante)
+    enviador = await _criar_usuario(admin_engine, tenant_id, "Enviador Retorno")
+    async with _sm(admin_engine)() as s:
+        lote = await lot.enviar_lote(s, tenant_id=tenant_id, lote_id=lote.id,
+                                     usuario_id=enviador)
+    return lote, d1, p1, conta
+
+
+@pytest.mark.asyncio
+async def test_retorno_sucesso_processa_lote_e_debito(admin_engine):
+    tenant, _sol = await _provisionar(admin_engine)
+    try:
+        lote, d1, p1, _conta = await _lote_ate_enviado(admin_engine, tenant.id)
+
+        async with _sm(admin_engine)() as s:
+            lote = await lot.processar_retorno(
+                s, tenant_id=tenant.id, lote_id=lote.id,
+                retornos=[RetornoParcelaIn(parcela_id=p1, resultado="PAGA")],
+                usuario_id=d1.id_usuario_solicitante,
+            )
+        assert lote.situacao == "PROCESSADO"
+        assert lote.processado_em is not None
+
+        async with _sm(admin_engine)() as s:
+            parcela = (await s.execute(select(Parcela).where(Parcela.id == p1))).scalar_one()
+        assert parcela.status == "PAGA"
+        assert parcela.id_movimentacao is not None
+
+        async with _sm(admin_engine)() as s:
+            mov = (await s.execute(select(MovimentacaoConta).where(
+                MovimentacaoConta.id == parcela.id_movimentacao))).scalar_one()
+        assert mov.valor == Decimal("1000.00")
+        assert mov.tipo == "SAIDA"
+        assert mov.origem == "PAGAMENTO"
+
+        async with _sm(admin_engine)() as s:
+            debito = await deb.obter_debito(s, tenant_id=tenant.id, debito_id=d1.id)
+        assert debito.situacao_pagamento == "PAGA"
+        assert debito.situacao_fila == "CONCLUIDA"
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_retorno_desconta_retencao_lancada_antes_do_lote(admin_engine):
+    from app.services import pagamentos_retencoes as ret
+
+    tenant, _sol = await _provisionar(admin_engine)
+    try:
+        async with _sm(admin_engine)() as s:
+            nat = await cad.criar_natureza(s, tenant_id=tenant.id, payload=NaturezaCreate(
+                codigo=f"N{uuid.uuid4().hex[:6]}", descricao="Material"))
+        async with _sm(admin_engine)() as s:
+            unidade_id = await id_unidade_padrao(s, tenant.id)
+        fonte, conta = await _fonte_conta(admin_engine, tenant.id)
+        forn = await _fornecedor2(admin_engine, tenant.id, nome="Forn Retencao Lote")
+        d1, p1 = await _debito_liberado(admin_engine, tenant.id, forn=forn, nat=nat,
+                                        fonte=fonte, conta=conta, unidade_id=unidade_id,
+                                        valor="1000.00")
+
+        # Retenção lançada ANTES do lote existir — janela permitida (ruling 5).
+        async with _sm(admin_engine)() as s:
+            await ret.criar_retencao(
+                s, tenant_id=tenant.id, debito_id=d1.id,
+                payload=RetencaoCreate(tipo="IRRF", base_calculo=Decimal("1000.00"),
+                                       valor=Decimal("15.00")))
+
+        async with _sm(admin_engine)() as s:
+            lote = await lot.criar_lote(s, tenant_id=tenant.id, id_conta_pagadora=conta.id,
+                                        parcela_ids=[p1], usuario_id=d1.id_usuario_solicitante)
+        async with _sm(admin_engine)() as s:
+            lote = await lot.programar_lote(s, tenant_id=tenant.id, lote_id=lote.id,
+                                            data_programada=date(2026, 9, 25),
+                                            usuario_id=d1.id_usuario_solicitante)
+        enviador = await _criar_usuario(admin_engine, tenant.id, "Enviador Retencao")
+        async with _sm(admin_engine)() as s:
+            lote = await lot.enviar_lote(s, tenant_id=tenant.id, lote_id=lote.id,
+                                         usuario_id=enviador)
+
+        async with _sm(admin_engine)() as s:
+            await lot.processar_retorno(
+                s, tenant_id=tenant.id, lote_id=lote.id,
+                retornos=[RetornoParcelaIn(parcela_id=p1, resultado="PAGA")],
+                usuario_id=enviador,
+            )
+
+        async with _sm(admin_engine)() as s:
+            parcela = (await s.execute(select(Parcela).where(Parcela.id == p1))).scalar_one()
+        async with _sm(admin_engine)() as s:
+            mov = (await s.execute(select(MovimentacaoConta).where(
+                MovimentacaoConta.id == parcela.id_movimentacao))).scalar_one()
+        assert mov.valor == Decimal("985.00")
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_retorno_falha_permite_reprocesso(admin_engine):
+    tenant, _sol = await _provisionar(admin_engine)
+    try:
+        lote, d1, p1, conta = await _lote_ate_enviado(admin_engine, tenant.id)
+
+        async with _sm(admin_engine)() as s:
+            lote = await lot.processar_retorno(
+                s, tenant_id=tenant.id, lote_id=lote.id,
+                retornos=[RetornoParcelaIn(parcela_id=p1, resultado="FALHOU",
+                                           motivo_falha="conta encerrada")],
+                usuario_id=d1.id_usuario_solicitante,
+            )
+        assert lote.situacao == "PROCESSADO"  # única parcela do lote, já resolvida
+
+        async with _sm(admin_engine)() as s:
+            parcela = (await s.execute(select(Parcela).where(Parcela.id == p1))).scalar_one()
+        assert parcela.status == "LIBERADA"  # nunca mudou
+
+        async with _sm(admin_engine)() as s:
+            debito = await deb.obter_debito(s, tenant_id=tenant.id, debito_id=d1.id)
+        assert debito.situacao_pagamento == "FALHOU"
+
+        # Reaparece em elegíveis — reprocesso num lote novo.
+        async with _sm(admin_engine)() as s:
+            elegiveis = await lot.parcelas_elegiveis_para_lote(s, tenant_id=tenant.id)
+        assert p1 in {p.id for p in elegiveis}
+
+        async with _sm(admin_engine)() as s:
+            novo_lote = await lot.criar_lote(
+                s, tenant_id=tenant.id, id_conta_pagadora=conta.id,
+                parcela_ids=[p1], usuario_id=d1.id_usuario_solicitante)
+        assert novo_lote.id != lote.id
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_retorno_falha_sem_motivo_e_422(admin_engine):
+    tenant, _sol = await _provisionar(admin_engine)
+    try:
+        lote, d1, p1, _conta = await _lote_ate_enviado(admin_engine, tenant.id)
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as e:
+                await lot.processar_retorno(
+                    s, tenant_id=tenant.id, lote_id=lote.id,
+                    retornos=[RetornoParcelaIn(parcela_id=p1, resultado="FALHOU")],
+                    usuario_id=d1.id_usuario_solicitante,
+                )
+            assert e.value.status_code == 422
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_retorno_lote_nao_enviado_e_409(admin_engine):
+    tenant, _sol = await _provisionar(admin_engine)
+    try:
+        lote, d1, p1, _conta = await _lote_de_um(admin_engine, tenant.id)
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as e:
+                await lot.processar_retorno(
+                    s, tenant_id=tenant.id, lote_id=lote.id,
+                    retornos=[RetornoParcelaIn(parcela_id=p1, resultado="PAGA")],
+                    usuario_id=d1.id_usuario_solicitante,
+                )
+            assert e.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_retorno_parcela_ja_resolvida_e_409(admin_engine):
+    tenant, _sol = await _provisionar(admin_engine)
+    try:
+        lote, d1, p1, _conta = await _lote_ate_enviado(admin_engine, tenant.id)
+        async with _sm(admin_engine)() as s:
+            await lot.processar_retorno(
+                s, tenant_id=tenant.id, lote_id=lote.id,
+                retornos=[RetornoParcelaIn(parcela_id=p1, resultado="PAGA")],
+                usuario_id=d1.id_usuario_solicitante,
+            )
+        async with _sm(admin_engine)() as s:
+            with pytest.raises(HTTPException) as e:
+                await lot.processar_retorno(
+                    s, tenant_id=tenant.id, lote_id=lote.id,
+                    retornos=[RetornoParcelaIn(parcela_id=p1, resultado="PAGA")],
+                    usuario_id=d1.id_usuario_solicitante,
+                )
+            assert e.value.status_code == 409
+    finally:
+        await _cleanup(admin_engine, tenant.id)
+
+
+@pytest.mark.asyncio
+async def test_anexar_e_baixar_comprovante(admin_engine):
+    import io
+
+    from fastapi import UploadFile
+
+    tenant, _sol = await _provisionar(admin_engine)
+    try:
+        lote, d1, _p1, _conta = await _lote_ate_enviado(admin_engine, tenant.id)
+        async with _sm(admin_engine)() as s:
+            atualizado = await lot.anexar_comprovante(
+                s, tenant_id=tenant.id, tenant_slug=tenant.slug, lote_id=lote.id,
+                usuario_id=d1.id_usuario_solicitante,
+                file=UploadFile(filename="remessa.pdf", file=io.BytesIO(b"%PDF-1.4 fake")),
+                descricao="Remessa bancária",
+            )
+        assert atualizado.id_anexo_comprovante is not None
+
+        async with _sm(admin_engine)() as s:
+            path, anexo = await lot.get_comprovante_path_autorizado(
+                s, tenant_id=tenant.id, tenant_slug=tenant.slug, lote_id=lote.id)
+        assert path.exists()
+        assert anexo.id == atualizado.id_anexo_comprovante
     finally:
         await _cleanup(admin_engine, tenant.id)
