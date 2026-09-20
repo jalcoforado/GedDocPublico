@@ -353,6 +353,53 @@ async def _get_or_create_usuario(
     return u.id, True
 
 
+async def _garantir_leitura_transversal(
+    db: AsyncSession, *, tenant_id: int, grupo_id: int,
+) -> None:
+    """Concede LEITURA (sem inserir/atualizar/excluir) das 9 transações da
+    migration 0074 a um grupo demo — item 1.0.7 do backlog.
+
+    Sem isso, qualquer grupo Operacional criado por este seed toma 403 em
+    telas transversais gateadas nessas 9 (ex.: organograma/`unidadeTrabalho`,
+    lista de usuários) mesmo sem nunca ter tentado nada fora do próprio
+    domínio de pagamentos — o sintoma que o item 1.0.7 descreve como "a tela
+    sumiu para o pessoal do setor X". Só leitura, de propósito: dar
+    inserir/atualizar/excluir num Operacional lhe daria poder (ex.: excluir
+    processo) que ele nunca teve — a mesma ressalva que a CLI
+    `diagnostico_permissoes` registra para não conceder isso em bloco fora de
+    um contexto de demonstração.
+    """
+    from .diagnostico_permissoes import TRANSACOES_0074
+
+    transacoes = {
+        t.codigo: t.id
+        for t in (
+            await db.execute(
+                select(Transacao).where(Transacao.codigo.in_(TRANSACOES_0074))
+            )
+        ).scalars().all()
+    }
+    ja_concedidas = set(
+        (
+            await db.execute(
+                select(GrupoTransacao.id_transacao).where(
+                    GrupoTransacao.id_grupo == grupo_id,
+                    GrupoTransacao.excluido.is_(False),
+                )
+            )
+        ).scalars().all()
+    )
+    for codigo in TRANSACOES_0074:
+        id_transacao = transacoes.get(codigo)
+        if id_transacao is None or id_transacao in ja_concedidas:
+            continue
+        db.add(GrupoTransacao(
+            tenant_id=tenant_id, id_grupo=grupo_id, id_transacao=id_transacao,
+            inserir=False, atualizar=False, excluir=False, excluido=False,
+        ))
+    await db.flush()
+
+
 async def _garantir_grupo_demo(
     db: AsyncSession, *, tenant_id: int, app_name: str, codigo_transacao: str,
 ) -> int:
@@ -411,6 +458,8 @@ async def _garantir_grupo_demo(
             inserir=True, atualizar=True, excluir=True, excluido=False,
         ))
         await db.flush()
+
+    await _garantir_leitura_transversal(db, tenant_id=tenant_id, grupo_id=grupo.id)
 
     return grupo.id
 

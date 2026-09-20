@@ -143,6 +143,24 @@ async def tenant_com_protocolo(admin_engine):
 
 
 @pytest_asyncio.fixture
+async def tenant_com_transporte(admin_engine):
+    """Só `transporte` — item 2.2 do backlog: o motor de workflow genérico
+    (routers/workflow.py) não pode mais exigir `protocolo` para um tenant
+    que só tem transporte contratado."""
+    tenant = await provisionar_tenant_de_teste(admin_engine, "leitura-transp-")
+    async with _sm(admin_engine)() as s:
+        await contratar(s, tenant.id, ["transporte"])
+        await s.commit()
+    su_id = await admin_id_do_tenant(admin_engine, tenant.id)
+    try:
+        yield as_user_dependency(admin_engine, su_id, tenant.id, tenant.slug)
+    finally:
+        app.dependency_overrides.clear()
+        from app.database import engine as app_engine
+        await app_engine.dispose()
+
+
+@pytest_asyncio.fixture
 async def tenant_sem_administracao(admin_engine):
     # Contrata `protocolo`, não nenhum — prova que o gate é específico do
     # slug "administracao", não um "tenant sem módulo nenhum" genérico.
@@ -211,6 +229,31 @@ async def test_com_protocolo_contratado_leitura_passa(rota, tenant_com_protocolo
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         r = await c.get(rota)
     assert r.status_code == 200, f"{rota} deveria passar com 200: {r.status_code} {r.text}"
+
+
+@pytest.mark.asyncio
+async def test_transporte_contratado_le_workflow_definitions_passa(tenant_com_transporte):
+    """A PROPRIEDADE DO ITEM 2.2: motor de workflow genérico não é mais
+    exclusivo de protocolo. Antes da migration 0120 + require_modulo_qualquer,
+    este tenant (só transporte) tomava 403 aqui."""
+    tenant_com_transporte()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/api/v2/workflow-definitions")
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.asyncio
+async def test_transporte_contratado_nao_le_rota_protocolo_especifica(tenant_com_transporte):
+    """O CONTROLE: `/processos` não faz parte do gate `qualquer` — continua
+    exclusivo de `protocolo`. Sem este teste, um `require_modulo_qualquer`
+    aplicado por engano a TODA rota de protocolo (em vez de só às 5
+    genéricas) passaria batido."""
+    tenant_com_transporte()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/api/v2/processos")
+    assert r.status_code == 403, r.text
 
 
 @pytest.mark.asyncio

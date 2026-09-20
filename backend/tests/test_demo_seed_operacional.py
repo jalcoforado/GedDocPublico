@@ -241,6 +241,55 @@ async def test_usuarios_pagamentos_tem_a_permissao_do_papel(admin_engine, tenant
 
 
 @pytest.mark.asyncio
+async def test_grupo_demo_ganha_leitura_das_9_transacoes_da_0074(admin_engine, tenant_ops):
+    """Item 1.0.7: sem isto, qualquer grupo Operacional deste seed toma 403 em
+    telas transversais gateadas nas 9 transações da migration 0074 (ex.:
+    organograma), mesmo sem nunca sair do próprio domínio de pagamentos — "a
+    tela sumiu para o pessoal do setor X". Concessão é só leitura: nenhuma das
+    três flags de CRUD, para não dar a um Operacional poder (ex.: excluir
+    processo) que ele nunca teve."""
+    from app.cli.diagnostico_permissoes import TRANSACOES_0074
+
+    slug, tid = tenant_ops
+    await _apply(_ns(slug, modulo="pagamentos"))
+
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(f"SET LOCAL app.tenant_id = {int(tid)}"))
+        grupo_id = (
+            await s.execute(
+                text(
+                    "SELECT gt.id_grupo FROM utils.grupo_transacao gt "
+                    "JOIN utils.transacao t ON t.id = gt.id_transacao "
+                    "WHERE gt.tenant_id = :t AND t.codigo = 'pagamento_solicitar' "
+                    "AND gt.inserir = true"
+                ),
+                {"t": tid},
+            )
+        ).scalar_one()
+        rows = (
+            await s.execute(
+                text(
+                    "SELECT t.codigo, gt.inserir, gt.atualizar, gt.excluir "
+                    "FROM utils.grupo_transacao gt "
+                    "JOIN utils.transacao t ON t.id = gt.id_transacao "
+                    "WHERE gt.id_grupo = :g AND gt.excluido = false"
+                ),
+                {"g": grupo_id},
+            )
+        ).all()
+    por_codigo = {r[0]: (r[1], r[2], r[3]) for r in rows}
+
+    for codigo in TRANSACOES_0074:
+        assert codigo in por_codigo, f"{codigo} não foi concedido ao grupo demo"
+        assert por_codigo[codigo] == (False, False, False), (
+            f"{codigo} deveria ser só leitura, veio {por_codigo[codigo]}"
+        )
+    # A transação do próprio papel continua com CRUD total — não é regressão
+    # da concessão que o seed já fazia antes desta fatia.
+    assert por_codigo["pagamento_solicitar"] == (True, True, True)
+
+
+@pytest.mark.asyncio
 async def test_apply_idempotente(admin_engine, tenant_ops):
     slug, tid = tenant_ops
     await _apply(_ns(slug))

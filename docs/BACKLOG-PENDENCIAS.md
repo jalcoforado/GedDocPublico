@@ -310,6 +310,21 @@ tem linha em `utils.grupo_transacao`.
 - ~~**A verificar antes de criar grupo não-SU na VPS**~~ — **feito em 2026-08-11**, resultado no
   aviso acima. A CLI `diagnostico_permissoes` substitui a query manual e cobre os dois ambientes.
 
+> **FECHADO em 2026-09-20 para os grupos de DEMONSTRAÇÃO** (decisão do Jorge: dados de demo, pode
+> ajustar). `seed_demo_operacional.py::_garantir_grupo_demo` agora chama
+> `_garantir_leitura_transversal`, que concede LEITURA (as três flags de CRUD em `false`) das 9
+> transações da 0074 a todo grupo `Demo — ...` que o seed criar — antes só tinha a transação do
+> próprio papel (`pagamento_solicitar` etc.), com CRUD total. Rodado `apply --tenant sobral
+> --allow-non-demo` no dev local: os 5 grupos que a atualização de 2026-08-11 media sem nenhuma das
+> 9 agora têm todas, confirmado por `diagnostico_permissoes`. Novo teste
+> (`test_grupo_demo_ganha_leitura_das_9_transacoes_da_0074`) trava que a concessão é só leitura.
+>
+> **O que isto NÃO fecha:** a decisão de política para grupos NÃO-demo (reais, de um tenant de
+> produção) continua do dono do produto, como o texto acima já explicava — a fatia de hoje só
+> resolve o caso concreto que já existia (grupos de demonstração 403ando em tela transversal). Na
+> VPS o item continua latente até `seed_demo_operacional` rodar lá — quando rodar, já vem com a
+> concessão de leitura, sem precisar de outro passo manual.
+
 ### 1.0.86 A família `SEC-RLS-*` só produz efeito quando `APP_DATABASE_URL` for definida
 
 *(Registrado em 2026-08-02, na revisão de `SEC-RLS-00C`, para que a narrativa dos PRs de segurança
@@ -428,9 +443,11 @@ entrada, então nunca alcança `sobral` nem tenant preexistente.
 - Medido: `test_transporte_p5_2_atendimento.py` (28 testes) vazava 28 tenants e passou a vazar
   **zero**; lote de 6 arquivos, 85 testes, também zero.
 
-**O acumulado de 4.032 continua no banco local** — decisão do Jorge em 2026-08-14 de receber a
-ferramenta sem executá-la. A fixture impede o crescimento; quem apaga o que já está lá é
-`limpar_tenants_de_teste --apagar`.
+~~**O acumulado de 4.032 continua no banco local**~~ — em 2026-09-20, `limpar_tenants_de_teste`
+(sem `--apagar`, dry-run) reportou **0 tenants de teste** no banco de dev local (só `sobral`). O
+banco foi resetado/recriado em algum ponto entre 2026-08-14 e agora — a fixture segue impedindo o
+reacúmulo desde 2026-08-16, e não há mais nada pendente para apagar aqui. Se o acumulado reaparecer
+em outro ambiente, o comando é `limpar_tenants_de_teste --apagar`.
 
 **Achado de carona, já consertado:** a rodada de validação cruzou a meia-noite e cinco testes de
 frota caíram com `date(2026, 8, 16) == date(2026, 8, 15)`. Não tinha relação com a limpeza —
@@ -856,8 +873,19 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >
 > Pendências registradas para fatia futura:
 >
-> - A transação `workflow` (edição de DSL) mora no módulo `protocolo` — editar DSL de transporte
->   exige contratar o módulo protocolo; mover para `comum` é decisão futura do Jorge.
+> - ~~A transação `workflow` (edição de DSL) mora no módulo `protocolo` — editar DSL de transporte
+>   exige contratar o módulo protocolo; mover para `comum` é decisão futura do Jorge.~~ **FECHADO
+>   em 2026-09-20.** Mover só a transação não bastava: as 5 rotas GET genéricas de
+>   `routers/workflow.py` (`/workflow-definitions[/{id}[/versoes]]`, `/workflow-instances[/{id}]`)
+>   tinham `require_modulo("protocolo")` FIXO, gate independente da transação. Novo
+>   `require_modulo_qualquer(*slugs)` em `auth/modulos.py` (aceita qualquer um dos módulos
+>   listados, expõe `modulo_slug` como tupla para o guard de `test_guarda_modularizacao.py`
+>   continuar funcionando) — aplicado só a essas 5 rotas, que agora aceitam `protocolo` OU
+>   `transporte`. `/tipo-processo-workflow` (conceito exclusivo de `processo`) e `/workflow-alertas`
+>   (o SELECT já faz INNER JOIN em `Processo`) ficaram protocolo-only, de propósito — não são
+>   infraestrutura genérica. Migration `0120` move o vínculo `modulo_transacao` de `workflow`
+>   (protocolo → comum) diretamente, sem depender do próximo `seed_bootstrap` para ter efeito
+>   completo.
 > - Notificação de alerta de SLA para tipos de transporte não dispara: a linha de alerta é criada, mas
 >   o aviso por e-mail é processo-only; implementar quando algum tenant configurar `sla_dias` no tipo.
 >   Hoje o alerta de transporte também NÃO aparece em painel nenhum — a listagem de alertas faz

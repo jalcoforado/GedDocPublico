@@ -457,7 +457,7 @@ GATES_DE_MODULO: set[tuple[str, str]] = {
 # logo abaixo, lê `modulo_slug` de cada dependência real e reprova nos dois
 # sentidos: rota gateada fora daqui, e rota daqui com slug diferente do que a
 # rota realmente exige.
-ROTAS_POR_MODULO: dict[tuple[str, str], str] = {
+ROTAS_POR_MODULO: dict[tuple[str, str], str | tuple[str, ...]] = {
     ("GET", "/api/v2/anexos/{anexo_id}/carimbado.pdf"): "protocolo",
     ("GET", "/api/v2/anexos/{anexo_id}/download"): "protocolo",
     ("GET", "/api/v2/assinaturas/{assinatura_anexo_id}/comprovante.pdf"): "protocolo",
@@ -514,11 +514,17 @@ ROTAS_POR_MODULO: dict[tuple[str, str], str] = {
     ("GET", "/api/v2/tipos-manifestante"): "protocolo",
     ("GET", "/api/v2/tipos-processo"): "protocolo",
     ("GET", "/api/v2/workflow-alertas"): "protocolo",
-    ("GET", "/api/v2/workflow-definitions"): "protocolo",
-    ("GET", "/api/v2/workflow-definitions/{wf_id}"): "protocolo",
-    ("GET", "/api/v2/workflow-definitions/{wf_id}/versoes"): "protocolo",
-    ("GET", "/api/v2/workflow-instances"): "protocolo",
-    ("GET", "/api/v2/workflow-instances/{instance_id}"): "protocolo",
+    # As 5 abaixo usam require_modulo_qualquer("protocolo", "transporte")
+    # desde a migration 0120 (item 2.2) — motor de workflow genérico,
+    # reaproveitado por processo (protocolo) e ocorrência/alvará/convocação
+    # (transporte). `/tipo-processo-workflow` e `/workflow-alertas` ficam só
+    # protocolo: o primeiro é conceito exclusivo de `processo`, o segundo
+    # faz INNER JOIN em Processo no próprio SELECT.
+    ("GET", "/api/v2/workflow-definitions"): ("protocolo", "transporte"),
+    ("GET", "/api/v2/workflow-definitions/{wf_id}"): ("protocolo", "transporte"),
+    ("GET", "/api/v2/workflow-definitions/{wf_id}/versoes"): ("protocolo", "transporte"),
+    ("GET", "/api/v2/workflow-instances"): ("protocolo", "transporte"),
+    ("GET", "/api/v2/workflow-instances/{instance_id}"): ("protocolo", "transporte"),
 
     # Task 3 (2026-07-30) — as 12 de administracao originais. `/organograma`
     # saiu deste grupo no review final e voltou para ENDPOINTS_LEITURA_SEM_GATE
