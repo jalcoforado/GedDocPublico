@@ -15,7 +15,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
-from ..auth.modulos import require_modulo
+from ..auth.modulos import require_modulo, require_modulo_qualquer
 from ..auth.perms import require_permission
 from ..database import get_db, tenant_filter
 from ..models import (
@@ -61,7 +61,11 @@ router = APIRouter(prefix="/workflow-definitions", tags=["workflow"])
 @router.get(
     "",
     response_model=list[WorkflowDefinitionListItem],
-    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("workflow"))],
+    # Motor genérico, reaproveitado por transporte (ver require_modulo_qualquer).
+    dependencies=[
+        Depends(require_modulo_qualquer("protocolo", "transporte")),
+        Depends(require_permission("workflow")),
+    ],
 )
 async def list_workflow_definitions(
     _: Usuario = Depends(get_current_user),
@@ -81,7 +85,10 @@ async def list_workflow_definitions(
 @router.get(
     "/{wf_id}",
     response_model=WorkflowDefinitionOut,
-    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("workflow"))],
+    dependencies=[
+        Depends(require_modulo_qualquer("protocolo", "transporte")),
+        Depends(require_permission("workflow")),
+    ],
 )
 async def get_workflow_definition(
     wf_id: int,
@@ -260,7 +267,10 @@ async def delete_workflow_definition(
 
 @router.get(
     "/{wf_id}/versoes",
-    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("workflow"))],
+    dependencies=[
+        Depends(require_modulo_qualquer("protocolo", "transporte")),
+        Depends(require_permission("workflow")),
+    ],
 )
 async def list_versoes_mesmo_slug(
     wf_id: int,
@@ -370,7 +380,10 @@ async def _get_instance_or_404(
 @instances_router.get(
     "",
     response_model=list[WorkflowInstanceOut],
-    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("workflow"))],
+    dependencies=[
+        Depends(require_modulo_qualquer("protocolo", "transporte")),
+        Depends(require_permission("workflow")),
+    ],
 )
 async def list_workflow_instances(
     _: Usuario = Depends(get_current_user),
@@ -392,7 +405,10 @@ async def list_workflow_instances(
 @instances_router.get(
     "/{instance_id}",
     response_model=WorkflowInstanceDetail,
-    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("workflow"))],
+    dependencies=[
+        Depends(require_modulo_qualquer("protocolo", "transporte")),
+        Depends(require_permission("workflow")),
+    ],
 )
 async def get_workflow_instance(
     instance_id: int,

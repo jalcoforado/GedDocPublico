@@ -63,7 +63,7 @@ async def _set_local_tenant(db: AsyncSession, tenant_id: int) -> None:
 MODULO_TRANSACOES: dict[str, tuple[str, ...]] = {
     "protocolo": (
         "processo", "catalogo", "assunto", "manifestante", "servico",
-        "minuta_template", "cidade", "endereco", "workflow",
+        "minuta_template", "cidade", "endereco",
     ),
     "pagamentos": (
         "pagamento_cadastro", "pagamento_solicitar", "pagamento_autorizar",
@@ -74,7 +74,14 @@ MODULO_TRANSACOES: dict[str, tuple[str, ...]] = {
     # `auditoria` (migration 0090, item 1.0.8) fica em administração: a trilha
     # atravessa todos os módulos, mas quem a lê é quem administra o município.
     "administracao": ("usuario", "unidadeTrabalho", "configuracao", "auditoria"),
-    "comum": ("dashboard",),
+    # `workflow` é infraestrutura do motor (Fase 20+), reaproveitada por
+    # protocolo (processo) e transporte (ocorrência/alvará/convocação) por
+    # igual — não é conteúdo de um módulo específico. Fica em `comum` (nunca
+    # bloqueado); as 5 rotas GET genéricas de routers/workflow.py usam
+    # require_modulo_qualquer("protocolo", "transporte") como segunda
+    # barreira — mover só a transação não bastaria sozinho (item 2.2 do
+    # backlog; migration 0120 move o vínculo já existente).
+    "comum": ("dashboard", "workflow"),
 }
 
 

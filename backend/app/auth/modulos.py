@@ -59,3 +59,45 @@ def require_modulo(slug: str):
     # verificar se a rota exige o módulo CERTO — só que exige algum.
     _check_modulo.modulo_slug = slug
     return _check_modulo
+
+
+def require_modulo_qualquer(*slugs: str):
+    """Cria uma dependency que exige QUALQUER UM dos módulos em `slugs`.
+
+    Caso de uso: rota que serve infraestrutura genérica reaproveitada por
+    mais de um módulo — hoje só `routers/workflow.py::/workflow-definitions`
+    e `/workflow-instances` (motor de workflow usado por `processo`, de
+    protocolo, e por `ocorrencia`/`alvara`/`convocacao`, de transporte).
+    `require_modulo("protocolo")` sozinho bloqueava um tenant só-transporte
+    de ler/editar as próprias definições de workflow (item 2.2 do backlog).
+
+    NÃO é "qualquer módulo contratado" — é qualquer um DESTA lista, a mesma
+    disciplina de `require_modulo`: a rota declara explicitamente quais
+    módulos a habilitam, `slugs_de_modulo_por_rota`
+    (`tests/test_guarda_modularizacao.py`) lê `modulo_slug` (aqui uma tupla,
+    não uma string) e reprova rota nova sem entrada em `ROTAS_POR_MODULO`.
+    """
+
+    async def _check_modulo_qualquer(
+        tenant_id: int = Depends(require_tenant_id),
+        db: AsyncSession = Depends(get_db),
+    ) -> None:
+        disponiveis = await slugs_contratados(db, tenant_id)
+        if not disponiveis:
+            raise RuntimeError(
+                f"Nenhum módulo disponível para o tenant {tenant_id} — nem os "
+                "não-contratáveis. Catálogo corrompido; verifique se 'comum' "
+                "existe e está ativo."
+            )
+        if not any(slug in disponiveis for slug in slugs):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Nenhum dos módulos "
+                    f"{', '.join(repr(s) for s in slugs)} está contratado "
+                    "para este tenant"
+                ),
+            )
+
+    _check_modulo_qualquer.modulo_slug = tuple(slugs)
+    return _check_modulo_qualquer
