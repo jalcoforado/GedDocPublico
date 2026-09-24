@@ -38,24 +38,6 @@ def _sessionmaker(engine):
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
-async def _cleanup(admin_engine, tenant_id: int) -> None:
-    """Remove tudo que o provisionamento cria, em ordem FK-safe (via ged_user)."""
-    Session = _sessionmaker(admin_engine)
-    async with Session() as s:
-        for stmt in (
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 def _novo_slug(prefixo: str) -> str:
     return f"{prefixo}{uuid.uuid4().hex[:8]}"
 
@@ -83,21 +65,18 @@ async def test_provisiona_tenant_completo(admin_engine):
     tenant, senha = await _provisionar(
         Session, slug, plano="profissional", limite_usuarios=10, limite_armazenamento_mb=2048
     )
-    try:
-        assert senha and len(senha) >= 8
-        async with Session() as s:
-            t = (await s.execute(text("SELECT plano, limite_usuarios, limite_armazenamento_mb, ativo FROM aprimora_py.tenant WHERE id=:t"), {"t": tenant.id})).first()
-            assert t.plano == "profissional" and t.limite_usuarios == 10 and t.limite_armazenamento_mb == 2048 and t.ativo is True
-            # admin bcrypt-only (sem MD5)
-            u = (await s.execute(text("SELECT senha, senha_bcrypt FROM utils.usuario WHERE tenant_id=:t"), {"t": tenant.id})).first()
-            assert u.senha == "" and u.senha_bcrypt and u.senha_bcrypt.startswith("$2")
-            for tbl in ("utils.grupo", "utils.usuario_grupo", "utils.unidade_trabalho", "protocolos.tipo_manifestante"):
-                n = (await s.execute(text(f"SELECT count(*) FROM {tbl} WHERE tenant_id=:t"), {"t": tenant.id})).scalar_one()
-                assert n == 1, f"{tbl} deveria ter 1 linha"
-            audit = (await s.execute(text("SELECT count(*) FROM aprimora_py.audit_log WHERE tenant_id=:t AND acao='tenant.provisionado'"), {"t": tenant.id})).scalar_one()
-            assert audit == 1
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    assert senha and len(senha) >= 8
+    async with Session() as s:
+        t = (await s.execute(text("SELECT plano, limite_usuarios, limite_armazenamento_mb, ativo FROM aprimora_py.tenant WHERE id=:t"), {"t": tenant.id})).first()
+        assert t.plano == "profissional" and t.limite_usuarios == 10 and t.limite_armazenamento_mb == 2048 and t.ativo is True
+        # admin bcrypt-only (sem MD5)
+        u = (await s.execute(text("SELECT senha, senha_bcrypt FROM utils.usuario WHERE tenant_id=:t"), {"t": tenant.id})).first()
+        assert u.senha == "" and u.senha_bcrypt and u.senha_bcrypt.startswith("$2")
+        for tbl in ("utils.grupo", "utils.usuario_grupo", "utils.unidade_trabalho", "protocolos.tipo_manifestante"):
+            n = (await s.execute(text(f"SELECT count(*) FROM {tbl} WHERE tenant_id=:t"), {"t": tenant.id})).scalar_one()
+            assert n == 1, f"{tbl} deveria ter 1 linha"
+        audit = (await s.execute(text("SELECT count(*) FROM aprimora_py.audit_log WHERE tenant_id=:t AND acao='tenant.provisionado'"), {"t": tenant.id})).scalar_one()
+        assert audit == 1
 
 
 # ---- CRÍTICO: provisionamento sob a role RLS de produção (aprimora_app) ----
@@ -129,24 +108,21 @@ async def test_provisiona_sob_rls_producao(admin_engine, app_session, platform_s
         slug=slug, nome="RLS Prod", admin_email=f"{slug}@t.local",
         admin_nome="Adm", admin_cpf=uuid.uuid4().hex[:11], plano="basico",
     )
-    try:
-        assert tenant.id and senha
-        # confirma via ged_user (bypass) que o bootstrap tenant-scoped foi gravado
-        async with _sessionmaker(admin_engine)() as s:
-            n = (await s.execute(text("SELECT count(*) FROM utils.usuario WHERE tenant_id=:t"), {"t": tenant.id})).scalar_one()
-            assert n == 1
-            # O ato 3 rodou: tenant completo é tenant ATIVO. Sem esta asserção o
-            # teste passaria com o tenant inerte, que é o estado de falha.
-            ativo = (await s.execute(text("SELECT ativo FROM aprimora_py.tenant WHERE id=:t"), {"t": tenant.id})).scalar_one()
-            assert ativo is True, (
-                "o tenant ficou inativo: o ato de ativação (3) não rodou, e o "
-                "município não resolveria por subdomínio."
-            )
-            # O ato 1 rodou pelo papel de plataforma: a contratação existe.
-            mods = (await s.execute(text("SELECT count(*) FROM aprimora_py.tenant_modulo WHERE tenant_id=:t"), {"t": tenant.id})).scalar_one()
-            assert mods > 0, "nenhum módulo contratado — o ato de plataforma não gravou"
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    assert tenant.id and senha
+    # confirma via ged_user (bypass) que o bootstrap tenant-scoped foi gravado
+    async with _sessionmaker(admin_engine)() as s:
+        n = (await s.execute(text("SELECT count(*) FROM utils.usuario WHERE tenant_id=:t"), {"t": tenant.id})).scalar_one()
+        assert n == 1
+        # O ato 3 rodou: tenant completo é tenant ATIVO. Sem esta asserção o
+        # teste passaria com o tenant inerte, que é o estado de falha.
+        ativo = (await s.execute(text("SELECT ativo FROM aprimora_py.tenant WHERE id=:t"), {"t": tenant.id})).scalar_one()
+        assert ativo is True, (
+            "o tenant ficou inativo: o ato de ativação (3) não rodou, e o "
+            "município não resolveria por subdomínio."
+        )
+        # O ato 1 rodou pelo papel de plataforma: a contratação existe.
+        mods = (await s.execute(text("SELECT count(*) FROM aprimora_py.tenant_modulo WHERE tenant_id=:t"), {"t": tenant.id})).scalar_one()
+        assert mods > 0, "nenhum módulo contratado — o ato de plataforma não gravou"
 
 
 # ---- slug duplicado / inválido / reservado ----
@@ -154,11 +130,8 @@ async def test_slug_duplicado_409(admin_engine):
     slug = _novo_slug("dup")
     Session = _sessionmaker(admin_engine)
     tenant, _ = await _provisionar(Session, slug)
-    try:
-        with pytest.raises(SlugIndisponivelError):
-            await _provisionar(Session, slug, admin_cpf=uuid.uuid4().hex[:11])
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    with pytest.raises(SlugIndisponivelError):
+        await _provisionar(Session, slug, admin_cpf=uuid.uuid4().hex[:11])
 
 
 def test_slug_validacao():
@@ -202,96 +175,92 @@ async def test_falha_no_ato_municipal_deixa_tenant_inerte_e_retomavel(
     monkeypatch.setattr(ps, "hash_password", _boom)
     Session = _sessionmaker(admin_engine)
     tenant_id = None
-    try:
-        async with Session() as s:
-            with pytest.raises(ps.ProvisionamentoIncompletoError) as exc:
-                await provisionar_tenant(
-                    s, slug=slug, nome="X", admin_email="x@x.local",
-                    admin_nome="X", admin_cpf=uuid.uuid4().hex[:11],
-                )
-        tenant_id = exc.value.tenant_id
-        assert exc.value.slug == slug
-        assert "retomar" in str(exc.value), (
-            "a exceção do provisionamento parcial precisa dizer COMO concluir; "
-            "sem isso o operador fica com um tenant inerte e nenhuma instrução."
+    async with Session() as s:
+        with pytest.raises(ps.ProvisionamentoIncompletoError) as exc:
+            await provisionar_tenant(
+                s, slug=slug, nome="X", admin_email="x@x.local",
+                admin_nome="X", admin_cpf=uuid.uuid4().hex[:11],
+            )
+    tenant_id = exc.value.tenant_id
+    assert exc.value.slug == slug
+    assert "retomar" in str(exc.value), (
+        "a exceção do provisionamento parcial precisa dizer COMO concluir; "
+        "sem isso o operador fica com um tenant inerte e nenhuma instrução."
+    )
+
+    async with Session() as s:
+        # 1a. o tenant existe — não houve compensação por DELETE
+        linha = (
+            await s.execute(
+                text("SELECT id, ativo FROM aprimora_py.tenant WHERE slug=:s"),
+                {"s": slug},
+            )
+        ).first()
+        assert linha is not None, (
+            "o tenant sumiu: alguém acrescentou compensação por DELETE. "
+            "Apagar tenant não é operação de runtime nenhum (0076)."
+        )
+        assert linha.ativo is False, "o tenant incompleto ficou ATIVO"
+
+        # 1b. e é INERTE: a query do TenantMiddleware não o resolve
+        resolvido = (
+            await s.execute(
+                text(
+                    "SELECT id FROM aprimora_py.tenant "
+                    " WHERE slug=:s AND ativo=true"
+                ),
+                {"s": slug},
+            )
+        ).scalar_one_or_none()
+        assert resolvido is None, (
+            "o tenant incompleto resolve por subdomínio — é a diferença "
+            "entre 'inerte' e 'meio aberto'."
         )
 
-        async with Session() as s:
-            # 1a. o tenant existe — não houve compensação por DELETE
-            linha = (
-                await s.execute(
-                    text("SELECT id, ativo FROM aprimora_py.tenant WHERE slug=:s"),
-                    {"s": slug},
-                )
-            ).first()
-            assert linha is not None, (
-                "o tenant sumiu: alguém acrescentou compensação por DELETE. "
-                "Apagar tenant não é operação de runtime nenhum (0076)."
+        # 1c. sem admin: o ato municipal não deixou usuário para trás
+        usuarios = (
+            await s.execute(
+                text("SELECT count(*) FROM utils.usuario WHERE tenant_id=:t"),
+                {"t": linha.id},
             )
-            assert linha.ativo is False, "o tenant incompleto ficou ATIVO"
+        ).scalar_one()
+        assert usuarios == 0
 
-            # 1b. e é INERTE: a query do TenantMiddleware não o resolve
-            resolvido = (
+    # 2. a retomada conclui — com o defeito corrigido, como na vida real
+    monkeypatch.undo()
+    async with Session() as s:
+        tenant, senha = await ps.retomar_provisionamento(
+            s, slug=slug, admin_email="x@x.local", admin_nome="X",
+            admin_cpf=uuid.uuid4().hex[:11],
+        )
+    assert senha, "a retomada tinha de gerar a senha do admin que faltava"
+    assert tenant.ativo is True
+
+    async with Session() as s:
+        usuarios = (
+            await s.execute(
+                text("SELECT count(*) FROM utils.usuario WHERE tenant_id=:t"),
+                {"t": tenant.id},
+            )
+        ).scalar_one()
+        assert usuarios == 1
+        acoes = [
+            a
+            for (a,) in (
                 await s.execute(
                     text(
-                        "SELECT id FROM aprimora_py.tenant "
-                        " WHERE slug=:s AND ativo=true"
+                        "SELECT acao FROM aprimora_py.audit_log "
+                        " WHERE tenant_id=:t ORDER BY id"
                     ),
-                    {"s": slug},
-                )
-            ).scalar_one_or_none()
-            assert resolvido is None, (
-                "o tenant incompleto resolve por subdomínio — é a diferença "
-                "entre 'inerte' e 'meio aberto'."
-            )
-
-            # 1c. sem admin: o ato municipal não deixou usuário para trás
-            usuarios = (
-                await s.execute(
-                    text("SELECT count(*) FROM utils.usuario WHERE tenant_id=:t"),
-                    {"t": linha.id},
-                )
-            ).scalar_one()
-            assert usuarios == 0
-
-        # 2. a retomada conclui — com o defeito corrigido, como na vida real
-        monkeypatch.undo()
-        async with Session() as s:
-            tenant, senha = await ps.retomar_provisionamento(
-                s, slug=slug, admin_email="x@x.local", admin_nome="X",
-                admin_cpf=uuid.uuid4().hex[:11],
-            )
-        assert senha, "a retomada tinha de gerar a senha do admin que faltava"
-        assert tenant.ativo is True
-
-        async with Session() as s:
-            usuarios = (
-                await s.execute(
-                    text("SELECT count(*) FROM utils.usuario WHERE tenant_id=:t"),
                     {"t": tenant.id},
                 )
-            ).scalar_one()
-            assert usuarios == 1
-            acoes = [
-                a
-                for (a,) in (
-                    await s.execute(
-                        text(
-                            "SELECT acao FROM aprimora_py.audit_log "
-                            " WHERE tenant_id=:t ORDER BY id"
-                        ),
-                        {"t": tenant.id},
-                    )
-                ).all()
-            ]
-            assert acoes == ["tenant.provisionamento_retomado"], (
-                f"trilha inesperada: {acoes}. A retomada tem de aparecer como "
-                "evento próprio — quem audita precisa saber que este tenant "
-                "não nasceu num ato só."
-            )
-    finally:
-        if tenant_id is not None:
-            await _cleanup(admin_engine, tenant_id)
+            ).all()
+        ]
+        assert acoes == ["tenant.provisionamento_retomado"], (
+            f"trilha inesperada: {acoes}. A retomada tem de aparecer como "
+            "evento próprio — quem audita precisa saber que este tenant "
+            "não nasceu num ato só."
+        )
 
 
 async def test_retomar_recusa_tenant_ativo(admin_engine):
@@ -307,28 +276,25 @@ async def test_retomar_recusa_tenant_ativo(admin_engine):
     slug = _novo_slug("ativo")
     Session = _sessionmaker(admin_engine)
     tenant, _ = await _provisionar(Session, slug)
-    try:
-        async with Session() as s:
-            with pytest.raises(ProvisioningError) as exc:
-                await ps.retomar_provisionamento(
-                    s, slug=slug, admin_email="invasor@x.local",
-                    admin_nome="Invasor", admin_cpf=uuid.uuid4().hex[:11],
-                )
-        assert "já está ativo" in str(exc.value).lower()
+    async with Session() as s:
+        with pytest.raises(ProvisioningError) as exc:
+            await ps.retomar_provisionamento(
+                s, slug=slug, admin_email="invasor@x.local",
+                admin_nome="Invasor", admin_cpf=uuid.uuid4().hex[:11],
+            )
+    assert "já está ativo" in str(exc.value).lower()
 
-        async with Session() as s:
-            n = (
-                await s.execute(
-                    text("SELECT count(*) FROM utils.usuario WHERE tenant_id=:t"),
-                    {"t": tenant.id},
-                )
-            ).scalar_one()
-        assert n == 1, (
-            "a recusa não impediu a criação do usuário — o teste passaria pela "
-            "exceção certa com o efeito colateral errado."
-        )
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with Session() as s:
+        n = (
+            await s.execute(
+                text("SELECT count(*) FROM utils.usuario WHERE tenant_id=:t"),
+                {"t": tenant.id},
+            )
+        ).scalar_one()
+    assert n == 1, (
+        "a recusa não impediu a criação do usuário — o teste passaria pela "
+        "exceção certa com o efeito colateral errado."
+    )
 
 
 async def test_retomar_recusa_municipio_suspenso_de_proposito(admin_engine):
@@ -373,95 +339,92 @@ async def test_retomar_recusa_municipio_suspenso_de_proposito(admin_engine):
     slug = _novo_slug("suspenso")
     Session = _sessionmaker(admin_engine)
     tenant, _ = await _provisionar(Session, slug)
-    try:
-        # --- o município em operação: mais um servidor além do admin -------
-        async with Session() as s:
+    # --- o município em operação: mais um servidor além do admin -------
+    async with Session() as s:
+        await s.execute(
+            text(
+                "INSERT INTO utils.usuario (tenant_id, nome, email, senha, cpf) "
+                "VALUES (:t, 'Servidor', :e, '', :c)"
+            ),
+            {"t": tenant.id, "e": f"serv-{slug}@x.local", "c": uuid.uuid4().hex[:11]},
+        )
+        # --- suspensão deliberada, pelo caminho suportado --------------
+        await s.execute(
+            text("UPDATE aprimora_py.tenant SET ativo=false WHERE id=:t"),
+            {"t": tenant.id},
+        )
+        await s.commit()
+
+    async with Session() as s:
+        grupo_su_antes = (
             await s.execute(
                 text(
-                    "INSERT INTO utils.usuario (tenant_id, nome, email, senha, cpf) "
-                    "VALUES (:t, 'Servidor', :e, '', :c)"
+                    "SELECT id FROM utils.grupo "
+                    " WHERE tenant_id=:t AND grupo='Super Usuário'"
                 ),
-                {"t": tenant.id, "e": f"serv-{slug}@x.local", "c": uuid.uuid4().hex[:11]},
-            )
-            # --- suspensão deliberada, pelo caminho suportado --------------
-            await s.execute(
-                text("UPDATE aprimora_py.tenant SET ativo=false WHERE id=:t"),
                 {"t": tenant.id},
             )
-            await s.commit()
+        ).scalar_one()
 
-        async with Session() as s:
-            grupo_su_antes = (
+    # --- o ataque -----------------------------------------------------
+    async with Session() as s:
+        with pytest.raises(ProvisioningError) as exc:
+            await ps.retomar_provisionamento(
+                s,
+                slug=slug,
+                admin_email="invasor@x.local",
+                admin_nome="Invasor",
+                admin_cpf=uuid.uuid4().hex[:11],
+                senha="SenhaEscolhidaPeloInvasor",
+            )
+    assert "nunca terminou" in str(exc.value), (
+        "a recusa tem de ser a da guarda de provisionamento concluído, não "
+        f"outra qualquer: {exc.value}"
+    )
+
+    # --- e o efeito colateral NÃO aconteceu ----------------------------
+    async with Session() as s:
+        usuarios = [
+            e
+            for (e,) in (
                 await s.execute(
                     text(
-                        "SELECT id FROM utils.grupo "
-                        " WHERE tenant_id=:t AND grupo='Super Usuário'"
+                        "SELECT email FROM utils.usuario WHERE tenant_id=:t "
+                        " ORDER BY id"
                     ),
                     {"t": tenant.id},
                 )
-            ).scalar_one()
+            ).all()
+        ]
+        assert "invasor@x.local" not in usuarios, (
+            "USUÁRIO CRIADO apesar da recusa — a exceção certa com o efeito "
+            f"colateral errado. Usuários: {usuarios}"
+        )
+        assert len(usuarios) == 2, f"usuários inesperados: {usuarios}"
 
-        # --- o ataque -----------------------------------------------------
-        async with Session() as s:
-            with pytest.raises(ProvisioningError) as exc:
-                await ps.retomar_provisionamento(
-                    s,
-                    slug=slug,
-                    admin_email="invasor@x.local",
-                    admin_nome="Invasor",
-                    admin_cpf=uuid.uuid4().hex[:11],
-                    senha="SenhaEscolhidaPeloInvasor",
-                )
-        assert "nunca terminou" in str(exc.value), (
-            "a recusa tem de ser a da guarda de provisionamento concluído, não "
-            f"outra qualquer: {exc.value}"
+        vinculos = (
+            await s.execute(
+                text(
+                    "SELECT count(*) FROM utils.usuario_grupo "
+                    " WHERE tenant_id=:t AND id_grupo=:g"
+                ),
+                {"t": tenant.id, "g": grupo_su_antes},
+            )
+        ).scalar_one()
+        assert vinculos == 1, (
+            "alguém foi ligado ao grupo Super Usuário apesar da recusa"
         )
 
-        # --- e o efeito colateral NÃO aconteceu ----------------------------
-        async with Session() as s:
-            usuarios = [
-                e
-                for (e,) in (
-                    await s.execute(
-                        text(
-                            "SELECT email FROM utils.usuario WHERE tenant_id=:t "
-                            " ORDER BY id"
-                        ),
-                        {"t": tenant.id},
-                    )
-                ).all()
-            ]
-            assert "invasor@x.local" not in usuarios, (
-                "USUÁRIO CRIADO apesar da recusa — a exceção certa com o efeito "
-                f"colateral errado. Usuários: {usuarios}"
+        ainda_suspenso = (
+            await s.execute(
+                text("SELECT ativo FROM aprimora_py.tenant WHERE id=:t"),
+                {"t": tenant.id},
             )
-            assert len(usuarios) == 2, f"usuários inesperados: {usuarios}"
-
-            vinculos = (
-                await s.execute(
-                    text(
-                        "SELECT count(*) FROM utils.usuario_grupo "
-                        " WHERE tenant_id=:t AND id_grupo=:g"
-                    ),
-                    {"t": tenant.id, "g": grupo_su_antes},
-                )
-            ).scalar_one()
-            assert vinculos == 1, (
-                "alguém foi ligado ao grupo Super Usuário apesar da recusa"
-            )
-
-            ainda_suspenso = (
-                await s.execute(
-                    text("SELECT ativo FROM aprimora_py.tenant WHERE id=:t"),
-                    {"t": tenant.id},
-                )
-            ).scalar_one()
-            assert ainda_suspenso is False, (
-                "a suspensão deliberada foi DESFEITA — a retomada reativou um "
-                "município suspenso por inadimplência/incidente/retenção legal."
-            )
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+        ).scalar_one()
+        assert ainda_suspenso is False, (
+            "a suspensão deliberada foi DESFEITA — a retomada reativou um "
+            "município suspenso por inadimplência/incidente/retenção legal."
+        )
 
 
 # ---- gate de plataforma: o e-mail saiu do caminho de decisão (SEC-01A) ----
@@ -505,16 +468,13 @@ async def test_desativado_bloqueia_resolucao(admin_engine):
     slug = _novo_slug("deact")
     Session = _sessionmaker(admin_engine)
     tenant, _ = await _provisionar(Session, slug)
-    try:
-        async with Session() as s:
-            await s.execute(text("UPDATE aprimora_py.tenant SET ativo=false WHERE id=:t"), {"t": tenant.id})
-            await s.commit()
-        # mesma query do TenantMiddleware: slug + ativo=true → não resolve
-        async with Session() as s:
-            achado = (await s.execute(text("SELECT id FROM aprimora_py.tenant WHERE slug=:s AND ativo=true"), {"s": slug})).scalar_one_or_none()
-        assert achado is None
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with Session() as s:
+        await s.execute(text("UPDATE aprimora_py.tenant SET ativo=false WHERE id=:t"), {"t": tenant.id})
+        await s.commit()
+    # mesma query do TenantMiddleware: slug + ativo=true → não resolve
+    async with Session() as s:
+        achado = (await s.execute(text("SELECT id FROM aprimora_py.tenant WHERE slug=:s AND ativo=true"), {"s": slug})).scalar_one_or_none()
+    assert achado is None
 
 
 # ---- contratos: slug imutável, módulos por plano, listagem sem dados internos ----

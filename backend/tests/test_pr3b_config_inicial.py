@@ -61,25 +61,6 @@ async def _provisionar(engine, **kw) -> Tenant:
     return tenant
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sessionmaker(engine)() as s:
-        for stmt in (
-            "DELETE FROM protocolos.assunto WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.especie_documental WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _unidade_id(engine, tenant_id: int) -> int:
     async with _sessionmaker(engine)() as s:
         return int(
@@ -95,165 +76,141 @@ async def _unidade_id(engine, tenant_id: int) -> int:
 # ---------- whitelist + escopo ----------
 async def test_atualiza_so_institucional_ignora_plataforma(admin_engine):
     tenant = await _provisionar(admin_engine, plano="basico")
-    try:
-        # Corpo com campos PROIBIDOS junto dos permitidos: o schema descarta os extras.
-        payload = TenantInstitucionalUpdate.model_validate(
-            {
-                "nome": "Prefeitura Nova",
-                "sigla": "PMN",
-                "email_institucional": "contato@pmn.gov.br",
-                # proibidos — devem ser ignorados:
-                "id": 999999,
-                "slug": "hackeado",
-                "plano": "enterprise",
-                "ativo": False,
-                "limite_usuarios": 1,
-                "cnpj": "00000000000000",
-            }
-        )
-        async with _sessionmaker(admin_engine)() as s:
-            await atualizar_config_institucional(s, tenant_id=tenant.id, payload=payload)
+    # Corpo com campos PROIBIDOS junto dos permitidos: o schema descarta os extras.
+    payload = TenantInstitucionalUpdate.model_validate(
+        {
+            "nome": "Prefeitura Nova",
+            "sigla": "PMN",
+            "email_institucional": "contato@pmn.gov.br",
+            # proibidos — devem ser ignorados:
+            "id": 999999,
+            "slug": "hackeado",
+            "plano": "enterprise",
+            "ativo": False,
+            "limite_usuarios": 1,
+            "cnpj": "00000000000000",
+        }
+    )
+    async with _sessionmaker(admin_engine)() as s:
+        await atualizar_config_institucional(s, tenant_id=tenant.id, payload=payload)
 
-        async with _sessionmaker(admin_engine)() as s:
-            t = (await s.execute(select(Tenant).where(Tenant.id == tenant.id))).scalar_one()
-            assert t.nome == "Prefeitura Nova"
-            assert t.sigla == "PMN"
-            assert t.email_institucional == "contato@pmn.gov.br"
-            # plataforma intacta
-            assert t.slug == tenant.slug
-            assert t.plano == "basico"
-            assert t.ativo is True
-            assert t.limite_usuarios is None
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        t = (await s.execute(select(Tenant).where(Tenant.id == tenant.id))).scalar_one()
+        assert t.nome == "Prefeitura Nova"
+        assert t.sigla == "PMN"
+        assert t.email_institucional == "contato@pmn.gov.br"
+        # plataforma intacta
+        assert t.slug == tenant.slug
+        assert t.plano == "basico"
+        assert t.ativo is True
+        assert t.limite_usuarios is None
 
 
 async def test_escopo_por_tenant_id_sem_cross_tenant(admin_engine):
     a = await _provisionar(admin_engine, nome="Tenant A")
     b = await _provisionar(admin_engine, nome="Tenant B")
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            await atualizar_config_institucional(
-                s, tenant_id=a.id, payload=TenantInstitucionalUpdate(nome="Só o A muda")
-            )
-        async with _sessionmaker(admin_engine)() as s:
-            ta = (await s.execute(select(Tenant).where(Tenant.id == a.id))).scalar_one()
-            tb = (await s.execute(select(Tenant).where(Tenant.id == b.id))).scalar_one()
-            assert ta.nome == "Só o A muda"
-            assert tb.nome == "Tenant B"  # intacto
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    async with _sessionmaker(admin_engine)() as s:
+        await atualizar_config_institucional(
+            s, tenant_id=a.id, payload=TenantInstitucionalUpdate(nome="Só o A muda")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        ta = (await s.execute(select(Tenant).where(Tenant.id == a.id))).scalar_one()
+        tb = (await s.execute(select(Tenant).where(Tenant.id == b.id))).scalar_one()
+        assert ta.nome == "Só o A muda"
+        assert tb.nome == "Tenant B"  # intacto
 
 
 # ---------- id_unidade_padrao ----------
 async def test_unidade_padrao_do_tenant_aceita(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _unidade_id(admin_engine, tenant.id)
-        async with _sessionmaker(admin_engine)() as s:
-            t = await atualizar_config_institucional(
-                s, tenant_id=tenant.id, payload=TenantInstitucionalUpdate(id_unidade_padrao=uid)
-            )
-            assert t.id_unidade_padrao == uid
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _unidade_id(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        t = await atualizar_config_institucional(
+            s, tenant_id=tenant.id, payload=TenantInstitucionalUpdate(id_unidade_padrao=uid)
+        )
+        assert t.id_unidade_padrao == uid
 
 
 async def test_unidade_padrao_de_outro_tenant_rejeitada(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        uid_b = await _unidade_id(admin_engine, b.id)
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await atualizar_config_institucional(
-                    s, tenant_id=a.id, payload=TenantInstitucionalUpdate(id_unidade_padrao=uid_b)
-                )
-            assert exc.value.status_code == 400
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    uid_b = await _unidade_id(admin_engine, b.id)
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await atualizar_config_institucional(
+                s, tenant_id=a.id, payload=TenantInstitucionalUpdate(id_unidade_padrao=uid_b)
+            )
+        assert exc.value.status_code == 400
 
 
 async def test_unidade_padrao_inativa_rejeitada(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _unidade_id(admin_engine, tenant.id)
-        async with _sessionmaker(admin_engine)() as s:
-            await s.execute(
-                text("UPDATE utils.unidade_trabalho SET excluido=true WHERE id=:i"), {"i": uid}
+    uid = await _unidade_id(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        await s.execute(
+            text("UPDATE utils.unidade_trabalho SET excluido=true WHERE id=:i"), {"i": uid}
+        )
+        await s.commit()
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await atualizar_config_institucional(
+                s, tenant_id=tenant.id, payload=TenantInstitucionalUpdate(id_unidade_padrao=uid)
             )
-            await s.commit()
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await atualizar_config_institucional(
-                    s, tenant_id=tenant.id, payload=TenantInstitucionalUpdate(id_unidade_padrao=uid)
-                )
-            assert exc.value.status_code == 400
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+        assert exc.value.status_code == 400
 
 
 # ---------- reset de senha temporária ----------
 async def test_reset_gera_persiste_hash_e_audita(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            admin = (
-                await s.execute(select(Usuario).where(Usuario.tenant_id == tenant.id))
-            ).scalar_one()
-            user, senha_temp = await resetar_senha_usuario(
-                s, usuario_id=admin.id, tenant_id=tenant.id, ator_usuario_id=admin.id
+    async with _sessionmaker(admin_engine)() as s:
+        admin = (
+            await s.execute(select(Usuario).where(Usuario.tenant_id == tenant.id))
+        ).scalar_one()
+        user, senha_temp = await resetar_senha_usuario(
+            s, usuario_id=admin.id, tenant_id=tenant.id, ator_usuario_id=admin.id
+        )
+    assert senha_temp and len(senha_temp) >= 8
+
+    async with _sessionmaker(admin_engine)() as s:
+        row = (
+            await s.execute(
+                text("SELECT senha, senha_bcrypt FROM utils.usuario WHERE id=:i"),
+                {"i": user.id},
             )
-        assert senha_temp and len(senha_temp) >= 8
+        ).first()
+        assert row.senha == ""  # MD5 legado zerado
+        assert row.senha_bcrypt and row.senha_bcrypt.startswith("$2")
+        # login com a nova funciona; a senha não fica em claro
+        ok, _ = verify_password(senha_temp, bcrypt_hash=row.senha_bcrypt, md5_hash=row.senha)
+        assert ok is True
 
-        async with _sessionmaker(admin_engine)() as s:
-            row = (
-                await s.execute(
-                    text("SELECT senha, senha_bcrypt FROM utils.usuario WHERE id=:i"),
-                    {"i": user.id},
-                )
-            ).first()
-            assert row.senha == ""  # MD5 legado zerado
-            assert row.senha_bcrypt and row.senha_bcrypt.startswith("$2")
-            # login com a nova funciona; a senha não fica em claro
-            ok, _ = verify_password(senha_temp, bcrypt_hash=row.senha_bcrypt, md5_hash=row.senha)
-            assert ok is True
-
-            audit = (
-                await s.execute(
-                    text(
-                        "SELECT payload::text AS p FROM aprimora_py.audit_log "
-                        "WHERE tenant_id=:t AND acao='usuario.senha_resetada'"
-                    ),
-                    {"t": tenant.id},
-                )
-            ).first()
-            assert audit is not None
-            assert senha_temp not in audit.p  # senha NUNCA no audit
-            assert '"afetado_super_usuario": true' in audit.p  # admin provisionado é SU
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+        audit = (
+            await s.execute(
+                text(
+                    "SELECT payload::text AS p FROM aprimora_py.audit_log "
+                    "WHERE tenant_id=:t AND acao='usuario.senha_resetada'"
+                ),
+                {"t": tenant.id},
+            )
+        ).first()
+        assert audit is not None
+        assert senha_temp not in audit.p  # senha NUNCA no audit
+        assert '"afetado_super_usuario": true' in audit.p  # admin provisionado é SU
 
 
 async def test_reset_cross_tenant_404(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            admin_b = (
-                await s.execute(select(Usuario).where(Usuario.tenant_id == b.id))
-            ).scalar_one()
-            # tenta resetar o admin de B usando o tenant de A → 404
-            with pytest.raises(HTTPException) as exc:
-                await resetar_senha_usuario(
-                    s, usuario_id=admin_b.id, tenant_id=a.id, ator_usuario_id=1
-                )
-            assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    async with _sessionmaker(admin_engine)() as s:
+        admin_b = (
+            await s.execute(select(Usuario).where(Usuario.tenant_id == b.id))
+        ).scalar_one()
+        # tenta resetar o admin de B usando o tenant de A → 404
+        with pytest.raises(HTTPException) as exc:
+            await resetar_senha_usuario(
+                s, usuario_id=admin_b.id, tenant_id=a.id, ator_usuario_id=1
+            )
+        assert exc.value.status_code == 404
 
 
 # ---------- onboarding ----------
@@ -273,48 +230,45 @@ async def test_onboarding_reflete_estado_real(admin_engine):
             ).scalar_one()
         )
         await s.commit()
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            tenant = (await s.execute(select(Tenant).where(Tenant.id == tid))).scalar_one()
-            onb = await calcular_onboarding(s, tenant_id=tid, tenant=tenant)
-        por_chave = {i.chave: i.concluido for i in onb.itens}
-        assert por_chave["dados_institucionais"] is False
-        assert por_chave["unidade_padrao"] is False
-        assert por_chave["unidades"] is False
-        assert por_chave["assuntos"] is False
-        # módulo de assinatura está no plano básico → habilitado (placeholder honesto)
-        assert por_chave["assinatura"] is True
+    async with _sessionmaker(admin_engine)() as s:
+        tenant = (await s.execute(select(Tenant).where(Tenant.id == tid))).scalar_one()
+        onb = await calcular_onboarding(s, tenant_id=tid, tenant=tenant)
+    por_chave = {i.chave: i.concluido for i in onb.itens}
+    assert por_chave["dados_institucionais"] is False
+    assert por_chave["unidade_padrao"] is False
+    assert por_chave["unidades"] is False
+    assert por_chave["assuntos"] is False
+    # módulo de assinatura está no plano básico → habilitado (placeholder honesto)
+    assert por_chave["assinatura"] is True
 
-        # preenche dados institucionais + cria uma unidade → itens viram true
-        async with _sessionmaker(admin_engine)() as s:
-            await atualizar_config_institucional(
-                s,
-                tenant_id=tid,
-                payload=TenantInstitucionalUpdate(
-                    email_institucional="x@x.gov.br",
-                    telefone_institucional="(00) 0000-0000",
-                    texto_boas_vindas_portal="Bem-vindo!",
-                ),
-            )
-            await s.execute(
-                text(
-                    "INSERT INTO utils.unidade_trabalho (tenant_id, unidade_trabalho, excluido) "
-                    "VALUES (:t, 'Protocolo', false)"
-                ),
-                {"t": tid},
-            )
-            await s.commit()
+    # preenche dados institucionais + cria uma unidade → itens viram true
+    async with _sessionmaker(admin_engine)() as s:
+        await atualizar_config_institucional(
+            s,
+            tenant_id=tid,
+            payload=TenantInstitucionalUpdate(
+                email_institucional="x@x.gov.br",
+                telefone_institucional="(00) 0000-0000",
+                texto_boas_vindas_portal="Bem-vindo!",
+            ),
+        )
+        await s.execute(
+            text(
+                "INSERT INTO utils.unidade_trabalho (tenant_id, unidade_trabalho, excluido) "
+                "VALUES (:t, 'Protocolo', false)"
+            ),
+            {"t": tid},
+        )
+        await s.commit()
 
-        async with _sessionmaker(admin_engine)() as s:
-            tenant = (await s.execute(select(Tenant).where(Tenant.id == tid))).scalar_one()
-            onb2 = await calcular_onboarding(s, tenant_id=tid, tenant=tenant)
-        por_chave2 = {i.chave: i.concluido for i in onb2.itens}
-        assert por_chave2["dados_institucionais"] is True
-        assert por_chave2["unidades"] is True
-        assert por_chave2["portal_cidadao"] is True
-        assert onb2.concluidos > onb.concluidos
-    finally:
-        await _cleanup(admin_engine, tid)
+    async with _sessionmaker(admin_engine)() as s:
+        tenant = (await s.execute(select(Tenant).where(Tenant.id == tid))).scalar_one()
+        onb2 = await calcular_onboarding(s, tenant_id=tid, tenant=tenant)
+    por_chave2 = {i.chave: i.concluido for i in onb2.itens}
+    assert por_chave2["dados_institucionais"] is True
+    assert por_chave2["unidades"] is True
+    assert por_chave2["portal_cidadao"] is True
+    assert onb2.concluidos > onb.concluidos
 
 
 # ---------- gate configuracao:atualizar (sem DB; monkeypatch) ----------
@@ -406,60 +360,57 @@ async def test_config_institucional_grava_pelo_orm_sob_aprimora_app(
     coluna suja fora do payload, que é o alvo real.
     """
     tenant = await _provisionar(admin_engine)
+    uid = await _unidade_id(admin_engine, tenant.id)
+    payload = TenantInstitucionalUpdate(
+        nome="Prefeitura ORM",
+        sigla="PORM",
+        email_institucional="contato@porm.gov.br",
+        telefone_institucional="(88) 3611-0000",
+        endereco="Rua Um, 100 - Centro",
+        site_oficial="https://porm.gov.br",
+        horario_atendimento="08h às 14h",
+        texto_boas_vindas_portal="Bem-vindo ao portal.",
+        logo_url="https://porm.gov.br/logo.png",
+        cor_primaria="#0055aa",
+        id_unidade_padrao=uid,
+    )
+    enviados = set(payload.model_dump(exclude_unset=True))
+    assert enviados == set(TenantInstitucionalUpdate.model_fields), (
+        "este teste tem de enviar TODOS os campos de "
+        "`TenantInstitucionalUpdate` na MESMA instrução — campo não enviado "
+        "é campo cujo grant não foi medido pelo caminho ORM.\n"
+        f"  no schema e não no payload: "
+        f"{sorted(set(TenantInstitucionalUpdate.model_fields) - enviados)}"
+    )
+
+    # `app_session` exige o `SET LOCAL` de quem a usa: `aprimora_py.tenant`
+    # não tem RLS, mas a validação de `id_unidade_padrao` lê
+    # `utils.unidade_trabalho`, que tem.
+    await app_session.execute(text(f"SET LOCAL app.tenant_id = '{tenant.id}'"))
     try:
-        uid = await _unidade_id(admin_engine, tenant.id)
-        payload = TenantInstitucionalUpdate(
-            nome="Prefeitura ORM",
-            sigla="PORM",
-            email_institucional="contato@porm.gov.br",
-            telefone_institucional="(88) 3611-0000",
-            endereco="Rua Um, 100 - Centro",
-            site_oficial="https://porm.gov.br",
-            horario_atendimento="08h às 14h",
-            texto_boas_vindas_portal="Bem-vindo ao portal.",
-            logo_url="https://porm.gov.br/logo.png",
-            cor_primaria="#0055aa",
-            id_unidade_padrao=uid,
+        await atualizar_config_institucional(
+            app_session, tenant_id=tenant.id, payload=payload
         )
-        enviados = set(payload.model_dump(exclude_unset=True))
-        assert enviados == set(TenantInstitucionalUpdate.model_fields), (
-            "este teste tem de enviar TODOS os campos de "
-            "`TenantInstitucionalUpdate` na MESMA instrução — campo não enviado "
-            "é campo cujo grant não foi medido pelo caminho ORM.\n"
-            f"  no schema e não no payload: "
-            f"{sorted(set(TenantInstitucionalUpdate.model_fields) - enviados)}"
+    except DBAPIError as e:  # noqa: PERF203 - a mensagem É o teste
+        pytest.fail(
+            _diagnostico_de_grant(
+                "services.tenant_config.atualizar_config_institucional "
+                "(PUT /api/v2/tenants/me)",
+                e.orig or e,
+            )
         )
 
-        # `app_session` exige o `SET LOCAL` de quem a usa: `aprimora_py.tenant`
-        # não tem RLS, mas a validação de `id_unidade_padrao` lê
-        # `utils.unidade_trabalho`, que tem.
-        await app_session.execute(text(f"SET LOCAL app.tenant_id = '{tenant.id}'"))
-        try:
-            await atualizar_config_institucional(
-                app_session, tenant_id=tenant.id, payload=payload
-            )
-        except DBAPIError as e:  # noqa: PERF203 - a mensagem É o teste
-            pytest.fail(
-                _diagnostico_de_grant(
-                    "services.tenant_config.atualizar_config_institucional "
-                    "(PUT /api/v2/tenants/me)",
-                    e.orig or e,
-                )
-            )
-
-        # Releitura por sessão administrativa: "não levantou" não é "gravou".
-        async with _sessionmaker(admin_engine)() as s:
-            t = (
-                await s.execute(select(Tenant).where(Tenant.id == tenant.id))
-            ).scalar_one()
-        assert (t.nome, t.sigla, t.cor_primaria, t.id_unidade_padrao) == (
-            "Prefeitura ORM",
-            "PORM",
-            "#0055aa",
-            uid,
-        ), "o UPDATE passou pelo grant mas os valores não chegaram à linha."
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    # Releitura por sessão administrativa: "não levantou" não é "gravou".
+    async with _sessionmaker(admin_engine)() as s:
+        t = (
+            await s.execute(select(Tenant).where(Tenant.id == tenant.id))
+        ).scalar_one()
+    assert (t.nome, t.sigla, t.cor_primaria, t.id_unidade_padrao) == (
+        "Prefeitura ORM",
+        "PORM",
+        "#0055aa",
+        uid,
+    ), "o UPDATE passou pelo grant mas os valores não chegaram à linha."
 
 
 async def test_nup_config_grava_pelo_orm_sob_aprimora_app(admin_engine, app_session):
@@ -471,38 +422,35 @@ async def test_nup_config_grava_pelo_orm_sob_aprimora_app(admin_engine, app_sess
     para o teste de cima.
     """
     tenant = await _provisionar(admin_engine)
+    payload = TenantNupConfigUpdate(codigo_orgao_nup="54321", usar_nup_federal=True)
+    enviados = set(payload.model_dump(exclude_unset=True))
+    assert enviados == set(TenantNupConfigUpdate.model_fields), (
+        "este teste tem de enviar TODOS os campos de `TenantNupConfigUpdate`:"
+        f" faltam {sorted(set(TenantNupConfigUpdate.model_fields) - enviados)}"
+    )
+
+    await app_session.execute(text(f"SET LOCAL app.tenant_id = '{tenant.id}'"))
+    alvo = (
+        await app_session.execute(select(Tenant).where(Tenant.id == tenant.id))
+    ).scalar_one()
     try:
-        payload = TenantNupConfigUpdate(codigo_orgao_nup="54321", usar_nup_federal=True)
-        enviados = set(payload.model_dump(exclude_unset=True))
-        assert enviados == set(TenantNupConfigUpdate.model_fields), (
-            "este teste tem de enviar TODOS os campos de `TenantNupConfigUpdate`:"
-            f" faltam {sorted(set(TenantNupConfigUpdate.model_fields) - enviados)}"
-        )
-
-        await app_session.execute(text(f"SET LOCAL app.tenant_id = '{tenant.id}'"))
-        alvo = (
-            await app_session.execute(select(Tenant).where(Tenant.id == tenant.id))
-        ).scalar_one()
-        try:
-            await update_nup_config(payload=payload, tenant=alvo, db=app_session)
-        except DBAPIError as e:
-            pytest.fail(
-                _diagnostico_de_grant(
-                    "routers.tenant.update_nup_config "
-                    "(PUT /api/v2/tenants/me/nup-config)",
-                    e.orig or e,
-                )
+        await update_nup_config(payload=payload, tenant=alvo, db=app_session)
+    except DBAPIError as e:
+        pytest.fail(
+            _diagnostico_de_grant(
+                "routers.tenant.update_nup_config "
+                "(PUT /api/v2/tenants/me/nup-config)",
+                e.orig or e,
             )
-
-        async with _sessionmaker(admin_engine)() as s:
-            t = (
-                await s.execute(select(Tenant).where(Tenant.id == tenant.id))
-            ).scalar_one()
-        assert (t.codigo_orgao_nup, t.usar_nup_federal) == ("54321", True), (
-            "o UPDATE de NUP passou pelo grant mas os valores não chegaram à linha."
         )
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+
+    async with _sessionmaker(admin_engine)() as s:
+        t = (
+            await s.execute(select(Tenant).where(Tenant.id == tenant.id))
+        ).scalar_one()
+    assert (t.codigo_orgao_nup, t.usar_nup_federal) == ("54321", True), (
+        "o UPDATE de NUP passou pelo grant mas os valores não chegaram à linha."
+    )
 
 
 # ---------- schema: descarta extras ----------

@@ -93,200 +93,147 @@ async def _get_cidadao(engine, cid: int) -> UsuarioExterno:
         return (await s.execute(select(UsuarioExterno).where(UsuarioExterno.id == cid))).scalar_one()
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            # quebra o ciclo de FK processo↔movimentacao (id_ultima_movimentacao)
-            "UPDATE protocolos.processo SET id_ultima_movimentacao = NULL WHERE tenant_id=:t",
-            "DELETE FROM protocolos.movimentacao WHERE tenant_id=:t",
-            "DELETE FROM protocolos.processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.servico WHERE tenant_id=:t",
-            "DELETE FROM protocolos.assunto WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_externo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 # ---------- happy path: defaults aplicados + id_servico gravado ----------
 async def test_abre_por_servico_aplica_defaults(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _unidade_id(admin_engine, tenant.id)
-        id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
-        sv = await _criar_servico(
-            admin_engine, tenant.id, slug="certidao-iptu",
-            id_assunto_padrao=id_assunto, id_unidade_responsavel=uid,
-            nivel_sigilo_padrao="interno", canal_entrada_permitido="portal",
+    uid = await _unidade_id(admin_engine, tenant.id)
+    id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
+    sv = await _criar_servico(
+        admin_engine, tenant.id, slug="certidao-iptu",
+        id_assunto_padrao=id_assunto, id_unidade_responsavel=uid,
+        nivel_sigilo_padrao="interno", canal_entrada_permitido="portal",
+    )
+    cid = await _criar_cidadao(admin_engine, tenant.id, uuid.uuid4().hex[:11])
+
+    async with _sm(admin_engine)() as s:
+        cidadao = (await s.execute(select(UsuarioExterno).where(UsuarioExterno.id == cid))).scalar_one()
+        servico = (await s.execute(select(Servico).where(Servico.id == sv.id))).scalar_one()
+        proc = await abrir_processo_por_servico(
+            s, cidadao, servico,
+            AbrirPorServicoRequest(corpo="Preciso de uma certidão de IPTU."),
+            tenant_id=tenant.id,
         )
-        cid = await _criar_cidadao(admin_engine, tenant.id, uuid.uuid4().hex[:11])
+        pid = proc.id
 
-        async with _sm(admin_engine)() as s:
-            cidadao = (await s.execute(select(UsuarioExterno).where(UsuarioExterno.id == cid))).scalar_one()
-            servico = (await s.execute(select(Servico).where(Servico.id == sv.id))).scalar_one()
-            proc = await abrir_processo_por_servico(
-                s, cidadao, servico,
-                AbrirPorServicoRequest(corpo="Preciso de uma certidão de IPTU."),
-                tenant_id=tenant.id,
-            )
-            pid = proc.id
-
-        async with _sm(admin_engine)() as s:
-            p = (await s.execute(select(Processo).where(Processo.id == pid))).scalar_one()
-            assert p.id_servico == sv.id
-            assert p.id_assunto == id_assunto
-            assert p.id_unidade_proprietaria == uid and p.id_local_atual == uid
-            assert p.nivel_sigilo == "interno"
-            assert p.canal_entrada == "portal"
-            assert p.externo is True
-            # auditoria minimizada — sem dados pessoais
-            audit = (await s.execute(text(
-                "SELECT acao, payload::text AS p FROM aprimora_py.audit_log "
-                "WHERE tenant_id=:t AND acao='processo.aberto_por_servico'"
-            ), {"t": tenant.id})).first()
-            assert audit is not None
-            assert str(sv.id) in audit.p and "portal" in audit.p and "servico" in audit.p
-            assert "Maria" not in audit.p and "certidão" not in audit.p.lower()
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as s:
+        p = (await s.execute(select(Processo).where(Processo.id == pid))).scalar_one()
+        assert p.id_servico == sv.id
+        assert p.id_assunto == id_assunto
+        assert p.id_unidade_proprietaria == uid and p.id_local_atual == uid
+        assert p.nivel_sigilo == "interno"
+        assert p.canal_entrada == "portal"
+        assert p.externo is True
+        # auditoria minimizada — sem dados pessoais
+        audit = (await s.execute(text(
+            "SELECT acao, payload::text AS p FROM aprimora_py.audit_log "
+            "WHERE tenant_id=:t AND acao='processo.aberto_por_servico'"
+        ), {"t": tenant.id})).first()
+        assert audit is not None
+        assert str(sv.id) in audit.p and "portal" in audit.p and "servico" in audit.p
+        assert "Maria" not in audit.p and "certidão" not in audit.p.lower()
 
 
 # ---------- obter_servico_solicitavel: 404 / 409 ----------
 async def test_solicitavel_inativo_404(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _unidade_id(admin_engine, tenant.id)
-        id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
-        sv = await _criar_servico(admin_engine, tenant.id, slug="serv-inat", id_assunto_padrao=id_assunto, id_unidade_responsavel=uid)
-        async with _sm(admin_engine)() as s:
-            await servico_svc.set_ativo(s, tenant_id=tenant.id, servico_id=sv.id, ativo=False)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await servico_svc.obter_servico_solicitavel(s, tenant_id=tenant.id, slug="serv-inat")
-            assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _unidade_id(admin_engine, tenant.id)
+    id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
+    sv = await _criar_servico(admin_engine, tenant.id, slug="serv-inat", id_assunto_padrao=id_assunto, id_unidade_responsavel=uid)
+    async with _sm(admin_engine)() as s:
+        await servico_svc.set_ativo(s, tenant_id=tenant.id, servico_id=sv.id, ativo=False)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await servico_svc.obter_servico_solicitavel(s, tenant_id=tenant.id, slug="serv-inat")
+        assert exc.value.status_code == 404
 
 
 async def test_solicitavel_outro_tenant_404(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        uid = await _unidade_id(admin_engine, a.id)
-        id_assunto, _ = await _criar_assunto(admin_engine, a.id)
-        await _criar_servico(admin_engine, a.id, slug="serv-a", id_assunto_padrao=id_assunto, id_unidade_responsavel=uid)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await servico_svc.obter_servico_solicitavel(s, tenant_id=b.id, slug="serv-a")
-            assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    uid = await _unidade_id(admin_engine, a.id)
+    id_assunto, _ = await _criar_assunto(admin_engine, a.id)
+    await _criar_servico(admin_engine, a.id, slug="serv-a", id_assunto_padrao=id_assunto, id_unidade_responsavel=uid)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await servico_svc.obter_servico_solicitavel(s, tenant_id=b.id, slug="serv-a")
+        assert exc.value.status_code == 404
 
 
 async def test_solicitavel_canal_diferente_409(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _unidade_id(admin_engine, tenant.id)
-        id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
-        await _criar_servico(admin_engine, tenant.id, slug="serv-balcao", id_assunto_padrao=id_assunto, id_unidade_responsavel=uid, canal_entrada_permitido="balcao")
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await servico_svc.obter_servico_solicitavel(s, tenant_id=tenant.id, slug="serv-balcao")
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _unidade_id(admin_engine, tenant.id)
+    id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
+    await _criar_servico(admin_engine, tenant.id, slug="serv-balcao", id_assunto_padrao=id_assunto, id_unidade_responsavel=uid, canal_entrada_permitido="balcao")
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await servico_svc.obter_servico_solicitavel(s, tenant_id=tenant.id, slug="serv-balcao")
+        assert exc.value.status_code == 409
 
 
 async def test_solicitavel_sem_assunto_409(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _unidade_id(admin_engine, tenant.id)
-        await _criar_servico(admin_engine, tenant.id, slug="serv-sem-assunto", id_unidade_responsavel=uid)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await servico_svc.obter_servico_solicitavel(s, tenant_id=tenant.id, slug="serv-sem-assunto")
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _unidade_id(admin_engine, tenant.id)
+    await _criar_servico(admin_engine, tenant.id, slug="serv-sem-assunto", id_unidade_responsavel=uid)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await servico_svc.obter_servico_solicitavel(s, tenant_id=tenant.id, slug="serv-sem-assunto")
+        assert exc.value.status_code == 409
 
 
 async def test_solicitavel_sem_unidade_409(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
-        await _criar_servico(admin_engine, tenant.id, slug="serv-sem-unidade", id_assunto_padrao=id_assunto)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await servico_svc.obter_servico_solicitavel(s, tenant_id=tenant.id, slug="serv-sem-unidade")
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
+    await _criar_servico(admin_engine, tenant.id, slug="serv-sem-unidade", id_assunto_padrao=id_assunto)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await servico_svc.obter_servico_solicitavel(s, tenant_id=tenant.id, slug="serv-sem-unidade")
+        assert exc.value.status_code == 409
 
 
 # ---------- solicitar_habilitado calculado (projeção pública) ----------
 async def test_solicitar_habilitado_calculado(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _unidade_id(admin_engine, tenant.id)
-        id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
-        await _criar_servico(admin_engine, tenant.id, slug="serv-ok", nome="OK", id_assunto_padrao=id_assunto, id_unidade_responsavel=uid)
-        await _criar_servico(admin_engine, tenant.id, slug="serv-bad", nome="Bad")  # sem assunto/unidade
-        async with _sm(admin_engine)() as s:
-            pub = await servico_svc.listar_publico(s, tenant_id=tenant.id)
-        por_nome = {p.nome: p.solicitar_habilitado for p in pub}
-        assert por_nome["OK"] is True
-        assert por_nome["Bad"] is False
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _unidade_id(admin_engine, tenant.id)
+    id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
+    await _criar_servico(admin_engine, tenant.id, slug="serv-ok", nome="OK", id_assunto_padrao=id_assunto, id_unidade_responsavel=uid)
+    await _criar_servico(admin_engine, tenant.id, slug="serv-bad", nome="Bad")  # sem assunto/unidade
+    async with _sm(admin_engine)() as s:
+        pub = await servico_svc.listar_publico(s, tenant_id=tenant.id)
+    por_nome = {p.nome: p.solicitar_habilitado for p in pub}
+    assert por_nome["OK"] is True
+    assert por_nome["Bad"] is False
 
 
 # ---------- rate-limit continua valendo ----------
 async def test_rate_limit_continua(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _unidade_id(admin_engine, tenant.id)
-        id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
-        sv = await _criar_servico(admin_engine, tenant.id, slug="serv-rl", id_assunto_padrao=id_assunto, id_unidade_responsavel=uid)
-        cpf = uuid.uuid4().hex[:11]
-        cid = await _criar_cidadao(admin_engine, tenant.id, cpf)
-        # 5 aberturas OK, 6ª estoura (RATE_LIMIT_24H=5)
-        for _ in range(5):
-            async with _sm(admin_engine)() as s:
-                cidadao = (await s.execute(select(UsuarioExterno).where(UsuarioExterno.id == cid))).scalar_one()
-                servico = (await s.execute(select(Servico).where(Servico.id == sv.id))).scalar_one()
-                await abrir_processo_por_servico(s, cidadao, servico, AbrirPorServicoRequest(corpo="Pedido de teste."), tenant_id=tenant.id)
+    uid = await _unidade_id(admin_engine, tenant.id)
+    id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
+    sv = await _criar_servico(admin_engine, tenant.id, slug="serv-rl", id_assunto_padrao=id_assunto, id_unidade_responsavel=uid)
+    cpf = uuid.uuid4().hex[:11]
+    cid = await _criar_cidadao(admin_engine, tenant.id, cpf)
+    # 5 aberturas OK, 6ª estoura (RATE_LIMIT_24H=5)
+    for _ in range(5):
         async with _sm(admin_engine)() as s:
             cidadao = (await s.execute(select(UsuarioExterno).where(UsuarioExterno.id == cid))).scalar_one()
             servico = (await s.execute(select(Servico).where(Servico.id == sv.id))).scalar_one()
-            with pytest.raises(CidadaoProcessoError):
-                await abrir_processo_por_servico(s, cidadao, servico, AbrirPorServicoRequest(corpo="Pedido de teste."), tenant_id=tenant.id)
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+            await abrir_processo_por_servico(s, cidadao, servico, AbrirPorServicoRequest(corpo="Pedido de teste."), tenant_id=tenant.id)
+    async with _sm(admin_engine)() as s:
+        cidadao = (await s.execute(select(UsuarioExterno).where(UsuarioExterno.id == cid))).scalar_one()
+        servico = (await s.execute(select(Servico).where(Servico.id == sv.id))).scalar_one()
+        with pytest.raises(CidadaoProcessoError):
+            await abrir_processo_por_servico(s, cidadao, servico, AbrirPorServicoRequest(corpo="Pedido de teste."), tenant_id=tenant.id)
 
 
 # ---------- compatibilidade: processo antigo (legado) fica com id_servico null ----------
 async def test_legacy_abertura_id_servico_null(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
-        cid = await _criar_cidadao(admin_engine, tenant.id, uuid.uuid4().hex[:11])
-        async with _sm(admin_engine)() as s:
-            cidadao = (await s.execute(select(UsuarioExterno).where(UsuarioExterno.id == cid))).scalar_one()
-            proc = await abrir_processo_cidadao(
-                s, cidadao, AbrirProcessoCidadaoRequest(id_assunto=id_assunto, corpo="Pedido legado de teste."),
-                tenant_id=tenant.id,
-            )
-            assert proc.id_servico is None
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    id_assunto, _ = await _criar_assunto(admin_engine, tenant.id)
+    cid = await _criar_cidadao(admin_engine, tenant.id, uuid.uuid4().hex[:11])
+    async with _sm(admin_engine)() as s:
+        cidadao = (await s.execute(select(UsuarioExterno).where(UsuarioExterno.id == cid))).scalar_one()
+        proc = await abrir_processo_cidadao(
+            s, cidadao, AbrirProcessoCidadaoRequest(id_assunto=id_assunto, corpo="Pedido legado de teste."),
+            tenant_id=tenant.id,
+        )
+        assert proc.id_servico is None

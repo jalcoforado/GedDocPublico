@@ -77,24 +77,14 @@ async def _linha(
 
 
 async def _limpar(engine, tenant_id: int) -> None:
+    """Higiene do app entre testes: solta os `dependency_overrides` e descarta o pool do engine
+    global (senão ele sobrevive ao event loop do teste e o seguinte quebra). Os dados do tenant
+    saem em `_limpa_tenants_do_modulo` (conftest); os parâmetros ficam só para não mexer nos
+    pontos de chamada."""
     app.dependency_overrides.clear()
     from app.database import engine as app_engine
 
     await app_engine.dispose()
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM transporte_regulado.linha_horario WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.linha_parada WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.linha WHERE tenant_id=:t",
-            # `test_alvara_continua_emitindo_para_operador_de_linha` emite um
-            # alvará ligado ao permissionário: sem apagá-lo antes, o DELETE do
-            # permissionário abaixo esbarra na FK `alvara_id_permissionario_fkey`.
-            "DELETE FROM transporte_regulado.alvara WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.empresa WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.permissionario WHERE tenant_id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
 
 
 @pytest.mark.asyncio

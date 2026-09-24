@@ -56,40 +56,6 @@ async def _provisionar(engine):
     return tenant
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.bloqueio_saldo WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.pedido_ajuste WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _novo_usuario(engine, tenant_id, sufixo):
     async with _sm(engine)() as s:
         r = await s.execute(text(
@@ -224,27 +190,24 @@ async def test_autorizacao_torna_elegivel(admin_engine):
     """autoridade_aprovar: AGUARDANDO_AUTORIDADE -> AUTORIZADA + ELEGIVEL, e a
     posição da fila (criada REGISTRADA na liquidação) passa a espelhar isso."""
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, fonte, conta, unidade = await _base(admin_engine, t.id)
-        d, autoridade = await _debito_ate_autoridade(admin_engine, t.id, forn, nat, fonte, conta, unidade)
+    forn, nat, fonte, conta, unidade = await _base(admin_engine, t.id)
+    d, autoridade = await _debito_ate_autoridade(admin_engine, t.id, forn, nat, fonte, conta, unidade)
 
-        posicao_antes = await _posicao(admin_engine, t.id, d.id)
-        assert posicao_antes.situacao == est.REGISTRADA
+    posicao_antes = await _posicao(admin_engine, t.id, d.id)
+    assert posicao_antes.situacao == est.REGISTRADA
 
-        async with _sm(admin_engine)() as s:
-            d = await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
-                                             usuario_id=autoridade, lock_version=d.lock_version)
-        assert d.situacao_fila == est.ELEGIVEL
+    async with _sm(admin_engine)() as s:
+        d = await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
+                                         usuario_id=autoridade, lock_version=d.lock_version)
+    assert d.situacao_fila == est.ELEGIVEL
 
-        posicao = await _posicao(admin_engine, t.id, d.id)
-        assert posicao.situacao == est.ELEGIVEL
-        assert posicao.motivo_bloqueio is None
+    posicao = await _posicao(admin_engine, t.id, d.id)
+    assert posicao.situacao == est.ELEGIVEL
+    assert posicao.motivo_bloqueio is None
 
-        async with _sm(admin_engine)() as s:
-            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        assert any(h.acao == "FILA_REAVALIADA" for h in hist)
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
+    assert any(h.acao == "FILA_REAVALIADA" for h in hist)
 
 
 @pytest.mark.asyncio
@@ -252,31 +215,28 @@ async def test_fornecedor_irregular_bloqueia_na_fila(admin_engine):
     """atualizar_fornecedor IRREGULAR bloqueia na fila os débitos AUTORIZADOS
     dele; voltar REGULAR devolve a ELEGIVEL."""
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, fonte, conta, unidade = await _base(admin_engine, t.id)
-        d, autoridade = await _debito_ate_autoridade(admin_engine, t.id, forn, nat, fonte, conta, unidade)
-        async with _sm(admin_engine)() as s:
-            d = await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
-                                             usuario_id=autoridade, lock_version=d.lock_version)
-        assert (await _posicao(admin_engine, t.id, d.id)).situacao == est.ELEGIVEL
+    forn, nat, fonte, conta, unidade = await _base(admin_engine, t.id)
+    d, autoridade = await _debito_ate_autoridade(admin_engine, t.id, forn, nat, fonte, conta, unidade)
+    async with _sm(admin_engine)() as s:
+        d = await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
+                                         usuario_id=autoridade, lock_version=d.lock_version)
+    assert (await _posicao(admin_engine, t.id, d.id)).situacao == est.ELEGIVEL
 
-        async with _sm(admin_engine)() as s:
-            await cad.atualizar_fornecedor(
-                s, tenant_id=t.id, fornecedor_id=forn.id,
-                payload=FornecedorUpdate(situacao_cadastral="IRREGULAR", motivo_pendencia="CND vencida"))
-        posicao = await _posicao(admin_engine, t.id, d.id)
-        assert posicao.situacao == est.BLOQUEADA
-        assert posicao.motivo_bloqueio == "Fornecedor com situação cadastral irregular."
+    async with _sm(admin_engine)() as s:
+        await cad.atualizar_fornecedor(
+            s, tenant_id=t.id, fornecedor_id=forn.id,
+            payload=FornecedorUpdate(situacao_cadastral="IRREGULAR", motivo_pendencia="CND vencida"))
+    posicao = await _posicao(admin_engine, t.id, d.id)
+    assert posicao.situacao == est.BLOQUEADA
+    assert posicao.motivo_bloqueio == "Fornecedor com situação cadastral irregular."
 
-        async with _sm(admin_engine)() as s:
-            await cad.atualizar_fornecedor(
-                s, tenant_id=t.id, fornecedor_id=forn.id,
-                payload=FornecedorUpdate(situacao_cadastral="REGULAR"))
-        posicao = await _posicao(admin_engine, t.id, d.id)
-        assert posicao.situacao == est.ELEGIVEL
-        assert posicao.motivo_bloqueio is None
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        await cad.atualizar_fornecedor(
+            s, tenant_id=t.id, fornecedor_id=forn.id,
+            payload=FornecedorUpdate(situacao_cadastral="REGULAR"))
+    posicao = await _posicao(admin_engine, t.id, d.id)
+    assert posicao.situacao == est.ELEGIVEL
+    assert posicao.motivo_bloqueio is None
 
 
 @pytest.mark.asyncio
@@ -284,30 +244,27 @@ async def test_bloqueio_de_saldo_bloqueia_debitos_da_conta(admin_engine):
     """criar_bloqueio ativo e vigente na conta pagadora bloqueia na fila os
     débitos ELEGIVEIS que pagam por ela — mesmo com saldo de sobra."""
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, fonte, conta, unidade = await _base(admin_engine, t.id)
-        d, autoridade = await _debito_ate_autoridade(admin_engine, t.id, forn, nat, fonte, conta, unidade)
-        async with _sm(admin_engine)() as s:
-            d = await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
-                                             usuario_id=autoridade, lock_version=d.lock_version)
-        # Rito singular não grava conta pagadora — grava manualmente para o teste
-        # exercitar o caminho de bloqueio (o rito em lote é quem grava de verdade).
-        async with _sm(admin_engine)() as s:
-            dd = await svc.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-            dd.id_conta_pagadora = conta.id
-            await s.commit()
-        assert (await _posicao(admin_engine, t.id, d.id)).situacao == est.ELEGIVEL
+    forn, nat, fonte, conta, unidade = await _base(admin_engine, t.id)
+    d, autoridade = await _debito_ate_autoridade(admin_engine, t.id, forn, nat, fonte, conta, unidade)
+    async with _sm(admin_engine)() as s:
+        d = await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
+                                         usuario_id=autoridade, lock_version=d.lock_version)
+    # Rito singular não grava conta pagadora — grava manualmente para o teste
+    # exercitar o caminho de bloqueio (o rito em lote é quem grava de verdade).
+    async with _sm(admin_engine)() as s:
+        dd = await svc.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+        dd.id_conta_pagadora = conta.id
+        await s.commit()
+    assert (await _posicao(admin_engine, t.id, d.id)).situacao == est.ELEGIVEL
 
-        async with _sm(admin_engine)() as s:
-            await bloq.criar_bloqueio(
-                s, tenant_id=t.id, usuario_id=autoridade,
-                payload=BloqueioSaldoCreate(id_conta=conta.id, valor=Decimal("100.00"),
-                                            motivo="Reserva orçamentária", periodo_inicio="2026-01-01"))
-        posicao = await _posicao(admin_engine, t.id, d.id)
-        assert posicao.situacao == est.BLOQUEADA
-        assert posicao.motivo_bloqueio == "Bloqueio de saldo ativo na conta pagadora."
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        await bloq.criar_bloqueio(
+            s, tenant_id=t.id, usuario_id=autoridade,
+            payload=BloqueioSaldoCreate(id_conta=conta.id, valor=Decimal("100.00"),
+                                        motivo="Reserva orçamentária", periodo_inicio="2026-01-01"))
+    posicao = await _posicao(admin_engine, t.id, d.id)
+    assert posicao.situacao == est.BLOQUEADA
+    assert posicao.motivo_bloqueio == "Bloqueio de saldo ativo na conta pagadora."
 
 
 async def _debito_autorizado_em_lote(engine, tenant_id, *, valor="9000.00", saldo_inicial="10000.00",
@@ -341,27 +298,24 @@ async def test_sem_disponivel_aguarda_disponibilidade(admin_engine):
     REGISTRADA) — quem grava a fila de verdade é a FILA_REAVALIADA logo
     depois, e nenhuma linha do histórico chega a ter ELEGIVEL."""
     t = await _provisionar(admin_engine)
-    try:
-        d, _conta = await _debito_autorizado_em_lote(
-            admin_engine, t.id, valor="9000.00", saldo_inicial="1000.00",
-            permitir_saldo_insuficiente=True)
-        posicao = await _posicao(admin_engine, t.id, d.id)
-        assert posicao.situacao == est.AGUARDANDO_DISPONIBILIDADE
-        assert posicao.motivo_bloqueio == "Saldo disponível insuficiente na conta pagadora."
+    d, _conta = await _debito_autorizado_em_lote(
+        admin_engine, t.id, valor="9000.00", saldo_inicial="1000.00",
+        permitir_saldo_insuficiente=True)
+    posicao = await _posicao(admin_engine, t.id, d.id)
+    assert posicao.situacao == est.AGUARDANDO_DISPONIBILIDADE
+    assert posicao.motivo_bloqueio == "Saldo disponível insuficiente na conta pagadora."
 
-        async with _sm(admin_engine)() as s:
-            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        autorizado = [h for h in hist if h.acao == "AUTORIZADO"]
-        reavaliado = [h for h in hist if h.acao == "FILA_REAVALIADA"]
-        assert len(autorizado) == 1
-        assert autorizado[0].situacao_fila_anterior == est.REGISTRADA
-        assert autorizado[0].situacao_fila_nova == est.REGISTRADA
-        assert len(reavaliado) == 1
-        assert reavaliado[0].situacao_fila_anterior == est.REGISTRADA
-        assert reavaliado[0].situacao_fila_nova == est.AGUARDANDO_DISPONIBILIDADE
-        assert not any(h.situacao_fila_nova == est.ELEGIVEL for h in hist)
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
+    autorizado = [h for h in hist if h.acao == "AUTORIZADO"]
+    reavaliado = [h for h in hist if h.acao == "FILA_REAVALIADA"]
+    assert len(autorizado) == 1
+    assert autorizado[0].situacao_fila_anterior == est.REGISTRADA
+    assert autorizado[0].situacao_fila_nova == est.REGISTRADA
+    assert len(reavaliado) == 1
+    assert reavaliado[0].situacao_fila_anterior == est.REGISTRADA
+    assert reavaliado[0].situacao_fila_nova == est.AGUARDANDO_DISPONIBILIDADE
+    assert not any(h.situacao_fila_nova == est.ELEGIVEL for h in hist)
 
 
 @pytest.mark.asyncio
@@ -372,19 +326,16 @@ async def test_saldo_exato_apos_reserva_propria_e_elegivel(admin_engine):
     disponivel==0 depois da própria reserva, e isso é ELEGIVEL, não
     AGUARDANDO_DISPONIBILIDADE."""
     t = await _provisionar(admin_engine)
-    try:
-        d, conta = await _debito_autorizado_em_lote(
-            admin_engine, t.id, valor="1000.00", saldo_inicial="1000.00")
+    d, conta = await _debito_autorizado_em_lote(
+        admin_engine, t.id, valor="1000.00", saldo_inicial="1000.00")
 
-        async with _sm(admin_engine)() as s:
-            from app.services import pagamentos_caixa as caixa
-            saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        assert saldo.disponivel == Decimal("0.00")
+    async with _sm(admin_engine)() as s:
+        from app.services import pagamentos_caixa as caixa
+        saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+    assert saldo.disponivel == Decimal("0.00")
 
-        posicao = await _posicao(admin_engine, t.id, d.id)
-        assert posicao.situacao == est.ELEGIVEL
-    finally:
-        await _cleanup(admin_engine, t.id)
+    posicao = await _posicao(admin_engine, t.id, d.id)
+    assert posicao.situacao == est.ELEGIVEL
 
 
 @pytest.mark.asyncio
@@ -399,52 +350,46 @@ async def test_pedido_de_ajuste_pos_autorizacao_bloqueia(admin_engine):
     coberta só pela tabela pura, como o ramo defensivo que é.
     """
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, fonte, conta, unidade = await _base(admin_engine, t.id)
-        solicitante = await _novo_usuario(admin_engine, t.id, f"sol{uuid.uuid4().hex[:6]}")
-        gestor = await _novo_usuario(admin_engine, t.id, f"ges{uuid.uuid4().hex[:6]}")
+    forn, nat, fonte, conta, unidade = await _base(admin_engine, t.id)
+    solicitante = await _novo_usuario(admin_engine, t.id, f"sol{uuid.uuid4().hex[:6]}")
+    gestor = await _novo_usuario(admin_engine, t.id, f"ges{uuid.uuid4().hex[:6]}")
 
-        async with _sm(admin_engine)() as s:
-            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
-                                       payload=_payload_debito(forn, nat, fonte, conta, unidade))
-        async with _sm(admin_engine)() as s:
-            d = await svc.enviar_para_gestor(s, tenant_id=t.id, debito_id=d.id,
-                                             usuario_id=solicitante, lock_version=d.lock_version)
-        async with _sm(admin_engine)() as s:
-            d = await svc.solicitar_ajuste(
-                s, tenant_id=t.id, debito_id=d.id, usuario_id=gestor, lock_version=d.lock_version,
-                etapa="GESTOR", motivo="Falta documento", descricao="Anexar nota fiscal",
-                transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL")
-        assert d.situacao_tramitacao == est.AJUSTE_GESTOR
-        # Sem posição na fila ainda (não liquidado) — reavaliar_debito é no-op.
-        assert await _posicao(admin_engine, t.id, d.id) is None
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
+                                   payload=_payload_debito(forn, nat, fonte, conta, unidade))
+    async with _sm(admin_engine)() as s:
+        d = await svc.enviar_para_gestor(s, tenant_id=t.id, debito_id=d.id,
+                                         usuario_id=solicitante, lock_version=d.lock_version)
+    async with _sm(admin_engine)() as s:
+        d = await svc.solicitar_ajuste(
+            s, tenant_id=t.id, debito_id=d.id, usuario_id=gestor, lock_version=d.lock_version,
+            etapa="GESTOR", motivo="Falta documento", descricao="Anexar nota fiscal",
+            transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL")
+    assert d.situacao_tramitacao == est.AJUSTE_GESTOR
+    # Sem posição na fila ainda (não liquidado) — reavaliar_debito é no-op.
+    assert await _posicao(admin_engine, t.id, d.id) is None
 
 
 @pytest.mark.asyncio
 async def test_pagamento_integral_conclui(admin_engine):
     """pagar_parcela integral espelha CONCLUIDA na posição da fila."""
     t = await _provisionar(admin_engine)
-    try:
-        d, conta = await _debito_autorizado_em_lote(admin_engine, t.id, valor="1000.00")
-        assert (await _posicao(admin_engine, t.id, d.id)).situacao == est.ELEGIVEL
+    d, conta = await _debito_autorizado_em_lote(admin_engine, t.id, valor="1000.00")
+    assert (await _posicao(admin_engine, t.id, d.id)).situacao == est.ELEGIVEL
 
-        usuario = await _novo_usuario(admin_engine, t.id, f"pag{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            parcelas = await svc.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
-        parcela_id = parcelas[0].id
-        async with _sm(admin_engine)() as s:
-            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario, parcela_ids=[parcela_id])
-        async with _sm(admin_engine)() as s:
-            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario, parcela_id=parcela_id,
-                                    forma_pagamento="TED")
+    usuario = await _novo_usuario(admin_engine, t.id, f"pag{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        parcelas = await svc.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+    parcela_id = parcelas[0].id
+    async with _sm(admin_engine)() as s:
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario, parcela_ids=[parcela_id])
+    async with _sm(admin_engine)() as s:
+        await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario, parcela_id=parcela_id,
+                                forma_pagamento="TED")
 
-        async with _sm(admin_engine)() as s:
-            d2 = await svc.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.situacao_fila == est.CONCLUIDA
+    async with _sm(admin_engine)() as s:
+        d2 = await svc.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+    assert d2.situacao_fila == est.CONCLUIDA
 
-        posicao = await _posicao(admin_engine, t.id, d.id)
-        assert posicao.situacao == est.CONCLUIDA
-    finally:
-        await _cleanup(admin_engine, t.id)
+    posicao = await _posicao(admin_engine, t.id, d.id)
+    assert posicao.situacao == est.CONCLUIDA

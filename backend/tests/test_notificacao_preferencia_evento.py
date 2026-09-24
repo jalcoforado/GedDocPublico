@@ -66,27 +66,14 @@ async def _admin_do_tenant(engine, tenant_id: int) -> Usuario:
 
 
 async def _cleanup(engine, tenant_id: int) -> None:
+    """Higiene do app entre testes: solta os `dependency_overrides` e descarta o pool do engine
+    global (senão ele sobrevive ao event loop do teste e o seguinte quebra). Os dados do tenant
+    saem em `_limpa_tenants_do_modulo` (conftest); os parâmetros ficam só para não mexer nos
+    pontos de chamada."""
     app.dependency_overrides.clear()
     from app.database import engine as app_engine
 
     await app_engine.dispose()
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM aprimora_py.notificacao WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.notificacao_preferencia_evento WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
 
 
 @pytest.mark.asyncio

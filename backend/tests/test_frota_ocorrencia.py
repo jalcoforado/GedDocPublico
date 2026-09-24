@@ -101,70 +101,35 @@ async def _veiculo_situacao(engine, veiculo_id: int) -> str:
         ).scalar_one()
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM frota.veiculo_ocorrencia WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo_vistoria WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo_abastecimento WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo_manutencao WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo_documento WHERE tenant_id=:t",
-            "DELETE FROM frota.solicitacao_veiculo WHERE tenant_id=:t",
-            "DELETE FROM frota.motorista WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 # ============================ Criação =======================================
 async def test_criar_ocorrencia_aberta_sem_efeito_no_veiculo(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id, situacao="disponivel")
-        o = await _criar_oc(admin_engine, t.id, v, tipo="sinistro", gravidade="critica")
-        assert o.status == "aberta"
-        assert o.gravidade == "critica"
-        assert o.data_ocorrencia == date.today()  # default server-side; ver a nota de HOJE
-        assert o.data_resolucao is None
-        assert await _veiculo_situacao(admin_engine, v) == "disponivel"  # intocado
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id, situacao="disponivel")
+    o = await _criar_oc(admin_engine, t.id, v, tipo="sinistro", gravidade="critica")
+    assert o.status == "aberta"
+    assert o.gravidade == "critica"
+    assert o.data_ocorrencia == date.today()  # default server-side; ver a nota de HOJE
+    assert o.data_resolucao is None
+    assert await _veiculo_situacao(admin_engine, v) == "disponivel"  # intocado
 
 
 async def test_bloqueia_ocorrencia_veiculo_cross_tenant(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        va = await _veiculo(admin_engine, a.id)
-        with pytest.raises(HTTPException) as exc:
-            await _criar_oc(admin_engine, b.id, va)
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    va = await _veiculo(admin_engine, a.id)
+    with pytest.raises(HTTPException) as exc:
+        await _criar_oc(admin_engine, b.id, va)
+    assert exc.value.status_code == 404
 
 
 async def test_bloqueia_motorista_cross_tenant(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        vb = await _veiculo(admin_engine, b.id)
-        ma = await _motorista(admin_engine, a.id)
-        with pytest.raises(HTTPException) as exc:
-            await _criar_oc(admin_engine, b.id, vb, id_motorista=ma)
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    vb = await _veiculo(admin_engine, b.id)
+    ma = await _motorista(admin_engine, a.id)
+    with pytest.raises(HTTPException) as exc:
+        await _criar_oc(admin_engine, b.id, vb, id_motorista=ma)
+    assert exc.value.status_code == 404
 
 
 def test_tipo_e_descricao_validados():
@@ -177,91 +142,79 @@ def test_tipo_e_descricao_validados():
 # ============================ Ciclo de status ===============================
 async def test_iniciar_resolver_grava_data_resolucao(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        o = await _criar_oc(admin_engine, t.id, v)
-        async with _sm(admin_engine)() as s:
-            em_trat = await frota_svc.iniciar_tratamento_ocorrencia(
-                s, tenant_id=t.id, ocorrencia_id=o.id
-            )
-        assert em_trat.status == "em_tratamento"
-        async with _sm(admin_engine)() as s:
-            resolvida = await frota_svc.resolver_ocorrencia(
-                s, tenant_id=t.id, ocorrencia_id=o.id,
-                payload=VeiculoOcorrenciaResolver(providencias="trocado o para-choque"),
-            )
-        assert resolvida.status == "resolvida"
-        assert resolvida.data_resolucao == date.today()  # server-side; ver a nota de HOJE
-        assert resolvida.providencias == "trocado o para-choque"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    o = await _criar_oc(admin_engine, t.id, v)
+    async with _sm(admin_engine)() as s:
+        em_trat = await frota_svc.iniciar_tratamento_ocorrencia(
+            s, tenant_id=t.id, ocorrencia_id=o.id
+        )
+    assert em_trat.status == "em_tratamento"
+    async with _sm(admin_engine)() as s:
+        resolvida = await frota_svc.resolver_ocorrencia(
+            s, tenant_id=t.id, ocorrencia_id=o.id,
+            payload=VeiculoOcorrenciaResolver(providencias="trocado o para-choque"),
+        )
+    assert resolvida.status == "resolvida"
+    assert resolvida.data_resolucao == date.today()  # server-side; ver a nota de HOJE
+    assert resolvida.providencias == "trocado o para-choque"
 
 
 async def test_bloqueia_resolver_cancelada(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        o = await _criar_oc(admin_engine, t.id, v)
-        async with _sm(admin_engine)() as s:
-            await frota_svc.cancelar_ocorrencia(s, tenant_id=t.id, ocorrencia_id=o.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.resolver_ocorrencia(
-                    s, tenant_id=t.id, ocorrencia_id=o.id,
-                    payload=VeiculoOcorrenciaResolver(),
-                )
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    o = await _criar_oc(admin_engine, t.id, v)
+    async with _sm(admin_engine)() as s:
+        await frota_svc.cancelar_ocorrencia(s, tenant_id=t.id, ocorrencia_id=o.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.resolver_ocorrencia(
+                s, tenant_id=t.id, ocorrencia_id=o.id,
+                payload=VeiculoOcorrenciaResolver(),
+            )
+        assert exc.value.status_code == 409
 
 
 # ============================ Listagem / filtros ============================
 async def test_listar_filtra_status(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        o1 = await _criar_oc(admin_engine, t.id, v)
-        await _criar_oc(admin_engine, t.id, v)
-        async with _sm(admin_engine)() as s:
-            await frota_svc.resolver_ocorrencia(
-                s, tenant_id=t.id, ocorrencia_id=o1.id, payload=VeiculoOcorrenciaResolver()
-            )
-        async with _sm(admin_engine)() as s:
-            abertas = await frota_svc.listar_ocorrencias(s, tenant_id=t.id, status_filtro="aberta")
-            resolvidas = await frota_svc.listar_ocorrencias(s, tenant_id=t.id, status_filtro="resolvida")
-        assert len(abertas) == 1
-        assert len(resolvidas) == 1
-        assert resolvidas[0].id == o1.id
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    o1 = await _criar_oc(admin_engine, t.id, v)
+    await _criar_oc(admin_engine, t.id, v)
+    async with _sm(admin_engine)() as s:
+        await frota_svc.resolver_ocorrencia(
+            s, tenant_id=t.id, ocorrencia_id=o1.id, payload=VeiculoOcorrenciaResolver()
+        )
+    async with _sm(admin_engine)() as s:
+        abertas = await frota_svc.listar_ocorrencias(s, tenant_id=t.id, status_filtro="aberta")
+        resolvidas = await frota_svc.listar_ocorrencias(s, tenant_id=t.id, status_filtro="resolvida")
+    assert len(abertas) == 1
+    assert len(resolvidas) == 1
+    assert resolvidas[0].id == o1.id
 
 
 # ============================ Update / whitelist ============================
 async def test_update_whitelist_e_bloqueio_em_resolvida(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        o = await _criar_oc(admin_engine, t.id, v)
-        async with _sm(admin_engine)() as s:
-            atualizada = await frota_svc.atualizar_ocorrencia(
+    v = await _veiculo(admin_engine, t.id)
+    o = await _criar_oc(admin_engine, t.id, v)
+    async with _sm(admin_engine)() as s:
+        atualizada = await frota_svc.atualizar_ocorrencia(
+            s, tenant_id=t.id, ocorrencia_id=o.id,
+            payload=VeiculoOcorrenciaUpdate(gravidade="alta", descricao="atualizada"),
+        )
+    assert atualizada.gravidade == "alta"
+    assert atualizada.descricao == "atualizada"
+    async with _sm(admin_engine)() as s:
+        await frota_svc.resolver_ocorrencia(
+            s, tenant_id=t.id, ocorrencia_id=o.id, payload=VeiculoOcorrenciaResolver()
+        )
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.atualizar_ocorrencia(
                 s, tenant_id=t.id, ocorrencia_id=o.id,
-                payload=VeiculoOcorrenciaUpdate(gravidade="alta", descricao="atualizada"),
+                payload=VeiculoOcorrenciaUpdate(gravidade="baixa"),
             )
-        assert atualizada.gravidade == "alta"
-        assert atualizada.descricao == "atualizada"
-        async with _sm(admin_engine)() as s:
-            await frota_svc.resolver_ocorrencia(
-                s, tenant_id=t.id, ocorrencia_id=o.id, payload=VeiculoOcorrenciaResolver()
-            )
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.atualizar_ocorrencia(
-                    s, tenant_id=t.id, ocorrencia_id=o.id,
-                    payload=VeiculoOcorrenciaUpdate(gravidade="baixa"),
-                )
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+        assert exc.value.status_code == 409
 
 
 def test_update_schema_descarta_proibidos():
@@ -280,27 +233,23 @@ def test_update_schema_descarta_proibidos():
 async def test_delete_soft_e_cross_tenant_404(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        va = await _veiculo(admin_engine, a.id)
-        o = await _criar_oc(admin_engine, a.id, va)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_ocorrencia(s, tenant_id=b.id, ocorrencia_id=o.id)
-            assert exc.value.status_code == 404
-        async with _sm(admin_engine)() as s:
-            await frota_svc.excluir_ocorrencia(s, tenant_id=a.id, ocorrencia_id=o.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_ocorrencia(s, tenant_id=a.id, ocorrencia_id=o.id)
-            assert exc.value.status_code == 404
-        async with _sm(admin_engine)() as s:
-            excluido = (
-                await s.execute(
-                    text("SELECT excluido FROM frota.veiculo_ocorrencia WHERE id=:i"),
-                    {"i": o.id},
-                )
-            ).scalar_one()
-        assert excluido is True
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    va = await _veiculo(admin_engine, a.id)
+    o = await _criar_oc(admin_engine, a.id, va)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_ocorrencia(s, tenant_id=b.id, ocorrencia_id=o.id)
+        assert exc.value.status_code == 404
+    async with _sm(admin_engine)() as s:
+        await frota_svc.excluir_ocorrencia(s, tenant_id=a.id, ocorrencia_id=o.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_ocorrencia(s, tenant_id=a.id, ocorrencia_id=o.id)
+        assert exc.value.status_code == 404
+    async with _sm(admin_engine)() as s:
+        excluido = (
+            await s.execute(
+                text("SELECT excluido FROM frota.veiculo_ocorrencia WHERE id=:i"),
+                {"i": o.id},
+            )
+        ).scalar_one()
+    assert excluido is True

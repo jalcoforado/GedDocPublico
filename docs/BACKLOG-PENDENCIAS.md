@@ -377,13 +377,36 @@ por esquecimento. Agrupados aqui para não se perderem.)*
   2026-09-19** para o arquivo citado — `provisionar_tenant_de_teste`/`admin_id_do_tenant`/
   `as_user_dependency`, novos em `tests/conftest.py`, cobrem a parte genérica (provisionar +
   impersonar); `test_leitura_por_modulo.py` migrou e perdeu as 4 cópias locais. A parte de
-  **limpeza** ficou de fora de propósito — não generalizada, porque já é redundante: descoberto
-  nesta fatia que `_limpa_tenants_do_modulo` (autouse de escopo de módulo, item 1.1.6, entregue em
-  2026-08-16) já apaga tudo que qualquer módulo de teste cria, tabela por tabela, dinamicamente. Os
-  `_cleanup_tenant`/`_limpar_engine`/primos que ainda existem em dezenas de arquivos (a contagem real
-  é maior que "quarta cópia" sugeria — a nota é de antes da explosão de arquivos de transporte/
-  pagamentos) são hoje trabalho morto, não incorreção. Removê-los é um refactor maior e de baixo
-  risco funcional, deliberadamente fora desta fatia: mecânico, mas toca ~60 arquivos.
+  **limpeza** ficou de fora dessa fatia por ser redundante com `_limpa_tenants_do_modulo` (autouse de
+  escopo de módulo, item 1.1.6, entregue em 2026-08-16).
+  **Limpeza redundante — FECHADA em 2026-09-24, com 5 arquivos de fora (abaixo).** Saíram
+  `_cleanup_tenant`/`_limpar_engine`/primos de **60 arquivos** de teste: 57 helpers removidos junto
+  com os pontos de chamada (o `try/finally` cuja única função era limpar foi desembrulhado), −2,8 mil
+  linhas, por codemod AST. Os helpers que misturavam limpeza com higiene do app
+  (`dependency_overrides.clear()` + `app_engine.dispose()`, que a fixture NÃO faz) ficaram só com a
+  higiene. **Provado por delta de banco, não por leitura:** os arquivos rodados em Postgres isolado
+  (receita do CI) antes e depois — 865 testes, zero tenants vazados, contagem de linhas idêntica em
+  490 das 491 tabelas; o oráculo foi invertido (com `PYTEST_NAO_LIMPAR_TENANT=1` ele acusa os
+  tenants e as tabelas que vazam). O que ficou, e por quê:
+  - `test_modulos_provisionamento.py::_cleanup_tenant` — **não é limpeza, é guarda**: o `DELETE` do
+    tenant sem apagar `tenant_modulo` falha se o CASCADE da migration 0075 não existir. A fixture
+    apaga com `session_replication_role = replica`, que desliga FK e cascade.
+  - `test_pagamentos_rn15_c13.py` (usa o `_cleanup` de `test_pagamentos_autorizacao.py`) —
+    `test_o_backfill_alcanca_linha_antiga` roda o SQL da migration 0091, cujo `DISTINCT ON
+    (h.justificativa)` não filtra por tenant; sem a limpeza entre testes o histórico do teste
+    anterior colide e a asserção falha (reproduzido em banco isolado). **A fixture é por módulo, não
+    por teste.** O `DISTINCT ON` sem tenant é, ele mesmo, suspeito na migration 0091 — não investigado.
+  - `test_apensamento_anticiclo.py::_cleanup_catalogs` — apaga por id linhas de tenant preexistente,
+    fora do alcance da fixture.
+  - **Adiados por conflito com o F5** (`pagamentos/f5-remove-status-legado` altera os mesmos
+    arquivos; o merge simulado dá 4 conflitos): `test_pagamentos_autorizacao.py`,
+    `test_pagamentos_conciliacao_v2.py`, `test_pagamentos_debitos.py`,
+    `test_pagamentos_validacoes_v2.py`. Mecânico — refazer depois que o F5 entrar. No ambiente do F5 a
+    remoção nesses quatro passou (a única falha daquela rodada foi o `rn15`, acima).
+  - **Pendência nova, não tratada:** `utils.auditoria` (5,2 mi de linhas no banco de dev) é
+    alimentada por triggers de `utils.usuario`/`usuario_grupo`/… e não tem `tenant_id` — nem os helpers
+    nem a fixture a limpam (a fixture desliga os triggers). Cresce ~83 linhas por teste; sem os
+    `DELETE` dos helpers, ~48 (−43%, mesmo conjunto de testes, banco isolado).
 
 ### 1.1.6 A suíte deixa tenants para trás — 4.032 no banco local em uma semana
 

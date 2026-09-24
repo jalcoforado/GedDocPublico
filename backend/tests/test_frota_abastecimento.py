@@ -100,91 +100,52 @@ async def _veiculo_estado(engine, veiculo_id: int):
         ).one()
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM frota.veiculo_abastecimento WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo_manutencao WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo_documento WHERE tenant_id=:t",
-            "DELETE FROM frota.solicitacao_veiculo WHERE tenant_id=:t",
-            "DELETE FROM frota.motorista WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 # ============================ Criação + km do veículo =======================
 async def test_criar_abastecimento_atualiza_km_se_maior(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id, km=1000)
-        a = await _criar_abast(admin_engine, t.id, v, km=1500)
-        assert a.id is not None
-        assert float(a.litros) == 40.0
-        sit, km = await _veiculo_estado(admin_engine, v)
-        assert km == 1500                 # hodômetro avançou
-        assert sit == "disponivel"        # situação NÃO muda
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id, km=1000)
+    a = await _criar_abast(admin_engine, t.id, v, km=1500)
+    assert a.id is not None
+    assert float(a.litros) == 40.0
+    sit, km = await _veiculo_estado(admin_engine, v)
+    assert km == 1500                 # hodômetro avançou
+    assert sit == "disponivel"        # situação NÃO muda
 
 
 async def test_criar_abastecimento_nao_reduz_km(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id, km=5000)
-        await _criar_abast(admin_engine, t.id, v, km=4000)  # km menor, registro retroativo
-        _, km = await _veiculo_estado(admin_engine, v)
-        assert km == 5000                 # não regride
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id, km=5000)
+    await _criar_abast(admin_engine, t.id, v, km=4000)  # km menor, registro retroativo
+    _, km = await _veiculo_estado(admin_engine, v)
+    assert km == 5000                 # não regride
 
 
 async def test_abastecimento_com_motorista_same_tenant(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        m = await _motorista(admin_engine, t.id)
-        a = await _criar_abast(admin_engine, t.id, v, km=10, id_motorista=m)
-        assert a.id_motorista == m
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    m = await _motorista(admin_engine, t.id)
+    a = await _criar_abast(admin_engine, t.id, v, km=10, id_motorista=m)
+    assert a.id_motorista == m
 
 
 # ============================ Bloqueios =====================================
 async def test_bloqueia_abastecimento_veiculo_cross_tenant(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        va = await _veiculo(admin_engine, a.id)
-        with pytest.raises(HTTPException) as exc:
-            await _criar_abast(admin_engine, b.id, va, km=10)
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    va = await _veiculo(admin_engine, a.id)
+    with pytest.raises(HTTPException) as exc:
+        await _criar_abast(admin_engine, b.id, va, km=10)
+    assert exc.value.status_code == 404
 
 
 async def test_bloqueia_motorista_cross_tenant(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        vb = await _veiculo(admin_engine, b.id)
-        ma = await _motorista(admin_engine, a.id)
-        with pytest.raises(HTTPException) as exc:  # motorista de A em abastecimento de B
-            await _criar_abast(admin_engine, b.id, vb, km=10, id_motorista=ma)
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    vb = await _veiculo(admin_engine, b.id)
+    ma = await _motorista(admin_engine, a.id)
+    with pytest.raises(HTTPException) as exc:  # motorista de A em abastecimento de B
+        await _criar_abast(admin_engine, b.id, vb, km=10, id_motorista=ma)
+    assert exc.value.status_code == 404
 
 
 def test_bloqueia_litros_nao_positivo():
@@ -200,48 +161,38 @@ def test_bloqueia_valor_negativo():
 # ============================ Listagem / resumo =============================
 async def test_listar_e_resumo(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id, km=0)
-        await _criar_abast(admin_engine, t.id, v, km=100, litros=40, valor=300)
-        await _criar_abast(admin_engine, t.id, v, km=500, litros=60, valor=480)
-        async with _sm(admin_engine)() as s:
-            lista = await frota_svc.listar_abastecimentos(s, tenant_id=t.id, id_veiculo=v)
-            resumo = await frota_svc.resumo_abastecimentos(s, tenant_id=t.id)
-        assert len(lista) == 2
-        assert resumo["total_abastecimentos"] == 2
-        assert resumo["total_litros"] == 100.0
-        assert resumo["total_valor"] == 780.0
-        assert resumo["media_valor_litro"] == round(780.0 / 100.0, 4)
-        assert resumo["ultimo_abastecimento"] == date.today()  # server-side; ver a nota de HOJE
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id, km=0)
+    await _criar_abast(admin_engine, t.id, v, km=100, litros=40, valor=300)
+    await _criar_abast(admin_engine, t.id, v, km=500, litros=60, valor=480)
+    async with _sm(admin_engine)() as s:
+        lista = await frota_svc.listar_abastecimentos(s, tenant_id=t.id, id_veiculo=v)
+        resumo = await frota_svc.resumo_abastecimentos(s, tenant_id=t.id)
+    assert len(lista) == 2
+    assert resumo["total_abastecimentos"] == 2
+    assert resumo["total_litros"] == 100.0
+    assert resumo["total_valor"] == 780.0
+    assert resumo["media_valor_litro"] == round(780.0 / 100.0, 4)
+    assert resumo["ultimo_abastecimento"] == date.today()  # server-side; ver a nota de HOJE
 
 
 async def test_resumo_vazio(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        async with _sm(admin_engine)() as s:
-            resumo = await frota_svc.resumo_abastecimentos(s, tenant_id=t.id)
-        assert resumo["total_abastecimentos"] == 0
-        assert resumo["total_litros"] == 0
-        assert resumo["media_valor_litro"] is None
-        assert resumo["ultimo_abastecimento"] is None
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        resumo = await frota_svc.resumo_abastecimentos(s, tenant_id=t.id)
+    assert resumo["total_abastecimentos"] == 0
+    assert resumo["total_litros"] == 0
+    assert resumo["media_valor_litro"] is None
+    assert resumo["ultimo_abastecimento"] is None
 
 
 async def test_resumo_respeita_tenant(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        va = await _veiculo(admin_engine, a.id)
-        await _criar_abast(admin_engine, a.id, va, km=10)
-        async with _sm(admin_engine)() as s:
-            resumo_b = await frota_svc.resumo_abastecimentos(s, tenant_id=b.id)
-        assert resumo_b["total_abastecimentos"] == 0
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    va = await _veiculo(admin_engine, a.id)
+    await _criar_abast(admin_engine, a.id, va, km=10)
+    async with _sm(admin_engine)() as s:
+        resumo_b = await frota_svc.resumo_abastecimentos(s, tenant_id=b.id)
+    assert resumo_b["total_abastecimentos"] == 0
 
 
 # ============================ Update / whitelist ============================
@@ -259,28 +210,24 @@ def test_update_schema_descarta_proibidos():
 async def test_update_e_soft_delete_cross_tenant(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        va = await _veiculo(admin_engine, a.id)
-        ab = await _criar_abast(admin_engine, a.id, va, km=10)
-        async with _sm(admin_engine)() as s:
-            atualizado = await frota_svc.atualizar_abastecimento(
-                s, tenant_id=a.id, abastecimento_id=ab.id,
-                payload=VeiculoAbastecimentoUpdate(posto="Posto Central", valor_total=350),
-            )
-        assert atualizado.posto == "Posto Central"
-        assert float(atualizado.valor_total) == 350
-        # cross-tenant detalhe -> 404
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_abastecimento(s, tenant_id=b.id, abastecimento_id=ab.id)
-            assert exc.value.status_code == 404
-        # soft delete
-        async with _sm(admin_engine)() as s:
-            await frota_svc.excluir_abastecimento(s, tenant_id=a.id, abastecimento_id=ab.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_abastecimento(s, tenant_id=a.id, abastecimento_id=ab.id)
-            assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    va = await _veiculo(admin_engine, a.id)
+    ab = await _criar_abast(admin_engine, a.id, va, km=10)
+    async with _sm(admin_engine)() as s:
+        atualizado = await frota_svc.atualizar_abastecimento(
+            s, tenant_id=a.id, abastecimento_id=ab.id,
+            payload=VeiculoAbastecimentoUpdate(posto="Posto Central", valor_total=350),
+        )
+    assert atualizado.posto == "Posto Central"
+    assert float(atualizado.valor_total) == 350
+    # cross-tenant detalhe -> 404
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_abastecimento(s, tenant_id=b.id, abastecimento_id=ab.id)
+        assert exc.value.status_code == 404
+    # soft delete
+    async with _sm(admin_engine)() as s:
+        await frota_svc.excluir_abastecimento(s, tenant_id=a.id, abastecimento_id=ab.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_abastecimento(s, tenant_id=a.id, abastecimento_id=ab.id)
+        assert exc.value.status_code == 404

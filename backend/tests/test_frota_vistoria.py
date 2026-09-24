@@ -85,66 +85,33 @@ async def _veiculo_situacao(engine, veiculo_id: int) -> str:
         ).scalar_one()
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM frota.veiculo_vistoria WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo_abastecimento WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo_manutencao WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo_documento WHERE tenant_id=:t",
-            "DELETE FROM frota.solicitacao_veiculo WHERE tenant_id=:t",
-            "DELETE FROM frota.motorista WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 # ============================ Criação =======================================
 async def test_criar_vistoria_mesmo_tenant(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        vist = await _criar_vist(admin_engine, t.id, v, tipo="saida", resultado="aprovada")
-        assert vist.id is not None
-        assert vist.tipo == "saida"
-        assert vist.resultado == "aprovada"
-        assert vist.pneus_ok is True
-        assert vist.luzes_ok is False     # default
-        assert vist.data_vistoria == date.today()  # default server-side; ver a nota de HOJE
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    vist = await _criar_vist(admin_engine, t.id, v, tipo="saida", resultado="aprovada")
+    assert vist.id is not None
+    assert vist.tipo == "saida"
+    assert vist.resultado == "aprovada"
+    assert vist.pneus_ok is True
+    assert vist.luzes_ok is False     # default
+    assert vist.data_vistoria == date.today()  # default server-side; ver a nota de HOJE
 
 
 async def test_vistoria_reprovada_nao_altera_situacao(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id, situacao="disponivel")
-        await _criar_vist(admin_engine, t.id, v, resultado="reprovada", pneus=False)
-        assert await _veiculo_situacao(admin_engine, v) == "disponivel"  # intocado
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id, situacao="disponivel")
+    await _criar_vist(admin_engine, t.id, v, resultado="reprovada", pneus=False)
+    assert await _veiculo_situacao(admin_engine, v) == "disponivel"  # intocado
 
 
 async def test_bloqueia_vistoria_cross_tenant(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        va = await _veiculo(admin_engine, a.id)
-        with pytest.raises(HTTPException) as exc:
-            await _criar_vist(admin_engine, b.id, va)
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    va = await _veiculo(admin_engine, a.id)
+    with pytest.raises(HTTPException) as exc:
+        await _criar_vist(admin_engine, b.id, va)
+    assert exc.value.status_code == 404
 
 
 def test_tipo_e_resultado_obrigatorios():
@@ -159,38 +126,32 @@ def test_tipo_e_resultado_obrigatorios():
 # ============================ Listagem / filtros ============================
 async def test_listar_filtra_veiculo_e_resultado(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v1 = await _veiculo(admin_engine, t.id)
-        v2 = await _veiculo(admin_engine, t.id)
-        await _criar_vist(admin_engine, t.id, v1, resultado="aprovada")
-        await _criar_vist(admin_engine, t.id, v1, resultado="reprovada")
-        await _criar_vist(admin_engine, t.id, v2, resultado="aprovada")
-        async with _sm(admin_engine)() as s:
-            do_v1 = await frota_svc.listar_vistorias(s, tenant_id=t.id, id_veiculo=v1)
-            reprovadas = await frota_svc.listar_vistorias(s, tenant_id=t.id, resultado="reprovada")
-        assert len(do_v1) == 2
-        assert len(reprovadas) == 1
-        assert all(x.resultado == "reprovada" for x in reprovadas)
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v1 = await _veiculo(admin_engine, t.id)
+    v2 = await _veiculo(admin_engine, t.id)
+    await _criar_vist(admin_engine, t.id, v1, resultado="aprovada")
+    await _criar_vist(admin_engine, t.id, v1, resultado="reprovada")
+    await _criar_vist(admin_engine, t.id, v2, resultado="aprovada")
+    async with _sm(admin_engine)() as s:
+        do_v1 = await frota_svc.listar_vistorias(s, tenant_id=t.id, id_veiculo=v1)
+        reprovadas = await frota_svc.listar_vistorias(s, tenant_id=t.id, resultado="reprovada")
+    assert len(do_v1) == 2
+    assert len(reprovadas) == 1
+    assert all(x.resultado == "reprovada" for x in reprovadas)
 
 
 # ============================ Update / whitelist ============================
 async def test_update_campos_e_whitelist(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        vist = await _criar_vist(admin_engine, t.id, v, resultado="com_ressalvas")
-        async with _sm(admin_engine)() as s:
-            atualizada = await frota_svc.atualizar_vistoria(
-                s, tenant_id=t.id, vistoria_id=vist.id,
-                payload=VeiculoVistoriaUpdate(resultado="aprovada", luzes_ok=True),
-            )
-        assert atualizada.resultado == "aprovada"
-        assert atualizada.luzes_ok is True
-        assert atualizada.id_veiculo == v  # imutável
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    vist = await _criar_vist(admin_engine, t.id, v, resultado="com_ressalvas")
+    async with _sm(admin_engine)() as s:
+        atualizada = await frota_svc.atualizar_vistoria(
+            s, tenant_id=t.id, vistoria_id=vist.id,
+            payload=VeiculoVistoriaUpdate(resultado="aprovada", luzes_ok=True),
+        )
+    assert atualizada.resultado == "aprovada"
+    assert atualizada.luzes_ok is True
+    assert atualizada.id_veiculo == v  # imutável
 
 
 def test_update_schema_descarta_proibidos():
@@ -208,27 +169,23 @@ def test_update_schema_descarta_proibidos():
 async def test_delete_soft_e_cross_tenant_404(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        va = await _veiculo(admin_engine, a.id)
-        vist = await _criar_vist(admin_engine, a.id, va)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_vistoria(s, tenant_id=b.id, vistoria_id=vist.id)
-            assert exc.value.status_code == 404
-        async with _sm(admin_engine)() as s:
-            await frota_svc.excluir_vistoria(s, tenant_id=a.id, vistoria_id=vist.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_vistoria(s, tenant_id=a.id, vistoria_id=vist.id)
-            assert exc.value.status_code == 404
-        async with _sm(admin_engine)() as s:
-            excluido = (
-                await s.execute(
-                    text("SELECT excluido FROM frota.veiculo_vistoria WHERE id=:i"),
-                    {"i": vist.id},
-                )
-            ).scalar_one()
-        assert excluido is True
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    va = await _veiculo(admin_engine, a.id)
+    vist = await _criar_vist(admin_engine, a.id, va)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_vistoria(s, tenant_id=b.id, vistoria_id=vist.id)
+        assert exc.value.status_code == 404
+    async with _sm(admin_engine)() as s:
+        await frota_svc.excluir_vistoria(s, tenant_id=a.id, vistoria_id=vist.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_vistoria(s, tenant_id=a.id, vistoria_id=vist.id)
+        assert exc.value.status_code == 404
+    async with _sm(admin_engine)() as s:
+        excluido = (
+            await s.execute(
+                text("SELECT excluido FROM frota.veiculo_vistoria WHERE id=:i"),
+                {"i": vist.id},
+            )
+        ).scalar_one()
+    assert excluido is True
