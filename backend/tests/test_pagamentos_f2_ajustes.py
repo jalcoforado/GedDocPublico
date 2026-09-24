@@ -78,42 +78,6 @@ async def _provisionar(engine):
     return tenant, solicitante_id, gestor_id, validador_id, autoridade_id
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.anexo_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_versao WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.pedido_ajuste WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _setup_debito(engine, tenant_id: int, usuario_id: int):
     """Cria um débito completo em rascunho com fonte, conta, fornecedor etc.
 
@@ -245,7 +209,6 @@ async def test_solicitar_ajuste_cria_pedido_estruturado(admin_engine):
     assert pedido.motivo == "Falta comprovante"
     assert pedido.transacao_responsavel == "pagamento_solicitar"
     assert pedido.tipo == "NAO_MATERIAL"
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -283,7 +246,6 @@ async def test_pedido_adicional_na_mesma_etapa(admin_engine):
     assert {p.situacao for p in pedidos} == {"ABERTO"}
     assert d2.situacao_tramitacao == "AJUSTE_VALIDACAO", "pedido adicional não transiciona o débito"
     assert pedido2.id in {p.id for p in pedidos}
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -304,7 +266,6 @@ async def test_pedido_adicional_de_outra_etapa_e_409(admin_engine):
     r = await _post(admin_engine, tenant.id, tenant.slug, uid,
                     f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste", body)
     assert r.status_code == 409, (r.status_code, r.text)
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -323,7 +284,6 @@ async def test_transacao_responsavel_desconhecida_e_422(admin_engine):
                 transacao_responsavel="transacao_que_nao_existe", tipo="NAO_MATERIAL",
             )
     assert exc.value.status_code == 422
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -353,7 +313,6 @@ async def test_responder_pedido_grava_resposta(admin_engine):
     assert resultado.resposta == "Comprovante anexado ao processo."
     assert resultado.id_usuario_resposta == solicitante_id
     assert resultado.respondido_em is not None
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -385,7 +344,6 @@ async def test_responder_pedido_ja_respondido_e_409(admin_engine):
                 s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido_id,
                 usuario_id=solicitante_id, resposta="Segunda resposta.")
     assert exc.value.status_code == 409
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -413,7 +371,6 @@ async def test_cancelar_pedido_pelo_solicitante(admin_engine):
 
     assert resultado.situacao == "CANCELADO"
     assert resultado.resolvido_em is not None
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -450,7 +407,6 @@ async def test_pedidos_pendentes_da_etapa_encontra_pedido_sintetico(admin_engine
             s, tenant_id=tenant.id, debito_id=debito.id, etapa="VALIDACAO")
     assert len(pendentes) == 1
     assert pendentes[0].situacao == "ABERTO"
-    await _cleanup(admin_engine, tenant.id)
 
 
 # --------------------------------------------------------------------------
@@ -551,17 +507,14 @@ async def test_http_usuario_comum_lista_pedidos(admin_engine):
         )
         slug = tenant.slug
 
-    try:
-        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
-        r = await _get(admin_engine, tenant.id, slug, uid,
-                       f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste")
-        assert r.status_code == 200, (r.status_code, r.text[:300])
-        corpo = r.json()
-        assert len(corpo) == 1
-        assert corpo[0]["situacao"] == "ABERTO"
-        assert corpo[0]["etapa_solicitante"] == "VALIDACAO"
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
+    r = await _get(admin_engine, tenant.id, slug, uid,
+                   f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste")
+    assert r.status_code == 200, (r.status_code, r.text[:300])
+    corpo = r.json()
+    assert len(corpo) == 1
+    assert corpo[0]["situacao"] == "ABERTO"
+    assert corpo[0]["etapa_solicitante"] == "VALIDACAO"
 
 
 @pytest.mark.asyncio
@@ -584,17 +537,13 @@ async def test_http_pedido_cross_tenant_e_404(admin_engine):
         pedido_id = pedidos[0].id
 
     tenant_b, sol_b, gestor_b, validador_b, _ = await _provisionar(admin_engine)
-    try:
-        uid_b = await _usuario_com(admin_engine, tenant_b.id, ["pagamento_validar"])
-        body = {"resposta": "Não deveria alcançar o pedido do outro tenant."}
-        r = await _post(
-            admin_engine, tenant_b.id, tenant_b.slug, uid_b,
-            f"/api/v2/pagamentos/debitos/{debito_a.id}/pedidos-ajuste/{pedido_id}/responder",
-            body)
-        assert r.status_code == 404, (r.status_code, r.text[:300])
-    finally:
-        await _cleanup(admin_engine, tenant_a.id)
-        await _cleanup(admin_engine, tenant_b.id)
+    uid_b = await _usuario_com(admin_engine, tenant_b.id, ["pagamento_validar"])
+    body = {"resposta": "Não deveria alcançar o pedido do outro tenant."}
+    r = await _post(
+        admin_engine, tenant_b.id, tenant_b.slug, uid_b,
+        f"/api/v2/pagamentos/debitos/{debito_a.id}/pedidos-ajuste/{pedido_id}/responder",
+        body)
+    assert r.status_code == 404, (r.status_code, r.text[:300])
 
 
 @pytest.mark.asyncio
@@ -619,28 +568,25 @@ async def test_http_responder_pedido_sucesso_e_403_para_outra_transacao(admin_en
         pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
         pedido_id = pedidos[0].id
 
-    try:
-        # Usuário SEM a transacao_responsavel do pedido (tem só pagamento_gerir,
-        # que passa pelo Depends de leitura mas não é 'pagamento_solicitar') → 403.
-        uid_errado = await _usuario_com(admin_engine, tenant.id, ["pagamento_gerir"])
-        r_403 = await _post(
-            admin_engine, tenant.id, tenant.slug, uid_errado,
-            f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste/{pedido_id}/responder",
-            {"resposta": "Não deveria conseguir."})
-        assert r_403.status_code == 403, (r_403.status_code, r_403.text[:300])
+    # Usuário SEM a transacao_responsavel do pedido (tem só pagamento_gerir,
+    # que passa pelo Depends de leitura mas não é 'pagamento_solicitar') → 403.
+    uid_errado = await _usuario_com(admin_engine, tenant.id, ["pagamento_gerir"])
+    r_403 = await _post(
+        admin_engine, tenant.id, tenant.slug, uid_errado,
+        f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste/{pedido_id}/responder",
+        {"resposta": "Não deveria conseguir."})
+    assert r_403.status_code == 403, (r_403.status_code, r_403.text[:300])
 
-        # Usuário COM a transacao_responsavel do pedido ('pagamento_solicitar') → 200.
-        uid_certo = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
-        r_200 = await _post(
-            admin_engine, tenant.id, tenant.slug, uid_certo,
-            f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste/{pedido_id}/responder",
-            {"resposta": "Comprovante anexado ao processo."})
-        assert r_200.status_code == 200, (r_200.status_code, r_200.text[:300])
-        corpo = r_200.json()
-        assert corpo["situacao"] == "RESPONDIDO"
-        assert corpo["resposta"] == "Comprovante anexado ao processo."
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    # Usuário COM a transacao_responsavel do pedido ('pagamento_solicitar') → 200.
+    uid_certo = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
+    r_200 = await _post(
+        admin_engine, tenant.id, tenant.slug, uid_certo,
+        f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste/{pedido_id}/responder",
+        {"resposta": "Comprovante anexado ao processo."})
+    assert r_200.status_code == 200, (r_200.status_code, r_200.text[:300])
+    corpo = r_200.json()
+    assert corpo["situacao"] == "RESPONDIDO"
+    assert corpo["resposta"] == "Comprovante anexado ao processo."
 
 
 @pytest.mark.asyncio
@@ -663,19 +609,16 @@ async def test_http_cancelar_pedido_sucesso_pela_etapa_solicitante(admin_engine)
         pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
         pedido_id = pedidos[0].id
 
-    try:
-        # etapa_solicitante do pedido é VALIDACAO -> exige pagamento_validar.
-        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_validar"])
-        r = await _post(
-            admin_engine, tenant.id, tenant.slug, uid,
-            f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste/{pedido_id}/cancelar",
-            {})
-        assert r.status_code == 200, (r.status_code, r.text[:300])
-        corpo = r.json()
-        assert corpo["situacao"] == "CANCELADO"
-        assert corpo["resolvido_em"] is not None
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    # etapa_solicitante do pedido é VALIDACAO -> exige pagamento_validar.
+    uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_validar"])
+    r = await _post(
+        admin_engine, tenant.id, tenant.slug, uid,
+        f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste/{pedido_id}/cancelar",
+        {})
+    assert r.status_code == 200, (r.status_code, r.text[:300])
+    corpo = r.json()
+    assert corpo["situacao"] == "CANCELADO"
+    assert corpo["resolvido_em"] is not None
 
 
 @pytest.mark.asyncio
@@ -696,27 +639,24 @@ async def test_http_criar_pedido_adicional_sucesso(admin_engine):
             transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
         )
 
-    try:
-        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_validar"])
-        body = {
-            "motivo": "Falta também a nota", "descricao": "Segunda pendência da validação.",
-            "transacao_responsavel": "pagamento_solicitar", "tipo": "NAO_MATERIAL",
-        }
-        r = await _post(
-            admin_engine, tenant.id, tenant.slug, uid,
-            f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste", body)
-        assert r.status_code == 201, (r.status_code, r.text[:300])
-        corpo = r.json()
-        assert corpo["situacao"] == "ABERTO"
-        assert corpo["etapa_solicitante"] == "VALIDACAO"
+    uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_validar"])
+    body = {
+        "motivo": "Falta também a nota", "descricao": "Segunda pendência da validação.",
+        "transacao_responsavel": "pagamento_solicitar", "tipo": "NAO_MATERIAL",
+    }
+    r = await _post(
+        admin_engine, tenant.id, tenant.slug, uid,
+        f"/api/v2/pagamentos/debitos/{debito.id}/pedidos-ajuste", body)
+    assert r.status_code == 201, (r.status_code, r.text[:300])
+    corpo = r.json()
+    assert corpo["situacao"] == "ABERTO"
+    assert corpo["etapa_solicitante"] == "VALIDACAO"
 
-        async with _sm(admin_engine)() as s:
-            pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
-            d = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
-        assert len(pedidos) == 2
-        assert d.situacao_tramitacao == "AJUSTE_VALIDACAO", "pedido adicional não transiciona o débito"
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as s:
+        pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
+        d = await svc.obter_debito(s, tenant_id=tenant.id, debito_id=debito.id)
+    assert len(pedidos) == 2
+    assert d.situacao_tramitacao == "AJUSTE_VALIDACAO", "pedido adicional não transiciona o débito"
 
 
 # --------------------------------------------------------------------------
@@ -761,7 +701,6 @@ async def test_reenvio_nao_material_volta_a_etapa_que_pediu(admin_engine):
         pedido = await ajustes.obter_pedido(
             s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido_id)
     assert pedido.situacao == "RESOLVIDO"
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -820,7 +759,6 @@ async def test_reenvio_com_alteracao_material_volta_ao_gestor(admin_engine):
     invalidacao = [h for h in hist if h.acao == "APROVACOES_INVALIDADAS"]
     assert len(invalidacao) == 1
     assert "invalidadas pela versão 2" in invalidacao[0].justificativa
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -891,7 +829,6 @@ async def test_reenvio_material_com_pedido_cancelado_e_reaberto_volta_ao_gestor(
         "pedido não pode apagar essa materialidade")
     assert resultado.id_gestor_decisor is None
     assert resultado.id_validador is None
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -933,7 +870,6 @@ async def test_reenvio_todos_cancelados_sem_alteracao_volta_a_etapa_de_origem(ad
         pedido = await ajustes.obter_pedido(
             s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido_id)
     assert pedido.situacao == "CANCELADO", "pedido cancelado não é 'resolvido' pelo reenvio"
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -960,7 +896,6 @@ async def test_reenvio_com_pedido_aberto_e_409(admin_engine):
                 usuario_id=sol, lock_version=d.lock_version)
     assert exc.value.status_code == 409
     assert "Falta comprovante" in exc.value.detail
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -1011,7 +946,6 @@ async def test_reenvio_resolve_os_respondidos(admin_engine):
             s, tenant_id=tenant.id, debito_id=debito.id, pedido_id=pedido2.id)
     assert p1.situacao == "RESOLVIDO"
     assert p2.situacao == "CANCELADO"
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -1032,7 +966,6 @@ async def test_historico_registra_dimensoes_e_versao(admin_engine):
     assert enviado.versao_debito == 1
     assert enviado.situacao_tramitacao_anterior == "RASCUNHO"
     assert enviado.situacao_tramitacao_nova == "AGUARDANDO_GESTOR"
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -1060,17 +993,14 @@ async def test_versao_anterior_recuperavel(admin_engine):
                                  parcelas=[ParcelaCreate(numero=1, valor=Decimal("2000.00"),
                                                           vencimento="2026-02-01")]))
 
-    try:
-        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
-        r = await _get(admin_engine, tenant.id, tenant.slug, uid,
-                       f"/api/v2/pagamentos/debitos/{debito.id}/versoes")
-        assert r.status_code == 200, (r.status_code, r.text[:300])
-        corpo = r.json()
-        assert len(corpo) == 1
-        assert corpo[0]["versao"] == 1
-        assert Decimal(str(corpo[0]["dados"]["valor_total"])) == Decimal("1000.00")
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
+    r = await _get(admin_engine, tenant.id, tenant.slug, uid,
+                   f"/api/v2/pagamentos/debitos/{debito.id}/versoes")
+    assert r.status_code == 200, (r.status_code, r.text[:300])
+    corpo = r.json()
+    assert len(corpo) == 1
+    assert corpo[0]["versao"] == 1
+    assert Decimal(str(corpo[0]["dados"]["valor_total"])) == Decimal("1000.00")
 
 
 # --------------------------------------------------------------------------
@@ -1098,24 +1028,21 @@ async def test_minha_fila_lista_pendencia_ajuste_da_transacao_do_usuario(admin_e
         pedidos = await ajustes.listar_pedidos(s, tenant_id=tenant.id, debito_id=debito.id)
         pedido_id = pedidos[0].id
 
-    try:
-        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
-        r = await _get(admin_engine, tenant.id, tenant.slug, uid,
-                       "/api/v2/pagamentos/minha-fila")
-        assert r.status_code == 200, (r.status_code, r.text[:300])
-        corpo = r.json()
-        pendencias = corpo.get("pendencias_ajuste") or []
-        assert len(pendencias) == 1
-        item = pendencias[0]
-        assert item["id_pedido"] == pedido_id
-        assert item["id_debito"] == debito.id
-        assert item["descricao_debito"] == "Débito de Teste"
-        assert item["motivo"] == "Falta comprovante"
-        assert item["prazo"] == "2026-09-01"
-        assert item["etapa_solicitante"] == "VALIDACAO"
-        assert item["criado_em"]
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
+    r = await _get(admin_engine, tenant.id, tenant.slug, uid,
+                   "/api/v2/pagamentos/minha-fila")
+    assert r.status_code == 200, (r.status_code, r.text[:300])
+    corpo = r.json()
+    pendencias = corpo.get("pendencias_ajuste") or []
+    assert len(pendencias) == 1
+    item = pendencias[0]
+    assert item["id_pedido"] == pedido_id
+    assert item["id_debito"] == debito.id
+    assert item["descricao_debito"] == "Débito de Teste"
+    assert item["motivo"] == "Falta comprovante"
+    assert item["prazo"] == "2026-09-01"
+    assert item["etapa_solicitante"] == "VALIDACAO"
+    assert item["criado_em"]
 
 
 @pytest.mark.asyncio
@@ -1135,16 +1062,13 @@ async def test_minha_fila_nao_lista_pendencia_de_transacao_que_usuario_nao_tem(a
             transacao_responsavel="pagamento_solicitar", tipo="NAO_MATERIAL",
         )
 
-    try:
-        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_validar"])
-        r = await _get(admin_engine, tenant.id, tenant.slug, uid,
-                       "/api/v2/pagamentos/minha-fila")
-        assert r.status_code == 200, (r.status_code, r.text[:300])
-        corpo = r.json()
-        pendencias = corpo.get("pendencias_ajuste") or []
-        assert len(pendencias) == 0
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_validar"])
+    r = await _get(admin_engine, tenant.id, tenant.slug, uid,
+                   "/api/v2/pagamentos/minha-fila")
+    assert r.status_code == 200, (r.status_code, r.text[:300])
+    corpo = r.json()
+    pendencias = corpo.get("pendencias_ajuste") or []
+    assert len(pendencias) == 0
 
 
 @pytest.mark.asyncio
@@ -1168,13 +1092,10 @@ async def test_minha_fila_nao_lista_pendencia_respondida(admin_engine):
             usuario_id=sol, resposta="Comprovante anexado.")
         await s.commit()
 
-    try:
-        uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
-        r = await _get(admin_engine, tenant.id, tenant.slug, uid,
-                       "/api/v2/pagamentos/minha-fila")
-        assert r.status_code == 200, (r.status_code, r.text[:300])
-        corpo = r.json()
-        pendencias = corpo.get("pendencias_ajuste") or []
-        assert len(pendencias) == 0
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _usuario_com(admin_engine, tenant.id, ["pagamento_solicitar"])
+    r = await _get(admin_engine, tenant.id, tenant.slug, uid,
+                   "/api/v2/pagamentos/minha-fila")
+    assert r.status_code == 200, (r.status_code, r.text[:300])
+    corpo = r.json()
+    pendencias = corpo.get("pendencias_ajuste") or []
+    assert len(pendencias) == 0

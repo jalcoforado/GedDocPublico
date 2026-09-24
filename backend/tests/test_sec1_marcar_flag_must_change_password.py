@@ -51,22 +51,6 @@ def _slug(p: str) -> str:
     return f"{p}{uuid.uuid4().hex[:8]}"
 
 
-async def _cleanup_tenant(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 def _payload_contem_segredo(payload: dict | None, *segredos: str) -> bool:
     """Procura strings sensíveis em qualquer valor textual do payload do audit."""
     if not payload:
@@ -102,23 +86,20 @@ async def test_provisionamento_cria_admin_com_flag_true(admin_engine):
             admin_cpf=cpf,
             plano="basico",
         )
-    try:
-        async with _sm(admin_engine)() as s:
-            admin = (
-                await s.execute(
-                    select(Usuario).where(Usuario.tenant_id == tenant.id)
-                )
-            ).scalar_one()
-        assert admin.must_change_password is True
-        assert admin.senha == ""  # MD5 vazio
-        assert admin.senha_bcrypt is not None and admin.senha_bcrypt.startswith("$2")
-        # Senha temporária deve continuar válida via bcrypt
-        ok, _ = verify_password(
-            senha_temp, bcrypt_hash=admin.senha_bcrypt, md5_hash=None
-        )
-        assert ok is True
-    finally:
-        await _cleanup_tenant(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as s:
+        admin = (
+            await s.execute(
+                select(Usuario).where(Usuario.tenant_id == tenant.id)
+            )
+        ).scalar_one()
+    assert admin.must_change_password is True
+    assert admin.senha == ""  # MD5 vazio
+    assert admin.senha_bcrypt is not None and admin.senha_bcrypt.startswith("$2")
+    # Senha temporária deve continuar válida via bcrypt
+    ok, _ = verify_password(
+        senha_temp, bcrypt_hash=admin.senha_bcrypt, md5_hash=None
+    )
+    assert ok is True
 
 
 # ============================================================
@@ -168,10 +149,7 @@ async def tenant_com_su(admin_engine):
             ).scalar_one()
         )
         await s.commit()
-    try:
-        yield {"tenant_id": tenant.id, "su_id": su.id, "alvo_id": alvo_id}
-    finally:
-        await _cleanup_tenant(admin_engine, tenant.id)
+    yield {"tenant_id": tenant.id, "su_id": su.id, "alvo_id": alvo_id}
 
 
 async def test_reset_administrativo_marca_flag_true(admin_engine, tenant_com_su):
@@ -278,15 +256,12 @@ async def tenant_su_unidade(admin_engine):
                 )
             ).scalar_one()
         )
-    try:
-        yield {
-            "tenant_id": tenant.id,
-            "tenant_slug": tenant.slug,
-            "su_id": su.id,
-            "unidade_id": uid,
-        }
-    finally:
-        await _cleanup_tenant(admin_engine, tenant.id)
+    yield {
+        "tenant_id": tenant.id,
+        "tenant_slug": tenant.slug,
+        "su_id": su.id,
+        "unidade_id": uid,
+    }
 
 
 def _as_usuario(_admin_engine, usuario_id: int, tenant_id: int, tenant_slug: str):
@@ -585,22 +560,19 @@ async def test_usuario_sem_flag_alterar_senha_sem_efeito_na_flag(admin_engine):
             ).scalar_one()
         )
         await s.commit()
-    try:
-        async with _sm(admin_engine)() as s:
-            u = (
-                await s.execute(select(Usuario).where(Usuario.id == uid))
-            ).scalar_one()
-            await alterar_senha(s, usuario=u, senha_atual="velha", nova_senha="nova-senha-1")
-        async with _sm(admin_engine)() as s:
-            u = (
-                await s.execute(select(Usuario).where(Usuario.id == uid))
-            ).scalar_one()
-        assert u.must_change_password is False
-        # Senha nova autentica via bcrypt; MD5 permanece vazio.
-        assert u.senha == ""
-        ok, _ = verify_password(
-            "nova-senha-1", bcrypt_hash=u.senha_bcrypt, md5_hash=None
-        )
-        assert ok is True
-    finally:
-        await _cleanup_tenant(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as s:
+        u = (
+            await s.execute(select(Usuario).where(Usuario.id == uid))
+        ).scalar_one()
+        await alterar_senha(s, usuario=u, senha_atual="velha", nova_senha="nova-senha-1")
+    async with _sm(admin_engine)() as s:
+        u = (
+            await s.execute(select(Usuario).where(Usuario.id == uid))
+        ).scalar_one()
+    assert u.must_change_password is False
+    # Senha nova autentica via bcrypt; MD5 permanece vazio.
+    assert u.senha == ""
+    ok, _ = verify_password(
+        "nova-senha-1", bcrypt_hash=u.senha_bcrypt, md5_hash=None
+    )
+    assert ok is True

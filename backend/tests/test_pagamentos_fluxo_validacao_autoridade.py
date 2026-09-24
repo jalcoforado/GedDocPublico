@@ -49,37 +49,6 @@ def _doc() -> str:
     return str(uuid.uuid4().int)[:14]
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _base(engine, tenant_id):
     """Fornecedor + natureza + fonte + conta + unidade prontos para um débito."""
     from sqlalchemy import select
@@ -188,19 +157,16 @@ async def arreio_debito_em_autoridade(admin_engine, arreio_debito_em_validacao):
 async def test_validar_transita_para_autoridade(admin_engine, arreio_debito_em_validacao):
     """AGUARDANDO_VALIDACAO → AGUARDANDO_AUTORIDADE."""
     t, d, _sol, _gest, validador, _forn, _nat, _conta = arreio_debito_em_validacao
-    try:
-        async with _sm(admin_engine)() as s:
-            d = await svc.confirmar_liquidacao(
-                s, tenant_id=t.id, debito_id=d.id, usuario_id=validador)
-            result = await svc.validar(s, tenant_id=t.id, debito_id=d.id,
-                                      usuario_id=validador, lock_version=d.lock_version)
-        assert result.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
-        assert result.id_validador == validador
-        async with _sm(admin_engine)() as s:
-            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        assert any(h.acao == "VALIDADO" for h in hist)
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        d = await svc.confirmar_liquidacao(
+            s, tenant_id=t.id, debito_id=d.id, usuario_id=validador)
+        result = await svc.validar(s, tenant_id=t.id, debito_id=d.id,
+                                  usuario_id=validador, lock_version=d.lock_version)
+    assert result.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
+    assert result.id_validador == validador
+    async with _sm(admin_engine)() as s:
+        hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
+    assert any(h.acao == "VALIDADO" for h in hist)
 
 
 @pytest.mark.asyncio
@@ -208,17 +174,14 @@ async def test_autoridade_aprovar_transita_para_autorizada(admin_engine, arreio_
     """AGUARDANDO_AUTORIDADE → AUTORIZADA + ELEGIVEL."""
     t, d, _sol, _gest, _val, _forn, _nat, _conta = arreio_debito_em_autoridade
     autoridade = await _novo_usuario(admin_engine, t.id, f"aut{uuid.uuid4().hex[:6]}")
-    try:
-        async with _sm(admin_engine)() as s:
-            result = await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
-                                                 usuario_id=autoridade, lock_version=d.lock_version)
-        assert result.situacao_tramitacao == est.AUTORIZADA
-        assert result.situacao_fila == est.ELEGIVEL
-        async with _sm(admin_engine)() as s:
-            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        assert any(h.acao == "AUTORIZADO" for h in hist)
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        result = await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
+                                             usuario_id=autoridade, lock_version=d.lock_version)
+    assert result.situacao_tramitacao == est.AUTORIZADA
+    assert result.situacao_fila == est.ELEGIVEL
+    async with _sm(admin_engine)() as s:
+        hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
+    assert any(h.acao == "AUTORIZADO" for h in hist)
 
 
 @pytest.mark.asyncio
@@ -226,19 +189,16 @@ async def test_autoridade_indeferir_terminal(admin_engine, arreio_debito_em_auto
     """AGUARDANDO_AUTORIDADE → INDEFERIDA_AUTORIDADE (terminal)."""
     t, d, _sol, _gest, _val, _forn, _nat, _conta = arreio_debito_em_autoridade
     autoridade = await _novo_usuario(admin_engine, t.id, f"aut{uuid.uuid4().hex[:6]}")
-    try:
-        async with _sm(admin_engine)() as s:
-            result = await svc.autoridade_indeferir(s, tenant_id=t.id, debito_id=d.id,
-                                                   usuario_id=autoridade, lock_version=d.lock_version,
-                                                   justificativa="Recurso insuficiente")
-        assert result.situacao_tramitacao == est.INDEFERIDA_AUTORIDADE
-        async with _sm(admin_engine)() as s:
-            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        ind = [h for h in hist if h.acao == "INDEFERIDO"]
-        assert len(ind) == 1
-        assert ind[0].justificativa == "Recurso insuficiente"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        result = await svc.autoridade_indeferir(s, tenant_id=t.id, debito_id=d.id,
+                                               usuario_id=autoridade, lock_version=d.lock_version,
+                                               justificativa="Recurso insuficiente")
+    assert result.situacao_tramitacao == est.INDEFERIDA_AUTORIDADE
+    async with _sm(admin_engine)() as s:
+        hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
+    ind = [h for h in hist if h.acao == "INDEFERIDO"]
+    assert len(ind) == 1
+    assert ind[0].justificativa == "Recurso insuficiente"
 
 
 @pytest.mark.asyncio
@@ -246,15 +206,12 @@ async def test_autoridade_indeferir_sem_justificativa_422(admin_engine, arreio_d
     """autoridade_indeferir exige justificativa."""
     t, d, _sol, _gest, _val, _forn, _nat, _conta = arreio_debito_em_autoridade
     autoridade = await _novo_usuario(admin_engine, t.id, f"aut{uuid.uuid4().hex[:6]}")
-    try:
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await svc.autoridade_indeferir(s, tenant_id=t.id, debito_id=d.id,
-                                              usuario_id=autoridade, lock_version=d.lock_version,
-                                              justificativa="")
-            assert exc.value.status_code == 422
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await svc.autoridade_indeferir(s, tenant_id=t.id, debito_id=d.id,
+                                          usuario_id=autoridade, lock_version=d.lock_version,
+                                          justificativa="")
+        assert exc.value.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -265,36 +222,30 @@ async def test_cancelar_de_rascunho(admin_engine):
     async with _sm(admin_engine)() as s:
         solicitante = (await s.execute(text(
             "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-    try:
-        async with _sm(admin_engine)() as s:
-            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
-                                       payload=_payload_debito(forn, nat, conta, unidade))
-        async with _sm(admin_engine)() as s:
-            result = await svc.cancelar(s, tenant_id=t.id, debito_id=d.id,
-                                       usuario_id=solicitante, lock_version=d.lock_version,
-                                       justificativa="Solicitação cancelada")
-        assert result.situacao_tramitacao == est.CANCELADA
-        async with _sm(admin_engine)() as s:
-            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        canc = [h for h in hist if h.acao == "CANCELADO"]
-        assert len(canc) == 1
-        assert canc[0].justificativa == "Solicitação cancelada"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
+                                   payload=_payload_debito(forn, nat, conta, unidade))
+    async with _sm(admin_engine)() as s:
+        result = await svc.cancelar(s, tenant_id=t.id, debito_id=d.id,
+                                   usuario_id=solicitante, lock_version=d.lock_version,
+                                   justificativa="Solicitação cancelada")
+    assert result.situacao_tramitacao == est.CANCELADA
+    async with _sm(admin_engine)() as s:
+        hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
+    canc = [h for h in hist if h.acao == "CANCELADO"]
+    assert len(canc) == 1
+    assert canc[0].justificativa == "Solicitação cancelada"
 
 
 @pytest.mark.asyncio
 async def test_cancelar_de_autoridade(admin_engine, arreio_debito_em_autoridade):
     """Pode cancelar de AGUARDANDO_AUTORIDADE."""
     t, d, _sol, _gest, _val, _forn, _nat, _conta = arreio_debito_em_autoridade
-    try:
-        async with _sm(admin_engine)() as s:
-            result = await svc.cancelar(s, tenant_id=t.id, debito_id=d.id,
-                                       usuario_id=_val, lock_version=d.lock_version,
-                                       justificativa="Cancelado por erro de entrada")
-        assert result.situacao_tramitacao == est.CANCELADA
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        result = await svc.cancelar(s, tenant_id=t.id, debito_id=d.id,
+                                   usuario_id=_val, lock_version=d.lock_version,
+                                   justificativa="Cancelado por erro de entrada")
+    assert result.situacao_tramitacao == est.CANCELADA
 
 
 @pytest.mark.asyncio
@@ -302,51 +253,42 @@ async def test_cancelar_terminal_409(admin_engine, arreio_debito_em_autoridade):
     """Não pode cancelar de estado terminal (INDEFERIDA_AUTORIDADE)."""
     t, d, _sol, _gest, _val, _forn, _nat, _conta = arreio_debito_em_autoridade
     autoridade = await _novo_usuario(admin_engine, t.id, f"aut{uuid.uuid4().hex[:6]}")
-    try:
-        # Indeferir (terminal)
-        async with _sm(admin_engine)() as s:
-            d = await svc.autoridade_indeferir(s, tenant_id=t.id, debito_id=d.id,
-                                              usuario_id=autoridade, lock_version=d.lock_version,
-                                              justificativa="Não aprovado")
+    # Indeferir (terminal)
+    async with _sm(admin_engine)() as s:
+        d = await svc.autoridade_indeferir(s, tenant_id=t.id, debito_id=d.id,
+                                          usuario_id=autoridade, lock_version=d.lock_version,
+                                          justificativa="Não aprovado")
 
-        # Tentar cancelar
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await svc.cancelar(s, tenant_id=t.id, debito_id=d.id,
-                                  usuario_id=_val, lock_version=d.lock_version,
-                                  justificativa="Cancelado")
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+    # Tentar cancelar
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await svc.cancelar(s, tenant_id=t.id, debito_id=d.id,
+                              usuario_id=_val, lock_version=d.lock_version,
+                              justificativa="Cancelado")
+        assert exc.value.status_code == 409
 
 
 @pytest.mark.asyncio
 async def test_cancelar_sem_justificativa_422(admin_engine, arreio_debito_em_validacao):
     """cancelar exige justificativa."""
     t, d, _sol, _gest, _val, _forn, _nat, _conta = arreio_debito_em_validacao
-    try:
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await svc.cancelar(s, tenant_id=t.id, debito_id=d.id,
-                                  usuario_id=_val, lock_version=d.lock_version,
-                                  justificativa="")
-            assert exc.value.status_code == 422
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await svc.cancelar(s, tenant_id=t.id, debito_id=d.id,
+                              usuario_id=_val, lock_version=d.lock_version,
+                              justificativa="")
+        assert exc.value.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_validar_lock_version_mismatch_409(admin_engine, arreio_debito_em_validacao):
     """Lock version incompatível (concorrência) → 409."""
     t, d, _sol, _gest, validador, _forn, _nat, _conta = arreio_debito_em_validacao
-    try:
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await svc.validar(s, tenant_id=t.id, debito_id=d.id,
-                                 usuario_id=validador, lock_version=d.lock_version + 999)
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await svc.validar(s, tenant_id=t.id, debito_id=d.id,
+                             usuario_id=validador, lock_version=d.lock_version + 999)
+        assert exc.value.status_code == 409
 
 
 @pytest.mark.asyncio
@@ -354,11 +296,8 @@ async def test_autoridade_aprovar_lock_version_mismatch_409(admin_engine, arreio
     """Lock version incompatível em autoridade_aprovar → 409."""
     t, d, _sol, _gest, _val, _forn, _nat, _conta = arreio_debito_em_autoridade
     autoridade = await _novo_usuario(admin_engine, t.id, f"aut{uuid.uuid4().hex[:6]}")
-    try:
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
-                                            usuario_id=autoridade, lock_version=d.lock_version + 999)
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
+                                        usuario_id=autoridade, lock_version=d.lock_version + 999)
+        assert exc.value.status_code == 409

@@ -109,26 +109,6 @@ def _as_user(engine, usuario_id: int, tenant_id: int, tenant_slug: str):
     arreio_tenant_http(tenant_id, tenant_slug)
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM aprimora_py.notificacao WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.notificacao_preferencia_evento WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _post(corpo: dict):
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
@@ -171,7 +151,6 @@ async def test_telefone_no_corpo_nao_muda_o_destino(admin_engine):
         from app.database import engine as app_engine
 
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -221,7 +200,6 @@ async def test_sem_telefone_no_perfil_da_400_e_nao_grava(admin_engine):
         from app.database import engine as app_engine
 
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -262,7 +240,6 @@ async def test_limite_conta_por_usuario_e_nao_por_telefone(admin_engine):
         from app.database import engine as app_engine
 
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -318,4 +295,3 @@ async def test_limite_e_por_usuario_nao_por_tenant(admin_engine):
         from app.database import engine as app_engine
 
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant.id)

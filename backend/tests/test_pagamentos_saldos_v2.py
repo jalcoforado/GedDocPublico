@@ -47,39 +47,6 @@ async def _provisionar(engine):
     return tenant
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.saldo_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.bloqueio_saldo WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _conta(engine, tenant_id, *, saldo="1000.00", modo="PAGA", fonte_id=None):
     async with _sm(engine)() as s:
         if fonte_id is None:
@@ -95,76 +62,64 @@ async def _conta(engine, tenant_id, *, saldo="1000.00", modo="PAGA", fonte_id=No
 
 async def test_bloqueio_reduz_disponivel_projetado(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        _fonte, conta = await _conta(admin_engine, t.id, saldo="1000.00")
-        async with _sm(admin_engine)() as s:
-            uid = (await s.execute(text(
-                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-            await bloq.criar_bloqueio(s, tenant_id=t.id, usuario_id=uid, payload=BloqueioSaldoCreate(
-                id_conta=conta.id, valor="300.00", motivo="Reserva judicial",
-                periodo_inicio=date.today()))
-        async with _sm(admin_engine)() as s:
-            saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        assert saldo.bloqueado == Decimal("300.00")
-        assert saldo.saldo_bancario == Decimal("1000.00")
-        assert saldo.disponivel == Decimal("700.00")
-        assert saldo.disponivel_projetado == Decimal("700.00")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    _fonte, conta = await _conta(admin_engine, t.id, saldo="1000.00")
+    async with _sm(admin_engine)() as s:
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        await bloq.criar_bloqueio(s, tenant_id=t.id, usuario_id=uid, payload=BloqueioSaldoCreate(
+            id_conta=conta.id, valor="300.00", motivo="Reserva judicial",
+            periodo_inicio=date.today()))
+    async with _sm(admin_engine)() as s:
+        saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+    assert saldo.bloqueado == Decimal("300.00")
+    assert saldo.saldo_bancario == Decimal("1000.00")
+    assert saldo.disponivel == Decimal("700.00")
+    assert saldo.disponivel_projetado == Decimal("700.00")
 
 
 async def test_bloqueio_fora_do_periodo_nao_afeta(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        _fonte, conta = await _conta(admin_engine, t.id, saldo="1000.00")
-        futuro = date.today() + timedelta(days=10)
-        async with _sm(admin_engine)() as s:
-            uid = (await s.execute(text(
-                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-            await bloq.criar_bloqueio(s, tenant_id=t.id, usuario_id=uid, payload=BloqueioSaldoCreate(
-                id_conta=conta.id, valor="300.00", motivo="Futuro",
-                periodo_inicio=futuro, periodo_fim=futuro + timedelta(days=5)))
-        async with _sm(admin_engine)() as s:
-            saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        assert saldo.bloqueado == Decimal("0")
-        assert saldo.disponivel == Decimal("1000.00")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    _fonte, conta = await _conta(admin_engine, t.id, saldo="1000.00")
+    futuro = date.today() + timedelta(days=10)
+    async with _sm(admin_engine)() as s:
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        await bloq.criar_bloqueio(s, tenant_id=t.id, usuario_id=uid, payload=BloqueioSaldoCreate(
+            id_conta=conta.id, valor="300.00", motivo="Futuro",
+            periodo_inicio=futuro, periodo_fim=futuro + timedelta(days=5)))
+    async with _sm(admin_engine)() as s:
+        saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+    assert saldo.bloqueado == Decimal("0")
+    assert saldo.disponivel == Decimal("1000.00")
 
 
 async def test_conta_nao_paga_fora_de_elegiveis(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        fonte_id, conta_paga = await _conta(admin_engine, t.id, modo="PAGA")
-        _f, conta_recebe = await _conta(admin_engine, t.id, modo="RECEBE", fonte_id=fonte_id)
-        async with _sm(admin_engine)() as s:
-            elegiveis = await aut.contas_elegiveis(s, tenant_id=t.id, id_fonte=fonte_id)
-        ids = {c.id_conta for c in elegiveis}
-        assert conta_paga.id in ids
-        assert conta_recebe.id not in ids
-    finally:
-        await _cleanup(admin_engine, t.id)
+    fonte_id, conta_paga = await _conta(admin_engine, t.id, modo="PAGA")
+    _f, conta_recebe = await _conta(admin_engine, t.id, modo="RECEBE", fonte_id=fonte_id)
+    async with _sm(admin_engine)() as s:
+        elegiveis = await aut.contas_elegiveis(s, tenant_id=t.id, id_fonte=fonte_id)
+    ids = {c.id_conta for c in elegiveis}
+    assert conta_paga.id in ids
+    assert conta_recebe.id not in ids
 
 
 async def test_snapshot_saldos_idempotente(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        _fonte, conta = await _conta(admin_engine, t.id, saldo="500.00")
-        async with _sm(admin_engine)() as s:
-            n1 = await caixa.registrar_snapshot_saldos(s, tenant_id=t.id)
-        # 2ª execução no mesmo dia não duplica (upsert por conta+data)
-        async with _sm(admin_engine)() as s:
-            n2 = await caixa.registrar_snapshot_saldos(s, tenant_id=t.id)
-        assert n1 == 1 and n2 == 1
-        async with _sm(admin_engine)() as s:
-            linhas = (await s.execute(text(
-                "SELECT saldo_bancario FROM pagamentos.saldo_historico "
-                "WHERE tenant_id=:t AND id_conta=:c AND data=CURRENT_DATE"),
-                {"t": t.id, "c": conta.id})).all()
-        assert len(linhas) == 1
-        assert linhas[0][0] == Decimal("500.00")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    _fonte, conta = await _conta(admin_engine, t.id, saldo="500.00")
+    async with _sm(admin_engine)() as s:
+        n1 = await caixa.registrar_snapshot_saldos(s, tenant_id=t.id)
+    # 2ª execução no mesmo dia não duplica (upsert por conta+data)
+    async with _sm(admin_engine)() as s:
+        n2 = await caixa.registrar_snapshot_saldos(s, tenant_id=t.id)
+    assert n1 == 1 and n2 == 1
+    async with _sm(admin_engine)() as s:
+        linhas = (await s.execute(text(
+            "SELECT saldo_bancario FROM pagamentos.saldo_historico "
+            "WHERE tenant_id=:t AND id_conta=:c AND data=CURRENT_DATE"),
+            {"t": t.id, "c": conta.id})).all()
+    assert len(linhas) == 1
+    assert linhas[0][0] == Decimal("500.00")
 
 
 # ---- autorizar rejeita conta pagadora não-PAGA (RF-CTA-08) ----
@@ -180,101 +135,89 @@ async def _novo_usuario(engine, tenant_id, sufixo):
 
 async def test_autorizar_conta_nao_paga_422(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        fonte_id, conta_recebe = await _conta(admin_engine, t.id, modo="RECEBE")
-        async with _sm(admin_engine)() as s:
-            forn = await cad.criar_fornecedor(s, tenant_id=t.id, payload=FornecedorCreate(
-                tipo_pessoa="JURIDICA", cnpj_cpf=_doc(), nome="Forn"))
-            nat = await cad.criar_natureza(s, tenant_id=t.id, payload=NaturezaCreate(
-                codigo=f"N{uuid.uuid4().hex[:6]}", descricao="Mat"))
-        sol = await _novo_usuario(admin_engine, t.id, f"s{uuid.uuid4().hex[:6]}")
-        gestor = await _novo_usuario(admin_engine, t.id, f"g{uuid.uuid4().hex[:6]}")
-        apr = await _novo_usuario(admin_engine, t.id, f"a{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            unidade_id = await id_unidade_padrao(s, t.id)
-            d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol, payload=DebitoCreate(
-                id_fornecedor=forn.id, id_natureza=nat.id, id_fonte_recursos=fonte_id,
-                id_unidade=unidade_id,
-                valor_total="100.00", competencia="2026-07", descricao="x",
-                categoria="SERVICOS",  # débito sem contrato: exigida p/ confirmar_liquidacao (F3)
-                parcelas=[ParcelaCreate(numero=1, valor="100.00", vencimento="2026-08-01")]))
-        async with _sm(admin_engine)() as s:
-            d = await deb.enviar_para_gestor(
-                s, tenant_id=t.id, debito_id=d.id, usuario_id=sol,
-                lock_version=d.lock_version)
-        async with _sm(admin_engine)() as s:
-            d = await deb.gestor_autorizar(
-                s, tenant_id=t.id, debito_id=d.id, usuario_id=gestor,
-                lock_version=d.lock_version)
-        async with _sm(admin_engine)() as s:
-            d = await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
-        async with _sm(admin_engine)() as s:
-            d = await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr,
-                                  lock_version=d.lock_version)
-        autorizador = await _novo_usuario(admin_engine, t.id, f"au{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
-                id_usuario=autorizador, id_natureza=None, valor_maximo="999999.00"))
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador, grupos=[
-                    GrupoAutorizacaoIn(id_fonte=fonte_id, id_conta_pagadora=conta_recebe.id,
-                                       debito_ids=[d.id])])
-            assert exc.value.status_code == 422
-            assert "pagamento" in exc.value.detail.lower()
-    finally:
-        await _cleanup(admin_engine, t.id)
+    fonte_id, conta_recebe = await _conta(admin_engine, t.id, modo="RECEBE")
+    async with _sm(admin_engine)() as s:
+        forn = await cad.criar_fornecedor(s, tenant_id=t.id, payload=FornecedorCreate(
+            tipo_pessoa="JURIDICA", cnpj_cpf=_doc(), nome="Forn"))
+        nat = await cad.criar_natureza(s, tenant_id=t.id, payload=NaturezaCreate(
+            codigo=f"N{uuid.uuid4().hex[:6]}", descricao="Mat"))
+    sol = await _novo_usuario(admin_engine, t.id, f"s{uuid.uuid4().hex[:6]}")
+    gestor = await _novo_usuario(admin_engine, t.id, f"g{uuid.uuid4().hex[:6]}")
+    apr = await _novo_usuario(admin_engine, t.id, f"a{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        unidade_id = await id_unidade_padrao(s, t.id)
+        d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol, payload=DebitoCreate(
+            id_fornecedor=forn.id, id_natureza=nat.id, id_fonte_recursos=fonte_id,
+            id_unidade=unidade_id,
+            valor_total="100.00", competencia="2026-07", descricao="x",
+            categoria="SERVICOS",  # débito sem contrato: exigida p/ confirmar_liquidacao (F3)
+            parcelas=[ParcelaCreate(numero=1, valor="100.00", vencimento="2026-08-01")]))
+    async with _sm(admin_engine)() as s:
+        d = await deb.enviar_para_gestor(
+            s, tenant_id=t.id, debito_id=d.id, usuario_id=sol,
+            lock_version=d.lock_version)
+    async with _sm(admin_engine)() as s:
+        d = await deb.gestor_autorizar(
+            s, tenant_id=t.id, debito_id=d.id, usuario_id=gestor,
+            lock_version=d.lock_version)
+    async with _sm(admin_engine)() as s:
+        d = await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr)
+    async with _sm(admin_engine)() as s:
+        d = await deb.validar(s, tenant_id=t.id, debito_id=d.id, usuario_id=apr,
+                              lock_version=d.lock_version)
+    autorizador = await _novo_usuario(admin_engine, t.id, f"au{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
+            id_usuario=autorizador, id_natureza=None, valor_maximo="999999.00"))
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador, grupos=[
+                GrupoAutorizacaoIn(id_fonte=fonte_id, id_conta_pagadora=conta_recebe.id,
+                                   debito_ids=[d.id])])
+        assert exc.value.status_code == 422
+        assert "pagamento" in exc.value.detail.lower()
 
 
 async def test_ficha_fonte_lista_contas_e_saldos(admin_engine):
     """RF-FON-06: a ficha da fonte traz todas as contas vinculadas com seus saldos."""
     t = await _provisionar(admin_engine)
-    try:
-        fonte_id, conta1 = await _conta(admin_engine, t.id, saldo="1000.00", modo="PAGA")
-        _f2, conta2 = await _conta(admin_engine, t.id, saldo="500.00", modo="RECEBE", fonte_id=fonte_id)
-        async with _sm(admin_engine)() as s:
-            ficha = await caixa.ficha_fonte(s, tenant_id=t.id, id_fonte=fonte_id)
-        assert ficha.id_fonte == fonte_id
-        ids = {c.id_conta for c in ficha.contas}
-        assert ids == {conta1.id, conta2.id}
-        # disponível_total consolida as contas ativas (RF-SLD-05)
-        assert ficha.disponivel_total == Decimal("1500.00")
-        c1 = next(c for c in ficha.contas if c.id_conta == conta1.id)
-        assert c1.saldo_bancario == Decimal("1000.00")
-        assert c1.conta_mascarada.startswith("****")
-        assert c1.modo_movimentacao == "PAGA"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    fonte_id, conta1 = await _conta(admin_engine, t.id, saldo="1000.00", modo="PAGA")
+    _f2, conta2 = await _conta(admin_engine, t.id, saldo="500.00", modo="RECEBE", fonte_id=fonte_id)
+    async with _sm(admin_engine)() as s:
+        ficha = await caixa.ficha_fonte(s, tenant_id=t.id, id_fonte=fonte_id)
+    assert ficha.id_fonte == fonte_id
+    ids = {c.id_conta for c in ficha.contas}
+    assert ids == {conta1.id, conta2.id}
+    # disponível_total consolida as contas ativas (RF-SLD-05)
+    assert ficha.disponivel_total == Decimal("1500.00")
+    c1 = next(c for c in ficha.contas if c.id_conta == conta1.id)
+    assert c1.saldo_bancario == Decimal("1000.00")
+    assert c1.conta_mascarada.startswith("****")
+    assert c1.modo_movimentacao == "PAGA"
 
 
 async def test_ficha_fonte_inexistente_404(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await caixa.ficha_fonte(s, tenant_id=t.id, id_fonte=999999)
-            assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await caixa.ficha_fonte(s, tenant_id=t.id, id_fonte=999999)
+        assert exc.value.status_code == 404
 
 
 async def test_simular_autorizacao_projeta_disponivel(admin_engine):
     """RF-PNL-05: simulação projeta o disponível após um pagamento, sem gravar."""
     t = await _provisionar(admin_engine)
-    try:
-        _fonte, conta = await _conta(admin_engine, t.id, saldo="1000.00")
-        async with _sm(admin_engine)() as s:
-            ok = await caixa.simular_autorizacao(s, tenant_id=t.id, id_conta=conta.id, valor="300.00")
-        assert ok.disponivel_antes == Decimal("1000.00")
-        assert ok.disponivel_projetado_apos == Decimal("700.00")
-        assert ok.suficiente is True
-        async with _sm(admin_engine)() as s:
-            insuf = await caixa.simular_autorizacao(s, tenant_id=t.id, id_conta=conta.id, valor="2000.00")
-        assert insuf.disponivel_projetado_apos == Decimal("-1000.00")
-        assert insuf.suficiente is False
-        # não grava nada: saldo permanece intacto
-        async with _sm(admin_engine)() as s:
-            saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        assert saldo.saldo_atual == Decimal("1000.00")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    _fonte, conta = await _conta(admin_engine, t.id, saldo="1000.00")
+    async with _sm(admin_engine)() as s:
+        ok = await caixa.simular_autorizacao(s, tenant_id=t.id, id_conta=conta.id, valor="300.00")
+    assert ok.disponivel_antes == Decimal("1000.00")
+    assert ok.disponivel_projetado_apos == Decimal("700.00")
+    assert ok.suficiente is True
+    async with _sm(admin_engine)() as s:
+        insuf = await caixa.simular_autorizacao(s, tenant_id=t.id, id_conta=conta.id, valor="2000.00")
+    assert insuf.disponivel_projetado_apos == Decimal("-1000.00")
+    assert insuf.suficiente is False
+    # não grava nada: saldo permanece intacto
+    async with _sm(admin_engine)() as s:
+        saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+    assert saldo.saldo_atual == Decimal("1000.00")

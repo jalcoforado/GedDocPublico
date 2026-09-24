@@ -253,34 +253,6 @@ async def _attach_anexo(engine, tenant_id, processo_id, mov_id, key: str | None)
         return a.id
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM protocolos.complementacao_documental WHERE tenant_id=:t",
-            "UPDATE protocolos.processo SET id_ultima_movimentacao = NULL WHERE tenant_id=:t",
-            "DELETE FROM protocolos.anexo_processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.movimentacao WHERE tenant_id=:t",
-            "DELETE FROM protocolos.processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.anexo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.servico WHERE tenant_id=:t",
-            "DELETE FROM protocolos.assunto WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_externo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 # =====================================================================
 # 1) Migration 0028 — idempotência + round-trip
 # =====================================================================
@@ -428,27 +400,23 @@ async def setup_pr5a(admin_engine):
     tenant_b = await _provisionar(admin_engine, prefix="pr5a-vazio")
     su_b_id = await _su_id(admin_engine, tenant_b.id)
 
-    try:
-        yield {
-            "tenant": tenant,
-            "tenant_b": tenant_b,
-            "su_id": su_id,
-            "sem_perm_id": sem_perm_id,
-            "com_perm_id": com_perm_id,
-            "su_b_id": su_b_id,
-            "sv_a": sv_a,
-            "sv_b": sv_b,
-            "p_a_pendente": p_a_pendente,
-            "p_a_parcial": p_a_parcial,
-            "p_a_completo": p_a_completo,
-            "p_b": p_b,
-            "p_legado": p_legado,
-            "c1": c1,
-            "c2": c2,
-        }
-    finally:
-        await _cleanup(admin_engine, tenant.id)
-        await _cleanup(admin_engine, tenant_b.id)
+    yield {
+        "tenant": tenant,
+        "tenant_b": tenant_b,
+        "su_id": su_id,
+        "sem_perm_id": sem_perm_id,
+        "com_perm_id": com_perm_id,
+        "su_b_id": su_b_id,
+        "sv_a": sv_a,
+        "sv_b": sv_b,
+        "p_a_pendente": p_a_pendente,
+        "p_a_parcial": p_a_parcial,
+        "p_a_completo": p_a_completo,
+        "p_b": p_b,
+        "p_legado": p_legado,
+        "c1": c1,
+        "c2": c2,
+    }
 
 
 async def _criar_servidor_sem_perm(engine, tenant_id: int, uid: int) -> int:

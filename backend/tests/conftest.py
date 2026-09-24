@@ -500,12 +500,35 @@ def arreio_tenant_http(tenant_id: int, tenant_slug: str | None = None) -> None:
 # de "logar como" — a mesma função que `arreio_tenant_http` já fatorava).
 #
 # O que ficou de fora, de propósito: criar usuário SEM permissão (varia por
-# arquivo — nível, transações, grupo) e limpar o tenant no teardown. A
-# limpeza manual por arquivo (`_cleanup_tenant`/`_limpar_engine` e primos) é
-# hoje redundante — `_limpa_tenants_do_modulo` (acima) já apaga tudo que o
-# módulo criou, tabela por tabela, ao fim do módulo —, mas retirá-la dos
-# ~60 arquivos que ainda a chamam é um refactor maior, deliberadamente fora
-# desta fatia (ver docs/BACKLOG-PENDENCIAS.md §1.0.9).
+# arquivo — nível, transações, grupo).
+#
+# Limpar o tenant no teardown NÃO é responsabilidade de cada arquivo:
+# `_limpa_tenants_do_modulo` (acima) apaga tudo que o módulo criou, tabela por
+# tabela, ao fim do módulo. Os `_cleanup_tenant`/`_limpar_engine` e primos por
+# arquivo foram removidos (docs/BACKLOG-PENDENCIAS.md §1.0.9) — não os
+# reintroduza. Quatro coisas ficaram, cada uma por um motivo que a fixture não
+# cobre:
+#
+# - higiene do app (`dependency_overrides.clear()` + `app_engine.dispose()`),
+#   em `_limpar`/`_limpar_engine`/`_encerrar_arreio`: a fixture só apaga linhas,
+#   e sem isso o override vaza para o teste seguinte e o pool sobrevive ao
+#   event loop;
+# - `test_modulos_provisionamento.py::_cleanup_tenant`: é o GUARDA do CASCADE da
+#   migration 0075 (o DELETE do tenant sem apagar `tenant_modulo` falha se ela
+#   não foi aplicada), e a fixture apaga com `session_replication_role =
+#   replica`, que desliga FK e cascade;
+# - `test_apensamento_anticiclo.py::_cleanup_catalogs`: apaga por id linhas de
+#   um tenant PREEXISTENTE, fora do alcance da fixture (só `id >` o de entrada);
+# - `test_pagamentos_rn15_c13.py` (usa o `_cleanup` de
+#   `test_pagamentos_autorizacao.py`): a fixture limpa ao FIM DO MÓDULO, não
+#   entre testes. `test_o_backfill_alcanca_linha_antiga` roda o SQL da migration
+#   0091, cujo `DISTINCT ON (h.justificativa)` não filtra por tenant: com o
+#   histórico dos testes anteriores do módulo ainda no banco, o tenant do teste
+#   perde a linha e a asserção falha (reproduzido em banco isolado). Teste com
+#   SQL que atravessa tenants precisa de isolamento entre testes, e ele é do
+#   arquivo, não da fixture.
+#
+# Prova de que um teste não vaza: `PYTEST_FALHA_SE_VAZAR_TENANT=1`.
 # ---------------------------------------------------------------------------
 
 

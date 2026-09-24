@@ -46,38 +46,6 @@ def _doc() -> str:
     return str(uuid.uuid4().int)[:14]
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _base(engine, tenant_id, *, saldo_inicial="10000.00"):
     async with _sm(engine)() as s:
         forn = await cad.criar_fornecedor(s, tenant_id=tenant_id, payload=FornecedorCreate(
@@ -193,122 +161,107 @@ async def _cenario(engine, tenant_id):
 
 async def test_kpis(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, conta = await _cenario(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            out = await dash.montar_dashboard(s, tenant_id=t.id)
-        k = out.kpis
-        assert k.saldo_total == Decimal("11400.00")
-        assert k.comprometido_total == Decimal("400.00")
-        assert k.disponivel_total == Decimal("11000.00")
-        assert k.pago_no_mes == Decimal("600.00")
-        assert k.vencidas_qtd == 1
-        assert k.vencidas_valor == Decimal("400.00")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d, conta = await _cenario(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        out = await dash.montar_dashboard(s, tenant_id=t.id)
+    k = out.kpis
+    assert k.saldo_total == Decimal("11400.00")
+    assert k.comprometido_total == Decimal("400.00")
+    assert k.disponivel_total == Decimal("11000.00")
+    assert k.pago_no_mes == Decimal("600.00")
+    assert k.vencidas_qtd == 1
+    assert k.vencidas_valor == Decimal("400.00")
 
 
 async def test_kpis_pipeline_e_30d(admin_engine):
     """a_pagar_30d é PROSPECTIVO (hoje..hoje+30, sem sobrepor vencidas) e os
     contadores de pipeline contam débitos parados em AGUARDANDO_APROVACAO/APROVADO."""
     t = await _provisionar(admin_engine)
-    try:
-        hoje = date.today()
-        base = await _base(admin_engine, t.id)
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    hoje = date.today()
+    base = await _base(admin_engine, t.id)
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
 
-        # débito AUTORIZADO com parcela a vencer em hoje+10 → conta em a_pagar_30d
-        d_futuro, _s1, _a1, _c1 = await _debito_aprovado(
-            admin_engine, t.id, valor="500.00", base=base,
-            parcelas=[ParcelaCreate(numero=1, valor="500.00",
-                                    vencimento=(hoje + timedelta(days=10)).isoformat())])
-        async with _sm(admin_engine)() as s:
-            await aut.autorizar_lote(
-                s, tenant_id=t.id, usuario_id=autorizador,
-                grupos=[GrupoAutorizacaoIn(id_fonte=d_futuro.id_fonte_recursos,
-                                           id_conta_pagadora=d_futuro.id_conta,
-                                           debito_ids=[d_futuro.id])])
+    # débito AUTORIZADO com parcela a vencer em hoje+10 → conta em a_pagar_30d
+    d_futuro, _s1, _a1, _c1 = await _debito_aprovado(
+        admin_engine, t.id, valor="500.00", base=base,
+        parcelas=[ParcelaCreate(numero=1, valor="500.00",
+                                vencimento=(hoje + timedelta(days=10)).isoformat())])
+    async with _sm(admin_engine)() as s:
+        await aut.autorizar_lote(
+            s, tenant_id=t.id, usuario_id=autorizador,
+            grupos=[GrupoAutorizacaoIn(id_fonte=d_futuro.id_fonte_recursos,
+                                       id_conta_pagadora=d_futuro.id_conta,
+                                       debito_ids=[d_futuro.id])])
 
-        # débito AUTORIZADO com parcela vencida ontem → vencidas, NÃO em a_pagar_30d
-        d_vencido, _s2, _a2, _c2 = await _debito_aprovado(
-            admin_engine, t.id, valor="300.00", base=base,
-            parcelas=[ParcelaCreate(numero=1, valor="300.00",
-                                    vencimento=(hoje - timedelta(days=1)).isoformat())])
-        async with _sm(admin_engine)() as s:
-            await aut.autorizar_lote(
-                s, tenant_id=t.id, usuario_id=autorizador,
-                grupos=[GrupoAutorizacaoIn(id_fonte=d_vencido.id_fonte_recursos,
-                                           id_conta_pagadora=d_vencido.id_conta,
-                                           debito_ids=[d_vencido.id])])
+    # débito AUTORIZADO com parcela vencida ontem → vencidas, NÃO em a_pagar_30d
+    d_vencido, _s2, _a2, _c2 = await _debito_aprovado(
+        admin_engine, t.id, valor="300.00", base=base,
+        parcelas=[ParcelaCreate(numero=1, valor="300.00",
+                                vencimento=(hoje - timedelta(days=1)).isoformat())])
+    async with _sm(admin_engine)() as s:
+        await aut.autorizar_lote(
+            s, tenant_id=t.id, usuario_id=autorizador,
+            grupos=[GrupoAutorizacaoIn(id_fonte=d_vencido.id_fonte_recursos,
+                                       id_conta_pagadora=d_vencido.id_conta,
+                                       debito_ids=[d_vencido.id])])
 
-        # débito parado em APROVADO → aguardando_autorizacao_qtd
-        await _debito_aprovado(admin_engine, t.id, valor="200.00", base=base)
+    # débito parado em APROVADO → aguardando_autorizacao_qtd
+    await _debito_aprovado(admin_engine, t.id, valor="200.00", base=base)
 
-        # débito parado em EM_VALIDACAO → aguardando_aprovacao_qtd
-        forn, nat, conta = base
-        solicitante = await _novo_usuario(admin_engine, t.id, f"sol{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            d_ag = await deb.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
-                                          payload=_payload_debito(forn, nat, conta, valor="100.00"))
-        async with _sm(admin_engine)() as s:
-            await deb.enviar_para_gestor(
-                s, tenant_id=t.id, debito_id=d_ag.id, usuario_id=solicitante,
-                lock_version=d_ag.lock_version)
+    # débito parado em EM_VALIDACAO → aguardando_aprovacao_qtd
+    forn, nat, conta = base
+    solicitante = await _novo_usuario(admin_engine, t.id, f"sol{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        d_ag = await deb.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
+                                      payload=_payload_debito(forn, nat, conta, valor="100.00"))
+    async with _sm(admin_engine)() as s:
+        await deb.enviar_para_gestor(
+            s, tenant_id=t.id, debito_id=d_ag.id, usuario_id=solicitante,
+            lock_version=d_ag.lock_version)
 
-        async with _sm(admin_engine)() as s:
-            out = await dash.montar_dashboard(s, tenant_id=t.id)
-        k = out.kpis
-        assert k.a_pagar_30d == Decimal("500.00")  # prospectivo: só hoje..hoje+30
-        assert k.vencidas_qtd == 1
-        assert k.vencidas_valor == Decimal("300.00")
-        assert k.aguardando_aprovacao_qtd == 1
-        assert k.aguardando_autorizacao_qtd == 1
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        out = await dash.montar_dashboard(s, tenant_id=t.id)
+    k = out.kpis
+    assert k.a_pagar_30d == Decimal("500.00")  # prospectivo: só hoje..hoje+30
+    assert k.vencidas_qtd == 1
+    assert k.vencidas_valor == Decimal("300.00")
+    assert k.aguardando_aprovacao_qtd == 1
+    assert k.aguardando_autorizacao_qtd == 1
 
 
 async def test_fluxo_mensal(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        await _cenario(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            out = await dash.montar_dashboard(s, tenant_id=t.id, meses=12)
-        assert len(out.fluxo_mensal) == 12
-        mes_atual = date.today().strftime("%Y-%m")
-        item = next(i for i in out.fluxo_mensal if i.mes == mes_atual)
-        assert item.entradas == Decimal("2000.00")
-        assert item.saidas == Decimal("600.00")
-        outros = [i for i in out.fluxo_mensal if i.mes != mes_atual]
-        for i in outros:
-            assert i.entradas == Decimal("0") and i.saidas == Decimal("0")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    await _cenario(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        out = await dash.montar_dashboard(s, tenant_id=t.id, meses=12)
+    assert len(out.fluxo_mensal) == 12
+    mes_atual = date.today().strftime("%Y-%m")
+    item = next(i for i in out.fluxo_mensal if i.mes == mes_atual)
+    assert item.entradas == Decimal("2000.00")
+    assert item.saidas == Decimal("600.00")
+    outros = [i for i in out.fluxo_mensal if i.mes != mes_atual]
+    for i in outros:
+        assert i.entradas == Decimal("0") and i.saidas == Decimal("0")
 
 
 async def test_por_natureza_e_fonte(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        await _cenario(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            out = await dash.montar_dashboard(s, tenant_id=t.id)
-        assert len(out.por_natureza) == 1
-        assert out.por_natureza[0].valor == Decimal("600.00")
-        assert len(out.por_fonte) == 1
-        assert out.por_fonte[0].valor == Decimal("600.00")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    await _cenario(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        out = await dash.montar_dashboard(s, tenant_id=t.id)
+    assert len(out.por_natureza) == 1
+    assert out.por_natureza[0].valor == Decimal("600.00")
+    assert len(out.por_fonte) == 1
+    assert out.por_fonte[0].valor == Decimal("600.00")
 
 
 async def test_maiores_e_alertas(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, conta = await _cenario(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            out = await dash.montar_dashboard(s, tenant_id=t.id)
-        assert any(m.id == d.id and m.status == "PAGO_PARCIAL" for m in out.maiores_debitos)
-        vencidas = out.alertas.parcelas_vencidas
-        assert len(vencidas) == 1
-        assert vencidas[0].id_debito == d.id
-        assert vencidas[0].dias_atraso == 1
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d, conta = await _cenario(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        out = await dash.montar_dashboard(s, tenant_id=t.id)
+    assert any(m.id == d.id and m.status == "PAGO_PARCIAL" for m in out.maiores_debitos)
+    vencidas = out.alertas.parcelas_vencidas
+    assert len(vencidas) == 1
+    assert vencidas[0].id_debito == d.id
+    assert vencidas[0].dias_atraso == 1

@@ -45,22 +45,6 @@ def _slug(p: str) -> str:
     return f"{p}{uuid.uuid4().hex[:8]}"
 
 
-async def _cleanup_tenant(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 def _payload_contem_pii(payload: dict | None, *segredos: str) -> bool:
     """Procura segredos/PII no payload do audit_log. Bloqueia também hashes
     bcrypt (heurística por prefixo $2a/$2b/$2y) — qualquer um seria leak."""
@@ -135,17 +119,14 @@ async def tenant_su_alvo(admin_engine):
             ).scalar_one()
         )
         await s.commit()
-    try:
-        yield {
-            "tenant_id": tenant.id,
-            "tenant_slug": tenant.slug,
-            "su_id": su.id,
-            "alvo_id": alvo_id,
-            "alvo_email": alvo_email,
-            "alvo_cpf": None,  # carregado abaixo só se algum teste precisar
-        }
-    finally:
-        await _cleanup_tenant(admin_engine, tenant.id)
+    yield {
+        "tenant_id": tenant.id,
+        "tenant_slug": tenant.slug,
+        "su_id": su.id,
+        "alvo_id": alvo_id,
+        "alvo_email": alvo_email,
+        "alvo_cpf": None,  # carregado abaixo só se algum teste precisar
+    }
 
 
 def _override_as(_admin_engine, *, usuario_id: int, tenant_id: int, tenant_slug: str):
@@ -424,27 +405,24 @@ async def test_put_cross_tenant_continua_404_e_nao_marca_flag(
                 select(Usuario).where(Usuario.tenant_id == outro_tenant.id)
             )
         ).scalar_one()
-    try:
-        _override_as(
-            admin_engine,
-            usuario_id=su_outro.id,
-            tenant_id=outro_tenant.id,
-            tenant_slug=outro_tenant.slug,
-        )
-        r = await client.put(
-            f"/api/v2/usuarios/{ctx['alvo_id']}", json={"senha": "tentativa"}
-        )
-        assert r.status_code == 404
-        async with _sm(admin_engine)() as s:
-            u = (
-                await s.execute(
-                    select(Usuario).where(Usuario.id == ctx["alvo_id"])
-                )
-            ).scalar_one()
-        assert u.must_change_password is False
-        assert u.senha != ""  # MD5 antigo segue intacto
-    finally:
-        await _cleanup_tenant(admin_engine, outro_tenant.id)
+    _override_as(
+        admin_engine,
+        usuario_id=su_outro.id,
+        tenant_id=outro_tenant.id,
+        tenant_slug=outro_tenant.slug,
+    )
+    r = await client.put(
+        f"/api/v2/usuarios/{ctx['alvo_id']}", json={"senha": "tentativa"}
+    )
+    assert r.status_code == 404
+    async with _sm(admin_engine)() as s:
+        u = (
+            await s.execute(
+                select(Usuario).where(Usuario.id == ctx["alvo_id"])
+            )
+        ).scalar_one()
+    assert u.must_change_password is False
+    assert u.senha != ""  # MD5 antigo segue intacto
 
 
 # ----------------------------------------------------------------------

@@ -81,54 +81,31 @@ async def _provisionar_tenant_e_definicao(admin_session: AsyncSession) -> tuple[
     return tenant_id, definicao_id
 
 
-async def _limpar(admin_session: AsyncSession, tenant_id: int) -> None:
-    async with admin_session.begin():
-        await admin_session.execute(
-            text(
-                "DELETE FROM aprimora_py.workflow_instance WHERE tenant_id = :t"
-            ),
-            {"t": tenant_id},
-        )
-        await admin_session.execute(
-            text(
-                "DELETE FROM aprimora_py.workflow_definition WHERE tenant_id = :t"
-            ),
-            {"t": tenant_id},
-        )
-        await admin_session.execute(
-            text("DELETE FROM aprimora_py.tenant WHERE id = :t"),
-            {"t": tenant_id},
-        )
-
-
 async def test_workflow_instance_aceita_entidade_polimorfica(admin_session):
     """entidade_tipo/entidade_id existem, aceitam 'ocorrencia' e id_processo
     fica NULL — sem exigir vínculo de processo."""
     tenant_id, definicao_id = await _provisionar_tenant_e_definicao(admin_session)
-    try:
-        now = datetime.now()
-        res = await admin_session.execute(
-            text(
-                "INSERT INTO aprimora_py.workflow_instance "
-                "(tenant_id, id_workflow_definition, id_processo, "
-                " entidade_tipo, entidade_id, estado_atual, ativa, iniciada_em) "
-                "VALUES (:tenant_id, :def_id, NULL, 'ocorrencia', :entidade_id, "
-                " 'inicial', true, :now) RETURNING id, entidade_tipo, entidade_id, id_processo"
-            ),
-            {
-                "tenant_id": tenant_id,
-                "def_id": definicao_id,
-                "entidade_id": 42,
-                "now": now,
-            },
-        )
-        await admin_session.commit()
-        row = res.one()
-        assert row.entidade_tipo == "ocorrencia"
-        assert row.entidade_id == 42
-        assert row.id_processo is None
-    finally:
-        await _limpar(admin_session, tenant_id)
+    now = datetime.now()
+    res = await admin_session.execute(
+        text(
+            "INSERT INTO aprimora_py.workflow_instance "
+            "(tenant_id, id_workflow_definition, id_processo, "
+            " entidade_tipo, entidade_id, estado_atual, ativa, iniciada_em) "
+            "VALUES (:tenant_id, :def_id, NULL, 'ocorrencia', :entidade_id, "
+            " 'inicial', true, :now) RETURNING id, entidade_tipo, entidade_id, id_processo"
+        ),
+        {
+            "tenant_id": tenant_id,
+            "def_id": definicao_id,
+            "entidade_id": 42,
+            "now": now,
+        },
+    )
+    await admin_session.commit()
+    row = res.one()
+    assert row.entidade_tipo == "ocorrencia"
+    assert row.entidade_id == 42
+    assert row.id_processo is None
 
 
 async def test_uma_instancia_ativa_por_entidade_por_inversao(admin_session):
@@ -136,9 +113,21 @@ async def test_uma_instancia_ativa_por_entidade_por_inversao(admin_session):
     viola o índice único parcial. Terceira com ativa=false passa — prova por
     inversão que a exclusividade é do índice, não de checagem de serviço."""
     tenant_id, definicao_id = await _provisionar_tenant_e_definicao(admin_session)
-    try:
-        now = datetime.now()
+    now = datetime.now()
 
+    async with admin_session.begin():
+        await admin_session.execute(
+            text(
+                "INSERT INTO aprimora_py.workflow_instance "
+                "(tenant_id, id_workflow_definition, id_processo, "
+                " entidade_tipo, entidade_id, estado_atual, ativa, iniciada_em) "
+                "VALUES (:tenant_id, :def_id, NULL, 'ocorrencia', 7, "
+                " 'inicial', true, :now)"
+            ),
+            {"tenant_id": tenant_id, "def_id": definicao_id, "now": now},
+        )
+
+    with pytest.raises(IntegrityError):
         async with admin_session.begin():
             await admin_session.execute(
                 text(
@@ -150,34 +139,19 @@ async def test_uma_instancia_ativa_por_entidade_por_inversao(admin_session):
                 ),
                 {"tenant_id": tenant_id, "def_id": definicao_id, "now": now},
             )
+    await admin_session.rollback()
 
-        with pytest.raises(IntegrityError):
-            async with admin_session.begin():
-                await admin_session.execute(
-                    text(
-                        "INSERT INTO aprimora_py.workflow_instance "
-                        "(tenant_id, id_workflow_definition, id_processo, "
-                        " entidade_tipo, entidade_id, estado_atual, ativa, iniciada_em) "
-                        "VALUES (:tenant_id, :def_id, NULL, 'ocorrencia', 7, "
-                        " 'inicial', true, :now)"
-                    ),
-                    {"tenant_id": tenant_id, "def_id": definicao_id, "now": now},
-                )
-        await admin_session.rollback()
-
-        async with admin_session.begin():
-            await admin_session.execute(
-                text(
-                    "INSERT INTO aprimora_py.workflow_instance "
-                    "(tenant_id, id_workflow_definition, id_processo, "
-                    " entidade_tipo, entidade_id, estado_atual, ativa, iniciada_em) "
-                    "VALUES (:tenant_id, :def_id, NULL, 'ocorrencia', 7, "
-                    " 'finalizado', false, :now)"
-                ),
-                {"tenant_id": tenant_id, "def_id": definicao_id, "now": now},
-            )
-    finally:
-        await _limpar(admin_session, tenant_id)
+    async with admin_session.begin():
+        await admin_session.execute(
+            text(
+                "INSERT INTO aprimora_py.workflow_instance "
+                "(tenant_id, id_workflow_definition, id_processo, "
+                " entidade_tipo, entidade_id, estado_atual, ativa, iniciada_em) "
+                "VALUES (:tenant_id, :def_id, NULL, 'ocorrencia', 7, "
+                " 'finalizado', false, :now)"
+            ),
+            {"tenant_id": tenant_id, "def_id": definicao_id, "now": now},
+        )
 
 
 # ============================================================================
@@ -256,38 +230,14 @@ async def _remover_instancia_auto_criada(engine, tenant_id: int, oc_id: int) -> 
 
 
 async def _limpar_engine(engine, tenant_id: int) -> None:
-    """Mesma ordem de `_encerrar_arreio` (test_transporte_p5_2_atendimento),
-    acrescida das tabelas de workflow e ocorrência que este arquivo grava —
-    `provisionar_tenant` cria usuário/unidade/tipo_manifestante/grupo, e sem
-    apagá-los antes o DELETE do tenant esbarra em FK."""
+    """Higiene do app entre testes: solta os `dependency_overrides` e descarta o pool do engine
+    global (senão ele sobrevive ao event loop do teste e o seguinte quebra). Os dados do tenant
+    saem em `_limpa_tenants_do_modulo` (conftest); os parâmetros ficam só para não mexer nos
+    pontos de chamada."""
     app.dependency_overrides.clear()
     from app.database import engine as app_engine
 
     await app_engine.dispose()
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM aprimora_py.workflow_sla_alerta WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.workflow_transicao_log WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.workflow_instance WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.workflow_definition WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.ocorrencia_andamento WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.ocorrencia WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.ocorrencia_tipo WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.empresa WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.permissionario WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
 
 
 async def test_compute_contexto_ocorrencia_usa_provider_sem_tocar_processo(admin_engine):
@@ -722,32 +672,6 @@ async def _alvara(
         )
 
 
-async def _limpar_alvara_e_engine(engine, tenant_id: int) -> None:
-    """`_limpar_engine` (Task 2/3) não conhece `alvara` nem `recadastramento_*`
-    (só o teste (c), com convocação suspensa, usa a segunda) — sem apagá-las
-    antes, o DELETE de permissionario/empresa dentro de `_limpar_engine`
-    esbarra na FK. Apagar tabela sem linha nenhuma é no-op, seguro para os
-    outros testes desta seção.
-
-    Task 5 acrescentou `veiculo`/`veiculo_vistoria` (cenário de deferimento
-    com vistoria em dia) — mesma FK de permissionario/empresa, mesmo
-    tratamento no-op quando a seção não os usa."""
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM transporte_regulado.recadastramento_decisao WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.recadastramento_marca WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.recadastramento_item WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.recadastramento_convocacao WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.recadastramento_ciclo WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.veiculo_vistoria WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.veiculo WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.alvara WHERE tenant_id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-    await _limpar_engine(engine, tenant_id)
-
-
 async def test_criar_alvara_cria_instancia_ativa_em_vigente(admin_engine):
     """(a) `criar_alvara` cria a instância ativa `('alvara', id)` já em
     `vigente` — `situacao` do alvará espelha o mesmo slug do DSL."""
@@ -770,7 +694,7 @@ async def test_criar_alvara_cria_instancia_ativa_em_vigente(admin_engine):
         assert inst.ativa is True
         assert inst.estado_atual == "vigente"
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_alvara_antigo_sem_situacao_nasce_vigente_pelo_default(admin_engine):
@@ -804,7 +728,7 @@ async def test_alvara_antigo_sem_situacao_nasce_vigente_pelo_default(admin_engin
             ).scalar_one()
         assert situacao == "vigente"
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def _definicao_alvara_custom(engine, tenant_id: int, *, estado_inicial: str) -> None:
@@ -852,7 +776,7 @@ async def test_criar_alvara_estado_inicial_customizado_grava_slug_completo(admin
         a = await _alvara(admin_engine, t.id, id_empresa=id_emp)
         assert a.situacao == estado
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_criar_alvara_estado_inicial_longo_nao_trunca_500(admin_engine):
@@ -882,7 +806,7 @@ async def test_criar_alvara_estado_inicial_longo_nao_trunca_500(admin_engine):
             ).scalar_one()
         assert persistido == estado
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_ocorrencia_situacao_aceita_slug_ate_50_chars(admin_engine):
@@ -951,7 +875,7 @@ async def test_recadastramento_convocacao_situacao_aceita_slug_ate_50_chars(admi
             ).scalar_one()
         assert persistido == slug_longo
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_definicao_desativada_409_e_nao_recria_semente(admin_engine):
@@ -1006,7 +930,7 @@ async def test_definicao_desativada_409_e_nao_recria_semente(admin_engine):
             ).one()
         assert qtd_depois == 1
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_renovar_alvara_transiciona_origem_e_cria_filho_vigente(admin_engine):
@@ -1057,7 +981,7 @@ async def test_renovar_alvara_transiciona_origem_e_cria_filho_vigente(admin_engi
         assert inst_filho.estado_atual == "vigente"
         assert inst_filho.id != inst_origem.id
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_renovar_alvara_titular_suspenso_409_mensagem_fase_c(admin_engine):
@@ -1090,7 +1014,7 @@ async def test_renovar_alvara_titular_suspenso_409_mensagem_fase_c(admin_engine)
         assert e.value.status_code == 409
         assert "reativação" in e.value.detail
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_revogar_alvara_com_motivo(admin_engine):
@@ -1131,7 +1055,7 @@ async def test_revogar_alvara_com_motivo(admin_engine):
         assert inst.estado_atual == "revogado"
         assert log.contexto_snapshot.get("motivo") == "Irregularidade constatada em vistoria"
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_http_revogar_sem_motivo_422(admin_engine):
@@ -1157,7 +1081,7 @@ async def test_http_revogar_sem_motivo_422(admin_engine):
             )
         assert r.status_code == 422, r.text
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_renovar_alvara_revogado_409_dsl(admin_engine):
@@ -1184,7 +1108,7 @@ async def test_renovar_alvara_revogado_409_dsl(admin_engine):
                 )
         assert e.value.status_code == 409
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_http_usuario_comum_revoga_alvara_200(admin_engine):
@@ -1211,7 +1135,7 @@ async def test_http_usuario_comum_revoga_alvara_200(admin_engine):
         assert r.status_code == 200, r.text
         assert r.json()["situacao"] == "revogado"
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 # ============================================================================
@@ -1273,7 +1197,7 @@ async def test_deferir_completo_sincroniza_estados_e_finaliza(admin_engine):
         assert inst.estado_atual == "deferido"
         assert inst.ativa is False
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_deferir_incompleto_409_mensagem_p5_2(admin_engine):
@@ -1292,7 +1216,7 @@ async def test_deferir_incompleto_409_mensagem_p5_2(admin_engine):
         assert e.value.status_code == 409
         assert "Deferimento exige checklist obrigatório completo" in e.value.detail
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_suspender_e_reativar_respeita_o_estado_anterior(admin_engine):
@@ -1350,7 +1274,7 @@ async def test_suspender_e_reativar_respeita_o_estado_anterior(admin_engine):
             )
         assert recarregada2.situacao == "em_analise"
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_convocacao_de_estoque_em_analise_ganha_workflow_lazy(admin_engine):
@@ -1415,7 +1339,7 @@ async def test_convocacao_de_estoque_em_analise_ganha_workflow_lazy(admin_engine
         assert logs[0].estado_de == "em_analise"
         assert logs[0].estado_para == "indeferido"
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_indeferir_409_quando_dsl_do_tenant_nao_permite(admin_engine):
@@ -1446,7 +1370,7 @@ async def test_indeferir_409_quando_dsl_do_tenant_nao_permite(admin_engine):
                 )
         assert e.value.status_code == 409
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_decidir_409_antes_do_hop_nao_persiste_decisao(admin_engine):
@@ -1521,7 +1445,7 @@ async def test_decidir_409_antes_do_hop_nao_persiste_decisao(admin_engine):
             ).one()
         assert qtd_depois == 0
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 # ============================================================================
@@ -1590,7 +1514,7 @@ async def test_http_get_workflow_alvara_com_instancia_devolve_log_e_estado(admin
         assert body["log"][0]["estado_de"] == "vigente"
         assert body["log"][0]["estado_para"] == "revogado"
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_http_get_workflow_convocacao_com_instancia_devolve_log_e_estado(admin_engine):
@@ -1627,7 +1551,7 @@ async def test_http_get_workflow_convocacao_com_instancia_devolve_log_e_estado(a
         assert body["log"][1]["estado_de"] == "em_analise"
         assert body["log"][1]["estado_para"] == "indeferido"
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_http_get_workflow_convocacao_sem_instancia_devolve_estado_none(admin_engine):
@@ -1655,7 +1579,7 @@ async def test_http_get_workflow_convocacao_sem_instancia_devolve_estado_none(ad
         assert body["sla_dias"] is None
         assert body["log"] == []
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)
 
 
 async def test_http_get_workflow_entidade_cross_tenant_404(admin_engine):
@@ -1839,4 +1763,4 @@ async def test_excluir_alvara_encerra_a_instancia_de_workflow(admin_engine):
             assert inst2.ativa is False
             assert inst2.finalizada_em is not None
     finally:
-        await _limpar_alvara_e_engine(admin_engine, t.id)
+        await _limpar_engine(admin_engine, t.id)

@@ -154,25 +154,6 @@ async def _concede(
     return gid
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 # --------------------------------------------------------------------------
 # load_permissions — o filtro por lotação
 # --------------------------------------------------------------------------
@@ -183,68 +164,59 @@ async def test_grant_de_lotacao_nao_conta_sem_contexto_ativo(admin_engine):
     """Comportamento de sempre: sem `id_unidade_contexto`, só o global conta —
     byte a byte igual a antes desta fatia."""
     tenant, _, principal_id, secundaria_id, _ = await _provisionar(admin_engine)
-    try:
-        async with _sm(admin_engine)() as db:
-            uid, sis, niv = await _cria_usuario_comum(
-                db, tenant.id, principal_id=principal_id, secundaria_id=secundaria_id,
-            )
-            await _concede(
-                db, tenant.id, sis, niv, uid, "manifestante",
-                id_unidade_trabalho=secundaria_id,
-            )
-            await db.commit()
+    async with _sm(admin_engine)() as db:
+        uid, sis, niv = await _cria_usuario_comum(
+            db, tenant.id, principal_id=principal_id, secundaria_id=secundaria_id,
+        )
+        await _concede(
+            db, tenant.id, sis, niv, uid, "manifestante",
+            id_unidade_trabalho=secundaria_id,
+        )
+        await db.commit()
 
-        async with _sm(admin_engine)() as db:
-            perms = await load_permissions(db, uid, tenant_id=tenant.id)
-        assert "manifestante" not in {p.codigo for p in perms.items}
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as db:
+        perms = await load_permissions(db, uid, tenant_id=tenant.id)
+    assert "manifestante" not in {p.codigo for p in perms.items}
 
 
 @pytest.mark.asyncio
 async def test_grant_de_lotacao_nao_vaza_para_lotacao_errada(admin_engine):
     tenant, _, principal_id, secundaria_id, _ = await _provisionar(admin_engine)
-    try:
-        async with _sm(admin_engine)() as db:
-            uid, sis, niv = await _cria_usuario_comum(
-                db, tenant.id, principal_id=principal_id, secundaria_id=secundaria_id,
-            )
-            await _concede(
-                db, tenant.id, sis, niv, uid, "manifestante",
-                id_unidade_trabalho=secundaria_id,
-            )
-            await db.commit()
+    async with _sm(admin_engine)() as db:
+        uid, sis, niv = await _cria_usuario_comum(
+            db, tenant.id, principal_id=principal_id, secundaria_id=secundaria_id,
+        )
+        await _concede(
+            db, tenant.id, sis, niv, uid, "manifestante",
+            id_unidade_trabalho=secundaria_id,
+        )
+        await db.commit()
 
-        async with _sm(admin_engine)() as db:
-            perms = await load_permissions(
-                db, uid, tenant_id=tenant.id, id_unidade_contexto=principal_id,
-            )
-        assert "manifestante" not in {p.codigo for p in perms.items}
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as db:
+        perms = await load_permissions(
+            db, uid, tenant_id=tenant.id, id_unidade_contexto=principal_id,
+        )
+    assert "manifestante" not in {p.codigo for p in perms.items}
 
 
 @pytest.mark.asyncio
 async def test_grant_de_lotacao_conta_com_contexto_certo(admin_engine):
     tenant, _, principal_id, secundaria_id, _ = await _provisionar(admin_engine)
-    try:
-        async with _sm(admin_engine)() as db:
-            uid, sis, niv = await _cria_usuario_comum(
-                db, tenant.id, principal_id=principal_id, secundaria_id=secundaria_id,
-            )
-            await _concede(
-                db, tenant.id, sis, niv, uid, "manifestante",
-                id_unidade_trabalho=secundaria_id,
-            )
-            await db.commit()
+    async with _sm(admin_engine)() as db:
+        uid, sis, niv = await _cria_usuario_comum(
+            db, tenant.id, principal_id=principal_id, secundaria_id=secundaria_id,
+        )
+        await _concede(
+            db, tenant.id, sis, niv, uid, "manifestante",
+            id_unidade_trabalho=secundaria_id,
+        )
+        await db.commit()
 
-        async with _sm(admin_engine)() as db:
-            perms = await load_permissions(
-                db, uid, tenant_id=tenant.id, id_unidade_contexto=secundaria_id,
-            )
-        assert "manifestante" in {p.codigo for p in perms.items}
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as db:
+        perms = await load_permissions(
+            db, uid, tenant_id=tenant.id, id_unidade_contexto=secundaria_id,
+        )
+    assert "manifestante" in {p.codigo for p in perms.items}
 
 
 @pytest.mark.asyncio
@@ -252,35 +224,32 @@ async def test_uniao_global_e_lotacao_nao_interseccao(admin_engine):
     """Q1: os dois eixos se SOMAM. Um grant global ('frota') sobrevive
     trocando de lotação; o de lotação ('manifestante') só aparece na sua."""
     tenant, _, principal_id, secundaria_id, _ = await _provisionar(admin_engine)
-    try:
-        async with _sm(admin_engine)() as db:
-            uid, sis, niv = await _cria_usuario_comum(
-                db, tenant.id, principal_id=principal_id, secundaria_id=secundaria_id,
-            )
-            await _concede(db, tenant.id, sis, niv, uid, "frota")  # global
-            await _concede(
-                db, tenant.id, sis, niv, uid, "manifestante",
-                id_unidade_trabalho=secundaria_id,
-            )
-            await db.commit()
+    async with _sm(admin_engine)() as db:
+        uid, sis, niv = await _cria_usuario_comum(
+            db, tenant.id, principal_id=principal_id, secundaria_id=secundaria_id,
+        )
+        await _concede(db, tenant.id, sis, niv, uid, "frota")  # global
+        await _concede(
+            db, tenant.id, sis, niv, uid, "manifestante",
+            id_unidade_trabalho=secundaria_id,
+        )
+        await db.commit()
 
-        async with _sm(admin_engine)() as db:
-            no_principal = await load_permissions(
-                db, uid, tenant_id=tenant.id, id_unidade_contexto=principal_id,
-            )
-        codigos_principal = {p.codigo for p in no_principal.items}
-        assert "frota" in codigos_principal
-        assert "manifestante" not in codigos_principal
+    async with _sm(admin_engine)() as db:
+        no_principal = await load_permissions(
+            db, uid, tenant_id=tenant.id, id_unidade_contexto=principal_id,
+        )
+    codigos_principal = {p.codigo for p in no_principal.items}
+    assert "frota" in codigos_principal
+    assert "manifestante" not in codigos_principal
 
-        async with _sm(admin_engine)() as db:
-            na_secundaria = await load_permissions(
-                db, uid, tenant_id=tenant.id, id_unidade_contexto=secundaria_id,
-            )
-        codigos_secundaria = {p.codigo for p in na_secundaria.items}
-        assert "frota" in codigos_secundaria, "vínculo global sumiu ao trocar de lotação"
-        assert "manifestante" in codigos_secundaria
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as db:
+        na_secundaria = await load_permissions(
+            db, uid, tenant_id=tenant.id, id_unidade_contexto=secundaria_id,
+        )
+    codigos_secundaria = {p.codigo for p in na_secundaria.items}
+    assert "frota" in codigos_secundaria, "vínculo global sumiu ao trocar de lotação"
+    assert "manifestante" in codigos_secundaria
 
 
 # --------------------------------------------------------------------------
@@ -291,43 +260,39 @@ async def test_uniao_global_e_lotacao_nao_interseccao(admin_engine):
 @pytest.mark.asyncio
 async def test_listar_lotacoes_principal_e_secundaria_sem_duplicar(admin_engine):
     tenant, admin_id, principal_id, secundaria_id, _ = await _provisionar(admin_engine)
-    try:
-        async with _sm(admin_engine)() as db:
-            uid, _, _ = await _cria_usuario_comum(
-                db, tenant.id, principal_id=principal_id, secundaria_id=secundaria_id,
-            )
-            # segunda linha "acidental" apontando pra própria principal — não
-            # pode duplicar na resposta.
-            await db.execute(text("""
+    async with _sm(admin_engine)() as db:
+        uid, _, _ = await _cria_usuario_comum(
+            db, tenant.id, principal_id=principal_id, secundaria_id=secundaria_id,
+        )
+        # segunda linha "acidental" apontando pra própria principal — não
+        # pode duplicar na resposta.
+        await db.execute(text("""
                 INSERT INTO utils.usuario_unidade_trabalho
                     (tenant_id, id_usuario, id_unidade_trabalho, excluido)
                 VALUES (:t, :u, :p, false)
             """), {"t": tenant.id, "u": uid, "p": principal_id})
-            await db.commit()
+        await db.commit()
 
-        async with _sm(admin_engine)() as db:
-            from app.models import Usuario
-            from sqlalchemy import select
-            usuario = (await db.execute(
-                select(Usuario).where(Usuario.id == uid)
-            )).scalar_one()
-            lotacoes = await listar_lotacoes(db, tenant_id=tenant.id, usuario=usuario)
+    async with _sm(admin_engine)() as db:
+        from app.models import Usuario
+        from sqlalchemy import select
+        usuario = (await db.execute(
+            select(Usuario).where(Usuario.id == uid)
+        )).scalar_one()
+        lotacoes = await listar_lotacoes(db, tenant_id=tenant.id, usuario=usuario)
 
-        assert {l.id for l in lotacoes} == {principal_id, secundaria_id}
-        principal = next(l for l in lotacoes if l.id == principal_id)
-        secundaria = next(l for l in lotacoes if l.id == secundaria_id)
-        assert principal.principal is True
-        assert secundaria.principal is False
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    assert {l.id for l in lotacoes} == {principal_id, secundaria_id}
+    principal = next(l for l in lotacoes if l.id == principal_id)
+    secundaria = next(l for l in lotacoes if l.id == secundaria_id)
+    assert principal.principal is True
+    assert secundaria.principal is False
 
 
 @pytest.mark.asyncio
 async def test_listar_lotacoes_usuario_sem_lotacao_devolve_vazio(admin_engine):
     tenant, admin_id, principal_id, secundaria_id, _ = await _provisionar(admin_engine)
-    try:
-        async with _sm(admin_engine)() as db:
-            uid = (await db.execute(text("""
+    async with _sm(admin_engine)() as db:
+        uid = (await db.execute(text("""
                 INSERT INTO utils.usuario (tenant_id, nome, email, senha, cpf,
                     ativo, excluido, app, nivel_acesso_sigilo, id_unidade_trabalho,
                     must_change_password)
@@ -335,21 +300,19 @@ async def test_listar_lotacoes_usuario_sem_lotacao_devolve_vazio(admin_engine):
                         'interno', NULL, false)
                 RETURNING id
             """), {
-                "t": tenant.id, "email": f"semlotacao-{uuid.uuid4().hex[:8]}@t.local",
-                "cpf": uuid.uuid4().hex[:11], "app": APP,
-            })).scalar_one()
-            await db.commit()
+            "t": tenant.id, "email": f"semlotacao-{uuid.uuid4().hex[:8]}@t.local",
+            "cpf": uuid.uuid4().hex[:11], "app": APP,
+        })).scalar_one()
+        await db.commit()
 
-        async with _sm(admin_engine)() as db:
-            from app.models import Usuario
-            from sqlalchemy import select
-            usuario = (await db.execute(
-                select(Usuario).where(Usuario.id == uid)
-            )).scalar_one()
-            lotacoes = await listar_lotacoes(db, tenant_id=tenant.id, usuario=usuario)
-        assert lotacoes == []
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as db:
+        from app.models import Usuario
+        from sqlalchemy import select
+        usuario = (await db.execute(
+            select(Usuario).where(Usuario.id == uid)
+        )).scalar_one()
+        lotacoes = await listar_lotacoes(db, tenant_id=tenant.id, usuario=usuario)
+    assert lotacoes == []
 
 
 # --------------------------------------------------------------------------
@@ -380,7 +343,6 @@ async def test_login_emite_contexto_com_lotacao_principal(admin_engine):
         app.dependency_overrides.clear()
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant.id)
 
 
 def _admin_email(slug: str) -> str:
@@ -440,7 +402,6 @@ async def test_trocar_lotacao_ativa_muda_o_que_permissoes_me_mostra(admin_engine
     finally:
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -477,6 +438,3 @@ async def test_trocar_para_lotacao_alheia_recebe_403(admin_engine):
     finally:
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant.id)
-        if outro_tenant is not None:
-            await _cleanup(admin_engine, outro_tenant.id)

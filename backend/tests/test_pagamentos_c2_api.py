@@ -100,22 +100,6 @@ async def _usuario_gestor(engine, tenant_id: int) -> int:
     return uid
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    from sqlalchemy import text
-
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.idempotencia WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.sistema_integrado WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-    from tests.test_pagamentos_autorizacao import _cleanup as _cleanup_aut
-
-    await _cleanup_aut(engine, tenant_id)
-
-
 def _fake_request(*, api_key: str | None, tenant_id: int | None) -> Request:
     headers = []
     if api_key is not None:
@@ -160,29 +144,26 @@ async def _criar_sistema_direto(engine, tenant_id: int, *, usuario_id: int, **kw
 @pytest.mark.asyncio
 async def test_a_criar_devolve_chave_uma_vez_lista_nao_expoe_segredo(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
 
-        r = await _http(admin_engine, t.id, t.slug, uid, "POST",
-                        "/api/v2/pagamentos/sistemas-integrados",
-                        json={"nome": "ERP Financeiro"})
-        assert r.status_code == 201, r.text[:300]
-        body = r.json()
-        assert body["chave"].startswith("apy_")
-        prefixo, _, segredo = body["chave"].partition(".")
-        assert prefixo == body["prefixo"]
-        assert segredo  # segredo não-vazio
+    r = await _http(admin_engine, t.id, t.slug, uid, "POST",
+                    "/api/v2/pagamentos/sistemas-integrados",
+                    json={"nome": "ERP Financeiro"})
+    assert r.status_code == 201, r.text[:300]
+    body = r.json()
+    assert body["chave"].startswith("apy_")
+    prefixo, _, segredo = body["chave"].partition(".")
+    assert prefixo == body["prefixo"]
+    assert segredo  # segredo não-vazio
 
-        r2 = await _http(admin_engine, t.id, t.slug, uid, "GET",
-                         "/api/v2/pagamentos/sistemas-integrados")
-        assert r2.status_code == 200
-        itens = r2.json()
-        assert any(i["id"] == body["id"] for i in itens)
-        for item in itens:
-            assert "chave" not in item
-            assert "hash_chave" not in item
-    finally:
-        await _cleanup(admin_engine, t.id)
+    r2 = await _http(admin_engine, t.id, t.slug, uid, "GET",
+                     "/api/v2/pagamentos/sistemas-integrados")
+    assert r2.status_code == 200
+    itens = r2.json()
+    assert any(i["id"] == body["id"] for i in itens)
+    for item in itens:
+        assert "chave" not in item
+        assert "hash_chave" not in item
 
 
 # ---------------------------------------------------------------- (b)
@@ -190,18 +171,15 @@ async def test_a_criar_devolve_chave_uma_vez_lista_nao_expoe_segredo(admin_engin
 @pytest.mark.asyncio
 async def test_b_chave_valida_resolve_tenant_e_escopos(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
-        sistema, chave = await _criar_sistema_direto(
-            admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    sistema, chave = await _criar_sistema_direto(
+        admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
 
-        resolvido = await _resolver(admin_engine, api_key=chave)
-        assert resolvido.id == sistema.id
-        assert resolvido.tenant_id == t.id
-        assert resolvido.escopo_leitura is True
-        assert resolvido.escopo_escrita is True
-    finally:
-        await _cleanup(admin_engine, t.id)
+    resolvido = await _resolver(admin_engine, api_key=chave)
+    assert resolvido.id == sistema.id
+    assert resolvido.tenant_id == t.id
+    assert resolvido.escopo_leitura is True
+    assert resolvido.escopo_escrita is True
 
 
 # ---------------------------------------------------------------- (c)
@@ -216,39 +194,33 @@ async def test_c_prefixo_desconhecido_401(admin_engine):
 @pytest.mark.asyncio
 async def test_c_segredo_errado_401(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
-        sistema, chave = await _criar_sistema_direto(admin_engine, t.id, usuario_id=uid)
-        prefixo = chave.split(".", 1)[0]
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    sistema, chave = await _criar_sistema_direto(admin_engine, t.id, usuario_id=uid)
+    prefixo = chave.split(".", 1)[0]
 
-        with pytest.raises(Exception) as exc:
-            await _resolver(admin_engine, api_key=f"{prefixo}.segredo-errado")
-        assert getattr(exc.value, "status_code", None) == 401
-    finally:
-        await _cleanup(admin_engine, t.id)
+    with pytest.raises(Exception) as exc:
+        await _resolver(admin_engine, api_key=f"{prefixo}.segredo-errado")
+    assert getattr(exc.value, "status_code", None) == 401
 
 
 @pytest.mark.asyncio
 async def test_c_chave_revogada_401(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_gestor(admin_engine, t.id)
-        sistema, chave = await _criar_sistema_direto(admin_engine, t.id, usuario_id=uid)
+    uid = await _usuario_gestor(admin_engine, t.id)
+    sistema, chave = await _criar_sistema_direto(admin_engine, t.id, usuario_id=uid)
 
-        # A chave funciona antes da revogação.
-        assert (await _resolver(admin_engine, api_key=chave)).id == sistema.id
+    # A chave funciona antes da revogação.
+    assert (await _resolver(admin_engine, api_key=chave)).id == sistema.id
 
-        r = await _http(admin_engine, t.id, t.slug, uid, "POST",
-                        f"/api/v2/pagamentos/sistemas-integrados/{sistema.id}/revogar")
-        assert r.status_code == 200
-        assert r.json()["revogado_em"] is not None
-        assert r.json()["ativo"] is False
+    r = await _http(admin_engine, t.id, t.slug, uid, "POST",
+                    f"/api/v2/pagamentos/sistemas-integrados/{sistema.id}/revogar")
+    assert r.status_code == 200
+    assert r.json()["revogado_em"] is not None
+    assert r.json()["ativo"] is False
 
-        with pytest.raises(Exception) as exc:
-            await _resolver(admin_engine, api_key=chave)
-        assert getattr(exc.value, "status_code", None) == 401
-    finally:
-        await _cleanup(admin_engine, t.id)
+    with pytest.raises(Exception) as exc:
+        await _resolver(admin_engine, api_key=chave)
+    assert getattr(exc.value, "status_code", None) == 401
 
 
 @pytest.mark.asyncio
@@ -265,25 +237,22 @@ async def test_c_sem_header_ou_mal_formado_401(admin_engine):
 async def test_d_chave_do_tenant_a_nao_autentica_como_tenant_b(admin_engine, two_tenants):
     tid_a, tid_b = two_tenants
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
-        sistema, chave = await _criar_sistema_direto(admin_engine, t.id, usuario_id=uid)
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    sistema, chave = await _criar_sistema_direto(admin_engine, t.id, usuario_id=uid)
 
-        # Host resolveu um tenant DIFERENTE do dono da chave -> 401, não 200
-        # "autenticado como o tenant errado".
-        with pytest.raises(Exception) as exc:
-            await _resolver(admin_engine, api_key=chave, tenant_id=tid_a if tid_a != t.id else tid_b)
-        assert getattr(exc.value, "status_code", None) == 401
+    # Host resolveu um tenant DIFERENTE do dono da chave -> 401, não 200
+    # "autenticado como o tenant errado".
+    with pytest.raises(Exception) as exc:
+        await _resolver(admin_engine, api_key=chave, tenant_id=tid_a if tid_a != t.id else tid_b)
+    assert getattr(exc.value, "status_code", None) == 401
 
-        # Sem tenant resolvido pelo host, a chave manda -- e é o tenant certo.
-        resolvido = await _resolver(admin_engine, api_key=chave, tenant_id=None)
-        assert resolvido.tenant_id == t.id
+    # Sem tenant resolvido pelo host, a chave manda -- e é o tenant certo.
+    resolvido = await _resolver(admin_engine, api_key=chave, tenant_id=None)
+    assert resolvido.tenant_id == t.id
 
-        # Host resolvendo o MESMO tenant da chave funciona normalmente.
-        resolvido2 = await _resolver(admin_engine, api_key=chave, tenant_id=t.id)
-        assert resolvido2.tenant_id == t.id
-    finally:
-        await _cleanup(admin_engine, t.id)
+    # Host resolvendo o MESMO tenant da chave funciona normalmente.
+    resolvido2 = await _resolver(admin_engine, api_key=chave, tenant_id=t.id)
+    assert resolvido2.tenant_id == t.id
 
 
 # ---------------------------------------------------------------- (e)
@@ -291,39 +260,36 @@ async def test_d_chave_do_tenant_a_nao_autentica_como_tenant_b(admin_engine, two
 @pytest.mark.asyncio
 async def test_e_log_de_acesso_nao_expoe_segredo_da_api_key(admin_engine, caplog):
     t = await _provisionar(admin_engine)
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    sistema, chave = await _criar_sistema_direto(admin_engine, t.id, usuario_id=uid)
+    segredo = chave.split(".", 1)[1]
+
     try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
-        sistema, chave = await _criar_sistema_direto(admin_engine, t.id, usuario_id=uid)
-        segredo = chave.split(".", 1)[1]
-
-        try:
-            with caplog.at_level(logging.INFO, logger="aprimora.access"):
-                transport = ASGITransport(app=app)
-                async with AsyncClient(transport=transport, base_url="http://test") as c:
-                    resp = await c.get("/api/v2/health", headers={"X-Api-Key": chave})
-            assert resp.status_code == 200
-        finally:
-            # Sem isto, a conexão asyncpg do engine de `app.database` fica no
-            # pool presa ao event loop DESTE teste; o próximo teste roda num
-            # loop novo (pytest-asyncio é function-scoped) e o
-            # `pool_pre_ping` estoura "attached to a different loop" ao tentar
-            # reciclar essa conexão — flake descoberto na Task 7 (bastou um
-            # teste HTTP novo logo depois deste para expor).
-            from app.database import engine as app_engine
-            await app_engine.dispose()
-
-        registros_access = [r for r in caplog.records if r.name == "aprimora.access"]
-        assert registros_access, "esperava ao menos 1 linha de log de acesso"
-        for record in registros_access:
-            partes = [record.getMessage()]
-            for k, v in record.__dict__.items():
-                if k not in ("msg", "args"):
-                    partes.append(str(v))
-            texto = " ".join(partes)
-            assert segredo not in texto, f"segredo vazou no log: {texto!r}"
-            assert chave not in texto, f"chave completa vazou no log: {texto!r}"
+        with caplog.at_level(logging.INFO, logger="aprimora.access"):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as c:
+                resp = await c.get("/api/v2/health", headers={"X-Api-Key": chave})
+        assert resp.status_code == 200
     finally:
-        await _cleanup(admin_engine, t.id)
+        # Sem isto, a conexão asyncpg do engine de `app.database` fica no
+        # pool presa ao event loop DESTE teste; o próximo teste roda num
+        # loop novo (pytest-asyncio é function-scoped) e o
+        # `pool_pre_ping` estoura "attached to a different loop" ao tentar
+        # reciclar essa conexão — flake descoberto na Task 7 (bastou um
+        # teste HTTP novo logo depois deste para expor).
+        from app.database import engine as app_engine
+        await app_engine.dispose()
+
+    registros_access = [r for r in caplog.records if r.name == "aprimora.access"]
+    assert registros_access, "esperava ao menos 1 linha de log de acesso"
+    for record in registros_access:
+        partes = [record.getMessage()]
+        for k, v in record.__dict__.items():
+            if k not in ("msg", "args"):
+                partes.append(str(v))
+        texto = " ".join(partes)
+        assert segredo not in texto, f"segredo vazou no log: {texto!r}"
+        assert chave not in texto, f"chave completa vazou no log: {texto!r}"
 
 
 # ============================================================================
@@ -376,66 +342,57 @@ ROTA_DEBITOS = "/api/v2/integracao/pagamentos/debitos"
 @pytest.mark.asyncio
 async def test_t7_a_post_debito_com_chave_replay_nao_cria_segundo(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
-        sistema, chave = await _criar_sistema_direto(
-            admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
-        forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
-        payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    sistema, chave = await _criar_sistema_direto(
+        admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
+    forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
+    payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
 
-        antes = await _contar_debitos(admin_engine, t.id)
-        r1 = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
-                             json=payload, headers={"Idempotency-Key": "chave-x"})
-        assert r1.status_code == 201, r1.text[:300]
-        body1 = r1.json()
+    antes = await _contar_debitos(admin_engine, t.id)
+    r1 = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
+                         json=payload, headers={"Idempotency-Key": "chave-x"})
+    assert r1.status_code == 201, r1.text[:300]
+    body1 = r1.json()
 
-        r2 = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
-                             json=payload, headers={"Idempotency-Key": "chave-x"})
-        assert r2.status_code == 201, r2.text[:300]
-        assert r2.json() == body1, "replay deveria devolver a MESMA resposta gravada"
+    r2 = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
+                         json=payload, headers={"Idempotency-Key": "chave-x"})
+    assert r2.status_code == 201, r2.text[:300]
+    assert r2.json() == body1, "replay deveria devolver a MESMA resposta gravada"
 
-        depois = await _contar_debitos(admin_engine, t.id)
-        assert depois == antes + 1, "replay não pode criar um segundo débito"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    depois = await _contar_debitos(admin_engine, t.id)
+    assert depois == antes + 1, "replay não pode criar um segundo débito"
 
 
 @pytest.mark.asyncio
 async def test_t7_b_mesma_chave_payload_diferente_409(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
-        sistema, chave = await _criar_sistema_direto(
-            admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
-        forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
-        p1 = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
-        p2 = _payload_json(forn, nat, fonte, conta, unidade_id, valor="200.00")
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    sistema, chave = await _criar_sistema_direto(
+        admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
+    forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
+    p1 = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
+    p2 = _payload_json(forn, nat, fonte, conta, unidade_id, valor="200.00")
 
-        r1 = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
-                             json=p1, headers={"Idempotency-Key": "chave-y"})
-        assert r1.status_code == 201, r1.text[:300]
+    r1 = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
+                         json=p1, headers={"Idempotency-Key": "chave-y"})
+    assert r1.status_code == 201, r1.text[:300]
 
-        r2 = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
-                             json=p2, headers={"Idempotency-Key": "chave-y"})
-        assert r2.status_code == 409, r2.text[:300]
-    finally:
-        await _cleanup(admin_engine, t.id)
+    r2 = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
+                         json=p2, headers={"Idempotency-Key": "chave-y"})
+    assert r2.status_code == 409, r2.text[:300]
 
 
 @pytest.mark.asyncio
 async def test_t7_c_sem_idempotency_key_422(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
-        sistema, chave = await _criar_sistema_direto(
-            admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
-        forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
-        payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    sistema, chave = await _criar_sistema_direto(
+        admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
+    forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
+    payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
 
-        r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS, json=payload)
-        assert r.status_code == 422, r.text[:300]
-    finally:
-        await _cleanup(admin_engine, t.id)
+    r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS, json=payload)
+    assert r.status_code == 422, r.text[:300]
 
 
 @pytest.mark.asyncio
@@ -445,105 +402,93 @@ async def test_t7_c2_idempotency_key_maior_que_64_chars_422(admin_engine):
     router e só estourava no INSERT como 500 (StringDataRightTruncation),
     em vez de um 422 claro para o integrador."""
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
-        sistema, chave = await _criar_sistema_direto(
-            admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
-        forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
-        payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
-        chave_longa = "x" * 65
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    sistema, chave = await _criar_sistema_direto(
+        admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
+    forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
+    payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
+    chave_longa = "x" * 65
 
-        r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
-                            json=payload, headers={"Idempotency-Key": chave_longa})
-        assert r.status_code == 422, r.text[:300]
-    finally:
-        await _cleanup(admin_engine, t.id)
+    r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
+                        json=payload, headers={"Idempotency-Key": chave_longa})
+    assert r.status_code == 422, r.text[:300]
 
 
 @pytest.mark.asyncio
 async def test_t7_d_escopo_leitura_tentando_escrever_403(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
-        sistema, chave = await _criar_sistema_direto(
-            admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=False)
-        forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
-        payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    sistema, chave = await _criar_sistema_direto(
+        admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=False)
+    forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
+    payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
 
-        r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
-                            json=payload, headers={"Idempotency-Key": "chave-d"})
-        assert r.status_code == 403, r.text[:300]
-    finally:
-        await _cleanup(admin_engine, t.id)
+    r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
+                        json=payload, headers={"Idempotency-Key": "chave-d"})
+    assert r.status_code == 403, r.text[:300]
 
 
 @pytest.mark.asyncio
 async def test_t7_e_get_debitos_paginado_por_cursor_cobre_tudo_sem_repetir(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
-        sistema, chave = await _criar_sistema_direto(
-            admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
-        forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    sistema, chave = await _criar_sistema_direto(
+        admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
+    forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
 
-        criados_ids = []
-        for i in range(5):
-            payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor=f"{100 + i}.00")
-            r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
-                                json=payload, headers={"Idempotency-Key": f"chave-lote-{i}"})
-            assert r.status_code == 201, r.text[:300]
-            criados_ids.append(r.json()["id"])
+    criados_ids = []
+    for i in range(5):
+        payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor=f"{100 + i}.00")
+        r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
+                            json=payload, headers={"Idempotency-Key": f"chave-lote-{i}"})
+        assert r.status_code == 201, r.text[:300]
+        criados_ids.append(r.json()["id"])
 
-        vistos = []
-        cursor = None
-        paginas = 0
-        while True:
-            caminho = ROTA_DEBITOS + (f"?cursor={cursor}&limite=2" if cursor else "?limite=2")
-            r = await _http_m2m(admin_engine, t.id, t.slug, chave, "GET", caminho)
-            assert r.status_code == 200, r.text[:300]
-            body = r.json()
-            ids_pagina = [item["id"] for item in body["items"]]
-            assert all(i in criados_ids for i in ids_pagina)
-            vistos.extend(ids_pagina)
-            paginas += 1
-            assert paginas <= 10, "loop de paginação não convergiu"
-            cursor = body["proximo_cursor"]
-            if cursor is None:
-                break
+    vistos = []
+    cursor = None
+    paginas = 0
+    while True:
+        caminho = ROTA_DEBITOS + (f"?cursor={cursor}&limite=2" if cursor else "?limite=2")
+        r = await _http_m2m(admin_engine, t.id, t.slug, chave, "GET", caminho)
+        assert r.status_code == 200, r.text[:300]
+        body = r.json()
+        ids_pagina = [item["id"] for item in body["items"]]
+        assert all(i in criados_ids for i in ids_pagina)
+        vistos.extend(ids_pagina)
+        paginas += 1
+        assert paginas <= 10, "loop de paginação não convergiu"
+        cursor = body["proximo_cursor"]
+        if cursor is None:
+            break
 
-        assert sorted(vistos) == sorted(set(vistos)), "cursor repetiu algum id"
-        assert set(criados_ids) <= set(vistos), "cursor pulou algum débito criado"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    assert sorted(vistos) == sorted(set(vistos)), "cursor repetiu algum id"
+    assert set(criados_ids) <= set(vistos), "cursor pulou algum débito criado"
 
 
 @pytest.mark.asyncio
 async def test_t7_f_alterado_desde_filtra(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
-        sistema, chave = await _criar_sistema_direto(
-            admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
-        forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
-        payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
-        r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
-                            json=payload, headers={"Idempotency-Key": "chave-f"})
-        assert r.status_code == 201, r.text[:300]
-        did = r.json()["id"]
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    sistema, chave = await _criar_sistema_direto(
+        admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
+    forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
+    payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
+    r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
+                        json=payload, headers={"Idempotency-Key": "chave-f"})
+    assert r.status_code == 201, r.text[:300]
+    did = r.json()["id"]
 
-        futuro = (datetime.utcnow() + timedelta(days=1)).isoformat()
-        r_futuro = await _http_m2m(admin_engine, t.id, t.slug, chave, "GET",
-                                   ROTA_DEBITOS + f"?alterado_desde={futuro}")
-        assert r_futuro.status_code == 200
-        assert did not in [i["id"] for i in r_futuro.json()["items"]]
+    futuro = (datetime.utcnow() + timedelta(days=1)).isoformat()
+    r_futuro = await _http_m2m(admin_engine, t.id, t.slug, chave, "GET",
+                               ROTA_DEBITOS + f"?alterado_desde={futuro}")
+    assert r_futuro.status_code == 200
+    assert did not in [i["id"] for i in r_futuro.json()["items"]]
 
-        passado = (datetime.utcnow() - timedelta(days=1)).isoformat()
-        r_passado = await _http_m2m(admin_engine, t.id, t.slug, chave, "GET",
-                                    ROTA_DEBITOS + f"?alterado_desde={passado}")
-        assert r_passado.status_code == 200
-        assert did in [i["id"] for i in r_passado.json()["items"]]
-    finally:
-        await _cleanup(admin_engine, t.id)
+    passado = (datetime.utcnow() - timedelta(days=1)).isoformat()
+    r_passado = await _http_m2m(admin_engine, t.id, t.slug, chave, "GET",
+                                ROTA_DEBITOS + f"?alterado_desde={passado}")
+    assert r_passado.status_code == 200
+    assert did in [i["id"] for i in r_passado.json()["items"]]
 
 
 @pytest.mark.asyncio
@@ -561,73 +506,66 @@ async def test_t7_g_liquidar_sem_empenho_paridade_com_realm_admin(admin_engine):
     então "funciona" não é um acidente da M2M, é o comportamento real que
     ela está espelhando."""
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(
-            admin_engine, t.id, ["pagamento_cadastro", "pagamento_validar", "pagamento_solicitar"])
-        sistema, chave = await _criar_sistema_direto(
-            admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
-        forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
+    uid = await _usuario_com(
+        admin_engine, t.id, ["pagamento_cadastro", "pagamento_validar", "pagamento_solicitar"])
+    sistema, chave = await _criar_sistema_direto(
+        admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
+    forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
 
-        # (1) Porta M2M: cria sem empenho, liquida — tem que dar 200.
-        payload = _payload_debito(forn, nat, fonte, conta, unidade_id=unidade_id, valor="100.00")
-        payload_dict = payload.model_dump(mode="json")
-        payload_dict["numero_ne"] = None  # sem empenho
-        r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
-                            json=payload_dict, headers={"Idempotency-Key": "chave-g-criar"})
-        assert r.status_code == 201, r.text[:300]
-        did = r.json()["id"]
-        assert r.json()["numero_ne"] is None
+    # (1) Porta M2M: cria sem empenho, liquida — tem que dar 200.
+    payload = _payload_debito(forn, nat, fonte, conta, unidade_id=unidade_id, valor="100.00")
+    payload_dict = payload.model_dump(mode="json")
+    payload_dict["numero_ne"] = None  # sem empenho
+    r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
+                        json=payload_dict, headers={"Idempotency-Key": "chave-g-criar"})
+    assert r.status_code == 201, r.text[:300]
+    did = r.json()["id"]
+    assert r.json()["numero_ne"] is None
 
-        r_liq = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST",
-                                f"{ROTA_DEBITOS}/{did}/liquidar",
-                                headers={"Idempotency-Key": "chave-g-liquidar"})
-        assert r_liq.status_code == 200, r_liq.text[:300]
-        assert r_liq.json()["liquidacao_confirmada"] is True
-        assert r_liq.json()["numero_ne"] is None  # continua sem empenho — ninguém exigiu
+    r_liq = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST",
+                            f"{ROTA_DEBITOS}/{did}/liquidar",
+                            headers={"Idempotency-Key": "chave-g-liquidar"})
+    assert r_liq.status_code == 200, r_liq.text[:300]
+    assert r_liq.json()["liquidacao_confirmada"] is True
+    assert r_liq.json()["numero_ne"] is None  # continua sem empenho — ninguém exigiu
 
-        # (2) Porta admin: MESMO cenário (débito sem empenho), mesmo ato
-        # (`confirmar-liquidacao`) — tem que dar 200 também, provando que o
-        # (1) acima não é um caminho paralelo mais frouxo, é o MESMO caminho.
-        r_admin_criar = await _http(admin_engine, t.id, t.slug, uid, "POST",
-                                    "/api/v2/pagamentos/debitos", json=payload_dict)
-        assert r_admin_criar.status_code == 201, r_admin_criar.text[:300]
-        did_admin = r_admin_criar.json()["id"]
+    # (2) Porta admin: MESMO cenário (débito sem empenho), mesmo ato
+    # (`confirmar-liquidacao`) — tem que dar 200 também, provando que o
+    # (1) acima não é um caminho paralelo mais frouxo, é o MESMO caminho.
+    r_admin_criar = await _http(admin_engine, t.id, t.slug, uid, "POST",
+                                "/api/v2/pagamentos/debitos", json=payload_dict)
+    assert r_admin_criar.status_code == 201, r_admin_criar.text[:300]
+    did_admin = r_admin_criar.json()["id"]
 
-        r_admin_liq = await _http(admin_engine, t.id, t.slug, uid, "POST",
-                                  f"/api/v2/pagamentos/debitos/{did_admin}/confirmar-liquidacao",
-                                  json={})
-        assert r_admin_liq.status_code == 200, r_admin_liq.text[:300]
-        assert r_admin_liq.json()["liquidacao_confirmada"] is True
-    finally:
-        await _cleanup(admin_engine, t.id)
+    r_admin_liq = await _http(admin_engine, t.id, t.slug, uid, "POST",
+                              f"/api/v2/pagamentos/debitos/{did_admin}/confirmar-liquidacao",
+                              json={})
+    assert r_admin_liq.status_code == 200, r_admin_liq.text[:300]
+    assert r_admin_liq.json()["liquidacao_confirmada"] is True
 
 
 @pytest.mark.asyncio
 async def test_t7_h_cross_tenant_404(admin_engine, two_tenants):
     t = await _provisionar(admin_engine)
     t2 = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
-        sistema, chave = await _criar_sistema_direto(
-            admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
-        forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
-        payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
-        r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
-                            json=payload, headers={"Idempotency-Key": "chave-h"})
-        assert r.status_code == 201, r.text[:300]
-        did = r.json()["id"]
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    sistema, chave = await _criar_sistema_direto(
+        admin_engine, t.id, usuario_id=uid, escopo_leitura=True, escopo_escrita=True)
+    forn, nat, fonte, conta, unidade_id = await _cenario_debito(admin_engine, t.id)
+    payload = _payload_json(forn, nat, fonte, conta, unidade_id, valor="100.00")
+    r = await _http_m2m(admin_engine, t.id, t.slug, chave, "POST", ROTA_DEBITOS,
+                        json=payload, headers={"Idempotency-Key": "chave-h"})
+    assert r.status_code == 201, r.text[:300]
+    did = r.json()["id"]
 
-        uid2 = await _usuario_com(admin_engine, t2.id, ["pagamento_cadastro"])
-        sistema2, chave2 = await _criar_sistema_direto(
-            admin_engine, t2.id, usuario_id=uid2, escopo_leitura=True, escopo_escrita=True)
+    uid2 = await _usuario_com(admin_engine, t2.id, ["pagamento_cadastro"])
+    sistema2, chave2 = await _criar_sistema_direto(
+        admin_engine, t2.id, usuario_id=uid2, escopo_leitura=True, escopo_escrita=True)
 
-        r_liq = await _http_m2m(admin_engine, t2.id, t2.slug, chave2, "POST",
-                                f"{ROTA_DEBITOS}/{did}/liquidar",
-                                headers={"Idempotency-Key": "chave-h-liquidar"})
-        assert r_liq.status_code == 404, r_liq.text[:300]
-    finally:
-        await _cleanup(admin_engine, t.id)
-        await _cleanup(admin_engine, t2.id)
+    r_liq = await _http_m2m(admin_engine, t2.id, t2.slug, chave2, "POST",
+                            f"{ROTA_DEBITOS}/{did}/liquidar",
+                            headers={"Idempotency-Key": "chave-h-liquidar"})
+    assert r_liq.status_code == 404, r_liq.text[:300]
 
 
 async def _slugs_contratados_e_contratavel(s, tenant_id: int) -> tuple[set[str], set[str]]:
@@ -686,14 +624,14 @@ async def test_t7_i_modulo_descontratado_403_via_gate_m2m(admin_engine):
         assert "pagamentos" in r_sem_modulo.json()["detail"]
         assert "não contratado" in r_sem_modulo.json()["detail"]
     finally:
-        # Recontrata antes do teardown: `_cleanup` apaga o tenant inteiro, mas
-        # deixar o vínculo descontratado por trás de um teste que falhou no
-        # meio não deveria depender disso — recontratar é barato e explícito.
+        # Recontrata antes do teardown: `_limpa_tenants_do_modulo` (conftest) apaga
+        # o tenant inteiro, mas deixar o vínculo descontratado por trás de um
+        # teste que falhou no meio não deveria depender disso — recontratar é
+        # barato e explícito.
         async with _sm(admin_engine)() as s:
             atuais, catalogo = await _slugs_contratados_e_contratavel(s, t.id)
             await modulos_svc.contratar(s, t.id, sorted((atuais & catalogo) | {"pagamentos"}))
             await s.commit()
-        await _cleanup(admin_engine, t.id)
 
 
 # --------------------------------------------- correções herdadas da Task 6
@@ -736,57 +674,53 @@ async def test_corr3_prefixo_sob_aprimora_app_enxerga_tenant_da_chave(admin_engi
     """
     t_a = await _provisionar(admin_engine)
     t_b = await _provisionar(admin_engine)
+    uid_a = await _usuario_com(admin_engine, t_a.id, ["pagamento_cadastro"])
+    uid_b = await _usuario_com(admin_engine, t_b.id, ["pagamento_cadastro"])
+    sistema_a, _ = await _criar_sistema_direto(admin_engine, t_a.id, usuario_id=uid_a)
+    sistema_b, _ = await _criar_sistema_direto(admin_engine, t_b.id, usuario_id=uid_b)
+
+    engine = create_async_engine(APP_URL)
+    Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     try:
-        uid_a = await _usuario_com(admin_engine, t_a.id, ["pagamento_cadastro"])
-        uid_b = await _usuario_com(admin_engine, t_b.id, ["pagamento_cadastro"])
-        sistema_a, _ = await _criar_sistema_direto(admin_engine, t_a.id, usuario_id=uid_a)
-        sistema_b, _ = await _criar_sistema_direto(admin_engine, t_b.id, usuario_id=uid_b)
+        # 1) Busca por PREFIXO com GUC NULL (pré-autenticação, como
+        #    `get_current_sistema_integrado` faz numa chamada M2M cujo Host
+        #    não resolveu tenant nenhum) — precisa achar a linha de
+        #    QUALQUER tenant, senão a autenticação M2M quebra sob RLS.
+        async with Session() as s:
+            achou_a = (await s.execute(
+                select(SistemaIntegrado).where(SistemaIntegrado.prefixo == sistema_a.prefixo)
+            )).scalar_one_or_none()
+            assert achou_a is not None, (
+                "com GUC NULL a policy nova devia achar QUALQUER tenant — "
+                "sem isso a autenticação M2M fica cega sob aprimora_app")
+            assert achou_a.tenant_id == t_a.id
+            await s.rollback()
 
-        engine = create_async_engine(APP_URL)
-        Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-        try:
-            # 1) Busca por PREFIXO com GUC NULL (pré-autenticação, como
-            #    `get_current_sistema_integrado` faz numa chamada M2M cujo Host
-            #    não resolveu tenant nenhum) — precisa achar a linha de
-            #    QUALQUER tenant, senão a autenticação M2M quebra sob RLS.
-            async with Session() as s:
-                achou_a = (await s.execute(
-                    select(SistemaIntegrado).where(SistemaIntegrado.prefixo == sistema_a.prefixo)
-                )).scalar_one_or_none()
-                assert achou_a is not None, (
-                    "com GUC NULL a policy nova devia achar QUALQUER tenant — "
-                    "sem isso a autenticação M2M fica cega sob aprimora_app")
-                assert achou_a.tenant_id == t_a.id
-                await s.rollback()
+        # 2) Com a GUC fixada no tenant ERRADO (não o dono do prefixo),
+        #    a mesma busca não pode achar a linha — a policy não virou
+        #    "sempre visível", só "visível quando não há tenant fixado".
+        async with Session() as s:
+            await s.execute(text(f"SET LOCAL app.tenant_id = '{t_b.id}'"))
+            nao_achou = (await s.execute(
+                select(SistemaIntegrado).where(SistemaIntegrado.prefixo == sistema_a.prefixo)
+            )).scalar_one_or_none()
+            assert nao_achou is None
+            await s.rollback()
 
-            # 2) Com a GUC fixada no tenant ERRADO (não o dono do prefixo),
-            #    a mesma busca não pode achar a linha — a policy não virou
-            #    "sempre visível", só "visível quando não há tenant fixado".
-            async with Session() as s:
-                await s.execute(text(f"SET LOCAL app.tenant_id = '{t_b.id}'"))
-                nao_achou = (await s.execute(
-                    select(SistemaIntegrado).where(SistemaIntegrado.prefixo == sistema_a.prefixo)
-                )).scalar_one_or_none()
-                assert nao_achou is None
-                await s.rollback()
-
-            # 3) Query de negócio ESCOPADA (GUC = tenant da chave, como
-            #    `get_db_m2m` monta a sessão depois de autenticar): enxerga o
-            #    PRÓPRIO sistema e não o do outro tenant — "enxerga o tenant
-            #    da chave", nada mais.
-            async with Session() as s:
-                await s.execute(text(f"SET LOCAL app.tenant_id = '{t_a.id}'"))
-                vistos = (await s.execute(
-                    select(SistemaIntegrado.id).where(SistemaIntegrado.tenant_id == t_a.id)
-                )).scalars().all()
-                assert sistema_a.id in vistos
-                cross = (await s.execute(
-                    select(SistemaIntegrado).where(SistemaIntegrado.id == sistema_b.id)
-                )).scalar_one_or_none()
-                assert cross is None, "cross-tenant deveria ser invisível, não só filtrado"
-                await s.rollback()
-        finally:
-            await engine.dispose()
+        # 3) Query de negócio ESCOPADA (GUC = tenant da chave, como
+        #    `get_db_m2m` monta a sessão depois de autenticar): enxerga o
+        #    PRÓPRIO sistema e não o do outro tenant — "enxerga o tenant
+        #    da chave", nada mais.
+        async with Session() as s:
+            await s.execute(text(f"SET LOCAL app.tenant_id = '{t_a.id}'"))
+            vistos = (await s.execute(
+                select(SistemaIntegrado.id).where(SistemaIntegrado.tenant_id == t_a.id)
+            )).scalars().all()
+            assert sistema_a.id in vistos
+            cross = (await s.execute(
+                select(SistemaIntegrado).where(SistemaIntegrado.id == sistema_b.id)
+            )).scalar_one_or_none()
+            assert cross is None, "cross-tenant deveria ser invisível, não só filtrado"
+            await s.rollback()
     finally:
-        await _cleanup(admin_engine, t_a.id)
-        await _cleanup(admin_engine, t_b.id)
+        await engine.dispose()

@@ -83,87 +83,54 @@ async def _criar_doc(
         )
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM frota.veiculo_documento WHERE tenant_id=:t",
-            "DELETE FROM frota.solicitacao_veiculo WHERE tenant_id=:t",
-            "DELETE FROM frota.motorista WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 # ============================ Criação (caminho feliz) =======================
 async def test_criar_documento_mesmo_tenant(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        doc = await _criar_doc(
-            admin_engine, t.id, v, vencimento=HOJE + timedelta(days=200),
-            emissao=HOJE - timedelta(days=10),
-        )
-        assert doc.id is not None
-        assert doc.id_veiculo == v
-        assert doc.tenant_id == t.id
-        assert doc.tipo_documento == "crlv"
-        assert doc.status == "ativo"
-        assert doc.excluido is False
-        assert doc.criado_em is not None  # server-side
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    doc = await _criar_doc(
+        admin_engine, t.id, v, vencimento=HOJE + timedelta(days=200),
+        emissao=HOJE - timedelta(days=10),
+    )
+    assert doc.id is not None
+    assert doc.id_veiculo == v
+    assert doc.tenant_id == t.id
+    assert doc.tipo_documento == "crlv"
+    assert doc.status == "ativo"
+    assert doc.excluido is False
+    assert doc.criado_em is not None  # server-side
 
 
 # ============================ Criação (bloqueios) ===========================
 async def test_bloqueia_criar_documento_cross_tenant(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        va = await _veiculo(admin_engine, a.id)
-        with pytest.raises(HTTPException) as exc:  # tenant B não enxerga veículo de A
-            await _criar_doc(
-                admin_engine, b.id, va, vencimento=HOJE + timedelta(days=30)
-            )
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    va = await _veiculo(admin_engine, a.id)
+    with pytest.raises(HTTPException) as exc:  # tenant B não enxerga veículo de A
+        await _criar_doc(
+            admin_engine, b.id, va, vencimento=HOJE + timedelta(days=30)
+        )
+    assert exc.value.status_code == 404
 
 
 async def test_bloqueia_criar_documento_veiculo_inexistente(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        with pytest.raises(HTTPException) as exc:
-            await _criar_doc(
-                admin_engine, t.id, 999_999, vencimento=HOJE + timedelta(days=30)
-            )
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, t.id)
+    with pytest.raises(HTTPException) as exc:
+        await _criar_doc(
+            admin_engine, t.id, 999_999, vencimento=HOJE + timedelta(days=30)
+        )
+    assert exc.value.status_code == 404
 
 
 async def test_bloqueia_criar_documento_veiculo_excluido(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            await frota_svc.excluir_veiculo(s, tenant_id=t.id, veiculo_id=v)
-        with pytest.raises(HTTPException) as exc:
-            await _criar_doc(
-                admin_engine, t.id, v, vencimento=HOJE + timedelta(days=30)
-            )
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        await frota_svc.excluir_veiculo(s, tenant_id=t.id, veiculo_id=v)
+    with pytest.raises(HTTPException) as exc:
+        await _criar_doc(
+            admin_engine, t.id, v, vencimento=HOJE + timedelta(days=30)
+        )
+    assert exc.value.status_code == 404
 
 
 def test_bloqueia_data_emissao_posterior_ao_vencimento():
@@ -177,64 +144,54 @@ def test_bloqueia_data_emissao_posterior_ao_vencimento():
 
 async def test_bloqueia_update_data_emissao_posterior_ao_vencimento(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        doc = await _criar_doc(
-            admin_engine, t.id, v, vencimento=HOJE + timedelta(days=100)
-        )
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.atualizar_documento(
-                    s, tenant_id=t.id, documento_id=doc.id,
-                    payload=VeiculoDocumentoUpdate(
-                        data_emissao=HOJE + timedelta(days=200)
-                    ),
-                )
-            assert exc.value.status_code == 400
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    doc = await _criar_doc(
+        admin_engine, t.id, v, vencimento=HOJE + timedelta(days=100)
+    )
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.atualizar_documento(
+                s, tenant_id=t.id, documento_id=doc.id,
+                payload=VeiculoDocumentoUpdate(
+                    data_emissao=HOJE + timedelta(days=200)
+                ),
+            )
+        assert exc.value.status_code == 400
 
 
 # ============================ Listagem ======================================
 async def test_listar_documentos_por_veiculo(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        outro_v = await _veiculo(admin_engine, t.id)
-        await _criar_doc(admin_engine, t.id, v, tipo="crlv",
-                         vencimento=HOJE + timedelta(days=10))
-        await _criar_doc(admin_engine, t.id, v, tipo="seguro",
-                         vencimento=HOJE + timedelta(days=20))
-        await _criar_doc(admin_engine, t.id, outro_v, tipo="vistoria",
-                         vencimento=HOJE + timedelta(days=5))
-        async with _sm(admin_engine)() as s:
-            docs = await frota_svc.listar_documentos_veiculo(
-                s, tenant_id=t.id, id_veiculo=v
-            )
-        assert len(docs) == 2  # só os do veículo v
-        assert {d.tipo_documento for d in docs} == {"crlv", "seguro"}
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    outro_v = await _veiculo(admin_engine, t.id)
+    await _criar_doc(admin_engine, t.id, v, tipo="crlv",
+                     vencimento=HOJE + timedelta(days=10))
+    await _criar_doc(admin_engine, t.id, v, tipo="seguro",
+                     vencimento=HOJE + timedelta(days=20))
+    await _criar_doc(admin_engine, t.id, outro_v, tipo="vistoria",
+                     vencimento=HOJE + timedelta(days=5))
+    async with _sm(admin_engine)() as s:
+        docs = await frota_svc.listar_documentos_veiculo(
+            s, tenant_id=t.id, id_veiculo=v
+        )
+    assert len(docs) == 2  # só os do veículo v
+    assert {d.tipo_documento for d in docs} == {"crlv", "seguro"}
 
 
 # ============================ Detalhe cross-tenant ==========================
 async def test_detalhe_documento_cross_tenant_404(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        va = await _veiculo(admin_engine, a.id)
-        doc = await _criar_doc(
-            admin_engine, a.id, va, vencimento=HOJE + timedelta(days=30)
-        )
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_documento(
-                    s, tenant_id=b.id, documento_id=doc.id
-                )
-            assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    va = await _veiculo(admin_engine, a.id)
+    doc = await _criar_doc(
+        admin_engine, a.id, va, vencimento=HOJE + timedelta(days=30)
+    )
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_documento(
+                s, tenant_id=b.id, documento_id=doc.id
+            )
+        assert exc.value.status_code == 404
 
 
 # ============================ Update: whitelist =============================
@@ -253,134 +210,115 @@ def test_update_schema_descarta_campos_proibidos():
 
 async def test_update_atualiza_campos_permitidos(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        doc = await _criar_doc(
-            admin_engine, t.id, v, vencimento=HOJE + timedelta(days=100)
+    v = await _veiculo(admin_engine, t.id)
+    doc = await _criar_doc(
+        admin_engine, t.id, v, vencimento=HOJE + timedelta(days=100)
+    )
+    async with _sm(admin_engine)() as s:
+        atualizado = await frota_svc.atualizar_documento(
+            s, tenant_id=t.id, documento_id=doc.id,
+            payload=VeiculoDocumentoUpdate(
+                numero="CRLV-2030", orgao_emissor="DETRAN", status="substituido"
+            ),
         )
-        async with _sm(admin_engine)() as s:
-            atualizado = await frota_svc.atualizar_documento(
-                s, tenant_id=t.id, documento_id=doc.id,
-                payload=VeiculoDocumentoUpdate(
-                    numero="CRLV-2030", orgao_emissor="DETRAN", status="substituido"
-                ),
-            )
-        assert atualizado.numero == "CRLV-2030"
-        assert atualizado.orgao_emissor == "DETRAN"
-        assert atualizado.status == "substituido"
-        assert atualizado.id_veiculo == v  # imutável
-        assert atualizado.atualizado_em is not None
-    finally:
-        await _cleanup(admin_engine, t.id)
+    assert atualizado.numero == "CRLV-2030"
+    assert atualizado.orgao_emissor == "DETRAN"
+    assert atualizado.status == "substituido"
+    assert atualizado.id_veiculo == v  # imutável
+    assert atualizado.atualizado_em is not None
 
 
 # ============================ Delete = soft-delete ==========================
 async def test_delete_faz_soft_delete(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        doc = await _criar_doc(
-            admin_engine, t.id, v, vencimento=HOJE + timedelta(days=30)
-        )
-        async with _sm(admin_engine)() as s:
-            await frota_svc.excluir_documento(s, tenant_id=t.id, documento_id=doc.id)
-        # 404 via serviço (filtra excluído)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_documento(s, tenant_id=t.id, documento_id=doc.id)
-            assert exc.value.status_code == 404
-        # linha permanece com excluido=true
-        async with _sm(admin_engine)() as s:
-            excluido = (
-                await s.execute(
-                    text("SELECT excluido FROM frota.veiculo_documento WHERE id=:i"),
-                    {"i": doc.id},
-                )
-            ).scalar_one()
-        assert excluido is True
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    doc = await _criar_doc(
+        admin_engine, t.id, v, vencimento=HOJE + timedelta(days=30)
+    )
+    async with _sm(admin_engine)() as s:
+        await frota_svc.excluir_documento(s, tenant_id=t.id, documento_id=doc.id)
+    # 404 via serviço (filtra excluído)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_documento(s, tenant_id=t.id, documento_id=doc.id)
+        assert exc.value.status_code == 404
+    # linha permanece com excluido=true
+    async with _sm(admin_engine)() as s:
+        excluido = (
+            await s.execute(
+                text("SELECT excluido FROM frota.veiculo_documento WHERE id=:i"),
+                {"i": doc.id},
+            )
+        ).scalar_one()
+    assert excluido is True
 
 
 # ============================ Alertas =======================================
 async def test_alertas_retornam_vencidos_e_a_vencer(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        d_vencido = await _criar_doc(
-            admin_engine, t.id, v, tipo="crlv", vencimento=HOJE - timedelta(days=5)
+    v = await _veiculo(admin_engine, t.id)
+    d_vencido = await _criar_doc(
+        admin_engine, t.id, v, tipo="crlv", vencimento=HOJE - timedelta(days=5)
+    )
+    d_a_vencer = await _criar_doc(
+        admin_engine, t.id, v, tipo="seguro", vencimento=HOJE + timedelta(days=10)
+    )
+    # fora da janela de 30 dias — não deve aparecer
+    await _criar_doc(
+        admin_engine, t.id, v, tipo="vistoria",
+        vencimento=HOJE + timedelta(days=200),
+    )
+    async with _sm(admin_engine)() as s:
+        grupos = await frota_svc.listar_alertas_documentos(
+            s, tenant_id=t.id, dias=30
         )
-        d_a_vencer = await _criar_doc(
-            admin_engine, t.id, v, tipo="seguro", vencimento=HOJE + timedelta(days=10)
-        )
-        # fora da janela de 30 dias — não deve aparecer
-        await _criar_doc(
-            admin_engine, t.id, v, tipo="vistoria",
-            vencimento=HOJE + timedelta(days=200),
-        )
-        async with _sm(admin_engine)() as s:
-            grupos = await frota_svc.listar_alertas_documentos(
-                s, tenant_id=t.id, dias=30
-            )
-        ids_vencidos = {d.id for d in grupos["vencidos"]}
-        ids_a_vencer = {d.id for d in grupos["a_vencer"]}
-        assert d_vencido.id in ids_vencidos
-        assert d_a_vencer.id in ids_a_vencer
-        assert d_vencido.id not in ids_a_vencer
-        assert len(grupos["a_vencer"]) == 1  # vistoria de 200 dias fica de fora
-    finally:
-        await _cleanup(admin_engine, t.id)
+    ids_vencidos = {d.id for d in grupos["vencidos"]}
+    ids_a_vencer = {d.id for d in grupos["a_vencer"]}
+    assert d_vencido.id in ids_vencidos
+    assert d_a_vencer.id in ids_a_vencer
+    assert d_vencido.id not in ids_a_vencer
+    assert len(grupos["a_vencer"]) == 1  # vistoria de 200 dias fica de fora
 
 
 async def test_alertas_param_dias_amplia_janela(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        d = await _criar_doc(
-            admin_engine, t.id, v, vencimento=HOJE + timedelta(days=100)
-        )
-        async with _sm(admin_engine)() as s:
-            g30 = await frota_svc.listar_alertas_documentos(s, tenant_id=t.id, dias=30)
-            g120 = await frota_svc.listar_alertas_documentos(s, tenant_id=t.id, dias=120)
-        assert d.id not in {x.id for x in g30["a_vencer"]}
-        assert d.id in {x.id for x in g120["a_vencer"]}
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    d = await _criar_doc(
+        admin_engine, t.id, v, vencimento=HOJE + timedelta(days=100)
+    )
+    async with _sm(admin_engine)() as s:
+        g30 = await frota_svc.listar_alertas_documentos(s, tenant_id=t.id, dias=30)
+        g120 = await frota_svc.listar_alertas_documentos(s, tenant_id=t.id, dias=120)
+    assert d.id not in {x.id for x in g30["a_vencer"]}
+    assert d.id in {x.id for x in g120["a_vencer"]}
 
 
 async def test_alertas_ignoram_status_retirado(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        v = await _veiculo(admin_engine, t.id)
-        # substituido/cancelado não disparam alerta mesmo vencidos
-        await _criar_doc(admin_engine, t.id, v, tipo="crlv",
-                         vencimento=HOJE - timedelta(days=5), status_doc="substituido")
-        await _criar_doc(admin_engine, t.id, v, tipo="seguro",
-                         vencimento=HOJE - timedelta(days=5), status_doc="cancelado")
-        async with _sm(admin_engine)() as s:
-            grupos = await frota_svc.listar_alertas_documentos(
-                s, tenant_id=t.id, dias=30
-            )
-        assert grupos["vencidos"] == []
-        assert grupos["a_vencer"] == []
-    finally:
-        await _cleanup(admin_engine, t.id)
+    v = await _veiculo(admin_engine, t.id)
+    # substituido/cancelado não disparam alerta mesmo vencidos
+    await _criar_doc(admin_engine, t.id, v, tipo="crlv",
+                     vencimento=HOJE - timedelta(days=5), status_doc="substituido")
+    await _criar_doc(admin_engine, t.id, v, tipo="seguro",
+                     vencimento=HOJE - timedelta(days=5), status_doc="cancelado")
+    async with _sm(admin_engine)() as s:
+        grupos = await frota_svc.listar_alertas_documentos(
+            s, tenant_id=t.id, dias=30
+        )
+    assert grupos["vencidos"] == []
+    assert grupos["a_vencer"] == []
 
 
 async def test_alertas_respeitam_tenant(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        va = await _veiculo(admin_engine, a.id)
-        await _criar_doc(
-            admin_engine, a.id, va, vencimento=HOJE - timedelta(days=5)
+    va = await _veiculo(admin_engine, a.id)
+    await _criar_doc(
+        admin_engine, a.id, va, vencimento=HOJE - timedelta(days=5)
+    )
+    async with _sm(admin_engine)() as s:
+        grupos_b = await frota_svc.listar_alertas_documentos(
+            s, tenant_id=b.id, dias=30
         )
-        async with _sm(admin_engine)() as s:
-            grupos_b = await frota_svc.listar_alertas_documentos(
-                s, tenant_id=b.id, dias=30
-            )
-        assert grupos_b["vencidos"] == []  # tenant B não enxerga docs de A
-        assert grupos_b["a_vencer"] == []
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    assert grupos_b["vencidos"] == []  # tenant B não enxerga docs de A
+    assert grupos_b["a_vencer"] == []

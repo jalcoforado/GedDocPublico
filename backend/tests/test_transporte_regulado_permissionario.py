@@ -56,36 +56,16 @@ async def _criar(engine, tenant_id, *, cpf=None, tipo="taxi", situacao="pendente
         )
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM transporte_regulado.permissionario WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 # ============================ Criação =======================================
 async def test_criar_permissionario(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        p = await _criar(admin_engine, t.id, tipo="mototaxi")
-        assert p.id is not None
-        assert p.tenant_id == t.id
-        assert p.tipo_servico == "mototaxi"
-        assert p.situacao == "pendente"      # default
-        assert p.excluido is False
-        assert p.criado_em is not None       # server-side
-    finally:
-        await _cleanup(admin_engine, t.id)
+    p = await _criar(admin_engine, t.id, tipo="mototaxi")
+    assert p.id is not None
+    assert p.tenant_id == t.id
+    assert p.tipo_servico == "mototaxi"
+    assert p.situacao == "pendente"      # default
+    assert p.excluido is False
+    assert p.criado_em is not None       # server-side
 
 
 def test_cpf_normaliza():
@@ -112,72 +92,55 @@ def test_tipo_servico_obrigatorio():
 # ============================ Unicidade de CPF ==============================
 async def test_cpf_duplicado_mesmo_tenant_409(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        cpf = _cpf()
+    cpf = _cpf()
+    await _criar(admin_engine, t.id, cpf=cpf)
+    with pytest.raises(HTTPException) as exc:
         await _criar(admin_engine, t.id, cpf=cpf)
-        with pytest.raises(HTTPException) as exc:
-            await _criar(admin_engine, t.id, cpf=cpf)
-        assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+    assert exc.value.status_code == 409
 
 
 async def test_cpf_igual_em_outro_tenant_permitido(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        cpf = _cpf()
-        pa = await _criar(admin_engine, a.id, cpf=cpf)
-        pb = await _criar(admin_engine, b.id, cpf=cpf)  # mesmo CPF, outro tenant: OK
-        assert pa.id != pb.id
-        assert pa.cpf == pb.cpf == cpf
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    cpf = _cpf()
+    pa = await _criar(admin_engine, a.id, cpf=cpf)
+    pb = await _criar(admin_engine, b.id, cpf=cpf)  # mesmo CPF, outro tenant: OK
+    assert pa.id != pb.id
+    assert pa.cpf == pb.cpf == cpf
 
 
 async def test_cpf_reutilizavel_apos_soft_delete(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        cpf = _cpf()
-        p1 = await _criar(admin_engine, t.id, cpf=cpf)
-        async with _sm(admin_engine)() as s:
-            await tr_svc.excluir_permissionario(s, tenant_id=t.id, permissionario_id=p1.id)
-        p2 = await _criar(admin_engine, t.id, cpf=cpf)  # CPF liberado após soft-delete
-        assert p2.id != p1.id
-    finally:
-        await _cleanup(admin_engine, t.id)
+    cpf = _cpf()
+    p1 = await _criar(admin_engine, t.id, cpf=cpf)
+    async with _sm(admin_engine)() as s:
+        await tr_svc.excluir_permissionario(s, tenant_id=t.id, permissionario_id=p1.id)
+    p2 = await _criar(admin_engine, t.id, cpf=cpf)  # CPF liberado após soft-delete
+    assert p2.id != p1.id
 
 
 # ============================ Cross-tenant 404 ==============================
 async def test_detalhe_cross_tenant_404(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        pa = await _criar(admin_engine, a.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await tr_svc.obter_permissionario(s, tenant_id=b.id, permissionario_id=pa.id)
-            assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    pa = await _criar(admin_engine, a.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await tr_svc.obter_permissionario(s, tenant_id=b.id, permissionario_id=pa.id)
+        assert exc.value.status_code == 404
 
 
 # ============================ Update / whitelist ============================
 async def test_update_atualiza_campos(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        p = await _criar(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            up = await tr_svc.atualizar_permissionario(
-                s, tenant_id=t.id, permissionario_id=p.id,
-                payload=PermissionarioUpdate(telefone="88999990000", numero_permissao="PERM-001"),
-            )
-        assert up.telefone == "88999990000"
-        assert up.numero_permissao == "PERM-001"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    p = await _criar(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        up = await tr_svc.atualizar_permissionario(
+            s, tenant_id=t.id, permissionario_id=p.id,
+            payload=PermissionarioUpdate(telefone="88999990000", numero_permissao="PERM-001"),
+        )
+    assert up.telefone == "88999990000"
+    assert up.numero_permissao == "PERM-001"
 
 
 def test_update_schema_descarta_proibidos():
@@ -195,57 +158,48 @@ def test_update_schema_descarta_proibidos():
 # ============================ Ações de situação =============================
 async def test_inativar_reativar_suspender(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        p = await _criar(admin_engine, t.id, situacao="ativo")
-        async with _sm(admin_engine)() as s:
-            inativo = await tr_svc.set_situacao_permissionario(
-                s, tenant_id=t.id, permissionario_id=p.id, situacao="inativo")
-        assert inativo.situacao == "inativo"
-        async with _sm(admin_engine)() as s:
-            ativo = await tr_svc.set_situacao_permissionario(
-                s, tenant_id=t.id, permissionario_id=p.id, situacao="ativo")
-        assert ativo.situacao == "ativo"
-        async with _sm(admin_engine)() as s:
-            suspenso = await tr_svc.set_situacao_permissionario(
-                s, tenant_id=t.id, permissionario_id=p.id, situacao="suspenso")
-        assert suspenso.situacao == "suspenso"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    p = await _criar(admin_engine, t.id, situacao="ativo")
+    async with _sm(admin_engine)() as s:
+        inativo = await tr_svc.set_situacao_permissionario(
+            s, tenant_id=t.id, permissionario_id=p.id, situacao="inativo")
+    assert inativo.situacao == "inativo"
+    async with _sm(admin_engine)() as s:
+        ativo = await tr_svc.set_situacao_permissionario(
+            s, tenant_id=t.id, permissionario_id=p.id, situacao="ativo")
+    assert ativo.situacao == "ativo"
+    async with _sm(admin_engine)() as s:
+        suspenso = await tr_svc.set_situacao_permissionario(
+            s, tenant_id=t.id, permissionario_id=p.id, situacao="suspenso")
+    assert suspenso.situacao == "suspenso"
 
 
 # ============================ Listagem / filtros ============================
 async def test_listar_filtra_situacao_e_tipo(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        await _criar(admin_engine, t.id, tipo="taxi", situacao="ativo")
-        await _criar(admin_engine, t.id, tipo="mototaxi", situacao="pendente")
-        async with _sm(admin_engine)() as s:
-            ativos, _ = await tr_svc.listar_permissionarios(s, tenant_id=t.id, situacao="ativo")
-            mototaxi, _ = await tr_svc.listar_permissionarios(s, tenant_id=t.id, tipo_servico="mototaxi")
-        assert len(ativos) == 1 and ativos[0].situacao == "ativo"
-        assert len(mototaxi) == 1 and mototaxi[0].tipo_servico == "mototaxi"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    await _criar(admin_engine, t.id, tipo="taxi", situacao="ativo")
+    await _criar(admin_engine, t.id, tipo="mototaxi", situacao="pendente")
+    async with _sm(admin_engine)() as s:
+        ativos, _ = await tr_svc.listar_permissionarios(s, tenant_id=t.id, situacao="ativo")
+        mototaxi, _ = await tr_svc.listar_permissionarios(s, tenant_id=t.id, tipo_servico="mototaxi")
+    assert len(ativos) == 1 and ativos[0].situacao == "ativo"
+    assert len(mototaxi) == 1 and mototaxi[0].tipo_servico == "mototaxi"
 
 
 # ============================ Soft-delete ===================================
 async def test_delete_faz_soft_delete(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        p = await _criar(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            await tr_svc.excluir_permissionario(s, tenant_id=t.id, permissionario_id=p.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await tr_svc.obter_permissionario(s, tenant_id=t.id, permissionario_id=p.id)
-            assert exc.value.status_code == 404
-        async with _sm(admin_engine)() as s:
-            excluido = (
-                await s.execute(
-                    text("SELECT excluido FROM transporte_regulado.permissionario WHERE id=:i"),
-                    {"i": p.id},
-                )
-            ).scalar_one()
-        assert excluido is True
-    finally:
-        await _cleanup(admin_engine, t.id)
+    p = await _criar(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        await tr_svc.excluir_permissionario(s, tenant_id=t.id, permissionario_id=p.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await tr_svc.obter_permissionario(s, tenant_id=t.id, permissionario_id=p.id)
+        assert exc.value.status_code == 404
+    async with _sm(admin_engine)() as s:
+        excluido = (
+            await s.execute(
+                text("SELECT excluido FROM transporte_regulado.permissionario WHERE id=:i"),
+                {"i": p.id},
+            )
+        ).scalar_one()
+    assert excluido is True
