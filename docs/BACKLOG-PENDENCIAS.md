@@ -1006,9 +1006,16 @@ gerencial) estão em `main` e no ar. O que resta é uma **iniciativa nova**, nã
 
 ### 2.4 Minutas / Google Docs — sincronização de volta
 
-- `sincronizar_google_doc()` em `backend/app/services/google_docs_service.py` é **v1**: cria o Doc
+- ~~`sincronizar_google_doc()` em `backend/app/services/google_docs_service.py` é **v1**: cria o Doc
   e exporta PDF na finalização, mas **não reimporta** o conteúdo editado para `corpo_html`.
-  Faria falta um pipeline DOCX → HTML → sanitização.
+  Faria falta um pipeline DOCX → HTML → sanitização.~~ **BACKEND ENTREGUE em 2026-09-24**:
+  `POST /minutas/{id}/sincronizar-google` (`services/minutas.py::sincronizar_google_doc_para_minuta`)
+  baixa o DOCX, converte os parágrafos em `<p>` (texto escapado — `<nome>` digitado no Doc é
+  texto, não tag), sanitiza e, **só se o conteúdo mudou**, sobe `versao` e grava `minuta_historico`.
+  Testes em `tests/test_minuta_sincronizar_google.py`. **Ainda falta para fechar o item:**
+  (a) **nenhuma tela chama** — `api.minutas.sincronizarGoogle` existe em `frontend/lib/api.ts` e
+  não tem consumidor; (b) a **formatação se perde** — só parágrafos: negrito/itálico, listas,
+  tabelas e alinhamento do Doc não voltam para o `corpo_html`.
 - Sem re-autenticação automática quando o usuário revoga o acesso do app no Google — a próxima
   operação simplesmente falha.
 - Sem coordenação de edição concorrente e sem contagem de páginas (o Google não expõe o metadado;
