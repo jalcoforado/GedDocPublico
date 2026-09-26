@@ -35,8 +35,8 @@ import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import { api, type ComposicaoItem, type StatusDebito } from "@/lib/api";
-import { DEBITO_STATUS_BADGE } from "@/components/pagamentos/statusDebito";
+import { api, type ComposicaoItem } from "@/lib/api";
+import { PAGAMENTO_ROTULO, TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
 import { cn } from "@/lib/utils";
 
 // Dataviz: entradas/saídas seguem o mesmo semântico usado no caixa
@@ -51,8 +51,6 @@ const PERIODOS = [
   { value: 12, label: "12 meses" },
   { value: 24, label: "24 meses" },
 ];
-
-const STATUS_BADGE = DEBITO_STATUS_BADGE;
 
 function fmtBRL(v: string | number): string {
   const n = typeof v === "string" ? Number(v) : v;
@@ -401,7 +399,12 @@ export default function PagamentosDashboardPage() {
                 </THead>
                 <TBody>
                   {maiores_debitos.map((deb) => {
-                    const badge = STATUS_BADGE[deb.status];
+                    // Antes de autorizado, a dimensão que se move é a
+                    // tramitação; depois, a tramitação fica presa em
+                    // AUTORIZADA e quem informa é a execução do pagamento.
+                    const rotulo = deb.situacao_tramitacao === "AUTORIZADA"
+                      ? PAGAMENTO_ROTULO[deb.situacao_pagamento]
+                      : TRAMITACAO_ROTULO[deb.situacao_tramitacao];
                     const href = `/m/pagamentos/contas-a-pagar/${deb.id}`;
                     return (
                       <TR
@@ -436,7 +439,7 @@ export default function PagamentosDashboardPage() {
                         </TD>
                         <TD className="whitespace-nowrap text-right tabular-nums">{fmtBRL(deb.valor_total)}</TD>
                         <TD>
-                          <Badge intent={badge.intent}>{badge.label}</Badge>
+                          <Badge intent={rotulo.intent} icon={rotulo.icon}>{rotulo.label}</Badge>
                         </TD>
                       </TR>
                     );

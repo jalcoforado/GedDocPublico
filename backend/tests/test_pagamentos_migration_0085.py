@@ -67,10 +67,19 @@ def test_mapa_do_teste_bate_com_a_migration():
     assert MAPA == _migration.MAPA_BACKFILL
 
 
+# Os 16 valores do extinto `Debito.status` (coluna removida na F5, migration
+# 0121). Pinado aqui em vez de importado de `StatusDebito` (que morreu junto
+# com a coluna): esta migration é histórica e imutável, então o conjunto que
+# ela precisa cobrir também é — não deveria mais mudar.
+_STATUS_LEGADOS_16 = {
+    "RASCUNHO", "EM_VALIDACAO", "DEVOLVIDO", "VALIDADO", "ENVIADO_SECRETARIO",
+    "AGUARDANDO_AUTORIZACAO", "AUTORIZADO", "ENVIADO_TESOURARIA", "EM_PROCESSAMENTO",
+    "PAGO_PARCIAL", "PAGO", "CONCILIADO", "REJEITADO", "SUSPENSO", "CANCELADO", "ESTORNADO",
+}
+
+
 def test_mapa_cobre_os_dezesseis_status_legados():
-    from app.schemas.pagamentos import StatusDebito
-    legados = set(StatusDebito.__args__)
-    assert set(_migration.MAPA_BACKFILL) == legados
+    assert set(_migration.MAPA_BACKFILL) == _STATUS_LEGADOS_16
 
 
 def test_toda_combinacao_do_mapa_e_valida():

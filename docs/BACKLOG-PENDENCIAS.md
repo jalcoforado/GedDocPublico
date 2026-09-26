@@ -641,8 +641,22 @@ Pendências registradas da F3 (menores):
   `bloqueado_conta` (DRY); `total_grupo` do GET /fila muda de semântica para débito terminal;
   checagem 422 de categoria duplicada (defesa em profundidade).
 - `id_usuario_registro` da exceção = a própria autoridade (um 3º registrante não existe no rito).
-- F4 (tesouraria: lote/retenções/central) e F5 (remoção do `status` legado) continuam **não
-  autorizadas** — o `status` derivado segue vivo e sincronizado até a F5.
+- **F4** (tesouraria: lote/retenções/central) implementada na branch `pagamentos/f4-tesouraria`,
+  **PR #68 aberto, CI verde, ainda não mesclado**. Teste manual em navegador não foi possível nesta
+  sessão (sem ferramenta de browser) — ressalva registrada no PR.
+- **F5 — só a parte de remoção do `status` legado** implementada na branch
+  `pagamentos/f5-remove-status-legado` (cortada de `main`, **não** da F4 — as duas divergem e
+  precisam de merge/rebase cruzado quando a outra entrar), plano em
+  `docs/superpowers/plans/2026-09-20-pagamentos-f5-remove-status-legado.md`. A coluna `Debito.
+  status` saiu do banco (migration 0122) e de toda a aplicação — backend e frontend só leem as três
+  dimensões; `debito_historico.status_anterior/novo` continua alimentado, calculado na hora via
+  `status_legado()`. Suíte completa (backend 1698 passos + os 3 falhos pré-existentes de
+  `test_guarda_links_docs.py`, não relacionados; frontend `tsc`+vitest limpos) verificada, PR ainda
+  não aberto. **A outra metade da F5** do pedido original (visão geral com indicadores clicáveis,
+  caixa de trabalho refinada, sweep de estados vazios/erro/carregamento/permissão/conflito,
+  acessibilidade/responsividade, critérios de aceite dos "23 cenários") **continua não feita e sem
+  plano** — o documento de 20 seções/§17/23-cenários que a descrevia não está neste repositório;
+  escopo explicitamente restrito à remoção do status por decisão do Jorge em 2026-09-20.
 
 ### 2.2 Transporte Regulado — P5 a P8
 

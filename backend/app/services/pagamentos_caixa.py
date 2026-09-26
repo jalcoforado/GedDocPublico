@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,8 +18,14 @@ from ..schemas.pagamentos import (
     ContaSaldoPainel, FichaFonteContaItem, FichaFonteOut, MovimentacaoCreate, SaldoConta,
     SimulacaoAutorizacaoOut,
 )
+from . import pagamentos_estados as est
 
 _ORIGENS_MANUAIS = {"APORTE", "RECEITA", "AJUSTE"}
+
+# Espelha o ruling COM_RESERVA (autorizado e ainda não pago) — mesma condição
+# de `pagamentos_dashboard._TEM_RESERVA` (F5).
+_TEM_RESERVA = and_(Debito.situacao_tramitacao == est.AUTORIZADA,
+                    Debito.situacao_pagamento != est.PAGA)
 
 
 async def _obter_conta(db, *, tenant_id, conta_id) -> ContaBancaria:
@@ -53,12 +59,11 @@ async def listar_extrato(db, *, tenant_id, conta_id) -> list[MovimentacaoConta]:
 async def comprometido_conta(db, *, tenant_id, conta_id) -> Decimal:
     """Σ parcelas A_PAGAR/LIBERADA (não excluídas) de débitos com reserva ativa
     (AUTORIZADO ou em tesouraria) cuja conta PAGADORA é esta conta (v2.0)."""
-    from .pagamentos_debitos import COM_RESERVA
     stmt = (select(func.coalesce(func.sum(Parcela.valor), 0))
             .join(Debito, Debito.id == Parcela.id_debito)
             .where(Parcela.tenant_id == tenant_id, Parcela.status.in_(("A_PAGAR", "LIBERADA")),
                    Parcela.excluido.is_(False), Debito.id_conta_pagadora == conta_id,
-                   Debito.excluido.is_(False), Debito.status.in_(COM_RESERVA)))
+                   Debito.excluido.is_(False), _TEM_RESERVA))
     return (await db.execute(stmt)).scalar_one()
 
 

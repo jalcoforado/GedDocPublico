@@ -38,7 +38,6 @@ const debitoBase: DebitoOut = {
   urgente: false,
   justificativa_urgencia: null,
   descricao: "Despesa de teste",
-  status: "ativo" as any,
   id_usuario_solicitante: 1,
   liquidacao_confirmada: false,
   data_liquidacao: null,
