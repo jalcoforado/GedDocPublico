@@ -347,6 +347,12 @@ SituacaoPagamento = Literal[
 CategoriaContrato = Literal["BENS", "LOCACOES", "SERVICOS", "OBRAS"]
 # ----------------------------------------------------------------------------
 
+# --- F4: lote de pagamento e retenções (spec §4.3) --------------------------
+TipoRetencaoLit = Literal["IRRF", "INSS", "ISS", "PIS_COFINS_CSLL", "OUTRAS"]
+SituacaoLoteLit = Literal["RASCUNHO", "PROGRAMADO", "ENVIADO", "PROCESSADO", "CANCELADO"]
+SituacaoLoteParcelaLit = Literal["PENDENTE", "PAGA", "FALHOU"]
+# ----------------------------------------------------------------------------
+
 
 class ParcelaCreate(BaseModel):
     numero: int = Field(ge=1)
@@ -886,3 +892,90 @@ class SistemaIntegradoOut(BaseModel):
 class SistemaIntegradoCriadoOut(SistemaIntegradoOut):
     """Resposta do POST de criação — única vez em que a chave completa aparece."""
     chave: str
+
+
+# ---------- F4: retenções (spec §4.3) ----------
+class RetencaoCreate(BaseModel):
+    tipo: TipoRetencaoLit
+    descricao: str | None = Field(default=None, max_length=150)
+    base_calculo: Decimal = Field(gt=0)
+    aliquota: Decimal | None = Field(default=None, ge=0)
+    valor: Decimal = Field(gt=0)
+
+
+class RetencaoUpdate(BaseModel):
+    tipo: TipoRetencaoLit | None = None
+    descricao: str | None = Field(default=None, max_length=150)
+    base_calculo: Decimal | None = Field(default=None, gt=0)
+    aliquota: Decimal | None = Field(default=None, ge=0)
+    valor: Decimal | None = Field(default=None, gt=0)
+
+
+class RetencaoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; id_debito: int; tipo: TipoRetencaoLit
+    descricao: str | None; base_calculo: Decimal; aliquota: Decimal | None
+    valor: Decimal; recolhido: bool
+    data_recolhimento: date | None; documento_recolhimento: str | None
+    criado_em: datetime; atualizado_em: datetime | None
+
+
+class RetencaoRecolherIn(BaseModel):
+    data_recolhimento: date
+    documento_recolhimento: str = Field(min_length=1, max_length=50)
+
+
+class RetencoesDebitoOut(BaseModel):
+    """Lista de retenções do débito + o líquido resultante — sempre calculado,
+    nunca uma coluna (spec §4.3)."""
+    valor_bruto: Decimal
+    valor_liquido: Decimal
+    retencoes: list[RetencaoOut]
+
+
+# ---------- F4: lote de pagamento (spec §4.3, §7.6) ----------
+class LoteCriarIn(BaseModel):
+    id_conta_pagadora: int
+    parcela_ids: list[int] = Field(min_length=1)
+
+
+class LoteParcelaIn(BaseModel):
+    parcela_id: int
+
+
+class LotePagamentoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; numero: str; id_conta_pagadora: int
+    situacao: SituacaoLoteLit
+    data_programada: date | None; valor_total: Decimal
+    id_anexo_comprovante: int | None
+    id_usuario: int; id_usuario_envio: int | None
+    enviado_em: datetime | None; processado_em: datetime | None
+    criado_em: datetime; atualizado_em: datetime | None
+
+
+class LotePagamentoParcelaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int; id_lote: int; id_parcela: int
+    situacao: SituacaoLoteParcelaLit
+    motivo_falha: str | None
+    criado_em: datetime; atualizado_em: datetime | None
+
+
+class LoteDetalheOut(LotePagamentoOut):
+    parcelas: list[LotePagamentoParcelaOut]
+
+
+class LoteProgramarIn(BaseModel):
+    data_programada: date
+
+
+class RetornoParcelaIn(BaseModel):
+    parcela_id: int
+    resultado: Literal["PAGA", "FALHOU"]
+    motivo_falha: str | None = Field(default=None, max_length=255)
+    data_pagamento: date | None = None
+
+
+class RetornoLoteIn(BaseModel):
+    retornos: list[RetornoParcelaIn] = Field(min_length=1)

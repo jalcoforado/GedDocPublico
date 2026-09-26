@@ -26,7 +26,7 @@ from ..schemas.pagamentos import (
     AnexoDebitoOut, AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
     DebitoHistoricoOut, DebitoOut, DebitoUpdate, DecisaoIn, DecisaoJustificadaIn,
     ExcecaoCronologicaIn, ExcecaoCronologicaOut, FichaFonteOut,
-    FilaAutorizacaoFonteGrupo, ChecklistDebitoItemOut, FilaLiberacaoGrupo, FilaTesourariaOut,
+    FilaAutorizacaoFonteGrupo, ChecklistDebitoItemOut, FilaLiberacaoGrupo,
     JustificativaIn, LiquidacaoIn, MarcarChecklistIn, MinhaFilaOut, OrdemPagamentoOut,
     PagarParcelaIn, ParcelaFilaOut, ParcelaOut, PedidoAjusteCreate, PedidoAjusteOut,
     PedidoAjusteResponderIn, PendenciaAjusteOut, SolicitarAjusteIn, SimulacaoAutorizacaoIn,
@@ -857,11 +857,15 @@ async def fila_liberacao(_: Usuario = Depends(require_permission("pagamento_auto
     return await filas.fila_liberacao(db, tenant_id=tenant_id)
 
 
-@operacoes_router.get("/tesouraria/fila", response_model=FilaTesourariaOut)
-async def fila_tesouraria(_: Usuario = Depends(require_permission("pagamento_pagar")),
-                          tenant_id: int = Depends(require_tenant_id),
-                          db: AsyncSession = Depends(get_db)):
-    return await filas.fila_tesouraria(db, tenant_id=tenant_id)
+@operacoes_router.get("/tesouraria/fila", status_code=status.HTTP_410_GONE)
+async def fila_tesouraria_deprecated(_: Usuario = Depends(require_permission("pagamento_pagar"))):
+    """Endpoint descontinuado (F4) — substituído pela Central da tesouraria:
+    GET /pagamentos/lotes/elegiveis (seleção) e GET /pagamentos/lotes (lotes)."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=("Este endpoint foi descontinuado. Use GET /pagamentos/lotes/elegiveis "
+                "e GET /pagamentos/lotes (Central da tesouraria, F4)."),
+    )
 
 
 @operacoes_router.post("/parcelas/liberar", response_model=list[ParcelaOut])

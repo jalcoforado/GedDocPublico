@@ -1,79 +1,78 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Banknote, FileText, Undo2 } from "lucide-react";
+import {
+  Banknote, ChevronDown, ChevronRight, FileText, Paperclip, Send, Upload, XCircle,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { fmtData, fmtDataCurta, fmtDataHora, fmtMoeda, hojeSemHora, parseDataLocal } from "@/components/pagamentos/format";
+import { fmtData, fmtDataHora, fmtMoeda } from "@/components/pagamentos/format";
 import { RitoPagamento } from "@/components/pagamentos/RitoPagamento";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { usePrompt } from "@/components/ui/confirm";
-import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { TabList, TabPanel, Tabs } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
-import { api, type ParcelaTesourariaItem } from "@/lib/api";
+import {
+  api,
+  type ContaBancaria,
+  type LoteDetalhe,
+  type LotePagamento,
+  type Parcela,
+  type RetornoParcelaInput,
+  type SituacaoLote,
+} from "@/lib/api";
 import { BotoesExportar } from "@/components/pagamentos/BotoesExportar";
 
-type TabId = "pagar" | "ops" | "pagas";
+type TabId = "selecionar" | "lotes" | "ops";
 
 const MAX_ORDENS = 15;
 
 const INVALIDATE_KEYS = [
-  ["pag-fila-autorizacao"],
-  ["pag-fila-liberacao"],
-  ["pag-fila-tesouraria"],
-  ["pag-fila"],
-  ["pag-debitos"],
+  ["pag-lotes"],
+  ["pag-lotes-elegiveis"],
   ["pag-caixa-painel"],
 ] as const;
 
-type Urgencia = "atrasadas" | "hoje" | "semana" | "depois";
+const SITUACAO_LOTE_INTENT: Record<SituacaoLote, "neutral" | "info" | "warning" | "success" | "danger"> = {
+  RASCUNHO: "neutral",
+  PROGRAMADO: "info",
+  ENVIADO: "warning",
+  PROCESSADO: "success",
+  CANCELADO: "danger",
+};
 
-function bucketDe(item: ParcelaTesourariaItem): Urgencia {
-  const ref = parseDataLocal(item.data_prevista_pagamento ?? item.vencimento);
-  const hoje = hojeSemHora();
-  const diffDias = Math.round((ref.getTime() - hoje.getTime()) / 86_400_000);
-  if (diffDias < 0) return "atrasadas";
-  if (diffDias === 0) return "hoje";
-  if (diffDias <= 7) return "semana";
-  return "depois";
-}
-
-const BUCKET_LABEL: Record<Urgencia, string> = {
-  atrasadas: "Atrasadas",
-  hoje: "Hoje",
-  semana: "Esta semana",
-  depois: "Depois",
+const SITUACAO_LOTE_ROTULO: Record<SituacaoLote, string> = {
+  RASCUNHO: "Rascunho",
+  PROGRAMADO: "Programado",
+  ENVIADO: "Enviado ao banco",
+  PROCESSADO: "Processado",
+  CANCELADO: "Cancelado",
 };
 
 export default function TesourariaPage() {
-  const [tab, setTab] = useState<TabId>("pagar");
+  const [tab, setTab] = useState<TabId>("selecionar");
 
   return (
-    // `Tabs` envolve o header E os painéis: a `TabList` viaja como prop até o
-    // `PageHeader`, mas continua DENTRO desta subárvore no React, então o
-    // contexto (ids, aria-controls) alcança os dois lados.
     <Tabs value={tab} onChange={(v) => setTab(v as TabId)} className="space-y-4">
       <PageHeader
         icon={Banknote}
         title="Tesouraria"
-        description="Execute os pagamentos das parcelas liberadas pelo ordenador — o último ato do rito da Lei 4.320/64."
+        description="Central da execução: selecione parcelas liberadas, monte o lote e acompanhe até o retorno do banco."
         tabs={
           <TabList
             aria-label="Seção da tesouraria"
             variant="pill"
             tabs={[
-              { value: "pagar", label: "A pagar" },
+              { value: "selecionar", label: "Selecionar e criar lote" },
+              { value: "lotes", label: "Lotes" },
               { value: "ops", label: "OPs emitidas" },
-              { value: "pagas", label: "Pagas recentemente" },
             ]}
           />
         }
@@ -81,279 +80,420 @@ export default function TesourariaPage() {
 
       <RitoPagamento atual="pagar" />
 
-      <TabPanel value="pagar">
-        <TabAPagar />
+      <TabPanel value="selecionar">
+        <TabSelecionar onLoteCriado={() => setTab("lotes")} />
+      </TabPanel>
+      <TabPanel value="lotes">
+        <TabLotes />
       </TabPanel>
       <TabPanel value="ops">
         <TabOps />
-      </TabPanel>
-      <TabPanel value="pagas">
-        <TabPagas />
       </TabPanel>
     </Tabs>
   );
 }
 
-
 // ---------------------------------------------------------------------------
-// Tab "A pagar" — parcelas LIBERADAS, agrupadas por urgência temporal.
+// "Selecionar e criar lote" — 1º e 2º passos da Central (spec §7.6).
 // ---------------------------------------------------------------------------
 
-function TabAPagar() {
+function TabSelecionar({ onLoteCriado }: { onLoteCriado: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const prompt = usePrompt();
-  const [selecionados, setSelecionados] = useState<number[]>([]);
-  const [pagarOpen, setPagarOpen] = useState(false);
-  const [pagarIds, setPagarIds] = useState<number[]>([]);
-  const [formaPagamento, setFormaPagamento] = useState("PIX");
-  const [dataPagamento, setDataPagamento] = useState("");
+  const [contaId, setContaId] = useState<number | "">("");
+  const [selecionadas, setSelecionadas] = useState<number[]>([]);
 
-  const filaQ = useQuery({
-    queryKey: ["pag-fila-tesouraria"],
-    queryFn: () => api.pagamentos.filas.tesouraria(),
+  const contasQ = useQuery({
+    queryKey: ["pag-contas-tesouraria"],
+    queryFn: () => api.pagamentos.cadastros.contas.list(),
   });
+  const contas = (contasQ.data ?? []).filter((c: ContaBancaria) => c.ativa);
 
-  const liberadas = filaQ.data?.liberadas ?? [];
-  const selecionadosSet = useMemo(() => new Set(selecionados), [selecionados]);
+  const elegiveisQ = useQuery({
+    queryKey: ["pag-lotes-elegiveis", contaId],
+    queryFn: () => api.pagamentos.lotes.elegiveis(contaId === "" ? undefined : contaId),
+  });
+  const elegiveis = elegiveisQ.data ?? [];
+  const selecionadasSet = useMemo(() => new Set(selecionadas), [selecionadas]);
 
-  const grupos = useMemo(() => {
-    const m: Record<Urgencia, ParcelaTesourariaItem[]> = {
-      atrasadas: [], hoje: [], semana: [], depois: [],
-    };
-    liberadas.forEach((p) => m[bucketDe(p)].push(p));
-    return m;
-  }, [liberadas]);
-
-  const somaSelecionados = useMemo(
+  const somaSelecionadas = useMemo(
     () =>
-      liberadas
-        .filter((p) => selecionadosSet.has(p.id))
+      elegiveis
+        .filter((p) => selecionadasSet.has(p.id))
         .reduce((acc, p) => acc + (Number(p.valor) || 0), 0),
-    [liberadas, selecionadosSet],
+    [elegiveis, selecionadasSet],
   );
 
   function toggle(id: number) {
-    setSelecionados((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+    setSelecionadas((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   }
 
-  function abrirPagar(ids: number[]) {
-    setPagarIds(ids);
-    setFormaPagamento("PIX");
-    setDataPagamento("");
-    setPagarOpen(true);
-  }
-
-  const pagarM = useMutation({
-    mutationFn: async () => {
-      let ok = 0;
-      const erros: string[] = [];
-      for (const id of pagarIds) {
-        try {
-          // eslint-disable-next-line no-await-in-loop -- lote intencionalmente sequencial (evita corrida no caixa)
-          await api.pagamentos.parcelas.pagar(id, {
-            forma_pagamento: formaPagamento,
-            data_pagamento: dataPagamento || null,
-          });
-          ok += 1;
-        } catch (e) {
-          erros.push((e as Error).message);
-        }
-      }
-      return { ok, total: pagarIds.length, erros };
+  const criarLoteM = useMutation({
+    mutationFn: () => {
+      if (contaId === "") throw new Error("Selecione a conta pagadora");
+      return api.pagamentos.lotes.criar({ id_conta_pagadora: contaId, parcela_ids: selecionadas });
     },
-    onSuccess: (res) => {
+    onSuccess: (lote: LotePagamento) => {
+      toast.success(`Lote ${lote.numero} criado com ${selecionadas.length} parcela(s).`);
+      setSelecionadas([]);
       INVALIDATE_KEYS.forEach((key) => qc.invalidateQueries({ queryKey: key }));
-      if (res.erros.length === 0) {
-        toast.success(`${res.ok} parcela(s) paga(s).`);
-      } else {
-        toast.error(`${res.ok}/${res.total} pagas — ${res.erros.length} falharam: ${res.erros[0]}`);
-      }
-      setSelecionados((cur) => cur.filter((id) => !pagarIds.includes(id)));
-      setPagarOpen(false);
+      onLoteCriado();
     },
     onError: (e: Error) => toast.error(e.message),
   });
-
-  const revogarM = useMutation({
-    mutationFn: (vars: { id: number; justificativa: string }) =>
-      api.pagamentos.parcelas.revogarLiberacao(vars.id, vars.justificativa),
-    onSuccess: () => {
-      INVALIDATE_KEYS.forEach((key) => qc.invalidateQueries({ queryKey: key }));
-      toast.success("Liberação revogada — parcela volta para a fila de liberação.");
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  async function revogar(p: ParcelaTesourariaItem) {
-    const j = await prompt({
-      title: "Revogar liberação",
-      message: `A parcela ${p.numero}/${p.qtd_parcelas} de ${p.nome_fornecedor} volta para a fila de liberação.`,
-      label: "Justificativa",
-      required: true,
-      confirmLabel: "Revogar",
-    });
-    if (j) revogarM.mutate({ id: p.id, justificativa: j });
-  }
-
-  if (!filaQ.isLoading && liberadas.length === 0) {
-    return (
-      <EmptyState
-        icon={Banknote}
-        title="Nada aguardando liberação"
-        description="Autorize despesas na aba Despesa e libere pagamentos na aba Pagamento das Autorizações — as parcelas liberadas aparecem aqui."
-      />
-    );
-  }
-
-  const ordemBuckets: Urgencia[] = ["atrasadas", "hoje", "semana", "depois"];
 
   return (
     <div className="space-y-4 pb-24">
-      {ordemBuckets.map((bucket) => {
-        const itens = grupos[bucket];
-        if (itens.length === 0) return null;
-        return (
-          <section key={bucket} className="space-y-2">
-            <h2
-              className={cn(
-                "text-sm font-semibold uppercase tracking-wide",
-                bucket === "atrasadas" ? "text-danger-soft-foreground" : "text-muted-foreground",
-              )}
-            >
-              {BUCKET_LABEL[bucket]} <span className="tabular-nums">({itens.length})</span>
-            </h2>
-            <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface-1">
-              {itens.map((p) => (
-                <div key={p.id} className="flex items-center gap-3 px-4 py-3">
-                  <input
-                    type="checkbox"
-                    checked={selecionadosSet.has(p.id)}
-                    onChange={() => toggle(p.id)}
-                    aria-label={`Selecionar parcela de ${p.nome_fornecedor}`}
-                    className="h-5 w-5 shrink-0 cursor-pointer rounded border-input text-primary focus:ring-2 focus:ring-ring"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="truncate font-semibold text-foreground" title={p.nome_fornecedor}>
-                        {p.nome_fornecedor}
-                      </span>
-                      <span className="truncate text-xs text-muted-foreground" title={p.descricao_debito}>
-                        {p.descricao_debito}
-                      </span>
-                      {p.vencida && <Badge intent="danger">vencida há {p.dias_atraso}d</Badge>}
-                    </div>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {p.op_numero && (
-                        <>
-                          {p.op_id ? (
-                            <a
-                              href={api.pagamentos.ordens.pdfUrl(p.op_id)}
-                              target="_blank"
-                              rel="noopener"
-                              className="inline-flex items-center gap-0.5 hover:text-foreground hover:underline"
-                            >
-                              {p.op_numero}
-                              <FileText className="h-3 w-3" aria-hidden="true" />
-                            </a>
-                          ) : (
-                            p.op_numero
-                          )}
-                          {" · "}
-                        </>
-                      )}
-                      {p.liberado_por
-                        ? `liberado por ${p.liberado_por} em ${fmtDataCurta(p.data_liberacao)}`
-                        : "liberação sem registro de usuário"}
-                      {p.data_prevista_pagamento && <> · previsto {fmtData(p.data_prevista_pagamento)}</>}
-                    </p>
-                  </div>
-                  <p className="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums text-foreground">
-                    {fmtMoeda(p.valor)}
-                  </p>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button size="sm" onClick={() => abrirPagar([p.id])}>
-                      Pagar
-                    </Button>
-                    <button
-                      type="button"
-                      onClick={() => revogar(p)}
-                      disabled={revogarM.isPending}
-                      aria-label={`Revogar liberação de ${p.nome_fornecedor}`}
-                      title="Revogar liberação"
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-                    >
-                      <Undo2 className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        );
-      })}
+      <div className="max-w-sm">
+        <FormField label="Conta pagadora" required>
+          <Select
+            value={contaId === "" ? "" : String(contaId)}
+            onChange={(e) => {
+              setContaId(e.target.value ? Number(e.target.value) : "");
+              setSelecionadas([]);
+            }}
+          >
+            <option value="">Selecione…</option>
+            {contas.map((c: ContaBancaria) => (
+              <option key={c.id} value={c.id}>
+                {c.nome} — {c.banco}/{c.agencia}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+      </div>
 
-      {selecionados.length > 0 && (
-        <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t border-border bg-surface-1 px-4 py-3 shadow-md sm:mx-0 sm:rounded-lg sm:border">
-          <p className="text-sm text-foreground">
-            <span className="font-semibold">{selecionados.length}</span> selecionada(s) — Σ{" "}
-            <span className="font-semibold tabular-nums">{fmtMoeda(somaSelecionados)}</span>
-          </p>
-          <Button onClick={() => abrirPagar(selecionados)}>Pagar selecionadas</Button>
+      {contaId === "" ? (
+        <EmptyState
+          icon={Banknote}
+          title="Escolha uma conta pagadora"
+          description="As parcelas liberadas e disponíveis para lote aparecem depois de escolher a conta."
+        />
+      ) : elegiveisQ.isLoading ? (
+        <Skeleton className="h-32 w-full" />
+      ) : elegiveis.length === 0 ? (
+        <EmptyState
+          icon={Banknote}
+          title="Nada elegível nesta conta"
+          description="Libere pagamentos na fila de liberação das Autorizações para que apareçam aqui."
+        />
+      ) : (
+        <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface-1">
+          {elegiveis.map((p: Parcela) => (
+            <div key={p.id} className="flex items-center gap-3 px-4 py-3">
+              <input
+                type="checkbox"
+                checked={selecionadasSet.has(p.id)}
+                onChange={() => toggle(p.id)}
+                aria-label={`Selecionar parcela ${p.numero} do débito #${p.id_debito}`}
+                className="h-5 w-5 shrink-0 cursor-pointer rounded border-input text-primary focus:ring-2 focus:ring-ring"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-foreground">
+                  Débito #{p.id_debito} · parcela {p.numero}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  vencimento {fmtData(p.vencimento)}
+                  {p.data_prevista_pagamento && <> · previsto {fmtData(p.data_prevista_pagamento)}</>}
+                </p>
+              </div>
+              <p className="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums text-foreground">
+                {fmtMoeda(p.valor)}
+              </p>
+            </div>
+          ))}
         </div>
       )}
 
-      <Dialog
-        open={pagarOpen}
-        onClose={() => setPagarOpen(false)}
-        title={pagarIds.length > 1 ? `Pagar ${pagarIds.length} parcelas` : "Pagar parcela"}
-        size="sm"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setPagarOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={() => pagarM.mutate()} disabled={pagarM.isPending}>
-              {pagarM.isPending ? "Salvando..." : "Confirmar pagamento"}
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          <div>
-            <Label htmlFor="tes-forma" required>
-              Forma de pagamento
-            </Label>
-            <Select
-              id="tes-forma"
-              value={formaPagamento}
-              onChange={(e) => setFormaPagamento(e.target.value)}
-              required
-            >
-              <option value="PIX">PIX</option>
-              <option value="TED">TED</option>
-              <option value="BOLETO">Boleto</option>
-              <option value="DINHEIRO">Dinheiro</option>
-              <option value="OUTRO">Outro</option>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="tes-data">Data do pagamento (opcional)</Label>
-            <Input
-              id="tes-data"
-              type="date"
-              value={dataPagamento}
-              onChange={(e) => setDataPagamento(e.target.value)}
-            />
-          </div>
+      {selecionadas.length > 0 && (
+        <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t border-border bg-surface-1 px-4 py-3 shadow-md sm:mx-0 sm:rounded-lg sm:border">
+          <p className="text-sm text-foreground">
+            <span className="font-semibold">{selecionadas.length}</span> selecionada(s) — Σ{" "}
+            <span className="font-semibold tabular-nums">{fmtMoeda(String(somaSelecionadas))}</span>
+          </p>
+          <Button onClick={() => criarLoteM.mutate()} disabled={criarLoteM.isPending}>
+            {criarLoteM.isPending ? "Criando…" : "Criar lote"}
+          </Button>
         </div>
-      </Dialog>
+      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Tab "OPs emitidas" — movida da tela de Autorizações.
+// "Lotes" — lista + detalhe inline com as ações de cada estágio.
+// ---------------------------------------------------------------------------
+
+function TabLotes() {
+  const [expandido, setExpandido] = useState<number | null>(null);
+
+  const lotesQ = useQuery({
+    queryKey: ["pag-lotes"],
+    queryFn: () => api.pagamentos.lotes.listar(),
+  });
+  const lotes = lotesQ.data ?? [];
+
+  if (!lotesQ.isLoading && lotes.length === 0) {
+    return (
+      <EmptyState
+        icon={Banknote}
+        title="Nenhum lote criado ainda"
+        description="Monte o primeiro lote na aba Selecionar e criar lote."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-2 pb-12">
+      {lotes.map((lote: LotePagamento) => (
+        <div key={lote.id} className="overflow-hidden rounded-lg border border-border bg-surface-1">
+          <button
+            type="button"
+            onClick={() => setExpandido((cur) => (cur === lote.id ? null : lote.id))}
+            className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/40"
+            aria-expanded={expandido === lote.id}
+          >
+            {expandido === lote.id ? (
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="font-semibold text-foreground">{lote.numero}</span>{" "}
+              <span className="text-xs text-muted-foreground">criado em {fmtDataHora(lote.criado_em)}</span>
+            </span>
+            <Badge intent={SITUACAO_LOTE_INTENT[lote.situacao]}>{SITUACAO_LOTE_ROTULO[lote.situacao]}</Badge>
+            <span className="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums text-foreground">
+              {fmtMoeda(lote.valor_total)}
+            </span>
+          </button>
+          {expandido === lote.id && <LoteDetalheInline loteId={lote.id} />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LoteDetalheInline({ loteId }: { loteId: number }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [dataProgramada, setDataProgramada] = useState("");
+  const [retornos, setRetornos] = useState<Record<number, { resultado: "PAGA" | "FALHOU"; motivo: string }>>({});
+  const [comprovanteArquivo, setComprovanteArquivo] = useState<File | null>(null);
+
+  const loteQ = useQuery({
+    queryKey: ["pag-lote", loteId],
+    queryFn: () => api.pagamentos.lotes.obter(loteId),
+  });
+  const lote = loteQ.data as LoteDetalhe | undefined;
+
+  function invalidar() {
+    INVALIDATE_KEYS.forEach((key) => qc.invalidateQueries({ queryKey: key }));
+    qc.invalidateQueries({ queryKey: ["pag-lote", loteId] });
+  }
+
+  const removerParcelaM = useMutation({
+    mutationFn: (parcelaId: number) => api.pagamentos.lotes.removerParcela(loteId, parcelaId),
+    onSuccess: () => { toast.success("Parcela removida do lote"); invalidar(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const cancelarM = useMutation({
+    mutationFn: () => api.pagamentos.lotes.cancelar(loteId),
+    onSuccess: () => { toast.success("Lote cancelado — parcelas liberadas para um novo lote."); invalidar(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const programarM = useMutation({
+    mutationFn: () => api.pagamentos.lotes.programar(loteId, dataProgramada),
+    onSuccess: () => { toast.success("Lote programado"); invalidar(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const enviarM = useMutation({
+    mutationFn: () => api.pagamentos.lotes.enviar(loteId),
+    onSuccess: () => { toast.success("Lote enviado ao banco"); invalidar(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const retornoM = useMutation({
+    mutationFn: () => {
+      const pendentes = (lote?.parcelas ?? []).filter((p) => p.situacao === "PENDENTE");
+      const payload: RetornoParcelaInput[] = pendentes.map((p) => {
+        const decisao = retornos[p.id_parcela] ?? { resultado: "PAGA" as const, motivo: "" };
+        return {
+          parcela_id: p.id_parcela,
+          resultado: decisao.resultado,
+          motivo_falha: decisao.resultado === "FALHOU" ? decisao.motivo : undefined,
+        };
+      });
+      return api.pagamentos.lotes.processarRetorno(loteId, payload);
+    },
+    onSuccess: () => { toast.success("Retorno registrado"); setRetornos({}); invalidar(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const comprovanteM = useMutation({
+    mutationFn: () => {
+      if (!comprovanteArquivo) throw new Error("Selecione um arquivo");
+      return api.pagamentos.lotes.anexarComprovante(loteId, comprovanteArquivo);
+    },
+    onSuccess: () => { toast.success("Comprovante anexado"); setComprovanteArquivo(null); invalidar(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (loteQ.isLoading || !lote) {
+    return <div className="border-t border-border p-4"><Skeleton className="h-24 w-full" /></div>;
+  }
+
+  return (
+    <div className="space-y-4 border-t border-border p-4">
+      <div className="overflow-x-auto">
+        <Table variant="flat">
+          <THead>
+            <TR>
+              <TH>Parcela</TH>
+              <TH>Situação</TH>
+              {lote.situacao === "ENVIADO" && <TH>Retorno</TH>}
+              {lote.situacao === "RASCUNHO" && <TH className="text-right">Ações</TH>}
+            </TR>
+          </THead>
+          <TBody>
+            {lote.parcelas.map((p) => (
+              <TR key={p.id}>
+                <TD>Parcela #{p.id_parcela}</TD>
+                <TD>
+                  <Badge
+                    intent={p.situacao === "PAGA" ? "success" : p.situacao === "FALHOU" ? "danger" : "neutral"}
+                  >
+                    {p.situacao}
+                  </Badge>
+                  {p.motivo_falha && <p className="text-xs text-muted-foreground">{p.motivo_falha}</p>}
+                </TD>
+                {lote.situacao === "ENVIADO" && (
+                  <TD>
+                    {p.situacao === "PENDENTE" ? (
+                      <div className="flex items-center gap-2">
+                        <Select
+                          value={retornos[p.id_parcela]?.resultado ?? "PAGA"}
+                          onChange={(e) =>
+                            setRetornos((cur) => ({
+                              ...cur,
+                              [p.id_parcela]: {
+                                resultado: e.target.value as "PAGA" | "FALHOU",
+                                motivo: cur[p.id_parcela]?.motivo ?? "",
+                              },
+                            }))
+                          }
+                        >
+                          <option value="PAGA">Pago</option>
+                          <option value="FALHOU">Falhou</option>
+                        </Select>
+                        {retornos[p.id_parcela]?.resultado === "FALHOU" && (
+                          <Input
+                            placeholder="Motivo da falha"
+                            value={retornos[p.id_parcela]?.motivo ?? ""}
+                            onChange={(e) =>
+                              setRetornos((cur) => ({
+                                ...cur,
+                                [p.id_parcela]: { resultado: "FALHOU", motivo: e.target.value },
+                              }))
+                            }
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">já resolvida</span>
+                    )}
+                  </TD>
+                )}
+                {lote.situacao === "RASCUNHO" && (
+                  <TD className="text-right">
+                    <Button
+                      variant="ghost" size="sm"
+                      onClick={() => removerParcelaM.mutate(p.id_parcela)}
+                      disabled={removerParcelaM.isPending}
+                    >
+                      Remover
+                    </Button>
+                  </TD>
+                )}
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      </div>
+
+      {lote.situacao === "RASCUNHO" && (
+        <div className="flex flex-wrap items-end gap-3">
+          <FormField label="Data programada" required>
+            <Input type="date" value={dataProgramada} onChange={(e) => setDataProgramada(e.target.value)} />
+          </FormField>
+          <Button onClick={() => programarM.mutate()} disabled={!dataProgramada || programarM.isPending}>
+            Programar
+          </Button>
+          <Button variant="danger" onClick={() => cancelarM.mutate()} disabled={cancelarM.isPending}>
+            <XCircle className="mr-1 h-4 w-4" aria-hidden="true" />
+            Cancelar lote
+          </Button>
+        </div>
+      )}
+
+      {lote.situacao === "PROGRAMADO" && (
+        <div className="flex flex-wrap gap-3">
+          <Button onClick={() => enviarM.mutate()} disabled={enviarM.isPending}>
+            <Send className="mr-1 h-4 w-4" aria-hidden="true" />
+            {enviarM.isPending ? "Enviando…" : "Enviar ao banco"}
+          </Button>
+          <Button variant="danger" onClick={() => cancelarM.mutate()} disabled={cancelarM.isPending}>
+            <XCircle className="mr-1 h-4 w-4" aria-hidden="true" />
+            Cancelar lote
+          </Button>
+        </div>
+      )}
+
+      {lote.situacao === "ENVIADO" && (
+        <div className="space-y-3 border-t border-border pt-3">
+          <Button onClick={() => retornoM.mutate()} disabled={retornoM.isPending}>
+            {retornoM.isPending ? "Registrando…" : "Registrar retorno"}
+          </Button>
+          <div className="flex flex-wrap items-end gap-2">
+            <FormField label="Comprovante da remessa" hint="PDF do protocolo bancário, opcional">
+              <input
+                type="file"
+                onChange={(e) => setComprovanteArquivo(e.target.files?.[0] ?? null)}
+                className="block text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted/80"
+              />
+            </FormField>
+            <Button
+              variant="secondary" size="sm"
+              onClick={() => comprovanteM.mutate()}
+              disabled={!comprovanteArquivo || comprovanteM.isPending}
+            >
+              <Upload className="mr-1 h-4 w-4" aria-hidden="true" />
+              Anexar
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {(lote.situacao === "PROCESSADO" || lote.id_anexo_comprovante) && lote.id_anexo_comprovante && (
+        <a
+          href={api.pagamentos.lotes.comprovanteDownloadUrl(lote.id)}
+          target="_blank"
+          rel="noopener"
+          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+        >
+          <Paperclip className="h-4 w-4" aria-hidden="true" />
+          Ver comprovante
+        </a>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// "OPs emitidas" — inalterada da versão anterior.
 // ---------------------------------------------------------------------------
 
 function TabOps() {
@@ -377,8 +517,6 @@ function TabOps() {
 
   return (
     <div className="space-y-3">
-      {/* Export da LISTA (C1.3). Não confundir com o `pdfUrl` de cada linha:
-          aquele é a OP individual, este é o relatório de todas. */}
       <div className="flex justify-end">
         <BotoesExportar
           csvUrl={api.pagamentos.ordens.listaCsvUrl()}
@@ -427,87 +565,6 @@ function TabOps() {
         </p>
       )}
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Tab "Pagas recentemente" — últimas 15, com Estornar.
-// ---------------------------------------------------------------------------
-
-function TabPagas() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const prompt = usePrompt();
-
-  const filaQ = useQuery({
-    queryKey: ["pag-fila-tesouraria"],
-    queryFn: () => api.pagamentos.filas.tesouraria(),
-  });
-
-  const pagas = filaQ.data?.pagas_recentes ?? [];
-
-  const estornarM = useMutation({
-    mutationFn: (vars: { id: number; justificativa: string }) =>
-      api.pagamentos.parcelas.estornar(vars.id, vars.justificativa),
-    onSuccess: () => {
-      INVALIDATE_KEYS.forEach((key) => qc.invalidateQueries({ queryKey: key }));
-      toast.success("Parcela estornada — volta para a fila de liberação.");
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  async function estornar(p: ParcelaTesourariaItem) {
-    const j = await prompt({
-      title: "Estornar parcela",
-      message: `A parcela ${p.numero}/${p.qtd_parcelas} de ${p.nome_fornecedor} volta para A pagar (será preciso liberar novamente).`,
-      label: "Justificativa",
-      required: true,
-      confirmLabel: "Estornar",
-    });
-    if (j) estornarM.mutate({ id: p.id, justificativa: j });
-  }
-
-  if (!filaQ.isLoading && pagas.length === 0) {
-    return (
-      <EmptyState
-        icon={Banknote}
-        title="Nenhum pagamento recente"
-        description="As últimas parcelas pagas pela tesouraria aparecem aqui."
-      />
-    );
-  }
-
-  return (
-    <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface-1">
-      {pagas.map((p) => (
-        <div key={p.id} className="flex items-center gap-3 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="truncate font-semibold text-foreground" title={p.nome_fornecedor}>
-                {p.nome_fornecedor}
-              </span>
-              <span className="truncate text-xs text-muted-foreground" title={p.descricao_debito}>
-                {p.descricao_debito}
-              </span>
-            </div>
-            <p className="truncate text-xs text-muted-foreground">
-              parcela {p.numero}/{p.qtd_parcelas} · pago em {fmtData(p.data_pagamento)}
-            </p>
-          </div>
-          <p className="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums text-foreground">
-            {fmtMoeda(p.valor)}
-          </p>
-          <Button
-            size="sm"
-            variant="danger"
-            onClick={() => estornar(p)}
-            disabled={estornarM.isPending}
-          >
-            Estornar
-          </Button>
-        </div>
-      ))}
     </div>
   );
 }
