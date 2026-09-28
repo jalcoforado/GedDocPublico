@@ -402,6 +402,13 @@ async def processar_retorno(db: AsyncSession, *, tenant_id: int, lote_id: int,
             v.atualizado_em = _utcnow()
             continue  # Parcela.status permanece LIBERADA — reelegível num lote novo.
 
+        # A trava de cima é do VÍNCULO com o lote; esta é da PARCELA. Se ela
+        # deixou de estar LIBERADA por qualquer outro caminho, lançar a SAIDA
+        # aqui pagaria duas vezes.
+        if parcela.status != "LIBERADA":
+            raise PagamentoDebitoError(
+                f"Parcela {parcela.id} não está mais liberada (está '{parcela.status}') — "
+                "o retorno não pode lançar outro pagamento.", status.HTTP_409_CONFLICT)
         quando = r.data_pagamento or _utcnow().date()
         todas = await listar_parcelas(db, tenant_id=tenant_id, debito_id=d.id)
         integral = not any(x.id != parcela.id and x.status not in ("PAGA", "CANCELADA") for x in todas)

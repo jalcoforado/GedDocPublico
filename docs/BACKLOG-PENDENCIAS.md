@@ -635,7 +635,12 @@ Pendências registradas da F3 (menores):
   - Fecha o gap de segregação de funções que a F1 deixou aberto: `assert_segregacao(ato="PAGAR")`
     existia em `pagamentos_guardas.py` desde a F1 mas nunca era chamada — `enviar_lote` (F4) passou
     a chamá-la, e agora nem super-usuário pode enviar um lote com débito que ele mesmo decidiu em
-    papel anterior.
+    papel anterior. **A revisão do PR achou o desvio, fechado antes do merge:** o
+    `POST /pagamentos/parcelas/{id}/pagar` avulso (mesma permissão) não checava segregação
+    nem lote — e como o lote não muda `Parcela.status`, pagava parcela já enviada ao banco, e o
+    retorno lançava uma segunda SAIDA (saldo em dobro). Hoje o avulso recusa parcela em lote
+    ativo (409) e exige a mesma segregação (403), e o retorno recusa parcela que não esteja
+    LIBERADA. Testes em `test_pagamentos_f4_lote_guardas.py`, incluindo HTTP com usuário comum.
   - `GET /pagamentos/tesouraria/fila` descontinuado (410) — substituído por
     `GET /pagamentos/lotes/elegiveis` + `GET /pagamentos/lotes`.
   - **Simplificação frontend assumida, não uma decisão do produto**: a Central da tesouraria mostra
