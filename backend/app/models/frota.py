@@ -341,3 +341,30 @@ class VeiculoOcorrencia(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoPosicao(Base):
+    """Posição GPS de um veículo (telemetria de frota — série temporal).
+
+    `data_hora` é o instante da leitura no rastreador (UTC, sem fuso);
+    `criado_em`, o da gravação (server-side). Única por
+    `(tenant_id, id_veiculo, data_hora)`: reenvio de lote não duplica ponto.
+    `id_veiculo` validado same-tenant no serviço. Sem soft-delete — é leitura
+    de sensor, não cadastro (migration 0123)."""
+
+    __tablename__ = "veiculo_posicao"
+    __table_args__ = {"schema": "frota"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("frota.veiculo.id"), nullable=False
+    )
+    data_hora: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    latitude: Mapped[Decimal] = mapped_column(Numeric(10, 8), nullable=False)
+    longitude: Mapped[Decimal] = mapped_column(Numeric(11, 8), nullable=False)
+    velocidade: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    ignicao_ligada: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)

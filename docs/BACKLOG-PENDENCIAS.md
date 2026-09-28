@@ -1053,19 +1053,38 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   até achar um `>(` qualquer, porque `>` também fecha genérico aninhado (`Paginated<X>>`) — o
 >   "tipo" capturado continha blocos inteiros do arquivo e a guarda ficava verde comparando lixo.
 
-### 2.3 Frota — backlog de telemetria
+### 2.3 Frota — backlog de telemetria — 1ª fatia (posições) ENTREGUE em 2026-09-28
 
 Frota-1..6 + a fatia Operacional (manutenção, abastecimento, vistoria, ocorrências, visão
-gerencial) estão em `main` e no ar. O que resta é uma **iniciativa nova**, não uma continuação:
+gerencial) estão em `main` e no ar. O que resta é uma **iniciativa nova**, não uma continuação.
 
-- **Geolocalização / rastreamento GPS em tempo real** — não existe. Depende de telemetria
-  (rastreador embarcado ou provedor externo), ingestão de posições e provável armazenamento de
-  série temporal. **Decisão de arquitetura pendente:** provider externo × hardware próprio.
-- **Rotas / trajetos do veículo** — não existe; depende do item acima. Distinto de "rotas/linhas"
-  do Transporte Regulado (P6), que é outro domínio.
+**Entregue em 2026-09-28 (backend + cliente `api.ts`, sem tela):** o armazenamento e a API da
+série de posições. `frota.veiculo_posicao` (migration `0123`, RLS/FORCE/policies/grants no padrão
+do schema), `POST /frota/veiculos/{id}/telemetria/posicoes` (lote de até 1.000 pontos, transação
+`frota` + `inserir`; **idempotente**: reenvio do mesmo `(veículo, data_hora)` é ignorado e contado
+em `ignoradas`) e `GET` no mesmo caminho com `inicio`/`fim` (leitura sem action; período com mais
+de 5.000 pontos é 422 em vez de truncar). Veículo de outro tenant é 404 nas duas. Testes em
+`tests/test_frota_telemetria.py`, com usuário comum e RLS sob `aprimora_app`.
+
+O que continua aberto:
+
+- **Canal de ingestão definitivo — decisão de arquitetura pendente:** provider externo × hardware
+  próprio. O `POST` de hoje exige **usuário autenticado** com a transação `frota`; rastreador
+  embarcado não tem login. Ou um provider externo empurra/é consultado por um conector (job Celery
+  chamando este mesmo serviço), ou o hardware próprio ganha credencial de dispositivo — nos dois
+  casos é autenticação nova, não um ajuste nesta rota.
+- **Tempo real** — não existe: sem push (SSE/WebSocket) nem "última posição" da frota inteira.
+- **Rotas / trajetos derivados** — o dado bruto existe; falta derivar percurso, paradas e km por
+  trajeto. Distinto de "rotas/linhas" do Transporte Regulado (P6), que é outro domínio.
+- **Retenção da série** — nada apaga posição hoje; a tabela cresce sem limite. Definir janela de
+  retenção (e se vira particionamento) antes de ligar um rastreador de verdade.
+- **UI** — sem tela (mapa/trajeto). Tela nova precisa de link no mesmo PR (guarda de página órfã).
 - **Consumo (km/l e eficiência)** — parcial. Abastecimento já registra litros, custo e média R$/l;
   faltam km/l e "km rodado por período", explicitamente adiados na visão gerencial
   (`/frotas/relatorios`). Depende de séries de odômetro — ou do GPS, para km mais preciso.
+  A WIP de 2026-09-24 trazia um cálculo por odômetro entre abastecimentos; ficou **fora** da
+  fatia de posições porque assume tanque cheio a cada abastecimento sem que o cadastro registre
+  isso — decidir a regra (tanque cheio × parcial) antes de publicar um km/l.
 
 ### 2.4 Minutas / Google Docs — sincronização de volta
 
