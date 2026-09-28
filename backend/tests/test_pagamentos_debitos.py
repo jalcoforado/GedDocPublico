@@ -49,35 +49,6 @@ def _doc() -> str:
     return str(uuid.uuid4().int)[:14]
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _base(engine, tenant_id, *, saldo_inicial="10000.00"):
     """Fornecedor + natureza + fonte + conta + unidade prontos para um débito."""
     from sqlalchemy import select
@@ -127,226 +98,196 @@ def _payload_debito(forn, nat, conta, unidade, *, valor="1000.00", parcelas=None
 
 async def test_criar_debito_com_parcelas(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, conta, unidade = await _base(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            uid = (await s.execute(text(
-                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
-                payload=_payload_debito(forn, nat, conta, unidade, valor="1000.00", parcelas=[
-                    ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-01"),
-                    ParcelaCreate(numero=2, valor="400.00", vencimento="2026-09-01"),
-                ]))
-        assert d.situacao_tramitacao == est.RASCUNHO
-        async with _sm(admin_engine)() as s:
-            parcelas = await svc.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
-            hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-        assert [p.numero for p in parcelas] == [1, 2]
-        assert len(hist) == 1 and hist[0].acao == "CRIADO"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    forn, nat, conta, unidade = await _base(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+            payload=_payload_debito(forn, nat, conta, unidade, valor="1000.00", parcelas=[
+                ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-01"),
+                ParcelaCreate(numero=2, valor="400.00", vencimento="2026-09-01"),
+            ]))
+    assert d.situacao_tramitacao == est.RASCUNHO
+    async with _sm(admin_engine)() as s:
+        parcelas = await svc.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+        hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
+    assert [p.numero for p in parcelas] == [1, 2]
+    assert len(hist) == 1 and hist[0].acao == "CRIADO"
 
 
 async def test_criar_debito_soma_parcelas_diferente_422(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, conta, unidade = await _base(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            uid = (await s.execute(text(
-                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-            with pytest.raises(HTTPException) as exc:
-                await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
-                    payload=_payload_debito(forn, nat, conta, unidade, valor="1000.00", parcelas=[
-                        ParcelaCreate(numero=1, valor="999.00", vencimento="2026-08-01")]))
-            assert exc.value.status_code == 422
-    finally:
-        await _cleanup(admin_engine, t.id)
+    forn, nat, conta, unidade = await _base(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        with pytest.raises(HTTPException) as exc:
+            await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+                payload=_payload_debito(forn, nat, conta, unidade, valor="1000.00", parcelas=[
+                    ParcelaCreate(numero=1, valor="999.00", vencimento="2026-08-01")]))
+        assert exc.value.status_code == 422
 
 
 async def test_atualizar_debito_fora_de_rascunho_409(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, conta, unidade = await _base(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            uid = (await s.execute(text(
-                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
-                payload=_payload_debito(forn, nat, conta, unidade))
-        async with _sm(admin_engine)() as s:
-            # F2: a checagem de edição passou de `status` (legado, coluna
-            # removida na F5) para `situacao_tramitacao` — só RASCUNHO e as
-            # três etapas de AJUSTE_* são editáveis. AGUARDANDO_GESTOR não é
-            # nenhuma delas.
-            await s.execute(text(
-                "UPDATE pagamentos.debito SET situacao_tramitacao='AGUARDANDO_GESTOR' "
-                "WHERE id=:i"), {"i": d.id})
-            await s.commit()
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await svc.atualizar_debito(s, tenant_id=t.id, debito_id=d.id, usuario_id=uid,
-                    payload=DebitoUpdate(descricao="Alterado"))
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+    forn, nat, conta, unidade = await _base(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+            payload=_payload_debito(forn, nat, conta, unidade))
+    async with _sm(admin_engine)() as s:
+        # F2: a checagem de edição passou de `status` (legado, coluna
+        # removida na F5) para `situacao_tramitacao` — só RASCUNHO e as
+        # três etapas de AJUSTE_* são editáveis. AGUARDANDO_GESTOR não é
+        # nenhuma delas.
+        await s.execute(text(
+            "UPDATE pagamentos.debito SET situacao_tramitacao='AGUARDANDO_GESTOR' "
+            "WHERE id=:i"), {"i": d.id})
+        await s.commit()
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await svc.atualizar_debito(s, tenant_id=t.id, debito_id=d.id, usuario_id=uid,
+                payload=DebitoUpdate(descricao="Alterado"))
+        assert exc.value.status_code == 409
 
 
 async def test_atualizar_debito_rascunho_troca_parcelas(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, conta, unidade = await _base(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            uid = (await s.execute(text(
-                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
-                payload=_payload_debito(forn, nat, conta, unidade))
-        async with _sm(admin_engine)() as s:
-            atualizado = await svc.atualizar_debito(s, tenant_id=t.id, debito_id=d.id,
-                usuario_id=uid, payload=DebitoUpdate(
-                    descricao="Compra revisada", valor_total="1500.00", parcelas=[
-                        ParcelaCreate(numero=1, valor="900.00", vencimento="2026-08-01"),
-                        ParcelaCreate(numero=2, valor="600.00", vencimento="2026-09-01"),
-                    ]))
-        assert atualizado.descricao == "Compra revisada"
-        assert atualizado.valor_total == Decimal("1500.00")
-        async with _sm(admin_engine)() as s:
-            parcelas = await svc.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
-        # parcela antiga (1x 1000.00) soft-deletada; só as novas aparecem
-        assert [(p.numero, p.valor) for p in parcelas] == [
-            (1, Decimal("900.00")), (2, Decimal("600.00"))]
-        async with _sm(admin_engine)() as s:
-            total = (await s.execute(text(
-                "SELECT count(*) FROM pagamentos.parcela WHERE id_debito=:i"),
-                {"i": d.id})).scalar_one()
-        assert total == 3  # 1 antiga (excluido=true) + 2 novas
-    finally:
-        await _cleanup(admin_engine, t.id)
+    forn, nat, conta, unidade = await _base(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+            payload=_payload_debito(forn, nat, conta, unidade))
+    async with _sm(admin_engine)() as s:
+        atualizado = await svc.atualizar_debito(s, tenant_id=t.id, debito_id=d.id,
+            usuario_id=uid, payload=DebitoUpdate(
+                descricao="Compra revisada", valor_total="1500.00", parcelas=[
+                    ParcelaCreate(numero=1, valor="900.00", vencimento="2026-08-01"),
+                    ParcelaCreate(numero=2, valor="600.00", vencimento="2026-09-01"),
+                ]))
+    assert atualizado.descricao == "Compra revisada"
+    assert atualizado.valor_total == Decimal("1500.00")
+    async with _sm(admin_engine)() as s:
+        parcelas = await svc.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+    # parcela antiga (1x 1000.00) soft-deletada; só as novas aparecem
+    assert [(p.numero, p.valor) for p in parcelas] == [
+        (1, Decimal("900.00")), (2, Decimal("600.00"))]
+    async with _sm(admin_engine)() as s:
+        total = (await s.execute(text(
+            "SELECT count(*) FROM pagamentos.parcela WHERE id_debito=:i"),
+            {"i": d.id})).scalar_one()
+    assert total == 3  # 1 antiga (excluido=true) + 2 novas
 
 
 async def test_atualizar_valor_total_sem_parcelas_divergente_422(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, conta, unidade = await _base(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            uid = (await s.execute(text(
-                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
-                payload=_payload_debito(forn, nat, conta, unidade))
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await svc.atualizar_debito(s, tenant_id=t.id, debito_id=d.id, usuario_id=uid,
-                    payload=DebitoUpdate(valor_total="2000.00"))
-            assert exc.value.status_code == 422
-    finally:
-        await _cleanup(admin_engine, t.id)
+    forn, nat, conta, unidade = await _base(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+            payload=_payload_debito(forn, nat, conta, unidade))
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await svc.atualizar_debito(s, tenant_id=t.id, debito_id=d.id, usuario_id=uid,
+                payload=DebitoUpdate(valor_total="2000.00"))
+        assert exc.value.status_code == 422
 
 
 async def test_excluir_debito_fora_de_status_permitido_409(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, conta, unidade = await _base(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            uid = (await s.execute(text(
-                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
-                payload=_payload_debito(forn, nat, conta, unidade))
-        async with _sm(admin_engine)() as s:
-            await s.execute(text(
-                "UPDATE pagamentos.debito SET situacao_tramitacao='AGUARDANDO_GESTOR' WHERE id=:i"),
-                {"i": d.id})
-            await s.commit()
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await svc.excluir_debito(s, tenant_id=t.id, debito_id=d.id)
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+    forn, nat, conta, unidade = await _base(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+            payload=_payload_debito(forn, nat, conta, unidade))
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(
+            "UPDATE pagamentos.debito SET situacao_tramitacao='AGUARDANDO_GESTOR' WHERE id=:i"),
+            {"i": d.id})
+        await s.commit()
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await svc.excluir_debito(s, tenant_id=t.id, debito_id=d.id)
+        assert exc.value.status_code == 409
 
 
 async def test_excluir_debito_rascunho_soft_delete(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, conta, unidade = await _base(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            uid = (await s.execute(text(
-                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
-                payload=_payload_debito(forn, nat, conta, unidade))
-        async with _sm(admin_engine)() as s:
-            await svc.excluir_debito(s, tenant_id=t.id, debito_id=d.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await svc.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-            assert exc.value.status_code == 404
-        async with _sm(admin_engine)() as s:
-            row = (await s.execute(text(
-                "SELECT excluido FROM pagamentos.debito WHERE id=:i"), {"i": d.id})).fetchone()
-        assert row[0] is True
-    finally:
-        await _cleanup(admin_engine, t.id)
+    forn, nat, conta, unidade = await _base(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+            payload=_payload_debito(forn, nat, conta, unidade))
+    async with _sm(admin_engine)() as s:
+        await svc.excluir_debito(s, tenant_id=t.id, debito_id=d.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await svc.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+        assert exc.value.status_code == 404
+    async with _sm(admin_engine)() as s:
+        row = (await s.execute(text(
+            "SELECT excluido FROM pagamentos.debito WHERE id=:i"), {"i": d.id})).fetchone()
+    assert row[0] is True
 
 
 async def test_criar_debito_sem_conta_sugerida_ok(admin_engine):
     """v2.0: a conta sugerida é opcional; a fonte é obrigatória e vinculante."""
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, conta, unidade = await _base(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            uid = (await s.execute(text(
-                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-            d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid, payload=DebitoCreate(
-                id_fornecedor=forn.id, id_natureza=nat.id,
-                id_fonte_recursos=conta.id_fonte_recursos, id_conta=None, id_unidade=unidade.id,
-                valor_total="1000.00", competencia="2026-07", descricao="Sem conta sugerida",
-                parcelas=[ParcelaCreate(numero=1, valor="1000.00", vencimento="2026-08-01")]))
-        assert d.situacao_tramitacao == est.RASCUNHO
-        assert d.id_conta is None
-        assert d.id_fonte_recursos == conta.id_fonte_recursos
-        assert d.id_conta_pagadora is None
-    finally:
-        await _cleanup(admin_engine, t.id)
+    forn, nat, conta, unidade = await _base(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        d = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid, payload=DebitoCreate(
+            id_fornecedor=forn.id, id_natureza=nat.id,
+            id_fonte_recursos=conta.id_fonte_recursos, id_conta=None, id_unidade=unidade.id,
+            valor_total="1000.00", competencia="2026-07", descricao="Sem conta sugerida",
+            parcelas=[ParcelaCreate(numero=1, valor="1000.00", vencimento="2026-08-01")]))
+    assert d.situacao_tramitacao == est.RASCUNHO
+    assert d.id_conta is None
+    assert d.id_fonte_recursos == conta.id_fonte_recursos
+    assert d.id_conta_pagadora is None
 
 
 async def test_criar_debito_conta_de_outra_fonte_422(admin_engine):
     """A conta sugerida, se informada, deve pertencer à fonte do débito."""
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, conta, unidade = await _base(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            outra_fonte = await cad.criar_fonte(s, tenant_id=t.id, payload=FonteCreate(
-                codigo=f"F{uuid.uuid4().hex[:6]}", descricao="Outra", grupos_despesa_permitidos=[]))
-            outra_conta = await cad.criar_conta(s, tenant_id=t.id, payload=ContaCreate(
-                nome="Conta Outra", banco="002", agencia="2", conta=uuid.uuid4().hex[:8],
-                id_fonte_recursos=outra_fonte.id, grupo_despesa="CUSTEIO"))
-            uid = (await s.execute(text(
-                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid, payload=DebitoCreate(
-                    id_fornecedor=forn.id, id_natureza=nat.id,
-                    id_fonte_recursos=conta.id_fonte_recursos, id_conta=outra_conta.id, id_unidade=unidade.id,
-                    valor_total="1000.00", competencia="2026-07", descricao="Conta divergente",
-                    parcelas=[ParcelaCreate(numero=1, valor="1000.00", vencimento="2026-08-01")]))
-            assert exc.value.status_code == 422
-    finally:
-        await _cleanup(admin_engine, t.id)
+    forn, nat, conta, unidade = await _base(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        outra_fonte = await cad.criar_fonte(s, tenant_id=t.id, payload=FonteCreate(
+            codigo=f"F{uuid.uuid4().hex[:6]}", descricao="Outra", grupos_despesa_permitidos=[]))
+        outra_conta = await cad.criar_conta(s, tenant_id=t.id, payload=ContaCreate(
+            nome="Conta Outra", banco="002", agencia="2", conta=uuid.uuid4().hex[:8],
+            id_fonte_recursos=outra_fonte.id, grupo_despesa="CUSTEIO"))
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid, payload=DebitoCreate(
+                id_fornecedor=forn.id, id_natureza=nat.id,
+                id_fonte_recursos=conta.id_fonte_recursos, id_conta=outra_conta.id, id_unidade=unidade.id,
+                valor_total="1000.00", competencia="2026-07", descricao="Conta divergente",
+                parcelas=[ParcelaCreate(numero=1, valor="1000.00", vencimento="2026-08-01")]))
+        assert exc.value.status_code == 422
 
 
 async def test_listar_debitos_filtra_por_fonte_e_urgente(admin_engine):
     """RF-PNL-02: a listagem filtra por fonte/urgência (dimensões do painel)."""
     t = await _provisionar(admin_engine)
-    try:
-        forn_a, nat_a, conta_a, unidade_a = await _base(admin_engine, t.id)
-        forn_b, nat_b, conta_b, unidade_b = await _base(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            uid = (await s.execute(text(
-                "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
-            da = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
-                                        payload=_payload_debito(forn_a, nat_a, conta_a, unidade_a))
-            db_ = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
-                                         payload=_payload_debito(forn_b, nat_b, conta_b, unidade_b))
-        async with _sm(admin_engine)() as s:
-            so_a = await svc.listar_debitos(s, tenant_id=t.id, id_fonte=conta_a.id_fonte_recursos)
-        ids = {d.id for d in so_a}
-        assert da.id in ids and db_.id not in ids
-    finally:
-        await _cleanup(admin_engine, t.id)
+    forn_a, nat_a, conta_a, unidade_a = await _base(admin_engine, t.id)
+    forn_b, nat_b, conta_b, unidade_b = await _base(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        uid = (await s.execute(text(
+            "SELECT id FROM utils.usuario WHERE tenant_id=:t LIMIT 1"), {"t": t.id})).scalar_one()
+        da = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+                                    payload=_payload_debito(forn_a, nat_a, conta_a, unidade_a))
+        db_ = await svc.criar_debito(s, tenant_id=t.id, usuario_id=uid,
+                                     payload=_payload_debito(forn_b, nat_b, conta_b, unidade_b))
+    async with _sm(admin_engine)() as s:
+        so_a = await svc.listar_debitos(s, tenant_id=t.id, id_fonte=conta_a.id_fonte_recursos)
+    ids = {d.id for d in so_a}
+    assert da.id in ids and db_.id not in ids
