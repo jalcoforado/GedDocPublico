@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -83,6 +84,19 @@ class Settings(BaseSettings):
     # carimbados para `.../carimbados/`, jobs para `.../jobs/{job_id}/`.
     tenants_storage_root: str = "/app/uploads/tenants"
     max_upload_size_mb: int = 20
+
+    # Object storage de anexos (backlog §3.1) — `services/storage.py`.
+    # `local` (padrão) é o filesystem acima, comportamento de sempre. `s3` é
+    # EXPERIMENTAL, nunca testado contra bucket real e exige o extra opcional
+    # `.[s3]` (aioboto3); não ligar em ambiente nenhum sem fechar as pendências
+    # listadas em `S3Storage`. `Literal` para que um valor digitado errado
+    # derrube o start em vez de cair em silêncio no local.
+    storage_backend: Literal["local", "s3"] = "local"
+    s3_bucket: str = ""
+    s3_endpoint_url: str = ""  # vazio = AWS; preencher para MinIO
+    s3_region: str = "us-east-1"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
 
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"

@@ -776,7 +776,7 @@ async def completo_pdf_endpoint(
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     _recusar_pdf_se_rascunho(detail)
-    pdf_bytes = gerar_processo_completo_pdf(detail, tenant_slug=tenant_slug)
+    pdf_bytes = await gerar_processo_completo_pdf(detail, tenant_slug=tenant_slug)
     fname = f"processo-completo-{detail.numero_processo.replace('/', '_')}.pdf"
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
 

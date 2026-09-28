@@ -127,20 +127,26 @@ def _cache_path(anexo_id: int, tenant_slug: str | None = None) -> Path:
     return legacy / f"{anexo_id}.pdf"
 
 
-def carimbar_anexo_com_cache(
+async def carimbar_anexo_com_cache(
     *,
     anexo_id: int,
-    source_pdf_path: Path,
     numero_processo: str,
     e_doc: str,
-    tenant_slug: str | None = None,
+    tenant_slug: str,
 ) -> Path:
-    """Retorna o path do PDF carimbado, gerando e cacheando se necessário."""
+    """Retorna o path do PDF carimbado, gerando e cacheando se necessário.
+
+    O original é lido pela abstração de storage (`services/storage.py`), não
+    por caminho local. Levanta `FileNotFoundError` se o original não existir.
+    **Não autoriza**: quem chama já tem de ter passado pelo guard de sigilo.
+    O cache de carimbados continua no disco local."""
     cache = _cache_path(anexo_id, tenant_slug)
     if cache.exists():
         return cache
 
-    original_bytes = source_pdf_path.read_bytes()
+    from .storage import obter_storage
+
+    original_bytes = await obter_storage().get_bytes(tenant_slug, e_doc)
     stamped = carimbar_pdf_bytes(
         original_bytes,
         numero_processo=numero_processo,
