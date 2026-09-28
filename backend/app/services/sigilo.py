@@ -134,6 +134,32 @@ async def assert_acesso_processo(
         raise SigiloAcessoError("Processo não encontrado")
 
 
+async def niveis_acesso_usuario(
+    db: AsyncSession, usuario, *, tenant_id: int
+) -> list[str] | None:
+    """Níveis que o usuário alcança numa LISTAGEM. `None` = super-usuário (tudo).
+
+    Irmã de `assert_acesso_processo`, para o caso de muitos processos: aquela
+    decide um id, esta devolve o filtro para `list_processos(niveis_permitidos=)`.
+    Super-usuário é o de `load_permissions` (`nível.valor == 0` no grupo), não
+    um atributo do `Usuario` — o modelo não tem `is_super`, e um
+    `getattr(usuario, "is_super", False)` responderia `False` para todo mundo.
+
+    Mora aqui, e não no router de processos, porque há dois consumidores que
+    NÃO podem divergir: `GET /processos` e o assistente global (IA-2). Se o
+    assistente decidisse sigilo por conta própria, a primeira mudança na regra
+    abriria uma diferença entre o que a tela mostra e o que o bot conta.
+    """
+    from .permissoes import load_permissions  # lazy: evita ciclo de import
+
+    perms = await load_permissions(db, usuario.id, tenant_id=tenant_id)
+    if perms.is_super_usuario:
+        return None
+    return niveis_permitidos(
+        getattr(usuario, "nivel_acesso_sigilo", CREDENCIAL_DEFAULT)
+    )
+
+
 def resolver_nivel_criacao(nivel_sigilo: str, publico: bool) -> str:
     """Resolve o nível na ABERTURA a partir das duas entradas possíveis.
 

@@ -1,11 +1,14 @@
-"""Assistente conversacional — IA-1, escopo de UM processo já aberto.
+"""Assistente conversacional — IA-1 (UM processo aberto) e IA-2 (busca global).
 
-Uma rota só, de propósito. Não há `/ia/chat` genérico, não há busca: o
-assistente responde sobre o processo cujo id está na URL, e o usuário já
-atravessou toda a autorização que existe para abrir aquele processo. Ver
+IA-1: o assistente responde sobre o processo cujo id está na URL, e o usuário
+já atravessou toda a autorização que existe para abrir aquele processo. Ver
 `docs/superpowers/specs/2026-08-07-ia-1-assistente-do-processo-design.md` §2
-para por que a busca ficou de fora (resumo: ela transforma o item 1.0.8 de
-buraco latente em buraco explorável).
+para por que a busca ficou de fora naquela fatia.
+
+IA-2 (`POST /ia/perguntar-global`): a busca entrou, com uma regra só — o
+assistente não alcança processo que o mesmo usuário não veria em
+`GET /processos`. A busca É a listagem; ver a docstring de
+`services/ia/assistente_global.py` para como isso é garantido.
 
 Os três eixos de acesso aparecem juntos aqui, e é raro isso — vale a leitura:
 
@@ -33,6 +36,8 @@ from ..services.ia.assistente import (
     AssistenteError,
     responder,
 )
+from ..services.ia.assistente_global import preparar as preparar_busca
+from ..services.ia.assistente_global import responder_sobre
 from ..services.ia.llm_client import IAIndisponivelError, LLMClient, obter_cliente
 from ..services.sigilo import SigiloAcessoError
 
@@ -143,6 +148,97 @@ async def perguntar_sobre_processo(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post(
+    "/perguntar-global",
+    # Módulo e permissão no decorator, ANTES dos parâmetros: o FastAPI resolve
+    # estas primeiro, então quem não pode ler processo leva 403 antes de o
+    # `get_llm_client` sequer olhar se há chave — autorizar vem antes de tudo.
+    dependencies=[
+        Depends(require_modulo("protocolo")),
+        Depends(require_permission("processo")),
+    ],
+)
+async def perguntar_global(
+    payload: PerguntaRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(require_tenant_id),
+    usuario: Usuario = Depends(get_current_user),
+    cliente: LLMClient = Depends(get_llm_client),
+) -> StreamingResponse:
+    """Pergunta em linguagem natural que busca entre os processos (SSE).
+
+    Gates: os mesmos de `GET /processos` — `require_modulo("protocolo")`,
+    `require_permission("processo")` de leitura, e tenant + sigilo aplicados
+    DENTRO da busca, que é a própria listagem (`assistente_global.buscar`).
+
+    Eventos, na ordem:
+
+    1. `event: resultados` — `{total, exibidos, filtros, processos}`, montado
+       pelo sistema, não pelo modelo. É a lista que a tela pode linkar e o
+       número em que ela pode confiar.
+    2. `data: {"texto": ...}` — a resposta do modelo em pedaços (igual à IA-1).
+    3. `event: fim`.
+
+    Extração e busca rodam antes de devolver a resposta, e o primeiro pedaço do
+    modelo também é puxado aqui — mesmo motivo da IA-1: erro depois do `200`
+    viraria texto no meio de uma resposta bem-sucedida.
+    """
+    try:
+        pergunta, resultado = await preparar_busca(
+            db,
+            pergunta=payload.pergunta,
+            tenant_id=tenant_id,
+            usuario=usuario,
+            cliente=cliente,
+        )
+        gerador = responder_sobre(resultado, pergunta=pergunta, cliente=cliente)
+        primeiro = await anext(gerador, None)
+    except AssistenteError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except IAIndisponivelError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
+        )
+
+    resumo = {
+        "total": resultado.total,
+        "exibidos": len(resultado.processos),
+        "filtros": resultado.parametros.como_dict(),
+        "processos": [
+            {
+                "id": p.id,
+                "numero_processo": p.numero_processo,
+                "assunto": p.assunto,
+                "local_atual": p.local_atual,
+                "ativo": p.ativo,
+                "nivel_sigilo": p.nivel_sigilo,
+                "data_hora_abertura": p.data_hora_abertura.isoformat(),
+            }
+            for p in resultado.processos
+        ],
+    }
+
+    async def _sse():
+        yield _evento_nomeado("resultados", resumo)
+        if primeiro is not None:
+            yield _evento(primeiro)
+            async for pedaco in gerador:
+                yield _evento(pedaco)
+        yield "event: fim\ndata: {}\n\n"
+
+    return StreamingResponse(
+        _sse(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _evento_nomeado(nome: str, dados: dict) -> str:
+    import json
+
+    return f"event: {nome}\ndata: {json.dumps(dados, ensure_ascii=False)}\n\n"
 
 
 def _evento(texto: str) -> str:

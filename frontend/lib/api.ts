@@ -6059,7 +6059,100 @@ export const iaApi = {
       }
     }
   },
+
+  /** IA-2 — pergunta em linguagem natural que busca ENTRE processos (SSE).
+   *
+   * O backend só devolve processo que o usuário veria em `GET /processos`
+   * (mesmo service, mesmos filtros de tenant/sigilo). O evento `resultados`
+   * chega ANTES do texto e é montado pelo sistema, não pelo modelo: é a
+   * lista que a tela pode linkar e o total em que ela pode confiar. */
+  iaPerguntarGlobal: async (
+    pergunta: string,
+    onPedaco: (texto: string) => void,
+    onResultados?: (resultados: IaResultadoBusca) => void,
+    sinal?: AbortSignal,
+  ): Promise<void> => {
+    const res = await fetch(`${baseUrl()}/ia/perguntar-global`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pergunta }),
+      credentials: "include",
+      cache: "no-store",
+      signal: sinal,
+    });
+    if (!res.ok) {
+      let detalhe = `Erro ${res.status}`;
+      try {
+        const corpo = await res.json();
+        if (corpo?.detail) detalhe = String(corpo.detail);
+      } catch {
+        // corpo não-JSON: fica a mensagem genérica
+      }
+      throw new ApiError(detalhe, res.status);
+    }
+    if (!res.body) throw new ApiError("Resposta sem corpo.", 500);
+
+    const leitor = res.body.getReader();
+    const decodificador = new TextDecoder();
+    // Mesmo buffer da IA-1: chunk de rede não é evento SSE.
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await leitor.read();
+      if (done) break;
+      buffer += decodificador.decode(value, { stream: true });
+      const partes = buffer.split("\n\n");
+      buffer = partes.pop() ?? "";
+      for (const parte of partes) {
+        let evento = "message";
+        let dados = "";
+        for (const linha of parte.split("\n")) {
+          if (linha.startsWith("event: ")) evento = linha.slice(7);
+          else if (linha.startsWith("data: ")) dados += linha.slice(6);
+        }
+        if (!dados || evento === "fim") continue;
+        try {
+          const obj = JSON.parse(dados);
+          if (evento === "resultados") onResultados?.(obj as IaResultadoBusca);
+          else if (obj.texto) onPedaco(obj.texto);
+        } catch {
+          // pedaço malformado: ignora em vez de derrubar a resposta inteira
+        }
+      }
+    }
+  },
 };
+
+/** Espelha o evento `resultados` de `POST /ia/perguntar-global`
+ * (`backend/app/routers/ia.py::perguntar_global`). */
+export interface IaProcessoEncontrado {
+  id: number;
+  numero_processo: string | null;
+  assunto: string | null;
+  local_atual: string | null;
+  ativo: boolean;
+  nivel_sigilo: string;
+  data_hora_abertura: string;
+}
+
+/** Filtros que o sistema ACEITOU da interpretação da pergunta — a whitelist
+ * de `ParametrosBusca`. Mostrá-los deixa o usuário ver o que foi buscado. */
+export interface IaFiltrosBusca {
+  busca: string | null;
+  apenas_ativos: boolean;
+  escopo: "meus" | "unidade" | "unidade_e_subordinadas" | null;
+  favoritos: boolean;
+  desde: string | null;
+  ate: string | null;
+}
+
+export interface IaResultadoBusca {
+  /** Total calculado pelo sistema (COUNT da listagem), não pelo modelo. */
+  total: number;
+  /** Quantos vieram em `processos` (teto fixo no backend). */
+  exibidos: number;
+  filtros: IaFiltrosBusca;
+  processos: IaProcessoEncontrado[];
+}
 
 export interface WorkflowSlaAlerta {
   id: number;
