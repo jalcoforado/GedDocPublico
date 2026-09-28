@@ -35,6 +35,7 @@ from ..services.ia.assistente import (
 )
 from ..services.ia.llm_client import IAIndisponivelError, LLMClient, obter_cliente
 from ..services.sigilo import SigiloAcessoError
+from ..services.ia.assistente_global import responder_global
 
 router = APIRouter(prefix="/ia", tags=["ia"])
 
@@ -155,3 +156,49 @@ def _evento(texto: str) -> str:
     import json
 
     return f"data: {json.dumps({'texto': texto}, ensure_ascii=False)}\n\n"
+
+
+@router.post(
+    "/perguntar-global",
+    dependencies=[Depends(require_modulo("protocolo"))],
+)
+async def perguntar_busca_global(
+    payload: PerguntaRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: int = Depends(require_tenant_id),
+    usuario: Usuario = Depends(get_current_user),
+    cliente: LLMClient = Depends(get_llm_client),
+    _perm=Depends(require_permission("processo")),
+) -> StreamingResponse:
+    """Responde a perguntas gerais do usuário buscando na base de processos."""
+    
+    gerador = responder_global(
+        db,
+        pergunta=payload.pergunta,
+        tenant_id=tenant_id,
+        usuario=usuario,
+        cliente=cliente,
+    )
+
+    try:
+        primeiro = await anext(gerador, None)
+    except SigiloAcessoError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhum processo acessível.")
+    except AssistenteError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    async def _sse():
+        if primeiro is not None:
+            yield _evento(primeiro)
+            async for pedaco in gerador:
+                yield _evento(pedaco)
+        yield "event: fim\ndata: {}\n\n"
+
+    return StreamingResponse(
+        _sse(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        },
+    )

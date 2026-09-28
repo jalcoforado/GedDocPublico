@@ -112,3 +112,56 @@ async def login(
         cidadao.senha = ""
         await db.commit()
     return cidadao
+
+
+async def login_ou_cadastrar_via_govbr(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    cpf: str,
+    nome: str,
+    email: str | None,
+    nivel_govbr: str | None,
+    app: str = "portal",
+) -> UsuarioExterno:
+    """Faz login via gov.br. Se o CPF não existir, provisiona o usuário auto-ativado."""
+    cpf_norm = _normaliza_cpf_cnpj(cpf)
+    
+    cidadao = (
+        await db.execute(
+            select(UsuarioExterno).where(
+                UsuarioExterno.cpf_cnpj == cpf_norm,
+                UsuarioExterno.tenant_id == tenant_id,
+                UsuarioExterno.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+
+    if cidadao is None:
+        cidadao = UsuarioExterno(
+            tenant_id=tenant_id,
+            nome=nome.strip(),
+            cpf_cnpj=cpf_norm,
+            email=email.strip().lower() if email else None,
+            senha="",
+            senha_bcrypt="",
+            login_govbr=True,
+            nivel_govbr=nivel_govbr,
+            ativo=True,
+            excluido=False,
+            uid=uuid4(),
+            data_criacao=datetime.utcnow(),
+            app=app,
+            telefone=None,
+            telefone_whatsapp=False,
+        )
+        db.add(cidadao)
+    else:
+        cidadao.login_govbr = True
+        cidadao.nivel_govbr = nivel_govbr
+        if not cidadao.ativo:
+            cidadao.ativo = True
+            
+    await db.commit()
+    await db.refresh(cidadao)
+    return cidadao

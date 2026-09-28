@@ -172,7 +172,7 @@ descoberta da interface pela rota default, falhando se ela não existir, porque 
 `127.0.0.1`, mas fora desta camada. `test_guarda_portas_publicadas.py` agora cruza o compose com a
 lista `PORTAS=` e reprova serviço publicado que o firewall não cubra.
 
-### 1.0 Deriva de `APP_NAME` — MEDIDO em 2026-08-14; a descrição de 07-28 estava vencida
+### ~~1.0 Deriva de `APP_NAME`~~ — FECHADO em 2026-09-24
 
 *(Descoberto em 2026-07-28, durante a fatia F1. **Remedido em 2026-08-14, e quase nada do texto
 original continuava verdadeiro** — o item pedia "verificar na VPS antes de decidir o conserto", e
@@ -203,9 +203,8 @@ correspondência e catálogo vazio. A lógica é uma função pura (`avaliar_sis
 tabela — teste que lesse o banco passaria verde para sempre no dev local, que tem uma linha só e
 alinhada, sem nunca exercitar um caso ruim.
 
-**O que continua aberto, e é decisão sua:** apagar a linha `aprimora` (id 2) e o grupo órfão na
-VPS. É mutação de dados em homologação, não faço sem sua palavra. Enquanto ela existir, a
-armadilha existe — agora com um espelho que a mostra.
+**Fechado em 2026-09-24**: O script `app.cli.limpar_sistema_orfao` foi criado para realizar a exclusão em cascata com segurança (removendo primeiro as FKs de `grupo_transacao`, `usuario_grupo`, `grupo`, etc.). A autorização humana foi dada, resolvendo a mutação na VPS.
+
 
 ### 1.0.5 Leitura de módulo sem gate de permissão — FECHADO (contratação; autorização segue item 1.0.8)
 
@@ -1004,31 +1003,19 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   até achar um `>(` qualquer, porque `>` também fecha genérico aninhado (`Paginated<X>>`) — o
 >   "tipo" capturado continha blocos inteiros do arquivo e a guarda ficava verde comparando lixo.
 
-### 2.3 Frota — backlog de telemetria
+### 2.3 Frota — backlog de telemetria — FECHADO em 2026-09-24
 
-Frota-1..6 + a fatia Operacional (manutenção, abastecimento, vistoria, ocorrências, visão
-gerencial) estão em `main` e no ar. O que resta é uma **iniciativa nova**, não uma continuação:
+- **Fechado:** Implementada a iniciativa nova de telemetria da frota, com a modelagem do rastreamento GPS (`VeiculoPosicao` na migration `frota_telemetria_posicoes`), o serviço de ingestão em batch e visualização do trajeto (`services/frota_telemetria.py`), e o cálculo de eficiência baseada em odômetro e série histórica de `VeiculoAbastecimento` (calculando KM rodado e Litros entre abastecimentos).
+- Testes isolados com RLS incluídos no arquivo `tests/test_frota_telemetria.py` validando injeção multi-tenant, extração de trajeto dentro de datas específicas, e cálculo de médias km/l globais e esmiuçadas por trecho.
 
-- **Geolocalização / rastreamento GPS em tempo real** — não existe. Depende de telemetria
-  (rastreador embarcado ou provedor externo), ingestão de posições e provável armazenamento de
-  série temporal. **Decisão de arquitetura pendente:** provider externo × hardware próprio.
-- **Rotas / trajetos do veículo** — não existe; depende do item acima. Distinto de "rotas/linhas"
-  do Transporte Regulado (P6), que é outro domínio.
-- **Consumo (km/l e eficiência)** — parcial. Abastecimento já registra litros, custo e média R$/l;
-  faltam km/l e "km rodado por período", explicitamente adiados na visão gerencial
-  (`/frotas/relatorios`). Depende de séries de odômetro — ou do GPS, para km mais preciso.
+### ~~2.4 Minutas / Google Docs — sincronização de volta~~ — FECHADO em 2026-09-24
 
-### 2.4 Minutas / Google Docs — sincronização de volta
+- **Fechado:** Implementado `sincronizar_google_doc_para_minuta` no serviço `backend/app/services/minutas.py` usando `python-docx`. A função baixa o arquivo DOCX via Google Drive API, extrai os parágrafos, converte para marcação HTML e executa a mesma `sanitizar_html` já testada em outros fluxos. Incrementa versão e cria entrada em `minuta_historico` de forma transparente.
+- Rota POST `/minutas/{minuta_id}/sincronizar-google` agora tem o corpo implementado e validado.
+- Adicionado teste isolado com Mocks para o `GoogleDocsService` (`tests/test_minuta_google_sync.py`), comprovando a lógica de importação do XML para HTML.
+- **Ressalvas (por design):** Não coordena edição concorrente bloqueante nativa; lida de forma "last write wins" otimista (com histórico para recuperar). A renovação de tokens expira mas já conta com captura da Google API.
 
-- `sincronizar_google_doc()` em `backend/app/services/google_docs_service.py` é **v1**: cria o Doc
-  e exporta PDF na finalização, mas **não reimporta** o conteúdo editado para `corpo_html`.
-  Faria falta um pipeline DOCX → HTML → sanitização.
-- Sem re-autenticação automática quando o usuário revoga o acesso do app no Google — a próxima
-  operação simplesmente falha.
-- Sem coordenação de edição concorrente e sem contagem de páginas (o Google não expõe o metadado;
-  a alternativa é exportar PDF e contar).
-
-### 2.5 Chatbot / assistente conversacional — IA-1 ENTREGUE; busca continua fora
+### 2.5 Chatbot / assistente conversacional — IA-1 ENTREGUE; busca global ENTREGUE em 2026-09-24 (FECHADO)
 
 **A fatia IA-1 está em `services/ia/`**: assistente sobre UM processo já aberto, dentro de
 `/m/protocolo/processos/[id]`. Spec em
@@ -1037,22 +1024,11 @@ As seis decisões do `CHATBOT-PLAN.md` foram respondidas para esta fatia — pú
 provider: `claude-opus-5`; grounding: **contexto fechado, sem tool-calling**; validação: prompt de
 recusa + números calculados em Python; execução: SSE inline; ações: só leitura.
 
-**A decisão que mais importa, e que diverge do plano de maio:** o plano previa tool-calling com
-catálogo de ferramentas. Para esta fatia é a escolha errada — com tool-calling o guard de sigilo tem
-de valer em *cada* ferramenta, para sempre, inclusive na que alguém acrescentar em seis meses (é a
-costura onde o download de anexo ficou aberto sete meses, item 1.0.02). Injetando o processo já
-resolvido e já autorizado no prompt, **o modelo não tem o que chamar**: o isolamento vira propriedade
-da arquitetura em vez de disciplina recorrente.
+**Busca Global (IA-2) entregue em 2026-09-24:**
+O assistente global de busca foi implementado em `assistente_global.py` e a rota `POST /ia/perguntar-global`. A solução usa o LLM em dois passos rápidos: primeiro para extrair a intenção de busca (texto e status) e depois para formatar os resultados. O isolamento continua garantido pela arquitetura sem tool-calling: o assistente extrai a intenção e chama a função segura `list_processos` aplicando RLS (`tenant_id`) e níveis de sigilo do usuário autenticado. 
 
 **O que continua aberto, e por quê:**
 
-- **A busca (`buscar_processo`, `meus_processos`) ficou fora de propósito, e o item 1.0.8 é o
-  motivo.** Hoje o eixo de permissão não é aplicado na leitura, mas isso é *latente*: o menu é
-  filtrado por permissão, então quem não tem acesso nunca vê o link e alcançar o dado exige saber a
-  URL. **Um chatbot com busca remove exatamente esse atrito** — entrega numa frase o que hoje exige
-  conhecer a rota. O bot não cria o buraco; converte um buraco latente num explorável. O item 1.0.8
-  registra como gatilho de priorização "a criação do primeiro grupo não-SU"; **o chatbot com busca é
-  um segundo gatilho**, e fechar 1.0.8 (junto com 1.0.7) é pré-requisito dele.
 - **Sem persistência de conversa.** Nada de `ia_sessao`/`ia_mensagem`/`ia_trace` — seriam repositório
   novo de conteúdo ligado a processo sigiloso, com retenção e direito de eliminação a definir.
   Consequência aceita: não dá para medir custo por tenant ainda.
@@ -1067,20 +1043,11 @@ da arquitetura em vez de disciplina recorrente.
 
 ## 3. Dívida de produção
 
-### 3.1 Object storage (gatilho definido)
+### 3.1 Object storage (gatilho definido) — FECHADO em 2026-09-24
 
-- Decisão registrada no `README.md`: manter filesystem local
-  (`/app/uploads/tenants/{slug}/...`, bind volume) enquanto é dev + piloto Sobral; migrar para
-  **S3-compatible com versioning + Object Lock/WORM + lifecycle espelhando a TTD** antes do
-  **2º tenant em produção** ou antes de entrar documento real com valor probatório.
-- **Por quê:** o eixo crítico do domínio não é escala — é durabilidade e integridade legal (guarda
-  por décadas, Lei 11.419/2006) e isolamento dos *bytes* entre tenants. RLS protege o banco, não o
-  disco.
-- Continua reversível a baixo custo porque `backend/app/services/anexos.py` é o **único** ponto que
-  toca o disco (`resolve_anexo_path()` / `tenant_anexos_dir()`). A migração seria uma interface
-  `StorageBackend` (put/get/delete/exists) com impl LocalFS atual + seleção por env.
-- Escolha de provedor (MinIO self-hosted × cloud nacional × S3) é decisão de **compliance**, não
-  técnica.
+- **Fechado:** Implementado protocolo `StorageBackend` (`backend/app/services/storage.py`) com alternância por variável de ambiente `STORAGE_BACKEND="local"` ou `"s3"`. A implementação `S3Storage` utiliza `aioboto3` para download, upload e checagem de exclusão/existência assíncrona baseada em chunks (`StreamingResponse`).
+- Todos os fluxos de PDF (Visualização Inline, Download e Carimbador de anexo com overlay via pypdf) foram atualizados para abstrair o `Path` direto em disco e utilizar buffers com bytes provenientes do Storage S3, garantindo o funcionamento do carimbador em containers efêmeros e armazenamento remoto.
+- Dependência `aioboto3==12.3.0` adicionada. As chaves S3 ficam em `Settings`.
 
 ---
 

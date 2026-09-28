@@ -15,12 +15,14 @@ from .routers import (
     assuntos,
     audit,
     auth,
+    auth_govbr,
     branding,
     busca,
     catalogo,
     cidadao,
     dashboard,
     frota,
+    frota_telemetria,
     grupos,
     health,
     ia,
@@ -96,6 +98,7 @@ app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(health.router, prefix="/api/v2", tags=["health"])
 app.include_router(auth.router, prefix="/api/v2")
+app.include_router(auth_govbr.router, prefix="/api/v2")
 app.include_router(permissoes.router, prefix="/api/v2")
 app.include_router(modulos.router, prefix="/api/v2")
 app.include_router(catalogo.router, prefix="/api/v2")
@@ -132,6 +135,7 @@ app.include_router(frota.manutencoes_router, prefix="/api/v2")
 app.include_router(frota.abastecimentos_router, prefix="/api/v2")
 app.include_router(frota.vistorias_router, prefix="/api/v2")
 app.include_router(frota.ocorrencias_router, prefix="/api/v2")
+app.include_router(frota_telemetria.router, prefix="/api/v2")
 app.include_router(transporte_regulado.permissionarios_router, prefix="/api/v2")
 app.include_router(transporte_regulado.empresas_router, prefix="/api/v2")
 app.include_router(transporte_regulado.veiculos_router, prefix="/api/v2")

@@ -29,6 +29,9 @@ dependencies = [
   "google-api-python-client==2.108.0",
   "python-docx==1.0.1",
   "anthropic==0.121.0",
+  "aioboto3==12.3.0",
+  "pyhanko==0.25.1",
+  "pyhanko-certvalidator==0.26.5",
 ]
 
 [project.optional-dependencies]

@@ -341,3 +341,27 @@ class VeiculoOcorrencia(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class VeiculoPosicao(Base):
+    """Série temporal de geolocalização e rastreamento (Telemetria)."""
+    
+    __tablename__ = "veiculo_posicao"
+    __table_args__ = {"schema": "frota"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("aprimora_py.tenant.id"), nullable=False
+    )
+    id_veiculo: Mapped[int] = mapped_column(
+        ForeignKey("frota.veiculo.id"), nullable=False
+    )
+    
+    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    latitude: Mapped[Decimal] = mapped_column(Numeric(10, 8), nullable=False)
+    longitude: Mapped[Decimal] = mapped_column(Numeric(11, 8), nullable=False)
+    velocidade: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    ignicao_ligada: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+

@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings, resolve_anexo_path, tenant_anexos_dir
+from .storage import obter_storage
 from ..models import Anexo, AnexoProcesso, AssinaturaAnexo, Minuta, Processo, Servico
 from . import cota_anexacao
 from .sigilo import SigiloAcessoError, assert_acesso_processo
@@ -132,9 +133,8 @@ async def _persistir_arquivo(
     e_doc = f"{anexo.id}.{ext}"
     anexo.e_doc = e_doc
 
-    # Storage por tenant (Fase 14).
-    path = tenant_anexos_dir(tenant_slug) / e_doc
-    path.write_bytes(content)
+    storage = obter_storage()
+    await storage.put(tenant_slug, e_doc, content)
 
     return anexo
 
@@ -281,9 +281,14 @@ async def get_anexo_path(
         raise AnexoError("Anexo não encontrado")
     if not anexo.e_doc:
         raise AnexoError("Anexo sem arquivo físico associado")
-    path = resolve_anexo_path(tenant_slug, anexo.e_doc)
-    if path is None:
+        
+    storage = obter_storage()
+    if not await storage.exists(tenant_slug, anexo.e_doc):
         raise AnexoError(f"Arquivo {anexo.e_doc} não está no storage")
+        
+    # Mantém a assinatura de retorno (anexo, path) por retrocompatibilidade temporária
+    # Se for S3 no futuro, path será None
+    path = await storage.get_local_path_if_possible(tenant_slug, anexo.e_doc)
     return anexo, path
 
 
@@ -387,13 +392,13 @@ async def hash_anexo(
     db: AsyncSession, anexo_id: int, *, tenant_id: int, tenant_slug: str
 ) -> tuple[str, str]:
     """SHA-256 do conteúdo exato do anexo no disco. Retorna (hex, 'sha256')."""
-    _anexo, path = await get_anexo_path(
+    _anexo, _ = await get_anexo_path(
         db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug
     )
     h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
+    storage = obter_storage()
+    async for chunk in storage.get_stream(tenant_slug, _anexo.e_doc):
+        h.update(chunk)
     return h.hexdigest(), "sha256"
 
 

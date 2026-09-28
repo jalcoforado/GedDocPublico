@@ -21,7 +21,7 @@ from .pdf_capa import gerar_capa_pdf
 from .pdf_carimbo import CarimboError, carimbar_anexo_com_cache
 
 
-def gerar_processo_completo_pdf(detail: ProcessoDetail, *, tenant_slug: str) -> bytes:
+async def gerar_processo_completo_pdf(detail: ProcessoDetail, *, tenant_slug: str) -> bytes:
     writer = PdfWriter()
 
     # 1. Capa
@@ -37,15 +37,9 @@ def gerar_processo_completo_pdf(detail: ProcessoDetail, *, tenant_slug: str) -> 
     pdf_anexos.sort(key=lambda a: (a.ordem if a.ordem is not None else 9999, a.id))
 
     for anexo in pdf_anexos:
-        # Storage por tenant (Fase 14) primeiro, legacy (Sobral) como fallback —
-        # mesma resolução usada pelo download avulso (services/anexos.py).
-        source_path = resolve_anexo_path(tenant_slug, anexo.e_doc or "")
-        if source_path is None:
-            continue
         try:
-            carimbado_path = carimbar_anexo_com_cache(
+            carimbado_path = await carimbar_anexo_com_cache(
                 anexo_id=anexo.id,
-                source_pdf_path=source_path,
                 numero_processo=detail.numero_processo,
                 e_doc=anexo.e_doc or "",
                 tenant_slug=tenant_slug,

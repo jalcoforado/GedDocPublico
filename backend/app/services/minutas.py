@@ -693,3 +693,98 @@ async def finalizar_minuta(
     await db.commit()
 
     return m
+
+
+async def sincronizar_google_doc_para_minuta(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    minuta_id: int,
+    usuario_id: int,
+) -> Minuta:
+    """Sincroniza o conteúdo do Google Doc de volta para a Minuta local.
+
+    1. Baixa os bytes em formato DOCX da API do Google.
+    2. Converte os parágrafos para HTML.
+    3. Sanitiza o HTML.
+    4. Se houver mudanças, atualiza o `corpo_html`, incrementa a versão e grava histórico.
+    """
+    import io
+
+    from docx import Document
+
+    m = await obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+
+    if m.status != "rascunho":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Apenas minutas em rascunho podem ser sincronizadas.",
+        )
+
+    if not m.google_doc_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A minuta não tem um Google Doc associado.",
+        )
+
+    service = GoogleDocsService()
+
+    try:
+        # Obter credenciais e baixar DOCX do Drive
+        cred = await service.obter_credentials_usuario(
+            db, tenant_id=tenant_id, usuario_id=usuario_id
+        )
+        docx_bytes = await service.sincronizar_google_doc(
+            db, cred=cred, google_doc_id=m.google_doc_id
+        )
+    except GoogleDocsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Erro ao sincronizar do Google Docs: {str(e)}",
+        )
+
+    # Converter DOCX para HTML básico (parágrafos)
+    doc = Document(io.BytesIO(docx_bytes))
+    html_parts = []
+
+    for para in doc.paragraphs:
+        texto = para.text.strip()
+        if texto:
+            html_parts.append(f"<p>{texto}</p>")
+
+    novo_corpo_html = "".join(html_parts)
+
+    # Passa pelo sanitizador padrão do Aprimora
+    novo_corpo_html = sanitizar_html(novo_corpo_html)
+
+    # Só salva se houver diferença no conteúdo
+    if m.corpo_html != novo_corpo_html:
+        m.corpo_html = novo_corpo_html
+        m.versao += 1
+        m.atualizado_em = _utcnow()
+
+        db.add(
+            MinutaHistorico(
+                tenant_id=tenant_id,
+                id_minuta=m.id,
+                versao=m.versao,
+                corpo_html=m.corpo_html,
+                id_usuario=usuario_id,
+                criado_em=m.atualizado_em,
+            )
+        )
+        await db.commit()
+        await db.refresh(m)
+
+        await audit_log(
+            db,
+            tenant_id=tenant_id,
+            id_usuario=usuario_id,
+            acao="minuta.google_doc_sincronizado",
+            entidade="minuta",
+            id_entidade=m.id,
+            payload={"id_processo": m.id_processo, "versao": m.versao},
+        )
+        await db.commit()
+
+    return m

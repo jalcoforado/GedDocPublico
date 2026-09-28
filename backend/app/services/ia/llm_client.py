@@ -52,7 +52,7 @@ class IAIndisponivelError(Exception):
 class LLMClient(Protocol):
     """Contrato mínimo: recebe system + pergunta, devolve texto em pedaços."""
 
-    async def stream(self, *, system: str, pergunta: str) -> AsyncIterator[str]:
+    async def stream(self, *, system: str, pergunta: str | None = None, messages: list[dict] | None = None) -> AsyncIterator[str]:
         ...
 
 
@@ -63,16 +63,21 @@ class AnthropicClient:
         self._api_key = api_key
         self._modelo = modelo
 
-    async def stream(self, *, system: str, pergunta: str) -> AsyncIterator[str]:
+    async def stream(self, *, system: str, pergunta: str | None = None, messages: list[dict] | None = None) -> AsyncIterator[str]:
         # Import aqui dentro, não no topo: ver docstring do módulo.
         from anthropic import AsyncAnthropic
 
         cliente = AsyncAnthropic(api_key=self._api_key)
+        
+        _msgs = messages or []
+        if pergunta:
+            _msgs = _msgs + [{"role": "user", "content": pergunta}]
+
         async with cliente.messages.stream(
             model=self._modelo,
             max_tokens=MAX_TOKENS,
             system=system,
-            messages=[{"role": "user", "content": pergunta}],
+            messages=_msgs,
         ) as fluxo:
             async for pedaco in fluxo.text_stream:
                 yield pedaco
@@ -107,19 +112,22 @@ class DeepSeekClient:
         self._modelo = modelo or cfg.deepseek_modelo
         self._base_url = (base_url or cfg.deepseek_base_url).rstrip("/")
 
-    async def stream(self, *, system: str, pergunta: str) -> AsyncIterator[str]:
+    async def stream(self, *, system: str, pergunta: str | None = None, messages: list[dict] | None = None) -> AsyncIterator[str]:
         import json
 
         import httpx
+
+        _msgs = [{"role": "system", "content": system}]
+        if messages:
+            _msgs.extend(messages)
+        if pergunta:
+            _msgs.append({"role": "user", "content": pergunta})
 
         corpo = {
             "model": self._modelo,
             "max_tokens": MAX_TOKENS,
             "stream": True,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": pergunta},
-            ],
+            "messages": _msgs,
         }
         # Timeout explícito: o default do httpx é 5s, que um fluxo de LLM
         # estoura com facilidade. `read` alto porque o tempo entre pedaços é

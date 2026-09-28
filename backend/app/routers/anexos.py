@@ -2,7 +2,7 @@ import mimetypes
 import urllib.parse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,11 +90,24 @@ async def download_endpoint(
     disposition = "inline" if inline else "attachment"
 
     media_type, _enc = mimetypes.guess_type(anexo.e_doc or "")
-    return FileResponse(
-        path=str(path),
-        media_type=media_type or "application/octet-stream",
-        headers={"Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_name}"},
-    )
+    media_type = media_type or "application/octet-stream"
+    headers = {"Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_name}"}
+
+    if path:
+        return FileResponse(
+            path=str(path),
+            media_type=media_type,
+            headers=headers,
+        )
+    else:
+        # Se path é None (ex: S3), faz o streaming através da abstração
+        from ..services.storage import obter_storage
+        storage = obter_storage()
+        return StreamingResponse(
+            storage.get_stream(tenant_slug, anexo.e_doc),
+            media_type=media_type,
+            headers=headers,
+        )
 
 
 @router.delete(
@@ -156,15 +169,16 @@ async def carimbado_endpoint(
     numero_processo = row[0] if row else "—"
 
     try:
-        carimbado_path = carimbar_anexo_com_cache(
+        carimbado_path = await carimbar_anexo_com_cache(
             anexo_id=anexo_id,
-            source_pdf_path=source_path,
             numero_processo=numero_processo,
             e_doc=anexo.e_doc,
             tenant_slug=tenant_slug,
         )
     except CarimboError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
     download_name = (anexo.descricao or anexo.e_doc).strip()
     if "." not in download_name:

@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     tenants_storage_root: str = "/app/uploads/tenants"
     max_upload_size_mb: int = 20
 
+    # Configurações de Object Storage (S3 / MinIO)
+    storage_backend: str = "local"  # "local" ou "s3"
+    s3_bucket: str = ""
+    s3_endpoint_url: str = ""
+    s3_region: str = "us-east-1"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"
     # Legacy jobs root (pre Fase 14). Novos jobs vão para `tenants_storage_root/{slug}/jobs`.
