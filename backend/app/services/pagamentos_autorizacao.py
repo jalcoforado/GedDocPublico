@@ -325,7 +325,7 @@ async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         # reserva de verdade (mesmo domínio do ST_PAGO/ST_CONCILIADO ausentes
         # de COM_RESERVA no legado).
         tem_reserva = (d.situacao_tramitacao == est.AUTORIZADA
-                      and d.situacao_pagamento != est.PAGA)
+                      and d.situacao_pagamento not in (est.PAGA, est.CONCILIADA))
         if not tem_reserva:
             raise PagamentoDebitoError(
                 f"Débito {d.id} não autorizado para liberação de pagamento "

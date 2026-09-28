@@ -19,11 +19,13 @@ from . import pagamentos_debitos as deb
 from . import pagamentos_estados as est
 
 # Traduções de status legado (§4.5) para as três dimensões — F5.
-# "Tem reserva na conta pagadora": autorizada e ainda não paga (mesmo
+# "Tem reserva na conta pagadora": autorizada e nem paga nem conciliada
+# (o ex-COM_RESERVA não continha ST_PAGO nem ST_CONCILIADO; a conciliação
+# muda só a dimensão pagamento, a tramitação fica AUTORIZADA para sempre) (mesmo
 # predicado de pagamentos_autorizacao.py/pagamentos_filas.py) — inclui
 # ESTORNADA de propósito (ex-COM_RESERVA continha ST_ESTORNADO).
 _TEM_RESERVA = and_(Debito.situacao_tramitacao == est.AUTORIZADA,
-                    Debito.situacao_pagamento != est.PAGA)
+                    Debito.situacao_pagamento.notin_((est.PAGA, est.CONCILIADA)))
 # Pré-autorização em curso (ex-ST_EM_VALIDACAO/ST_VALIDADO/AUTORIZAVEIS).
 _PRE_AUTORIZACAO_EM_CURSO = Debito.situacao_tramitacao.in_(
     (est.AGUARDANDO_GESTOR, est.AGUARDANDO_VALIDACAO, est.AGUARDANDO_AUTORIDADE))

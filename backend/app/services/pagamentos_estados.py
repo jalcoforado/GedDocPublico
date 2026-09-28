@@ -11,7 +11,7 @@ parte do fluxo que dá para exercitar sem arreio, e é onde as regras que não
 podem se perder ficam legíveis.
 
 `status_legado()` deriva o valor antigo das três dimensões. A coluna `Debito.
-status` que ela alimentava foi removida na F5 (migration 0121) — todo
+status` que ela alimentava foi removida na F5 (migration 0122) — todo
 consumidor migrou para as três dimensões. A função em si SOBREVIVE
 PERMANENTEMENTE: `debito_historico.status_anterior/novo` (trilha de auditoria,
 `NOT NULL`) e a coluna `status` do CSV de exportação continuam existindo,

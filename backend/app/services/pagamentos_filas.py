@@ -153,11 +153,11 @@ async def fila_liberacao(db: AsyncSession, *, tenant_id: int) -> list[FilaLibera
     """Parcelas A_PAGAR de débitos autorizados/na tesouraria, agrupadas por conta
     (nome asc); dentro do grupo, vencimento asc."""
     # "Tem reserva" (mesmo predicado de pagamentos_autorizacao.py): AUTORIZADA
-    # e ainda não PAGA — não é sobre fila, é sobre a reserva na conta pagadora.
+    # e nem PAGA nem CONCILIADA — não é sobre fila, é sobre a reserva na conta pagadora.
     debitos = list((await db.execute(select(Debito).where(
         Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
         Debito.situacao_tramitacao == est.AUTORIZADA,
-        Debito.situacao_pagamento != est.PAGA))).scalars().all())
+        Debito.situacao_pagamento.notin_((est.PAGA, est.CONCILIADA))))).scalars().all())
     if not debitos:
         return []
     debitos_por_id = {d.id: d for d in debitos}

@@ -22,10 +22,10 @@ from . import pagamentos_estados as est
 
 _ORIGENS_MANUAIS = {"APORTE", "RECEITA", "AJUSTE"}
 
-# Espelha o ruling COM_RESERVA (autorizado e ainda não pago) — mesma condição
+# Espelha o ruling COM_RESERVA (autorizado, nem pago nem conciliado) — mesma condição
 # de `pagamentos_dashboard._TEM_RESERVA` (F5).
 _TEM_RESERVA = and_(Debito.situacao_tramitacao == est.AUTORIZADA,
-                    Debito.situacao_pagamento != est.PAGA)
+                    Debito.situacao_pagamento.notin_((est.PAGA, est.CONCILIADA)))
 
 
 async def _obter_conta(db, *, tenant_id, conta_id) -> ContaBancaria:

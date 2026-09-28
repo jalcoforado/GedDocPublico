@@ -68,7 +68,7 @@ def test_mapa_do_teste_bate_com_a_migration():
 
 
 # Os 16 valores do extinto `Debito.status` (coluna removida na F5, migration
-# 0121). Pinado aqui em vez de importado de `StatusDebito` (que morreu junto
+# 0122). Pinado aqui em vez de importado de `StatusDebito` (que morreu junto
 # com a coluna): esta migration é histórica e imutável, então o conjunto que
 # ela precisa cobrir também é — não deveria mais mudar.
 _STATUS_LEGADOS_16 = {
