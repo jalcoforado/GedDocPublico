@@ -46,40 +46,6 @@ async def _provisionar(engine):
     return tenant
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.conciliacao WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.lancamento_extrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.extrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _novo_usuario(engine, tenant_id, sufixo):
     async with _sm(engine)() as s:
         r = await s.execute(text(
@@ -158,87 +124,78 @@ def _csv(valor="1000.00", data="2026-08-01", tipo="DEBITO"):
 
 async def test_conciliacao_completa_debito_vira_conciliado(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, fonte, conta = await _base(admin_engine, t.id)
-        d, _p = await _debito_pago(admin_engine, t.id, forn, nat, fonte, conta, valor="1000.00")
-        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
-        # importa extrato com um débito de R$ 1000 em 2026-08-01
-        async with _sm(admin_engine)() as s:
-            ex = (await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
-                id_conta=conta.id, nome_arquivo="ext.csv", conteudo=_csv()))).extrato
-        assert ex.qtd_lancamentos == 1 and ex.status_processamento == "PROCESSADO"
-        # reimportar o mesmo arquivo → 409
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
-                    id_conta=conta.id, nome_arquivo="ext.csv", conteudo=_csv()))
-            assert exc.value.status_code == 409
-        # sugestão EXATA
-        async with _sm(admin_engine)() as s:
-            sug = await conc.sugerir_baixas(s, tenant_id=t.id, id_extrato=ex.id)
-        assert len(sug) == 1 and sug[0].tipo_correspondencia == "EXATA"
-        # baixa automática concilia e leva o débito a CONCILIADO
-        async with _sm(admin_engine)() as s:
-            n = await conc.baixa_automatica(s, tenant_id=t.id, id_extrato=ex.id, usuario_id=uid)
-        assert n == 1
-        async with _sm(admin_engine)() as s:
-            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-            saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-            lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
-        assert d2.situacao_pagamento == est.CONCILIADA
-        assert lancs[0].conciliado is True
-        # saldo conciliado = inicial 10000 − 1000 pago conciliado
-        assert saldo.saldo_conciliado == Decimal("9000.00")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    forn, nat, fonte, conta = await _base(admin_engine, t.id)
+    d, _p = await _debito_pago(admin_engine, t.id, forn, nat, fonte, conta, valor="1000.00")
+    uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+    # importa extrato com um débito de R$ 1000 em 2026-08-01
+    async with _sm(admin_engine)() as s:
+        ex = (await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
+            id_conta=conta.id, nome_arquivo="ext.csv", conteudo=_csv()))).extrato
+    assert ex.qtd_lancamentos == 1 and ex.status_processamento == "PROCESSADO"
+    # reimportar o mesmo arquivo → 409
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
+                id_conta=conta.id, nome_arquivo="ext.csv", conteudo=_csv()))
+        assert exc.value.status_code == 409
+    # sugestão EXATA
+    async with _sm(admin_engine)() as s:
+        sug = await conc.sugerir_baixas(s, tenant_id=t.id, id_extrato=ex.id)
+    assert len(sug) == 1 and sug[0].tipo_correspondencia == "EXATA"
+    # baixa automática concilia e leva o débito a CONCILIADO
+    async with _sm(admin_engine)() as s:
+        n = await conc.baixa_automatica(s, tenant_id=t.id, id_extrato=ex.id, usuario_id=uid)
+    assert n == 1
+    async with _sm(admin_engine)() as s:
+        d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+        saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+        lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
+    assert d2.situacao_pagamento == est.CONCILIADA
+    assert lancs[0].conciliado is True
+    # saldo conciliado = inicial 10000 − 1000 pago conciliado
+    assert saldo.saldo_conciliado == Decimal("9000.00")
 
 
 async def test_conciliar_movimentacao_de_outra_conta_bloqueia_rn11(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, fonte, conta = await _base(admin_engine, t.id)
-        _f2, _n2, fonte2, conta2 = await _base(admin_engine, t.id)
-        d, p = await _debito_pago(admin_engine, t.id, forn, nat, fonte, conta, valor="1000.00")
-        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
-        # extrato importado na CONTA2, mas a movimentação do pagamento é da conta1
-        async with _sm(admin_engine)() as s:
-            ex = (await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
-                id_conta=conta2.id, nome_arquivo="ext2.csv", conteudo=_csv()))).extrato
-            lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
-            mov_id = (await s.execute(text(
-                "SELECT id_movimentacao FROM pagamentos.parcela WHERE id=:p"), {"p": p.id})).scalar_one()
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await conc.conciliar(s, tenant_id=t.id, id_lancamento=lancs[0].id,
-                                     id_movimentacao=mov_id, usuario_id=uid)
-            assert exc.value.status_code == 422
-            assert "conta do extrato" in exc.value.detail.lower()
-    finally:
-        await _cleanup(admin_engine, t.id)
+    forn, nat, fonte, conta = await _base(admin_engine, t.id)
+    _f2, _n2, fonte2, conta2 = await _base(admin_engine, t.id)
+    d, p = await _debito_pago(admin_engine, t.id, forn, nat, fonte, conta, valor="1000.00")
+    uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+    # extrato importado na CONTA2, mas a movimentação do pagamento é da conta1
+    async with _sm(admin_engine)() as s:
+        ex = (await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
+            id_conta=conta2.id, nome_arquivo="ext2.csv", conteudo=_csv()))).extrato
+        lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
+        mov_id = (await s.execute(text(
+            "SELECT id_movimentacao FROM pagamentos.parcela WHERE id=:p"), {"p": p.id})).scalar_one()
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await conc.conciliar(s, tenant_id=t.id, id_lancamento=lancs[0].id,
+                                 id_movimentacao=mov_id, usuario_id=uid)
+        assert exc.value.status_code == 422
+        assert "conta do extrato" in exc.value.detail.lower()
 
 
 async def test_dupla_baixa_bloqueada_rn14(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        forn, nat, fonte, conta = await _base(admin_engine, t.id)
-        d, p = await _debito_pago(admin_engine, t.id, forn, nat, fonte, conta, valor="1000.00")
-        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
-        # dois lançamentos iguais no extrato
-        csv = (_csv() + "2026-08-01;Pagamento fornecedor;DOC2;Forn;1000.00;DEBITO\n")
-        async with _sm(admin_engine)() as s:
-            ex = (await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
-                id_conta=conta.id, nome_arquivo="ext.csv", conteudo=csv))).extrato
-            lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
-            mov_id = (await s.execute(text(
-                "SELECT id_movimentacao FROM pagamentos.parcela WHERE id=:p"), {"p": p.id})).scalar_one()
-        async with _sm(admin_engine)() as s:
-            await conc.conciliar(s, tenant_id=t.id, id_lancamento=lancs[0].id,
+    forn, nat, fonte, conta = await _base(admin_engine, t.id)
+    d, p = await _debito_pago(admin_engine, t.id, forn, nat, fonte, conta, valor="1000.00")
+    uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+    # dois lançamentos iguais no extrato
+    csv = (_csv() + "2026-08-01;Pagamento fornecedor;DOC2;Forn;1000.00;DEBITO\n")
+    async with _sm(admin_engine)() as s:
+        ex = (await conc.importar_extrato(s, tenant_id=t.id, usuario_id=uid, payload=ImportarExtratoIn(
+            id_conta=conta.id, nome_arquivo="ext.csv", conteudo=csv))).extrato
+        lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
+        mov_id = (await s.execute(text(
+            "SELECT id_movimentacao FROM pagamentos.parcela WHERE id=:p"), {"p": p.id})).scalar_one()
+    async with _sm(admin_engine)() as s:
+        await conc.conciliar(s, tenant_id=t.id, id_lancamento=lancs[0].id,
+                             id_movimentacao=mov_id, usuario_id=uid)
+    # a mesma movimentação não pode ser conciliada de novo (RN-14)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await conc.conciliar(s, tenant_id=t.id, id_lancamento=lancs[1].id,
                                  id_movimentacao=mov_id, usuario_id=uid)
-        # a mesma movimentação não pode ser conciliada de novo (RN-14)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await conc.conciliar(s, tenant_id=t.id, id_lancamento=lancs[1].id,
-                                     id_movimentacao=mov_id, usuario_id=uid)
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+        assert exc.value.status_code == 409

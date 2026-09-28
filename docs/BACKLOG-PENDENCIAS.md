@@ -398,11 +398,11 @@ por esquecimento. Agrupados aqui para não se perderem.)*
     por teste.** O `DISTINCT ON` sem tenant é, ele mesmo, suspeito na migration 0091 — não investigado.
   - `test_apensamento_anticiclo.py::_cleanup_catalogs` — apaga por id linhas de tenant preexistente,
     fora do alcance da fixture.
-  - **Adiados por conflito com o F5** (`pagamentos/f5-remove-status-legado` altera os mesmos
-    arquivos; o merge simulado dá 4 conflitos): `test_pagamentos_autorizacao.py`,
-    `test_pagamentos_conciliacao_v2.py`, `test_pagamentos_debitos.py`,
-    `test_pagamentos_validacoes_v2.py`. Mecânico — refazer depois que o F5 entrar. No ambiente do F5 a
-    remoção nesses quatro passou (a única falha daquela rodada foi o `rn15`, acima).
+  - ~~**Adiados por conflito com o F5**~~ — **feito em 2026-09-28**, depois do merge do F5 (#69):
+    `test_pagamentos_conciliacao_v2.py`, `test_pagamentos_debitos.py` e
+    `test_pagamentos_validacoes_v2.py` perderam o helper; em `test_pagamentos_autorizacao.py` saíram
+    as 18 chamadas, mas a **definição fica** (com docstring dizendo por quê), porque o `rn15` acima a
+    importa. Base pristina × modificada, banco isolado: 45/45 nos dois lados, zero tenant vazado.
   - **Pendência nova, não tratada:** `utils.auditoria` (5,2 mi de linhas no banco de dev) é
     alimentada por triggers de `utils.usuario`/`usuario_grupo`/… e não tem `tenant_id` — nem os helpers
     nem a fixture a limpam (a fixture desliga os triggers). Cresce ~83 linhas por teste; sem os

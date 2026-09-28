@@ -60,6 +60,11 @@ def _doc() -> str:
 
 
 async def _cleanup(engine, tenant_id: int) -> None:
+    """Não é usado neste arquivo — a limpeza é de `_limpa_tenants_do_modulo` (conftest).
+    Existe para `test_pagamentos_rn15_c13.py`, que precisa de limpeza ENTRE testes:
+    o SQL da migration 0091 que ele exercita (`DISTINCT ON`) não filtra por tenant, e
+    a fixture só limpa ao fim do módulo. Não remova sem resolver aquilo.
+    """
     async with _sm(engine)() as s:
         for stmt in (
             "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
@@ -224,471 +229,423 @@ async def _debito_autorizado(engine, tenant_id, *, valor="1000.00", saldo_inicia
 
 async def test_autorizar_gera_op_grava_conta_pagadora_e_reserva(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, fonte, conta = await _debito_aprovado(admin_engine, t.id, valor="1000.00")
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
-        ops = await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d])
-        assert len(ops) == 1
-        op = ops[0]
-        assert op.numero.startswith("OP-") and op.numero.endswith("-0001")
-        assert op.valor_total == Decimal("1000.00")
-        assert op.id_conta_pagadora == conta.id
-        assert op.valor_reservado == Decimal("1000.00")
-        # RF-AUT-16: saldo antes/projetado após a reserva gravados na OP
-        assert op.saldo_antes == Decimal("10000.00")
-        assert op.saldo_projetado_apos == Decimal("9000.00")
-        async with _sm(admin_engine)() as s:
-            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-            hist = await deb.listar_historico(s, tenant_id=t.id, debito_id=d.id)
-            debs_op = await aut.debitos_da_ordem(s, tenant_id=t.id, ordem_id=op.id)
-        assert d2.situacao_tramitacao == est.AUTORIZADA and d2.situacao_pagamento == est.NAO_INICIADA
-        assert d2.id_conta_pagadora == conta.id      # gravada imutável na autorização
-        # F3 (Task 4): a reavaliação síncrona da fila roda logo após a
-        # autorização e grava a própria transição (FILA_REAVALIADA),
-        # espelhando a posição — por isso o mais recente do histórico não é
-        # mais necessariamente "AUTORIZADO".
-        assert hist[0].acao == "FILA_REAVALIADA"
-        assert any(h.acao == "AUTORIZADO" for h in hist)
-        assert [x.id for x in debs_op] == [d.id]
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d, _sol, _apr, fonte, conta = await _debito_aprovado(admin_engine, t.id, valor="1000.00")
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    ops = await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d])
+    assert len(ops) == 1
+    op = ops[0]
+    assert op.numero.startswith("OP-") and op.numero.endswith("-0001")
+    assert op.valor_total == Decimal("1000.00")
+    assert op.id_conta_pagadora == conta.id
+    assert op.valor_reservado == Decimal("1000.00")
+    # RF-AUT-16: saldo antes/projetado após a reserva gravados na OP
+    assert op.saldo_antes == Decimal("10000.00")
+    assert op.saldo_projetado_apos == Decimal("9000.00")
+    async with _sm(admin_engine)() as s:
+        d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+        hist = await deb.listar_historico(s, tenant_id=t.id, debito_id=d.id)
+        debs_op = await aut.debitos_da_ordem(s, tenant_id=t.id, ordem_id=op.id)
+    assert d2.situacao_tramitacao == est.AUTORIZADA and d2.situacao_pagamento == est.NAO_INICIADA
+    assert d2.id_conta_pagadora == conta.id      # gravada imutável na autorização
+    # F3 (Task 4): a reavaliação síncrona da fila roda logo após a
+    # autorização e grava a própria transição (FILA_REAVALIADA),
+    # espelhando a posição — por isso o mais recente do histórico não é
+    # mais necessariamente "AUTORIZADO".
+    assert hist[0].acao == "FILA_REAVALIADA"
+    assert any(h.acao == "AUTORIZADO" for h in hist)
+    assert [x.id for x in debs_op] == [d.id]
 
 
 async def test_ca_aut_01_contas_elegiveis_apenas_da_fonte(admin_engine):
     """CA-AUT-01: contas_elegiveis lista só contas ATIVAS da fonte informada."""
     t = await _provisionar(admin_engine)
-    try:
-        fonte1, conta1 = await _fonte_conta(admin_engine, t.id)
-        fonte2, conta2 = await _fonte_conta(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            elegiveis1 = await aut.contas_elegiveis(s, tenant_id=t.id, id_fonte=fonte1.id)
-        ids = {c.id_conta for c in elegiveis1}
-        assert ids == {conta1.id}
-        assert conta2.id not in ids
-        # conta mascarada expõe só os últimos 4 dígitos
-        assert elegiveis1[0].conta_mascarada.startswith("****")
-        # RF-AUT-05: reservado e disponível projetado expostos por conta elegível
-        assert elegiveis1[0].reservado == Decimal("0")
-        assert elegiveis1[0].disponivel_projetado == elegiveis1[0].disponivel
-    finally:
-        await _cleanup(admin_engine, t.id)
+    fonte1, conta1 = await _fonte_conta(admin_engine, t.id)
+    fonte2, conta2 = await _fonte_conta(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        elegiveis1 = await aut.contas_elegiveis(s, tenant_id=t.id, id_fonte=fonte1.id)
+    ids = {c.id_conta for c in elegiveis1}
+    assert ids == {conta1.id}
+    assert conta2.id not in ids
+    # conta mascarada expõe só os últimos 4 dígitos
+    assert elegiveis1[0].conta_mascarada.startswith("****")
+    # RF-AUT-05: reservado e disponível projetado expostos por conta elegível
+    assert elegiveis1[0].reservado == Decimal("0")
+    assert elegiveis1[0].disponivel_projetado == elegiveis1[0].disponivel
 
 
 async def test_ca_aut_03_conta_de_outra_fonte_rejeitada(admin_engine):
     """CA-AUT-03/RN-06: autorizar pagando por conta que não é da fonte → 422."""
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, fonte1, _conta1 = await _debito_aprovado(admin_engine, t.id, valor="1000.00")
-        _fonte2, conta2 = await _fonte_conta(admin_engine, t.id)  # conta de OUTRA fonte
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.autorizar_lote(
-                    s, tenant_id=t.id, usuario_id=autorizador,
-                    grupos=[GrupoAutorizacaoIn(id_fonte=fonte1.id, id_conta_pagadora=conta2.id,
-                                               debito_ids=[d.id])])
-            assert exc.value.status_code == 422
-        async with _sm(admin_engine)() as s:
-            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE and d2.id_conta_pagadora is None
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d, _sol, _apr, fonte1, _conta1 = await _debito_aprovado(admin_engine, t.id, valor="1000.00")
+    _fonte2, conta2 = await _fonte_conta(admin_engine, t.id)  # conta de OUTRA fonte
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.autorizar_lote(
+                s, tenant_id=t.id, usuario_id=autorizador,
+                grupos=[GrupoAutorizacaoIn(id_fonte=fonte1.id, id_conta_pagadora=conta2.id,
+                                           debito_ids=[d.id])])
+        assert exc.value.status_code == 422
+    async with _sm(admin_engine)() as s:
+        d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+    assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE and d2.id_conta_pagadora is None
 
 
 async def test_ca_aut_04_saldo_insuficiente_bloqueia_422(admin_engine):
     """CA-AUT-04: disponível projetado da conta pagadora < Σ → 422, sem gravar."""
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, fonte, conta = await _debito_aprovado(
-            admin_engine, t.id, valor="1000.00", saldo_inicial="100.00")
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
-                                         grupos=[_grupo(fonte, conta, [d])])
-            assert exc.value.status_code == 422
-            assert "saldo" in exc.value.detail.lower()
-        async with _sm(admin_engine)() as s:
-            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d, _sol, _apr, fonte, conta = await _debito_aprovado(
+        admin_engine, t.id, valor="1000.00", saldo_inicial="100.00")
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
+                                     grupos=[_grupo(fonte, conta, [d])])
+        assert exc.value.status_code == 422
+        assert "saldo" in exc.value.detail.lower()
+    async with _sm(admin_engine)() as s:
+        d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+    assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
 
 
 async def test_ca_aut_05_reserva_reduz_disponivel(admin_engine):
     """CA-AUT-05: autorizar reserva na conta pagadora e reduz o disponível."""
     t = await _provisionar(admin_engine)
-    try:
-        base = await _base(admin_engine, t.id, saldo_inicial="1000.00")
-        _forn, _nat, fonte, conta, _unidade_id = base
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    base = await _base(admin_engine, t.id, saldo_inicial="1000.00")
+    _forn, _nat, fonte, conta, _unidade_id = base
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
 
-        d_a, _sol_a, _apr_a, _f, _c = await _debito_aprovado(
-            admin_engine, t.id, valor="800.00", base=base)
-        await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d_a])
+    d_a, _sol_a, _apr_a, _f, _c = await _debito_aprovado(
+        admin_engine, t.id, valor="800.00", base=base)
+    await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d_a])
 
-        async with _sm(admin_engine)() as s:
-            saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        assert saldo.comprometido == Decimal("800.00")
-        assert saldo.disponivel == Decimal("200.00")
+    async with _sm(admin_engine)() as s:
+        saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+    assert saldo.comprometido == Decimal("800.00")
+    assert saldo.disponivel == Decimal("200.00")
 
-        # segunda autorização na mesma conta não cabe no disponível remanescente
-        d_b, _sol_b, _apr_b, _f2, _c2 = await _debito_aprovado(
-            admin_engine, t.id, valor="500.00", base=base)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
-                                         grupos=[_grupo(fonte, conta, [d_b])])
-            assert exc.value.status_code == 422
-        async with _sm(admin_engine)() as s:
-            d_b2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_b.id)
-        assert d_b2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
-    finally:
-        await _cleanup(admin_engine, t.id)
+    # segunda autorização na mesma conta não cabe no disponível remanescente
+    d_b, _sol_b, _apr_b, _f2, _c2 = await _debito_aprovado(
+        admin_engine, t.id, valor="500.00", base=base)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
+                                     grupos=[_grupo(fonte, conta, [d_b])])
+        assert exc.value.status_code == 422
+    async with _sm(admin_engine)() as s:
+        d_b2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_b.id)
+    assert d_b2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
 
 
 async def test_rf_aut_11_fonte_sem_conta_ativa_bloqueia(admin_engine):
     """RF-AUT-11: fonte sem conta ativa → elegíveis vazio e autorização por
     conta inativa é 422."""
     t = await _provisionar(admin_engine)
-    try:
-        async with _sm(admin_engine)() as s:
-            forn = await cad.criar_fornecedor(s, tenant_id=t.id, payload=FornecedorCreate(
-                tipo_pessoa="JURIDICA", cnpj_cpf=_doc(), nome="Forn LTDA"))
-            nat = await cad.criar_natureza(s, tenant_id=t.id, payload=NaturezaCreate(
-                codigo=f"N{uuid.uuid4().hex[:6]}", descricao="Material"))
-            unidade_id = await id_unidade_padrao(s, t.id)
-        fonte, conta = await _fonte_conta(admin_engine, t.id, ativa=False)  # conta INATIVA
+    async with _sm(admin_engine)() as s:
+        forn = await cad.criar_fornecedor(s, tenant_id=t.id, payload=FornecedorCreate(
+            tipo_pessoa="JURIDICA", cnpj_cpf=_doc(), nome="Forn LTDA"))
+        nat = await cad.criar_natureza(s, tenant_id=t.id, payload=NaturezaCreate(
+            codigo=f"N{uuid.uuid4().hex[:6]}", descricao="Material"))
+        unidade_id = await id_unidade_padrao(s, t.id)
+    fonte, conta = await _fonte_conta(admin_engine, t.id, ativa=False)  # conta INATIVA
 
-        async with _sm(admin_engine)() as s:
-            elegiveis = await aut.contas_elegiveis(s, tenant_id=t.id, id_fonte=fonte.id)
-        assert elegiveis == []
+    async with _sm(admin_engine)() as s:
+        elegiveis = await aut.contas_elegiveis(s, tenant_id=t.id, id_fonte=fonte.id)
+    assert elegiveis == []
 
-        # débito da fonte (sem conta sugerida) percorre o rito até ENVIADO_SECRETARIO
-        sol = await _novo_usuario(admin_engine, t.id, f"sol{uuid.uuid4().hex[:6]}")
-        gestor = await _novo_usuario(admin_engine, t.id, f"ges{uuid.uuid4().hex[:6]}")
-        val = await _novo_usuario(admin_engine, t.id, f"val{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol,
-                                       payload=_payload_debito(
-                                           forn, nat, fonte, conta=None,
-                                           unidade_id=unidade_id))
-        async with _sm(admin_engine)() as s:
-            d = await deb.enviar_para_gestor(
-                s, tenant_id=t.id, debito_id=d.id, usuario_id=sol,
-                lock_version=d.lock_version)
-        async with _sm(admin_engine)() as s:
-            d = await deb.gestor_autorizar(
-                s, tenant_id=t.id, debito_id=d.id, usuario_id=gestor,
-                lock_version=d.lock_version)
-        async with _sm(admin_engine)() as s:
-            d = await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
-        async with _sm(admin_engine)() as s:
-            d = await deb.validar(
-                s, tenant_id=t.id, debito_id=d.id, usuario_id=val,
-                lock_version=d.lock_version)
+    # débito da fonte (sem conta sugerida) percorre o rito até ENVIADO_SECRETARIO
+    sol = await _novo_usuario(admin_engine, t.id, f"sol{uuid.uuid4().hex[:6]}")
+    gestor = await _novo_usuario(admin_engine, t.id, f"ges{uuid.uuid4().hex[:6]}")
+    val = await _novo_usuario(admin_engine, t.id, f"val{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        d = await deb.criar_debito(s, tenant_id=t.id, usuario_id=sol,
+                                   payload=_payload_debito(
+                                       forn, nat, fonte, conta=None,
+                                       unidade_id=unidade_id))
+    async with _sm(admin_engine)() as s:
+        d = await deb.enviar_para_gestor(
+            s, tenant_id=t.id, debito_id=d.id, usuario_id=sol,
+            lock_version=d.lock_version)
+    async with _sm(admin_engine)() as s:
+        d = await deb.gestor_autorizar(
+            s, tenant_id=t.id, debito_id=d.id, usuario_id=gestor,
+            lock_version=d.lock_version)
+    async with _sm(admin_engine)() as s:
+        d = await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+    async with _sm(admin_engine)() as s:
+        d = await deb.validar(
+            s, tenant_id=t.id, debito_id=d.id, usuario_id=val,
+            lock_version=d.lock_version)
 
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
-                                         grupos=[_grupo(fonte, conta, [d])])
-            assert exc.value.status_code == 422
-    finally:
-        await _cleanup(admin_engine, t.id)
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
+                                     grupos=[_grupo(fonte, conta, [d])])
+        assert exc.value.status_code == 422
 
 
 async def test_rf_aut_15_fontes_distintas_no_grupo_bloqueadas(admin_engine):
     """RF-AUT-15: débito de fonte diferente da declarada no grupo → 422."""
     t = await _provisionar(admin_engine)
-    try:
-        d1, _s1, _a1, fonte1, conta1 = await _debito_aprovado(admin_engine, t.id, valor="500.00")
-        d2, _s2, _a2, _fonte2, _conta2 = await _debito_aprovado(admin_engine, t.id, valor="500.00")
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.autorizar_lote(
-                    s, tenant_id=t.id, usuario_id=autorizador,
-                    grupos=[GrupoAutorizacaoIn(id_fonte=fonte1.id, id_conta_pagadora=conta1.id,
-                                               debito_ids=[d1.id, d2.id])])
-            assert exc.value.status_code == 422
-        async with _sm(admin_engine)() as s:
-            d1b = await deb.obter_debito(s, tenant_id=t.id, debito_id=d1.id)
-            d2b = await deb.obter_debito(s, tenant_id=t.id, debito_id=d2.id)
-        assert (d1b.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
-                and d2b.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE)
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d1, _s1, _a1, fonte1, conta1 = await _debito_aprovado(admin_engine, t.id, valor="500.00")
+    d2, _s2, _a2, _fonte2, _conta2 = await _debito_aprovado(admin_engine, t.id, valor="500.00")
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.autorizar_lote(
+                s, tenant_id=t.id, usuario_id=autorizador,
+                grupos=[GrupoAutorizacaoIn(id_fonte=fonte1.id, id_conta_pagadora=conta1.id,
+                                           debito_ids=[d1.id, d2.id])])
+        assert exc.value.status_code == 422
+    async with _sm(admin_engine)() as s:
+        d1b = await deb.obter_debito(s, tenant_id=t.id, debito_id=d1.id)
+        d2b = await deb.obter_debito(s, tenant_id=t.id, debito_id=d2.id)
+    assert (d1b.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
+            and d2b.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE)
 
 
 async def test_validar_sem_liquidacao_422(admin_engine):
     """RN-01/RF-VAL-02: sem liquidação confirmada, o débito não pode ser validado."""
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, val, fonte, conta = await _debito_aprovado(
-            admin_engine, t.id, valor="1000.00", liquidar=False)  # fica em EM_VALIDACAO
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await deb.validar(
-                    s, tenant_id=t.id, debito_id=d.id, usuario_id=val,
-                    lock_version=d.lock_version)
-            assert exc.value.status_code == 422
-            assert "liquidação" in exc.value.detail.lower()
-        # confirmando a liquidação: validar → autoriza
-        async with _sm(admin_engine)() as s:
-            d = await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
-        async with _sm(admin_engine)() as s:
-            d = await deb.validar(
+    d, _sol, val, fonte, conta = await _debito_aprovado(
+        admin_engine, t.id, valor="1000.00", liquidar=False)  # fica em EM_VALIDACAO
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await deb.validar(
                 s, tenant_id=t.id, debito_id=d.id, usuario_id=val,
                 lock_version=d.lock_version)
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
-        ops = await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d])
-        assert len(ops) == 1
-    finally:
-        await _cleanup(admin_engine, t.id)
+        assert exc.value.status_code == 422
+        assert "liquidação" in exc.value.detail.lower()
+    # confirmando a liquidação: validar → autoriza
+    async with _sm(admin_engine)() as s:
+        d = await deb.confirmar_liquidacao(s, tenant_id=t.id, debito_id=d.id, usuario_id=val)
+    async with _sm(admin_engine)() as s:
+        d = await deb.validar(
+            s, tenant_id=t.id, debito_id=d.id, usuario_id=val,
+            lock_version=d.lock_version)
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    ops = await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d])
+    assert len(ops) == 1
 
 
 async def test_autorizar_acima_da_alcada_403(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, fonte, conta = await _debito_aprovado(admin_engine, t.id, valor="1000.00")
-        autorizador_baixo = await _autorizador_com_alcada(admin_engine, t.id, valor_maximo="500.00")
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador_baixo,
-                                         grupos=[_grupo(fonte, conta, [d])])
-            assert exc.value.status_code == 403
-        async with _sm(admin_engine)() as s:
-            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
+    d, _sol, _apr, fonte, conta = await _debito_aprovado(admin_engine, t.id, valor="1000.00")
+    autorizador_baixo = await _autorizador_com_alcada(admin_engine, t.id, valor_maximo="500.00")
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador_baixo,
+                                     grupos=[_grupo(fonte, conta, [d])])
+        assert exc.value.status_code == 403
+    async with _sm(admin_engine)() as s:
+        d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+    assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
 
-        sem_alcada = await _novo_usuario(admin_engine, t.id, f"nal{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=sem_alcada,
-                                         grupos=[_grupo(fonte, conta, [d])])
-            assert exc.value.status_code == 403
-        async with _sm(admin_engine)() as s:
-            d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d3.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
-    finally:
-        await _cleanup(admin_engine, t.id)
+    sem_alcada = await _novo_usuario(admin_engine, t.id, f"nal{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=sem_alcada,
+                                     grupos=[_grupo(fonte, conta, [d])])
+        assert exc.value.status_code == 403
+    async with _sm(admin_engine)() as s:
+        d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+    assert d3.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
 
 
 async def test_alcada_por_fonte_mais_especifica_vence(admin_engine):
     """RF-CAD-06: alçada escopada pela fonte do débito vence a geral (menor). Um
     autorizador com geral R$ 500 mas alçada da fonte R$ 5000 autoriza débito R$ 1000."""
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, fonte, conta = await _debito_aprovado(admin_engine, t.id, valor="1000.00")
-        autorizador = await _novo_usuario(admin_engine, t.id, f"au{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
-                id_usuario=autorizador, id_natureza=None, valor_maximo="500.00"))  # geral, baixa
-            await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
-                id_usuario=autorizador, id_natureza=None, id_fonte=fonte.id,
-                valor_maximo="5000.00"))  # específica da fonte, alta
-        ops = await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d])
-        assert len(ops) == 1
-        async with _sm(admin_engine)() as s:
-            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.situacao_tramitacao == est.AUTORIZADA and d2.situacao_pagamento == est.NAO_INICIADA
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d, _sol, _apr, fonte, conta = await _debito_aprovado(admin_engine, t.id, valor="1000.00")
+    autorizador = await _novo_usuario(admin_engine, t.id, f"au{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
+            id_usuario=autorizador, id_natureza=None, valor_maximo="500.00"))  # geral, baixa
+        await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
+            id_usuario=autorizador, id_natureza=None, id_fonte=fonte.id,
+            valor_maximo="5000.00"))  # específica da fonte, alta
+    ops = await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d])
+    assert len(ops) == 1
+    async with _sm(admin_engine)() as s:
+        d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+    assert d2.situacao_tramitacao == est.AUTORIZADA and d2.situacao_pagamento == est.NAO_INICIADA
 
 
 async def test_autorizar_por_solicitante_ou_aprovador_403(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, solicitante, aprovador, fonte, conta = await _debito_aprovado(
-            admin_engine, t.id, valor="1000.00")
-        await _dar_alcada(admin_engine, t.id, solicitante)
-        await _dar_alcada(admin_engine, t.id, aprovador)
+    d, solicitante, aprovador, fonte, conta = await _debito_aprovado(
+        admin_engine, t.id, valor="1000.00")
+    await _dar_alcada(admin_engine, t.id, solicitante)
+    await _dar_alcada(admin_engine, t.id, aprovador)
 
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=solicitante,
-                                         grupos=[_grupo(fonte, conta, [d])])
-            assert exc.value.status_code == 403
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=solicitante,
+                                     grupos=[_grupo(fonte, conta, [d])])
+        assert exc.value.status_code == 403
 
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=aprovador,
-                                         grupos=[_grupo(fonte, conta, [d])])
-            assert exc.value.status_code == 403
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=aprovador,
+                                     grupos=[_grupo(fonte, conta, [d])])
+        assert exc.value.status_code == 403
 
-        async with _sm(admin_engine)() as s:
-            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+    assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
 
 
 async def test_autorizacao_em_lote_all_or_nothing(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        base = await _base(admin_engine, t.id, saldo_inicial="1000.00")
-        _forn, _nat, fonte, conta, _unidade_id = base
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    base = await _base(admin_engine, t.id, saldo_inicial="1000.00")
+    _forn, _nat, fonte, conta, _unidade_id = base
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
 
-        d_a, _sol_a, _apr_a, _f, _c = await _debito_aprovado(
-            admin_engine, t.id, valor="600.00", base=base)
-        d_b, _sol_b, _apr_b, _f2, _c2 = await _debito_aprovado(
-            admin_engine, t.id, valor="600.00", base=base)
+    d_a, _sol_a, _apr_a, _f, _c = await _debito_aprovado(
+        admin_engine, t.id, valor="600.00", base=base)
+    d_b, _sol_b, _apr_b, _f2, _c2 = await _debito_aprovado(
+        admin_engine, t.id, valor="600.00", base=base)
 
-        # os dois somam 1200 > 1000 disponível → nada é gravado
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
-                                         grupos=[_grupo(fonte, conta, [d_a, d_b])])
-            assert exc.value.status_code == 422
+    # os dois somam 1200 > 1000 disponível → nada é gravado
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.autorizar_lote(s, tenant_id=t.id, usuario_id=autorizador,
+                                     grupos=[_grupo(fonte, conta, [d_a, d_b])])
+        assert exc.value.status_code == 422
 
-        async with _sm(admin_engine)() as s:
-            d_a2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_a.id)
-            d_b2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_b.id)
-        assert d_a2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
-        assert d_b2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        d_a2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_a.id)
+        d_b2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_b.id)
+    assert d_a2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
+    assert d_b2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
 
 
 async def test_pagar_parcela_deduz_saldo_e_finaliza_debito(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, fonte, conta = await _debito_aprovado(
-            admin_engine, t.id, valor="1000.00",
-            parcelas=[ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-01"),
-                      ParcelaCreate(numero=2, valor="400.00", vencimento="2026-09-01")])
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
-        tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d])
-        async with _sm(admin_engine)() as s:
-            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
-            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
-                                       parcela_ids=[parcelas[0].id])
-        async with _sm(admin_engine)() as s:
-            p1 = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
-                                         parcela_id=parcelas[0].id, forma_pagamento="PIX")
-        assert p1.status == "PAGA" and p1.id_movimentacao is not None
-        async with _sm(admin_engine)() as s:
-            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-            saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        assert d2.situacao_pagamento == est.PAGA_PARCIAL
-        assert saldo.saldo_atual == Decimal("9400.00")
-        assert saldo.comprometido == Decimal("400.00")
-        async with _sm(admin_engine)() as s:
-            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
-                                       parcela_ids=[parcelas[1].id])
-        async with _sm(admin_engine)() as s:
-            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
-                                    parcela_id=parcelas[1].id, forma_pagamento="TED")
-        async with _sm(admin_engine)() as s:
-            d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-            saldo2 = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        assert d3.situacao_pagamento == est.PAGA
-        assert saldo2.saldo_atual == Decimal("9000.00")
-        assert saldo2.comprometido == Decimal("0")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d, _sol, _apr, fonte, conta = await _debito_aprovado(
+        admin_engine, t.id, valor="1000.00",
+        parcelas=[ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-01"),
+                  ParcelaCreate(numero=2, valor="400.00", vencimento="2026-09-01")])
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    await _autorizar(admin_engine, t.id, autorizador, fonte=fonte, conta=conta, debitos=[d])
+    async with _sm(admin_engine)() as s:
+        parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
+                                   parcela_ids=[parcelas[0].id])
+    async with _sm(admin_engine)() as s:
+        p1 = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                     parcela_id=parcelas[0].id, forma_pagamento="PIX")
+    assert p1.status == "PAGA" and p1.id_movimentacao is not None
+    async with _sm(admin_engine)() as s:
+        d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+        saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+    assert d2.situacao_pagamento == est.PAGA_PARCIAL
+    assert saldo.saldo_atual == Decimal("9400.00")
+    assert saldo.comprometido == Decimal("400.00")
+    async with _sm(admin_engine)() as s:
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
+                                   parcela_ids=[parcelas[1].id])
+    async with _sm(admin_engine)() as s:
+        await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                parcela_id=parcelas[1].id, forma_pagamento="TED")
+    async with _sm(admin_engine)() as s:
+        d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+        saldo2 = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+    assert d3.situacao_pagamento == est.PAGA
+    assert saldo2.saldo_atual == Decimal("9000.00")
+    assert saldo2.comprometido == Decimal("0")
 
 
 async def test_pagar_parcela_de_debito_nao_autorizado_409(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, _fonte, _conta = await _debito_aprovado(admin_engine, t.id, valor="1000.00")
-        tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
-                                        parcela_id=parcelas[0].id, forma_pagamento="PIX")
-            assert exc.value.status_code == 409
-        async with _sm(admin_engine)() as s:
-            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-            p2 = (await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id))[0]
-        assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
-        assert p2.status == "A_PAGAR"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d, _sol, _apr, _fonte, _conta = await _debito_aprovado(admin_engine, t.id, valor="1000.00")
+    tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                    parcela_id=parcelas[0].id, forma_pagamento="PIX")
+        assert exc.value.status_code == 409
+    async with _sm(admin_engine)() as s:
+        d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+        p2 = (await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id))[0]
+    assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
+    assert p2.status == "A_PAGAR"
 
 
 async def test_pagar_parcela_ja_paga_409(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, autorizador, _fonte, _conta = await _debito_autorizado(
-            admin_engine, t.id, valor="1000.00")
-        tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
-            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
-                                       parcela_ids=[parcelas[0].id])
-        async with _sm(admin_engine)() as s:
+    d, _sol, _apr, autorizador, _fonte, _conta = await _debito_autorizado(
+        admin_engine, t.id, valor="1000.00")
+    tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
+                                   parcela_ids=[parcelas[0].id])
+    async with _sm(admin_engine)() as s:
+        await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                parcela_id=parcelas[0].id, forma_pagamento="PIX")
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
             await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
                                     parcela_id=parcelas[0].id, forma_pagamento="PIX")
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
-                                        parcela_id=parcelas[0].id, forma_pagamento="PIX")
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+        assert exc.value.status_code == 409
 
 
 async def test_estornar_parcela_repoe_saldo_e_reabre(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, autorizador, _fonte, conta = await _debito_autorizado(
-            admin_engine, t.id, valor="1000.00",
-            parcelas=[ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-01"),
-                      ParcelaCreate(numero=2, valor="400.00", vencimento="2026-09-01")])
-        tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
-            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
-                                       parcela_ids=[parcelas[0].id])
-        async with _sm(admin_engine)() as s:
-            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
-                                    parcela_id=parcelas[0].id, forma_pagamento="PIX")
-        async with _sm(admin_engine)() as s:
-            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
-            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
-                                       parcela_ids=[parcelas[1].id])
-        async with _sm(admin_engine)() as s:
-            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
-                                    parcela_id=parcelas[1].id, forma_pagamento="TED")
-        async with _sm(admin_engine)() as s:
-            d1 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d1.situacao_pagamento == est.PAGA
+    d, _sol, _apr, autorizador, _fonte, conta = await _debito_autorizado(
+        admin_engine, t.id, valor="1000.00",
+        parcelas=[ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-01"),
+                  ParcelaCreate(numero=2, valor="400.00", vencimento="2026-09-01")])
+    tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
+                                   parcela_ids=[parcelas[0].id])
+    async with _sm(admin_engine)() as s:
+        await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                parcela_id=parcelas[0].id, forma_pagamento="PIX")
+    async with _sm(admin_engine)() as s:
+        parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
+                                   parcela_ids=[parcelas[1].id])
+    async with _sm(admin_engine)() as s:
+        await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                parcela_id=parcelas[1].id, forma_pagamento="TED")
+    async with _sm(admin_engine)() as s:
+        d1 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+    assert d1.situacao_pagamento == est.PAGA
 
-        async with _sm(admin_engine)() as s:
-            p2_estornada = await aut.estornar_parcela(
-                s, tenant_id=t.id, usuario_id=tesoureiro, parcela_id=parcelas[1].id,
-                justificativa="Pagamento em duplicidade")
-        assert p2_estornada.status == "A_PAGAR"
-        assert p2_estornada.data_pagamento is None
-        assert p2_estornada.forma_pagamento is None
-        assert p2_estornada.id_movimentacao is None
-        async with _sm(admin_engine)() as s:
-            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-            saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        assert d2.situacao_pagamento == est.PAGA_PARCIAL
-        assert saldo.saldo_atual == Decimal("9400.00")
-        assert saldo.comprometido == Decimal("400.00")
+    async with _sm(admin_engine)() as s:
+        p2_estornada = await aut.estornar_parcela(
+            s, tenant_id=t.id, usuario_id=tesoureiro, parcela_id=parcelas[1].id,
+            justificativa="Pagamento em duplicidade")
+    assert p2_estornada.status == "A_PAGAR"
+    assert p2_estornada.data_pagamento is None
+    assert p2_estornada.forma_pagamento is None
+    assert p2_estornada.id_movimentacao is None
+    async with _sm(admin_engine)() as s:
+        d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+        saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+    assert d2.situacao_pagamento == est.PAGA_PARCIAL
+    assert saldo.saldo_atual == Decimal("9400.00")
+    assert saldo.comprometido == Decimal("400.00")
 
-        async with _sm(admin_engine)() as s:
-            await aut.estornar_parcela(
-                s, tenant_id=t.id, usuario_id=tesoureiro, parcela_id=parcelas[0].id,
-                justificativa="Pagamento em duplicidade")
-        async with _sm(admin_engine)() as s:
-            d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-            saldo2 = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        # pagamento integralmente revertido → ESTORNADO (v2.0 seção 13)
-        assert d3.situacao_pagamento == est.ESTORNADA
-        assert saldo2.saldo_atual == Decimal("10000.00")
-        assert saldo2.comprometido == Decimal("1000.00")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        await aut.estornar_parcela(
+            s, tenant_id=t.id, usuario_id=tesoureiro, parcela_id=parcelas[0].id,
+            justificativa="Pagamento em duplicidade")
+    async with _sm(admin_engine)() as s:
+        d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+        saldo2 = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
+    # pagamento integralmente revertido → ESTORNADO (v2.0 seção 13)
+    assert d3.situacao_pagamento == est.ESTORNADA
+    assert saldo2.saldo_atual == Decimal("10000.00")
+    assert saldo2.comprometido == Decimal("1000.00")
 
 
 async def test_estornar_parcela_com_justificativa_longa_trunca_descricao(admin_engine):
@@ -696,28 +653,25 @@ async def test_estornar_parcela_com_justificativa_longa_trunca_descricao(admin_e
     (que também inclui o prefixo 'Estorno parcela N — débito #ID: '). A
     descrição gravada deve ser truncada em 255 chars — sem erro de banco."""
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, autorizador, _fonte, _conta = await _debito_autorizado(
-            admin_engine, t.id, valor="1000.00")
-        tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        justificativa_longa = "J" * 255
-        async with _sm(admin_engine)() as s:
-            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
-            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
-                                       parcela_ids=[parcelas[0].id])
-        async with _sm(admin_engine)() as s:
-            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
-                                    parcela_id=parcelas[0].id, forma_pagamento="PIX")
-        async with _sm(admin_engine)() as s:
-            p_estornada = await aut.estornar_parcela(
-                s, tenant_id=t.id, usuario_id=tesoureiro, parcela_id=parcelas[0].id,
-                justificativa=justificativa_longa)
-        assert p_estornada.status == "A_PAGAR"
-        async with _sm(admin_engine)() as s:
-            d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.situacao_pagamento == est.ESTORNADA  # reversão integral (v2.0 seção 13)
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d, _sol, _apr, autorizador, _fonte, _conta = await _debito_autorizado(
+        admin_engine, t.id, valor="1000.00")
+    tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    justificativa_longa = "J" * 255
+    async with _sm(admin_engine)() as s:
+        parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=autorizador,
+                                   parcela_ids=[parcelas[0].id])
+    async with _sm(admin_engine)() as s:
+        await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                parcela_id=parcelas[0].id, forma_pagamento="PIX")
+    async with _sm(admin_engine)() as s:
+        p_estornada = await aut.estornar_parcela(
+            s, tenant_id=t.id, usuario_id=tesoureiro, parcela_id=parcelas[0].id,
+            justificativa=justificativa_longa)
+    assert p_estornada.status == "A_PAGAR"
+    async with _sm(admin_engine)() as s:
+        d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+    assert d2.situacao_pagamento == est.ESTORNADA  # reversão integral (v2.0 seção 13)
 
 
 async def test_estornar_parcela_integral_reabre_posicao_na_fila(admin_engine):
@@ -728,47 +682,44 @@ async def test_estornar_parcela_integral_reabre_posicao_na_fila(admin_engine):
     que o débito terminou e ele nunca mais é preterido por quem está atrás.
     """
     t = await _provisionar(admin_engine)
-    try:
-        base = await _base(admin_engine, t.id)
-        _forn, _nat, fonte, conta, _unidade_id = base
-        # dois débitos na MESMA chave (base compartilhado): d1 autorizado
-        # primeiro, fica na frente da fila; d2 logo atrás.
-        d1, _sol1, _apr1, _aut1, _fonte1, _conta1 = await _debito_autorizado(
-            admin_engine, t.id, valor="1000.00", base=base)
-        d2, _sol2, _apr2, _aut2, _fonte2, _conta2 = await _debito_autorizado(
-            admin_engine, t.id, valor="1000.00", base=base)
-        tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    base = await _base(admin_engine, t.id)
+    _forn, _nat, fonte, conta, _unidade_id = base
+    # dois débitos na MESMA chave (base compartilhado): d1 autorizado
+    # primeiro, fica na frente da fila; d2 logo atrás.
+    d1, _sol1, _apr1, _aut1, _fonte1, _conta1 = await _debito_autorizado(
+        admin_engine, t.id, valor="1000.00", base=base)
+    d2, _sol2, _apr2, _aut2, _fonte2, _conta2 = await _debito_autorizado(
+        admin_engine, t.id, valor="1000.00", base=base)
+    tesoureiro = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
 
-        async with _sm(admin_engine)() as s:
-            parcelas1 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d1.id)
+    async with _sm(admin_engine)() as s:
+        parcelas1 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d1.id)
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                   parcela_ids=[parcelas1[0].id])
+    async with _sm(admin_engine)() as s:
+        await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                parcela_id=parcelas1[0].id, forma_pagamento="PIX")
+
+    async with _sm(admin_engine)() as s:
+        posicao1 = await cron.obter_posicao(s, tenant_id=t.id, id_debito=d1.id)
+    assert posicao1.situacao == cron.est.CONCLUIDA
+
+    async with _sm(admin_engine)() as s:
+        await aut.estornar_parcela(
+            s, tenant_id=t.id, usuario_id=tesoureiro, parcela_id=parcelas1[0].id,
+            justificativa="Pagamento em duplicidade")
+
+    async with _sm(admin_engine)() as s:
+        posicao1 = await cron.obter_posicao(s, tenant_id=t.id, id_debito=d1.id)
+    assert posicao1.situacao != cron.est.CONCLUIDA
+    assert posicao1.situacao == cron.est.ELEGIVEL
+
+    # d1 reaberto e ELEGIVEL volta a preterir d2, que está atrás na fila.
+    async with _sm(admin_engine)() as s:
+        parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
             await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=tesoureiro,
-                                       parcela_ids=[parcelas1[0].id])
-        async with _sm(admin_engine)() as s:
-            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
-                                    parcela_id=parcelas1[0].id, forma_pagamento="PIX")
-
-        async with _sm(admin_engine)() as s:
-            posicao1 = await cron.obter_posicao(s, tenant_id=t.id, id_debito=d1.id)
-        assert posicao1.situacao == cron.est.CONCLUIDA
-
-        async with _sm(admin_engine)() as s:
-            await aut.estornar_parcela(
-                s, tenant_id=t.id, usuario_id=tesoureiro, parcela_id=parcelas1[0].id,
-                justificativa="Pagamento em duplicidade")
-
-        async with _sm(admin_engine)() as s:
-            posicao1 = await cron.obter_posicao(s, tenant_id=t.id, id_debito=d1.id)
-        assert posicao1.situacao != cron.est.CONCLUIDA
-        assert posicao1.situacao == cron.est.ELEGIVEL
-
-        # d1 reaberto e ELEGIVEL volta a preterir d2, que está atrás na fila.
-        async with _sm(admin_engine)() as s:
-            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=tesoureiro,
-                                           parcela_ids=[parcelas2[0].id])
-            assert exc.value.status_code == 409
-            assert f"#{d1.id}" in exc.value.detail
-    finally:
-        await _cleanup(admin_engine, t.id)
+                                       parcela_ids=[parcelas2[0].id])
+        assert exc.value.status_code == 409
+        assert f"#{d1.id}" in exc.value.detail
