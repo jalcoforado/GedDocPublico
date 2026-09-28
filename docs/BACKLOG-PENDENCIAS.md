@@ -641,8 +641,37 @@ Pendências registradas da F3 (menores):
   `bloqueado_conta` (DRY); `total_grupo` do GET /fila muda de semântica para débito terminal;
   checagem 422 de categoria duplicada (defesa em profundidade).
 - `id_usuario_registro` da exceção = a própria autoridade (um 3º registrante não existe no rito).
-- F4 (tesouraria: lote/retenções/central) e F5 (remoção do `status` legado) continuam **não
-  autorizadas** — o `status` derivado segue vivo e sincronizado até a F5.
+- ~~F4 (tesouraria: lote/retenções/central) e F5 (remoção do `status` legado) continuam **não
+  autorizadas** — o `status` derivado segue vivo e sincronizado até a F5.~~ **F4 fechada em
+  2026-09-20** (branch `pagamentos/f4-tesouraria`, 7 tasks/commits; plano em
+  `docs/superpowers/plans/2026-09-20-pagamentos-f4-tesouraria.md`), migration 0121:
+
+  - `lote_pagamento`/`lote_pagamento_parcela` — execução real em lote (RASCUNHO → PROGRAMADO →
+    ENVIADO → PROCESSADO, CANCELADO de RASCUNHO/PROGRAMADO), substituindo o loop sequencial de
+    `pagar_parcela` que a tela de tesouraria fazia no cliente. `pagar_parcela`/`estornar_parcela`
+    avulsos continuam existindo para correção pontual — o lote é o caminho recomendado, não o único.
+  - `retencao` — CRUD travado (409) enquanto a parcela estiver engajada num lote; `valor_liquido`
+    sempre derivado, nunca coluna. Desconto de retenção acontece na parcela que fecha o pagamento
+    INTEGRAL do débito (ruling documentado em `pagamentos_lotes.processar_retorno`) — múltiplas
+    parcelas do mesmo débito em lotes diferentes não têm alocação proporcional; se a retenção
+    acumulada exceder essa parcela final, 409 explícito em vez de `MovimentacaoConta` negativa.
+  - Fecha o gap de segregação de funções que a F1 deixou aberto: `assert_segregacao(ato="PAGAR")`
+    existia em `pagamentos_guardas.py` desde a F1 mas nunca era chamada — `enviar_lote` (F4) passou
+    a chamá-la, e agora nem super-usuário pode enviar um lote com débito que ele mesmo decidiu em
+    papel anterior. **A revisão do PR achou o desvio, fechado antes do merge:** o
+    `POST /pagamentos/parcelas/{id}/pagar` avulso (mesma permissão) não checava segregação
+    nem lote — e como o lote não muda `Parcela.status`, pagava parcela já enviada ao banco, e o
+    retorno lançava uma segunda SAIDA (saldo em dobro). Hoje o avulso recusa parcela em lote
+    ativo (409) e exige a mesma segregação (403), e o retorno recusa parcela que não esteja
+    LIBERADA. Testes em `test_pagamentos_f4_lote_guardas.py`, incluindo HTTP com usuário comum.
+  - `GET /pagamentos/tesouraria/fila` descontinuado (410) — substituído por
+    `GET /pagamentos/lotes/elegiveis` + `GET /pagamentos/lotes`.
+  - **Simplificação frontend assumida, não uma decisão do produto**: a Central da tesouraria mostra
+    "Débito #\<id> · parcela \<n>" em vez do nome do fornecedor, porque `ParcelaOut`/
+    `LotePagamentoParcelaOut` não carregam esse dado e buscar por débito individualmente vira N+1.
+    Enriquecer é fatia própria, se o usuário sentir falta.
+  - F5 (remoção do `status` legado) segue **não autorizada** — o `status` derivado continua vivo e
+    sincronizado.
 
 ### 2.2 Transporte Regulado — P5 a P8
 

@@ -1796,6 +1796,54 @@ export interface FilaTesourariaOut {
   pagas_recentes: ParcelaTesourariaItem[];
 }
 
+// ---------- F4: retenções ----------
+export type TipoRetencao = "IRRF" | "INSS" | "ISS" | "PIS_COFINS_CSLL" | "OUTRAS";
+
+export interface Retencao {
+  id: number; id_debito: number; tipo: TipoRetencao;
+  descricao: string | null; base_calculo: string; aliquota: string | null;
+  valor: string; recolhido: boolean;
+  data_recolhimento: string | null; documento_recolhimento: string | null;
+  criado_em: string; atualizado_em: string | null;
+}
+
+export interface RetencaoInput {
+  tipo: TipoRetencao; descricao?: string | null;
+  base_calculo: string; aliquota?: string | null; valor: string;
+}
+
+export interface RetencoesDebito {
+  valor_bruto: string; valor_liquido: string; retencoes: Retencao[];
+}
+
+// ---------- F4: lote de pagamento ----------
+export type SituacaoLote = "RASCUNHO" | "PROGRAMADO" | "ENVIADO" | "PROCESSADO" | "CANCELADO";
+export type SituacaoLoteParcela = "PENDENTE" | "PAGA" | "FALHOU";
+
+export interface LotePagamento {
+  id: number; numero: string; id_conta_pagadora: number;
+  situacao: SituacaoLote; data_programada: string | null; valor_total: string;
+  id_anexo_comprovante: number | null;
+  id_usuario: number; id_usuario_envio: number | null;
+  enviado_em: string | null; processado_em: string | null;
+  criado_em: string; atualizado_em: string | null;
+}
+
+export interface LotePagamentoParcela {
+  id: number; id_lote: number; id_parcela: number;
+  situacao: SituacaoLoteParcela; motivo_falha: string | null;
+  criado_em: string; atualizado_em: string | null;
+}
+
+export interface LoteDetalhe extends LotePagamento {
+  parcelas: LotePagamentoParcela[];
+}
+
+export interface RetornoParcelaInput {
+  parcela_id: number; resultado: "PAGA" | "FALHOU";
+  motivo_falha?: string | null; data_pagamento?: string | null;
+}
+
 // ---------- dashboard financeiro ----------
 export interface DashboardKpis {
   saldo_total: string; disponivel_total: string; comprometido_total: string;
@@ -4490,8 +4538,62 @@ export const api = {
         request<FilaAutorizacaoFonteGrupo[]>("/pagamentos/autorizacao/fila"),
       liberacao: () =>
         request<FilaLiberacaoGrupo[]>("/pagamentos/liberacao/fila"),
-      tesouraria: () =>
-        request<FilaTesourariaOut>("/pagamentos/tesouraria/fila"),
+      // `tesouraria` foi substituída pela Central da tesouraria (F4) —
+      // GET /pagamentos/tesouraria/fila agora devolve 410. Ver `lotes`.
+    },
+    // F4 — retenções tributárias do débito (spec §4.3).
+    retencoes: {
+      listarDoDebito: (idDebito: number) =>
+        request<RetencoesDebito>(`/pagamentos/debitos/${idDebito}/retencoes`),
+      criar: (idDebito: number, data: RetencaoInput) =>
+        request<Retencao>(`/pagamentos/debitos/${idDebito}/retencoes`, {
+          method: "POST", body: JSON.stringify(data) }),
+      atualizar: (id: number, data: Partial<RetencaoInput>) =>
+        request<Retencao>(`/pagamentos/retencoes/${id}`, {
+          method: "PUT", body: JSON.stringify(data) }),
+      excluir: (id: number) =>
+        request<void>(`/pagamentos/retencoes/${id}`, { method: "DELETE" }),
+      recolher: (id: number, data: { data_recolhimento: string; documento_recolhimento: string }) =>
+        request<Retencao>(`/pagamentos/retencoes/${id}/recolher`, {
+          method: "POST", body: JSON.stringify(data) }),
+      pendentes: (tipo?: TipoRetencao) =>
+        request<Retencao[]>(`/pagamentos/retencoes/pendentes${qs({ tipo })}`),
+    },
+    // F4 — Central da tesouraria: seleção, criação, revisão, cancelamento,
+    // programação, envio e retorno do lote de pagamento (spec §4.3, §7.6).
+    lotes: {
+      elegiveis: (idContaPagadora?: number) =>
+        request<Parcela[]>(`/pagamentos/lotes/elegiveis${qs({ id_conta_pagadora: idContaPagadora })}`),
+      criar: (data: { id_conta_pagadora: number; parcela_ids: number[] }) =>
+        request<LotePagamento>("/pagamentos/lotes", {
+          method: "POST", body: JSON.stringify(data) }),
+      listar: (situacao?: SituacaoLote) =>
+        request<LotePagamento[]>(`/pagamentos/lotes${qs({ situacao })}`),
+      obter: (id: number) => request<LoteDetalhe>(`/pagamentos/lotes/${id}`),
+      adicionarParcela: (id: number, parcelaId: number) =>
+        request<LoteDetalhe>(`/pagamentos/lotes/${id}/parcelas`, {
+          method: "POST", body: JSON.stringify({ parcela_id: parcelaId }) }),
+      removerParcela: (id: number, parcelaId: number) =>
+        request<LoteDetalhe>(`/pagamentos/lotes/${id}/parcelas/${parcelaId}`, { method: "DELETE" }),
+      cancelar: (id: number) =>
+        request<LotePagamento>(`/pagamentos/lotes/${id}/cancelar`, { method: "POST" }),
+      programar: (id: number, dataProgramada: string) =>
+        request<LotePagamento>(`/pagamentos/lotes/${id}/programar`, {
+          method: "POST", body: JSON.stringify({ data_programada: dataProgramada }) }),
+      enviar: (id: number) =>
+        request<LotePagamento>(`/pagamentos/lotes/${id}/enviar`, { method: "POST" }),
+      processarRetorno: (id: number, retornos: RetornoParcelaInput[]) =>
+        request<LoteDetalhe>(`/pagamentos/lotes/${id}/retorno`, {
+          method: "POST", body: JSON.stringify({ retornos }) }),
+      anexarComprovante: (id: number, file: File, descricao?: string) => {
+        const fd = new FormData();
+        fd.append("file", file);
+        if (descricao) fd.append("descricao", descricao);
+        return request<LotePagamento>(`/pagamentos/lotes/${id}/comprovante`, {
+          method: "POST", body: fd });
+      },
+      comprovanteDownloadUrl: (id: number) =>
+        `${BROWSER_API_URL}/pagamentos/lotes/${id}/comprovante/download`,
     },
     minhaFila: () => request<MinhaFila>("/pagamentos/minha-fila"),
     // Ordem cronológica (F3, Task 3) — grupos por (unidade, fonte, categoria,

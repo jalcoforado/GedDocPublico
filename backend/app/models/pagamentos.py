@@ -670,3 +670,71 @@ class ExcecaoCronologica(Base):
     id_usuario_registro: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
     documentos: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class LotePagamento(Base):
+    """Artefato da EXECUÇÃO (F4, spec §4.3) — que parcelas foram ao banco
+    juntas, numa conta pagadora só. Não confundir com `OrdemPagamento`, que é
+    o artefato da AUTORIZAÇÃO (quem ordenou, que saldo reservou) e não é
+    reaproveitado aqui. Máquina de estados: RASCUNHO -> PROGRAMADO -> ENVIADO
+    -> PROCESSADO, com CANCELADO alcançável de RASCUNHO/PROGRAMADO (não de
+    ENVIADO — depois de enviado ao banco só se resolve por retorno)."""
+    __tablename__ = "lote_pagamento"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    numero: Mapped[str] = mapped_column(String(20), nullable=False)
+    id_conta_pagadora: Mapped[int] = mapped_column(ForeignKey("pagamentos.conta_bancaria.id"), nullable=False)
+    situacao: Mapped[str] = mapped_column(String(20), nullable=False, default="RASCUNHO")
+    data_programada: Mapped[date | None] = mapped_column(Date, nullable=True)
+    valor_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    id_anexo_comprovante: Mapped[int | None] = mapped_column(
+        ForeignKey("protocolos.anexo.id"), nullable=True)
+    id_usuario: Mapped[int] = mapped_column(ForeignKey("utils.usuario.id"), nullable=False)
+    id_usuario_envio: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    enviado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    processado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class LotePagamentoParcela(Base):
+    """Vínculo parcela<->lote (F4). `situacao` própria (PENDENTE/PAGA/FALHOU) —
+    independente de `Parcela.status`. Uma parcela só pode ter uma linha ativa
+    por vez (`UNIQUE (tenant_id, id_parcela) WHERE situacao <> 'FALHOU'`,
+    migration 0121): falha libera a parcela para reentrar num lote novo, mas a
+    linha falha permanece, imutável, como registro daquela tentativa."""
+    __tablename__ = "lote_pagamento_parcela"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_lote: Mapped[int] = mapped_column(ForeignKey("pagamentos.lote_pagamento.id"), nullable=False)
+    id_parcela: Mapped[int] = mapped_column(ForeignKey("pagamentos.parcela.id"), nullable=False)
+    situacao: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDENTE")
+    motivo_falha: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Retencao(Base):
+    """Retenção tributária sobre um débito (IRRF/INSS/ISS/PIS_COFINS_CSLL/
+    OUTRAS, F4, spec §4.3). `Debito.valor_liquido` é sempre DERIVADO daqui
+    (`valor_total - soma(valor) das não excluídas`) — nunca uma coluna. CRUD
+    travado enquanto o débito tiver parcela em lote ativo (RASCUNHO/
+    PROGRAMADO/ENVIADO) — ver `pagamentos_retencoes.py`."""
+    __tablename__ = "retencao"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_debito: Mapped[int] = mapped_column(ForeignKey("pagamentos.debito.id"), nullable=False)
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    base_calculo: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    aliquota: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    valor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    recolhido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    data_recolhimento: Mapped[date | None] = mapped_column(Date, nullable=True)
+    documento_recolhimento: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
