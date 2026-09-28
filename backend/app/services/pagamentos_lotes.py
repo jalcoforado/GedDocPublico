@@ -48,9 +48,11 @@ def _registrar_evento_lote(db, *, debito: Debito, acao: str, usuario_id: int,
     três dimensões do débito (a mudança de dimensão, quando houver, é feita
     por `_registrar_transicao` nas Tasks 4/5) — mesmo padrão de
     `revogar_liberacao` em `pagamentos_autorizacao.py`."""
+    status_atual = est.status_legado(
+        debito.situacao_tramitacao, debito.situacao_fila, debito.situacao_pagamento)
     db.add(DebitoHistorico(
         tenant_id=debito.tenant_id, id_debito=debito.id,
-        status_anterior=debito.status, status_novo=debito.status, acao=acao,
+        status_anterior=status_atual, status_novo=status_atual, acao=acao,
         justificativa=justificativa, id_usuario=usuario_id, criado_em=_utcnow(),
         versao_debito=debito.versao,
     ))

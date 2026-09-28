@@ -26,13 +26,14 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import ColumnElement, Select, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
     ContaBancaria, Debito, DebitoHistorico, Fornecedor, LancamentoExtrato,
     MovimentacaoConta, OrdemPagamento, OrdemPagamentoDebito,
 )
+from . import pagamentos_estados as est
 
 # Marcador que `pagamentos_autorizacao.autorizar_lote` ainda grava no texto do
 # histórico. NÃO é mais fonte de consulta (ver docstring); fica aqui porque o
@@ -43,12 +44,21 @@ MARCADOR_RN15 = "EXCEÇÃO DE SALDO (RN-15)"
 # Situações de fornecedor que não deveriam sustentar despesa em andamento.
 SITUACOES_IRREGULARES = ("IRREGULAR", "PENDENTE")
 
-# Status de débito que ainda consomem/reservam saldo — usados para decidir se
-# uma pendência cadastral do fornecedor é ou não relevante agora.
-STATUS_EM_ANDAMENTO = (
-    "EM_VALIDACAO", "VALIDADO", "ENVIADO_SECRETARIO", "AGUARDANDO_AUTORIZACAO",
-    "AUTORIZADO", "ENVIADO_TESOURARIA", "EM_PROCESSAMENTO", "PAGO_PARCIAL",
-)
+# Débito ainda consome/reserva saldo — usado para decidir se uma pendência
+# cadastral do fornecedor é ou não relevante agora. Tradução de
+# STATUS_EM_ANDAMENTO (8 valores legados, F5): tramitação em curso pré-
+# autorização, OU autorizada e ainda não paga/conciliada/estornada — a mesma
+# EXCLUSÃO de RASCUNHO/AJUSTE_*/terminais/PAGA que os 8 valores antigos
+# faziam (nenhum deles era DEVOLVIDO, REJEITADO, SUSPENSO, CANCELADO, PAGO,
+# CONCILIADO ou ESTORNADO).
+def _debito_em_andamento() -> ColumnElement[bool]:
+    return (
+        Debito.situacao_tramitacao.in_(
+            (est.AGUARDANDO_GESTOR, est.AGUARDANDO_VALIDACAO, est.AGUARDANDO_AUTORIDADE))
+        | and_(Debito.situacao_tramitacao == est.AUTORIZADA,
+               Debito.situacao_pagamento.in_(
+                   (est.NAO_INICIADA, est.PROGRAMADA, est.EM_PROCESSAMENTO, est.PAGA_PARCIAL)))
+    )
 
 
 @dataclass
@@ -127,32 +137,31 @@ async def _fornecedor_irregular(db: AsyncSession, tenant_id: int, limite: int) -
         severidade="alta",
     )
     stmt = (
-        select(Debito.id, Debito.descricao, Debito.status, Debito.valor_total,
+        select(Debito.id, Debito.descricao, Debito.situacao_tramitacao, Debito.valor_total,
                Fornecedor.nome, Fornecedor.situacao_cadastral, Fornecedor.motivo_pendencia)
         .join(Fornecedor, Fornecedor.id == Debito.id_fornecedor)
         .where(Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
-               Debito.status.in_(STATUS_EM_ANDAMENTO),
+               _debito_em_andamento(),
                Fornecedor.situacao_cadastral.in_(SITUACOES_IRREGULARES))
         .order_by(Debito.id.desc())
     )
     linhas, exc.total = await _colher(db, stmt, limite)
     exc.itens = [
-        _linha(id_debito=r[0], descricao=r[1], status=r[2], valor=r[3],
+        _linha(id_debito=r[0], descricao=r[1], situacao_tramitacao=r[2], valor=r[3],
                fornecedor=r[4], situacao=r[5], motivo=r[6])
         for r in linhas
     ]
     return exc
 
 
-async def _por_status(db: AsyncSession, tenant_id: int, limite: int, *,
-                      status: str, codigo: str, titulo: str, descricao: str,
-                      severidade: str) -> Excecao:
+async def _por_condicao(db: AsyncSession, tenant_id: int, limite: int, *,
+                        condicao: ColumnElement[bool], codigo: str, titulo: str,
+                        descricao: str, severidade: str) -> Excecao:
     exc = Excecao(codigo=codigo, titulo=titulo, descricao=descricao, severidade=severidade)
     stmt = (
         select(Debito.id, Debito.descricao, Debito.valor_total, Debito.competencia,
                Debito.atualizado_em)
-        .where(Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
-               Debito.status == status)
+        .where(Debito.tenant_id == tenant_id, Debito.excluido.is_(False), condicao)
         .order_by(Debito.id.desc())
     )
     linhas, exc.total = await _colher(db, stmt, limite)
@@ -171,7 +180,7 @@ async def _urgente_sem_justificativa(db: AsyncSession, tenant_id: int, limite: i
         severidade="media",
     )
     stmt = (
-        select(Debito.id, Debito.descricao, Debito.valor_total, Debito.status)
+        select(Debito.id, Debito.descricao, Debito.valor_total, Debito.situacao_tramitacao)
         .where(Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
                Debito.urgente.is_(True),
                (Debito.justificativa_urgencia.is_(None))
@@ -180,7 +189,8 @@ async def _urgente_sem_justificativa(db: AsyncSession, tenant_id: int, limite: i
     )
     linhas, exc.total = await _colher(db, stmt, limite)
     exc.itens = [
-        _linha(id_debito=r[0], descricao=r[1], valor=r[2], status=r[3]) for r in linhas
+        _linha(id_debito=r[0], descricao=r[1], valor=r[2], situacao_tramitacao=r[3])
+        for r in linhas
     ]
     return exc
 
@@ -264,18 +274,23 @@ async def relatorio_excecoes(
         await _saldo_insuficiente(db, tenant_id, limite_por_regra),
         await _fornecedor_irregular(db, tenant_id, limite_por_regra),
         await _conta_abaixo_do_minimo(db, tenant_id, limite_por_regra),
-        await _por_status(
-            db, tenant_id, limite_por_regra, status="SUSPENSO",
+        await _por_condicao(
+            db, tenant_id, limite_por_regra,
+            condicao=and_(Debito.situacao_tramitacao == est.AJUSTE_VALIDACAO,
+                         Debito.situacao_fila == est.BLOQUEADA),
             codigo="DEBITO_SUSPENSO", titulo="Débito suspenso",
             descricao="Parado por decisão administrativa; some da fila sem sumir da despesa.",
             severidade="media"),
-        await _por_status(
-            db, tenant_id, limite_por_regra, status="DEVOLVIDO",
+        await _por_condicao(
+            db, tenant_id, limite_por_regra,
+            condicao=Debito.situacao_tramitacao.in_(
+                (est.AJUSTE_GESTOR, est.AJUSTE_VALIDACAO, est.AJUSTE_AUTORIDADE)),
             codigo="DEBITO_DEVOLVIDO", titulo="Débito devolvido para ajuste",
             descricao="Voltou ao solicitante e depende dele para andar.",
             severidade="baixa"),
-        await _por_status(
-            db, tenant_id, limite_por_regra, status="PAGO",
+        await _por_condicao(
+            db, tenant_id, limite_por_regra,
+            condicao=(Debito.situacao_pagamento == est.PAGA),
             codigo="PAGO_NAO_CONCILIADO", titulo="Pago ainda não conciliado",
             descricao=("Saiu da tesouraria mas não casou com o extrato. Vira CONCILIADO "
                        "sozinho quando a conciliação fechar."),

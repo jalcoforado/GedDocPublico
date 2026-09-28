@@ -670,8 +670,19 @@ Pendências registradas da F3 (menores):
     "Débito #\<id> · parcela \<n>" em vez do nome do fornecedor, porque `ParcelaOut`/
     `LotePagamentoParcelaOut` não carregam esse dado e buscar por débito individualmente vira N+1.
     Enriquecer é fatia própria, se o usuário sentir falta.
-  - F5 (remoção do `status` legado) segue **não autorizada** — o `status` derivado continua vivo e
-    sincronizado.
+- **F5 — só a parte de remoção do `status` legado** implementada na branch
+  `pagamentos/f5-remove-status-legado` (PR #69; cortada de `main`, **não** da F4 — ao integrar,
+  a 0122 passou a descender da 0121 e `pagamentos_lotes._registrar_evento_lote`, da F4, deixou
+  de ler a coluna removida), plano em
+  `docs/superpowers/plans/2026-09-20-pagamentos-f5-remove-status-legado.md`. A coluna `Debito.
+  status` saiu do banco (migration 0122) e de toda a aplicação — backend e frontend só leem as três
+  dimensões; `debito_historico.status_anterior/novo` continua alimentado, calculado na hora via
+  `status_legado()`. Suíte completa (backend 1698 passos + os 3 falhos pré-existentes de
+  `test_guarda_links_docs.py`, não relacionados; frontend `tsc`+vitest limpos) verificada (PR #69). **A outra metade da F5** do pedido original (visão geral com indicadores clicáveis,
+  caixa de trabalho refinada, sweep de estados vazios/erro/carregamento/permissão/conflito,
+  acessibilidade/responsividade, critérios de aceite dos "23 cenários") **continua não feita e sem
+  plano** — o documento de 20 seções/§17/23-cenários que a descrevia não está neste repositório;
+  escopo explicitamente restrito à remoção do status por decisão do Jorge em 2026-09-20.
 
 ### 2.2 Transporte Regulado — P5 a P8
 

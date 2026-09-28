@@ -32,6 +32,7 @@ from app.services import pagamentos_caixa as caixa
 from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_cronologia as cron
 from app.services import pagamentos_debitos as deb
+from app.services import pagamentos_estados as est
 from app.services.provisioning_tenant import provisionar_tenant
 from tests.fixtures.pagamentos import id_unidade_padrao
 
@@ -240,7 +241,7 @@ async def test_autorizar_gera_op_grava_conta_pagadora_e_reserva(admin_engine):
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
             hist = await deb.listar_historico(s, tenant_id=t.id, debito_id=d.id)
             debs_op = await aut.debitos_da_ordem(s, tenant_id=t.id, ordem_id=op.id)
-        assert d2.status == "AUTORIZADO"
+        assert d2.situacao_tramitacao == est.AUTORIZADA and d2.situacao_pagamento == est.NAO_INICIADA
         assert d2.id_conta_pagadora == conta.id      # gravada imutável na autorização
         # F3 (Task 4): a reavaliação síncrona da fila roda logo após a
         # autorização e grava a própria transição (FILA_REAVALIADA),
@@ -289,7 +290,7 @@ async def test_ca_aut_03_conta_de_outra_fonte_rejeitada(admin_engine):
             assert exc.value.status_code == 422
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.status == "ENVIADO_SECRETARIO" and d2.id_conta_pagadora is None
+        assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE and d2.id_conta_pagadora is None
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -309,7 +310,7 @@ async def test_ca_aut_04_saldo_insuficiente_bloqueia_422(admin_engine):
             assert "saldo" in exc.value.detail.lower()
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.status == "ENVIADO_SECRETARIO"
+        assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -341,7 +342,7 @@ async def test_ca_aut_05_reserva_reduz_disponivel(admin_engine):
             assert exc.value.status_code == 422
         async with _sm(admin_engine)() as s:
             d_b2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_b.id)
-        assert d_b2.status == "ENVIADO_SECRETARIO"
+        assert d_b2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -414,7 +415,8 @@ async def test_rf_aut_15_fontes_distintas_no_grupo_bloqueadas(admin_engine):
         async with _sm(admin_engine)() as s:
             d1b = await deb.obter_debito(s, tenant_id=t.id, debito_id=d1.id)
             d2b = await deb.obter_debito(s, tenant_id=t.id, debito_id=d2.id)
-        assert d1b.status == "ENVIADO_SECRETARIO" and d2b.status == "ENVIADO_SECRETARIO"
+        assert (d1b.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
+                and d2b.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE)
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -458,7 +460,7 @@ async def test_autorizar_acima_da_alcada_403(admin_engine):
             assert exc.value.status_code == 403
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.status == "ENVIADO_SECRETARIO"
+        assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
 
         sem_alcada = await _novo_usuario(admin_engine, t.id, f"nal{uuid.uuid4().hex[:6]}")
         async with _sm(admin_engine)() as s:
@@ -468,7 +470,7 @@ async def test_autorizar_acima_da_alcada_403(admin_engine):
             assert exc.value.status_code == 403
         async with _sm(admin_engine)() as s:
             d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d3.status == "ENVIADO_SECRETARIO"
+        assert d3.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -490,7 +492,7 @@ async def test_alcada_por_fonte_mais_especifica_vence(admin_engine):
         assert len(ops) == 1
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.status == "AUTORIZADO"
+        assert d2.situacao_tramitacao == est.AUTORIZADA and d2.situacao_pagamento == est.NAO_INICIADA
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -517,7 +519,7 @@ async def test_autorizar_por_solicitante_ou_aprovador_403(admin_engine):
 
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.status == "ENVIADO_SECRETARIO"
+        assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -544,8 +546,8 @@ async def test_autorizacao_em_lote_all_or_nothing(admin_engine):
         async with _sm(admin_engine)() as s:
             d_a2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_a.id)
             d_b2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d_b.id)
-        assert d_a2.status == "ENVIADO_SECRETARIO"
-        assert d_b2.status == "ENVIADO_SECRETARIO"
+        assert d_a2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
+        assert d_b2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
     finally:
         await _cleanup(admin_engine, t.id)
 
@@ -571,7 +573,7 @@ async def test_pagar_parcela_deduz_saldo_e_finaliza_debito(admin_engine):
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
             saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        assert d2.status == "PAGO_PARCIAL"
+        assert d2.situacao_pagamento == est.PAGA_PARCIAL
         assert saldo.saldo_atual == Decimal("9400.00")
         assert saldo.comprometido == Decimal("400.00")
         async with _sm(admin_engine)() as s:
@@ -583,7 +585,7 @@ async def test_pagar_parcela_deduz_saldo_e_finaliza_debito(admin_engine):
         async with _sm(admin_engine)() as s:
             d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
             saldo2 = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        assert d3.status == "PAGO"
+        assert d3.situacao_pagamento == est.PAGA
         assert saldo2.saldo_atual == Decimal("9000.00")
         assert saldo2.comprometido == Decimal("0")
     finally:
@@ -605,7 +607,7 @@ async def test_pagar_parcela_de_debito_nao_autorizado_409(admin_engine):
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
             p2 = (await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id))[0]
-        assert d2.status == "ENVIADO_SECRETARIO"
+        assert d2.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE
         assert p2.status == "A_PAGAR"
     finally:
         await _cleanup(admin_engine, t.id)
@@ -657,7 +659,7 @@ async def test_estornar_parcela_repoe_saldo_e_reabre(admin_engine):
                                     parcela_id=parcelas[1].id, forma_pagamento="TED")
         async with _sm(admin_engine)() as s:
             d1 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d1.status == "PAGO"
+        assert d1.situacao_pagamento == est.PAGA
 
         async with _sm(admin_engine)() as s:
             p2_estornada = await aut.estornar_parcela(
@@ -670,7 +672,7 @@ async def test_estornar_parcela_repoe_saldo_e_reabre(admin_engine):
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
             saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
-        assert d2.status == "PAGO_PARCIAL"
+        assert d2.situacao_pagamento == est.PAGA_PARCIAL
         assert saldo.saldo_atual == Decimal("9400.00")
         assert saldo.comprometido == Decimal("400.00")
 
@@ -682,7 +684,7 @@ async def test_estornar_parcela_repoe_saldo_e_reabre(admin_engine):
             d3 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
             saldo2 = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
         # pagamento integralmente revertido → ESTORNADO (v2.0 seção 13)
-        assert d3.status == "ESTORNADO"
+        assert d3.situacao_pagamento == est.ESTORNADA
         assert saldo2.saldo_atual == Decimal("10000.00")
         assert saldo2.comprometido == Decimal("1000.00")
     finally:
@@ -713,7 +715,7 @@ async def test_estornar_parcela_com_justificativa_longa_trunca_descricao(admin_e
         assert p_estornada.status == "A_PAGAR"
         async with _sm(admin_engine)() as s:
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
-        assert d2.status == "ESTORNADO"  # reversão integral (v2.0 seção 13)
+        assert d2.situacao_pagamento == est.ESTORNADA  # reversão integral (v2.0 seção 13)
     finally:
         await _cleanup(admin_engine, t.id)
 

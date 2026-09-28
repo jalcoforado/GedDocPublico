@@ -265,3 +265,37 @@ async def test_maiores_e_alertas(admin_engine):
     assert len(vencidas) == 1
     assert vencidas[0].id_debito == d.id
     assert vencidas[0].dias_atraso == 1
+
+
+async def test_maiores_em_aberto_exclui_pago_e_conciliado(admin_engine):
+    """"Maiores débitos em aberto" traduz o ex-`COM_RESERVA`, que NÃO continha
+    `ST_PAGO` nem `ST_CONCILIADO`. A conciliação muda só a dimensão pagamento —
+    a tramitação fica AUTORIZADA para sempre —, então um predicado que exclua só
+    `PAGA` deixa o débito conciliado no card indefinidamente, ocupando a vaga de
+    um débito realmente em aberto."""
+    t = await _provisionar(admin_engine)
+    base = await _base(admin_engine, t.id)
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    ids = {}
+    for rotulo, valor in (("aberto", "100.00"), ("pago", "900.00"), ("conciliado", "800.00")):
+        d, _s, _a, _c = await _debito_aprovado(admin_engine, t.id, valor=valor, base=base)
+        async with _sm(admin_engine)() as s:
+            await aut.autorizar_lote(
+                s, tenant_id=t.id, usuario_id=autorizador,
+                grupos=[GrupoAutorizacaoIn(id_fonte=d.id_fonte_recursos,
+                                           id_conta_pagadora=d.id_conta,
+                                           debito_ids=[d.id])])
+        ids[rotulo] = d.id
+    async with _sm(admin_engine)() as s:
+        for rotulo, situacao in (("pago", "PAGA"), ("conciliado", "CONCILIADA")):
+            await s.execute(text(
+                "UPDATE pagamentos.debito SET situacao_pagamento = :sp WHERE id = :id"),
+                {"sp": situacao, "id": ids[rotulo]})
+        await s.commit()
+
+    async with _sm(admin_engine)() as s:
+        out = await dash.montar_dashboard(s, tenant_id=t.id)
+    maiores = {m.id for m in out.maiores_debitos}
+    assert ids["aberto"] in maiores
+    assert ids["pago"] not in maiores
+    assert ids["conciliado"] not in maiores, "débito conciliado apareceu como 'em aberto'"

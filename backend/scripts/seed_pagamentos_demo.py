@@ -699,8 +699,9 @@ async def imprimir_resumo(db: AsyncSession, *, tenant_id: int, cadastros: dict, 
 
     r = await db.execute(text(
         "SELECT count(*) FROM pagamentos.parcela p JOIN pagamentos.debito d ON d.id = p.id_debito "
-        "WHERE p.tenant_id=:t AND p.status='A_PAGAR' AND d.status IN ('AUTORIZADO','PAGO_PARCIAL') "
-        "AND p.excluido = false"), {"t": tenant_id})
+        "WHERE p.tenant_id=:t AND p.status='A_PAGAR' AND d.situacao_tramitacao='AUTORIZADA' "
+        "AND d.situacao_pagamento IN ('NAO_INICIADA','PAGA_PARCIAL') AND p.excluido = false"),
+        {"t": tenant_id})
     a_pagar_liberaveis = r.scalar_one()
 
     print("\nAsserts:")

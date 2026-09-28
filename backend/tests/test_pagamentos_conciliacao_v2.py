@@ -24,6 +24,7 @@ from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_caixa as caixa
 from app.services import pagamentos_conciliacao as conc
 from app.services import pagamentos_debitos as deb
+from app.services import pagamentos_estados as est
 from app.services.provisioning_tenant import provisionar_tenant
 from tests.fixtures.pagamentos import id_unidade_padrao
 
@@ -184,7 +185,7 @@ async def test_conciliacao_completa_debito_vira_conciliado(admin_engine):
             d2 = await deb.obter_debito(s, tenant_id=t.id, debito_id=d.id)
             saldo = await caixa.saldo_conta(s, tenant_id=t.id, conta_id=conta.id)
             lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
-        assert d2.status == "CONCILIADO"
+        assert d2.situacao_pagamento == est.CONCILIADA
         assert lancs[0].conciliado is True
         # saldo conciliado = inicial 10000 − 1000 pago conciliado
         assert saldo.saldo_conciliado == Decimal("9000.00")

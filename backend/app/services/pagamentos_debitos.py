@@ -57,50 +57,44 @@ async def _validar_refs(db, *, tenant_id: int, payload) -> None:
     await cad.obter_unidade(db, tenant_id=tenant_id, unidade_id=payload.id_unidade)
 
 
-def _sincronizar_status_legado(d: Debito) -> None:
-    """Recalcula `Debito.status` a partir das três dimensões.
-
-    Ponto ÚNICO de escrita da coluna legada. Havendo dois, eles divergem — é
-    exatamente o risco registrado na spec §4.2, e a mitigação é este ser o
-    único. Nenhum outro lugar do código pode atribuir a `d.status`.
-    """
-    d.status = est.status_legado(
-        d.situacao_tramitacao, d.situacao_fila, d.situacao_pagamento)
-
-
 def _registrar_transicao(db, *, debito: Debito, acao: str, usuario_id: int | None,
                          tramitacao: str | None = None, fila: str | None = None,
                          pagamento: str | None = None,
                          justificativa: str | None = None,
                          ip: str | None = None) -> None:
-    """Aplica a mudança nas dimensões informadas, deriva o status legado e grava
-    a trilha — tudo na MESMA transação do caller.
+    """Aplica a mudança nas dimensões informadas e grava a trilha — tudo na
+    MESMA transação do caller.
 
     Passar `tramitacao` exige que a transição seja legal no grafo. As outras
     duas dimensões não têm grafo nesta fatia: a fila é responsabilidade da F3 e
     a execução, da F4.
+
+    O histórico grava `status_anterior`/`status_novo` (valor legado, F5:
+    calculado aqui, não lido de coluna — a coluna não existe mais).
     """
     if tramitacao is not None and tramitacao != debito.situacao_tramitacao:
         if not est.transicao_permitida(debito.situacao_tramitacao, tramitacao):
             raise PagamentoDebitoError(
                 f"Transição inválida: de '{debito.situacao_tramitacao}' "
                 f"não se vai para '{tramitacao}'.", status.HTTP_409_CONFLICT)
-    status_anterior = debito.status
     situacao_tramitacao_anterior = debito.situacao_tramitacao
     situacao_fila_anterior = debito.situacao_fila
     situacao_pagamento_anterior = debito.situacao_pagamento
+    status_anterior = est.status_legado(
+        situacao_tramitacao_anterior, situacao_fila_anterior, situacao_pagamento_anterior)
     if tramitacao is not None:
         debito.situacao_tramitacao = tramitacao
     if fila is not None:
         debito.situacao_fila = fila
     if pagamento is not None:
         debito.situacao_pagamento = pagamento
-    _sincronizar_status_legado(debito)
+    status_novo = est.status_legado(
+        debito.situacao_tramitacao, debito.situacao_fila, debito.situacao_pagamento)
     debito.lock_version = (debito.lock_version or 0) + 1
     db.add(DebitoHistorico(
         tenant_id=debito.tenant_id, id_debito=debito.id,
         status_anterior=status_anterior if acao != "CRIADO" else None,
-        status_novo=debito.status, acao=acao, justificativa=justificativa,
+        status_novo=status_novo, acao=acao, justificativa=justificativa,
         id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow(),
         versao_debito=debito.versao,
         situacao_tramitacao_anterior=situacao_tramitacao_anterior,
@@ -124,7 +118,8 @@ async def detectar_duplicidade(db, *, tenant_id: int, id_fornecedor: int, numero
         Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
         Debito.id_fornecedor == id_fornecedor, Debito.numero_nf == numero_nf,
         Debito.valor_total == valor_total, Debito.competencia == competencia,
-        Debito.status.notin_(("REJEITADO", "CANCELADO")))
+        Debito.situacao_tramitacao.notin_((est.REJEITADA_GESTOR, est.INDEFERIDA_AUTORIDADE,
+                                           est.CANCELADA)))
     if numero_ne:
         stmt = stmt.where(Debito.numero_ne == numero_ne)
     if id_contrato is not None:
@@ -155,7 +150,7 @@ async def criar_debito(db: AsyncSession, *, tenant_id: int, usuario_id: int,
                urgente=payload.urgente, justificativa_urgencia=payload.justificativa_urgencia,
                descricao=payload.descricao, categoria=payload.categoria,
                situacao_tramitacao=est.RASCUNHO, situacao_fila=est.NAO_REGISTRADA,
-               situacao_pagamento=est.NAO_INICIADA, status="RASCUNHO",
+               situacao_pagamento=est.NAO_INICIADA,
                id_unidade=payload.id_unidade,
                id_usuario_solicitante=usuario_id, criado_em=_utcnow())
     db.add(d); await db.flush()
@@ -179,17 +174,15 @@ async def obter_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
     return d
 
 
-async def listar_debitos(db: AsyncSession, *, tenant_id: int, status_f: str | None = None,
+async def listar_debitos(db: AsyncSession, *, tenant_id: int,
                          tramitacao_f: str | None = None,
                          solicitante_id: int | None = None, id_fonte: int | None = None,
                          id_natureza: int | None = None, id_fornecedor: int | None = None,
                          id_contrato: int | None = None, urgente: bool | None = None,
                          competencia: str | None = None) -> list[Debito]:
     """Lista débitos com filtros do painel (RF-PNL-02): fonte, categoria (natureza),
-    credor, contrato, status, urgência e competência."""
+    credor, contrato, tramitação, urgência e competência."""
     stmt = select(Debito).where(Debito.tenant_id == tenant_id, Debito.excluido.is_(False))
-    if status_f:
-        stmt = stmt.where(Debito.status == status_f)
     if tramitacao_f:
         stmt = stmt.where(Debito.situacao_tramitacao == tramitacao_f)
     if solicitante_id is not None:
@@ -284,9 +277,11 @@ async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
             await cron.regravar_marco(
                 db, tenant_id=tenant_id, debito=d,
                 data_liquidacao_nova=d.data_liquidacao)
+            status_atual = est.status_legado(
+                d.situacao_tramitacao, d.situacao_fila, d.situacao_pagamento)
             db.add(DebitoHistorico(
-                tenant_id=tenant_id, id_debito=d.id, status_anterior=d.status,
-                status_novo=d.status, acao="MARCO_REGRAVADO",
+                tenant_id=tenant_id, id_debito=d.id, status_anterior=status_atual,
+                status_novo=status_atual, acao="MARCO_REGRAVADO",
                 justificativa=f"Marco regravado para {d.data_liquidacao.isoformat()}.",
                 id_usuario=usuario_id, criado_em=_utcnow(), versao_debito=d.versao))
     if alterados:
@@ -315,7 +310,9 @@ async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
 
 async def excluir_debito(db: AsyncSession, *, tenant_id: int, debito_id: int) -> None:
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    if d.status not in ("RASCUNHO", "REJEITADO", "CANCELADO"):
+    if d.situacao_tramitacao not in (
+        est.RASCUNHO, est.REJEITADA_GESTOR, est.INDEFERIDA_AUTORIDADE, est.CANCELADA,
+    ):
         raise PagamentoDebitoError("Só é possível excluir rascunhos/rejeitados/cancelados.",
                                    status.HTTP_409_CONFLICT)
     d.excluido = True; d.atualizado_em = _utcnow(); await db.commit()
@@ -345,36 +342,17 @@ async def validadores_do_debito(db: AsyncSession, *, tenant_id: int, debito_id: 
     return {r for r in rows if r is not None}
 
 
-# ---- Máquina de estados do pedido — Especificação v2.0 seção 13 (16 status) ----
-ST_RASCUNHO = "RASCUNHO"
-ST_EM_VALIDACAO = "EM_VALIDACAO"
-ST_DEVOLVIDO = "DEVOLVIDO"
-ST_VALIDADO = "VALIDADO"
-ST_ENVIADO_SECRETARIO = "ENVIADO_SECRETARIO"
-ST_AGUARDANDO_AUTORIZACAO = "AGUARDANDO_AUTORIZACAO"
-ST_AUTORIZADO = "AUTORIZADO"
-ST_ENVIADO_TESOURARIA = "ENVIADO_TESOURARIA"
-ST_EM_PROCESSAMENTO = "EM_PROCESSAMENTO"
-ST_PAGO = "PAGO"
-ST_PAGO_PARCIAL = "PAGO_PARCIAL"
-ST_CONCILIADO = "CONCILIADO"
-ST_REJEITADO = "REJEITADO"
-ST_SUSPENSO = "SUSPENSO"
-ST_CANCELADO = "CANCELADO"
-ST_ESTORNADO = "ESTORNADO"
-
-EDITAVEIS = (ST_RASCUNHO, ST_DEVOLVIDO)                      # pedido pode ser editado
-AUTORIZAVEIS = (ST_ENVIADO_SECRETARIO, ST_AGUARDANDO_AUTORIZACAO)  # fila da autoridade
-EM_TESOURARIA = (ST_ENVIADO_TESOURARIA, ST_EM_PROCESSAMENTO, ST_PAGO_PARCIAL)  # execução
-# Débitos cuja autorização mantém valor RESERVADO na conta pagadora (inclui
-# ESTORNADO: a autorização/OP permanece; basta re-liberar para repagar).
-COM_RESERVA = (ST_AUTORIZADO, *EM_TESOURARIA, ST_ESTORNADO)
-
-
-def _exigir_status(d: Debito, *esperados: str) -> None:
-    if d.status not in esperados:
+def _exigir_pre_autorizacao(d: Debito) -> None:
+    """`confirmar_liquidacao` é permitida em qualquer etapa pré-autorização e
+    não-terminal — equivalente aos 4 status legados que a versão anterior
+    desta guarda listava (`RASCUNHO/DEVOLVIDO/EM_VALIDACAO/VALIDADO`), só que
+    por tramitação em vez de status: o `not in (TERMINAIS ∪ {AUTORIZADA})`
+    cobre exatamente RASCUNHO + os 3 AJUSTE_* + os 3 AGUARDANDO_* — os mesmos
+    7 estados que os 4 valores legados mapeavam (§4.5)."""
+    if d.situacao_tramitacao in est.TERMINAIS or d.situacao_tramitacao == est.AUTORIZADA:
         raise PagamentoDebitoError(
-            f"Transição inválida: débito está '{d.status}' (esperado: {', '.join(esperados)}).",
+            f"Transição inválida: débito está em '{d.situacao_tramitacao}' "
+            "(a liquidação só pode ser confirmada antes da autorização).",
             status.HTTP_409_CONFLICT)
 
 
@@ -589,9 +567,11 @@ async def responder_ajuste(db: AsyncSession, *, tenant_id: int, debito_id: int,
         # Linha de histórico própria — NÃO é uma transição do grafo (a
         # tramitação não muda aqui; a mudança de tramitação é a de
         # `_registrar_transicao` logo abaixo). INSERT direto de propósito.
+        status_atual = est.status_legado(
+            d.situacao_tramitacao, d.situacao_fila, d.situacao_pagamento)
         db.add(DebitoHistorico(
             tenant_id=tenant_id, id_debito=d.id,
-            status_anterior=d.status, status_novo=d.status,
+            status_anterior=status_atual, status_novo=status_atual,
             acao="APROVACOES_INVALIDADAS",
             justificativa=f"Aprovações de gestor e validador invalidadas pela versão {d.versao}.",
             id_usuario=usuario_id, ip_origem=ip, criado_em=_utcnow(),
@@ -739,7 +719,7 @@ async def confirmar_liquidacao(db: AsyncSession, *, tenant_id: int, debito_id: i
     edição material de `data_liquidacao` (`atualizar_debito` em AJUSTE_*),
     que regrava o marco e deixa histórico `MARCO_REGRAVADO`."""
     d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
-    _exigir_status(d, ST_RASCUNHO, ST_DEVOLVIDO, ST_EM_VALIDACAO, ST_VALIDADO)
+    _exigir_pre_autorizacao(d)
     data_liquidacao = data_liquidacao or _utcnow().date()
 
     contrato = await cron.obter_contrato(db, tenant_id=tenant_id, id_contrato=d.id_contrato)
@@ -774,7 +754,7 @@ def debito_out(d: Debito, *, nome_fornecedor: str) -> dict:
         "valor_total": d.valor_total, "competencia": d.competencia,
         "numero_ne": d.numero_ne, "numero_nf": d.numero_nf, "criticidade": d.criticidade,
         "urgente": d.urgente, "justificativa_urgencia": d.justificativa_urgencia,
-        "descricao": d.descricao, "status": d.status,
+        "descricao": d.descricao,
         "situacao_tramitacao": d.situacao_tramitacao,
         "situacao_fila": d.situacao_fila,
         "situacao_pagamento": d.situacao_pagamento,

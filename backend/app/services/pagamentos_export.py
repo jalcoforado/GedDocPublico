@@ -31,6 +31,7 @@ from . import pagamentos_autorizacao as aut_svc
 from . import pagamentos_caixa as caixa_svc
 from . import pagamentos_conciliacao as conc_svc
 from . import pagamentos_debitos as deb_svc
+from . import pagamentos_estados as est
 
 # BOM: sem ele o Excel lê UTF-8 como ANSI e "competência" vira "competÃªncia".
 BOM = "﻿"
@@ -92,7 +93,10 @@ async def csv_debitos(db: AsyncSession, *, tenant_id: int, **filtros) -> str:
     for d in debitos:
         writer.writerow([
             d.id,
-            d.status,
+            # Coluna "status" preservada no ARQUIVO (contrato já entregue a
+            # quem consome o CSV) — o VALOR é calculado, não lido de coluna
+            # (F5: Debito.status deixou de existir/ser mantida).
+            est.status_legado(d.situacao_tramitacao, d.situacao_fila, d.situacao_pagamento),
             d.competencia,
             d.descricao,
             fornecedores.get(d.id_fornecedor, ""),

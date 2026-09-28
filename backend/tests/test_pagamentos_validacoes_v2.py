@@ -17,6 +17,7 @@ from app.schemas.pagamentos import (
 from app.services import pagamentos_autorizacao as aut
 from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_debitos as deb
+from app.services import pagamentos_estados as est
 from app.services.provisioning_tenant import provisionar_tenant
 from tests.fixtures.pagamentos import id_unidade_padrao
 
@@ -134,7 +135,7 @@ async def test_duplicidade_ignora_sem_nf(admin_engine):
             await deb.criar_debito(s, tenant_id=t.id, usuario_id=uid, payload=_payload(forn, nat, fonte))
         async with _sm(admin_engine)() as s:
             d2 = await deb.criar_debito(s, tenant_id=t.id, usuario_id=uid, payload=_payload(forn, nat, fonte))
-        assert d2.status == "RASCUNHO"
+        assert d2.situacao_tramitacao == est.RASCUNHO
     finally:
         await _cleanup(admin_engine, t.id)
 
