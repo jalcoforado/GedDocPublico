@@ -70,23 +70,6 @@ async def _usuario_id(engine, tenant_id: int) -> int:
         )
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sessionmaker(engine)() as s:
-        for stmt in (
-            "DELETE FROM frota.motorista WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 def _payload(**over) -> MotoristaCreate:
     base = dict(
         nome="João Motorista", cpf="12345678901", cnh_numero="98765432100",
@@ -99,133 +82,110 @@ def _payload(**over) -> MotoristaCreate:
 # ---------- CRUD básico ----------
 async def test_criar_e_editar_motorista(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            criado = await frota_svc.criar_motorista(
-                s, tenant_id=tenant.id, payload=_payload()
-            )
-            assert criado.id and criado.situacao == "ativo"
-            assert criado.cnh_categoria == "D" and criado.cpf == "12345678901"
+    async with _sessionmaker(admin_engine)() as s:
+        criado = await frota_svc.criar_motorista(
+            s, tenant_id=tenant.id, payload=_payload()
+        )
+        assert criado.id and criado.situacao == "ativo"
+        assert criado.cnh_categoria == "D" and criado.cpf == "12345678901"
 
-        async with _sessionmaker(admin_engine)() as s:
-            editado = await frota_svc.atualizar_motorista(
-                s, tenant_id=tenant.id, motorista_id=criado.id,
-                payload=MotoristaUpdate(telefone="85999990000", cnh_categoria="E"),
-            )
-            assert editado.telefone == "85999990000"
-            assert editado.cnh_categoria == "E"
-            assert editado.atualizado_em is not None
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        editado = await frota_svc.atualizar_motorista(
+            s, tenant_id=tenant.id, motorista_id=criado.id,
+            payload=MotoristaUpdate(telefone="85999990000", cnh_categoria="E"),
+        )
+        assert editado.telefone == "85999990000"
+        assert editado.cnh_categoria == "E"
+        assert editado.atualizado_em is not None
 
 
 async def test_cpf_e_cnh_normalizados(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            m = await frota_svc.criar_motorista(
-                s, tenant_id=tenant.id,
-                payload=_payload(cpf="123.456.789-01", cnh_numero="987.654.321-00"),
-            )
-            assert m.cpf == "12345678901" and m.cnh_numero == "98765432100"
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        m = await frota_svc.criar_motorista(
+            s, tenant_id=tenant.id,
+            payload=_payload(cpf="123.456.789-01", cnh_numero="987.654.321-00"),
+        )
+        assert m.cpf == "12345678901" and m.cnh_numero == "98765432100"
 
 
 # ---------- inativar / reativar ----------
 async def test_inativar_e_reativar(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            m = await frota_svc.criar_motorista(s, tenant_id=tenant.id, payload=_payload())
-        async with _sessionmaker(admin_engine)() as s:
-            d = await frota_svc.set_situacao_motorista(
-                s, tenant_id=tenant.id, motorista_id=m.id, situacao="inativo"
-            )
-            assert d.situacao == "inativo"
-        async with _sessionmaker(admin_engine)() as s:
-            a = await frota_svc.set_situacao_motorista(
-                s, tenant_id=tenant.id, motorista_id=m.id, situacao="ativo"
-            )
-            assert a.situacao == "ativo"
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        m = await frota_svc.criar_motorista(s, tenant_id=tenant.id, payload=_payload())
+    async with _sessionmaker(admin_engine)() as s:
+        d = await frota_svc.set_situacao_motorista(
+            s, tenant_id=tenant.id, motorista_id=m.id, situacao="inativo"
+        )
+        assert d.situacao == "inativo"
+    async with _sessionmaker(admin_engine)() as s:
+        a = await frota_svc.set_situacao_motorista(
+            s, tenant_id=tenant.id, motorista_id=m.id, situacao="ativo"
+        )
+        assert a.situacao == "ativo"
 
 
 # ---------- CPF único ----------
 async def test_cpf_unico_por_tenant(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
+    async with _sessionmaker(admin_engine)() as s:
+        await frota_svc.criar_motorista(
+            s, tenant_id=tenant.id, payload=_payload(cpf="11122233344")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
             await frota_svc.criar_motorista(
                 s, tenant_id=tenant.id, payload=_payload(cpf="11122233344")
             )
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.criar_motorista(
-                    s, tenant_id=tenant.id, payload=_payload(cpf="11122233344")
-                )
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+        assert exc.value.status_code == 409
 
 
 async def test_mesmo_cpf_em_tenants_diferentes_ok(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            ma = await frota_svc.criar_motorista(
-                s, tenant_id=a.id, payload=_payload(cpf="55566677788")
-            )
-        async with _sessionmaker(admin_engine)() as s:
-            mb = await frota_svc.criar_motorista(
-                s, tenant_id=b.id, payload=_payload(cpf="55566677788")
-            )
-        assert ma.cpf == mb.cpf and ma.tenant_id != mb.tenant_id
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    async with _sessionmaker(admin_engine)() as s:
+        ma = await frota_svc.criar_motorista(
+            s, tenant_id=a.id, payload=_payload(cpf="55566677788")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        mb = await frota_svc.criar_motorista(
+            s, tenant_id=b.id, payload=_payload(cpf="55566677788")
+        )
+    assert ma.cpf == mb.cpf and ma.tenant_id != mb.tenant_id
 
 
 async def test_cpf_reutilizavel_apos_soft_delete(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            m = await frota_svc.criar_motorista(
-                s, tenant_id=tenant.id, payload=_payload(cpf="99988877766")
-            )
-        async with _sessionmaker(admin_engine)() as s:
-            await frota_svc.excluir_motorista(s, tenant_id=tenant.id, motorista_id=m.id)
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_motorista(s, tenant_id=tenant.id, motorista_id=m.id)
-            assert exc.value.status_code == 404
-        async with _sessionmaker(admin_engine)() as s:
-            novo = await frota_svc.criar_motorista(
-                s, tenant_id=tenant.id, payload=_payload(cpf="99988877766")
-            )
-            assert novo.id != m.id
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        m = await frota_svc.criar_motorista(
+            s, tenant_id=tenant.id, payload=_payload(cpf="99988877766")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        await frota_svc.excluir_motorista(s, tenant_id=tenant.id, motorista_id=m.id)
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_motorista(s, tenant_id=tenant.id, motorista_id=m.id)
+        assert exc.value.status_code == 404
+    async with _sessionmaker(admin_engine)() as s:
+        novo = await frota_svc.criar_motorista(
+            s, tenant_id=tenant.id, payload=_payload(cpf="99988877766")
+        )
+        assert novo.id != m.id
 
 
 # ---------- cross-tenant ----------
 async def test_cross_tenant_404(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            m = await frota_svc.criar_motorista(
-                s, tenant_id=a.id, payload=_payload(cpf="10101010101")
-            )
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_motorista(s, tenant_id=b.id, motorista_id=m.id)
-            assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    async with _sessionmaker(admin_engine)() as s:
+        m = await frota_svc.criar_motorista(
+            s, tenant_id=a.id, payload=_payload(cpf="10101010101")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_motorista(s, tenant_id=b.id, motorista_id=m.id)
+        assert exc.value.status_code == 404
 
 
 def test_update_schema_descarta_tenant_id():
@@ -242,34 +202,27 @@ def test_update_schema_descarta_tenant_id():
 # ---------- vínculos same-tenant ----------
 async def test_unidade_e_usuario_do_tenant_aceitos(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _unidade_id(admin_engine, tenant.id)
-        usr = await _usuario_id(admin_engine, tenant.id)
-        async with _sessionmaker(admin_engine)() as s:
-            m = await frota_svc.criar_motorista(
-                s, tenant_id=tenant.id,
-                payload=_payload(cpf="20202020202", id_unidade=uid, id_usuario=usr),
-            )
-            assert m.id_unidade == uid and m.id_usuario == usr
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _unidade_id(admin_engine, tenant.id)
+    usr = await _usuario_id(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        m = await frota_svc.criar_motorista(
+            s, tenant_id=tenant.id,
+            payload=_payload(cpf="20202020202", id_unidade=uid, id_usuario=usr),
+        )
+        assert m.id_unidade == uid and m.id_usuario == usr
 
 
 async def test_usuario_de_outro_tenant_rejeitado(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        usr_b = await _usuario_id(admin_engine, b.id)
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.criar_motorista(
-                    s, tenant_id=a.id,
-                    payload=_payload(cpf="30303030303", id_usuario=usr_b),
-                )
-            assert exc.value.status_code == 400
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    usr_b = await _usuario_id(admin_engine, b.id)
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.criar_motorista(
+                s, tenant_id=a.id,
+                payload=_payload(cpf="30303030303", id_usuario=usr_b),
+            )
+        assert exc.value.status_code == 400
 
 
 # ---------- validações de schema (422) ----------

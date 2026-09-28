@@ -55,142 +55,105 @@ async def _unidade_id(engine, tenant_id: int) -> int:
         )
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sessionmaker(engine)() as s:
-        for stmt in (
-            "DELETE FROM frota.veiculo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 # ---------- CRUD básico ----------
 async def test_criar_e_editar_veiculo(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            criado = await frota_svc.criar_veiculo(
-                s, tenant_id=tenant.id,
-                payload=VeiculoCreate(placa="ABC1234", marca="Fiat", modelo="Uno"),
-            )
-            assert criado.id and criado.situacao == "disponivel"
-            assert criado.forma_posse == "proprio" and criado.quilometragem_atual == 0
-            assert criado.placa == "ABC1234"
+    async with _sessionmaker(admin_engine)() as s:
+        criado = await frota_svc.criar_veiculo(
+            s, tenant_id=tenant.id,
+            payload=VeiculoCreate(placa="ABC1234", marca="Fiat", modelo="Uno"),
+        )
+        assert criado.id and criado.situacao == "disponivel"
+        assert criado.forma_posse == "proprio" and criado.quilometragem_atual == 0
+        assert criado.placa == "ABC1234"
 
-        async with _sessionmaker(admin_engine)() as s:
-            editado = await frota_svc.atualizar_veiculo(
-                s, tenant_id=tenant.id, veiculo_id=criado.id,
-                payload=VeiculoUpdate(situacao="manutencao", quilometragem_atual=15000),
-            )
-            assert editado.situacao == "manutencao"
-            assert editado.quilometragem_atual == 15000
-            assert editado.atualizado_em is not None
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        editado = await frota_svc.atualizar_veiculo(
+            s, tenant_id=tenant.id, veiculo_id=criado.id,
+            payload=VeiculoUpdate(situacao="manutencao", quilometragem_atual=15000),
+        )
+        assert editado.situacao == "manutencao"
+        assert editado.quilometragem_atual == 15000
+        assert editado.atualizado_em is not None
 
 
 async def test_placa_normalizada(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            v = await frota_svc.criar_veiculo(
-                s, tenant_id=tenant.id, payload=VeiculoCreate(placa=" abc-1d23 ")
-            )
-            assert v.placa == "ABC1D23"
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        v = await frota_svc.criar_veiculo(
+            s, tenant_id=tenant.id, payload=VeiculoCreate(placa=" abc-1d23 ")
+        )
+        assert v.placa == "ABC1D23"
 
 
 # ---------- placa única ----------
 async def test_placa_unica_por_tenant(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
+    async with _sessionmaker(admin_engine)() as s:
+        await frota_svc.criar_veiculo(
+            s, tenant_id=tenant.id, payload=VeiculoCreate(placa="DUP1234")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
             await frota_svc.criar_veiculo(
                 s, tenant_id=tenant.id, payload=VeiculoCreate(placa="DUP1234")
             )
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.criar_veiculo(
-                    s, tenant_id=tenant.id, payload=VeiculoCreate(placa="DUP1234")
-                )
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+        assert exc.value.status_code == 409
 
 
 async def test_mesma_placa_em_tenants_diferentes_ok(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            va = await frota_svc.criar_veiculo(
-                s, tenant_id=a.id, payload=VeiculoCreate(placa="SAM1234")
-            )
-        async with _sessionmaker(admin_engine)() as s:
-            vb = await frota_svc.criar_veiculo(
-                s, tenant_id=b.id, payload=VeiculoCreate(placa="SAM1234")
-            )
-        assert va.placa == vb.placa and va.tenant_id != vb.tenant_id
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    async with _sessionmaker(admin_engine)() as s:
+        va = await frota_svc.criar_veiculo(
+            s, tenant_id=a.id, payload=VeiculoCreate(placa="SAM1234")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        vb = await frota_svc.criar_veiculo(
+            s, tenant_id=b.id, payload=VeiculoCreate(placa="SAM1234")
+        )
+    assert va.placa == vb.placa and va.tenant_id != vb.tenant_id
 
 
 async def test_placa_reutilizavel_apos_soft_delete(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            v = await frota_svc.criar_veiculo(
-                s, tenant_id=tenant.id, payload=VeiculoCreate(placa="REC1234")
-            )
-        async with _sessionmaker(admin_engine)() as s:
-            await frota_svc.excluir_veiculo(s, tenant_id=tenant.id, veiculo_id=v.id)
-        # obter agora dá 404 (soft-deletado)
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_veiculo(s, tenant_id=tenant.id, veiculo_id=v.id)
-            assert exc.value.status_code == 404
-        # mesma placa pode ser recriada
-        async with _sessionmaker(admin_engine)() as s:
-            novo = await frota_svc.criar_veiculo(
-                s, tenant_id=tenant.id, payload=VeiculoCreate(placa="REC1234")
-            )
-            assert novo.id != v.id
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        v = await frota_svc.criar_veiculo(
+            s, tenant_id=tenant.id, payload=VeiculoCreate(placa="REC1234")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        await frota_svc.excluir_veiculo(s, tenant_id=tenant.id, veiculo_id=v.id)
+    # obter agora dá 404 (soft-deletado)
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_veiculo(s, tenant_id=tenant.id, veiculo_id=v.id)
+        assert exc.value.status_code == 404
+    # mesma placa pode ser recriada
+    async with _sessionmaker(admin_engine)() as s:
+        novo = await frota_svc.criar_veiculo(
+            s, tenant_id=tenant.id, payload=VeiculoCreate(placa="REC1234")
+        )
+        assert novo.id != v.id
 
 
 # ---------- cross-tenant + tenant_id imutável ----------
 async def test_cross_tenant_404(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            v = await frota_svc.criar_veiculo(
-                s, tenant_id=a.id, payload=VeiculoCreate(placa="CRS1234")
+    async with _sessionmaker(admin_engine)() as s:
+        v = await frota_svc.criar_veiculo(
+            s, tenant_id=a.id, payload=VeiculoCreate(placa="CRS1234")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_veiculo(s, tenant_id=b.id, veiculo_id=v.id)
+        assert exc.value.status_code == 404
+        with pytest.raises(HTTPException) as exc2:
+            await frota_svc.atualizar_veiculo(
+                s, tenant_id=b.id, veiculo_id=v.id,
+                payload=VeiculoUpdate(marca="hack"),
             )
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_veiculo(s, tenant_id=b.id, veiculo_id=v.id)
-            assert exc.value.status_code == 404
-            with pytest.raises(HTTPException) as exc2:
-                await frota_svc.atualizar_veiculo(
-                    s, tenant_id=b.id, veiculo_id=v.id,
-                    payload=VeiculoUpdate(marca="hack"),
-                )
-            assert exc2.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+        assert exc2.value.status_code == 404
 
 
 def test_update_schema_descarta_tenant_id():
@@ -207,33 +170,26 @@ def test_update_schema_descarta_tenant_id():
 # ---------- unidade same-tenant ----------
 async def test_unidade_do_tenant_aceita(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _unidade_id(admin_engine, tenant.id)
-        async with _sessionmaker(admin_engine)() as s:
-            v = await frota_svc.criar_veiculo(
-                s, tenant_id=tenant.id,
-                payload=VeiculoCreate(placa="UNI1234", id_unidade_responsavel=uid),
-            )
-            assert v.id_unidade_responsavel == uid
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _unidade_id(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        v = await frota_svc.criar_veiculo(
+            s, tenant_id=tenant.id,
+            payload=VeiculoCreate(placa="UNI1234", id_unidade_responsavel=uid),
+        )
+        assert v.id_unidade_responsavel == uid
 
 
 async def test_unidade_de_outro_tenant_rejeitada(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        uid_b = await _unidade_id(admin_engine, b.id)
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.criar_veiculo(
-                    s, tenant_id=a.id,
-                    payload=VeiculoCreate(placa="UNI9876", id_unidade_responsavel=uid_b),
-                )
-            assert exc.value.status_code == 400
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    uid_b = await _unidade_id(admin_engine, b.id)
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.criar_veiculo(
+                s, tenant_id=a.id,
+                payload=VeiculoCreate(placa="UNI9876", id_unidade_responsavel=uid_b),
+            )
+        assert exc.value.status_code == 400
 
 
 # ---------- validações de schema (422) ----------

@@ -106,95 +106,60 @@ async def _cenario(engine):
     return tid, conta.id, extrato.id, tenant.slug
 
 
-async def _limpar(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.lancamento_extrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.extrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 # ---------------------------------------------------------------- CSV
 
 
 @pytest.mark.asyncio
 async def test_extrato_da_conta_traz_a_movimentacao(admin_engine) -> None:
     tid, conta_id, _ext, _slug = await _cenario(admin_engine)
-    try:
-        async with _sm(admin_engine)() as db:
-            conteudo = await export.csv_extrato_conta(db, tenant_id=tid, conta_id=conta_id)
-        linhas = _linhas(conteudo)
-        assert linhas[0] == export.COLUNAS_EXTRATO
-        assert len(linhas) == 2, linhas
-        linha = dict(zip(export.COLUNAS_EXTRATO, linhas[1]))
-        assert linha["tipo"] == "ENTRADA"
-        assert linha["valor"] == "1234,56", "vírgula decimal, senão o Excel lê como texto"
-        assert linha["descricao"] == "Repasse do Tesouro"
-    finally:
-        await _limpar(admin_engine, tid)
+    async with _sm(admin_engine)() as db:
+        conteudo = await export.csv_extrato_conta(db, tenant_id=tid, conta_id=conta_id)
+    linhas = _linhas(conteudo)
+    assert linhas[0] == export.COLUNAS_EXTRATO
+    assert len(linhas) == 2, linhas
+    linha = dict(zip(export.COLUNAS_EXTRATO, linhas[1]))
+    assert linha["tipo"] == "ENTRADA"
+    assert linha["valor"] == "1234,56", "vírgula decimal, senão o Excel lê como texto"
+    assert linha["descricao"] == "Repasse do Tesouro"
 
 
 @pytest.mark.asyncio
 async def test_painel_de_caixa_traz_os_saldos(admin_engine) -> None:
     tid, _conta, _ext, _slug = await _cenario(admin_engine)
-    try:
-        async with _sm(admin_engine)() as db:
-            conteudo = await export.csv_painel_caixa(db, tenant_id=tid)
-        linhas = _linhas(conteudo)
-        assert linhas[0] == export.COLUNAS_PAINEL
-        linha = dict(zip(export.COLUNAS_PAINEL, linhas[1]))
-        assert linha["conta"] == "Conta C13"
-        # 1000 inicial + 1234,56 de entrada.
-        assert linha["saldo_atual"] == "2234,56", linha
-        assert linha["abaixo_minimo"] in ("sim", "não")
-    finally:
-        await _limpar(admin_engine, tid)
+    async with _sm(admin_engine)() as db:
+        conteudo = await export.csv_painel_caixa(db, tenant_id=tid)
+    linhas = _linhas(conteudo)
+    assert linhas[0] == export.COLUNAS_PAINEL
+    linha = dict(zip(export.COLUNAS_PAINEL, linhas[1]))
+    assert linha["conta"] == "Conta C13"
+    # 1000 inicial + 1234,56 de entrada.
+    assert linha["saldo_atual"] == "2234,56", linha
+    assert linha["abaixo_minimo"] in ("sim", "não")
 
 
 @pytest.mark.asyncio
 async def test_lancamentos_da_conciliacao(admin_engine) -> None:
     tid, _conta, extrato_id, _slug = await _cenario(admin_engine)
-    try:
-        async with _sm(admin_engine)() as db:
-            conteudo = await export.csv_lancamentos(db, tenant_id=tid, id_extrato=extrato_id)
-        linhas = _linhas(conteudo)
-        assert linhas[0] == export.COLUNAS_LANCAMENTOS
-        linha = dict(zip(export.COLUNAS_LANCAMENTOS, linhas[1]))
-        assert linha["favorecido"] == "Fulano"
-        assert linha["valor"] == "1234,56"
-        assert linha["conciliado"] == "não"
-    finally:
-        await _limpar(admin_engine, tid)
+    async with _sm(admin_engine)() as db:
+        conteudo = await export.csv_lancamentos(db, tenant_id=tid, id_extrato=extrato_id)
+    linhas = _linhas(conteudo)
+    assert linhas[0] == export.COLUNAS_LANCAMENTOS
+    linha = dict(zip(export.COLUNAS_LANCAMENTOS, linhas[1]))
+    assert linha["favorecido"] == "Fulano"
+    assert linha["valor"] == "1234,56"
+    assert linha["conciliado"] == "não"
 
 
 @pytest.mark.asyncio
 async def test_sem_dado_vem_cabecalho_e_nao_arquivo_vazio(admin_engine) -> None:
     """Planilha sem cabeçalho não diz "não achei nada" — diz "quebrou"."""
     tid, conta_id, _ext, _slug = await _cenario(admin_engine)
-    try:
-        async with _sm(admin_engine)() as db:
-            # Nenhuma ordem de pagamento foi criada neste cenário.
-            conteudo = await export.csv_ordens(db, tenant_id=tid)
-        linhas = _linhas(conteudo)
-        assert linhas == [export.COLUNAS_ORDENS], linhas
-        assert conteudo.startswith("﻿"), "o BOM some e o Excel estraga os acentos"
-    finally:
-        await _limpar(admin_engine, tid)
+    async with _sm(admin_engine)() as db:
+        # Nenhuma ordem de pagamento foi criada neste cenário.
+        conteudo = await export.csv_ordens(db, tenant_id=tid)
+    linhas = _linhas(conteudo)
+    assert linhas == [export.COLUNAS_ORDENS], linhas
+    assert conteudo.startswith("﻿"), "o BOM some e o Excel estraga os acentos"
 
 
 # ---------------------------------------------------------------- PDF
@@ -209,25 +174,22 @@ async def test_pdf_do_painel_tem_o_conteudo_e_nao_so_bytes(admin_engine) -> None
     """
     pypdf = pytest.importorskip("pypdf", reason="leitura de PDF exige pypdf")
     tid, _conta, _ext, _slug = await _cenario(admin_engine)
-    try:
-        async with _sm(admin_engine)() as db:
-            pdf = await export.pdf_painel_caixa(db, tenant_id=tid)
-        assert pdf[:4] == b"%PDF"
-        # Espaços normalizados antes de comparar: a extração quebra a célula
-        # entre linhas quando a coluna é estreita — "Conta C13" saiu como
-        # "...2976 Conta" + quebra + "C13 BB...". Afirmar sobre isso seria
-        # afirmar sobre LAYOUT e não sobre conteúdo: o teste ficaria vermelho
-        # no dia em que a largura mudasse, sem nada ter quebrado para quem lê
-        # o relatório.
-        texto = " ".join(
-            "".join(
-                p.extract_text() or "" for p in pypdf.PdfReader(io.BytesIO(pdf)).pages
-            ).split()
-        )
-        assert "Painel de caixa" in texto
-        assert "Conta C13" in texto, texto[:400]
-    finally:
-        await _limpar(admin_engine, tid)
+    async with _sm(admin_engine)() as db:
+        pdf = await export.pdf_painel_caixa(db, tenant_id=tid)
+    assert pdf[:4] == b"%PDF"
+    # Espaços normalizados antes de comparar: a extração quebra a célula
+    # entre linhas quando a coluna é estreita — "Conta C13" saiu como
+    # "...2976 Conta" + quebra + "C13 BB...". Afirmar sobre isso seria
+    # afirmar sobre LAYOUT e não sobre conteúdo: o teste ficaria vermelho
+    # no dia em que a largura mudasse, sem nada ter quebrado para quem lê
+    # o relatório.
+    texto = " ".join(
+        "".join(
+            p.extract_text() or "" for p in pypdf.PdfReader(io.BytesIO(pdf)).pages
+        ).split()
+    )
+    assert "Painel de caixa" in texto
+    assert "Conta C13" in texto, texto[:400]
 
 
 @pytest.mark.asyncio
@@ -240,17 +202,14 @@ async def test_pdf_e_csv_contam_a_mesma_historia(admin_engine) -> None:
     """
     pypdf = pytest.importorskip("pypdf", reason="leitura de PDF exige pypdf")
     tid, _conta, _ext, _slug = await _cenario(admin_engine)
-    try:
-        async with _sm(admin_engine)() as db:
-            csv_txt = await export.csv_painel_caixa(db, tenant_id=tid)
-            pdf = await export.pdf_painel_caixa(db, tenant_id=tid)
-        linha_csv = dict(zip(export.COLUNAS_PAINEL, _linhas(csv_txt)[1]))
-        texto = "".join(
-            p.extract_text() or "" for p in pypdf.PdfReader(io.BytesIO(pdf)).pages
-        )
-        assert linha_csv["saldo_atual"] in texto, (linha_csv["saldo_atual"], texto[:400])
-    finally:
-        await _limpar(admin_engine, tid)
+    async with _sm(admin_engine)() as db:
+        csv_txt = await export.csv_painel_caixa(db, tenant_id=tid)
+        pdf = await export.pdf_painel_caixa(db, tenant_id=tid)
+    linha_csv = dict(zip(export.COLUNAS_PAINEL, _linhas(csv_txt)[1]))
+    texto = "".join(
+        p.extract_text() or "" for p in pypdf.PdfReader(io.BytesIO(pdf)).pages
+    )
+    assert linha_csv["saldo_atual"] in texto, (linha_csv["saldo_atual"], texto[:400])
 
 
 # ---------------------------------------------------------------- HTTP
@@ -323,37 +282,31 @@ async def test_http_usuario_comum_com_a_transacao_baixa(admin_engine) -> None:
     antes de olhar a transação, e a suíte inteira é super-usuário.
     """
     tid, conta_id, extrato_id, slug = await _cenario(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, tid, ["pagamento_cadastro", "pagamento_pagar"])
-        for caminho, tipo in (
-            ("/api/v2/pagamentos/caixa/painel.csv", "text/csv"),
-            (f"/api/v2/pagamentos/contas/{conta_id}/extrato.csv", "text/csv"),
-            (f"/api/v2/pagamentos/extratos/{extrato_id}/lancamentos.csv", "text/csv"),
-            ("/api/v2/pagamentos/ordens-pagamento/exportar.csv", "text/csv"),
-        ):
-            r = await _get(admin_engine, tid, slug, uid, caminho)
-            assert r.status_code == 200, (caminho, r.status_code, r.text[:200])
-            assert tipo in r.headers["content-type"], caminho
-            assert "attachment" in r.headers.get("content-disposition", ""), caminho
-    finally:
-        await _limpar(admin_engine, tid)
+    uid = await _usuario_com(admin_engine, tid, ["pagamento_cadastro", "pagamento_pagar"])
+    for caminho, tipo in (
+        ("/api/v2/pagamentos/caixa/painel.csv", "text/csv"),
+        (f"/api/v2/pagamentos/contas/{conta_id}/extrato.csv", "text/csv"),
+        (f"/api/v2/pagamentos/extratos/{extrato_id}/lancamentos.csv", "text/csv"),
+        ("/api/v2/pagamentos/ordens-pagamento/exportar.csv", "text/csv"),
+    ):
+        r = await _get(admin_engine, tid, slug, uid, caminho)
+        assert r.status_code == 200, (caminho, r.status_code, r.text[:200])
+        assert tipo in r.headers["content-type"], caminho
+        assert "attachment" in r.headers.get("content-disposition", ""), caminho
 
 
 @pytest.mark.asyncio
 async def test_http_usuario_sem_transacao_leva_403(admin_engine) -> None:
     """O par: sem as transações, nada baixa. Prova que o gate decide."""
     tid, conta_id, _ext, slug = await _cenario(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, tid, [])
-        for caminho in (
-            "/api/v2/pagamentos/caixa/painel.csv",
-            f"/api/v2/pagamentos/contas/{conta_id}/extrato.csv",
-            "/api/v2/pagamentos/ordens-pagamento/exportar.csv",
-        ):
-            r = await _get(admin_engine, tid, slug, uid, caminho)
-            assert r.status_code == 403, (caminho, r.status_code)
-    finally:
-        await _limpar(admin_engine, tid)
+    uid = await _usuario_com(admin_engine, tid, [])
+    for caminho in (
+        "/api/v2/pagamentos/caixa/painel.csv",
+        f"/api/v2/pagamentos/contas/{conta_id}/extrato.csv",
+        "/api/v2/pagamentos/ordens-pagamento/exportar.csv",
+    ):
+        r = await _get(admin_engine, tid, slug, uid, caminho)
+        assert r.status_code == 403, (caminho, r.status_code)
 
 
 @pytest.mark.asyncio
@@ -365,13 +318,10 @@ async def test_http_a_rota_literal_nao_e_engolida_pela_parametrica(admin_engine)
     422 aqui não é "requisição inválida": é rota mal ordenada.
     """
     tid, _conta, _ext, slug = await _cenario(admin_engine)
-    try:
-        uid = await _usuario_com(admin_engine, tid, ["pagamento_cadastro", "pagamento_pagar"])
-        for caminho in ("/api/v2/pagamentos/ordens-pagamento/exportar.csv",
-                        "/api/v2/pagamentos/ordens-pagamento/exportar.pdf"):
-            r = await _get(admin_engine, tid, slug, uid, caminho)
-            assert r.status_code != 422, (
-                f"{caminho} caiu na rota paramétrica — declare a literal ANTES"
-            )
-    finally:
-        await _limpar(admin_engine, tid)
+    uid = await _usuario_com(admin_engine, tid, ["pagamento_cadastro", "pagamento_pagar"])
+    for caminho in ("/api/v2/pagamentos/ordens-pagamento/exportar.csv",
+                    "/api/v2/pagamentos/ordens-pagamento/exportar.pdf"):
+        r = await _get(admin_engine, tid, slug, uid, caminho)
+        assert r.status_code != 422, (
+            f"{caminho} caiu na rota paramétrica — declare a literal ANTES"
+        )

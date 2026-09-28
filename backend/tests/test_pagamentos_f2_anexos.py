@@ -74,42 +74,6 @@ async def _provisionar(engine):
     return tenant, solicitante_id, gestor_id, validador_id
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.anexo_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_versao WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.pedido_ajuste WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
-            "DELETE FROM protocolos.anexo_processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.anexo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _setup_debito(engine, tenant_id: int, usuario_id: int):
     """Cria um débito completo em rascunho — cópia do helper homônimo de
     `test_pagamentos_f2_ajustes.py`."""
@@ -308,8 +272,6 @@ async def test_upload_e_download_de_anexo_de_debito(admin_engine):
     assert r3.status_code == 200, r3.text
     assert r3.content == b"%PDF-1.4 conteudo de teste"
 
-    await _cleanup(admin_engine, tenant.id)
-
 
 @pytest.mark.asyncio
 async def test_download_cross_tenant_e_404(admin_engine):
@@ -327,9 +289,6 @@ async def test_download_cross_tenant_e_404(admin_engine):
     r2 = await _get(admin_engine, tenant_b.id, tenant_b.slug, uid_b,
                     f"/api/v2/pagamentos/anexos-debito/{anexo_debito_id}/download")
     assert r2.status_code == 404, (r2.status_code, r2.text)
-
-    await _cleanup(admin_engine, tenant_a.id)
-    await _cleanup(admin_engine, tenant_b.id)
 
 
 @pytest.mark.asyncio
@@ -358,8 +317,6 @@ async def test_download_de_vinculo_excluido_e_404(admin_engine):
         ), {"t": tenant.id})).fetchall()
         assert len(row) == 1
 
-    await _cleanup(admin_engine, tenant.id)
-
 
 @pytest.mark.asyncio
 async def test_upload_em_debito_terminal_e_409(admin_engine):
@@ -375,8 +332,6 @@ async def test_upload_em_debito_terminal_e_409(admin_engine):
     r = await _upload(admin_engine, tenant.id, tenant.slug, uid,
                       f"/api/v2/pagamentos/debitos/{debito.id}/anexos")
     assert r.status_code == 409, (r.status_code, r.text)
-
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -417,8 +372,6 @@ async def test_anexo_em_resposta_a_pedido_referencia_o_pedido(admin_engine):
         ), {"i": r.json()["id"]})).scalar_one()
         assert row == pedido_id
 
-    await _cleanup(admin_engine, tenant.id)
-
 
 @pytest.mark.asyncio
 async def test_pedido_de_outro_debito_e_422(admin_engine):
@@ -447,5 +400,3 @@ async def test_pedido_de_outro_debito_e_422(admin_engine):
                       f"/api/v2/pagamentos/debitos/{debito2.id}/anexos",
                       data={"id_pedido_ajuste": str(pedido_id)})
     assert r.status_code == 422, (r.status_code, r.text)
-
-    await _cleanup(admin_engine, tenant.id)

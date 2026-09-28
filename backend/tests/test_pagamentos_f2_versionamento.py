@@ -87,34 +87,6 @@ async def _provisionar(engine):
     return tenant, solicitante_id
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.anexo_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_versao WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.pedido_ajuste WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _setup_debito(engine, tenant_id: int, usuario_id: int):
     """Cria um débito completo em rascunho com fonte, conta, fornecedor etc.
 
@@ -223,12 +195,9 @@ async def test_debito_em_ajuste_com_pedido_aberto_nao_e_orfao(admin_engine):
         )
         await s.commit()
 
-    try:
-        async with _sm(admin_engine)() as s:
-            orfaos = (await s.execute(_ORFAOS_SQL, {"t": tenant.id})).scalar_one()
-        assert orfaos == 0
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as s:
+        orfaos = (await s.execute(_ORFAOS_SQL, {"t": tenant.id})).scalar_one()
+    assert orfaos == 0
 
 
 @pytest.mark.asyncio
@@ -247,12 +216,9 @@ async def test_debito_em_ajuste_sem_pedido_e_encontrado_como_orfao(admin_engine)
         )
         await s.commit()
 
-    try:
-        async with _sm(admin_engine)() as s:
-            orfaos = (await s.execute(_ORFAOS_SQL, {"t": tenant.id})).scalar_one()
-        assert orfaos == 1
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as s:
+        orfaos = (await s.execute(_ORFAOS_SQL, {"t": tenant.id})).scalar_one()
+    assert orfaos == 1
 
 
 # --------------------------------------------------------------------------
@@ -319,27 +285,24 @@ async def test_alteracao_material_em_ajuste_cria_versao_e_incrementa(admin_engin
     assert debito.situacao_tramitacao == "AJUSTE_VALIDACAO"
     assert debito.versao == 1
 
-    try:
-        async with _sm(admin_engine)() as s:
-            atualizado = await svc.atualizar_debito(
-                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
-                payload=DebitoUpdate(
-                    valor_total=Decimal("1500.00"),
-                    parcelas=[ParcelaCreate(numero=1, valor=Decimal("1500.00"), vencimento="2026-02-01")],
-                ),
-            )
-        assert atualizado.versao == 2
-        assert atualizado.valor_total == Decimal("1500.00")
+    async with _sm(admin_engine)() as s:
+        atualizado = await svc.atualizar_debito(
+            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
+            payload=DebitoUpdate(
+                valor_total=Decimal("1500.00"),
+                parcelas=[ParcelaCreate(numero=1, valor=Decimal("1500.00"), vencimento="2026-02-01")],
+            ),
+        )
+    assert atualizado.versao == 2
+    assert atualizado.valor_total == Decimal("1500.00")
 
-        async with _sm(admin_engine)() as s:
-            versoes = (await s.execute(select(DebitoVersao).where(
-                DebitoVersao.tenant_id == tenant.id, DebitoVersao.id_debito == debito.id
-            ))).scalars().all()
-        assert len(versoes) == 1
-        assert versoes[0].versao == 1
-        assert Decimal(str(versoes[0].dados["valor_total"])) == valor_antigo
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as s:
+        versoes = (await s.execute(select(DebitoVersao).where(
+            DebitoVersao.tenant_id == tenant.id, DebitoVersao.id_debito == debito.id
+        ))).scalars().all()
+    assert len(versoes) == 1
+    assert versoes[0].versao == 1
+    assert Decimal(str(versoes[0].dados["valor_total"])) == valor_antigo
 
 
 @pytest.mark.asyncio
@@ -360,22 +323,19 @@ async def test_alteracao_nao_material_nao_cria_versao(admin_engine):
         admin_engine, tenant.id, debito, solicitante_id, gestor_id, validador_id)
     assert debito.criticidade != "ALTA"
 
-    try:
-        async with _sm(admin_engine)() as s:
-            atualizado = await svc.atualizar_debito(
-                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
-                payload=DebitoUpdate(criticidade="ALTA"),
-            )
-        assert atualizado.versao == 1
-        assert atualizado.criticidade == "ALTA"
+    async with _sm(admin_engine)() as s:
+        atualizado = await svc.atualizar_debito(
+            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
+            payload=DebitoUpdate(criticidade="ALTA"),
+        )
+    assert atualizado.versao == 1
+    assert atualizado.criticidade == "ALTA"
 
-        async with _sm(admin_engine)() as s:
-            versoes = (await s.execute(select(DebitoVersao).where(
-                DebitoVersao.tenant_id == tenant.id, DebitoVersao.id_debito == debito.id
-            ))).scalars().all()
-        assert versoes == []
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as s:
+        versoes = (await s.execute(select(DebitoVersao).where(
+            DebitoVersao.tenant_id == tenant.id, DebitoVersao.id_debito == debito.id
+        ))).scalars().all()
+    assert versoes == []
 
 
 @pytest.mark.asyncio
@@ -391,22 +351,19 @@ async def test_edicao_em_rascunho_nao_versiona(admin_engine):
     debito = await _setup_debito(admin_engine, tenant.id, solicitante_id)
     assert debito.situacao_tramitacao == "RASCUNHO"
 
-    try:
-        async with _sm(admin_engine)() as s:
-            atualizado = await svc.atualizar_debito(
-                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
-                payload=DebitoUpdate(descricao="Débito de Teste — revisado"),
-            )
-        assert atualizado.versao == 1
-        assert atualizado.descricao == "Débito de Teste — revisado"
+    async with _sm(admin_engine)() as s:
+        atualizado = await svc.atualizar_debito(
+            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
+            payload=DebitoUpdate(descricao="Débito de Teste — revisado"),
+        )
+    assert atualizado.versao == 1
+    assert atualizado.descricao == "Débito de Teste — revisado"
 
-        async with _sm(admin_engine)() as s:
-            versoes = (await s.execute(select(DebitoVersao).where(
-                DebitoVersao.tenant_id == tenant.id, DebitoVersao.id_debito == debito.id
-            ))).scalars().all()
-        assert versoes == []
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sm(admin_engine)() as s:
+        versoes = (await s.execute(select(DebitoVersao).where(
+            DebitoVersao.tenant_id == tenant.id, DebitoVersao.id_debito == debito.id
+        ))).scalars().all()
+    assert versoes == []
 
 
 @pytest.mark.asyncio
@@ -427,13 +384,10 @@ async def test_edicao_fora_de_rascunho_e_ajuste_e_409(admin_engine):
         )
     assert debito.situacao_tramitacao == "AGUARDANDO_GESTOR"
 
-    try:
-        with pytest.raises(HTTPException) as exc_info:
-            async with _sm(admin_engine)() as s:
-                await svc.atualizar_debito(
-                    s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
-                    payload=DebitoUpdate(criticidade="ALTA"),
-                )
-        assert exc_info.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    with pytest.raises(HTTPException) as exc_info:
+        async with _sm(admin_engine)() as s:
+            await svc.atualizar_debito(
+                s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=solicitante_id,
+                payload=DebitoUpdate(criticidade="ALTA"),
+            )
+    assert exc_info.value.status_code == 409

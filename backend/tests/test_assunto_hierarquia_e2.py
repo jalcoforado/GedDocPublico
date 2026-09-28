@@ -58,28 +58,6 @@ async def _provisionar(engine) -> tuple[int, str, int, int]:
     return tenant.id, tenant.slug, su_id, tp.id
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM protocolos.assunto WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.manifestante WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 def _as_user(engine, usuario_id: int, tenant_id: int, tenant_slug: str):
     async def _get_user():
         async with _sm(engine)() as s:
@@ -140,7 +118,6 @@ async def test_criar_raiz_e_filhos_calcula_nivel(admin_engine):
         app.dependency_overrides.clear()
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant_id)
 
 
 @pytest.mark.asyncio
@@ -174,8 +151,6 @@ async def test_pai_de_outro_tenant_e_404(admin_engine):
         app.dependency_overrides.clear()
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant_a)
-        await _cleanup(admin_engine, tenant_b)
 
 
 @pytest.mark.asyncio
@@ -244,7 +219,6 @@ async def test_atualizar_pai_recalcula_nivel_e_recusa_ciclo(admin_engine):
         app.dependency_overrides.clear()
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant_id)
 
 
 @pytest.mark.asyncio
@@ -289,4 +263,3 @@ async def test_listar_filtra_por_ramo_e_por_raiz(admin_engine):
         app.dependency_overrides.clear()
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant_id)

@@ -46,7 +46,6 @@ from tests.conftest import arreio_tenant_http
 from tests.test_pagamentos_autorizacao import (
     _autorizador_com_alcada,
     _base,
-    _cleanup as _cleanup_autorizacao,
     _debito_aprovado,
     _debito_autorizado,
     _novo_usuario,
@@ -62,18 +61,6 @@ SEP = ";"
 def _linhas(conteudo: bytes) -> list[list[str]]:
     texto = conteudo.decode("utf-8-sig")
     return list(csv.reader(io.StringIO(texto), delimiter=SEP))
-
-
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.export_contabil_evento WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.export_contabil_lote WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-    await _cleanup_autorizacao(engine, tenant_id)
 
 
 async def _tesoureiro(engine, tenant_id: int) -> int:
@@ -106,33 +93,30 @@ async def _cenario_pago(engine, t):
 @pytest.mark.asyncio
 async def test_a_debito_empenhado_liquidado_pago_gera_tres_eventos(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
-        async with _sm(admin_engine)() as s:
-            pendentes = await svc.coletar_eventos_pendentes(
-                s, tenant_id=t.id, ate=svc.date.today())
-        tipos = sorted(e.tipo_evento for e in pendentes)
-        assert tipos == ["debito_empenhado", "liquidacao", "pagamento"], tipos
+    d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
+    async with _sm(admin_engine)() as s:
+        pendentes = await svc.coletar_eventos_pendentes(
+            s, tenant_id=t.id, ate=svc.date.today())
+    tipos = sorted(e.tipo_evento for e in pendentes)
+    assert tipos == ["debito_empenhado", "liquidacao", "pagamento"], tipos
 
-        async with _sm(admin_engine)() as s:
-            lote = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
-        assert lote.numero == 1
-        assert lote.qtd_eventos == 3
-        assert lote.hash_conteudo
+    async with _sm(admin_engine)() as s:
+        lote = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
+    assert lote.numero == 1
+    assert lote.qtd_eventos == 3
+    assert lote.hash_conteudo
 
-        async with _sm(admin_engine)() as s:
-            conteudo1 = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
-        linhas = _linhas(conteudo1)
-        assert linhas[0] == svc.COLUNAS
-        assert len(linhas) == 4, linhas  # cabeçalho + 3
+    async with _sm(admin_engine)() as s:
+        conteudo1 = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
+    linhas = _linhas(conteudo1)
+    assert linhas[0] == svc.COLUNAS
+    assert len(linhas) == 4, linhas  # cabeçalho + 3
 
-        # hash estável entre duas reconstruções.
-        async with _sm(admin_engine)() as s:
-            conteudo2 = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
-        import hashlib
-        assert hashlib.sha256(conteudo1).hexdigest() == hashlib.sha256(conteudo2).hexdigest()
-    finally:
-        await _cleanup(admin_engine, t.id)
+    # hash estável entre duas reconstruções.
+    async with _sm(admin_engine)() as s:
+        conteudo2 = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
+    import hashlib
+    assert hashlib.sha256(conteudo1).hexdigest() == hashlib.sha256(conteudo2).hexdigest()
 
 
 # ---------------------------------------------------------------- (crítico)
@@ -146,29 +130,26 @@ async def test_critico_edicao_de_cadastro_apos_gerar_lote_nao_quebra_reconstruca
     para um lote que nunca foi corrompido. Com snapshot, o download depois
     da edição devolve o MESMO CSV byte a byte."""
     t = await _provisionar(admin_engine)
-    try:
-        d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
+    d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
 
-        async with _sm(admin_engine)() as s:
-            lote = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
-        async with _sm(admin_engine)() as s:
-            conteudo_antes = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
+    async with _sm(admin_engine)() as s:
+        lote = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
+    async with _sm(admin_engine)() as s:
+        conteudo_antes = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
 
-        # Edição legítima e posterior de cadastro — nada aqui é proibido pelo
-        # domínio, e o débito/pagamento em si não muda.
-        async with _sm(admin_engine)() as s:
-            await cad.atualizar_fornecedor(
-                s, tenant_id=t.id, fornecedor_id=d.id_fornecedor,
-                payload=FornecedorUpdate(nome="Fornecedor Renomeado Depois Do Lote"))
+    # Edição legítima e posterior de cadastro — nada aqui é proibido pelo
+    # domínio, e o débito/pagamento em si não muda.
+    async with _sm(admin_engine)() as s:
+        await cad.atualizar_fornecedor(
+            s, tenant_id=t.id, fornecedor_id=d.id_fornecedor,
+            payload=FornecedorUpdate(nome="Fornecedor Renomeado Depois Do Lote"))
 
-        async with _sm(admin_engine)() as s:
-            conteudo_depois = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
+    async with _sm(admin_engine)() as s:
+        conteudo_depois = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
 
-        assert conteudo_depois == conteudo_antes, (
-            "reconstrução tem de ser IMUNE a edição de cadastro posterior — "
-            "o snapshot é gravado na geração, não recalculado do domínio atual")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    assert conteudo_depois == conteudo_antes, (
+        "reconstrução tem de ser IMUNE a edição de cadastro posterior — "
+        "o snapshot é gravado na geração, não recalculado do domínio atual")
 
 
 # ---------------------------------------------------------------- (b)
@@ -176,23 +157,20 @@ async def test_critico_edicao_de_cadastro_apos_gerar_lote_nao_quebra_reconstruca
 @pytest.mark.asyncio
 async def test_b_gerar_sem_evento_novo_da_409_e_download_e_estavel(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
-        async with _sm(admin_engine)() as s:
-            lote1 = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
-        async with _sm(admin_engine)() as s:
-            conteudo_a = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote1.id)
+    d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
+    async with _sm(admin_engine)() as s:
+        lote1 = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
+    async with _sm(admin_engine)() as s:
+        conteudo_a = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote1.id)
 
-        with pytest.raises(svc.ExportContabilError) as exc:
-            async with _sm(admin_engine)() as s:
-                await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
-        assert exc.value.status_code == 409
-
+    with pytest.raises(svc.ExportContabilError) as exc:
         async with _sm(admin_engine)() as s:
-            conteudo_b = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote1.id)
-        assert conteudo_a == conteudo_b, "reemissão tem de devolver o MESMO conteúdo"
-    finally:
-        await _cleanup(admin_engine, t.id)
+            await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
+    assert exc.value.status_code == 409
+
+    async with _sm(admin_engine)() as s:
+        conteudo_b = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote1.id)
+    assert conteudo_a == conteudo_b, "reemissão tem de devolver o MESMO conteúdo"
 
 
 # ---------------------------------------------------------------- (c)
@@ -200,36 +178,33 @@ async def test_b_gerar_sem_evento_novo_da_409_e_download_e_estavel(admin_engine)
 @pytest.mark.asyncio
 async def test_c_novo_pagamento_apos_lote_1_gera_lote_2_so_com_o_evento_novo(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, autorizador, fonte, conta = await _debito_autorizado(
-            admin_engine, t.id, valor="1000.00",
-            parcelas=[ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-01"),
-                      ParcelaCreate(numero=2, valor="400.00", vencimento="2026-09-01")])
-        tesoureiro = await _tesoureiro(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
-        await _pagar(admin_engine, t.id, autorizador=autorizador, tesoureiro=tesoureiro,
-                    parcela_id=parcelas[0].id)
+    d, _sol, _apr, autorizador, fonte, conta = await _debito_autorizado(
+        admin_engine, t.id, valor="1000.00",
+        parcelas=[ParcelaCreate(numero=1, valor="600.00", vencimento="2026-08-01"),
+                  ParcelaCreate(numero=2, valor="400.00", vencimento="2026-09-01")])
+    tesoureiro = await _tesoureiro(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+    await _pagar(admin_engine, t.id, autorizador=autorizador, tesoureiro=tesoureiro,
+                parcela_id=parcelas[0].id)
 
-        async with _sm(admin_engine)() as s:
-            lote1 = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
-        assert lote1.qtd_eventos == 3  # empenhado + liquidacao + 1º pagamento
+    async with _sm(admin_engine)() as s:
+        lote1 = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
+    assert lote1.qtd_eventos == 3  # empenhado + liquidacao + 1º pagamento
 
-        await _pagar(admin_engine, t.id, autorizador=autorizador, tesoureiro=tesoureiro,
-                    parcela_id=parcelas[1].id)
+    await _pagar(admin_engine, t.id, autorizador=autorizador, tesoureiro=tesoureiro,
+                parcela_id=parcelas[1].id)
 
-        async with _sm(admin_engine)() as s:
-            lote2 = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
-        assert lote2.numero == 2
-        assert lote2.qtd_eventos == 1, "só o 2º pagamento — o resto já foi capturado pelo lote 1"
+    async with _sm(admin_engine)() as s:
+        lote2 = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
+    assert lote2.numero == 2
+    assert lote2.qtd_eventos == 1, "só o 2º pagamento — o resto já foi capturado pelo lote 1"
 
-        async with _sm(admin_engine)() as s:
-            conteudo2 = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote2.id)
-        linhas = _linhas(conteudo2)
-        assert len(linhas) == 2, linhas
-        assert linhas[1][1] == "pagamento", linhas
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        conteudo2 = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote2.id)
+    linhas = _linhas(conteudo2)
+    assert len(linhas) == 2, linhas
+    assert linhas[1][1] == "pagamento", linhas
 
 
 # ---------------------------------------------------------------- (d)
@@ -237,27 +212,24 @@ async def test_c_novo_pagamento_apos_lote_1_gera_lote_2_so_com_o_evento_novo(adm
 @pytest.mark.asyncio
 async def test_d_mesmo_par_tipo_origem_em_dois_lotes_da_integrity_error(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
-        async with _sm(admin_engine)() as s:
-            lote1 = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
-        async with _sm(admin_engine)() as s:
-            row = (await s.execute(select(ExportContabilEvento).where(
-                ExportContabilEvento.tenant_id == t.id,
-                ExportContabilEvento.id_lote == lote1.id))).scalars().first()
+    d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
+    async with _sm(admin_engine)() as s:
+        lote1 = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
+    async with _sm(admin_engine)() as s:
+        row = (await s.execute(select(ExportContabilEvento).where(
+            ExportContabilEvento.tenant_id == t.id,
+            ExportContabilEvento.id_lote == lote1.id))).scalars().first()
 
-        async with _sm(admin_engine)() as s:
-            lote2 = ExportContabilLote(
-                tenant_id=t.id, numero=999, formato_versao="neutro-csv-v1",
-                qtd_eventos=1, id_usuario=autorizador, gerado_em=svc._utcnow())
-            s.add(lote2); await s.flush()
-            s.add(ExportContabilEvento(
-                tenant_id=t.id, id_lote=lote2.id, tipo_evento=row.tipo_evento,
-                id_origem=row.id_origem, ocorrido_em=row.ocorrido_em))
-            with pytest.raises(IntegrityError):
-                await s.commit()
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        lote2 = ExportContabilLote(
+            tenant_id=t.id, numero=999, formato_versao="neutro-csv-v1",
+            qtd_eventos=1, id_usuario=autorizador, gerado_em=svc._utcnow())
+        s.add(lote2); await s.flush()
+        s.add(ExportContabilEvento(
+            tenant_id=t.id, id_lote=lote2.id, tipo_evento=row.tipo_evento,
+            id_origem=row.id_origem, ocorrido_em=row.ocorrido_em))
+        with pytest.raises(IntegrityError):
+            await s.commit()
 
 
 # ---------------------------------------------------------------- (e)
@@ -265,38 +237,35 @@ async def test_d_mesmo_par_tipo_origem_em_dois_lotes_da_integrity_error(admin_en
 @pytest.mark.asyncio
 async def test_e_estorno_e_cancelamento_aparecem_com_os_tipos_certos(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        # débito pago e depois estornado.
-        d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
-        async with _sm(admin_engine)() as s:
-            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
-        async with _sm(admin_engine)() as s:
-            await aut.estornar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
-                                       parcela_id=parcelas[0].id, justificativa="Erro de digitação")
+    # débito pago e depois estornado.
+    d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
+    async with _sm(admin_engine)() as s:
+        parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+    async with _sm(admin_engine)() as s:
+        await aut.estornar_parcela(s, tenant_id=t.id, usuario_id=tesoureiro,
+                                   parcela_id=parcelas[0].id, justificativa="Erro de digitação")
 
-        # débito cancelado antes de autorizado (mesmo tenant, novo débito).
-        forn, nat, fonte, conta, unidade_id = await _base(admin_engine, t.id)
-        solicitante = await _novo_usuario(admin_engine, t.id, f"sol{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            d2 = await deb.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
-                                        payload=_payload_debito(forn, nat, fonte, conta,
-                                                                unidade_id=unidade_id))
-        async with _sm(admin_engine)() as s:
-            await deb.cancelar(s, tenant_id=t.id, debito_id=d2.id, usuario_id=solicitante,
-                               lock_version=d2.lock_version, justificativa="Pedido duplicado")
+    # débito cancelado antes de autorizado (mesmo tenant, novo débito).
+    forn, nat, fonte, conta, unidade_id = await _base(admin_engine, t.id)
+    solicitante = await _novo_usuario(admin_engine, t.id, f"sol{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        d2 = await deb.criar_debito(s, tenant_id=t.id, usuario_id=solicitante,
+                                    payload=_payload_debito(forn, nat, fonte, conta,
+                                                            unidade_id=unidade_id))
+    async with _sm(admin_engine)() as s:
+        await deb.cancelar(s, tenant_id=t.id, debito_id=d2.id, usuario_id=solicitante,
+                           lock_version=d2.lock_version, justificativa="Pedido duplicado")
 
-        async with _sm(admin_engine)() as s:
-            pendentes = await svc.coletar_eventos_pendentes(
-                s, tenant_id=t.id, ate=svc.date.today())
-        tipos = {e.tipo_evento for e in pendentes}
-        assert "estorno_parcela" in tipos, tipos
-        assert "cancelamento_debito" in tipos, tipos
+    async with _sm(admin_engine)() as s:
+        pendentes = await svc.coletar_eventos_pendentes(
+            s, tenant_id=t.id, ate=svc.date.today())
+    tipos = {e.tipo_evento for e in pendentes}
+    assert "estorno_parcela" in tipos, tipos
+    assert "cancelamento_debito" in tipos, tipos
 
-        ev_cancel = next(e for e in pendentes if e.tipo_evento == "cancelamento_debito")
-        assert ev_cancel.motivo == "Pedido duplicado"
-        assert ev_cancel.id_debito == d2.id
-    finally:
-        await _cleanup(admin_engine, t.id)
+    ev_cancel = next(e for e in pendentes if e.tipo_evento == "cancelamento_debito")
+    assert ev_cancel.motivo == "Pedido duplicado"
+    assert ev_cancel.id_debito == d2.id
 
 
 # ---------------------------------------------------------------- (f)
@@ -304,33 +273,30 @@ async def test_e_estorno_e_cancelamento_aparecem_com_os_tipos_certos(admin_engin
 @pytest.mark.asyncio
 async def test_f_pagamento_com_excecao_rn15_traz_justificativa_no_csv(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, fonte, conta = await _debito_aprovado(
-            admin_engine, t.id, valor="5000.00", saldo_inicial="100.00")
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
-        justificativa = "Folha atrasada; prefeito autorizou por ofício 12/2026."
-        async with _sm(admin_engine)() as s:
-            await aut.autorizar_lote(
-                s, tenant_id=t.id, usuario_id=autorizador,
-                grupos=[GrupoAutorizacaoIn(
-                    id_fonte=fonte.id, id_conta_pagadora=conta.id, debito_ids=[d.id],
-                    permitir_saldo_insuficiente=True, justificativa_excecao=justificativa)])
-        tesoureiro = await _tesoureiro(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
-        await _pagar(admin_engine, t.id, autorizador=autorizador, tesoureiro=tesoureiro,
-                    parcela_id=parcelas[0].id)
+    d, _sol, _apr, fonte, conta = await _debito_aprovado(
+        admin_engine, t.id, valor="5000.00", saldo_inicial="100.00")
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    justificativa = "Folha atrasada; prefeito autorizou por ofício 12/2026."
+    async with _sm(admin_engine)() as s:
+        await aut.autorizar_lote(
+            s, tenant_id=t.id, usuario_id=autorizador,
+            grupos=[GrupoAutorizacaoIn(
+                id_fonte=fonte.id, id_conta_pagadora=conta.id, debito_ids=[d.id],
+                permitir_saldo_insuficiente=True, justificativa_excecao=justificativa)])
+    tesoureiro = await _tesoureiro(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d.id)
+    await _pagar(admin_engine, t.id, autorizador=autorizador, tesoureiro=tesoureiro,
+                parcela_id=parcelas[0].id)
 
-        async with _sm(admin_engine)() as s:
-            lote = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
-            conteudo = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
-        linhas = _linhas(conteudo)
-        cab = linhas[0]
-        linha_pagto = next(dict(zip(cab, l)) for l in linhas[1:] if l[cab.index("tipo_evento")] == "pagamento")
-        assert linha_pagto["excecao_saldo"] == "sim", linha_pagto
-        assert justificativa in linha_pagto["justificativa"], linha_pagto
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        lote = await svc.gerar_lote(s, tenant_id=t.id, ate=svc.date.today(), usuario_id=autorizador)
+        conteudo = await svc.reconstruir_csv(s, tenant_id=t.id, lote_id=lote.id)
+    linhas = _linhas(conteudo)
+    cab = linhas[0]
+    linha_pagto = next(dict(zip(cab, l)) for l in linhas[1:] if l[cab.index("tipo_evento")] == "pagamento")
+    assert linha_pagto["excecao_saldo"] == "sim", linha_pagto
+    assert justificativa in linha_pagto["justificativa"], linha_pagto
 
 
 # ---------------------------------------------------------------- (g)/(h) HTTP
@@ -396,41 +362,34 @@ async def _http(engine, tenant_id, slug, usuario_id, metodo, caminho, **kw):
 @pytest.mark.asyncio
 async def test_g_http_usuario_comum_gera_e_baixa(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
-        uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
+    d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t)
+    uid = await _usuario_com(admin_engine, t.id, ["pagamento_cadastro"])
 
-        r = await _http(admin_engine, t.id, t.slug, uid, "POST",
-                        "/api/v2/pagamentos/contabil/lotes", json={"ate": str(svc.date.today())})
-        assert r.status_code == 201, r.text[:300]
-        lote_id = r.json()["id"]
+    r = await _http(admin_engine, t.id, t.slug, uid, "POST",
+                    "/api/v2/pagamentos/contabil/lotes", json={"ate": str(svc.date.today())})
+    assert r.status_code == 201, r.text[:300]
+    lote_id = r.json()["id"]
 
-        r2 = await _http(admin_engine, t.id, t.slug, uid, "GET", "/api/v2/pagamentos/contabil/lotes")
-        assert r2.status_code == 200
-        assert any(l["id"] == lote_id for l in r2.json())
+    r2 = await _http(admin_engine, t.id, t.slug, uid, "GET", "/api/v2/pagamentos/contabil/lotes")
+    assert r2.status_code == 200
+    assert any(l["id"] == lote_id for l in r2.json())
 
-        r3 = await _http(admin_engine, t.id, t.slug, uid, "GET",
-                         f"/api/v2/pagamentos/contabil/lotes/{lote_id}/arquivo")
-        assert r3.status_code == 200
-        assert "text/csv" in r3.headers["content-type"]
-        assert "attachment" in r3.headers.get("content-disposition", "")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    r3 = await _http(admin_engine, t.id, t.slug, uid, "GET",
+                     f"/api/v2/pagamentos/contabil/lotes/{lote_id}/arquivo")
+    assert r3.status_code == 200
+    assert "text/csv" in r3.headers["content-type"]
+    assert "attachment" in r3.headers.get("content-disposition", "")
 
 
 @pytest.mark.asyncio
 async def test_h_cross_tenant_404(admin_engine):
     t1 = await _provisionar(admin_engine)
     t2 = await _provisionar(admin_engine)
-    try:
-        d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t1)
-        async with _sm(admin_engine)() as s:
-            lote = await svc.gerar_lote(s, tenant_id=t1.id, ate=svc.date.today(), usuario_id=autorizador)
+    d, autorizador, tesoureiro = await _cenario_pago(admin_engine, t1)
+    async with _sm(admin_engine)() as s:
+        lote = await svc.gerar_lote(s, tenant_id=t1.id, ate=svc.date.today(), usuario_id=autorizador)
 
-        uid_t2 = await _usuario_com(admin_engine, t2.id, ["pagamento_cadastro"])
-        r = await _http(admin_engine, t2.id, t2.slug, uid_t2, "GET",
-                        f"/api/v2/pagamentos/contabil/lotes/{lote.id}/arquivo")
-        assert r.status_code == 404, r.text[:200]
-    finally:
-        await _cleanup(admin_engine, t1.id)
-        await _cleanup(admin_engine, t2.id)
+    uid_t2 = await _usuario_com(admin_engine, t2.id, ["pagamento_cadastro"])
+    r = await _http(admin_engine, t2.id, t2.slug, uid_t2, "GET",
+                    f"/api/v2/pagamentos/contabil/lotes/{lote.id}/arquivo")
+    assert r.status_code == 404, r.text[:200]

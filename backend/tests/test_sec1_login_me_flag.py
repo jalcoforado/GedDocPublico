@@ -48,22 +48,6 @@ def _slug(p: str) -> str:
     return f"{p}{uuid.uuid4().hex[:8]}"
 
 
-async def _cleanup_tenant(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 @pytest_asyncio.fixture
 async def cenario(admin_engine):
     """Provisiona tenant + 2 usuários do mesmo tenant:
@@ -124,18 +108,15 @@ async def cenario(admin_engine):
             ).scalar_one()
         )
         await s.commit()
-    try:
-        yield {
-            "tenant_id": tenant.id,
-            "tenant_slug": tenant.slug,
-            "normal_id": normal_id,
-            "normal_email": normal_email,
-            "flagged_id": flagged_id,
-            "flagged_email": flagged_email,
-            "senha": senha_plain,
-        }
-    finally:
-        await _cleanup_tenant(admin_engine, tenant.id)
+    yield {
+        "tenant_id": tenant.id,
+        "tenant_slug": tenant.slug,
+        "normal_id": normal_id,
+        "normal_email": normal_email,
+        "flagged_id": flagged_id,
+        "flagged_email": flagged_email,
+        "senha": senha_plain,
+    }
 
 
 def _login_host_header(tenant_slug: str) -> dict[str, str]:

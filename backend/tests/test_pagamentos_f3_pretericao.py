@@ -68,40 +68,6 @@ async def _provisionar(engine):
     return tenant
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _novo_usuario(engine, tenant_id, sufixo):
     async with _sm(engine)() as s:
         r = await s.execute(text(
@@ -296,45 +262,39 @@ async def cliente():
 async def test_pagar_o_primeiro_da_fila_passa(admin_engine):
     """Caminho feliz: nada preterido — liberar e pagar o 1º da fila passam."""
     t = await _provisionar(admin_engine)
-    try:
-        d1, _d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
-        usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d1.id)
-        async with _sm(admin_engine)() as s:
-            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
-                                       parcela_ids=[parcelas[0].id])
-        async with _sm(admin_engine)() as s:
-            p = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
-                                        parcela_id=parcelas[0].id, forma_pagamento="PIX")
-        assert p.status == "PAGA"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d1, _d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
+    usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        parcelas = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d1.id)
+    async with _sm(admin_engine)() as s:
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
+                                   parcela_ids=[parcelas[0].id])
+    async with _sm(admin_engine)() as s:
+        p = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
+                                    parcela_id=parcelas[0].id, forma_pagamento="PIX")
+    assert p.status == "PAGA"
 
 
 @pytest.mark.asyncio
 async def test_liberar_fora_de_ordem_e_409(admin_engine):
     """2 elegíveis; liberar o 2º sem liberar o 1º antes → 409 listando o 1º."""
     t = await _provisionar(admin_engine)
-    try:
-        d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
-        usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
-                                           parcela_ids=[parcelas2[0].id])
-            assert exc.value.status_code == 409
-            assert f"#{d1.id}" in exc.value.detail
+    d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
+    usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
+                                       parcela_ids=[parcelas2[0].id])
+        assert exc.value.status_code == 409
+        assert f"#{d1.id}" in exc.value.detail
 
-        # Nada mudou: a parcela do 2º continua A_PAGAR (all-or-nothing, sem
-        # escrita nenhuma quando a guarda barra).
-        async with _sm(admin_engine)() as s:
-            p2 = (await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id))[0]
-        assert p2.status == "A_PAGAR"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    # Nada mudou: a parcela do 2º continua A_PAGAR (all-or-nothing, sem
+    # escrita nenhuma quando a guarda barra).
+    async with _sm(admin_engine)() as s:
+        p2 = (await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id))[0]
+    assert p2.status == "A_PAGAR"
 
 
 @pytest.mark.asyncio
@@ -344,20 +304,17 @@ async def test_pagar_fora_de_ordem_e_409_com_preteridos(admin_engine):
     validação de status da parcela/débito, então nem precisa liberar o 2º
     para provar o 409 específico de ordem."""
     t = await _provisionar(admin_engine)
-    try:
-        d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
-        usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
-                                        parcela_id=parcelas2[0].id, forma_pagamento="PIX")
-            assert exc.value.status_code == 409
-            assert f"#{d1.id}" in exc.value.detail
-            assert "posição" in exc.value.detail
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
+    usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
+                                    parcela_id=parcelas2[0].id, forma_pagamento="PIX")
+        assert exc.value.status_code == 409
+        assert f"#{d1.id}" in exc.value.detail
+        assert "posição" in exc.value.detail
 
 
 @pytest.mark.asyncio
@@ -365,36 +322,33 @@ async def test_bloqueado_a_frente_nao_impede(admin_engine):
     """1º BLOQUEADA (fornecedor irregular), 2º ELEGIVEL → liberar e pagar o
     2º passam: só ELEGIVEL à frente bloqueia (Ruling 5)."""
     t = await _provisionar(admin_engine)
-    try:
-        nat, fonte, conta, unidade_id = await _base_compartilhado(admin_engine, t.id)
-        forn1 = await _fornecedor(admin_engine, t.id, nome="Fornecedor Bloqueado LTDA")
-        forn2 = await _fornecedor(admin_engine, t.id, nome="Fornecedor Regular LTDA")
-        d1 = await _debito_autorizado(admin_engine, t.id, forn=forn1, nat=nat, fonte=fonte,
-                                      conta=conta, unidade_id=unidade_id)
-        assert await _situacao_fila(admin_engine, t.id, d1.id) == cron.est.ELEGIVEL
+    nat, fonte, conta, unidade_id = await _base_compartilhado(admin_engine, t.id)
+    forn1 = await _fornecedor(admin_engine, t.id, nome="Fornecedor Bloqueado LTDA")
+    forn2 = await _fornecedor(admin_engine, t.id, nome="Fornecedor Regular LTDA")
+    d1 = await _debito_autorizado(admin_engine, t.id, forn=forn1, nat=nat, fonte=fonte,
+                                  conta=conta, unidade_id=unidade_id)
+    assert await _situacao_fila(admin_engine, t.id, d1.id) == cron.est.ELEGIVEL
 
-        async with _sm(admin_engine)() as s:
-            await cad.atualizar_fornecedor(
-                s, tenant_id=t.id, fornecedor_id=forn1.id,
-                payload=FornecedorUpdate(situacao_cadastral="IRREGULAR", motivo_pendencia="CND vencida"))
-        assert await _situacao_fila(admin_engine, t.id, d1.id) == cron.est.BLOQUEADA
+    async with _sm(admin_engine)() as s:
+        await cad.atualizar_fornecedor(
+            s, tenant_id=t.id, fornecedor_id=forn1.id,
+            payload=FornecedorUpdate(situacao_cadastral="IRREGULAR", motivo_pendencia="CND vencida"))
+    assert await _situacao_fila(admin_engine, t.id, d1.id) == cron.est.BLOQUEADA
 
-        d2 = await _debito_autorizado(admin_engine, t.id, forn=forn2, nat=nat, fonte=fonte,
-                                      conta=conta, unidade_id=unidade_id)
-        assert await _situacao_fila(admin_engine, t.id, d2.id) == cron.est.ELEGIVEL
+    d2 = await _debito_autorizado(admin_engine, t.id, forn=forn2, nat=nat, fonte=fonte,
+                                  conta=conta, unidade_id=unidade_id)
+    assert await _situacao_fila(admin_engine, t.id, d2.id) == cron.est.ELEGIVEL
 
-        usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
-        async with _sm(admin_engine)() as s:
-            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
-                                       parcela_ids=[parcelas2[0].id])
-        async with _sm(admin_engine)() as s:
-            p = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
-                                        parcela_id=parcelas2[0].id, forma_pagamento="PIX")
-        assert p.status == "PAGA"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+    async with _sm(admin_engine)() as s:
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
+                                   parcela_ids=[parcelas2[0].id])
+    async with _sm(admin_engine)() as s:
+        p = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
+                                    parcela_id=parcelas2[0].id, forma_pagamento="PIX")
+    assert p.status == "PAGA"
 
 
 @pytest.mark.asyncio
@@ -407,56 +361,53 @@ async def test_excecao_sobre_bloqueada_preserva_motivo(admin_engine):
     EXCECAO_AUTORIZADA (nunca passa por ELEGIVEL), porque a exceção já está
     registrada."""
     t = await _provisionar(admin_engine)
-    try:
-        nat, fonte, conta, unidade_id = await _base_compartilhado(admin_engine, t.id)
-        forn = await _fornecedor(admin_engine, t.id, nome="Fornecedor Bloqueado Exc LTDA")
-        d = await _debito_autorizado(admin_engine, t.id, forn=forn, nat=nat, fonte=fonte,
-                                     conta=conta, unidade_id=unidade_id)
-        assert await _situacao_fila(admin_engine, t.id, d.id) == cron.est.ELEGIVEL
+    nat, fonte, conta, unidade_id = await _base_compartilhado(admin_engine, t.id)
+    forn = await _fornecedor(admin_engine, t.id, nome="Fornecedor Bloqueado Exc LTDA")
+    d = await _debito_autorizado(admin_engine, t.id, forn=forn, nat=nat, fonte=fonte,
+                                 conta=conta, unidade_id=unidade_id)
+    assert await _situacao_fila(admin_engine, t.id, d.id) == cron.est.ELEGIVEL
 
-        async with _sm(admin_engine)() as s:
-            await cad.atualizar_fornecedor(
-                s, tenant_id=t.id, fornecedor_id=forn.id,
-                payload=FornecedorUpdate(situacao_cadastral="IRREGULAR", motivo_pendencia="CND vencida"))
-        assert await _situacao_fila(admin_engine, t.id, d.id) == cron.est.BLOQUEADA
+    async with _sm(admin_engine)() as s:
+        await cad.atualizar_fornecedor(
+            s, tenant_id=t.id, fornecedor_id=forn.id,
+            payload=FornecedorUpdate(situacao_cadastral="IRREGULAR", motivo_pendencia="CND vencida"))
+    assert await _situacao_fila(admin_engine, t.id, d.id) == cron.est.BLOQUEADA
 
-        autoridade = await _novo_usuario(admin_engine, t.id, f"aut{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            await cron.registrar_excecao(
-                s, tenant_id=t.id, debito_id=d.id, usuario_id=autoridade,
-                justificativa="Urgência de saúde pública.",
-                fundamento="Art. 5º, parágrafo único, Lei 8.666/93",
-                data_autorizacao=date(2026, 8, 26))
-            await s.commit()
+    autoridade = await _novo_usuario(admin_engine, t.id, f"aut{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        await cron.registrar_excecao(
+            s, tenant_id=t.id, debito_id=d.id, usuario_id=autoridade,
+            justificativa="Urgência de saúde pública.",
+            fundamento="Art. 5º, parágrafo único, Lei 8.666/93",
+            data_autorizacao=date(2026, 8, 26))
+        await s.commit()
 
-        # A exceção FOI criada...
-        async with _sm(admin_engine)() as s:
-            excecoes = (await s.execute(select(ExcecaoCronologica).where(
-                ExcecaoCronologica.tenant_id == t.id, ExcecaoCronologica.id_debito == d.id,
-            ))).scalars().all()
-        assert len(excecoes) == 1
+    # A exceção FOI criada...
+    async with _sm(admin_engine)() as s:
+        excecoes = (await s.execute(select(ExcecaoCronologica).where(
+            ExcecaoCronologica.tenant_id == t.id, ExcecaoCronologica.id_debito == d.id,
+        ))).scalars().all()
+    assert len(excecoes) == 1
 
-        # ...mas a fila continua BLOQUEADA, com o motivo real preservado —
-        # não mascarado por EXCECAO_AUTORIZADA/motivo=None.
-        async with _sm(admin_engine)() as s:
-            from app.models import PosicaoCronologica
-            posicao = (await s.execute(select(PosicaoCronologica).where(
-                PosicaoCronologica.tenant_id == t.id,
-                PosicaoCronologica.id_debito == d.id,
-            ))).scalar_one()
-        assert posicao.situacao == cron.est.BLOQUEADA
-        assert posicao.motivo_bloqueio == "Fornecedor com situação cadastral irregular."
+    # ...mas a fila continua BLOQUEADA, com o motivo real preservado —
+    # não mascarado por EXCECAO_AUTORIZADA/motivo=None.
+    async with _sm(admin_engine)() as s:
+        from app.models import PosicaoCronologica
+        posicao = (await s.execute(select(PosicaoCronologica).where(
+            PosicaoCronologica.tenant_id == t.id,
+            PosicaoCronologica.id_debito == d.id,
+        ))).scalar_one()
+    assert posicao.situacao == cron.est.BLOQUEADA
+    assert posicao.motivo_bloqueio == "Fornecedor com situação cadastral irregular."
 
-        # Regulariza o fornecedor: a reavaliação disparada por
-        # `atualizar_fornecedor` já enxerga `tem_excecao=True` e vai DIRETO
-        # para EXCECAO_AUTORIZADA — nunca passa por ELEGIVEL.
-        async with _sm(admin_engine)() as s:
-            await cad.atualizar_fornecedor(
-                s, tenant_id=t.id, fornecedor_id=forn.id,
-                payload=FornecedorUpdate(situacao_cadastral="REGULAR"))
-        assert await _situacao_fila(admin_engine, t.id, d.id) == cron.est.EXCECAO_AUTORIZADA
-    finally:
-        await _cleanup(admin_engine, t.id)
+    # Regulariza o fornecedor: a reavaliação disparada por
+    # `atualizar_fornecedor` já enxerga `tem_excecao=True` e vai DIRETO
+    # para EXCECAO_AUTORIZADA — nunca passa por ELEGIVEL.
+    async with _sm(admin_engine)() as s:
+        await cad.atualizar_fornecedor(
+            s, tenant_id=t.id, fornecedor_id=forn.id,
+            payload=FornecedorUpdate(situacao_cadastral="REGULAR"))
+    assert await _situacao_fila(admin_engine, t.id, d.id) == cron.est.EXCECAO_AUTORIZADA
 
 
 @pytest.mark.asyncio
@@ -464,33 +415,30 @@ async def test_filas_diferentes_nao_se_preterem(admin_engine):
     """Dois débitos ELEGIVEL, mas em fontes DISTINTAS (chaves diferentes) —
     pagar qualquer um dos dois primeiro não gera 409: filas independentes."""
     t = await _provisionar(admin_engine)
-    try:
-        nat, fonte1, conta1, unidade_id = await _base_compartilhado(admin_engine, t.id)
-        fonte2, conta2 = await _fonte_conta(admin_engine, t.id)
-        forn1 = await _fornecedor(admin_engine, t.id, nome="Fornecedor Fonte 1 LTDA")
-        forn2 = await _fornecedor(admin_engine, t.id, nome="Fornecedor Fonte 2 LTDA")
+    nat, fonte1, conta1, unidade_id = await _base_compartilhado(admin_engine, t.id)
+    fonte2, conta2 = await _fonte_conta(admin_engine, t.id)
+    forn1 = await _fornecedor(admin_engine, t.id, nome="Fornecedor Fonte 1 LTDA")
+    forn2 = await _fornecedor(admin_engine, t.id, nome="Fornecedor Fonte 2 LTDA")
 
-        d1 = await _debito_autorizado(admin_engine, t.id, forn=forn1, nat=nat, fonte=fonte1,
-                                      conta=conta1, unidade_id=unidade_id)
-        d2 = await _debito_autorizado(admin_engine, t.id, forn=forn2, nat=nat, fonte=fonte2,
-                                      conta=conta2, unidade_id=unidade_id)
-        assert await _situacao_fila(admin_engine, t.id, d1.id) == cron.est.ELEGIVEL
-        assert await _situacao_fila(admin_engine, t.id, d2.id) == cron.est.ELEGIVEL
+    d1 = await _debito_autorizado(admin_engine, t.id, forn=forn1, nat=nat, fonte=fonte1,
+                                  conta=conta1, unidade_id=unidade_id)
+    d2 = await _debito_autorizado(admin_engine, t.id, forn=forn2, nat=nat, fonte=fonte2,
+                                  conta=conta2, unidade_id=unidade_id)
+    assert await _situacao_fila(admin_engine, t.id, d1.id) == cron.est.ELEGIVEL
+    assert await _situacao_fila(admin_engine, t.id, d2.id) == cron.est.ELEGIVEL
 
-        usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        # Paga o SEGUNDO fisicamente primeiro — não é preterido de d1 porque
-        # a chave (fonte) é outra.
-        async with _sm(admin_engine)() as s:
-            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
-        async with _sm(admin_engine)() as s:
-            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
-                                       parcela_ids=[parcelas2[0].id])
-        async with _sm(admin_engine)() as s:
-            p2 = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
-                                         parcela_id=parcelas2[0].id, forma_pagamento="PIX")
-        assert p2.status == "PAGA"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    # Paga o SEGUNDO fisicamente primeiro — não é preterido de d1 porque
+    # a chave (fonte) é outra.
+    async with _sm(admin_engine)() as s:
+        parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+    async with _sm(admin_engine)() as s:
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
+                                   parcela_ids=[parcelas2[0].id])
+    async with _sm(admin_engine)() as s:
+        p2 = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
+                                     parcela_id=parcelas2[0].id, forma_pagamento="PIX")
+    assert p2.status == "PAGA"
 
 
 @pytest.mark.asyncio
@@ -499,48 +447,45 @@ async def test_excecao_destrava_e_fica_visivel(admin_engine, cliente):
     preterido → EXCECAO_AUTORIZADA na fila → liberar/pagar passam; a
     justificativa aparece no GET."""
     t = await _provisionar(admin_engine)
-    try:
-        d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
+    d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
 
-        async with _sm(admin_engine)() as s:
-            uid = await _cria_usuario_comum(s, t.id, codigo_transacao="pagamento_autorizar")
-            await s.commit()
+    async with _sm(admin_engine)() as s:
+        uid = await _cria_usuario_comum(s, t.id, codigo_transacao="pagamento_autorizar")
+        await s.commit()
 
-        _as_user(admin_engine, uid, t.id, t.slug)()
-        r = await cliente.post(
-            f"/api/v2/pagamentos/debitos/{d2.id}/excecao-cronologica",
-            json={
-                "justificativa": "Urgência de saúde pública — fornecimento de insumos hospitalares.",
-                "fundamento": "Art. 5º, parágrafo único, Lei 8.666/93 (LRF/licitações)",
-                "data_autorizacao": "2026-08-26",
-            },
-        )
-        assert r.status_code == 201, r.text
-        body = r.json()
-        assert body["fundamento"].startswith("Art. 5º")
+    _as_user(admin_engine, uid, t.id, t.slug)()
+    r = await cliente.post(
+        f"/api/v2/pagamentos/debitos/{d2.id}/excecao-cronologica",
+        json={
+            "justificativa": "Urgência de saúde pública — fornecimento de insumos hospitalares.",
+            "fundamento": "Art. 5º, parágrafo único, Lei 8.666/93 (LRF/licitações)",
+            "data_autorizacao": "2026-08-26",
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["fundamento"].startswith("Art. 5º")
 
-        assert await _situacao_fila(admin_engine, t.id, d2.id) == cron.est.EXCECAO_AUTORIZADA
+    assert await _situacao_fila(admin_engine, t.id, d2.id) == cron.est.EXCECAO_AUTORIZADA
 
-        r_get = await cliente.get(f"/api/v2/pagamentos/debitos/{d2.id}/excecao-cronologica")
-        assert r_get.status_code == 200, r_get.text
-        excecoes = r_get.json()
-        assert len(excecoes) == 1
-        assert "Urgência de saúde" in excecoes[0]["justificativa"]
+    r_get = await cliente.get(f"/api/v2/pagamentos/debitos/{d2.id}/excecao-cronologica")
+    assert r_get.status_code == 200, r_get.text
+    excecoes = r_get.json()
+    assert len(excecoes) == 1
+    assert "Urgência de saúde" in excecoes[0]["justificativa"]
 
-        # Destravado: liberar e pagar o 2º agora passam, mesmo com o 1º ainda
-        # ELEGIVEL à frente.
-        usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
-        async with _sm(admin_engine)() as s:
-            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
-                                       parcela_ids=[parcelas2[0].id])
-        async with _sm(admin_engine)() as s:
-            p = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
-                                        parcela_id=parcelas2[0].id, forma_pagamento="PIX")
-        assert p.status == "PAGA"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    # Destravado: liberar e pagar o 2º agora passam, mesmo com o 1º ainda
+    # ELEGIVEL à frente.
+    usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+    async with _sm(admin_engine)() as s:
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
+                                   parcela_ids=[parcelas2[0].id])
+    async with _sm(admin_engine)() as s:
+        p = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
+                                    parcela_id=parcelas2[0].id, forma_pagamento="PIX")
+    assert p.status == "PAGA"
 
 
 @pytest.mark.asyncio
@@ -548,47 +493,41 @@ async def test_excecao_sem_fundamento_e_422(admin_engine, cliente):
     """`fundamento` é obrigatório — payload sem ele é 422 (validação Pydantic,
     nem chega no service)."""
     t = await _provisionar(admin_engine)
-    try:
-        d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            uid = await _cria_usuario_comum(s, t.id, codigo_transacao="pagamento_autorizar")
-            await s.commit()
+    d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        uid = await _cria_usuario_comum(s, t.id, codigo_transacao="pagamento_autorizar")
+        await s.commit()
 
-        _as_user(admin_engine, uid, t.id, t.slug)()
-        r = await cliente.post(
-            f"/api/v2/pagamentos/debitos/{d2.id}/excecao-cronologica",
-            json={
-                "justificativa": "Urgência de saúde pública.",
-                "data_autorizacao": "2026-08-26",
-            },
-        )
-        assert r.status_code == 422, r.text
-    finally:
-        await _cleanup(admin_engine, t.id)
+    _as_user(admin_engine, uid, t.id, t.slug)()
+    r = await cliente.post(
+        f"/api/v2/pagamentos/debitos/{d2.id}/excecao-cronologica",
+        json={
+            "justificativa": "Urgência de saúde pública.",
+            "data_autorizacao": "2026-08-26",
+        },
+    )
+    assert r.status_code == 422, r.text
 
 
 @pytest.mark.asyncio
 async def test_excecao_por_usuario_sem_pagamento_autorizar_e_403(admin_engine, cliente):
     """Usuário comum com OUTRA permissão (não `pagamento_autorizar`) → 403."""
     t = await _provisionar(admin_engine)
-    try:
-        d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            uid = await _cria_usuario_comum(s, t.id, codigo_transacao="pagamento_solicitar")
-            await s.commit()
+    d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        uid = await _cria_usuario_comum(s, t.id, codigo_transacao="pagamento_solicitar")
+        await s.commit()
 
-        _as_user(admin_engine, uid, t.id, t.slug)()
-        r = await cliente.post(
-            f"/api/v2/pagamentos/debitos/{d2.id}/excecao-cronologica",
-            json={
-                "justificativa": "Urgência de saúde pública.",
-                "fundamento": "Art. 5º, parágrafo único, Lei 8.666/93",
-                "data_autorizacao": "2026-08-26",
-            },
-        )
-        assert r.status_code == 403, r.text
-    finally:
-        await _cleanup(admin_engine, t.id)
+    _as_user(admin_engine, uid, t.id, t.slug)()
+    r = await cliente.post(
+        f"/api/v2/pagamentos/debitos/{d2.id}/excecao-cronologica",
+        json={
+            "justificativa": "Urgência de saúde pública.",
+            "fundamento": "Art. 5º, parágrafo único, Lei 8.666/93",
+            "data_autorizacao": "2026-08-26",
+        },
+    )
+    assert r.status_code == 403, r.text
 
 
 # ---------------------------------------------------------------------------
@@ -600,28 +539,25 @@ async def test_selecionado_com_parcela_liberada_nao_pretere(admin_engine):
     """1º com parcela LIBERADA (chamada anterior) → liberar e pagar o 2º
     passam: a vez do 1º foi cumprida ao ser selecionado em ordem."""
     t = await _provisionar(admin_engine)
-    try:
-        d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
-        usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            parcelas1 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d1.id)
-        async with _sm(admin_engine)() as s:
-            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
-                                       parcela_ids=[parcelas1[0].id])
+    d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
+    usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        parcelas1 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d1.id)
+    async with _sm(admin_engine)() as s:
+        await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
+                                   parcela_ids=[parcelas1[0].id])
 
-        async with _sm(admin_engine)() as s:
-            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
-        async with _sm(admin_engine)() as s:
-            liberadas2 = await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
-                                                     parcela_ids=[parcelas2[0].id])
-        assert liberadas2[0].status == "LIBERADA"
+    async with _sm(admin_engine)() as s:
+        parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+    async with _sm(admin_engine)() as s:
+        liberadas2 = await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
+                                                 parcela_ids=[parcelas2[0].id])
+    assert liberadas2[0].status == "LIBERADA"
 
-        async with _sm(admin_engine)() as s:
-            paga2 = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
-                                            parcela_id=parcelas2[0].id, forma_pagamento="PIX")
-        assert paga2.status == "PAGA"
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        paga2 = await aut.pagar_parcela(s, tenant_id=t.id, usuario_id=usuario,
+                                        parcela_id=parcelas2[0].id, forma_pagamento="PIX")
+    assert paga2.status == "PAGA"
 
 
 @pytest.mark.asyncio
@@ -630,20 +566,17 @@ async def test_lote_libera_dois_debitos_numa_chamada(admin_engine):
     hoje dá 409, porque o 1º só era escrito depois de checar o 2º; a vez do
     1º dentro do próprio lote tem de valer imediatamente."""
     t = await _provisionar(admin_engine)
-    try:
-        d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
-        usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            parcelas1 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d1.id)
-            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
-        async with _sm(admin_engine)() as s:
-            liberadas = await aut.liberar_parcelas(
-                s, tenant_id=t.id, usuario_id=usuario,
-                parcela_ids=[parcelas1[0].id, parcelas2[0].id])
-        assert len(liberadas) == 2
-        assert all(p.status == "LIBERADA" for p in liberadas)
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
+    usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        parcelas1 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d1.id)
+        parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+    async with _sm(admin_engine)() as s:
+        liberadas = await aut.liberar_parcelas(
+            s, tenant_id=t.id, usuario_id=usuario,
+            parcela_ids=[parcelas1[0].id, parcelas2[0].id])
+    assert len(liberadas) == 2
+    assert all(p.status == "LIBERADA" for p in liberadas)
 
 
 @pytest.mark.asyncio
@@ -652,16 +585,13 @@ async def test_elegivel_puro_continua_bloqueando_regressao(admin_engine):
     iniciado) continua preterindo o 2º — o filtro novo só exclui quem já foi
     selecionado, não quem simplesmente está na frente na fila."""
     t = await _provisionar(admin_engine)
-    try:
-        d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
-        usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
-                                           parcela_ids=[parcelas2[0].id])
-            assert exc.value.status_code == 409
-            assert f"#{d1.id}" in exc.value.detail
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d1, d2, _fonte, _conta = await _dois_elegiveis(admin_engine, t.id)
+    usuario = await _novo_usuario(admin_engine, t.id, f"tes{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        parcelas2 = await deb.listar_parcelas(s, tenant_id=t.id, debito_id=d2.id)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await aut.liberar_parcelas(s, tenant_id=t.id, usuario_id=usuario,
+                                       parcela_ids=[parcelas2[0].id])
+        assert exc.value.status_code == 409
+        assert f"#{d1.id}" in exc.value.detail

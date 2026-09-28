@@ -75,23 +75,6 @@ async def _usuario_id(engine, tenant_id: int) -> int:
         )
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sessionmaker(engine)() as s:
-        for stmt in (
-            "DELETE FROM frota.solicitacao_veiculo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 def _payload(**over) -> SolicitacaoVeiculoCreate:
     base = dict(
         finalidade="Visita técnica", destino="Sede regional",
@@ -105,24 +88,21 @@ def _payload(**over) -> SolicitacaoVeiculoCreate:
 # ---------- CRUD básico + solicitante server-side ----------
 async def test_criar_e_editar(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, tenant.id)
-        async with _sessionmaker(admin_engine)() as s:
-            criada = await frota_svc.criar_solicitacao(
-                s, tenant_id=tenant.id, id_usuario_solicitante=uid, payload=_payload()
-            )
-            assert criada.id and criada.status == "solicitada"
-            assert criada.id_usuario_solicitante == uid
-            assert criada.necessita_motorista is False
-        async with _sessionmaker(admin_engine)() as s:
-            editada = await frota_svc.atualizar_solicitacao(
-                s, tenant_id=tenant.id, solicitacao_id=criada.id,
-                payload=SolicitacaoVeiculoUpdate(destino="Outro destino", quantidade_passageiros=5),
-            )
-            assert editada.destino == "Outro destino" and editada.quantidade_passageiros == 5
-            assert editada.atualizado_em is not None
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _usuario_id(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        criada = await frota_svc.criar_solicitacao(
+            s, tenant_id=tenant.id, id_usuario_solicitante=uid, payload=_payload()
+        )
+        assert criada.id and criada.status == "solicitada"
+        assert criada.id_usuario_solicitante == uid
+        assert criada.necessita_motorista is False
+    async with _sessionmaker(admin_engine)() as s:
+        editada = await frota_svc.atualizar_solicitacao(
+            s, tenant_id=tenant.id, solicitacao_id=criada.id,
+            payload=SolicitacaoVeiculoUpdate(destino="Outro destino", quantidade_passageiros=5),
+        )
+        assert editada.destino == "Outro destino" and editada.quantidade_passageiros == 5
+        assert editada.atualizado_em is not None
 
 
 def test_create_schema_ignora_solicitante_e_status():
@@ -180,157 +160,128 @@ async def _nova(engine, tenant_id, uid):
 
 async def test_aprovar(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, tenant.id)
-        sol = await _nova(admin_engine, tenant.id, uid)
-        async with _sessionmaker(admin_engine)() as s:
-            a = await frota_svc.aprovar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
-            assert a.status == "aprovada"
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _usuario_id(admin_engine, tenant.id)
+    sol = await _nova(admin_engine, tenant.id, uid)
+    async with _sessionmaker(admin_engine)() as s:
+        a = await frota_svc.aprovar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
+        assert a.status == "aprovada"
 
 
 async def test_rejeitar_define_justificativa(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, tenant.id)
-        sol = await _nova(admin_engine, tenant.id, uid)
-        async with _sessionmaker(admin_engine)() as s:
-            r = await frota_svc.rejeitar_solicitacao(
-                s, tenant_id=tenant.id, solicitacao_id=sol.id, justificativa="Sem veículo disponível"
-            )
-            assert r.status == "rejeitada" and r.justificativa_rejeicao == "Sem veículo disponível"
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _usuario_id(admin_engine, tenant.id)
+    sol = await _nova(admin_engine, tenant.id, uid)
+    async with _sessionmaker(admin_engine)() as s:
+        r = await frota_svc.rejeitar_solicitacao(
+            s, tenant_id=tenant.id, solicitacao_id=sol.id, justificativa="Sem veículo disponível"
+        )
+        assert r.status == "rejeitada" and r.justificativa_rejeicao == "Sem veículo disponível"
 
 
 async def test_cancelar_de_solicitada(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, tenant.id)
-        sol = await _nova(admin_engine, tenant.id, uid)
-        async with _sessionmaker(admin_engine)() as s:
-            c = await frota_svc.cancelar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
-            assert c.status == "cancelada"
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _usuario_id(admin_engine, tenant.id)
+    sol = await _nova(admin_engine, tenant.id, uid)
+    async with _sessionmaker(admin_engine)() as s:
+        c = await frota_svc.cancelar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
+        assert c.status == "cancelada"
 
 
 async def test_cancelar_de_aprovada(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, tenant.id)
-        sol = await _nova(admin_engine, tenant.id, uid)
-        async with _sessionmaker(admin_engine)() as s:
-            await frota_svc.aprovar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
-        async with _sessionmaker(admin_engine)() as s:
-            c = await frota_svc.cancelar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
-            assert c.status == "cancelada"
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _usuario_id(admin_engine, tenant.id)
+    sol = await _nova(admin_engine, tenant.id, uid)
+    async with _sessionmaker(admin_engine)() as s:
+        await frota_svc.aprovar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
+    async with _sessionmaker(admin_engine)() as s:
+        c = await frota_svc.cancelar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
+        assert c.status == "cancelada"
 
 
 async def test_transicoes_invalidas(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, tenant.id)
+    uid = await _usuario_id(admin_engine, tenant.id)
 
-        # cancelada → aprovar / rejeitar = 409
-        sol = await _nova(admin_engine, tenant.id, uid)
-        async with _sessionmaker(admin_engine)() as s:
-            await frota_svc.cancelar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as e1:
-                await frota_svc.aprovar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
-            assert e1.value.status_code == 409
-            with pytest.raises(HTTPException) as e2:
-                await frota_svc.rejeitar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id, justificativa="x")
-            assert e2.value.status_code == 409
+    # cancelada → aprovar / rejeitar = 409
+    sol = await _nova(admin_engine, tenant.id, uid)
+    async with _sessionmaker(admin_engine)() as s:
+        await frota_svc.cancelar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as e1:
+            await frota_svc.aprovar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
+        assert e1.value.status_code == 409
+        with pytest.raises(HTTPException) as e2:
+            await frota_svc.rejeitar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id, justificativa="x")
+        assert e2.value.status_code == 409
 
-        # rejeitada → cancelar / aprovar = 409
-        sol2 = await _nova(admin_engine, tenant.id, uid)
-        async with _sessionmaker(admin_engine)() as s:
-            await frota_svc.rejeitar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol2.id, justificativa="x")
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as e3:
-                await frota_svc.cancelar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol2.id)
-            assert e3.value.status_code == 409
-            with pytest.raises(HTTPException) as e4:
-                await frota_svc.aprovar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol2.id)
-            assert e4.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    # rejeitada → cancelar / aprovar = 409
+    sol2 = await _nova(admin_engine, tenant.id, uid)
+    async with _sessionmaker(admin_engine)() as s:
+        await frota_svc.rejeitar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol2.id, justificativa="x")
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as e3:
+            await frota_svc.cancelar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol2.id)
+        assert e3.value.status_code == 409
+        with pytest.raises(HTTPException) as e4:
+            await frota_svc.aprovar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol2.id)
+        assert e4.value.status_code == 409
 
 
 async def test_editar_so_quando_solicitada(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, tenant.id)
-        sol = await _nova(admin_engine, tenant.id, uid)
-        async with _sessionmaker(admin_engine)() as s:
-            await frota_svc.aprovar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.atualizar_solicitacao(
-                    s, tenant_id=tenant.id, solicitacao_id=sol.id,
-                    payload=SolicitacaoVeiculoUpdate(destino="tarde demais"),
-                )
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _usuario_id(admin_engine, tenant.id)
+    sol = await _nova(admin_engine, tenant.id, uid)
+    async with _sessionmaker(admin_engine)() as s:
+        await frota_svc.aprovar_solicitacao(s, tenant_id=tenant.id, solicitacao_id=sol.id)
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.atualizar_solicitacao(
+                s, tenant_id=tenant.id, solicitacao_id=sol.id,
+                payload=SolicitacaoVeiculoUpdate(destino="tarde demais"),
+            )
+        assert exc.value.status_code == 409
 
 
 async def test_update_datas_incoerentes_no_service(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, tenant.id)
-        sol = await _nova(admin_engine, tenant.id, uid)
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.atualizar_solicitacao(
-                    s, tenant_id=tenant.id, solicitacao_id=sol.id,
-                    payload=SolicitacaoVeiculoUpdate(data_retorno_prevista=SAIDA.replace(hour=6)),
-                )
-            assert exc.value.status_code == 400
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _usuario_id(admin_engine, tenant.id)
+    sol = await _nova(admin_engine, tenant.id, uid)
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.atualizar_solicitacao(
+                s, tenant_id=tenant.id, solicitacao_id=sol.id,
+                payload=SolicitacaoVeiculoUpdate(data_retorno_prevista=SAIDA.replace(hour=6)),
+            )
+        assert exc.value.status_code == 400
 
 
 # ---------- vínculos / cross-tenant ----------
 async def test_unidade_de_outro_tenant_rejeitada(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        ua = await _usuario_id(admin_engine, a.id)
-        uni_b = await _unidade_id(admin_engine, b.id)
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.criar_solicitacao(
-                    s, tenant_id=a.id, id_usuario_solicitante=ua,
-                    payload=_payload(id_unidade_solicitante=uni_b),
-                )
-            assert exc.value.status_code == 400
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    ua = await _usuario_id(admin_engine, a.id)
+    uni_b = await _unidade_id(admin_engine, b.id)
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.criar_solicitacao(
+                s, tenant_id=a.id, id_usuario_solicitante=ua,
+                payload=_payload(id_unidade_solicitante=uni_b),
+            )
+        assert exc.value.status_code == 400
 
 
 async def test_cross_tenant_404(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        ua = await _usuario_id(admin_engine, a.id)
-        sol = await _nova(admin_engine, a.id, ua)
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.obter_solicitacao(s, tenant_id=b.id, solicitacao_id=sol.id)
-            assert exc.value.status_code == 404
-            with pytest.raises(HTTPException) as exc2:
-                await frota_svc.aprovar_solicitacao(s, tenant_id=b.id, solicitacao_id=sol.id)
-            assert exc2.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    ua = await _usuario_id(admin_engine, a.id)
+    sol = await _nova(admin_engine, a.id, ua)
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.obter_solicitacao(s, tenant_id=b.id, solicitacao_id=sol.id)
+        assert exc.value.status_code == 404
+        with pytest.raises(HTTPException) as exc2:
+            await frota_svc.aprovar_solicitacao(s, tenant_id=b.id, solicitacao_id=sol.id)
+        assert exc2.value.status_code == 404
 
 
 def test_create_payload_nao_altera_tenant_via_schema():
@@ -391,34 +342,30 @@ async def _insert_solic(session: AsyncSession, *, tenant_id: int, id_user: int) 
 async def test_rls_isolada_entre_tenants(admin_engine, app_session: AsyncSession):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        ua = await _usuario_id(admin_engine, a.id)
-        ub = await _usuario_id(admin_engine, b.id)
+    ua = await _usuario_id(admin_engine, a.id)
+    ub = await _usuario_id(admin_engine, b.id)
 
-        await _set_tenant(app_session, a.id)
-        id_a = await _insert_solic(app_session, tenant_id=a.id, id_user=ua)
+    await _set_tenant(app_session, a.id)
+    id_a = await _insert_solic(app_session, tenant_id=a.id, id_user=ua)
+    await app_session.commit()
+
+    await _set_tenant(app_session, b.id)
+    id_b = await _insert_solic(app_session, tenant_id=b.id, id_user=ub)
+    await app_session.commit()
+
+    await _set_tenant(app_session, a.id)
+    visiveis = (
+        await app_session.execute(
+            text("SELECT id FROM frota.solicitacao_veiculo WHERE id IN (:a, :b)"),
+            {"a": id_a, "b": id_b},
+        )
+    ).scalars().all()
+    assert id_a in visiveis and id_b not in visiveis
+    await app_session.rollback()
+
+    await _set_tenant(app_session, a.id)
+    with pytest.raises(DBAPIError) as exc:
+        await _insert_solic(app_session, tenant_id=b.id, id_user=ub)
         await app_session.commit()
-
-        await _set_tenant(app_session, b.id)
-        id_b = await _insert_solic(app_session, tenant_id=b.id, id_user=ub)
-        await app_session.commit()
-
-        await _set_tenant(app_session, a.id)
-        visiveis = (
-            await app_session.execute(
-                text("SELECT id FROM frota.solicitacao_veiculo WHERE id IN (:a, :b)"),
-                {"a": id_a, "b": id_b},
-            )
-        ).scalars().all()
-        assert id_a in visiveis and id_b not in visiveis
-        await app_session.rollback()
-
-        await _set_tenant(app_session, a.id)
-        with pytest.raises(DBAPIError) as exc:
-            await _insert_solic(app_session, tenant_id=b.id, id_user=ub)
-            await app_session.commit()
-        assert "row-level security" in str(exc.value).lower() or "policy" in str(exc.value).lower()
-        await app_session.rollback()
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    assert "row-level security" in str(exc.value).lower() or "policy" in str(exc.value).lower()
+    await app_session.rollback()

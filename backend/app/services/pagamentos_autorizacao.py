@@ -10,8 +10,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
-    Alcada, ContaBancaria, Debito, DebitoHistorico, MovimentacaoConta, OrdemPagamento,
-    OrdemPagamentoDebito, Parcela,
+    Alcada, ContaBancaria, Debito, DebitoHistorico, LotePagamentoParcela, MovimentacaoConta,
+    OrdemPagamento, OrdemPagamentoDebito, Parcela,
 )
 from ..schemas.pagamentos import ContaElegivelOut, GrupoAutorizacaoIn
 from . import pagamentos_cadastros as cad
@@ -22,6 +22,7 @@ from .pagamentos_debitos import (
     PagamentoDebitoError, _registrar_transicao, listar_parcelas, obter_debito,
     validadores_do_debito,
 )
+from .pagamentos_guardas import assert_segregacao
 
 # Traduções de status legado (§4.5) para as três dimensões — F5. Só o que
 # este arquivo precisa; não viraram funções compartilhadas em
@@ -417,6 +418,21 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
     if p.status != "LIBERADA":
         raise PagamentoDebitoError(
             f"Parcela não liberada para pagamento (está '{p.status}').", status.HTTP_409_CONFLICT)
+    # O lote (F4) não muda `Parcela.status` — ela continua LIBERADA até o
+    # retorno do banco. Pagar aqui uma parcela que está num lote ativo gerava
+    # uma SAIDA agora e outra no `processar_retorno`: saldo descontado em dobro.
+    # "Ativo" = qualquer vínculo que não seja FALHOU (cancelar apaga o vínculo),
+    # o mesmo critério de `pagamentos_lotes._validar_parcelas_para_lote`.
+    em_lote = (await db.execute(select(LotePagamentoParcela.id).where(
+        LotePagamentoParcela.tenant_id == tenant_id, LotePagamentoParcela.id_parcela == p.id,
+        LotePagamentoParcela.situacao != "FALHOU"))).scalar_one_or_none()
+    if em_lote is not None:
+        raise PagamentoDebitoError(
+            "Parcela está num lote de pagamento ativo — o pagamento sai pelo retorno do "
+            "lote, não pelo pagamento avulso.", status.HTTP_409_CONFLICT)
+    # Mesma segregação que `enviar_lote` exige: sem ela o avulso, com a mesma
+    # permissão `pagamento_pagar`, era um desvio trivial da regra do lote.
+    assert_segregacao(d, usuario_id=usuario_id, ato="PAGAR")
     quando = data_pagamento or _utcnow().date()
     if d.id_conta_pagadora is None:
         raise PagamentoDebitoError(

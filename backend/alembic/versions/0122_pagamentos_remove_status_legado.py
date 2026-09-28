@@ -1,7 +1,7 @@
 """Pagamentos F5 — remove a coluna status legada de debito.
 
 Revision ID: 0122
-Revises: 0120
+Revises: 0121
 Create Date: 2026-09-20
 
 Numerada 0122, não 0121: a F4 (Task 1, PR #68, branch `pagamentos/f4-tesouraria`,
@@ -52,7 +52,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "0122"
-down_revision: str | Sequence[str] | None = "0120"
+down_revision: str | Sequence[str] | None = "0121"
 branch_labels = None
 depends_on = None
 S = "pagamentos"

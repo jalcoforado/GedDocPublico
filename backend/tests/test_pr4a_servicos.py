@@ -65,132 +65,95 @@ async def _criar_tipo_processo(engine, tenant_id: int) -> int:
         return tp.id
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sessionmaker(engine)() as s:
-        for stmt in (
-            "DELETE FROM protocolos.servico WHERE tenant_id=:t",
-            "DELETE FROM protocolos.assunto WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.especie_documental WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 # ---------- CRUD básico ----------
 async def test_criar_e_editar_servico(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            criado = await servico_svc.criar_servico(
-                s, tenant_id=tenant.id,
-                payload=ServicoCreate(
-                    nome="Certidão de IPTU", slug="certidao-iptu",
-                    descricao_curta="Emissão de certidão",
-                    documentos_exigidos=[{"nome": "RG", "obrigatorio": True}],
-                ),
-            )
-            assert criado.id and criado.ativo is True and criado.nivel_sigilo_padrao == "ostensivo"
-            assert criado.canal_entrada_permitido == "portal"
-            # PR 4c — `key` é injetado pela normalização (slug do nome).
-            assert criado.documentos_exigidos == [
-                {"key": "rg", "nome": "RG", "obrigatorio": True, "descricao": None}
-            ]
+    async with _sessionmaker(admin_engine)() as s:
+        criado = await servico_svc.criar_servico(
+            s, tenant_id=tenant.id,
+            payload=ServicoCreate(
+                nome="Certidão de IPTU", slug="certidao-iptu",
+                descricao_curta="Emissão de certidão",
+                documentos_exigidos=[{"nome": "RG", "obrigatorio": True}],
+            ),
+        )
+        assert criado.id and criado.ativo is True and criado.nivel_sigilo_padrao == "ostensivo"
+        assert criado.canal_entrada_permitido == "portal"
+        # PR 4c — `key` é injetado pela normalização (slug do nome).
+        assert criado.documentos_exigidos == [
+            {"key": "rg", "nome": "RG", "obrigatorio": True, "descricao": None}
+        ]
 
-        async with _sessionmaker(admin_engine)() as s:
-            editado = await servico_svc.atualizar_servico(
-                s, tenant_id=tenant.id, servico_id=criado.id,
-                payload=ServicoUpdate(nome="Certidão de IPTU (atualizada)", destaque=True),
-            )
-            assert editado.nome == "Certidão de IPTU (atualizada)"
-            assert editado.destaque is True
-            assert editado.atualizado_em is not None
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        editado = await servico_svc.atualizar_servico(
+            s, tenant_id=tenant.id, servico_id=criado.id,
+            payload=ServicoUpdate(nome="Certidão de IPTU (atualizada)", destaque=True),
+        )
+        assert editado.nome == "Certidão de IPTU (atualizada)"
+        assert editado.destaque is True
+        assert editado.atualizado_em is not None
 
 
 async def test_ativar_desativar(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            sv = await servico_svc.criar_servico(
-                s, tenant_id=tenant.id, payload=ServicoCreate(nome="X", slug="serv-x")
-            )
-        async with _sessionmaker(admin_engine)() as s:
-            d = await servico_svc.set_ativo(s, tenant_id=tenant.id, servico_id=sv.id, ativo=False)
-            assert d.ativo is False
-        async with _sessionmaker(admin_engine)() as s:
-            a = await servico_svc.set_ativo(s, tenant_id=tenant.id, servico_id=sv.id, ativo=True)
-            assert a.ativo is True
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        sv = await servico_svc.criar_servico(
+            s, tenant_id=tenant.id, payload=ServicoCreate(nome="X", slug="serv-x")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        d = await servico_svc.set_ativo(s, tenant_id=tenant.id, servico_id=sv.id, ativo=False)
+        assert d.ativo is False
+    async with _sessionmaker(admin_engine)() as s:
+        a = await servico_svc.set_ativo(s, tenant_id=tenant.id, servico_id=sv.id, ativo=True)
+        assert a.ativo is True
 
 
 # ---------- slug ----------
 async def test_slug_unico_por_tenant(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
+    async with _sessionmaker(admin_engine)() as s:
+        await servico_svc.criar_servico(
+            s, tenant_id=tenant.id, payload=ServicoCreate(nome="A", slug="dup-slug")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
             await servico_svc.criar_servico(
-                s, tenant_id=tenant.id, payload=ServicoCreate(nome="A", slug="dup-slug")
+                s, tenant_id=tenant.id, payload=ServicoCreate(nome="B", slug="dup-slug")
             )
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await servico_svc.criar_servico(
-                    s, tenant_id=tenant.id, payload=ServicoCreate(nome="B", slug="dup-slug")
-                )
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+        assert exc.value.status_code == 409
 
 
 async def test_mesmo_slug_em_tenants_diferentes_ok(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            sa = await servico_svc.criar_servico(
-                s, tenant_id=a.id, payload=ServicoCreate(nome="A", slug="mesmo-slug")
-            )
-        async with _sessionmaker(admin_engine)() as s:
-            sb = await servico_svc.criar_servico(
-                s, tenant_id=b.id, payload=ServicoCreate(nome="B", slug="mesmo-slug")
-            )
-        assert sa.slug == sb.slug and sa.tenant_id != sb.tenant_id
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    async with _sessionmaker(admin_engine)() as s:
+        sa = await servico_svc.criar_servico(
+            s, tenant_id=a.id, payload=ServicoCreate(nome="A", slug="mesmo-slug")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        sb = await servico_svc.criar_servico(
+            s, tenant_id=b.id, payload=ServicoCreate(nome="B", slug="mesmo-slug")
+        )
+    assert sa.slug == sb.slug and sa.tenant_id != sb.tenant_id
 
 
 # ---------- cross-tenant + tenant_id imutável ----------
 async def test_cross_tenant_404(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            sv = await servico_svc.criar_servico(
-                s, tenant_id=a.id, payload=ServicoCreate(nome="A", slug="serv-a")
+    async with _sessionmaker(admin_engine)() as s:
+        sv = await servico_svc.criar_servico(
+            s, tenant_id=a.id, payload=ServicoCreate(nome="A", slug="serv-a")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await servico_svc.obter_servico(s, tenant_id=b.id, servico_id=sv.id)
+        assert exc.value.status_code == 404
+        with pytest.raises(HTTPException) as exc2:
+            await servico_svc.atualizar_servico(
+                s, tenant_id=b.id, servico_id=sv.id, payload=ServicoUpdate(nome="hack")
             )
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await servico_svc.obter_servico(s, tenant_id=b.id, servico_id=sv.id)
-            assert exc.value.status_code == 404
-            with pytest.raises(HTTPException) as exc2:
-                await servico_svc.atualizar_servico(
-                    s, tenant_id=b.id, servico_id=sv.id, payload=ServicoUpdate(nome="hack")
-                )
-            assert exc2.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+        assert exc2.value.status_code == 404
 
 
 def test_update_schema_descarta_tenant_id():
@@ -204,58 +167,48 @@ def test_update_schema_descarta_tenant_id():
 
 async def test_payload_nao_altera_tenant_id(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            sv = await servico_svc.criar_servico(
-                s, tenant_id=tenant.id, payload=ServicoCreate(nome="X", slug="serv-y")
-            )
-        async with _sessionmaker(admin_engine)() as s:
-            # tenant_id no corpo é ignorado pelo schema; serviço permanece no tenant.
-            await servico_svc.atualizar_servico(
-                s, tenant_id=tenant.id, servico_id=sv.id,
-                payload=ServicoUpdate.model_validate({"nome": "Y", "tenant_id": 999999}),
-            )
-        async with _sessionmaker(admin_engine)() as s:
-            row = (await s.execute(select(Servico).where(Servico.id == sv.id))).scalar_one()
-            assert row.tenant_id == tenant.id
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        sv = await servico_svc.criar_servico(
+            s, tenant_id=tenant.id, payload=ServicoCreate(nome="X", slug="serv-y")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        # tenant_id no corpo é ignorado pelo schema; serviço permanece no tenant.
+        await servico_svc.atualizar_servico(
+            s, tenant_id=tenant.id, servico_id=sv.id,
+            payload=ServicoUpdate.model_validate({"nome": "Y", "tenant_id": 999999}),
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        row = (await s.execute(select(Servico).where(Servico.id == sv.id))).scalar_one()
+        assert row.tenant_id == tenant.id
 
 
 # ---------- defaults same-tenant ----------
 async def test_default_do_tenant_aceito(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        uid = await _unidade_id(admin_engine, tenant.id)
-        tp = await _criar_tipo_processo(admin_engine, tenant.id)
-        async with _sessionmaker(admin_engine)() as s:
-            sv = await servico_svc.criar_servico(
-                s, tenant_id=tenant.id,
-                payload=ServicoCreate(
-                    nome="X", slug="serv-def",
-                    id_unidade_responsavel=uid, id_tipo_processo_padrao=tp,
-                ),
-            )
-            assert sv.id_unidade_responsavel == uid and sv.id_tipo_processo_padrao == tp
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    uid = await _unidade_id(admin_engine, tenant.id)
+    tp = await _criar_tipo_processo(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        sv = await servico_svc.criar_servico(
+            s, tenant_id=tenant.id,
+            payload=ServicoCreate(
+                nome="X", slug="serv-def",
+                id_unidade_responsavel=uid, id_tipo_processo_padrao=tp,
+            ),
+        )
+        assert sv.id_unidade_responsavel == uid and sv.id_tipo_processo_padrao == tp
 
 
 async def test_default_de_outro_tenant_rejeitado(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        uid_b = await _unidade_id(admin_engine, b.id)
-        async with _sessionmaker(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await servico_svc.criar_servico(
-                    s, tenant_id=a.id,
-                    payload=ServicoCreate(nome="X", slug="serv-z", id_unidade_responsavel=uid_b),
-                )
-            assert exc.value.status_code == 400
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    uid_b = await _unidade_id(admin_engine, b.id)
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await servico_svc.criar_servico(
+                s, tenant_id=a.id,
+                payload=ServicoCreate(nome="X", slug="serv-z", id_unidade_responsavel=uid_b),
+            )
+        assert exc.value.status_code == 400
 
 
 # ---------- documentos_exigidos inválido (422 via schema) ----------
@@ -277,26 +230,23 @@ def test_documentos_lista_valida_ok():
 # ---------- público: só ativos do tenant + projeção segura ----------
 async def test_publico_lista_apenas_ativos(admin_engine):
     tenant = await _provisionar(admin_engine)
-    try:
-        async with _sessionmaker(admin_engine)() as s:
-            await servico_svc.criar_servico(
-                s, tenant_id=tenant.id, payload=ServicoCreate(nome="Ativo", slug="serv-ativo")
-            )
-            inativo = await servico_svc.criar_servico(
-                s, tenant_id=tenant.id, payload=ServicoCreate(nome="Inativo", slug="serv-inativo")
-            )
-            await servico_svc.set_ativo(s, tenant_id=tenant.id, servico_id=inativo.id, ativo=False)
-        async with _sessionmaker(admin_engine)() as s:
-            pub = await servico_svc.listar_publico(s, tenant_id=tenant.id)
-        nomes = {p.nome for p in pub}
-        assert "Ativo" in nomes and "Inativo" not in nomes
-        # projeção pública não expõe campos internos
-        campos = pub[0].model_dump().keys()
-        for interno in ("id", "tenant_id", "nivel_sigilo_padrao", "canal_entrada_permitido", "ativo", "excluido"):
-            assert interno not in campos
-        assert pub[0].solicitar_habilitado is False
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    async with _sessionmaker(admin_engine)() as s:
+        await servico_svc.criar_servico(
+            s, tenant_id=tenant.id, payload=ServicoCreate(nome="Ativo", slug="serv-ativo")
+        )
+        inativo = await servico_svc.criar_servico(
+            s, tenant_id=tenant.id, payload=ServicoCreate(nome="Inativo", slug="serv-inativo")
+        )
+        await servico_svc.set_ativo(s, tenant_id=tenant.id, servico_id=inativo.id, ativo=False)
+    async with _sessionmaker(admin_engine)() as s:
+        pub = await servico_svc.listar_publico(s, tenant_id=tenant.id)
+    nomes = {p.nome for p in pub}
+    assert "Ativo" in nomes and "Inativo" not in nomes
+    # projeção pública não expõe campos internos
+    campos = pub[0].model_dump().keys()
+    for interno in ("id", "tenant_id", "nivel_sigilo_padrao", "canal_entrada_permitido", "ativo", "excluido"):
+        assert interno not in campos
+    assert pub[0].solicitar_habilitado is False
 
 
 # ---------- gate de permissão `servico` (monkeypatch) ----------

@@ -33,7 +33,6 @@ from datetime import date, datetime, timedelta
 import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app.main import app
@@ -88,19 +87,14 @@ async def _ocupar(engine, tenant_id: int, ponto_id: int, vaga: int, perm_id: int
 
 
 async def _limpar(engine, tenant_id: int) -> None:
+    """Higiene do app entre testes: solta os `dependency_overrides` e descarta o pool do engine
+    global (senão ele sobrevive ao event loop do teste e o seguinte quebra). Os dados do tenant
+    saem em `_limpa_tenants_do_modulo` (conftest); os parâmetros ficam só para não mexer nos
+    pontos de chamada."""
     app.dependency_overrides.clear()
     from app.database import engine as app_engine
 
     await app_engine.dispose()
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM transporte_regulado.ponto_ocupacao WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.ponto WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.alvara WHERE tenant_id=:t",
-            "DELETE FROM transporte_regulado.permissionario WHERE tenant_id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
 
 
 # ------------------------------------------------------------------ cadastro

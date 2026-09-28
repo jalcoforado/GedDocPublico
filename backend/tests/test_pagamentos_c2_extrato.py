@@ -39,27 +39,6 @@ async def _provisionar(engine):
     return tenant
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.conciliacao WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.lancamento_extrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.extrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _novo_usuario(engine, tenant_id, sufixo):
     async with _sm(engine)() as s:
         r = await s.execute(text(
@@ -147,110 +126,98 @@ def test_parse_ofx_malformado_levanta_erro_claro():
 
 async def test_parse_ofx_malformado_importar_extrato_422(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        conta = await _conta(admin_engine, t.id)
-        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await conc.importar_extrato(
-                    s, tenant_id=t.id, usuario_id=uid,
-                    payload=ImportarExtratoIn(
-                        id_conta=conta.id, nome_arquivo="ruim.ofx", formato="OFX",
-                        conteudo="isto nao e um ofx"))
-            assert exc.value.status_code == 422
-    finally:
-        await _cleanup(admin_engine, t.id)
+    conta = await _conta(admin_engine, t.id)
+    uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await conc.importar_extrato(
+                s, tenant_id=t.id, usuario_id=uid,
+                payload=ImportarExtratoIn(
+                    id_conta=conta.id, nome_arquivo="ruim.ofx", formato="OFX",
+                    conteudo="isto nao e um ofx"))
+        assert exc.value.status_code == 422
 
 
 # ---------- (d) importar OFX cria extrato + lançamentos com id_externo ----------
 
 async def test_importar_ofx_cria_lancamentos_com_id_externo(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        conta = await _conta(admin_engine, t.id)
-        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
-        conteudo = (_FIXTURES / "extrato_exemplo.ofx").read_text(encoding="utf-8")
-        async with _sm(admin_engine)() as s:
-            ex = (await conc.importar_extrato(
-                s, tenant_id=t.id, usuario_id=uid,
-                payload=ImportarExtratoIn(
-                    id_conta=conta.id, nome_arquivo="ext.ofx", formato="OFX", conteudo=conteudo))).extrato
-        assert ex.qtd_lancamentos == 3
-        async with _sm(admin_engine)() as s:
-            lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
-        assert {l.id_externo for l in lancs} == {"F001", "F002", "F003"}
-        assert all(l.id_conta == conta.id for l in lancs)
-    finally:
-        await _cleanup(admin_engine, t.id)
+    conta = await _conta(admin_engine, t.id)
+    uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+    conteudo = (_FIXTURES / "extrato_exemplo.ofx").read_text(encoding="utf-8")
+    async with _sm(admin_engine)() as s:
+        ex = (await conc.importar_extrato(
+            s, tenant_id=t.id, usuario_id=uid,
+            payload=ImportarExtratoIn(
+                id_conta=conta.id, nome_arquivo="ext.ofx", formato="OFX", conteudo=conteudo))).extrato
+    assert ex.qtd_lancamentos == 3
+    async with _sm(admin_engine)() as s:
+        lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
+    assert {l.id_externo for l in lancs} == {"F001", "F002", "F003"}
+    assert all(l.id_conta == conta.id for l in lancs)
 
 
 # ---------- (e) reimportação com sobreposição de FITID ----------
 
 async def test_importar_ofx_segundo_arquivo_com_fitid_repetido_dedupe(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        conta = await _conta(admin_engine, t.id)
-        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
-        conteudo1 = _ofx_sgml([
-            dict(dtposted="20260801120000", trnamt="1500.00", fitid="F001", trntype="CREDIT"),
-            dict(dtposted="20260805090000", trnamt="-150.75", fitid="F002"),
-        ])
-        conteudo2 = _ofx_sgml([
-            dict(dtposted="20260801120000", trnamt="1500.00", fitid="F001", trntype="CREDIT"),
-            dict(dtposted="20260805090000", trnamt="-150.75", fitid="F002"),
-            dict(dtposted="20260809100000", trnamt="-42.00", fitid="F004"),
-        ])
-        async with _sm(admin_engine)() as s:
-            ex1 = (await conc.importar_extrato(
-                s, tenant_id=t.id, usuario_id=uid,
-                payload=ImportarExtratoIn(
-                    id_conta=conta.id, nome_arquivo="ext1.ofx", formato="OFX", conteudo=conteudo1))).extrato
-        assert ex1.qtd_lancamentos == 2
-        async with _sm(admin_engine)() as s:
-            ex2 = (await conc.importar_extrato(
-                s, tenant_id=t.id, usuario_id=uid,
-                payload=ImportarExtratoIn(
-                    id_conta=conta.id, nome_arquivo="ext2.ofx", formato="OFX", conteudo=conteudo2))).extrato
-        # só o F004 é lançamento novo
-        assert ex2.qtd_lancamentos == 1
-        async with _sm(admin_engine)() as s:
-            lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex2.id)
-        assert [l.id_externo for l in lancs] == ["F004"]
-        # o total de lançamentos da conta continua 3 (2 do primeiro + 1 novo)
-        async with _sm(admin_engine)() as s:
-            total = (await s.execute(text(
-                "SELECT count(*) FROM pagamentos.lancamento_extrato WHERE tenant_id=:t AND id_conta=:c"),
-                {"t": t.id, "c": conta.id})).scalar_one()
-        assert total == 3
-    finally:
-        await _cleanup(admin_engine, t.id)
+    conta = await _conta(admin_engine, t.id)
+    uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+    conteudo1 = _ofx_sgml([
+        dict(dtposted="20260801120000", trnamt="1500.00", fitid="F001", trntype="CREDIT"),
+        dict(dtposted="20260805090000", trnamt="-150.75", fitid="F002"),
+    ])
+    conteudo2 = _ofx_sgml([
+        dict(dtposted="20260801120000", trnamt="1500.00", fitid="F001", trntype="CREDIT"),
+        dict(dtposted="20260805090000", trnamt="-150.75", fitid="F002"),
+        dict(dtposted="20260809100000", trnamt="-42.00", fitid="F004"),
+    ])
+    async with _sm(admin_engine)() as s:
+        ex1 = (await conc.importar_extrato(
+            s, tenant_id=t.id, usuario_id=uid,
+            payload=ImportarExtratoIn(
+                id_conta=conta.id, nome_arquivo="ext1.ofx", formato="OFX", conteudo=conteudo1))).extrato
+    assert ex1.qtd_lancamentos == 2
+    async with _sm(admin_engine)() as s:
+        ex2 = (await conc.importar_extrato(
+            s, tenant_id=t.id, usuario_id=uid,
+            payload=ImportarExtratoIn(
+                id_conta=conta.id, nome_arquivo="ext2.ofx", formato="OFX", conteudo=conteudo2))).extrato
+    # só o F004 é lançamento novo
+    assert ex2.qtd_lancamentos == 1
+    async with _sm(admin_engine)() as s:
+        lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex2.id)
+    assert [l.id_externo for l in lancs] == ["F004"]
+    # o total de lançamentos da conta continua 3 (2 do primeiro + 1 novo)
+    async with _sm(admin_engine)() as s:
+        total = (await s.execute(text(
+            "SELECT count(*) FROM pagamentos.lancamento_extrato WHERE tenant_id=:t AND id_conta=:c"),
+            {"t": t.id, "c": conta.id})).scalar_one()
+    assert total == 3
 
 
 # ---------- (f) mesmo FITID em contas diferentes não colide ----------
 
 async def test_mesmo_fitid_em_contas_diferentes_nao_colide(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        conta1 = await _conta(admin_engine, t.id, sufixo="1")
-        conta2 = await _conta(admin_engine, t.id, sufixo="2")
-        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
-        conteudo = _ofx_sgml([
-            dict(dtposted="20260801120000", trnamt="500.00", fitid="DUP-1", trntype="CREDIT"),
-        ])
-        async with _sm(admin_engine)() as s:
-            ex1 = (await conc.importar_extrato(
-                s, tenant_id=t.id, usuario_id=uid,
-                payload=ImportarExtratoIn(
-                    id_conta=conta1.id, nome_arquivo="c1.ofx", formato="OFX", conteudo=conteudo))).extrato
-        assert ex1.qtd_lancamentos == 1
-        async with _sm(admin_engine)() as s:
-            ex2 = (await conc.importar_extrato(
-                s, tenant_id=t.id, usuario_id=uid,
-                payload=ImportarExtratoIn(
-                    id_conta=conta2.id, nome_arquivo="c2.ofx", formato="OFX", conteudo=conteudo))).extrato
-        assert ex2.qtd_lancamentos == 1  # a conta é diferente, então F001 entra normalmente
-    finally:
-        await _cleanup(admin_engine, t.id)
+    conta1 = await _conta(admin_engine, t.id, sufixo="1")
+    conta2 = await _conta(admin_engine, t.id, sufixo="2")
+    uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+    conteudo = _ofx_sgml([
+        dict(dtposted="20260801120000", trnamt="500.00", fitid="DUP-1", trntype="CREDIT"),
+    ])
+    async with _sm(admin_engine)() as s:
+        ex1 = (await conc.importar_extrato(
+            s, tenant_id=t.id, usuario_id=uid,
+            payload=ImportarExtratoIn(
+                id_conta=conta1.id, nome_arquivo="c1.ofx", formato="OFX", conteudo=conteudo))).extrato
+    assert ex1.qtd_lancamentos == 1
+    async with _sm(admin_engine)() as s:
+        ex2 = (await conc.importar_extrato(
+            s, tenant_id=t.id, usuario_id=uid,
+            payload=ImportarExtratoIn(
+                id_conta=conta2.id, nome_arquivo="c2.ofx", formato="OFX", conteudo=conteudo))).extrato
+    assert ex2.qtd_lancamentos == 1  # a conta é diferente, então F001 entra normalmente
 
 
 # ---------- (g) CSV continua funcionando (regressão) ----------
@@ -262,20 +229,17 @@ def _csv(valor="1000.00", data="2026-08-01", tipo="DEBITO"):
 
 async def test_importar_csv_regressao_id_externo_none(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        conta = await _conta(admin_engine, t.id)
-        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
-        async with _sm(admin_engine)() as s:
-            ex = (await conc.importar_extrato(
-                s, tenant_id=t.id, usuario_id=uid,
-                payload=ImportarExtratoIn(id_conta=conta.id, nome_arquivo="ext.csv", conteudo=_csv()))).extrato
-        assert ex.qtd_lancamentos == 1
-        async with _sm(admin_engine)() as s:
-            lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
-        assert lancs[0].id_externo is None
-        assert lancs[0].id_conta == conta.id
-    finally:
-        await _cleanup(admin_engine, t.id)
+    conta = await _conta(admin_engine, t.id)
+    uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+    async with _sm(admin_engine)() as s:
+        ex = (await conc.importar_extrato(
+            s, tenant_id=t.id, usuario_id=uid,
+            payload=ImportarExtratoIn(id_conta=conta.id, nome_arquivo="ext.csv", conteudo=_csv()))).extrato
+    assert ex.qtd_lancamentos == 1
+    async with _sm(admin_engine)() as s:
+        lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
+    assert lancs[0].id_externo is None
+    assert lancs[0].id_conta == conta.id
 
 
 # ---------- CNAB240 (C2.2 Task 2) ----------
@@ -353,68 +317,59 @@ def test_parse_cnab240_linha_tamanho_errado_levanta_erro_com_numero_da_linha():
 
 async def test_parse_cnab240_malformado_importar_extrato_422(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        conta = await _conta(admin_engine, t.id)
-        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
-        conteudo = "0" * 239
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await conc.importar_extrato(
-                    s, tenant_id=t.id, usuario_id=uid,
-                    payload=ImportarExtratoIn(
-                        id_conta=conta.id, nome_arquivo="ruim.cnab240.txt", formato="CNAB240",
-                        conteudo=conteudo))
-            assert exc.value.status_code == 422
-    finally:
-        await _cleanup(admin_engine, t.id)
+    conta = await _conta(admin_engine, t.id)
+    uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+    conteudo = "0" * 239
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await conc.importar_extrato(
+                s, tenant_id=t.id, usuario_id=uid,
+                payload=ImportarExtratoIn(
+                    id_conta=conta.id, nome_arquivo="ruim.cnab240.txt", formato="CNAB240",
+                    conteudo=conteudo))
+        assert exc.value.status_code == 422
 
 
 async def test_importar_cnab240_cria_extrato_e_lancamentos(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        conta = await _conta(admin_engine, t.id)
-        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
-        conteudo = (_FIXTURES / "extrato_exemplo.cnab240.txt").read_text(encoding="utf-8")
-        async with _sm(admin_engine)() as s:
-            ex = (await conc.importar_extrato(
-                s, tenant_id=t.id, usuario_id=uid,
-                payload=ImportarExtratoIn(
-                    id_conta=conta.id, nome_arquivo="ext.cnab240.txt", formato="CNAB240",
-                    conteudo=conteudo))).extrato
-        assert ex.qtd_lancamentos == 3
-        async with _sm(admin_engine)() as s:
-            lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
-        # FIX WAVE (Important 1): CNAB240 não popula mais id_externo — ver
-        # docstring de parse_cnab240.
-        assert {l.id_externo for l in lancs} == {None}
-        assert {l.documento for l in lancs} == {"1001", "77", None}
-        assert all(l.id_conta == conta.id for l in lancs)
-    finally:
-        await _cleanup(admin_engine, t.id)
+    conta = await _conta(admin_engine, t.id)
+    uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+    conteudo = (_FIXTURES / "extrato_exemplo.cnab240.txt").read_text(encoding="utf-8")
+    async with _sm(admin_engine)() as s:
+        ex = (await conc.importar_extrato(
+            s, tenant_id=t.id, usuario_id=uid,
+            payload=ImportarExtratoIn(
+                id_conta=conta.id, nome_arquivo="ext.cnab240.txt", formato="CNAB240",
+                conteudo=conteudo))).extrato
+    assert ex.qtd_lancamentos == 3
+    async with _sm(admin_engine)() as s:
+        lancs = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=ex.id)
+    # FIX WAVE (Important 1): CNAB240 não popula mais id_externo — ver
+    # docstring de parse_cnab240.
+    assert {l.id_externo for l in lancs} == {None}
+    assert {l.documento for l in lancs} == {"1001", "77", None}
+    assert all(l.id_conta == conta.id for l in lancs)
 
 
 async def test_importar_cnab240_reimportacao_mesmo_arquivo_409(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        conta = await _conta(admin_engine, t.id)
-        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
-        conteudo = (_FIXTURES / "extrato_exemplo.cnab240.txt").read_text(encoding="utf-8")
-        async with _sm(admin_engine)() as s:
+    conta = await _conta(admin_engine, t.id)
+    uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+    conteudo = (_FIXTURES / "extrato_exemplo.cnab240.txt").read_text(encoding="utf-8")
+    async with _sm(admin_engine)() as s:
+        await conc.importar_extrato(
+            s, tenant_id=t.id, usuario_id=uid,
+            payload=ImportarExtratoIn(
+                id_conta=conta.id, nome_arquivo="ext.cnab240.txt", formato="CNAB240",
+                conteudo=conteudo))
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
             await conc.importar_extrato(
                 s, tenant_id=t.id, usuario_id=uid,
                 payload=ImportarExtratoIn(
-                    id_conta=conta.id, nome_arquivo="ext.cnab240.txt", formato="CNAB240",
+                    id_conta=conta.id, nome_arquivo="ext2.cnab240.txt", formato="CNAB240",
                     conteudo=conteudo))
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await conc.importar_extrato(
-                    s, tenant_id=t.id, usuario_id=uid,
-                    payload=ImportarExtratoIn(
-                        id_conta=conta.id, nome_arquivo="ext2.cnab240.txt", formato="CNAB240",
-                        conteudo=conteudo))
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+        assert exc.value.status_code == 409
 
 
 def _linha_cnab_cabecalho(tipo_registro: str) -> str:
@@ -453,37 +408,34 @@ async def test_importar_cnab240_mesmo_documento_meses_diferentes_ambos_entram(ad
     coincidindo o nº de documento de 5 dígitos (que recicla). Com
     `id_externo=None` para CNAB, os DOIS lançamentos entram."""
     t = await _provisionar(admin_engine)
-    try:
-        conta = await _conta(admin_engine, t.id)
-        uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
-        conteudo_ago = _arquivo_cnab_um_lancamento(
-            data_ddmmaaaa="01082026", documento="1001", historico="Repasse agosto")
-        conteudo_set = _arquivo_cnab_um_lancamento(
-            data_ddmmaaaa="01092026", documento="1001", historico="Repasse setembro")
+    conta = await _conta(admin_engine, t.id)
+    uid = await _novo_usuario(admin_engine, t.id, f"c{uuid.uuid4().hex[:6]}")
+    conteudo_ago = _arquivo_cnab_um_lancamento(
+        data_ddmmaaaa="01082026", documento="1001", historico="Repasse agosto")
+    conteudo_set = _arquivo_cnab_um_lancamento(
+        data_ddmmaaaa="01092026", documento="1001", historico="Repasse setembro")
 
-        async with _sm(admin_engine)() as s:
-            r1 = await conc.importar_extrato(
-                s, tenant_id=t.id, usuario_id=uid,
-                payload=ImportarExtratoIn(
-                    id_conta=conta.id, nome_arquivo="ago.cnab240.txt", formato="CNAB240",
-                    conteudo=conteudo_ago))
-        async with _sm(admin_engine)() as s:
-            r2 = await conc.importar_extrato(
-                s, tenant_id=t.id, usuario_id=uid,
-                payload=ImportarExtratoIn(
-                    id_conta=conta.id, nome_arquivo="set.cnab240.txt", formato="CNAB240",
-                    conteudo=conteudo_set))
+    async with _sm(admin_engine)() as s:
+        r1 = await conc.importar_extrato(
+            s, tenant_id=t.id, usuario_id=uid,
+            payload=ImportarExtratoIn(
+                id_conta=conta.id, nome_arquivo="ago.cnab240.txt", formato="CNAB240",
+                conteudo=conteudo_ago))
+    async with _sm(admin_engine)() as s:
+        r2 = await conc.importar_extrato(
+            s, tenant_id=t.id, usuario_id=uid,
+            payload=ImportarExtratoIn(
+                id_conta=conta.id, nome_arquivo="set.cnab240.txt", formato="CNAB240",
+                conteudo=conteudo_set))
 
-        assert r1.importados == 1, r1
-        assert r1.ignorados_por_id_externo == 0, r1
-        assert r2.importados == 1, r2
-        assert r2.ignorados_por_id_externo == 0, r2
+    assert r1.importados == 1, r1
+    assert r1.ignorados_por_id_externo == 0, r1
+    assert r2.importados == 1, r2
+    assert r2.ignorados_por_id_externo == 0, r2
 
-        async with _sm(admin_engine)() as s:
-            lancs_ago = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=r1.extrato.id)
-            lancs_set = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=r2.extrato.id)
-        assert len(lancs_ago) == 1 and lancs_ago[0].documento == "1001"
-        assert len(lancs_set) == 1 and lancs_set[0].documento == "1001"
-        assert lancs_ago[0].data != lancs_set[0].data
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        lancs_ago = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=r1.extrato.id)
+        lancs_set = await conc.listar_lancamentos(s, tenant_id=t.id, id_extrato=r2.extrato.id)
+    assert len(lancs_ago) == 1 and lancs_ago[0].documento == "1001"
+    assert len(lancs_set) == 1 and lancs_set[0].documento == "1001"
+    assert lancs_ago[0].data != lancs_set[0].data

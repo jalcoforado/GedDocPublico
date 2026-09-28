@@ -48,51 +48,6 @@ def _ns(tenant: str, allow_non_demo: bool = False) -> argparse.Namespace:
     return argparse.Namespace(tenant=tenant, allow_non_demo=allow_non_demo)
 
 
-async def _cleanup_demo_tenant(engine, slug: str) -> None:
-    """Remove tenant + tudo que está nele (chamado no teardown).
-    Usa o _reset do CLI primeiro (remove dados tenant-scoped), depois apaga
-    o tenant em si."""
-    async with _sm(engine)() as s:
-        # Identifica tenant
-        tid = (
-            await s.execute(
-                text("SELECT id FROM aprimora_py.tenant WHERE slug=:s"),
-                {"s": slug},
-            )
-        ).scalar_one_or_none()
-        if tid is None:
-            return
-
-        # Limpa tudo do tenant — usa ordem de FK conhecida.
-        for sql in (
-            f"SET LOCAL app.tenant_id = {int(tid)}",
-            "UPDATE protocolos.processo SET id_ultima_movimentacao = NULL WHERE tenant_id = :t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id = :t",
-            "DELETE FROM protocolos.anexo_processo WHERE tenant_id = :t",
-            "DELETE FROM protocolos.anexo WHERE tenant_id = :t",
-            "DELETE FROM protocolos.complementacao_documental WHERE tenant_id = :t",
-            "DELETE FROM protocolos.movimentacao WHERE tenant_id = :t",
-            "DELETE FROM protocolos.processo WHERE tenant_id = :t",
-            "DELETE FROM protocolos.manifestante WHERE tenant_id = :t",
-            "DELETE FROM protocolos.servico WHERE tenant_id = :t",
-            "DELETE FROM protocolos.assunto WHERE tenant_id = :t",
-            "DELETE FROM protocolos.tipo_processo WHERE tenant_id = :t",
-            "DELETE FROM protocolos.tipo_anexo WHERE tenant_id = :t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id = :t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id = :t",
-            "DELETE FROM utils.grupo WHERE tenant_id = :t",
-            "DELETE FROM utils.usuario WHERE tenant_id = :t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id = :t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id = :t",
-            "DELETE FROM aprimora_py.tenant WHERE id = :t",
-        ):
-            if "SET LOCAL" in sql:
-                await s.execute(text(sql))
-            else:
-                await s.execute(text(sql), {"t": tid})
-        await s.commit()
-
-
 @pytest_asyncio.fixture
 async def demo_slug(admin_engine):
     """Yield um slug demo-pytest-XXXX único; cleanup garantido.
@@ -105,7 +60,6 @@ async def demo_slug(admin_engine):
     try:
         yield slug
     finally:
-        await _cleanup_demo_tenant(admin_engine, slug)
         from app.database import engine as app_engine
 
         await app_engine.dispose()
@@ -403,7 +357,6 @@ async def tenant_sem_provisionamento(admin_engine):
     try:
         yield slug
     finally:
-        await _cleanup_demo_tenant(admin_engine, slug)
         from app.database import engine as app_engine
 
         await app_engine.dispose()

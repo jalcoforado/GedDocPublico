@@ -107,25 +107,6 @@ async def _sol(engine, tenant_id: int, uid: int, *, necessita=False, status_fina
     return sid
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM frota.solicitacao_veiculo WHERE tenant_id=:t",
-            "DELETE FROM frota.motorista WHERE tenant_id=:t",
-            "DELETE FROM frota.veiculo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _designar(engine, tenant_id, sid, uid, *, id_veiculo, id_motorista=None, obs=None):
     async with _sm(engine)() as s:
         return await frota_svc.designar_solicitacao(
@@ -139,212 +120,167 @@ async def _designar(engine, tenant_id, sid, uid, *, id_veiculo, id_motorista=Non
 # ---------- designação feliz ----------
 async def test_designar_veiculo_em_aprovada(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, t.id)
-        sid = await _sol(admin_engine, t.id, uid)
-        v = await _veiculo(admin_engine, t.id)
-        d = await _designar(admin_engine, t.id, sid, uid, id_veiculo=v, obs="ok")
-        assert d.id_veiculo_designado == v
-        assert d.id_motorista_designado is None
-        assert d.id_usuario_designador == uid          # server-side
-        assert d.data_designacao is not None           # server-side
-        assert d.observacoes_designacao == "ok"
-        assert d.status == "aprovada"                  # status não muda
-    finally:
-        await _cleanup(admin_engine, t.id)
+    uid = await _usuario_id(admin_engine, t.id)
+    sid = await _sol(admin_engine, t.id, uid)
+    v = await _veiculo(admin_engine, t.id)
+    d = await _designar(admin_engine, t.id, sid, uid, id_veiculo=v, obs="ok")
+    assert d.id_veiculo_designado == v
+    assert d.id_motorista_designado is None
+    assert d.id_usuario_designador == uid          # server-side
+    assert d.data_designacao is not None           # server-side
+    assert d.observacoes_designacao == "ok"
+    assert d.status == "aprovada"                  # status não muda
 
 
 async def test_designar_veiculo_e_motorista_quando_necessita(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, t.id)
-        sid = await _sol(admin_engine, t.id, uid, necessita=True)
-        v = await _veiculo(admin_engine, t.id)
-        m = await _motorista(admin_engine, t.id, situacao="ativo")
-        d = await _designar(admin_engine, t.id, sid, uid, id_veiculo=v, id_motorista=m)
-        assert d.id_veiculo_designado == v and d.id_motorista_designado == m
-    finally:
-        await _cleanup(admin_engine, t.id)
+    uid = await _usuario_id(admin_engine, t.id)
+    sid = await _sol(admin_engine, t.id, uid, necessita=True)
+    v = await _veiculo(admin_engine, t.id)
+    m = await _motorista(admin_engine, t.id, situacao="ativo")
+    d = await _designar(admin_engine, t.id, sid, uid, id_veiculo=v, id_motorista=m)
+    assert d.id_veiculo_designado == v and d.id_motorista_designado == m
 
 
 async def test_rejeita_designacao_sem_motorista_quando_necessita(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, t.id)
-        sid = await _sol(admin_engine, t.id, uid, necessita=True)
-        v = await _veiculo(admin_engine, t.id)
-        with pytest.raises(HTTPException) as exc:
-            await _designar(admin_engine, t.id, sid, uid, id_veiculo=v)
-        assert exc.value.status_code == 400
-    finally:
-        await _cleanup(admin_engine, t.id)
+    uid = await _usuario_id(admin_engine, t.id)
+    sid = await _sol(admin_engine, t.id, uid, necessita=True)
+    v = await _veiculo(admin_engine, t.id)
+    with pytest.raises(HTTPException) as exc:
+        await _designar(admin_engine, t.id, sid, uid, id_veiculo=v)
+    assert exc.value.status_code == 400
 
 
 # ---------- status da solicitação ----------
 @pytest.mark.parametrize("st", ["solicitada", "rejeitada", "cancelada"])
 async def test_bloqueia_designacao_fora_de_aprovada(admin_engine, st):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, t.id)
-        sid = await _sol(admin_engine, t.id, uid, status_final=st)
-        v = await _veiculo(admin_engine, t.id)
-        with pytest.raises(HTTPException) as exc:
-            await _designar(admin_engine, t.id, sid, uid, id_veiculo=v)
-        assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+    uid = await _usuario_id(admin_engine, t.id)
+    sid = await _sol(admin_engine, t.id, uid, status_final=st)
+    v = await _veiculo(admin_engine, t.id)
+    with pytest.raises(HTTPException) as exc:
+        await _designar(admin_engine, t.id, sid, uid, id_veiculo=v)
+    assert exc.value.status_code == 409
 
 
 # ---------- veículo: só 'disponivel' ----------
 @pytest.mark.parametrize("sit", ["em_uso", "manutencao", "inativo", "baixado"])
 async def test_bloqueia_veiculo_nao_disponivel(admin_engine, sit):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, t.id)
-        sid = await _sol(admin_engine, t.id, uid)
-        v = await _veiculo(admin_engine, t.id, situacao=sit)
-        with pytest.raises(HTTPException) as exc:
-            await _designar(admin_engine, t.id, sid, uid, id_veiculo=v)
-        assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+    uid = await _usuario_id(admin_engine, t.id)
+    sid = await _sol(admin_engine, t.id, uid)
+    v = await _veiculo(admin_engine, t.id, situacao=sit)
+    with pytest.raises(HTTPException) as exc:
+        await _designar(admin_engine, t.id, sid, uid, id_veiculo=v)
+    assert exc.value.status_code == 409
 
 
 async def test_bloqueia_veiculo_inexistente(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, t.id)
-        sid = await _sol(admin_engine, t.id, uid)
-        with pytest.raises(HTTPException) as exc:
-            await _designar(admin_engine, t.id, sid, uid, id_veiculo=9999999)
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, t.id)
+    uid = await _usuario_id(admin_engine, t.id)
+    sid = await _sol(admin_engine, t.id, uid)
+    with pytest.raises(HTTPException) as exc:
+        await _designar(admin_engine, t.id, sid, uid, id_veiculo=9999999)
+    assert exc.value.status_code == 404
 
 
 async def test_bloqueia_veiculo_de_outro_tenant(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        ua = await _usuario_id(admin_engine, a.id)
-        sid = await _sol(admin_engine, a.id, ua)
-        vb = await _veiculo(admin_engine, b.id)
-        with pytest.raises(HTTPException) as exc:
-            await _designar(admin_engine, a.id, sid, ua, id_veiculo=vb)
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    ua = await _usuario_id(admin_engine, a.id)
+    sid = await _sol(admin_engine, a.id, ua)
+    vb = await _veiculo(admin_engine, b.id)
+    with pytest.raises(HTTPException) as exc:
+        await _designar(admin_engine, a.id, sid, ua, id_veiculo=vb)
+    assert exc.value.status_code == 404
 
 
 # ---------- motorista: só 'ativo' ----------
 @pytest.mark.parametrize("sit", ["inativo", "afastado"])
 async def test_bloqueia_motorista_nao_ativo(admin_engine, sit):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, t.id)
-        sid = await _sol(admin_engine, t.id, uid, necessita=True)
-        v = await _veiculo(admin_engine, t.id)
-        m = await _motorista(admin_engine, t.id, situacao=sit)
-        with pytest.raises(HTTPException) as exc:
-            await _designar(admin_engine, t.id, sid, uid, id_veiculo=v, id_motorista=m)
-        assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+    uid = await _usuario_id(admin_engine, t.id)
+    sid = await _sol(admin_engine, t.id, uid, necessita=True)
+    v = await _veiculo(admin_engine, t.id)
+    m = await _motorista(admin_engine, t.id, situacao=sit)
+    with pytest.raises(HTTPException) as exc:
+        await _designar(admin_engine, t.id, sid, uid, id_veiculo=v, id_motorista=m)
+    assert exc.value.status_code == 409
 
 
 async def test_bloqueia_motorista_inexistente(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, t.id)
-        sid = await _sol(admin_engine, t.id, uid, necessita=True)
-        v = await _veiculo(admin_engine, t.id)
-        with pytest.raises(HTTPException) as exc:
-            await _designar(admin_engine, t.id, sid, uid, id_veiculo=v, id_motorista=9999999)
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, t.id)
+    uid = await _usuario_id(admin_engine, t.id)
+    sid = await _sol(admin_engine, t.id, uid, necessita=True)
+    v = await _veiculo(admin_engine, t.id)
+    with pytest.raises(HTTPException) as exc:
+        await _designar(admin_engine, t.id, sid, uid, id_veiculo=v, id_motorista=9999999)
+    assert exc.value.status_code == 404
 
 
 async def test_bloqueia_motorista_de_outro_tenant(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        ua = await _usuario_id(admin_engine, a.id)
-        sid = await _sol(admin_engine, a.id, ua, necessita=True)
-        va = await _veiculo(admin_engine, a.id)
-        mb = await _motorista(admin_engine, b.id)
-        with pytest.raises(HTTPException) as exc:
-            await _designar(admin_engine, a.id, sid, ua, id_veiculo=va, id_motorista=mb)
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    ua = await _usuario_id(admin_engine, a.id)
+    sid = await _sol(admin_engine, a.id, ua, necessita=True)
+    va = await _veiculo(admin_engine, a.id)
+    mb = await _motorista(admin_engine, b.id)
+    with pytest.raises(HTTPException) as exc:
+        await _designar(admin_engine, a.id, sid, ua, id_veiculo=va, id_motorista=mb)
+    assert exc.value.status_code == 404
 
 
 # ---------- redesignação ----------
 async def test_redesignacao_enquanto_aprovada(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, t.id)
-        sid = await _sol(admin_engine, t.id, uid)
-        v1 = await _veiculo(admin_engine, t.id)
-        v2 = await _veiculo(admin_engine, t.id)
-        await _designar(admin_engine, t.id, sid, uid, id_veiculo=v1)
-        d2 = await _designar(admin_engine, t.id, sid, uid, id_veiculo=v2)
-        assert d2.id_veiculo_designado == v2
-    finally:
-        await _cleanup(admin_engine, t.id)
+    uid = await _usuario_id(admin_engine, t.id)
+    sid = await _sol(admin_engine, t.id, uid)
+    v1 = await _veiculo(admin_engine, t.id)
+    v2 = await _veiculo(admin_engine, t.id)
+    await _designar(admin_engine, t.id, sid, uid, id_veiculo=v1)
+    d2 = await _designar(admin_engine, t.id, sid, uid, id_veiculo=v2)
+    assert d2.id_veiculo_designado == v2
 
 
 # ---------- limpar designação ----------
 async def test_limpar_designacao_em_aprovada(admin_engine):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, t.id)
-        sid = await _sol(admin_engine, t.id, uid)
-        v = await _veiculo(admin_engine, t.id)
-        await _designar(admin_engine, t.id, sid, uid, id_veiculo=v, obs="x")
-        async with _sm(admin_engine)() as s:
-            d = await frota_svc.limpar_designacao(s, tenant_id=t.id, solicitacao_id=sid)
-        assert d.id_veiculo_designado is None
-        assert d.id_motorista_designado is None
-        assert d.id_usuario_designador is None
-        assert d.data_designacao is None
-        assert d.observacoes_designacao is None
-    finally:
-        await _cleanup(admin_engine, t.id)
+    uid = await _usuario_id(admin_engine, t.id)
+    sid = await _sol(admin_engine, t.id, uid)
+    v = await _veiculo(admin_engine, t.id)
+    await _designar(admin_engine, t.id, sid, uid, id_veiculo=v, obs="x")
+    async with _sm(admin_engine)() as s:
+        d = await frota_svc.limpar_designacao(s, tenant_id=t.id, solicitacao_id=sid)
+    assert d.id_veiculo_designado is None
+    assert d.id_motorista_designado is None
+    assert d.id_usuario_designador is None
+    assert d.data_designacao is None
+    assert d.observacoes_designacao is None
 
 
 @pytest.mark.parametrize("st", ["solicitada", "rejeitada", "cancelada"])
 async def test_bloqueia_limpar_fora_de_aprovada(admin_engine, st):
     t = await _provisionar(admin_engine)
-    try:
-        uid = await _usuario_id(admin_engine, t.id)
-        sid = await _sol(admin_engine, t.id, uid, status_final=st)
-        async with _sm(admin_engine)() as s:
-            with pytest.raises(HTTPException) as exc:
-                await frota_svc.limpar_designacao(s, tenant_id=t.id, solicitacao_id=sid)
-            assert exc.value.status_code == 409
-    finally:
-        await _cleanup(admin_engine, t.id)
+    uid = await _usuario_id(admin_engine, t.id)
+    sid = await _sol(admin_engine, t.id, uid, status_final=st)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.limpar_designacao(s, tenant_id=t.id, solicitacao_id=sid)
+        assert exc.value.status_code == 409
 
 
 # ---------- cross-tenant na própria solicitação ----------
 async def test_designar_solicitacao_cross_tenant_404(admin_engine):
     a = await _provisionar(admin_engine)
     b = await _provisionar(admin_engine)
-    try:
-        ua = await _usuario_id(admin_engine, a.id)
-        ub = await _usuario_id(admin_engine, b.id)
-        sid = await _sol(admin_engine, a.id, ua)
-        vb = await _veiculo(admin_engine, b.id)
-        with pytest.raises(HTTPException) as exc:
-            await _designar(admin_engine, b.id, sid, ub, id_veiculo=vb)
-        assert exc.value.status_code == 404
-    finally:
-        await _cleanup(admin_engine, a.id)
-        await _cleanup(admin_engine, b.id)
+    ua = await _usuario_id(admin_engine, a.id)
+    ub = await _usuario_id(admin_engine, b.id)
+    sid = await _sol(admin_engine, a.id, ua)
+    vb = await _veiculo(admin_engine, b.id)
+    with pytest.raises(HTTPException) as exc:
+        await _designar(admin_engine, b.id, sid, ub, id_veiculo=vb)
+    assert exc.value.status_code == 404
 
 
 # ---------- schema Designar não aceita campos proibidos ----------

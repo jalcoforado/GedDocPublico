@@ -76,41 +76,6 @@ async def _provisionar(engine):
     return tenant, solicitante_id, gestor_id, validador_id, autoridade_id
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM pagamentos.anexo_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_versao WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.pedido_ajuste WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento_debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.ordem_pagamento WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito_historico WHERE tenant_id=:t",
-            "UPDATE pagamentos.parcela SET id_movimentacao=NULL WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.movimentacao_conta WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.parcela WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.posicao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.excecao_cronologica WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.debito WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.contrato WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.alcada WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.natureza_despesa WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.conta_bancaria WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fonte_recursos WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor_situacao_historico WHERE tenant_id=:t",
-            "DELETE FROM pagamentos.fornecedor WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 async def _setup_debito(engine, tenant_id: int, usuario_id: int):
     """Cria um débito completo em rascunho com fonte, conta, fornecedor, etc."""
     async with _sm(engine)() as s:
@@ -212,7 +177,6 @@ async def test_enviar_gestor_success(admin_engine):
         )
 
     assert result.situacao_tramitacao == "AGUARDANDO_GESTOR"
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -236,7 +200,6 @@ async def test_gestor_autorizar_success(admin_engine):
 
     assert result.situacao_tramitacao == "AGUARDANDO_VALIDACAO"
     assert result.id_gestor_decisor == gestor_id
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -259,7 +222,6 @@ async def test_gestor_rejeitar_success(admin_engine):
 
     assert result.situacao_tramitacao == "REJEITADA_GESTOR"
     assert result.id_gestor_decisor == gestor_id
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -282,7 +244,6 @@ async def test_solicitar_ajuste_success(admin_engine):
         )
 
     assert result.situacao_tramitacao == "AJUSTE_GESTOR"
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -322,7 +283,6 @@ async def test_responder_ajuste_success(admin_engine):
         )
 
     assert result.situacao_tramitacao == "AGUARDANDO_GESTOR"
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -353,7 +313,6 @@ async def test_validar_success(admin_engine):
 
     assert result.situacao_tramitacao == "AGUARDANDO_AUTORIDADE"
     assert result.id_validador == validador_id
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -387,7 +346,6 @@ async def test_autoridade_aprovar_success(admin_engine):
         )
 
     assert result.situacao_tramitacao == "AUTORIZADA"
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -422,7 +380,6 @@ async def test_autoridade_indeferir_success(admin_engine):
         )
 
     assert result.situacao_tramitacao == "INDEFERIDA_AUTORIDADE"
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -439,7 +396,6 @@ async def test_cancelar_success(admin_engine):
         )
 
     assert result.situacao_tramitacao == "CANCELADA"
-    await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.asyncio
@@ -464,5 +420,3 @@ async def test_lock_version_conflict(admin_engine):
             )
 
         assert e.value.status_code == 409
-
-    await _cleanup(admin_engine, tenant.id)

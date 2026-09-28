@@ -110,24 +110,6 @@ async def _cria_usuario_comum(session, tenant_id: int, *, codigo_transacao: str)
     return int(uid)
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM aprimora_py.tenant_modulo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 def _as_user(engine, usuario_id: int, tenant_id: int, tenant_slug: str):
     async def _get_user():
         async with _sm(engine)() as s:
@@ -188,7 +170,6 @@ async def test_usuario_comum_com_permissao_e_modulo_contratado_acessa(
         app.dependency_overrides.clear()
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant.id)
 
 
 @pytest.mark.parametrize("modulo,transacao,rota", CENARIOS)
@@ -226,4 +207,3 @@ async def test_usuario_comum_sem_o_modulo_contratado_recebe_403(
         app.dependency_overrides.clear()
         from app.database import engine as app_engine
         await app_engine.dispose()
-        await _cleanup(admin_engine, tenant.id)

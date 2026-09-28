@@ -377,13 +377,36 @@ por esquecimento. Agrupados aqui para não se perderem.)*
   2026-09-19** para o arquivo citado — `provisionar_tenant_de_teste`/`admin_id_do_tenant`/
   `as_user_dependency`, novos em `tests/conftest.py`, cobrem a parte genérica (provisionar +
   impersonar); `test_leitura_por_modulo.py` migrou e perdeu as 4 cópias locais. A parte de
-  **limpeza** ficou de fora de propósito — não generalizada, porque já é redundante: descoberto
-  nesta fatia que `_limpa_tenants_do_modulo` (autouse de escopo de módulo, item 1.1.6, entregue em
-  2026-08-16) já apaga tudo que qualquer módulo de teste cria, tabela por tabela, dinamicamente. Os
-  `_cleanup_tenant`/`_limpar_engine`/primos que ainda existem em dezenas de arquivos (a contagem real
-  é maior que "quarta cópia" sugeria — a nota é de antes da explosão de arquivos de transporte/
-  pagamentos) são hoje trabalho morto, não incorreção. Removê-los é um refactor maior e de baixo
-  risco funcional, deliberadamente fora desta fatia: mecânico, mas toca ~60 arquivos.
+  **limpeza** ficou de fora dessa fatia por ser redundante com `_limpa_tenants_do_modulo` (autouse de
+  escopo de módulo, item 1.1.6, entregue em 2026-08-16).
+  **Limpeza redundante — FECHADA em 2026-09-24, com 5 arquivos de fora (abaixo).** Saíram
+  `_cleanup_tenant`/`_limpar_engine`/primos de **60 arquivos** de teste: 57 helpers removidos junto
+  com os pontos de chamada (o `try/finally` cuja única função era limpar foi desembrulhado), −2,8 mil
+  linhas, por codemod AST. Os helpers que misturavam limpeza com higiene do app
+  (`dependency_overrides.clear()` + `app_engine.dispose()`, que a fixture NÃO faz) ficaram só com a
+  higiene. **Provado por delta de banco, não por leitura:** os arquivos rodados em Postgres isolado
+  (receita do CI) antes e depois — 865 testes, zero tenants vazados, contagem de linhas idêntica em
+  490 das 491 tabelas; o oráculo foi invertido (com `PYTEST_NAO_LIMPAR_TENANT=1` ele acusa os
+  tenants e as tabelas que vazam). O que ficou, e por quê:
+  - `test_modulos_provisionamento.py::_cleanup_tenant` — **não é limpeza, é guarda**: o `DELETE` do
+    tenant sem apagar `tenant_modulo` falha se o CASCADE da migration 0075 não existir. A fixture
+    apaga com `session_replication_role = replica`, que desliga FK e cascade.
+  - `test_pagamentos_rn15_c13.py` (usa o `_cleanup` de `test_pagamentos_autorizacao.py`) —
+    `test_o_backfill_alcanca_linha_antiga` roda o SQL da migration 0091, cujo `DISTINCT ON
+    (h.justificativa)` não filtra por tenant; sem a limpeza entre testes o histórico do teste
+    anterior colide e a asserção falha (reproduzido em banco isolado). **A fixture é por módulo, não
+    por teste.** O `DISTINCT ON` sem tenant é, ele mesmo, suspeito na migration 0091 — não investigado.
+  - `test_apensamento_anticiclo.py::_cleanup_catalogs` — apaga por id linhas de tenant preexistente,
+    fora do alcance da fixture.
+  - **Adiados por conflito com o F5** (`pagamentos/f5-remove-status-legado` altera os mesmos
+    arquivos; o merge simulado dá 4 conflitos): `test_pagamentos_autorizacao.py`,
+    `test_pagamentos_conciliacao_v2.py`, `test_pagamentos_debitos.py`,
+    `test_pagamentos_validacoes_v2.py`. Mecânico — refazer depois que o F5 entrar. No ambiente do F5 a
+    remoção nesses quatro passou (a única falha daquela rodada foi o `rn15`, acima).
+  - **Pendência nova, não tratada:** `utils.auditoria` (5,2 mi de linhas no banco de dev) é
+    alimentada por triggers de `utils.usuario`/`usuario_grupo`/… e não tem `tenant_id` — nem os helpers
+    nem a fixture a limpam (a fixture desliga os triggers). Cresce ~83 linhas por teste; sem os
+    `DELETE` dos helpers, ~48 (−43%, mesmo conjunto de testes, banco isolado).
 
 ### 1.1.6 A suíte deixa tenants para trás — 4.032 no banco local em uma semana
 
@@ -618,18 +641,44 @@ Pendências registradas da F3 (menores):
   `bloqueado_conta` (DRY); `total_grupo` do GET /fila muda de semântica para débito terminal;
   checagem 422 de categoria duplicada (defesa em profundidade).
 - `id_usuario_registro` da exceção = a própria autoridade (um 3º registrante não existe no rito).
-- **F4** (tesouraria: lote/retenções/central) implementada na branch `pagamentos/f4-tesouraria`,
-  **PR #68 aberto, CI verde, ainda não mesclado**. Teste manual em navegador não foi possível nesta
-  sessão (sem ferramenta de browser) — ressalva registrada no PR.
+- ~~F4 (tesouraria: lote/retenções/central) e F5 (remoção do `status` legado) continuam **não
+  autorizadas** — o `status` derivado segue vivo e sincronizado até a F5.~~ **F4 fechada em
+  2026-09-20** (branch `pagamentos/f4-tesouraria`, 7 tasks/commits; plano em
+  `docs/superpowers/plans/2026-09-20-pagamentos-f4-tesouraria.md`), migration 0121:
+
+  - `lote_pagamento`/`lote_pagamento_parcela` — execução real em lote (RASCUNHO → PROGRAMADO →
+    ENVIADO → PROCESSADO, CANCELADO de RASCUNHO/PROGRAMADO), substituindo o loop sequencial de
+    `pagar_parcela` que a tela de tesouraria fazia no cliente. `pagar_parcela`/`estornar_parcela`
+    avulsos continuam existindo para correção pontual — o lote é o caminho recomendado, não o único.
+  - `retencao` — CRUD travado (409) enquanto a parcela estiver engajada num lote; `valor_liquido`
+    sempre derivado, nunca coluna. Desconto de retenção acontece na parcela que fecha o pagamento
+    INTEGRAL do débito (ruling documentado em `pagamentos_lotes.processar_retorno`) — múltiplas
+    parcelas do mesmo débito em lotes diferentes não têm alocação proporcional; se a retenção
+    acumulada exceder essa parcela final, 409 explícito em vez de `MovimentacaoConta` negativa.
+  - Fecha o gap de segregação de funções que a F1 deixou aberto: `assert_segregacao(ato="PAGAR")`
+    existia em `pagamentos_guardas.py` desde a F1 mas nunca era chamada — `enviar_lote` (F4) passou
+    a chamá-la, e agora nem super-usuário pode enviar um lote com débito que ele mesmo decidiu em
+    papel anterior. **A revisão do PR achou o desvio, fechado antes do merge:** o
+    `POST /pagamentos/parcelas/{id}/pagar` avulso (mesma permissão) não checava segregação
+    nem lote — e como o lote não muda `Parcela.status`, pagava parcela já enviada ao banco, e o
+    retorno lançava uma segunda SAIDA (saldo em dobro). Hoje o avulso recusa parcela em lote
+    ativo (409) e exige a mesma segregação (403), e o retorno recusa parcela que não esteja
+    LIBERADA. Testes em `test_pagamentos_f4_lote_guardas.py`, incluindo HTTP com usuário comum.
+  - `GET /pagamentos/tesouraria/fila` descontinuado (410) — substituído por
+    `GET /pagamentos/lotes/elegiveis` + `GET /pagamentos/lotes`.
+  - **Simplificação frontend assumida, não uma decisão do produto**: a Central da tesouraria mostra
+    "Débito #\<id> · parcela \<n>" em vez do nome do fornecedor, porque `ParcelaOut`/
+    `LotePagamentoParcelaOut` não carregam esse dado e buscar por débito individualmente vira N+1.
+    Enriquecer é fatia própria, se o usuário sentir falta.
 - **F5 — só a parte de remoção do `status` legado** implementada na branch
-  `pagamentos/f5-remove-status-legado` (cortada de `main`, **não** da F4 — as duas divergem e
-  precisam de merge/rebase cruzado quando a outra entrar), plano em
+  `pagamentos/f5-remove-status-legado` (PR #69; cortada de `main`, **não** da F4 — ao integrar,
+  a 0122 passou a descender da 0121 e `pagamentos_lotes._registrar_evento_lote`, da F4, deixou
+  de ler a coluna removida), plano em
   `docs/superpowers/plans/2026-09-20-pagamentos-f5-remove-status-legado.md`. A coluna `Debito.
   status` saiu do banco (migration 0122) e de toda a aplicação — backend e frontend só leem as três
   dimensões; `debito_historico.status_anterior/novo` continua alimentado, calculado na hora via
   `status_legado()`. Suíte completa (backend 1698 passos + os 3 falhos pré-existentes de
-  `test_guarda_links_docs.py`, não relacionados; frontend `tsc`+vitest limpos) verificada, PR ainda
-  não aberto. **A outra metade da F5** do pedido original (visão geral com indicadores clicáveis,
+  `test_guarda_links_docs.py`, não relacionados; frontend `tsc`+vitest limpos) verificada (PR #69). **A outra metade da F5** do pedido original (visão geral com indicadores clicáveis,
   caixa de trabalho refinada, sweep de estados vazios/erro/carregamento/permissão/conflito,
   acessibilidade/responsividade, critérios de aceite dos "23 cenários") **continua não feita e sem
   plano** — o documento de 20 seções/§17/23-cenários que a descrevia não está neste repositório;
@@ -1020,9 +1069,16 @@ gerencial) estão em `main` e no ar. O que resta é uma **iniciativa nova**, nã
 
 ### 2.4 Minutas / Google Docs — sincronização de volta
 
-- `sincronizar_google_doc()` em `backend/app/services/google_docs_service.py` é **v1**: cria o Doc
+- ~~`sincronizar_google_doc()` em `backend/app/services/google_docs_service.py` é **v1**: cria o Doc
   e exporta PDF na finalização, mas **não reimporta** o conteúdo editado para `corpo_html`.
-  Faria falta um pipeline DOCX → HTML → sanitização.
+  Faria falta um pipeline DOCX → HTML → sanitização.~~ **BACKEND ENTREGUE em 2026-09-24**:
+  `POST /minutas/{id}/sincronizar-google` (`services/minutas.py::sincronizar_google_doc_para_minuta`)
+  baixa o DOCX, converte os parágrafos em `<p>` (texto escapado — `<nome>` digitado no Doc é
+  texto, não tag), sanitiza e, **só se o conteúdo mudou**, sobe `versao` e grava `minuta_historico`.
+  Testes em `tests/test_minuta_sincronizar_google.py`. **Ainda falta para fechar o item:**
+  (a) **nenhuma tela chama** — `api.minutas.sincronizarGoogle` existe em `frontend/lib/api.ts` e
+  não tem consumidor; (b) a **formatação se perde** — só parágrafos: negrito/itálico, listas,
+  tabelas e alinhamento do Doc não voltam para o `corpo_html`.
 - Sem re-autenticação automática quando o usuário revoga o acesso do app no Google — a próxima
   operação simplesmente falha.
 - Sem coordenação de edição concorrente e sem contagem de páginas (o Google não expõe o metadado;

@@ -136,33 +136,6 @@ async def _abrir_processo(engine, tenant, sv_id: int, cid: int) -> int:
         return p.id
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM protocolos.complementacao_documental WHERE tenant_id=:t",
-            "UPDATE protocolos.processo SET id_ultima_movimentacao = NULL WHERE tenant_id=:t",
-            "DELETE FROM protocolos.anexo_processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.movimentacao WHERE tenant_id=:t",
-            "DELETE FROM protocolos.processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.anexo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.servico WHERE tenant_id=:t",
-            "DELETE FROM protocolos.assunto WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_externo WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 @pytest_asyncio.fixture
 async def http_setup(admin_engine):
     """Provisiona tenant A com SU, servidor sem-perm e cidadão dono;
@@ -197,21 +170,18 @@ async def http_setup(admin_engine):
             documentos_solicitados_keys=["rg"],
         )
         await s.commit()
-    try:
-        yield {
-            "tenant_id": tenant.id,
-            "tenant_slug": tenant.slug,
-            "su_id": su_id,
-            "sem_perm_id": sem_perm_id,
-            "processo_id": pid,
-            "complementacao_id": comp.id,
-            "dono_id": dono_id,
-            "dono_cpf": dono_cpf,
-            "alheio_id": alheio_id,
-            "alheio_cpf": alheio_cpf,
-        }
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    yield {
+        "tenant_id": tenant.id,
+        "tenant_slug": tenant.slug,
+        "su_id": su_id,
+        "sem_perm_id": sem_perm_id,
+        "processo_id": pid,
+        "complementacao_id": comp.id,
+        "dono_id": dono_id,
+        "dono_cpf": dono_cpf,
+        "alheio_id": alheio_id,
+        "alheio_cpf": alheio_cpf,
+    }
 
 
 def _as_servidor(admin_engine, usuario_id: int, tenant_id: int, tenant_slug: str):
@@ -324,16 +294,13 @@ async def test_http_servidor_su_outro_tenant_nao_acessa(
     (require_acesso_processo dispara via tenant filter)."""
     s = http_setup
     tenant_b = await _provisionar(admin_engine, prefix="pr4dhttpB")
-    try:
-        su_b = await _su_id(admin_engine, tenant_b.id)
-        _as_servidor(admin_engine, su_b, tenant_b.id, tenant_b.slug)()
-        r = await client.get(
-            f"/api/v2/processos/{s['processo_id']}/complementacoes",
-        )
-        # Cross-tenant: processo não existe sob tenant B
-        assert r.status_code == 404
-    finally:
-        await _cleanup(admin_engine, tenant_b.id)
+    su_b = await _su_id(admin_engine, tenant_b.id)
+    _as_servidor(admin_engine, su_b, tenant_b.id, tenant_b.slug)()
+    r = await client.get(
+        f"/api/v2/processos/{s['processo_id']}/complementacoes",
+    )
+    # Cross-tenant: processo não existe sob tenant B
+    assert r.status_code == 404
 
 
 async def test_http_servidor_lista_complementacoes_200(

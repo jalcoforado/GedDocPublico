@@ -68,40 +68,16 @@ async def _get_usuario(engine, usuario_id: int) -> Usuario:
         )).scalar_one()
 
 
-async def _cleanup(engine, tenant_id: int) -> None:
-    async with _sm(engine)() as s:
-        for stmt in (
-            "DELETE FROM protocolos.minuta WHERE tenant_id=:t",
-            "DELETE FROM protocolos.minuta_historico WHERE tenant_id=:t",
-            "DELETE FROM protocolos.processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_processo WHERE tenant_id=:t",
-            "DELETE FROM protocolos.assunto WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.grupo WHERE tenant_id=:t",
-            "DELETE FROM utils.usuario WHERE tenant_id=:t",
-            "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",
-            "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
-            "DELETE FROM aprimora_py.tenant WHERE id=:t",
-        ):
-            await s.execute(text(stmt), {"t": tenant_id})
-        await s.commit()
-
-
 @pytest_asyncio.fixture
 async def auth_setup(admin_engine):
     """Provisiona tenant com super-usuário."""
     tenant = await _provisionar(admin_engine)
     su_id = await _su_id(admin_engine, tenant.id)
-    try:
-        yield {
-            "tenant_id": tenant.id,
-            "tenant_slug": tenant.slug,
-            "su_id": su_id,
-        }
-    finally:
-        await _cleanup(admin_engine, tenant.id)
+    yield {
+        "tenant_id": tenant.id,
+        "tenant_slug": tenant.slug,
+        "su_id": su_id,
+    }
 
 
 @pytest_asyncio.fixture

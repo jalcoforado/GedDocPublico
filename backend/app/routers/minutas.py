@@ -317,13 +317,12 @@ async def sincronizar_minuta_google(
     db: AsyncSession = Depends(get_db),
 ) -> MinutaOut:
     """Sync latest content from Google Doc.
-
-    Note: For now, this is a placeholder. Full DOCX-to-HTML sync
-    would require python-docx parsing and is deferred to v2.
+    
+    Puxa o DOCX do Google Drive, extrai o texto e atualiza o corpo_html da minuta.
     """
-    m = await svc.obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
-    # Placeholder: just return current minuta
-    # TODO: Pull DOCX, extract text, update corpo_html
+    m = await svc.sincronizar_google_doc_para_minuta(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario_id=usuario.id
+    )
     return MinutaOut.model_validate(m)
 
 
