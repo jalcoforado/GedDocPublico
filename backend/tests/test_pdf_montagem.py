@@ -164,10 +164,10 @@ async def test_completo_pdf_inclui_anexo_do_storage_por_tenant(admin_engine, amb
     async with Session() as db:
         detail = await get_processo_detail(db, a["processo_id"], tenant_id=a["tenant_id"])
 
-    capa_only = gerar_processo_completo_pdf(
+    capa_only = await gerar_processo_completo_pdf(
         detail.model_copy(update={"anexos": []}), tenant_slug=a["tenant_slug"]
     )
-    completo = gerar_processo_completo_pdf(detail, tenant_slug=a["tenant_slug"])
+    completo = await gerar_processo_completo_pdf(detail, tenant_slug=a["tenant_slug"])
 
     paginas_capa = len(PdfReader(io.BytesIO(capa_only)).pages)
     paginas_completo = len(PdfReader(io.BytesIO(completo)).pages)
@@ -195,7 +195,7 @@ async def test_completo_pdf_usa_fallback_legacy_se_nao_achar_no_tenant(admin_eng
     legacy_path = legacy_dir / e_doc
     legacy_path.write_bytes(_pdf_valido())
     try:
-        completo = gerar_processo_completo_pdf(detail, tenant_slug=a["tenant_slug"])
+        completo = await gerar_processo_completo_pdf(detail, tenant_slug=a["tenant_slug"])
         paginas = len(PdfReader(io.BytesIO(completo)).pages)
         assert paginas > 1, "fallback legado não encontrou o anexo"
     finally:
