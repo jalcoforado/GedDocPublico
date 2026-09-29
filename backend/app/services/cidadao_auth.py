@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.password import hash_password, verify_password
@@ -111,4 +111,107 @@ async def login(
         cidadao.senha_bcrypt = hash_password(senha)
         cidadao.senha = ""
         await db.commit()
+    return cidadao
+
+
+class CidadaoInativoError(CidadaoAuthError):
+    """Cadastro existe e está inativo — o gov.br não o reativa."""
+
+
+async def login_ou_cadastrar_via_govbr(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    cpf: str,
+    nome: str,
+    email: str | None,
+    nivel_govbr: str | None,
+    app: str,
+) -> UsuarioExterno:
+    """Login pelo gov.br, provisionando o cidadão no primeiro acesso.
+
+    **Só pode ser chamado com identidade verificada.** `cpf` tem de vir do
+    `id_token` com assinatura conferida (`services/govbr_sso.py`) — nunca de
+    parâmetro que o navegador controle. Esta função não tem como distinguir um
+    do outro; a garantia é do chamador.
+
+    Regras, e o porquê de cada uma:
+
+    - **CPF é a chave.** Normalizado para dígitos; só 11 dígitos passam (o
+      gov.br autentica pessoa física). Busca dentro do tenant, ignorando
+      excluídos — a mesma regra do cadastro por senha.
+    - **Cadastro existente por senha é vinculado**, não duplicado: o gov.br
+      prova a posse do CPF com mais força que a senha escolhida no cadastro.
+      Nome e e-mail do cadastro NÃO são sobrescritos (são dados que o cidadão
+      mantém); o e-mail só é preenchido se estava vazio.
+    - **Inativo não é reativado.** `ativo=False` é decisão de alguém da
+      prefeitura, e o login pelo gov.br não é autoridade para desfazê-la —
+      levanta `CidadaoInativoError` (403 no router). O rascunho reativava.
+    - **Excluído não é ressuscitado**: como no cadastro por senha, a busca
+      ignora a linha excluída e um cadastro novo nasce. Soft-delete continua
+      sendo histórico.
+    - **E-mail não é chave nem é único** (`utils.usuario_externo` não tem
+      índice único de e-mail), então não há colisão a tratar — e também não se
+      usa e-mail para achar cadastro, senão bastaria um e-mail igual para
+      herdar a conta de outra pessoa.
+    - **Sem corrida de primeiro login.** A tabela não tem unicidade de CPF por
+      tenant; dois callbacks simultâneos criariam duas linhas e todo login
+      seguinte estouraria em `MultipleResultsFound`. Um advisory lock de
+      transação sobre (tenant, CPF) serializa o trecho.
+    """
+    cpf_norm = _normaliza_cpf_cnpj(cpf or "")
+    if len(cpf_norm) != 11:
+        raise CidadaoAuthError("CPF inválido na identidade gov.br")
+
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+        {"k": f"usuario_externo:govbr:{tenant_id}:{cpf_norm}"},
+    )
+    cidadao = (
+        await db.execute(
+            select(UsuarioExterno).where(
+                UsuarioExterno.cpf_cnpj == cpf_norm,
+                UsuarioExterno.tenant_id == tenant_id,
+                UsuarioExterno.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+
+    email_norm = (email or "").strip().lower() or None
+    if email_norm is not None and len(email_norm) > 100:
+        email_norm = None  # não cabe na coluna; melhor vazio que truncado
+
+    if cidadao is None:
+        cidadao = UsuarioExterno(
+            tenant_id=tenant_id,
+            nome=((nome or "").strip() or "Cidadão")[:100],
+            cpf_cnpj=cpf_norm,
+            email=email_norm,
+            senha="",  # sem senha: só entra pelo gov.br até definir uma
+            senha_bcrypt=None,
+            login_govbr=True,
+            nivel_govbr=nivel_govbr,
+            ativo=True,
+            excluido=False,
+            uid=uuid4(),
+            data_criacao=datetime.utcnow(),
+            app=app,
+            telefone=None,
+            telefone_whatsapp=False,
+        )
+        db.add(cidadao)
+    else:
+        if not cidadao.ativo:
+            await db.rollback()
+            raise CidadaoInativoError(
+                "Cadastro inativo nesta prefeitura. Procure o atendimento."
+            )
+        cidadao.login_govbr = True
+        if nivel_govbr is not None:
+            cidadao.nivel_govbr = nivel_govbr
+        if not cidadao.email and email_norm:
+            cidadao.email = email_norm
+
+    await db.commit()
+    await db.refresh(cidadao)
     return cidadao

@@ -184,6 +184,11 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     ("POST", "/api/v2/cidadao/processos/{processo_id}/anexos"),
     ("POST", "/api/v2/cidadao/processos/{processo_id}/complementacoes/{complementacao_id}/responder"),
     ("POST", "/api/v2/cidadao/servicos/{slug}/abrir"),
+    # Login do cidadão pelo gov.br (2.6 do backlog): mesma porta que
+    # `/cidadao/login`, só que por OIDC. Roda antes de haver cidadão — não há
+    # sujeito para permissionar nem módulo a exigir.
+    ("GET", "/api/v2/auth/govbr/login"),
+    ("GET", "/api/v2/auth/govbr/callback"),
 
     # -- API M2M de integrações (Pagamentos C2.3, Task 7): outro realm de
     # autenticação inteiro, por `X-Api-Key` (`get_current_sistema_integrado`),

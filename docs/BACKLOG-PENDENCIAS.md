@@ -1190,6 +1190,33 @@ da arquitetura em vez de disciplina recorrente.
   endpoint devolve 503, a tela não aparece, e a suíte passa sem chave, sem rede e sem o pacote
   instalado (o `import anthropic` é lazy e os testes injetam dublê).
 
+### 2.6 Portal do cidadão — login gov.br: BACKEND ENTREGUE (2026-09-28), desligado
+
+**O que entrega:** `GET /api/v2/auth/govbr/login?next=/cidadao/...` e `GET /api/v2/auth/govbr/callback`
+(`routers/auth_govbr.py`, `services/govbr_sso.py`). OIDC com `state` + `nonce` + PKCE S256 num
+cookie assinado preso ao navegador; CPF só do `sub` do `id_token` com assinatura conferida no JWKS
+do gov.br; tenant sempre do `Host`; `next` por allowlist (só `/cidadao/...`). Primeiro login cria o
+cidadão, os seguintes reaproveitam; cadastro por senha existente é vinculado; **inativo não é
+reativado** (403). A sessão emitida é a mesma do login por senha (`auth/cidadao_sessao.py`, cookie
+`aprimora_cidadao_token`). Migration `0124` grava o nível (`usuario_externo.nivel_govbr`). Testes em
+`tests/test_auth_govbr.py`, com o gov.br simulado — sem rede.
+
+**Sem configuração, as duas rotas respondem 503** — é o estado de todo ambiente hoje. **Falta para
+ligar em produção:**
+
+- **Credenciais do gov.br** (`GOVBR_CLIENT_ID`, `GOVBR_CLIENT_SECRET`, `GOVBR_SSO_URL`), obtidas
+  pela prefeitura no processo de adesão, com o `redirect_uri` de cada host registrado lá. O
+  `redirect_uri` padrão é derivado do request: atrás do nginx, confira que o esquema sai `https`
+  (ou fixe `GOVBR_REDIRECT_URI`, que só serve instalação de um tenant).
+- **Homologação** contra `sso.staging.acesso.gov.br`: nada foi exercitado contra o serviço real. Em
+  particular o **contrato da API de níveis** (`GOVBR_API_URL`, `consultar_nivel`) segue o roteiro
+  público e está sem confirmação — por isso falha dela vira `nivel_govbr = NULL`, nunca erro.
+- **Tela:** nenhum botão "Entrar com gov.br" em `/cidadao/login`, e os erros do callback saem como
+  JSON (400/401/403/502/503), não como página. Sem a tela o fluxo só é alcançável digitando a URL.
+- **Assinatura gov.br (ICP) ficou de fora.** O rascunho trazia `services/govbr_assinatura.py`
+  (pyHanko) sem nenhum chamador, sem teste e com um `Signer` sem certificado, que não assinaria.
+  Não entrou, e `pyhanko` não entrou no `pyproject.toml`. É fatia própria, a desenhar.
+
 ---
 
 ## 3. Dívida de produção
