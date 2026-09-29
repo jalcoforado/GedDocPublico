@@ -1,7 +1,7 @@
 """usuario_externo.nivel_govbr — nível de confiabilidade da conta gov.br
 
 Revision ID: 0124
-Revises: 0122
+Revises: 0123
 Create Date: 2026-09-24 13:00:00.000000
 
 Guarda o nível (``bronze``/``prata``/``ouro``) que o gov.br informou no último
@@ -23,7 +23,7 @@ from alembic import op
 
 
 revision: str = "0124"
-down_revision: str | Sequence[str] | None = "0122"
+down_revision: str | Sequence[str] | None = "0123"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
