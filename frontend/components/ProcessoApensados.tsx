@@ -28,6 +28,7 @@ import {
   type ApensamentoDetail,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useBuscaNoServidor } from "@/lib/busca-no-servidor";
 import { cn } from "@/lib/utils";
 
 function fmtDateTime(s: string | null) {
@@ -367,22 +368,24 @@ function ApensarDialog({
   const [idPrincipal, setIdPrincipal] = useState<number | null>(null);
   const [motivo, setMotivo] = useState("");
 
-  const processosQ = useQuery({
-    queryKey: ["processos-todos-apensar"],
-    queryFn: () => api.processos.list({ page_size: 200 }),
+  // Busca no servidor por número/manifestante: carregar "todos" pedia
+  // page_size 200 contra o teto de 100 de GET /processos (422, combo vazio) —
+  // e a lista de processos cresce sem limite.
+  const processoBusca = useBuscaNoServidor({
+    chave: "processos-apensar",
+    buscar: (q) =>
+      api.processos
+        .list({ q: q || undefined, page_size: 20 })
+        .then((r) => r.items.filter((p) => p.id !== processoId)),
+    valor: idPrincipal,
+    paraOpcao: (p) => ({
+      value: p.id,
+      // A lista já exclui rascunho por padrão (sem `situacao` no filtro);
+      // o fallback é só para o tsc, nunca deveria disparar em runtime.
+      label: p.nup ?? p.numero_processo ?? "Rascunho",
+      hint: p.manifestante ?? undefined,
+    }),
   });
-
-  const opts = useMemo<ComboboxOption[]>(() => {
-    return (processosQ.data?.items ?? [])
-      .filter((p) => p.id !== processoId)
-      .map((p) => ({
-        value: p.id,
-        // A lista já exclui rascunho por padrão (sem `situacao` no filtro);
-        // o fallback é só para o tsc, nunca deveria disparar em runtime.
-        label: p.nup ?? p.numero_processo ?? "Rascunho",
-        hint: p.manifestante ?? undefined,
-      }));
-  }, [processosQ.data, processoId]);
 
   const apensarM = useMutation({
     mutationFn: () => {
@@ -445,11 +448,13 @@ function ApensarDialog({
         <div>
           <Label>Processo principal (pai) <span className="text-danger">*</span></Label>
           <Combobox
-            options={opts}
+            options={processoBusca.options}
+            selectedOption={processoBusca.selectedOption}
+            onQueryChange={processoBusca.onQueryChange}
             value={idPrincipal}
             onChange={(v) => setIdPrincipal(typeof v === "number" ? v : null)}
             placeholder="Buscar por número ou manifestante…"
-            loading={processosQ.isLoading}
+            loading={processoBusca.loading}
           />
         </div>
 

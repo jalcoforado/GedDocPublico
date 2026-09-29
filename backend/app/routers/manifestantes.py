@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,6 +103,10 @@ async def list_manifestantes(
     q: str | None = None,
     id_tipo_manifestante: int | None = None,
 ):
+    # CPF/CNPJ é gravado só com dígitos: busca que parece documento com
+    # máscara ("123.456.789-09") procura pelos dígitos.
+    if q and re.fullmatch(r"[\d.\-/\s]+", q) and any(ch.isdigit() for ch in q):
+        q = re.sub(r"\D", "", q)
     extra = (
         Manifestante.id_tipo_manifestante == id_tipo_manifestante
         if id_tipo_manifestante

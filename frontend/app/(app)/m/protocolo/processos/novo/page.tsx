@@ -35,6 +35,7 @@ import { api, organogramaApi, type ProcessoCreateInput } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useAssuntosAll } from "@/lib/assuntos";
+import { useManifestantesBusca } from "@/lib/manifestantes";
 
 /** Espelha o regex de `backend/app/services/placeholders.py::resolve()`. */
 const TOKEN_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
@@ -190,10 +191,11 @@ export default function NovoProcessoPage() {
     queryFn: () => api.tiposProcesso.list(),
   });
   const assuntosQ = useAssuntosAll();
-  const manifestantesQ = useQuery({
-    queryKey: ["manifestantes-all"],
-    queryFn: () => api.manifestantes.list({ page_size: 500 }),
-  });
+  // Busca no servidor: a lista de manifestantes cresce sem limite e o
+  // backend corta em page_size ≤ 200 (pedir 500 dava 422 e combo vazio).
+  const manifestanteBusca = useManifestantesBusca(
+    form.id_manifestante === "" ? null : form.id_manifestante,
+  );
   const templatesQ = useQuery({
     queryKey: ["templates-documento", "ativos"],
     queryFn: () => api.templatesDocumento.list({ apenas_ativos: true }),
@@ -210,14 +212,6 @@ export default function NovoProcessoPage() {
       label: t.tipo_processo,
     }));
   }, [tiposProcessoQ.data]);
-
-  const manifestanteOptions = useMemo<ComboboxOption[]>(() => {
-    return (manifestantesQ.data?.items ?? []).map((m) => ({
-      value: m.id,
-      label: m.nome ?? "(sem nome)",
-      hint: m.cpf_cnpj ?? undefined,
-    }));
-  }, [manifestantesQ.data]);
 
   const assuntoOptions = useMemo<ComboboxOption<{ id_tipo_processo: number }>[]>(() => {
     const all = assuntosQ.data ?? [];
@@ -266,7 +260,7 @@ export default function NovoProcessoPage() {
       }
     }
 
-    const manifestante = manifestantesQ.data?.items.find((m) => m.id === form.id_manifestante);
+    const manifestante = manifestanteBusca.selecionado;
     const assunto = assuntosQ.data?.find((a) => a.id === form.id_assunto);
     const unidade = organogramaQ.data?.find((u) => u.id === form.id_unidade_proprietaria);
 
@@ -435,17 +429,19 @@ export default function NovoProcessoPage() {
             </Label>
             <Combobox
               id="manif"
-              options={manifestanteOptions}
+              options={manifestanteBusca.options}
+              selectedOption={manifestanteBusca.selectedOption}
+              onQueryChange={manifestanteBusca.onQueryChange}
               value={form.id_manifestante === "" ? null : form.id_manifestante}
               onChange={(v) =>
                 setForm({ ...form, id_manifestante: typeof v === "number" ? v : "" })
               }
               placeholder="Buscar por nome ou CPF/CNPJ…"
               searchPlaceholder="Nome, CPF ou CNPJ…"
-              loading={manifestantesQ.isLoading}
+              loading={manifestanteBusca.loading}
               footer={
                 <Link
-                  href="/cadastros/manifestantes/novo"
+                  href="/m/protocolo/manifestantes"
                   className="inline-flex items-center gap-1 text-brand hover:underline"
                 >
                   <span aria-hidden="true">+</span> Cadastrar novo manifestante

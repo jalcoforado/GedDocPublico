@@ -35,6 +35,19 @@ interface ComboboxProps<T> {
   loading?: boolean;
   /** Filtro custom — por padrão case-insensitive em label + hint */
   filter?: (option: ComboboxOption<T>, query: string) => boolean;
+  /**
+   * Busca no servidor: recebe o texto digitado (e `""` ao fechar). Com ele, o
+   * combo NÃO filtra localmente — `options` já é o resultado do servidor.
+   * Para listas que crescem sem limite (manifestante, processo): carregar tudo
+   * esbarra no teto de `page_size` do backend e esconde itens em silêncio.
+   */
+  onQueryChange?: (query: string) => void;
+  /**
+   * Opção do item selecionado quando ele pode não estar em `options` (busca
+   * no servidor: o resultado muda a cada tecla). Sem ela o gatilho voltaria
+   * ao placeholder com um valor escolhido.
+   */
+  selectedOption?: ComboboxOption<T> | null;
   className?: string;
   id?: string;
 }
@@ -58,6 +71,8 @@ export function Combobox<T>({
   footer,
   loading,
   filter,
+  onQueryChange,
+  selectedOption,
   className,
   id,
 }: ComboboxProps<T>) {
@@ -72,12 +87,28 @@ export function Combobox<T>({
   const listboxId = id ? `${id}-listbox` : `cb-${reactId}-listbox`;
 
   const filterFn = filter ?? defaultFilter;
+  const buscaNoServidor = onQueryChange !== undefined;
   const filtered = useMemo(() => {
-    if (!query) return options;
+    if (!query || buscaNoServidor) return options;
     return options.filter((o) => filterFn(o, query));
-  }, [options, query, filterFn]);
+  }, [options, query, filterFn, buscaNoServidor]);
 
-  const selected = options.find((o) => o.value === value) ?? null;
+  const selected =
+    options.find((o) => o.value === value) ??
+    (selectedOption && selectedOption.value === value ? selectedOption : null);
+
+  // Repassa a busca ao servidor; o `""` do fechamento também, para o próximo
+  // abrir não mostrar o resultado velho.
+  const onQueryChangeRef = useRef(onQueryChange);
+  onQueryChangeRef.current = onQueryChange;
+  const primeiraBusca = useRef(true);
+  useEffect(() => {
+    if (primeiraBusca.current) {
+      primeiraBusca.current = false;
+      return;
+    }
+    onQueryChangeRef.current?.(query);
+  }, [query]);
 
   // Posicionamento (flip/colisão/scroll/resize) e clique-fora agora são do
   // Popover (Floating UI) — eram ~60 linhas manuais aqui, a "6ª

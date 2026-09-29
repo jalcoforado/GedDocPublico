@@ -59,7 +59,7 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
     mutationFn: () => api.jobs.carimbarAnexos(processo.id),
     onSuccess: () => {
       toast.success("Carimbo enfileirado em background.");
-      router.push("/jobs");
+      router.push("/m/administracao/jobs");
     },
     onError: (e: Error) => toast.error(e.message),
   });

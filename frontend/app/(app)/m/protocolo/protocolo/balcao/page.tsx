@@ -40,6 +40,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useAssuntosAll } from "@/lib/assuntos";
+import { useManifestantesBusca } from "@/lib/manifestantes";
 
 type FormState = {
   id_especie_documental: number | "";
@@ -118,10 +119,6 @@ export default function ProtocoloBalcaoPage() {
     queryKey: ["especies-documentais"],
     queryFn: () => protocoloApi.listEspecies(false),
   });
-  const manifestantesQ = useQuery({
-    queryKey: ["manifestantes-all"],
-    queryFn: () => api.manifestantes.list({ page_size: 500 }),
-  });
   const assuntosQ = useAssuntosAll();
   const ccdTreeQ = useQuery({
     queryKey: ["ccd-tree"],
@@ -159,13 +156,9 @@ export default function ProtocoloBalcaoPage() {
 
   const especies = especiesQ.data ?? [];
 
-  const manifestanteOptions = useMemo<ComboboxOption[]>(() => {
-    return (manifestantesQ.data?.items ?? []).map((m) => ({
-      value: m.id,
-      label: m.nome ?? "(sem nome)",
-      hint: m.cpf_cnpj ?? undefined,
-    }));
-  }, [manifestantesQ.data]);
+  // Busca no servidor: a lista de manifestantes cresce sem limite e o
+  // backend corta em page_size ≤ 200 (pedir 500 dava 422 e combo vazio).
+  const manifestanteBusca = useManifestantesBusca(form.id_manifestante || null);
 
   const assuntoOptions = useMemo<ComboboxOption[]>(() => {
     return (assuntosQ.data ?? []).map((a) => ({
@@ -361,7 +354,9 @@ export default function ProtocoloBalcaoPage() {
                   </Label>
                   <Combobox
                     id="manifestante-cb"
-                    options={manifestanteOptions}
+                    options={manifestanteBusca.options}
+                    selectedOption={manifestanteBusca.selectedOption}
+                    onQueryChange={manifestanteBusca.onQueryChange}
                     value={form.id_manifestante || null}
                     onChange={(v) =>
                       setForm({
@@ -370,7 +365,7 @@ export default function ProtocoloBalcaoPage() {
                       })
                     }
                     placeholder="Buscar por nome ou CPF/CNPJ…"
-                    loading={manifestantesQ.isLoading}
+                    loading={manifestanteBusca.loading}
                     footer={
                       <Link
                         href="/m/protocolo/manifestantes"
