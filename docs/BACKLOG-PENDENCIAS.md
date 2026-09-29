@@ -391,11 +391,16 @@ por esquecimento. Agrupados aqui para não se perderem.)*
   - `test_modulos_provisionamento.py::_cleanup_tenant` — **não é limpeza, é guarda**: o `DELETE` do
     tenant sem apagar `tenant_modulo` falha se o CASCADE da migration 0075 não existir. A fixture
     apaga com `session_replication_role = replica`, que desliga FK e cascade.
-  - `test_pagamentos_rn15_c13.py` (usa o `_cleanup` de `test_pagamentos_autorizacao.py`) —
-    `test_o_backfill_alcanca_linha_antiga` roda o SQL da migration 0091, cujo `DISTINCT ON
-    (h.justificativa)` não filtra por tenant; sem a limpeza entre testes o histórico do teste
-    anterior colide e a asserção falha (reproduzido em banco isolado). **A fixture é por módulo, não
-    por teste.** O `DISTINCT ON` sem tenant é, ele mesmo, suspeito na migration 0091 — não investigado.
+  - ~~`test_pagamentos_rn15_c13.py` (usa o `_cleanup` de `test_pagamentos_autorizacao.py`)~~ —
+    **resolvido em 2026-09-29, e era defeito de produção, não de teste:** a limpeza entre testes
+    mascarava o `DISTINCT ON (h.justificativa)` sem tenant do backfill da migration 0091. Cada tenant
+    numera OPs a partir de 0001, então dois tenants com a mesma justificativa geram histórico de texto
+    idêntico e só um deles recebia `excecao_saldo` — a OP do outro sumia do relatório de exceções. A
+    migration **0126** refaz o backfill por tenant e com número de OP exato (o `LIKE` casava prefixo
+    a partir da OP 10000), só marcando OP ainda sem marca. Na VPS (um tenant só quando a 0091 rodou)
+    ela não altera nada. Com o SQL correto o `rn15` passa sem limpeza entre testes; o último
+    `_cleanup` saiu de `test_pagamentos_autorizacao.py`. Invertido (DISTINCT ON sem tenant), os
+    dois testes de backfill reprovam.
   - `test_apensamento_anticiclo.py::_cleanup_catalogs` — apaga por id linhas de tenant preexistente,
     fora do alcance da fixture.
   - ~~**Adiados por conflito com o F5**~~ — **feito em 2026-09-28**, depois do merge do F5 (#69):

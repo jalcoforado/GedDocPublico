@@ -28,11 +28,24 @@ from app.services import pagamentos_autorizacao as aut
 from app.services import pagamentos_excecoes as exc_svc
 from tests.test_pagamentos_autorizacao import (
     _autorizador_com_alcada,
-    _cleanup,
     _debito_aprovado,
     _provisionar,
     _sm,
 )
+
+def _sql_backfill() -> str:
+    """Importa o SQL da própria migration — o teste exercita o SQL real."""
+    import importlib.util
+    import pathlib
+
+    arq = next(pathlib.Path(__file__).resolve().parents[1].glob("alembic/versions/0126_*.py"))
+    spec = importlib.util.spec_from_file_location("migration_0126", arq)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.SQL_BACKFILL
+
+
+SQL_BACKFILL = _sql_backfill()
 
 JUSTIFICATIVA = "Folha atrasada; prefeito autorizou por ofício 12/2026."
 
@@ -68,15 +81,12 @@ async def _autorizar_com_excecao(engine, tenant_id, *, valor="5000.00", saldo="1
 async def test_autorizacao_com_excecao_grava_a_coluna(admin_engine) -> None:
     """O que a fatia acrescenta: a exceção deixa de ser só texto."""
     t = await _provisionar(admin_engine)
-    try:
-        await _autorizar_com_excecao(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            op = (await s.execute(select(OrdemPagamento).where(
-                OrdemPagamento.tenant_id == t.id))).scalars().one()
-        assert op.excecao_saldo is True
-        assert op.justificativa_excecao == JUSTIFICATIVA
-    finally:
-        await _cleanup(admin_engine, t.id)
+    await _autorizar_com_excecao(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        op = (await s.execute(select(OrdemPagamento).where(
+            OrdemPagamento.tenant_id == t.id))).scalars().one()
+    assert op.excecao_saldo is True
+    assert op.justificativa_excecao == JUSTIFICATIVA
 
 
 @pytest.mark.asyncio
@@ -85,24 +95,21 @@ async def test_autorizacao_normal_nao_marca_excecao(admin_engine) -> None:
     e todo pagamento do município apareceria no relatório de compliance como
     exceção, que é o jeito mais rápido de fazer ninguém mais ler o relatório."""
     t = await _provisionar(admin_engine)
-    try:
-        d, _sol, _apr, fonte, conta = await _debito_aprovado(
-            admin_engine, t.id, valor="100.00", saldo_inicial="10000.00")
-        autorizador = await _autorizador_com_alcada(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            await aut.autorizar_lote(
-                s, tenant_id=t.id, usuario_id=autorizador,
-                grupos=[GrupoAutorizacaoIn(id_fonte=fonte.id,
-                                           id_conta_pagadora=conta.id,
-                                           debito_ids=[d.id])])
-            await s.commit()
-        async with _sm(admin_engine)() as s:
-            op = (await s.execute(select(OrdemPagamento).where(
-                OrdemPagamento.tenant_id == t.id))).scalars().one()
-        assert op.excecao_saldo is False
-        assert op.justificativa_excecao is None
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d, _sol, _apr, fonte, conta = await _debito_aprovado(
+        admin_engine, t.id, valor="100.00", saldo_inicial="10000.00")
+    autorizador = await _autorizador_com_alcada(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        await aut.autorizar_lote(
+            s, tenant_id=t.id, usuario_id=autorizador,
+            grupos=[GrupoAutorizacaoIn(id_fonte=fonte.id,
+                                       id_conta_pagadora=conta.id,
+                                       debito_ids=[d.id])])
+        await s.commit()
+    async with _sm(admin_engine)() as s:
+        op = (await s.execute(select(OrdemPagamento).where(
+            OrdemPagamento.tenant_id == t.id))).scalars().one()
+    assert op.excecao_saldo is False
+    assert op.justificativa_excecao is None
 
 
 @pytest.mark.asyncio
@@ -113,17 +120,14 @@ async def test_o_relatorio_encontra_a_excecao_pela_coluna(admin_engine) -> None:
     zero para sempre e a suíte não notaria.
     """
     t = await _provisionar(admin_engine)
-    try:
-        d, _ops = await _autorizar_com_excecao(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            rel = await exc_svc.relatorio_excecoes(s, tenant_id=t.id, limite_por_regra=50)
-        regra = next(r for r in rel["regras"] if r["codigo"] == "RN15_SALDO_INSUFICIENTE")
-        assert regra["total"] == 1, regra
-        item = regra["itens"][0]
-        assert item["id_debito"] == d.id
-        assert JUSTIFICATIVA in (item["justificativa"] or "")
-    finally:
-        await _cleanup(admin_engine, t.id)
+    d, _ops = await _autorizar_com_excecao(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        rel = await exc_svc.relatorio_excecoes(s, tenant_id=t.id, limite_por_regra=50)
+    regra = next(r for r in rel["regras"] if r["codigo"] == "RN15_SALDO_INSUFICIENTE")
+    assert regra["total"] == 1, regra
+    item = regra["itens"][0]
+    assert item["id_debito"] == d.id
+    assert JUSTIFICATIVA in (item["justificativa"] or "")
 
 
 @pytest.mark.asyncio
@@ -135,32 +139,29 @@ async def test_coluna_e_like_encontram_o_mesmo_conjunto(admin_engine) -> None:
     nova está incompleta. Este teste é o que detectaria qualquer um dos dois.
     """
     t = await _provisionar(admin_engine)
-    try:
-        await _autorizar_com_excecao(admin_engine, t.id)
-        async with _sm(admin_engine)() as s:
-            por_coluna = (await s.execute(
-                select(func.count()).select_from(OrdemPagamentoDebito)
-                .join(OrdemPagamento, OrdemPagamento.id == OrdemPagamentoDebito.id_ordem)
-                .join(Debito, Debito.id == OrdemPagamentoDebito.id_debito)
-                .where(OrdemPagamento.tenant_id == t.id,
-                       OrdemPagamento.excecao_saldo.is_(True),
-                       Debito.excluido.is_(False))
-            )).scalar_one()
-            por_like = (await s.execute(
-                select(func.count()).select_from(DebitoHistorico)
-                .join(Debito, Debito.id == DebitoHistorico.id_debito)
-                .where(DebitoHistorico.tenant_id == t.id,
-                       DebitoHistorico.justificativa.like(f"%{exc_svc.MARCADOR_RN15}%"),
-                       Debito.excluido.is_(False))
-            )).scalar_one()
-        assert por_coluna == por_like == 1, (por_coluna, por_like)
-    finally:
-        await _cleanup(admin_engine, t.id)
+    await _autorizar_com_excecao(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        por_coluna = (await s.execute(
+            select(func.count()).select_from(OrdemPagamentoDebito)
+            .join(OrdemPagamento, OrdemPagamento.id == OrdemPagamentoDebito.id_ordem)
+            .join(Debito, Debito.id == OrdemPagamentoDebito.id_debito)
+            .where(OrdemPagamento.tenant_id == t.id,
+                   OrdemPagamento.excecao_saldo.is_(True),
+                   Debito.excluido.is_(False))
+        )).scalar_one()
+        por_like = (await s.execute(
+            select(func.count()).select_from(DebitoHistorico)
+            .join(Debito, Debito.id == DebitoHistorico.id_debito)
+            .where(DebitoHistorico.tenant_id == t.id,
+                   DebitoHistorico.justificativa.like(f"%{exc_svc.MARCADOR_RN15}%"),
+                   Debito.excluido.is_(False))
+        )).scalar_one()
+    assert por_coluna == por_like == 1, (por_coluna, por_like)
 
 
 @pytest.mark.asyncio
 async def test_o_backfill_alcanca_linha_antiga(admin_engine) -> None:
-    """O backfill da 0091, exercitado sobre uma linha no formato ANTIGO.
+    """O backfill da RN-15 (0091, refeito pela 0126), sobre uma linha no formato ANTIGO.
 
     A migration já rodou neste banco, então o teste refaz o cenário que ela
     encontraria: uma OP com a coluna zerada e o histórico com o texto. Sem
@@ -168,45 +169,77 @@ async def test_o_backfill_alcanca_linha_antiga(admin_engine) -> None:
     o histórico do município ficaria invisível no relatório, em silêncio.
     """
     t = await _provisionar(admin_engine)
-    try:
-        d, _ops = await _autorizar_com_excecao(admin_engine, t.id)
+    d, _ops = await _autorizar_com_excecao(admin_engine, t.id)
 
-        # Volta ao estado pré-0091: coluna zerada, texto intacto.
-        async with _sm(admin_engine)() as s:
-            await s.execute(text(
-                "UPDATE pagamentos.ordem_pagamento "
-                "SET excecao_saldo = false, justificativa_excecao = NULL "
-                "WHERE tenant_id = :t"), {"t": t.id})
-            await s.commit()
+    # Volta ao estado pré-0091: coluna zerada, texto intacto.
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(
+            "UPDATE pagamentos.ordem_pagamento "
+            "SET excecao_saldo = false, justificativa_excecao = NULL "
+            "WHERE tenant_id = :t"), {"t": t.id})
+        await s.commit()
 
-        async with _sm(admin_engine)() as s:
-            antes = (await s.execute(select(OrdemPagamento).where(
-                OrdemPagamento.tenant_id == t.id))).scalars().one()
-            assert antes.excecao_saldo is False, "o cenário não voltou ao estado antigo"
+    async with _sm(admin_engine)() as s:
+        antes = (await s.execute(select(OrdemPagamento).where(
+            OrdemPagamento.tenant_id == t.id))).scalars().one()
+        assert antes.excecao_saldo is False, "o cenário não voltou ao estado antigo"
 
-            # O MESMO SQL da migration 0091.
-            await s.execute(text("""
-                UPDATE pagamentos.ordem_pagamento AS op
-                   SET excecao_saldo = true,
-                       justificativa_excecao = TRIM(BOTH ': ' FROM sub.texto)
-                  FROM (
-                      SELECT DISTINCT ON (h.justificativa)
-                             h.tenant_id,
-                             split_part(h.justificativa, 'OP ', 2) AS resto,
-                             split_part(h.justificativa, 'EXCEÇÃO DE SALDO (RN-15)', 2) AS texto
-                        FROM pagamentos.debito_historico h
-                       WHERE h.justificativa LIKE '%EXCEÇÃO DE SALDO (RN-15)%'
-                  ) AS sub
-                 WHERE op.tenant_id = sub.tenant_id
-                   AND sub.resto LIKE op.numero || '%'
-            """))
-            await s.commit()
+        # O SQL da 0126, que refaz o backfill da 0091 por tenant.
+        await s.execute(text(SQL_BACKFILL))
+        await s.commit()
 
-        async with _sm(admin_engine)() as s:
-            depois = (await s.execute(select(OrdemPagamento).where(
-                OrdemPagamento.tenant_id == t.id))).scalars().one()
-        assert depois.excecao_saldo is True, "o backfill não alcançou a linha antiga"
-        assert depois.justificativa_excecao == JUSTIFICATIVA, depois.justificativa_excecao
-        assert d.id  # o débito existe; ancora o cenário
-    finally:
-        await _cleanup(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        depois = (await s.execute(select(OrdemPagamento).where(
+            OrdemPagamento.tenant_id == t.id))).scalars().one()
+    assert depois.excecao_saldo is True, "o backfill não alcançou a linha antiga"
+    assert depois.justificativa_excecao == JUSTIFICATIVA, depois.justificativa_excecao
+    assert d.id  # o débito existe; ancora o cenário
+
+
+@pytest.mark.asyncio
+async def test_backfill_nao_confunde_tenants_com_o_mesmo_texto(admin_engine) -> None:
+    """Cada tenant numera OPs a partir de 0001: dois tenants com a mesma
+    justificativa geram histórico com texto IDÊNTICO. A 0091 fazia
+    `DISTINCT ON (h.justificativa)` sem o tenant e só um dos dois recebia a
+    marca. A 0126 tem de marcar os dois."""
+    t1 = await _provisionar(admin_engine)
+    t2 = await _provisionar(admin_engine)
+    for t in (t1, t2):
+        await _autorizar_com_excecao(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        textos = (await s.execute(text(
+            "SELECT DISTINCT justificativa FROM pagamentos.debito_historico "
+            "WHERE tenant_id = ANY(:ts) AND justificativa LIKE '%RN-15%'"),
+            {"ts": [t1.id, t2.id]})).scalars().all()
+        assert len(textos) == 1, f"o cenário exige texto idêntico nos dois tenants: {textos}"
+        await s.execute(text(
+            "UPDATE pagamentos.ordem_pagamento SET excecao_saldo = false, "
+            "justificativa_excecao = NULL WHERE tenant_id = ANY(:ts)"), {"ts": [t1.id, t2.id]})
+        await s.commit()
+
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(SQL_BACKFILL))
+        await s.commit()
+        marcadas = dict((await s.execute(text(
+            "SELECT tenant_id, bool_and(excecao_saldo) FROM pagamentos.ordem_pagamento "
+            "WHERE tenant_id = ANY(:ts) GROUP BY tenant_id"), {"ts": [t1.id, t2.id]})).all())
+    assert marcadas == {t1.id: True, t2.id: True}, marcadas
+
+
+@pytest.mark.asyncio
+async def test_backfill_nao_sobrescreve_marca_existente(admin_engine) -> None:
+    """A 0126 só marca OP ainda sem marca: justificativa gravada pela aplicação
+    não é trocada pelo texto extraído do histórico."""
+    t = await _provisionar(admin_engine)
+    await _autorizar_com_excecao(admin_engine, t.id)
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(
+            "UPDATE pagamentos.ordem_pagamento SET justificativa_excecao = 'editada à mão' "
+            "WHERE tenant_id = :t"), {"t": t.id})
+        await s.commit()
+        await s.execute(text(SQL_BACKFILL))
+        await s.commit()
+        j = (await s.execute(text(
+            "SELECT justificativa_excecao FROM pagamentos.ordem_pagamento WHERE tenant_id = :t"),
+            {"t": t.id})).scalar_one()
+    assert j == "editada à mão"
