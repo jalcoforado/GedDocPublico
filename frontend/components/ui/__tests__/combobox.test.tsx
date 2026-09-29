@@ -91,3 +91,50 @@ describe("Combobox — limpar seleção acessível", () => {
     expect(screen.queryByRole("button", { name: "Limpar seleção" })).toBeNull();
   });
 });
+
+describe("Combobox — busca no servidor (onQueryChange)", () => {
+  // A lista vem do servidor já filtrada: o combo não pode filtrar de novo
+  // (esconderia o que o servidor achou por CPF sem máscara, p.ex.) e o item
+  // selecionado tem de continuar visível quando some do resultado da busca.
+  const DO_SERVIDOR = [
+    { value: 10, label: "Maria Souza", hint: "12345678909" },
+    { value: 11, label: "João Lima", hint: "98765432100" },
+  ];
+
+  it("repassa o que se digita e não filtra localmente", async () => {
+    const onQueryChange = vi.fn();
+    render(
+      <Combobox options={DO_SERVIDOR} value={null} onChange={() => {}} onQueryChange={onQueryChange} />,
+    );
+    await userEvent.click(screen.getByRole("combobox"));
+    await userEvent.type(screen.getByPlaceholderText("Buscar…"), "123.456");
+    expect(onQueryChange).toHaveBeenLastCalledWith("123.456");
+    // "123.456" não casa com label nem hint localmente — com filtro local as
+    // duas sumiriam. No modo servidor as duas continuam.
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+  });
+
+  it("mostra o selecionado mesmo fora das opções atuais", () => {
+    render(
+      <Combobox
+        options={[]}
+        value={99}
+        selectedOption={{ value: 99, label: "Fulano Selecionado" }}
+        onChange={() => {}}
+        onQueryChange={() => {}}
+      />,
+    );
+    expect(screen.getByRole("combobox")).toHaveTextContent("Fulano Selecionado");
+  });
+
+  it("fechar limpa a busca no servidor", async () => {
+    const onQueryChange = vi.fn();
+    render(
+      <Combobox options={DO_SERVIDOR} value={null} onChange={() => {}} onQueryChange={onQueryChange} />,
+    );
+    await userEvent.click(screen.getByRole("combobox"));
+    await userEvent.type(screen.getByPlaceholderText("Buscar…"), "mar");
+    await userEvent.keyboard("{Escape}");
+    expect(onQueryChange).toHaveBeenLastCalledWith("");
+  });
+});

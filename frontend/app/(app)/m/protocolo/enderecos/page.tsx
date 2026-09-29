@@ -14,7 +14,8 @@ export default function EnderecosPage() {
   });
   const bairrosQ = useQuery({
     queryKey: ["bairros-all"],
-    queryFn: () => api.bairros.list({ page_size: 500 }),
+    // Teto de GET /bairros é 200 (routers/localizacao.py); 500 dava 422.
+    queryFn: () => api.bairros.list({ page_size: 200 }),
   });
   const estadosQ = useQuery({ queryKey: ["estados"], queryFn: api.estados });
 

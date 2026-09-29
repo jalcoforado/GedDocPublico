@@ -61,7 +61,7 @@ export default function RelatorioTramitacaoPage() {
     mutationFn: () => api.jobs.relatorioTramitacao(applied),
     onSuccess: () => {
       toast.success("Relatório enfileirado em background.");
-      router.push("/jobs");
+      router.push("/m/administracao/jobs");
     },
     onError: (e: Error) => toast.error(e.message),
   });

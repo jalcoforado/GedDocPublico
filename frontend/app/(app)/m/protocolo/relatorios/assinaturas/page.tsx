@@ -71,7 +71,8 @@ export default function RelatorioAssinaturasPage() {
 
   const usuariosQ = useQuery({
     queryKey: ["usuarios-list-relatorio"],
-    queryFn: () => api.usuarios.list({ page_size: 200 }),
+    // Teto de GET /usuarios é 100 (routers/usuarios.py); 200 dava 422.
+    queryFn: () => api.usuarios.list({ page_size: 100 }),
   });
 
   const relQ = useQuery({

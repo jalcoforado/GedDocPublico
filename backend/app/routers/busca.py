@@ -33,6 +33,10 @@ async def busca_global(
         return {"processos": [], "manifestantes": [], "usuarios": [], "q": q}
 
     like = f"%{q}%"
+    # CPF/CNPJ de manifestante é gravado só com dígitos: "123.456.789-09"
+    # procura "12345678909".
+    digitos = "".join(ch for ch in q if ch.isdigit())
+    like_doc = f"%{digitos}%" if digitos else like
 
     # Processos por número (case-insensitive)
     procs = (
@@ -57,7 +61,7 @@ async def busca_global(
                 Manifestante.excluido.is_(False),
                 or_(
                     Manifestante.nome.ilike(like),
-                    Manifestante.cpf_cnpj.ilike(like),
+                    Manifestante.cpf_cnpj.ilike(like_doc),
                 ),
             )
             .order_by(Manifestante.nome)

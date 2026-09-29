@@ -296,7 +296,7 @@ export default function ProcessoDetailPage() {
     mutationFn: () => api.jobs.processoCompleto(processoId),
     onSuccess: () => {
       toast.success("Geração em background enfileirada.");
-      router.push("/jobs");
+      router.push("/m/administracao/jobs");
     },
     onError: (e: Error) => toast.error(e.message),
   });
