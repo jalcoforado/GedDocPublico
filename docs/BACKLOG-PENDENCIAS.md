@@ -1095,9 +1095,10 @@ O que continua aberto:
   baixa o DOCX, converte os parágrafos em `<p>` (texto escapado — `<nome>` digitado no Doc é
   texto, não tag), sanitiza e, **só se o conteúdo mudou**, sobe `versao` e grava `minuta_historico`.
   Testes em `tests/test_minuta_sincronizar_google.py`. **Ainda falta para fechar o item:**
-  (a) **nenhuma tela chama** — `api.minutas.sincronizarGoogle` existe em `frontend/lib/api.ts` e
-  não tem consumidor; (b) a **formatação se perde** — só parágrafos: negrito/itálico, listas,
-  tabelas e alinhamento do Doc não voltam para o `corpo_html`.
+  (a) ~~**nenhuma tela chama**~~ — **tela entregue em 2026-09-29**: na minuta de origem Google,
+  "Sincronizar do Google Docs" traz o texto e mostra a prévia com a versão (ou avisa que nada mudou);
+  (b) a **formatação se perde** — só parágrafos: negrito/itálico, listas,
+  tabelas e alinhamento do Doc não voltam para o `corpo_html` (a tela avisa isso ao lado da prévia).
 - Sem re-autenticação automática quando o usuário revoga o acesso do app no Google — a próxima
   operação simplesmente falha.
 - Sem coordenação de edição concorrente e sem contagem de páginas (o Google não expõe o metadado;
@@ -1211,8 +1212,11 @@ ligar em produção:**
 - **Homologação** contra `sso.staging.acesso.gov.br`: nada foi exercitado contra o serviço real. Em
   particular o **contrato da API de níveis** (`GOVBR_API_URL`, `consultar_nivel`) segue o roteiro
   público e está sem confirmação — por isso falha dela vira `nivel_govbr = NULL`, nunca erro.
-- **Tela:** nenhum botão "Entrar com gov.br" em `/cidadao/login`, e os erros do callback saem como
-  JSON (400/401/403/502/503), não como página. Sem a tela o fluxo só é alcançável digitando a URL.
+- ~~**Tela**~~ — **entregue em 2026-09-29**: "Entrar com gov.br" em `/cidadao/login`, que só aparece
+  quando `GET /auth/govbr/disponivel` diz que há configuração (hoje não aparece em ambiente nenhum). Erro
+  do callback pedido pelo NAVEGADOR volta a `/cidadao/login?govbr=<cancelado|inativo|indisponivel|falhou>`
+  com a explicação; cliente de API continua recebendo o status JSON de antes, que é o que os 35 testes de
+  segurança afirmam.
 - **Assinatura gov.br (ICP) ficou de fora.** O rascunho trazia `services/govbr_assinatura.py`
   (pyHanko) sem nenhum chamador, sem teste e com um `Signer` sem certificado, que não assinaria.
   Não entrou, e `pyhanko` não entrou no `pyproject.toml`. É fatia própria, a desenhar.

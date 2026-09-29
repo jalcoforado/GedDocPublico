@@ -38,11 +38,32 @@ def _redirect_uri(request: Request) -> str:
     return fixo or str(request.url_for("govbr_callback"))
 
 
-def _erro(status_code: int, detalhe: str) -> Response:
-    """Resposta de erro que também descarta o estado: não se reaproveita."""
-    resp = JSONResponse(status_code=status_code, content={"detail": detalhe})
+_MOTIVO_POR_STATUS = {503: "indisponivel", 403: "inativo"}
+
+
+def _erro(request: Request, status_code: int, detalhe: str, *, motivo: str | None = None) -> Response:
+    """Resposta de erro que também descarta o estado: não se reaproveita.
+
+    Quem chega aqui pelo NAVEGADOR (pede HTML) é o cidadão no meio do login:
+    ele volta à tela de login com um motivo curto na URL, em vez de ver um JSON
+    cru. Cliente de API continua recebendo o status e o JSON de sempre — é o
+    que os testes de segurança afirmam, um status por checagem. O motivo não
+    carrega o detalhe interno: é um de quatro rótulos fixos.
+    """
+    if "text/html" in request.headers.get("accept", ""):
+        rotulo = motivo or _MOTIVO_POR_STATUS.get(status_code, "falhou")
+        resp: Response = RedirectResponse(f"/cidadao/login?govbr={rotulo}", status_code=302)
+    else:
+        resp = JSONResponse(status_code=status_code, content={"detail": detalhe})
     resp.delete_cookie(COOKIE_ESTADO, path=_CAMINHO_COOKIE)
     return resp
+
+
+@router.get("/disponivel")
+async def govbr_disponivel() -> dict[str, bool]:
+    """Se o portal deve mostrar o botão "Entrar com gov.br". Sem credenciais
+    configuradas o botão não aparece — em vez de aparecer e falhar."""
+    return {"disponivel": get_settings().govbr_configurado}
 
 
 @router.get("/login")
@@ -55,7 +76,7 @@ async def govbr_login(
     try:
         govbr_sso.exigir_configuracao()
     except GovBrErro as e:
-        return _erro(e.status_code, e.detalhe)
+        return _erro(request, e.status_code, e.detalhe)
 
     estado = govbr_sso.novo_estado(tenant_id=tenant_id, destino=next)
     cookie = govbr_sso.codificar_estado(estado, await get_jwt_secret(db))
@@ -96,12 +117,15 @@ async def govbr_callback(
             segredo_jwt=await get_jwt_secret(db),
         )
         if error or not code:
-            raise GovBrErro(401, "Login gov.br não concluído")
+            # O próprio gov.br devolveu `error` (ex.: o cidadão recusou) — o
+            # estado já foi conferido acima, então isto é um retorno nosso.
+            return _erro(request, 401, "Login gov.br não concluído",
+                         motivo="cancelado" if error else None)
         identidade = await govbr_sso.identidade_do_callback(
             code, estado, redirect_uri=_redirect_uri(request)
         )
     except GovBrErro as e:
-        return _erro(e.status_code, e.detalhe)
+        return _erro(request, e.status_code, e.detalhe)
 
     try:
         cidadao = await login_ou_cadastrar_via_govbr(
@@ -114,9 +138,9 @@ async def govbr_callback(
             app=get_settings().app_name,
         )
     except CidadaoInativoError as e:
-        return _erro(403, str(e))
+        return _erro(request, 403, str(e))
     except CidadaoAuthError as e:
-        return _erro(401, str(e))
+        return _erro(request, 401, str(e))
 
     resp = RedirectResponse(estado.destino, status_code=302)
     await emitir_sessao_cidadao(db, resp, cidadao, tenant_id=tenant_id)

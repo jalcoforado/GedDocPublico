@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { RichTextEditor, RichTextView } from "@/components/ui/rich-text-editor";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { GoogleConnectDialog } from "@/components/GoogleConnectDialog";
@@ -130,6 +130,25 @@ export function RedigirDocumentoDialog({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Traz de volta o que foi editado no Google Docs (backend: PR #70). O
+  // backend só sobe a versão se o conteúdo mudou — por isso comparar com a
+  // versão de antes, para não anunciar "versão nova" quando nada mudou.
+  const sincronizarM = useMutation({
+    mutationFn: (id: number) => api.minutas.sincronizarGoogle(id),
+    onSuccess: (m) => {
+      const antes = minutaQ.data?.versao;
+      qc.setQueryData(["minuta", m.id], m);
+      qc.invalidateQueries({ queryKey: ["minutas", processoId] });
+      if (antes !== undefined && m.versao > antes) {
+        onSaved?.();
+        toast.success(`Conteúdo trazido do Google Docs (v${m.versao}).`);
+      } else {
+        toast.info("Nada mudou no Google Docs desde a última sincronização.");
+      }
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const salvarM = useMutation({
     mutationFn: () =>
       api.minutas.update(minutaAtualId as number, {
@@ -160,6 +179,13 @@ export function RedigirDocumentoDialog({
     <div className="flex justify-end gap-2">
       <Button variant="secondary" onClick={onClose}>
         Fechar
+      </Button>
+      <Button
+        variant="secondary"
+        onClick={() => minutaAtualId !== undefined && sincronizarM.mutate(minutaAtualId)}
+        disabled={sincronizarM.isPending || !minutaQ.data?.google_doc_id}
+      >
+        {sincronizarM.isPending ? "Sincronizando…" : "Sincronizar do Google Docs"}
       </Button>
       <Button
         onClick={() => {
@@ -302,8 +328,27 @@ export function RedigirDocumentoDialog({
           </p>
           <p className="text-sm text-muted-foreground">
             Este documento é editado no Google Docs, não aqui. Use "Abrir no
-            Google Docs" para continuar editando numa aba nova.
+            Google Docs" para continuar editando numa aba nova e "Sincronizar do
+            Google Docs" para trazer o texto de volta à plataforma.
           </p>
+          {minutaQ.data?.corpo_html ? (
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-foreground-muted">
+                Conteúdo trazido do Google Docs (v{minutaQ.data.versao})
+              </p>
+              <div className="max-h-80 overflow-y-auto rounded-md border border-border bg-card p-3">
+                <RichTextView html={minutaQ.data.corpo_html} />
+              </div>
+              <p className="text-xs text-foreground-subtle">
+                Só o texto dos parágrafos é trazido — negrito, listas e tabelas
+                continuam apenas no Google Docs.
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-foreground-subtle">
+              O conteúdo ainda não foi trazido para a plataforma.
+            </p>
+          )}
         </div>
       ) : (
         <div className="space-y-4">

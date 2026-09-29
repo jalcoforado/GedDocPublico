@@ -189,6 +189,8 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     # sujeito para permissionar nem módulo a exigir.
     ("GET", "/api/v2/auth/govbr/login"),
     ("GET", "/api/v2/auth/govbr/callback"),
+    # Se o portal mostra o botão (só lê a configuração, sem dado de ninguém).
+    ("GET", "/api/v2/auth/govbr/disponivel"),
 
     # -- API M2M de integrações (Pagamentos C2.3, Task 7): outro realm de
     # autenticação inteiro, por `X-Api-Key` (`get_current_sistema_integrado`),

@@ -566,3 +566,107 @@ async def test_runtime_municipal_pode_gravar_nivel_govbr(admin_engine):
             )
         ).scalar_one()
     assert pode is True
+
+
+# ---------------------------------------------------------------------------
+# Tela (2026-09-29): o portal precisa saber se mostra o botão, e o navegador do
+# cidadão não pode cair num JSON cru quando o login falha.
+# ---------------------------------------------------------------------------
+
+HTML = {"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
+
+
+@pytest.mark.asyncio
+async def test_disponivel_reflete_a_configuracao(govbr_desligado, tenants, monkeypatch):
+    a, _ = tenants
+    arreio_tenant_http(a.id, a.slug)
+    async with _cliente() as c:
+        r = await c.get("/api/v2/auth/govbr/disponivel")
+    assert r.status_code == 200 and r.json() == {"disponivel": False}
+
+
+@pytest.mark.asyncio
+async def test_disponivel_com_configuracao(govbr, tenants):
+    a, _ = tenants
+    arreio_tenant_http(a.id, a.slug)
+    async with _cliente() as c:
+        r = await c.get("/api/v2/auth/govbr/disponivel")
+    assert r.status_code == 200 and r.json() == {"disponivel": True}
+
+
+@pytest.mark.asyncio
+async def test_navegador_sem_configuracao_volta_ao_login_com_motivo(govbr_desligado, tenants):
+    a, _ = tenants
+    arreio_tenant_http(a.id, a.slug)
+    async with _cliente() as c:
+        r = await c.get("/api/v2/auth/govbr/login", headers=HTML)
+    assert r.status_code == 302
+    assert r.headers["location"] == "/cidadao/login?govbr=indisponivel"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state,motivo", [("outro", "falhou")])
+async def test_navegador_com_state_errado_volta_ao_login_sem_trocar_o_code(
+    govbr, tenants, admin_engine, state, motivo
+):
+    """A checagem é a MESMA do fluxo JSON (o code nem é trocado); muda só a
+    forma de responder ao navegador."""
+    a, _ = tenants
+    arreio_tenant_http(a.id, a.slug)
+    async with _cliente() as c:
+        r = await c.get("/api/v2/auth/govbr/login")
+        q = govbr.autorizar(r.headers["location"], cpf=CPF_A)
+        cb = await c.get("/api/v2/auth/govbr/callback",
+                         params={"code": q["code"], "state": state}, headers=HTML)
+    assert cb.status_code == 302
+    assert cb.headers["location"] == f"/cidadao/login?govbr={motivo}"
+    assert govbr.chamadas_token == 0
+    assert await _cidadaos(admin_engine, a.id, CPF_A) == []
+    assert "aprimora_cidadao_token" not in cb.cookies
+
+
+@pytest.mark.asyncio
+async def test_navegador_cancelado_no_govbr_volta_com_motivo_cancelado(govbr, tenants):
+    a, _ = tenants
+    arreio_tenant_http(a.id, a.slug)
+    async with _cliente() as c:
+        r = await c.get("/api/v2/auth/govbr/login")
+        q = govbr.autorizar(r.headers["location"], cpf=CPF_A)
+        cb = await c.get("/api/v2/auth/govbr/callback",
+                         params={"state": q["state"], "error": "access_denied"}, headers=HTML)
+    assert cb.status_code == 302
+    assert cb.headers["location"] == "/cidadao/login?govbr=cancelado"
+
+
+@pytest.mark.asyncio
+async def test_navegador_cidadao_inativo_volta_com_motivo_inativo(govbr, tenants, admin_engine):
+    a, _ = tenants
+    async with _cliente() as c:
+        assert (await _fluxo(c, govbr, a)).status_code == 302
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(
+            "UPDATE utils.usuario_externo SET ativo=false WHERE tenant_id=:t AND cpf_cnpj=:c"),
+            {"t": a.id, "c": CPF_A})
+        await s.commit()
+    async with _cliente() as c:
+        arreio_tenant_http(a.id, a.slug)
+        r = await c.get("/api/v2/auth/govbr/login")
+        q = govbr.autorizar(r.headers["location"], cpf=CPF_A)
+        cb = await c.get("/api/v2/auth/govbr/callback",
+                         params={"code": q["code"], "state": q["state"]}, headers=HTML)
+    assert cb.status_code == 302
+    assert cb.headers["location"] == "/cidadao/login?govbr=inativo"
+
+
+@pytest.mark.asyncio
+async def test_cliente_de_api_continua_recebendo_o_status_json(govbr, tenants):
+    """Sem pedir HTML, nada muda: os asserts de status acima dependem disso."""
+    a, _ = tenants
+    arreio_tenant_http(a.id, a.slug)
+    async with _cliente() as c:
+        r = await c.get("/api/v2/auth/govbr/login")
+        q = govbr.autorizar(r.headers["location"], cpf=CPF_A)
+        cb = await c.get("/api/v2/auth/govbr/callback",
+                         params={"code": q["code"], "state": "outro"},
+                         headers={"Accept": "application/json"})
+    assert cb.status_code == 400 and "detail" in cb.json()

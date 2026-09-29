@@ -4807,6 +4807,8 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+    /** Se o portal mostra "Entrar com gov.br" (backend: `auth_govbr.py`). */
+    govbrDisponivel: () => requestCidadao<{ disponivel: boolean }>("/auth/govbr/disponivel"),
     login: (cpf_cnpj: string, senha: string) =>
       requestCidadao<CidadaoLoginResponse>("/cidadao/login", {
         method: "POST",
@@ -5526,6 +5528,15 @@ export const apensamentoApi = {
   listarApensados: (processoId: number) =>
     request<ProcessoApensadoListItem[]>(`/processos/${processoId}/apensados`),
 };
+
+/**
+ * Início do login gov.br: navegação de topo (não fetch) — o navegador precisa
+ * seguir o redirect até o gov.br levando o cookie de estado. `next` volta ao
+ * portal depois; o backend só aceita destino sob `/cidadao/`.
+ */
+export function govbrLoginUrl(next: string): string {
+  return `${BROWSER_API_URL}/auth/govbr/login?next=${encodeURIComponent(next)}`;
+}
 
 export function termoApensamentoPdfUrl(apensamentoId: number): string {
   return `${BROWSER_API_URL}/processos/apensamentos/${apensamentoId}/termo.pdf`;
