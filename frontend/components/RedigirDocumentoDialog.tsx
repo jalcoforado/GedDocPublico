@@ -340,8 +340,8 @@ export function RedigirDocumentoDialog({
                 <RichTextView html={minutaQ.data.corpo_html} />
               </div>
               <p className="text-xs text-foreground-subtle">
-                Só o texto dos parágrafos é trazido — negrito, listas e tabelas
-                continuam apenas no Google Docs.
+                Vêm negrito, itálico, títulos, listas, alinhamento e tabelas.
+                Imagens, links, cores e fontes continuam só no Google Docs.
               </p>
             </div>
           ) : (
