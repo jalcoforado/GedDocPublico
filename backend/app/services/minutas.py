@@ -705,15 +705,12 @@ async def sincronizar_google_doc_para_minuta(
     """Sincroniza o conteúdo do Google Doc de volta para a Minuta local.
     
     1. Baixa os bytes em formato DOCX da API do Google.
-    2. Converte os parágrafos para HTML.
+    2. Converte para HTML com formatação, listas, títulos e tabelas (docx_para_html).
     3. Sanitiza o HTML.
     4. Se houver mudanças, atualiza o corpo_html, incrementa a versão e grava histórico.
     """
-    import io
-    from html import escape
+    from .docx_para_html import docx_para_html
 
-    from docx import Document
-    
     m = await obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
 
     if m.status != "rascunho":
@@ -743,18 +740,9 @@ async def sincronizar_google_doc_para_minuta(
             detail=f"Erro ao sincronizar do Google Docs: {str(e)}",
         )
 
-    doc = Document(io.BytesIO(docx_bytes))
-    html_parts = []
-    
-    for para in doc.paragraphs:
-        texto = para.text.strip()
-        if texto:
-            # `escape`: o texto do Google Doc é texto puro, não marcação — sem isso
-            # "<nome>" seria lido como tag e descartado pelo sanitizador.
-            html_parts.append(f"<p>{escape(texto, quote=False)}</p>")
-            
-    novo_corpo_html = "".join(html_parts)
-    novo_corpo_html = sanitizar_html(novo_corpo_html)
+    # Formatação, listas, títulos, alinhamento e tabelas (ver docx_para_html);
+    # texto sempre escapado, e o resultado ainda passa pelo sanitizador.
+    novo_corpo_html = sanitizar_html(docx_para_html(docx_bytes))
 
     if m.corpo_html != novo_corpo_html:
         m.corpo_html = novo_corpo_html

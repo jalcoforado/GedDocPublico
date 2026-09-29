@@ -1097,8 +1097,11 @@ O que continua aberto:
   Testes em `tests/test_minuta_sincronizar_google.py`. **Ainda falta para fechar o item:**
   (a) ~~**nenhuma tela chama**~~ — **tela entregue em 2026-09-29**: na minuta de origem Google,
   "Sincronizar do Google Docs" traz o texto e mostra a prévia com a versão (ou avisa que nada mudou);
-  (b) a **formatação se perde** — só parágrafos: negrito/itálico, listas,
-  tabelas e alinhamento do Doc não voltam para o `corpo_html` (a tela avisa isso ao lado da prévia).
+  (b) ~~a **formatação se perde**~~ — **entregue em 2026-09-29** (`services/docx_para_html.py`):
+  negrito, itálico, sublinhado, tachado, títulos (→ `h2`/`h3`, os níveis do editor), alinhamento,
+  listas (com marcador e numeradas; aninhamento sai achatado) e tabelas, na ordem do documento. Texto
+  sem formatação sai idêntico ao formato antigo, para não criar versão nova sem mudança real. Ficam
+  de fora imagens, destino de links, cores, fontes e cabeçalho/rodapé.
 - Sem re-autenticação automática quando o usuário revoga o acesso do app no Google — a próxima
   operação simplesmente falha.
 - Sem coordenação de edição concorrente e sem contagem de páginas (o Google não expõe o metadado;
