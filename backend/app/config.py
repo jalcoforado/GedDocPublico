@@ -195,6 +195,36 @@ class Settings(BaseSettings):
     google_oauth_redirect_uri: str = "http://localhost:8000/api/v2/auth/google/callback"
     google_credentials_file: str = "/app/keys/google-credentials.json"
 
+    # Login gov.br do cidadão (SSO OIDC — `services/govbr_sso.py`).
+    #
+    # DESLIGADO por padrão, e é assim que fica em todo ambiente sem credencial
+    # homologada: com qualquer um dos três primeiros vazio, `/auth/govbr/*`
+    # responde 503 e nada mais no sistema percebe a ausência. Não há default de
+    # URL de propósito — escolher entre homologação
+    # (`https://sso.staging.acesso.gov.br`) e produção
+    # (`https://sso.acesso.gov.br`) é decisão de quem configura, não do código.
+    govbr_client_id: str = ""
+    govbr_client_secret: str = ""
+    govbr_sso_url: str = ""
+    # API de confiabilidades (nível bronze/prata/ouro). Vazio = não consulta, e
+    # `usuario_externo.nivel_govbr` fica nulo. Ex.: `https://api.acesso.gov.br`.
+    govbr_api_url: str = ""
+    # `redirect_uri` registrado no gov.br. Vazio = deriva do request
+    # (`https://<host do tenant>/api/v2/auth/govbr/callback`). Fixar um valor
+    # só serve a instalação de um tenant: o cookie de estado é do host de
+    # origem, e callback em outro host é recusado.
+    govbr_redirect_uri: str = ""
+
+    @property
+    def govbr_configurado(self) -> bool:
+        return all(
+            (
+                self.govbr_client_id.strip(),
+                self.govbr_client_secret.strip(),
+                self.govbr_sso_url.strip(),
+            )
+        )
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]

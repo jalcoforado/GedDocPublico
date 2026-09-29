@@ -22,6 +22,9 @@ class UsuarioExterno(Base):
     cpf_cnpj: Mapped[str | None] = mapped_column(String(14), nullable=True)
     email: Mapped[str | None] = mapped_column(String(100), nullable=True)
     login_govbr: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Migration 0124. Último nível de confiabilidade informado pelo gov.br
+    # (bronze/prata/ouro); nulo se nunca entrou por SSO ou a consulta falhou.
+    nivel_govbr: Mapped[str | None] = mapped_column(String(20), nullable=True)
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     uid: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)

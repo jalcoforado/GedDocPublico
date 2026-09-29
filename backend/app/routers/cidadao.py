@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_cidadao, require_tenant_id, require_tenant_slug
-from ..auth.jwt import build_cidadao_payload, encode_token, get_jwt_secret
+from ..auth.cidadao_sessao import emitir_sessao_cidadao
 from ..config import get_settings
 from ..database import get_db, tenant_filter
 from ..models import Assunto, Manifestante, Processo, TipoProcesso, UsuarioExterno
@@ -85,20 +85,7 @@ async def login_endpoint(
     except CidadaoAuthError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
-    secret = await get_jwt_secret(db)
-    token_payload = build_cidadao_payload(
-        cidadao.id, cidadao.cpf_cnpj or "", tenant_id=tenant_id
-    )
-    token = encode_token(token_payload, secret)
-
-    response.set_cookie(
-        key="aprimora_cidadao_token",
-        value=token,
-        max_age=settings.jwt_ttl_seconds,
-        httponly=True,
-        samesite="lax",
-        path="/",
-    )
+    token = await emitir_sessao_cidadao(db, response, cidadao, tenant_id=tenant_id)
 
     return LoginCidadaoResponse(
         access_token=token,

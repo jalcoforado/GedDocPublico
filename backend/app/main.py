@@ -15,6 +15,7 @@ from .routers import (
     assuntos,
     audit,
     auth,
+    auth_govbr,
     branding,
     busca,
     catalogo,
@@ -98,6 +99,7 @@ app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(health.router, prefix="/api/v2", tags=["health"])
 app.include_router(auth.router, prefix="/api/v2")
+app.include_router(auth_govbr.router, prefix="/api/v2")
 app.include_router(permissoes.router, prefix="/api/v2")
 app.include_router(modulos.router, prefix="/api/v2")
 app.include_router(catalogo.router, prefix="/api/v2")
