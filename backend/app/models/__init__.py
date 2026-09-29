@@ -19,6 +19,7 @@ from .frota import (
     VeiculoDocumento,
     VeiculoManutencao,
     VeiculoOcorrencia,
+    VeiculoPosicao,
     VeiculoVistoria,
 )
 from .processo import (
@@ -241,6 +242,7 @@ __all__ = [
     "VeiculoDocumento",
     "VeiculoManutencao",
     "VeiculoOcorrencia",
+    "VeiculoPosicao",
     "VeiculoRegulado",
     "VeiculoVistoria",
     "VeiculoDocumentoRegulado",

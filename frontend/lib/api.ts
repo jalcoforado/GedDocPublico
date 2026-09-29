@@ -2292,6 +2292,34 @@ export interface OcorrenciaResolverInput {
   providencias?: string | null;
 }
 
+// --- Frota: telemetria (posições GPS) ---------------------------------------
+// Espelha `schemas/frota_telemetria.py`. Decimais chegam como string (Pydantic
+// serializa `Decimal` assim). `data_hora` é UTC sem fuso.
+export interface VeiculoPosicao {
+  id: number;
+  id_veiculo: number;
+  data_hora: string;
+  latitude: string;
+  longitude: string;
+  velocidade: string | null;
+  ignicao_ligada: boolean | null;
+  criado_em: string;
+}
+
+export interface VeiculoPosicaoInput {
+  data_hora: string;
+  latitude: string | number;
+  longitude: string | number;
+  velocidade?: string | number | null;
+  ignicao_ligada?: boolean | null;
+}
+
+export interface VeiculoPosicoesLoteOut {
+  recebidas: number;
+  registradas: number;
+  ignoradas: number;
+}
+
 // --- Transporte Regulado: Permissionário ------------------------------------
 export type TipoServico =
   | "taxi"
@@ -3452,6 +3480,18 @@ export const api = {
       request<VeiculoOcorrencia>(`/frota/ocorrencias/${id}/cancelar`, { method: "POST" }),
     remove: (id: number) =>
       request<void>(`/frota/ocorrencias/${id}`, { method: "DELETE" }),
+  },
+  telemetriaVeiculo: {
+    // Período fechado [inicio, fim]; acima do teto do backend é 422 (não trunca).
+    listPosicoes: (idVeiculo: number, params: { inicio: string; fim: string }) =>
+      request<VeiculoPosicao[]>(
+        `/frota/veiculos/${idVeiculo}/telemetria/posicoes${qs(params)}`,
+      ),
+    registrarPosicoes: (idVeiculo: number, posicoes: VeiculoPosicaoInput[]) =>
+      request<VeiculoPosicoesLoteOut>(`/frota/veiculos/${idVeiculo}/telemetria/posicoes`, {
+        method: "POST",
+        body: JSON.stringify({ posicoes }),
+      }),
   },
   permissionarios: {
     list: (params?: {
