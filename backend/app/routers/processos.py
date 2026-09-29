@@ -112,12 +112,14 @@ async def _is_super(db: AsyncSession, user: Usuario, tenant_id: int) -> bool:
 async def _niveis_acesso(
     db: AsyncSession, user: Usuario, tenant_id: int
 ) -> list[str] | None:
-    """Níveis de sigilo que o usuário alcança. None = super-usuário (tudo)."""
-    from ..services.sigilo import niveis_permitidos
+    """Níveis de sigilo que o usuário alcança. None = super-usuário (tudo).
 
-    if await _is_super(db, user, tenant_id):
-        return None
-    return niveis_permitidos(user.nivel_acesso_sigilo)
+    Delega a `services.sigilo.niveis_acesso_usuario`, que o assistente global
+    (IA-2) também usa — a listagem e o bot têm de decidir sigilo igual.
+    """
+    from ..services.sigilo import niveis_acesso_usuario
+
+    return await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
 
 
 async def acesso_niveis_dep(
