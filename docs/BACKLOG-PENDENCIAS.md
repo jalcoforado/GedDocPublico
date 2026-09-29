@@ -1053,19 +1053,38 @@ responsáveis, vínculo veicular, auditoria, relatórios). Faltam:
 >   até achar um `>(` qualquer, porque `>` também fecha genérico aninhado (`Paginated<X>>`) — o
 >   "tipo" capturado continha blocos inteiros do arquivo e a guarda ficava verde comparando lixo.
 
-### 2.3 Frota — backlog de telemetria
+### 2.3 Frota — backlog de telemetria — 1ª fatia (posições) ENTREGUE em 2026-09-28
 
 Frota-1..6 + a fatia Operacional (manutenção, abastecimento, vistoria, ocorrências, visão
-gerencial) estão em `main` e no ar. O que resta é uma **iniciativa nova**, não uma continuação:
+gerencial) estão em `main` e no ar. O que resta é uma **iniciativa nova**, não uma continuação.
 
-- **Geolocalização / rastreamento GPS em tempo real** — não existe. Depende de telemetria
-  (rastreador embarcado ou provedor externo), ingestão de posições e provável armazenamento de
-  série temporal. **Decisão de arquitetura pendente:** provider externo × hardware próprio.
-- **Rotas / trajetos do veículo** — não existe; depende do item acima. Distinto de "rotas/linhas"
-  do Transporte Regulado (P6), que é outro domínio.
+**Entregue em 2026-09-28 (backend + cliente `api.ts`, sem tela):** o armazenamento e a API da
+série de posições. `frota.veiculo_posicao` (migration `0123`, RLS/FORCE/policies/grants no padrão
+do schema), `POST /frota/veiculos/{id}/telemetria/posicoes` (lote de até 1.000 pontos, transação
+`frota` + `inserir`; **idempotente**: reenvio do mesmo `(veículo, data_hora)` é ignorado e contado
+em `ignoradas`) e `GET` no mesmo caminho com `inicio`/`fim` (leitura sem action; período com mais
+de 5.000 pontos é 422 em vez de truncar). Veículo de outro tenant é 404 nas duas. Testes em
+`tests/test_frota_telemetria.py`, com usuário comum e RLS sob `aprimora_app`.
+
+O que continua aberto:
+
+- **Canal de ingestão definitivo — decisão de arquitetura pendente:** provider externo × hardware
+  próprio. O `POST` de hoje exige **usuário autenticado** com a transação `frota`; rastreador
+  embarcado não tem login. Ou um provider externo empurra/é consultado por um conector (job Celery
+  chamando este mesmo serviço), ou o hardware próprio ganha credencial de dispositivo — nos dois
+  casos é autenticação nova, não um ajuste nesta rota.
+- **Tempo real** — não existe: sem push (SSE/WebSocket) nem "última posição" da frota inteira.
+- **Rotas / trajetos derivados** — o dado bruto existe; falta derivar percurso, paradas e km por
+  trajeto. Distinto de "rotas/linhas" do Transporte Regulado (P6), que é outro domínio.
+- **Retenção da série** — nada apaga posição hoje; a tabela cresce sem limite. Definir janela de
+  retenção (e se vira particionamento) antes de ligar um rastreador de verdade.
+- **UI** — sem tela (mapa/trajeto). Tela nova precisa de link no mesmo PR (guarda de página órfã).
 - **Consumo (km/l e eficiência)** — parcial. Abastecimento já registra litros, custo e média R$/l;
   faltam km/l e "km rodado por período", explicitamente adiados na visão gerencial
   (`/frotas/relatorios`). Depende de séries de odômetro — ou do GPS, para km mais preciso.
+  A WIP de 2026-09-24 trazia um cálculo por odômetro entre abastecimentos; ficou **fora** da
+  fatia de posições porque assume tanque cheio a cada abastecimento sem que o cadastro registre
+  isso — decidir a regra (tanque cheio × parcial) antes de publicar um km/l.
 
 ### 2.4 Minutas / Google Docs — sincronização de volta
 
@@ -1084,7 +1103,58 @@ gerencial) estão em `main` e no ar. O que resta é uma **iniciativa nova**, nã
 - Sem coordenação de edição concorrente e sem contagem de páginas (o Google não expõe o metadado;
   a alternativa é exportar PDF e contar).
 
-### 2.5 Chatbot / assistente conversacional — IA-1 ENTREGUE; busca continua fora
+### 2.5 Chatbot / assistente conversacional — IA-1 ENTREGUE; IA-2 (busca) ENTREGUE no backend
+
+**IA-2 — assistente global, entregue no backend em 2026-09-28** (`services/ia/assistente_global.py`,
+`POST /api/v2/ia/perguntar-global`, tipo e método `iaApi.iaPerguntarGlobal` em `frontend/lib/api.ts`;
+**sem tela** ainda). Pergunta em linguagem natural que busca ENTRE processos. A regra que a fatia
+garante, e que `tests/test_ia2_assistente_global.py` trava: **o assistente nunca devolve, cita, conta
+ou resume processo que o mesmo usuário não veria em `GET /processos`.** Como:
+
+- **A busca É a listagem.** O assistente chama `services.processos.list_processos` com os mesmos
+  argumentos de contexto de `list_endpoint` (tenant do caller via `tenant_filter`, usuário, lotação
+  principal), herdando excluído e rascunho fora. O sigilo é decidido por
+  `services.sigilo.niveis_acesso_usuario`, que nasceu nesta fatia e que a listagem **também** passou
+  a usar — as duas não podem divergir. Super-usuário vem de `load_permissions` (o WIP original usava
+  `getattr(usuario, "is_super", False)`, atributo que não existe: SU nunca passava). Teste de
+  equivalência compara os ids do assistente com os de `GET /processos` para usuário comum e SU.
+- **Gates iguais aos da listagem:** `require_modulo("protocolo")` + `require_permission("processo")`
+  de leitura, ambos no decorator — resolvem antes do cliente de LLM, então sem permissão é 403 mesmo
+  sem chave.
+- **Saída do LLM é entrada hostil.** O modelo só traduz a pergunta em filtros, e
+  `validar_parametros` aplica whitelist (`busca`, `apenas_ativos`, `escopo`, `favoritos`, `desde`,
+  `ate`), tipo sem coerção e teto de tamanho. **Todo campo aceito só recorta**; não existe campo
+  para tenant, sigilo, situação, página ou limite (teto fixo `MAX_RESULTADOS = 10`). Nada vira SQL:
+  os valores vão como parâmetro ligado. Sem tool-calling — o modelo recebe a lista já filtrada.
+- **Números do Python.** O total vem do `COUNT` da listagem, vai pronto no prompt e no evento SSE
+  `resultados` (montado pelo sistema, com os ids para a tela linkar). Sem resultado, o modelo nem é
+  chamado para responder; a frase fixa não distingue "não existe" de "existe, mas você não vê".
+- `llm_client.py` **não mudou** (o WIP alterava a assinatura para aceitar `messages` com papel
+  `system`, inválido na API da Anthropic); sem chave, 503 como na IA-1.
+
+**Decisão do Jorge em 2026-09-28: seguir sem fechar antes a política de permissões (1.0.7).** O
+parágrafo abaixo punha "fechar 1.0.8 junto com 1.0.7" como pré-requisito da busca. O 1.0.8 fechou em
+2026-08-11 (a leitura de processo exige a transação `processo`); o 1.0.7 — *quem* recebe `processo`
+e as outras 8 transações — continua aberto. O que isso implica:
+
+- **Na prática, só super-usuário usa o assistente global** enquanto nenhum grupo não-SU tiver
+  `processo` — que é o que o item 1.0.7 registra (última medição lá: 2026-08-11; **não remedido
+  nesta fatia**). Sem a transação o endpoint dá 403 — falha fechada, igual à listagem.
+- **Quem conceder `processo` a um grupo concede junto a busca em linguagem natural sobre TODO o
+  tenant até a credencial de sigilo daquele usuário.** A listagem não recorta por unidade nem por
+  envolvimento (o `escopo` é filtro opcional, não restrição). O assistente não amplia esse
+  alcance — mas remove o atrito de usá-lo, que era o argumento original deste item. Se o escopo
+  "todo o tenant" for largo demais para algum perfil, o conserto é na listagem/política (1.0.7),
+  e o assistente herda sozinho.
+- A credencial de sigilo (`nivel_acesso_sigilo`, default `interno`) passa a ser a principal barreira
+  de conteúdo do assistente para usuário comum — vale revisá-la junto com a concessão.
+
+**O que continua fora da IA-2:** tela (o painel global no frontend), persistência de conversa,
+conteúdo de anexo, portal do cidadão — pelos mesmos motivos listados abaixo para a IA-1.
+
+---
+
+*Texto original da IA-1 (2026-08), mantido pelo raciocínio:*
 
 **A fatia IA-1 está em `services/ia/`**: assistente sobre UM processo já aberto, dentro de
 `/m/protocolo/processos/[id]`. Spec em
@@ -1102,8 +1172,9 @@ da arquitetura em vez de disciplina recorrente.
 
 **O que continua aberto, e por quê:**
 
-- **A busca (`buscar_processo`, `meus_processos`) ficou fora de propósito, e o item 1.0.8 é o
-  motivo.** Hoje o eixo de permissão não é aplicado na leitura, mas isso é *latente*: o menu é
+- *(Superado pela IA-2 acima, em 2026-09-28 — ver lá o que a decisão de seguir sem 1.0.7
+  implica.)* **A busca (`buscar_processo`, `meus_processos`) ficou fora de propósito, e o item
+  1.0.8 é o motivo.** Hoje o eixo de permissão não é aplicado na leitura, mas isso é *latente*: o menu é
   filtrado por permissão, então quem não tem acesso nunca vê o link e alcançar o dado exige saber a
   URL. **Um chatbot com busca remove exatamente esse atrito** — entrega numa frase o que hoje exige
   conhecer a rota. O bot não cria o buraco; converte um buraco latente num explorável. O item 1.0.8

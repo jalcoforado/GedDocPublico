@@ -112,12 +112,14 @@ async def _is_super(db: AsyncSession, user: Usuario, tenant_id: int) -> bool:
 async def _niveis_acesso(
     db: AsyncSession, user: Usuario, tenant_id: int
 ) -> list[str] | None:
-    """Níveis de sigilo que o usuário alcança. None = super-usuário (tudo)."""
-    from ..services.sigilo import niveis_permitidos
+    """Níveis de sigilo que o usuário alcança. None = super-usuário (tudo).
 
-    if await _is_super(db, user, tenant_id):
-        return None
-    return niveis_permitidos(user.nivel_acesso_sigilo)
+    Delega a `services.sigilo.niveis_acesso_usuario`, que o assistente global
+    (IA-2) também usa — a listagem e o bot têm de decidir sigilo igual.
+    """
+    from ..services.sigilo import niveis_acesso_usuario
+
+    return await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
 
 
 async def acesso_niveis_dep(
@@ -776,7 +778,7 @@ async def completo_pdf_endpoint(
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     _recusar_pdf_se_rascunho(detail)
-    pdf_bytes = gerar_processo_completo_pdf(detail, tenant_slug=tenant_slug)
+    pdf_bytes = await gerar_processo_completo_pdf(detail, tenant_slug=tenant_slug)
     fname = f"processo-completo-{detail.numero_processo.replace('/', '_')}.pdf"
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
 

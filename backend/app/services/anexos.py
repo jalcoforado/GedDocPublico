@@ -4,6 +4,9 @@ Storage (Fase 14): por tenant em `{tenants_storage_root}/{slug}/anexos/`.
 Para anexos legacy (pré Fase 14) que estão em `{uploads_dir}/`, o
 `resolve_anexo_path` faz fallback de leitura.
 
+O acesso físico passa por `services/storage.py` (`obter_storage()`): hoje o
+filesystem local acima, com o mesmo comportamento de antes da abstração.
+
 Nome do arquivo no disco: `{anexo_id}.{ext}` — guardado no campo `e_doc`
 (unique constraint). O vínculo `protocolos.anexo_processo` requer
 `id_movimentacao`; usamos `id_ultima_movimentacao` do processo.
@@ -14,10 +17,11 @@ from fastapi import UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import get_settings, resolve_anexo_path, tenant_anexos_dir
+from ..config import get_settings
 from ..models import Anexo, AnexoProcesso, AssinaturaAnexo, Minuta, Processo, Servico
 from . import cota_anexacao
 from .sigilo import SigiloAcessoError, assert_acesso_processo
+from .storage import obter_storage
 
 
 class AnexoError(Exception):
@@ -132,9 +136,8 @@ async def _persistir_arquivo(
     e_doc = f"{anexo.id}.{ext}"
     anexo.e_doc = e_doc
 
-    # Storage por tenant (Fase 14).
-    path = tenant_anexos_dir(tenant_slug) / e_doc
-    path.write_bytes(content)
+    # Storage por tenant (Fase 14), via abstração (backlog §3.1).
+    await obter_storage().put(tenant_slug, e_doc, content)
 
     return anexo
 
@@ -281,9 +284,12 @@ async def get_anexo_path(
         raise AnexoError("Anexo não encontrado")
     if not anexo.e_doc:
         raise AnexoError("Anexo sem arquivo físico associado")
-    path = resolve_anexo_path(tenant_slug, anexo.e_doc)
-    if path is None:
+    storage = obter_storage()
+    if not await storage.exists(tenant_slug, anexo.e_doc):
         raise AnexoError(f"Arquivo {anexo.e_doc} não está no storage")
+    # `path` é None quando o storage não é local (S3, experimental): quem
+    # serve o arquivo cai no `get_stream` do storage em vez de `FileResponse`.
+    path = await storage.get_local_path_if_possible(tenant_slug, anexo.e_doc)
     return anexo, path
 
 
@@ -387,13 +393,12 @@ async def hash_anexo(
     db: AsyncSession, anexo_id: int, *, tenant_id: int, tenant_slug: str
 ) -> tuple[str, str]:
     """SHA-256 do conteúdo exato do anexo no disco. Retorna (hex, 'sha256')."""
-    _anexo, path = await get_anexo_path(
+    anexo, _path = await get_anexo_path(
         db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug
     )
     h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
+    async for chunk in obter_storage().get_stream(tenant_slug, anexo.e_doc):
+        h.update(chunk)
     return h.hexdigest(), "sha256"
 
 

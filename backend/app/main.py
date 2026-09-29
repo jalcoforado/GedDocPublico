@@ -22,6 +22,7 @@ from .routers import (
     cidadao,
     dashboard,
     frota,
+    frota_telemetria,
     grupos,
     health,
     ia,
@@ -136,6 +137,7 @@ app.include_router(frota.manutencoes_router, prefix="/api/v2")
 app.include_router(frota.abastecimentos_router, prefix="/api/v2")
 app.include_router(frota.vistorias_router, prefix="/api/v2")
 app.include_router(frota.ocorrencias_router, prefix="/api/v2")
+app.include_router(frota_telemetria.router, prefix="/api/v2")
 app.include_router(transporte_regulado.permissionarios_router, prefix="/api/v2")
 app.include_router(transporte_regulado.empresas_router, prefix="/api/v2")
 app.include_router(transporte_regulado.veiculos_router, prefix="/api/v2")

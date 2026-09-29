@@ -2,7 +2,7 @@ import mimetypes
 import urllib.parse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,7 @@ from ..services.anexos import (
 )
 from ..services.sigilo import SigiloAcessoError
 from ..services.pdf_carimbo import CarimboError, carimbar_anexo_com_cache, invalidate_cache
+from ..services.storage import obter_storage
 
 router = APIRouter(tags=["anexos"])
 
@@ -90,10 +91,19 @@ async def download_endpoint(
     disposition = "inline" if inline else "attachment"
 
     media_type, _enc = mimetypes.guess_type(anexo.e_doc or "")
-    return FileResponse(
-        path=str(path),
-        media_type=media_type or "application/octet-stream",
-        headers={"Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_name}"},
+    media_type = media_type or "application/octet-stream"
+    headers = {"Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_name}"}
+
+    # Daqui para baixo o acesso JÁ foi autorizado (sigilo + tenant) e o arquivo
+    # JÁ foi confirmado no storage por `get_anexo_path_autorizado`. Os dois
+    # ramos só diferem em como os bytes saem.
+    if path is not None:
+        return FileResponse(path=str(path), media_type=media_type, headers=headers)
+    # Storage não-local (S3, experimental): streaming pela abstração.
+    return StreamingResponse(
+        obter_storage().get_stream(tenant_slug, anexo.e_doc),
+        media_type=media_type,
+        headers=headers,
     )
 
 
@@ -129,7 +139,7 @@ async def carimbado_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        anexo, source_path = await get_anexo_path_autorizado(
+        anexo, _path = await get_anexo_path_autorizado(
             db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug, usuario=usuario
         )
     except (AnexoError, SigiloAcessoError) as e:
@@ -156,15 +166,18 @@ async def carimbado_endpoint(
     numero_processo = row[0] if row else "—"
 
     try:
-        carimbado_path = carimbar_anexo_com_cache(
+        carimbado_path = await carimbar_anexo_com_cache(
             anexo_id=anexo_id,
-            source_pdf_path=source_path,
             numero_processo=numero_processo,
             e_doc=anexo.e_doc,
             tenant_slug=tenant_slug,
         )
     except CarimboError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except FileNotFoundError:
+        # Arquivo sumiu entre a checagem e a leitura. O acesso já foi
+        # autorizado acima, então 404 aqui não vaza existência.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anexo não encontrado")
 
     download_name = (anexo.descricao or anexo.e_doc).strip()
     if "." not in download_name:

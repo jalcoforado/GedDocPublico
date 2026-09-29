@@ -38,6 +38,12 @@ dev = [
   "pytest-cov==6.0.0",
   "PyJWT==2.10.1",
 ]
+# Object storage S3/MinIO — EXPERIMENTAL, desligado por padrão
+# (`STORAGE_BACKEND=local`). A imagem não o instala; `services/storage.py`
+# importa aioboto3 só dentro de `S3Storage`.
+s3 = [
+  "aioboto3==12.3.0",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
