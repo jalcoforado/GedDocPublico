@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Fuel,
   IdCard,
+  MapPinned,
   Truck,
   Wrench,
 } from "lucide-react";
@@ -60,6 +61,12 @@ const CARDS = [
     icon: AlertOctagon,
     title: "Ocorrências",
     desc: "Avarias, multas, sinistros e uso indevido: gravidade, tratamento e resolução.",
+  },
+  {
+    href: "/m/frota/mapa",
+    icon: MapPinned,
+    title: "Mapa da frota",
+    desc: "Última posição e trajeto dos veículos no mapa do município.",
   },
   {
     href: "/m/frota/relatorios",

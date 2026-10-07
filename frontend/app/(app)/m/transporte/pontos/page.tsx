@@ -50,6 +50,8 @@ interface PontoForm {
   complemento: string;
   bairro: string;
   cep: string;
+  latitude: string;
+  longitude: string;
   vagas_total: string;
   situacao: PontoSituacao;
   observacoes: string;
@@ -64,6 +66,8 @@ const EMPTY: PontoForm = {
   complemento: "",
   bairro: "",
   cep: "",
+  latitude: "",
+  longitude: "",
   vagas_total: "1",
   situacao: "ativo",
   observacoes: "",
@@ -72,6 +76,12 @@ const EMPTY: PontoForm = {
 /** `""` vira `null` — o backend distingue "não informado" de string vazia. */
 function limpo(v: string): string | null {
   const t = v.trim();
+  return t === "" ? null : t;
+}
+
+/** Aceita vírgula decimal, que é como o brasileiro digita e cola coordenada. */
+function coordenada(v: string): string | null {
+  const t = v.trim().replace(",", ".");
   return t === "" ? null : t;
 }
 
@@ -85,6 +95,8 @@ function paraPayload(f: PontoForm): PontoCreate {
     complemento: limpo(f.complemento),
     bairro: limpo(f.bairro),
     cep: limpo(f.cep),
+    latitude: coordenada(f.latitude),
+    longitude: coordenada(f.longitude),
     vagas_total: Number(f.vagas_total) || 1,
     situacao: f.situacao,
     observacoes: limpo(f.observacoes),
@@ -101,6 +113,8 @@ function paraForm(p: Ponto): PontoForm {
     complemento: p.complemento ?? "",
     bairro: p.bairro ?? "",
     cep: p.cep ?? "",
+    latitude: p.latitude ?? "",
+    longitude: p.longitude ?? "",
     vagas_total: String(p.vagas_total),
     situacao: p.situacao,
     observacoes: p.observacoes ?? "",
@@ -418,6 +432,31 @@ export default function PontosPage() {
                 onChange={(e) => set("cep", e.target.value)}
               />
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="latitude">Latitude</Label>
+              <Input
+                id="latitude"
+                inputMode="decimal"
+                placeholder="-3.9694"
+                value={form.latitude}
+                onChange={(e) => set("latitude", e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="longitude">Longitude</Label>
+              <Input
+                id="longitude"
+                inputMode="decimal"
+                placeholder="-38.5280"
+                value={form.longitude}
+                onChange={(e) => set("longitude", e.target.value)}
+              />
+            </div>
+            <p className="col-span-2 -mt-2 text-xs text-muted-foreground">
+              Opcionais. Com as duas preenchidas, o ponto aparece no mapa.
+            </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

@@ -9,8 +9,20 @@ cassado(a) / inativo(a)); `excluido` é soft-delete. `cpf`/`cnpj` únicos por te
 entre não excluídos.
 """
 from datetime import date, datetime, time
+from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, SmallInteger, String, Text, Time
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    SmallInteger,
+    String,
+    Text,
+    Time,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -670,6 +682,9 @@ class Ponto(Base):
     complemento: Mapped[str | None] = mapped_column(String(100), nullable=True)
     bairro: Mapped[str | None] = mapped_column(String(100), nullable=True)
     cep: Mapped[str | None] = mapped_column(String(9), nullable=True)
+    # 0127 — opcionais e sempre em par (CHECK ck_ponto_coordenadas_em_par).
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 8), nullable=True)
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(11, 8), nullable=True)
     vagas_total: Mapped[int] = mapped_column(Integer, nullable=False)
     situacao: Mapped[str] = mapped_column(
         String(20), nullable=False, default="ativo"
