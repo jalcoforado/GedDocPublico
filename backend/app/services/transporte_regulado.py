@@ -3822,6 +3822,13 @@ async def atualizar_ponto(
 
     for campo, valor in dados.items():
         setattr(ponto, campo, valor)
+    # Conferido DEPOIS de aplicar: o PUT é parcial, então só o estado final diz
+    # se sobrou meia coordenada. Sem isto o CHECK da 0127 responderia com 500.
+    if (ponto.latitude is None) != (ponto.longitude is None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Informe latitude e longitude juntas, ou nenhuma das duas.",
+        )
     ponto.atualizado_em = datetime.utcnow()
     await db.flush()
     return ponto

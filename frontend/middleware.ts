@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { DESTINO_PADRAO, destinoSeguro } from "@/lib/destino-login";
 
-const PUBLIC_PATHS = ["/login", "/cidadao", "/_next", "/favicon.ico"];
+// `/brand` são os logos de tenant (`tenant.logo_url`), exibidos já na tela de login.
+const PUBLIC_PATHS = ["/login", "/cidadao", "/_next", "/favicon.ico", "/brand"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

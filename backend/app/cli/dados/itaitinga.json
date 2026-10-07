@@ -1,0 +1,550 @@
+{
+    "fonte":  "https://www.itaitinga.ce.gov.br (secretaria.php, unidadesaude.php, unidadeeducacao.php, unidadeacaosocial.php, unidadecultura.php), coletado em 2026-10-07",
+    "secretarias":  [
+                        {
+                            "nome":  "Fundo Municipal de Previdência Social - Itaitingaprev",
+                            "logradouro":  "Rua Jonas Alves Barbosa",
+                            "numero":  "87",
+                            "bairro":  "Antonio Miguel",
+                            "cep":  "61.881-128",
+                            "telefone":  "(85) 3371-1772"
+                        },
+                        {
+                            "nome":  "Gabinete do Prefeito",
+                            "logradouro":  "Av. Cel. Virgílio Távora",
+                            "numero":  "1710",
+                            "bairro":  "Antônio Miguel",
+                            "cep":  "61.881-092",
+                            "telefone":  "(85) 3513-2002"
+                        },
+                        {
+                            "nome":  "Procuradoria Geral do Município",
+                            "logradouro":  "Rua Manoel de Sousa",
+                            "numero":  "215",
+                            "bairro":  "Centro",
+                            "cep":  "61.880-000",
+                            "telefone":  "(85) 3513-2005"
+                        },
+                        {
+                            "nome":  "Secretaria da Controladoria e Ouvidoria Geral do Município",
+                            "logradouro":  "Rua Manoel de Sousa",
+                            "numero":  "215",
+                            "bairro":  "Centro",
+                            "cep":  "61.880-000",
+                            "telefone":  "(85) 3513-2007"
+                        },
+                        {
+                            "nome":  "Secretaria de Segurança e Trânsito",
+                            "logradouro":  "Rua Miguel Soares Cavalcante",
+                            "numero":  "60",
+                            "bairro":  "Antônio Miguel",
+                            "cep":  "61.880-000",
+                            "telefone":  "(85) 3513-2102"
+                        },
+                        {
+                            "nome":  "Secretaria Municipal de Administração",
+                            "logradouro":  "Rua Manoel de Sousa",
+                            "numero":  "215",
+                            "bairro":  "Centro",
+                            "cep":  "61.880-000",
+                            "telefone":  "(85) 3513-2010"
+                        },
+                        {
+                            "nome":  "Secretaria Municipal de Agricultura, Pecuária e Pesca",
+                            "logradouro":  "Avenida Dep. Paulino Rocha",
+                            "numero":  "7391",
+                            "bairro":  "Caracanga",
+                            "cep":  "61.880-000",
+                            "telefone":  "(85) 3513-2104"
+                        },
+                        {
+                            "nome":  "Secretaria Municipal de Cultura e Turismo",
+                            "logradouro":  "Rua Francisco Cordeiro de Oliveira",
+                            "numero":  "S/n",
+                            "bairro":  "Centro",
+                            "cep":  "61.880-000",
+                            "telefone":  "(85) 3513-2035"
+                        },
+                        {
+                            "nome":  "Secretaria Municipal de Educação",
+                            "logradouro":  "Rua Aristides Pereira Campos",
+                            "numero":  "403",
+                            "bairro":  "Parque Santo Antônio",
+                            "cep":  "61.880-000",
+                            "telefone":  "(85) 3513-2061"
+                        },
+                        {
+                            "nome":  "Secretaria Municipal de Infraestrutura, Obras e Serviços Públicos",
+                            "logradouro":  "Rua Manoel Alves de Assis",
+                            "numero":  "180",
+                            "bairro":  "Parque Santo Antônio",
+                            "cep":  "61.880-000",
+                            "telefone":  "(85) 3513-2069"
+                        },
+                        {
+                            "nome":  "Secretaria Municipal de Juventude e Esporte",
+                            "logradouro":  "Rua Jonas Alves Barbosa",
+                            "numero":  "01",
+                            "bairro":  "Antônio Miguel",
+                            "cep":  "61.880-000",
+                            "telefone":  "(85) 3513-2075"
+                        },
+                        {
+                            "nome":  "Secretaria Municipal de Meio Ambiente e Controle Urbano",
+                            "logradouro":  "Rua Manoel de Sousa",
+                            "numero":  "547",
+                            "bairro":  "Parque Genesaré",
+                            "cep":  "61.880-000",
+                            "telefone":  "(85) 99163-6442"
+                        },
+                        {
+                            "nome":  "Secretaria Municipal de Saúde",
+                            "logradouro":  "Rua Ester Cavalcante Assunção",
+                            "numero":  "S/n",
+                            "bairro":  "Antonio Miguel",
+                            "cep":  "61.881-012",
+                            "telefone":  "(85) 3513-2091"
+                        },
+                        {
+                            "nome":  "Secretaria Municipal de Trabalho e Assistência Social",
+                            "logradouro":  "Rua Boa Esperança",
+                            "numero":  "81",
+                            "bairro":  "Ponta da Serra",
+                            "cep":  "61.880-000",
+                            "telefone":  "(85) 3513-2011"
+                        },
+                        {
+                            "nome":  "Secretaria Municipal de Finanças e Planejamento",
+                            "logradouro":  "Rua Manoel de Sousa",
+                            "numero":  "215",
+                            "bairro":  "Parque Genezaré",
+                            "cep":  "61.881-263",
+                            "telefone":  "(85) 93300-6057"
+                        }
+                    ],
+    "unidades":  {
+                     "saude":  [
+                                   {
+                                       "nome":  "ATENÇÃO PRIMÁRIA À SAÚDE",
+                                       "logradouro":  "RUA ESTER CAVALCANTE ASSUNÇÃO",
+                                       "bairro":  "ANTONIO MIGUEL",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "CENTRAL DE ABASTECIMENTO FARMACÊUTICO",
+                                       "logradouro":  "RUA FRANCISCO CORDEIRO DE OLIVEIRA",
+                                       "bairro":  "CENTRO",
+                                       "telefone":  "(85) 3513-2092"
+                                   },
+                                   {
+                                       "nome":  "CENTRAL DE REGULAÇÃO",
+                                       "logradouro":  "RUA ESTER CAVALCANTE ASSUNÇÃO",
+                                       "bairro":  "ANTONIO MIGUEL",
+                                       "telefone":  "(85) 3513-2093"
+                                   },
+                                   {
+                                       "nome":  "Centro de Apoio Psicossocial CAPS - São Francisco de Assis",
+                                       "logradouro":  "Rua Joaquim Pereira da Silveira",
+                                       "bairro":  "Parque Genezaré",
+                                       "telefone":  "(85) 3513-2086"
+                                   },
+                                   {
+                                       "nome":  "Centro de Especialidades Odontológicas",
+                                       "logradouro":  "RUA ESTER CAVALCANTE ASSUNÇÃO",
+                                       "bairro":  "Centro",
+                                       "telefone":  "(85) 3513-2097"
+                                   },
+                                   {
+                                       "nome":  "Centro Integrado de Reabilitação de Itaitinga - CIRI",
+                                       "logradouro":  "RUA JOÃO MARQUES",
+                                       "bairro":  "PARQUE SANTO ANTÔNIO",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "COMBATE ÀS ENDEMIAS",
+                                       "logradouro":  "RUA FRANCISCO CORDEIRO DE OLIVEIRA",
+                                       "bairro":  "CENTRO",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "EQUIPES MULTIPROFISSIONAIS NA ATENÇÃO PRIMÁRIA À SAÚDE",
+                                       "logradouro":  "RUA ESTER CAVALCANTE ASSUNÇÃO",
+                                       "bairro":  "ANTONIO MIGUEL",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "Hospital e Maternidade Ester Cavalcante Assunção - HMECA",
+                                       "logradouro":  "RUA PREFEITO ISAC NEWTON CAMPOS",
+                                       "bairro":  "ANTONIO MIGUEL",
+                                       "telefone":  "(85) 3513-2082"
+                                   },
+                                   {
+                                       "nome":  "NÚCLEO DE ATENÇÃO À SAÚDE DA CRIANÇA E DO ADOLESCENTE COM TRANSTORNO DO ESPECTRO AUTISTA",
+                                       "logradouro":  "AVENIDA LÍDIA ALVES CAVALCANTE",
+                                       "bairro":  "PARQUE SANTO ANTONIO",
+                                       "telefone":  "(85) 3513-2008"
+                                   },
+                                   {
+                                       "nome":  "POLICLÍNICA DR. PAULO CÉSAR FEITOSA ARRAIS",
+                                       "logradouro":  "RUA ESTER CAVALCANTE ASSUNÇÃO",
+                                       "bairro":  "ANTONIO MIGUEL",
+                                       "telefone":  "(85) 3513-2087"
+                                   },
+                                   {
+                                       "nome":  "SAÚDE DA MULHER, IMUNIZAÇÃO E VIGILÂNCIA EPIDEMIOLÓGICA",
+                                       "logradouro":  "RUA ESTER CAVALCANTE ASSUNÇÃO",
+                                       "bairro":  "ANTONIO MIGUEL",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "Serviço de Atenção Domiciliar - SAD",
+                                       "logradouro":  "RUA FRANCISCO CORDEIRO DE OLIVEIRA",
+                                       "bairro":  "Centro",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "SERVIÇO DE ATENDIMENTO MÓVEL DE URGÊNCIA",
+                                       "logradouro":  "AV. CEL. VIRGÍLIO TÁVORA",
+                                       "bairro":  "ANTONIO MIGUEL",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE CRISTO REDENTOR - JABUTI",
+                                       "logradouro":  "RUA MÁRIO SALES",
+                                       "bairro":  "Jabuti",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE DR: SILVIO IDENURQUE CARNEIRO LEAL - PARQUE SANTO ANTONIO",
+                                       "logradouro":  "RUA FRANCISCO ALVES DE FRANÇA",
+                                       "bairro":  "PARQUE SANTO ANTÔNIO",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE FRANCISCA SANDRA ASSUNÇÃO LIMA - PONTA DA SERRA",
+                                       "logradouro":  "RUA: LIDIA ALVES CAVALCANTE",
+                                       "bairro":  "PONTA DA SERRA",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE FRANCISCO LUCIANO OLIVEIRA DA SILVA - CARAPIÓ",
+                                       "logradouro":  "RUA LOURIVAL TAVARES",
+                                       "bairro":  "Carapió",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE GERALDO CAVALCANTE RANGEL - BR",
+                                       "logradouro":  "RUA MIGUEL ALVES RANGEL",
+                                       "bairro":  "ANTÔNIO MIGUEL",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE II ERIDAN DA SILVA MONTEIRO - SEDE",
+                                       "logradouro":  "Rua Alfredo Rodrigues de Sousa",
+                                       "bairro":  "Centro",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE LAÍS ASSUNÇÃO SILVA - RIACHÃO",
+                                       "logradouro":  "Rua: Conjunto Habitar Brasil",
+                                       "bairro":  "Riachão",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE LEVI DA SILVA QUEIROZ - CARACANGA",
+                                       "logradouro":  "RUA MANOEL CAVALCANTE",
+                                       "bairro":  "Caracanga",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE MÁRCIA SABIÁ DE MOURA - GERERAÚ",
+                                       "logradouro":  "Rua. 13 de maio",
+                                       "bairro":  "Gereraú",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE MARIA BESSA GOMES DA ROCHA - BOA ESPERANÇA",
+                                       "logradouro":  "Rua Projetada",
+                                       "bairro":  "BOA ESPERANÇA",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE MARIA DO LIVRAMENTO DOS SANTOS - PARQUE DOM PEDRO",
+                                       "logradouro":  "AVENIDA I",
+                                       "bairro":  "Parque Dom Pedro",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE MARIA FERRER SERPA - ANCURI",
+                                       "logradouro":  "Rua Parque das Flores (Ao lado do colégio Fca. Moraes Ferrer)",
+                                       "bairro":  "Ancuri",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE MARIA TAVARES DE OLIVEIRA - BARROCÃO",
+                                       "logradouro":  "Rua Neo Florêncio",
+                                       "bairro":  "Barrocão",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "UNIDADE BÁSICA DE SAÚDE RUBENS VITORINO DANTAS - PARQUE GENEZARÉ",
+                                       "logradouro":  "RUA NAIR SÁTIRO",
+                                       "bairro":  "Parque Genezaré",
+                                       "telefone":  "(85) 3513-2091"
+                                   },
+                                   {
+                                       "nome":  "VIGILÂNCIA SANITÁRIA / VIGILÂNCIA AMBIENTAL E CONTROLE DE ZOONOSES",
+                                       "logradouro":  "RUA FRANCISCO CORDEIRO DE OLIVEIRA (RUA DO SILÊNCIO)",
+                                       "bairro":  "CENTRO",
+                                       "telefone":  "(85) 3513-2095"
+                                   }
+                               ],
+                     "educacao":  [
+                                      {
+                                          "nome":  "CASA DA CRIANÇA (ANEXO - GALDINO ASSUNÇÃO FILHO)",
+                                          "logradouro":  "RUA ITAPO",
+                                          "bairro":  "RIACHÃO",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "CEI MARIA TAVARES CAVALCANTE",
+                                          "logradouro":  "Rua Cândido Meireles",
+                                          "bairro":  "Taveira",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "CEI RITA LAUREANO DOS SANTOS",
+                                          "logradouro":  "Rua Amélia de Sousa",
+                                          "bairro":  "Centro",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "CRECHE ABÍLIO RODRIGUES PEREIRA",
+                                          "logradouro":  "RUA DOIS - CONJ.HABITACIONAL VILLAGE, NOVO GERERAÚ",
+                                          "bairro":  "BARROCÃO",
+                                          "telefone":  "(85) 3513-2061"
+                                      },
+                                      {
+                                          "nome":  "CRECHE CARLOS DE ALBUQUERQUE LIMA",
+                                          "logradouro":  "RUA JOÃO CARLOS ROBERTO NUNES",
+                                          "bairro":  "PONTA DA SERRA",
+                                          "telefone":  "(85) 3513-2044"
+                                      },
+                                      {
+                                          "nome":  "CRECHE FRANCISCA DE ASSUNÇÃO RIBEIRO",
+                                          "logradouro":  "Rua Altina David da Silva",
+                                          "bairro":  "Angorá",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "CRECHE GERVÁSIO QUEIROZ MARINHO",
+                                          "logradouro":  "Rua Francisco Custódio",
+                                          "bairro":  "Ancuri",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "CRECHE PROFESSORA LIEGE MARIA MAIA MARINHO",
+                                          "logradouro":  "JOSÉ PEREIRA CAMPOS",
+                                          "bairro":  "PARQUE SANTO ANTONIO",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "CRECHE RECANTO DO SABER",
+                                          "logradouro":  "Rua José Honório Ferreira",
+                                          "bairro":  "Centro",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF DONA CONCEIÇÃO",
+                                          "logradouro":  "Rua Dr. Manoel Sátiro",
+                                          "bairro":  "Genezaré",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF ELIAS DE SOUSA",
+                                          "logradouro":  "Rua José Rodrigues Pereira",
+                                          "bairro":  "Genezaré",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF FRANCISCA DE MORAIS FERRER",
+                                          "logradouro":  "Rua Parque das Flores",
+                                          "bairro":  "Ancuri",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF FRANCISCA FERREIRA SIQUEIRA",
+                                          "logradouro":  "Av. Cel. Antônio Ferreira",
+                                          "bairro":  "Gereraú",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF FRANCISCO SALES FILHO",
+                                          "logradouro":  "Rua Mário Sales",
+                                          "bairro":  "Jabuti",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF GALDINO ASSUNÇÃO FILHO",
+                                          "logradouro":  "Rua Laura de Sousa",
+                                          "bairro":  "Riachão",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF GERALDO BATISTA DE LIMA",
+                                          "logradouro":  "Av. Cel. Virgilio Távora",
+                                          "bairro":  "Parque Antônio Miguel",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF HENRIQUE GONÇALVES DA JUSTA",
+                                          "logradouro":  "Rua Sebastião Cajueiro",
+                                          "bairro":  "Jabuti",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF HORÁCIO ALVES FERREIRA",
+                                          "logradouro":  "Av. Cruzeiro do Sul",
+                                          "bairro":  "Vila Nova",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF JARDIM DE FÁTIMA",
+                                          "logradouro":  "Rua Pereira Coutinho",
+                                          "bairro":  "Barrocão",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF LÍDIA ALVES CAVALCANTE",
+                                          "logradouro":  "Rua Carlos da Costa Carmo",
+                                          "bairro":  "Parque Santo Antônio",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF MANOEL FERREIRA GOMES",
+                                          "logradouro":  "Rua D",
+                                          "bairro":  "Parque Dom Pedro",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF MANOEL NOVAIS DE OLIVEIRA",
+                                          "logradouro":  "Rod. Edson Queiroz",
+                                          "bairro":  "Carapió",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF MANOEL RODRIGUES DE PAIVA",
+                                          "logradouro":  "Rod. Dep. Paulino Rocha",
+                                          "bairro":  "Caracanga",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF MANUEL MACHADO",
+                                          "logradouro":  "Rua João Florindo Rodrigues",
+                                          "bairro":  "Vila Machado",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF PROFESSORA JÚLIA FERRER DE SERPA",
+                                          "logradouro":  "ADELSON PAIVA",
+                                          "bairro":  "ANCURI",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF PROFª LAURA DA COSTA LIMA",
+                                          "logradouro":  "Rua Francisco Alves França",
+                                          "bairro":  "Parque Santo Antônio",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF SANTA TEREZINHA",
+                                          "logradouro":  "Av. Lídia Alves Cavalcante",
+                                          "bairro":  "Ponta da Serra",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "EEF VALMIQUE SAMPAIO DE ALBUQUERQUE",
+                                          "logradouro":  "Rua Josmo Gurgel Araújo",
+                                          "bairro":  "Centro",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "ESCOLA CRECHE DO BAIRRO BARROCÃO",
+                                          "logradouro":  "RUA ELIATÁ DIÓGENES",
+                                          "bairro":  "BARROCÃO",
+                                          "telefone":  null
+                                      },
+                                      {
+                                          "nome":  "ESCOLA CRECHE DO BAIRRO JABUTI",
+                                          "logradouro":  "RUA ADALTO SERPA",
+                                          "bairro":  "JABUTI",
+                                          "telefone":  null
+                                      }
+                                  ],
+                     "assistencia":  [
+                                         {
+                                             "nome":  "CENTRO DE REFERÊNCIA DE ASSISTÊNCIA SOCIAL ANGORÁ",
+                                             "logradouro":  "RUA VALDEBERTO ALBUQUERQUE",
+                                             "bairro":  "Angorá",
+                                             "telefone":  "(85) 3513-2018"
+                                         },
+                                         {
+                                             "nome":  "CENTRO DE REFERÊNCIA DE ASSISTÊNCIA SOCIAL BARROCÃO",
+                                             "logradouro":  "RUA F",
+                                             "bairro":  "PARQUE DOM PEDRO",
+                                             "telefone":  "(85) 3513-2017"
+                                         },
+                                         {
+                                             "nome":  "CENTRO DE REFERÊNCIA DE ASSISTÊNCIA SOCIAL JABUTI",
+                                             "logradouro":  "RUA FRANCISCA FERREIRA SALES",
+                                             "bairro":  "Jabuti",
+                                             "telefone":  "(85) 3513-2016"
+                                         },
+                                         {
+                                             "nome":  "CENTRO DE REFERÊNCIA ESPECIALIZADO DE ASSISTÊNCIA SOCIAL - CREAS",
+                                             "logradouro":  "RUA JOSMO GURGEL ARAÚJO",
+                                             "bairro":  "Centro",
+                                             "telefone":  "(85) 3513-2015"
+                                         },
+                                         {
+                                             "nome":  "CENTRO DE TREINAMENTO PROFISSIONAL",
+                                             "logradouro":  "Rua Boa Esperança",
+                                             "bairro":  "Ponta da Serra",
+                                             "telefone":  "(85) 3513-2011"
+                                         },
+                                         {
+                                             "nome":  "CONSELHO TUTELAR",
+                                             "logradouro":  "Avenida Coronel Virgílio Távora",
+                                             "bairro":  "ANTÔNIO MIGUEL",
+                                             "telefone":  "(85) 3513-2014"
+                                         },
+                                         {
+                                             "nome":  "SINE/IDT ITAITINGA",
+                                             "logradouro":  "RUA JOÃO FERREIRA VIANA",
+                                             "bairro":  "Centro",
+                                             "telefone":  "(85) 3513-2013"
+                                         }
+                                     ],
+                     "cultura":  [
+                                     {
+                                         "nome":  "BIBLIOTECA MUNICIPAL JOSÉ SOARES",
+                                         "logradouro":  "RUA MANOEL SÁTIRO",
+                                         "bairro":  "PARQUE GENEZARÉ",
+                                         "telefone":  "(85) 3513-2036"
+                                     },
+                                     {
+                                         "nome":  "BIBLIOTECA MUNICIPAL MARCOS RIVIERE",
+                                         "logradouro":  "RUA FRANCISCO CORDEIRO DE OLIVEIRA",
+                                         "bairro":  "CENTRO",
+                                         "telefone":  "(85) 3513-2038"
+                                     }
+                                 ]
+                 },
+    "rotas_polyline":  {
+                           "DMO1A07":  "`gfWr~cjF`A{BlB?fAeCxAuCz@_BFQFSLc@lBBpBH|@D|@Dp@Nv@T~AsEnCyHFOReADW@S@U?]AqAMcCEaBIiBImBIwBEu@Ai@Ag@GwAGsAKmBEgAO{CMuCNAnBMd@ERCRCLKLOdFUDBHBF?H?xBERAJ?D?NBL@LDLDLDNLDDDFHLFLDLBHDJBVHJFHDFFDFDFDJ@LDH@HAJ?JCJAJCHGFEFEFGDIFQBK@M@ML{E?Y?MESGMKOMKYM[C[@WHUNIHGHINCNEPM\\ILIJKJOLQFODg@FkDHa@LoG\\yGZsCL_@BwAFu@Ds@D_EN_DNkETeERsCNuCLiHZC?sAHkFVkA@gACo@Ak@Cg@GsAOc@IsA[iA]mAc@s@]q@[eAs@s@c@cBqA{@o@k@[m@WSGME_@Mc@Ia@Iq@Ik@CUAgDOcAE]CKAUCeBSi@ESAg@Cc@AO?SAuBI}BI_BIe@As@A_@@_@?a@@_@?W?G?G?}@CaAGuAGw@EgAKg@G_@Gg@Kg@Ko@Qu@Sg@O_@QWKyCwAkFmCiAg@eDyAi@Sw@UcAS{@M_AKcAGcAEoAE}@CmDMyHUyEOyBK{BIYAaEIiAEeBIyD[uAKsBSoCUw@EcBE_O]eEGkACgDI}BGY?I?{@CWAYAi@C_DQsKi@s@Gi@Cs@K}@K{Da@m@EcAG}AIiEYk@CsAEaCIsBEeBA{@?MA{@Cs@CiESwKk@g@C]CyAKeAK_BOaGw@mAQoBWgAOi@GoC]wBYyBYsASaAMwB[_@Ec@GqGw@u@IiDe@sC_@k@Is@KaB]uB_@]GuCi@UBQBOFGFCJANBJHHLFRHrBLjBZkKlPANFNH\\F^Bt@Et@q@z@a@h@i@r@a@d@kArAg@j@]^}Aq@kAe@OCODkC`EmEcBqBw@o@Uw@Y}Ai@u@So@OaBc@uG_BY^c@n@?z@?f@@H@H@FDRJb@BL?L?J?JQdBKbAANCR?N@J@JMHm@hAe@t@u@z@W`@Ub@wCnDMBQN_@j@qAzBUV_@X_@Vy@l@{@r@]`@",
+                           "DMO1A01":  "`gfWr~cjF`A{BlB?zAl@vAt@Yt@|CfA~Af@k@|ASh@Up@`@Lf@N`@N|Bp@HB@BLJB@DBB@BBdA\\HDRD@\\@\\fEbAl@NHDHDPNl@x@Z^X`@VXFJHJRRn@j@n@f@h@b@zB`BlAz@vA`Ad@\\ZV^`@XZJJ~@|@dAfALLVPLFLBJ@F?XAXIp@Un@SJCR?NBFBHBpB~BRRt@p@`@\\DDNTHJJPFPFRDT?TCRCJGLCFGDIFGBG@IBK?U@a@@oABO?I@G@KBEBOFMLQPo@|@cD|Eu@dAe@p@iA~AMRMR`@d@TNHFJFXVj@f@NLJHFHOlBBVLP~AB|ABjBBH?n@GTA`@C\\Cb@An@AR?L?B?D@HBLDLFNFLDB@F@D?F?L?NAPAPCRAXAr@B|@DR@L@PFLDNHXXlA|Ah@n@PNTHTBX@j@CZ?ZGpAa@n@O\\?b@Bn@J^JRJHHFHBHBLHVNZJLLN\\h@R`@FXq@jBd@dB\\f@@NFVLj@J`@JVLTX`@DNDH@L?T@T@LNNFJ`@z@JHNH^ZTJTJTLNFbATLPTHNBhARDHi@TQRiAjCGVC\\@`A",
+                           "DMO1A03":  "`gfWr~cjF`A{BlB?fAeCxAuCz@_BFQFSLc@lBBpBH|@D|@Dp@Nv@T~AsEnCyHFOReADW@S@U?]AqAMcCEaBIiBImBIwBEu@Ai@Ag@GwAGsAKmBEgAO{CMuCNAnBMd@ERCRCLKLOdFUDBHBF?H?xBERAJ?D?NBL@LDLDLDNLDDDFHLFLDLBHDJBVHJFHDFFDFDFDJ@LDH@HAJ?JCJAJCHGFEFEFGDIFQBK@M@ML{E?Y?MESGMKOMKYM[C[@WHUNIHGHINCNEPM\\ILIJKJOLQFODg@FkDHa@LoG\\yGZsCL_@BwAFu@Ds@D_EN_DNkETeERsCNuCLiHZC?sAHkFVkA@gACo@Ak@Cg@GsAOc@IsA[iA]mAc@s@]q@[eAs@s@c@cBqA{@o@k@[m@WSGME_@Mc@Ia@Iq@Ik@CUAgDOcAE]CKAUCeBSi@ESAg@Cc@AO?SAuBI}BI_BIe@As@A_@@_@?a@@_@?W?G?G?}@CaAGuAGw@EgAKg@G_@Gg@Kg@Ko@Qu@Sg@O_@QWKyCwAkFmCdI_JRSJOHQNk@F[Hm@Hs@LaBHuB^sLDk@Do@Hy@BS?U@Q?Y?OAGCk@CeAEeB?wA?i@L}CJyDNwCRiF`@kNH{BD{A@QDUj@gCH]ZyAd@uB`@}BRaAL[NWZi@n@aAFG",
+                           "DMO1A04":  "tr~VhjgjFpEkFz@P^gEnDV~@mAlDsEhDoEjDuExA~@NHtA|@`@\\n@f@d@`@tAnAjBbBNNfC~BVZNRNZBBBHBHFVBP@N@RDvH?|@@^?F@RDVJ\\n@rB~@pC`@nA`@tA^nAfApDdApDdAkAf@m@\\_@j@s@|AkBtBgCvBiCrBaCHIdE}EdIoJf@m@XYfD}Dj@o@hIsJfCwCX_@`@c@HEFCHAL@n@DVBf@FH@HAHEJKxAcB|CqDzCoDpCaDhAqAfAsAz@_APSbEgFs@kBY_AOs@Ic@Iq@Ek@?aA@[DYBWH[N]`@w@tAkCnAGRANErAi@\\MRE\\Cd@@|@?b@?X?TDTF`AVdAZ`@FXBT@XBTANEJCn@Ud@SbA]fC{@NEPCRA^@~@B|BNjD?n@Cr@AN@PBh@Nn@PdBd@^JZLd@T`@\\NLLH`Bt@t@yAb@}@N_@hAeCxAb@xAiD",
+                           "DMO1A02":  "~neW|tdjF??ZBJ@N?HALCfBm@`Bi@XOVKVEVA`C?HBN@\\Fh@HjCVxAPh@DTBZ?xAwBv@oA@CfBt@@AbAwCNa@Tq@Ri@j@}AlAoDL_@`AoCBGfCgH~AsEnCyHFOReADW@S@O"
+                       }
+}

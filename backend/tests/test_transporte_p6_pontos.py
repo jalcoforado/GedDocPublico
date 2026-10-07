@@ -33,6 +33,7 @@ from datetime import date, datetime, timedelta
 import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 
 from app.main import app
@@ -368,6 +369,55 @@ async def test_reduzir_vagas_abaixo_da_maior_ocupada_recusa(admin_engine):
                     payload=PontoUpdate(vagas_total=5),
                 )
         assert atualizado.vagas_total == 5
+    finally:
+        await _limpar(admin_engine, t.id)
+
+
+# -------------------------------------------------------- coordenadas (0127)
+
+
+def test_criar_ponto_com_meia_coordenada_recusa():
+    """Meio ponto não se desenha no mapa — latitude e longitude andam em par."""
+    with pytest.raises(ValidationError):
+        PontoCreate(nome="Ponto", tipo_servico="taxi", vagas_total=2, latitude="-3.97")
+
+
+@pytest.mark.asyncio
+async def test_coordenadas_do_ponto_gravam_e_o_put_parcial_nao_deixa_meia(admin_engine):
+    """O PUT é parcial: só o estado FINAL diz se sobrou meia coordenada.
+
+    Sem a checagem no serviço, quem respondia era o CHECK da 0127 — com 500.
+    """
+    t = await _provisionar(admin_engine)
+    try:
+        p = await _ponto(admin_engine, t.id)
+        assert p.latitude is None and p.longitude is None
+
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.atualizar_ponto(
+                    db, tenant_id=t.id, ponto_id=p.id,
+                    payload=PontoUpdate(latitude="-3.9694"),
+                )
+        assert e.value.status_code == 422
+
+        async with _sm(admin_engine)() as db:
+            async with db.begin():
+                atualizado = await tr.atualizar_ponto(
+                    db, tenant_id=t.id, ponto_id=p.id,
+                    payload=PontoUpdate(latitude="-3.9694", longitude="-38.528"),
+                )
+        assert float(atualizado.latitude) == pytest.approx(-3.9694)
+        assert float(atualizado.longitude) == pytest.approx(-38.528)
+
+        # Apagar exige apagar as duas.
+        async with _sm(admin_engine)() as db:
+            with pytest.raises(HTTPException) as e:
+                await tr.atualizar_ponto(
+                    db, tenant_id=t.id, ponto_id=p.id,
+                    payload=PontoUpdate(longitude=None),
+                )
+        assert e.value.status_code == 422
     finally:
         await _limpar(admin_engine, t.id)
 

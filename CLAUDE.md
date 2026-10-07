@@ -172,7 +172,7 @@ overlay `docker-compose.dev.yml`, que usa base absoluta.
 
 ### Seeds
 
-São **três**, com papéis distintos:
+São **quatro**, com papéis distintos:
 
 ```bash
 # 1. Pré-requisitos globais — roda a cada deploy, idempotente. Garante
@@ -190,6 +190,15 @@ docker exec aprimora-py-backend python -m app.cli.seed_demo apply --tenant sobra
 #    rito real e as baixas geram movimentação de conta — é disso que a
 #    conciliação vive. `--modulo` limita a um deles; `reset`/`status` também.
 docker exec aprimora-py-backend python -m app.cli.seed_demo_operacional apply --tenant sobral --allow-non-demo
+
+# 4. Apresentação como Prefeitura de Itaitinga/CE: identidade (nome, brasão,
+#    contatos), as secretarias e unidades REAIS do município (coletadas do site
+#    oficial, em `cli/dados/itaitinga.json`) e a demo localizada — pontos de
+#    táxi com coordenadas e trajetos de GPS, que são ilustrativos. Roda DEPOIS
+#    dos dois acima: renomeia as unidades fictícias do `seed_demo` para as
+#    secretarias reais. O mapa da frota mostra 24h, então repita
+#    `--parte demo` no dia da apresentação.
+docker exec aprimora-py-backend python -m app.cli.seed_itaitinga apply --tenant sobral --allow-non-demo
 ```
 
 `--allow-non-demo` é obrigatório fora de um tenant `demo*`. Na VPS o alvo tem de ser **`sobral`**: o acesso é por IP e o `TenantMiddleware` resolve tudo para o tenant padrão, então dados em outro tenant ficariam invisíveis.

@@ -4,6 +4,7 @@
 whitelist: `tenant_id`/`id`/`excluido`/`criado_em`/`atualizado_em` nunca aceitos.
 """
 from datetime import date, datetime, time
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -1264,13 +1265,24 @@ class PontoBase(BaseModel):
     complemento: str | None = Field(default=None, max_length=100)
     bairro: str | None = Field(default=None, max_length=100)
     cep: str | None = Field(default=None, max_length=9)
+    # Opcionais, para o mapa dos pontos. Mesma precisão de `frota.veiculo_posicao`.
+    latitude: Decimal | None = Field(
+        default=None, ge=-90, le=90, max_digits=10, decimal_places=8
+    )
+    longitude: Decimal | None = Field(
+        default=None, ge=-180, le=180, max_digits=11, decimal_places=8
+    )
     vagas_total: int = Field(ge=1)
     situacao: Literal["ativo", "inativo"] = "ativo"
     observacoes: str | None = None
 
 
 class PontoCreate(PontoBase):
-    pass
+    @model_validator(mode="after")
+    def _coordenadas_em_par(self) -> "PontoCreate":
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("Informe latitude e longitude juntas, ou nenhuma das duas.")
+        return self
 
 
 class PontoUpdate(BaseModel):
@@ -1282,6 +1294,12 @@ class PontoUpdate(BaseModel):
     complemento: str | None = Field(default=None, max_length=100)
     bairro: str | None = Field(default=None, max_length=100)
     cep: str | None = Field(default=None, max_length=9)
+    latitude: Decimal | None = Field(
+        default=None, ge=-90, le=90, max_digits=10, decimal_places=8
+    )
+    longitude: Decimal | None = Field(
+        default=None, ge=-180, le=180, max_digits=11, decimal_places=8
+    )
     vagas_total: int | None = Field(default=None, ge=1)
     situacao: Literal["ativo", "inativo"] | None = None
     observacoes: str | None = None

@@ -2343,6 +2343,9 @@ export interface Ponto {
   complemento: string | null;
   bairro: string | null;
   cep: string | null;
+  /** Decimais chegam como string (Pydantic serializa `Decimal` assim). */
+  latitude: string | null;
+  longitude: string | null;
   vagas_total: number;
   situacao: PontoSituacao;
   observacoes: string | null;

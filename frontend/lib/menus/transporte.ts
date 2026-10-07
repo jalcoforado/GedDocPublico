@@ -6,6 +6,7 @@ import {
   Car,
   IdCard,
   MapPin,
+  MapPinned,
   RefreshCw,
   Route,
   ScrollText,
@@ -51,6 +52,12 @@ export const menuTransporte: MenuModulo = {
           label: "Pontos e Vagas",
           href: "/m/transporte/pontos",
           icon: MapPin,
+          perm: "transporte_regulado",
+        },
+        {
+          label: "Mapa dos pontos",
+          href: "/m/transporte/mapa",
+          icon: MapPinned,
           perm: "transporte_regulado",
         },
         {

@@ -5,6 +5,7 @@ import {
   Car,
   IdCard,
   MapPin,
+  MapPinned,
   RefreshCw,
   Route,
   ScrollText,
@@ -78,6 +79,13 @@ export const CARDS: HubCard[] = [
     icon: MapPin,
     title: "Pontos e Vagas",
     desc: "Pontos de estacionamento regulados, com vagas numeradas e o histórico de quem ocupou cada uma.",
+    ready: true,
+  },
+  {
+    href: "/m/transporte/mapa",
+    icon: MapPinned,
+    title: "Mapa dos pontos",
+    desc: "Pontos regulados no mapa do município, com a ocupação das vagas e os permissionários de cada ponto.",
     ready: true,
   },
   {
