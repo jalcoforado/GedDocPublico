@@ -34,6 +34,9 @@ class Veiculo(Base):
         ForeignKey("aprimora_py.tenant.id"), nullable=False
     )
     placa: Mapped[str] = mapped_column(String(8), nullable=False)
+    # 0128 — tombo patrimonial; único por tenant entre não excluídos. É a chave
+    # da futura ligação com o módulo de patrimônio.
+    numero_tombo: Mapped[str | None] = mapped_column(String(30), nullable=True)
     renavam: Mapped[str | None] = mapped_column(String(20), nullable=True)
     chassi: Mapped[str | None] = mapped_column(String(30), nullable=True)
     marca: Mapped[str | None] = mapped_column(String(60), nullable=True)
