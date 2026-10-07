@@ -92,6 +92,14 @@ IDENTIDADE = {
 
 # (nome do tipo, código) — o grupo do JSON aponta para o tipo e para a
 # secretaria a que as unidades se subordinam.
+TIPO_PREFEITURA = ("Prefeitura", "PREF")
+RAIZ = {
+    "nome": "Prefeitura Municipal de Itaitinga",
+    "logradouro": "Av. Cel. Virgílio Távora",
+    "numero": "1710",
+    "bairro": "Centro",
+    "cep": "61.880-000",
+}
 TIPO_SECRETARIA = ("Secretaria", "SEC")
 TIPO_SETOR = ("Setor", "SET")
 GRUPOS_UNIDADE = {
@@ -106,6 +114,9 @@ GRUPOS_UNIDADE = {
 
 # Unidades fictícias do `seed_demo` -> secretaria real equivalente (renomeia).
 RENOMEAR_DEMO = {
+    # As duas primeiras vêm do `provisionar_tenant`/bootstrap antigo (VPS).
+    "Prefeitura": "Prefeitura Municipal de Itaitinga",
+    "Secretaria de Planejamento e Gestão": "Secretaria Municipal de Finanças e Planejamento",
     "Secretaria de Obras": "Secretaria Municipal de Infraestrutura, Obras e Serviços Públicos",
     "Secretaria de Meio Ambiente": "Secretaria Municipal de Meio Ambiente e Controle Urbano",
     "Secretaria de Administração": "Secretaria Municipal de Administração",
@@ -332,11 +343,20 @@ async def _aplicar_unidades(db: AsyncSession, tenant_id: int) -> dict[str, Any]:
             contagens["unidades_renomeadas"] += 1
     await db.flush()
 
+    # Raiz do organograma: as secretarias se subordinam à Prefeitura.
+    id_raiz, _ = await _garantir_unidade(
+        db,
+        tenant_id,
+        {**RAIZ, "telefone": IDENTIDADE["telefone_institucional"]},
+        id_tipo=await _get_or_create_tipo(db, tenant_id, *TIPO_PREFEITURA),
+        id_pai=None,
+    )
+
     id_tipo_sec = await _get_or_create_tipo(db, tenant_id, *TIPO_SECRETARIA)
     secretarias: dict[str, int] = {}
     for sec in dados["secretarias"]:
         uid, criada = await _garantir_unidade(
-            db, tenant_id, sec, id_tipo=id_tipo_sec, id_pai=None
+            db, tenant_id, sec, id_tipo=id_tipo_sec, id_pai=id_raiz
         )
         secretarias[sec["nome"]] = uid
         contagens["secretarias_criadas"] += int(criada)
