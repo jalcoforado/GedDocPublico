@@ -146,10 +146,57 @@ remove_conflicting_containers() {
   done
 }
 
+# Aplica as migrations ANTES de subir a stack, num container descartável.
+#
+# A ordem antiga era `up` → `alembic upgrade head`, e ela tem um impasse: o
+# nginx só sobe com o backend `healthy`, e o `/health` passa pelo
+# `TenantMiddleware`, que carrega `aprimora_py.tenant`. Código novo que mapeia
+# coluna nova nessa tabela faz o `/health` responder 500 até a migration rodar —
+# mas a migration só rodava DEPOIS do `up`, que por sua vez esperava o `/health`.
+# O `up` abortava, a migration nunca rodava, e a VPS ficava sem nginx: foi o
+# deploy do #83 (0129, `tenant.logo_login_url`), ~5 min fora do ar em 2026-10-08
+# até a migration ser aplicada à mão.
+#
+# `compose run` não usa `container_name:` nem publica porta, então não disputa
+# nome com o backend de verdade. Falha aqui ABORTA o deploy: subir código novo
+# sobre schema velho é exatamente o cenário acima.
+#
+# Banco ainda sem `aprimora_py.alembic_version` é instalação nova — quem monta o
+# schema é o `bootstrap` (profile `init`), não o `upgrade head`; aqui só pula.
+migrate_before_up() {
+  log "Aplicando migrations antes de subir a stack..."
+  docker compose up -d db || error "não foi possível subir o banco para migrar"
+
+  local pronto=0
+  for _ in {1..30}; do
+    if docker compose exec -T db pg_isready -U ged_user -d ged_saas_db >/dev/null 2>&1; then
+      pronto=1
+      break
+    fi
+    sleep 2
+  done
+  if [ "$pronto" -ne 1 ]; then
+    error "banco não ficou pronto em 60s — migrations não aplicadas"
+  fi
+
+  local versionado
+  versionado=$(docker compose exec -T db psql -U ged_user -d ged_saas_db -tAc \
+    "SELECT to_regclass('aprimora_py.alembic_version') IS NOT NULL" 2>/dev/null || true)
+  if [ "$versionado" != "t" ]; then
+    log "Banco sem alembic_version (instalação nova) — migrations ficam para o bootstrap"
+    return 0
+  fi
+
+  docker compose run --rm -T --no-deps backend alembic upgrade head \
+    || error "alembic upgrade head falhou — deploy abortado antes de subir código novo"
+  log "✓ Migrations aplicadas"
+}
+
 # Start services
 start_services() {
   log "Starting services..."
   remove_conflicting_containers
+  migrate_before_up
   # `set -e` abortaria sem diagnóstico; `error` dispara o dump antes de sair.
   docker compose up -d --remove-orphans || error "docker compose up falhou"
   log "✓ Services started"
@@ -212,6 +259,8 @@ health_check() {
 
 # Run migrations if needed
 run_migrations() {
+  # Normalmente no-op: `migrate_before_up` já aplicou tudo antes do `up`. Fica
+  # como rede para a instalação nova, em que aquela etapa pula.
   log "Checking database migrations..."
   docker compose exec -T backend alembic upgrade head || log "Migrations skipped (DB may be initializing)"
 
