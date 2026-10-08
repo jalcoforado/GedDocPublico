@@ -47,6 +47,9 @@ _CAMPOS_INSTITUCIONAIS = frozenset(
         "texto_boas_vindas_portal",
         "logo_url",
         "cor_primaria",
+        # 0131 — tema do município; o grant por coluna vem da mesma migration.
+        "cor_destaque",
+        "cor_lateral",
         "id_unidade_padrao",
     }
 )

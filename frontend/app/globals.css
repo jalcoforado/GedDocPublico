@@ -367,6 +367,16 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* Títulos na fonte display (Plus Jakarta Sans). Só h1–h3: abaixo disso o
+     tamanho já é de corpo, e duas famílias no mesmo tamanho leem como ruído. */
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display, var(--font-sans)), ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: normal; /* os `ss01`/`cv11` do body são do Inter */
+    letter-spacing: -0.015em;
+  }
+
   /* Foco global: outline não deforma o controle nem empilha com o ring-* dos componentes */
   :focus-visible {
     outline: 2px solid hsl(var(--ring));

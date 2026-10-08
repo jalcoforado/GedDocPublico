@@ -372,6 +372,8 @@ async def test_config_institucional_grava_pelo_orm_sob_aprimora_app(
         texto_boas_vindas_portal="Bem-vindo ao portal.",
         logo_url="https://porm.gov.br/logo.png",
         cor_primaria="#0055aa",
+        cor_destaque="#e5451f",
+        cor_lateral="#12305a",
         id_unidade_padrao=uid,
     )
     enviados = set(payload.model_dump(exclude_unset=True))
@@ -405,12 +407,28 @@ async def test_config_institucional_grava_pelo_orm_sob_aprimora_app(
         t = (
             await s.execute(select(Tenant).where(Tenant.id == tenant.id))
         ).scalar_one()
-    assert (t.nome, t.sigla, t.cor_primaria, t.id_unidade_padrao) == (
+    assert (
+        t.nome, t.sigla, t.cor_primaria, t.cor_destaque, t.cor_lateral, t.id_unidade_padrao
+    ) == (
         "Prefeitura ORM",
         "PORM",
         "#0055aa",
+        "#e5451f",
+        "#12305a",
         uid,
     ), "o UPDATE passou pelo grant mas os valores não chegaram à linha."
+
+
+def test_cor_do_tema_so_aceita_hex_de_seis_digitos():
+    """A cor vira CSS no navegador de todo usuário do município — a borda não
+    deixa passar nada que não seja `#RRGGBB`."""
+    from pydantic import ValidationError
+
+    assert TenantInstitucionalUpdate(cor_lateral="#12305A").cor_lateral == "#12305A"
+    for ruim in ("12305a", "#123", "red", "#12305a; background:url(x)", "#12305g"):
+        for campo in ("cor_primaria", "cor_destaque", "cor_lateral"):
+            with pytest.raises(ValidationError):
+                TenantInstitucionalUpdate(**{campo: ruim})
 
 
 async def test_nup_config_grava_pelo_orm_sob_aprimora_app(admin_engine, app_session):

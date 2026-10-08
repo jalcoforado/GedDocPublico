@@ -1,0 +1,233 @@
+/**
+ * Tema por município — deriva a paleta do sistema a partir de até três cores
+ * configuradas no tenant (`cor_primaria`, `cor_destaque`, `cor_lateral`).
+ *
+ * O Design System fala em tokens HSL (`--brand: 166 45% 28%`), consumidos como
+ * `hsl(var(--brand) / <alpha>)`. Este módulo produz esses tokens; quem aplica é
+ * `lib/branding.tsx` (no `<html>`) e a pré-visualização de Configurações (num
+ * contêiner). Cor que o município não definiu não entra no mapa — e o token
+ * continua valendo o padrão do `globals.css`.
+ *
+ * A cor escolhida NÃO é usada crua: o contraste manda. Um amarelo como cor
+ * primária viraria botão ilegível com texto branco, então a luminosidade é
+ * ajustada até o par passar em AA (4.5:1). O matiz e a saturação — o que faz a
+ * cor "ser" a do município — são preservados.
+ */
+
+export type ModoTema = "light" | "dark";
+
+export interface CoresDoTema {
+  cor_primaria?: string | null;
+  cor_destaque?: string | null;
+  cor_lateral?: string | null;
+}
+
+/** Mapa `--token` → valor HSL sem `hsl()`, pronto para `style.setProperty`. */
+export type TokensDeTema = Record<string, string>;
+
+export interface Hsl {
+  h: number;
+  s: number;
+  l: number;
+}
+
+const HEX = /^#[0-9a-f]{6}$/i;
+const CONTRASTE_AA = 4.5;
+const BRANCO: Hsl = { h: 0, s: 0, l: 100 };
+// Fundo do modo escuro (`--bg` em `:root.dark`), contra o qual a marca clareia.
+const FUNDO_ESCURO: Hsl = { h: 158, s: 20, l: 8 };
+
+export function corValida(cor: string | null | undefined): cor is string {
+  return typeof cor === "string" && HEX.test(cor);
+}
+
+export function hexParaHsl(hex: string): Hsl {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return { h: 0, s: 0, l: l * 100 };
+  const s = d / (1 - Math.abs(2 * l - 1));
+  let h: number;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return { h: (h * 60 + 360) % 360, s: s * 100, l: l * 100 };
+}
+
+function hslParaRgb({ h, s, l }: Hsl): [number, number, number] {
+  const sat = s / 100;
+  const lum = l / 100;
+  const c = (1 - Math.abs(2 * lum - 1)) * sat;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = lum - c / 2;
+  const [r, g, b] =
+    h < 60 ? [c, x, 0]
+    : h < 120 ? [x, c, 0]
+    : h < 180 ? [0, c, x]
+    : h < 240 ? [0, x, c]
+    : h < 300 ? [x, 0, c]
+    : [c, 0, x];
+  return [r + m, g + m, b + m];
+}
+
+export function hslParaHex(cor: Hsl): string {
+  return (
+    "#" +
+    hslParaRgb(cor)
+      .map((v) => Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, "0"))
+      .join("")
+  );
+}
+
+/** Lê um token HSL do CSS (`166 45% 28%`) como hex — `null` se não for um. */
+export function tokenParaHex(valor: string): string | null {
+  const m = /^\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%\s*$/.exec(valor);
+  return m ? hslParaHex({ h: Number(m[1]), s: Number(m[2]), l: Number(m[3]) }) : null;
+}
+
+/** Luminância relativa (WCAG 2.x). */
+function luminancia(cor: Hsl): number {
+  const [r, g, b] = hslParaRgb(cor).map((v) =>
+    v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4,
+  );
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+export function contraste(a: Hsl, b: Hsl): number {
+  const la = luminancia(a);
+  const lb = luminancia(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+const limitar = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+
+/** Anda a luminosidade (`passo` negativo escurece) até o par passar em AA. */
+function ajustarAteContrastar(cor: Hsl, contra: Hsl, passo: number): Hsl {
+  let atual = cor;
+  // O limite é só o do sentido em que se anda: branco puro (l=100) tem de
+  // poder escurecer, e preto puro tem de poder clarear.
+  const podeAndar = (l: number) => (passo < 0 ? l > 2 : l < 98);
+  while (contraste(atual, contra) < CONTRASTE_AA && podeAndar(atual.l)) {
+    atual = { ...atual, l: atual.l + passo };
+  }
+  return atual;
+}
+
+const token = ({ h, s, l }: Hsl) =>
+  `${Math.round(h)} ${Math.round(limitar(s, 0, 100))}% ${Math.round(limitar(l, 0, 100))}%`;
+
+const comL = (cor: Hsl, l: number): Hsl => ({ ...cor, l: limitar(l, 0, 100) });
+
+/**
+ * Deriva os tokens de tema. Devolve só o que as cores informadas determinam.
+ *
+ * - **primária** → `--brand*`. No claro escurece até texto branco ler sobre
+ *   ela; no escuro clareia até ela ler sobre o fundo.
+ * - **destaque** → `--accent*`, e o texto sobre ela (claro ou escuro, o que
+ *   contrastar mais).
+ * - **lateral** → `--sidebar*`. Sempre escura: os itens do menu são claros.
+ *   Sem `cor_lateral`, a barra lateral acompanha o matiz da primária — um
+ *   município que define uma cor só já sai com o sistema coerente.
+ */
+export function derivarTema(cores: CoresDoTema, modo: ModoTema): TokensDeTema {
+  const tokens: TokensDeTema = {};
+
+  if (corValida(cores.cor_primaria)) {
+    const base = hexParaHsl(cores.cor_primaria);
+    const marca =
+      modo === "light"
+        ? ajustarAteContrastar(base, BRANCO, -2)
+        : ajustarAteContrastar(comL(base, Math.max(base.l, 55)), FUNDO_ESCURO, 2);
+    tokens["--brand"] = token(marca);
+    tokens["--brand-light"] = token(comL(marca, marca.l + (modo === "light" ? 6 : 10)));
+    tokens["--brand-dark"] = token(comL(marca, marca.l - (modo === "light" ? 7 : 16)));
+  }
+
+  if (corValida(cores.cor_destaque)) {
+    const base = hexParaHsl(cores.cor_destaque);
+    const acento = modo === "light" ? base : comL(base, Math.max(base.l, 58));
+    tokens["--accent"] = token(acento);
+    tokens["--accent-light"] = token(comL(acento, acento.l + 12));
+    tokens["--accent-dark"] = token(comL(acento, acento.l - 12));
+    const escuro: Hsl = { h: acento.h, s: 60, l: 10 };
+    tokens["--accent-foreground"] = token(
+      contraste(acento, BRANCO) >= contraste(acento, escuro) ? BRANCO : escuro,
+    );
+  }
+
+  const lateral = corValida(cores.cor_lateral)
+    ? hexParaHsl(cores.cor_lateral)
+    : corValida(cores.cor_primaria)
+      ? hexParaHsl(cores.cor_primaria)
+      : null;
+  if (lateral) {
+    const fundo: Hsl = {
+      h: lateral.h,
+      s: limitar(lateral.s, 0, 62),
+      l: limitar(lateral.l, 8, modo === "light" ? 20 : 14),
+    };
+    tokens["--sidebar"] = token(fundo);
+    tokens["--sidebar-accent"] = token(comL(fundo, fundo.l + 4));
+    tokens["--sidebar-active"] = token(comL(fundo, fundo.l + 7));
+    tokens["--sidebar-border"] = token({ ...fundo, s: fundo.s * 0.75, l: fundo.l + 7 });
+    tokens["--sidebar-foreground"] = token({ h: fundo.h, s: 18, l: 92 });
+    tokens["--sidebar-muted-foreground"] = token({ h: fundo.h, s: 16, l: 70 });
+  }
+
+  return tokens;
+}
+
+/** Todos os tokens que `derivarTema` pode definir — usado para limpar. */
+export const TOKENS_DE_TEMA = [
+  "--brand",
+  "--brand-light",
+  "--brand-dark",
+  "--accent",
+  "--accent-light",
+  "--accent-dark",
+  "--accent-foreground",
+  "--sidebar",
+  "--sidebar-accent",
+  "--sidebar-active",
+  "--sidebar-border",
+  "--sidebar-foreground",
+  "--sidebar-muted-foreground",
+] as const;
+
+/** Aplica o tema num elemento, removendo o que a paleta nova não define. */
+export function aplicarTema(el: HTMLElement, tokens: TokensDeTema): void {
+  for (const nome of TOKENS_DE_TEMA) {
+    if (nome in tokens) el.style.setProperty(nome, tokens[nome]);
+    else el.style.removeProperty(nome);
+  }
+}
+
+// --- Cache local, para a cor do município já valer antes da 1ª resposta da API
+//
+// O branding chega por fetch, depois da hidratação: sem cache, toda navegação
+// abriria no verde padrão e "piscaria" para a cor do município. O script de
+// `<head>` abaixo aplica o último tema conhecido antes da primeira pintura.
+
+export const STORAGE_TEMA = "aprimora.tema-cores";
+
+export function guardarTema(cores: CoresDoTema): void {
+  try {
+    const temas = { light: derivarTema(cores, "light"), dark: derivarTema(cores, "dark") };
+    window.localStorage.setItem(STORAGE_TEMA, JSON.stringify(temas));
+  } catch {
+    // Armazenamento bloqueado: o tema só chega depois do fetch, como antes.
+  }
+}
+
+/**
+ * Roda no `<head>`, depois do `THEME_INIT_SCRIPT` (que já pôs a classe `dark`).
+ * Só aceita nome começando por `--` e valor no formato de token HSL: o conteúdo
+ * do `localStorage` não é confiável o bastante para virar CSS sem filtro.
+ */
+export const TEMA_CORES_INIT_SCRIPT = `(function(){try{var t=JSON.parse(localStorage.getItem(${JSON.stringify(
+  STORAGE_TEMA,
+)})||"null");if(!t)return;var r=document.documentElement,m=t[r.classList.contains("dark")?"dark":"light"]||{};for(var k in m){if(/^--[a-z-]+$/.test(k)&&/^\\d{1,3} \\d{1,3}% \\d{1,3}%$/.test(m[k]))r.style.setProperty(k,m[k]);}}catch(e){}})();`;
