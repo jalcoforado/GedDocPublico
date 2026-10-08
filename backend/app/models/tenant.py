@@ -26,6 +26,8 @@ class Tenant(Base):
     # UPDATE nelas.
     logo_login_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     imagem_login_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # 0130 — atribuição da foto, quando a licença dela exigir.
+    imagem_login_credito: Mapped[str | None] = mapped_column(String(200), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Fase P2 — NUP federal (Decreto 8.539/2015). Opt-in por tenant.

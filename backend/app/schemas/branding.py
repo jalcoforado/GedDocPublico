@@ -13,3 +13,4 @@ class BrandingResponse(BaseModel):
     # Tela de login (0129): marca própria e foto do painel esquerdo.
     logo_login_url: str | None = None
     imagem_login_url: str | None = None
+    imagem_login_credito: str | None = None

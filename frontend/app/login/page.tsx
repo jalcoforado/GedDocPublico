@@ -98,7 +98,6 @@ export default function LoginPage() {
       <aside
         className="relative hidden overflow-hidden lg:block"
         style={{ backgroundColor: cor }}
-        aria-hidden="true"
       >
         {branding?.imagem_login_url ? (
           <>
@@ -110,10 +109,23 @@ export default function LoginPage() {
               alt=""
               className="absolute inset-0 h-full w-full object-cover opacity-90 mix-blend-multiply grayscale"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/25 to-white/10" />
+            <div
+              className="absolute inset-0 bg-gradient-to-t from-black/25 to-white/10"
+              aria-hidden="true"
+            />
+            {branding.imagem_login_credito ? (
+              // Atribuição exigida pela licença da foto: fica legível, não
+              // escondida de leitor de tela.
+              <p className="absolute bottom-3 left-4 right-4 text-[11px] text-white/80">
+                {branding.imagem_login_credito}
+              </p>
+            ) : null}
           </>
         ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-white/15 to-black/25" />
+          <div
+            className="absolute inset-0 bg-gradient-to-br from-white/15 to-black/25"
+            aria-hidden="true"
+          />
         )}
       </aside>
 

@@ -28,6 +28,8 @@ export interface BrandingResponse {
   /** Tela de login: marca própria (qualquer proporção) e foto do painel esquerdo. */
   logo_login_url: string | null;
   imagem_login_url: string | null;
+  /** Atribuição da foto do login, quando a licença dela exigir. */
+  imagem_login_credito: string | null;
 }
 
 export interface MeResponse {
