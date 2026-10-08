@@ -23,7 +23,6 @@ const IGNORAR = new Set(["node_modules", ".next", "coverage", "__tests__"]);
 
 /** Empilhamento local legítimo — cada entrada com a razão. */
 const LOCAIS_PERMITIDOS: Record<string, string> = {
-  "app/login/page.tsx": "conteúdo sobre a arte de fundo, dentro do próprio hero",
   "app/(app)/m/pagamentos/autorizacao/page.tsx": "barra de ações sticky dentro da página",
   "app/(app)/m/pagamentos/tesouraria/page.tsx": "barra de ações sticky dentro da página",
   "app/cidadao/servicos/[slug]/page.tsx": "barra de ação sticky dentro da página",

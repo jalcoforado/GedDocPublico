@@ -78,8 +78,13 @@ IDENTIDADE = {
     "nome": "Prefeitura de Itaitinga",
     "sigla": "PMI",
     "cnpj": "41.563.628/0001-82",
-    "cor_primaria": "#1B4F8F",
+    # Laranja do layout de apresentação: tinge o painel da cidade no login.
+    "cor_primaria": "#E5451F",
     "logo_url": "/brand/itaitinga-brasao.png",
+    "logo_login_url": "/brand/itaitinga-logo.png",
+    # A foto do portal da cidade entra em `frontend/public/brand/` quando a
+    # prefeitura a fornecer; até lá o painel fica liso na cor acima.
+    "imagem_login_url": None,
     "email_institucional": "prefeito@itaitinga.ce.gov.br",
     "telefone_institucional": "(85) 3513-2002",
     "endereco": "Av. Cel. Virgílio Távora, 1710 - Centro, Itaitinga - CE, 61.880-000",

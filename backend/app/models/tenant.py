@@ -21,6 +21,11 @@ class Tenant(Base):
     plano: Mapped[str] = mapped_column(String(20), nullable=False, default="basico")
     cor_primaria: Mapped[str | None] = mapped_column(String(7), nullable=True)
     logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # 0129 — identidade da tela de login: marca (qualquer proporção) e foto do
+    # painel esquerdo. Definidas pela plataforma; o runtime municipal não tem
+    # UPDATE nelas.
+    logo_login_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    imagem_login_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Fase P2 — NUP federal (Decreto 8.539/2015). Opt-in por tenant.

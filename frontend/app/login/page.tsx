@@ -1,12 +1,10 @@
 "use client";
 
-import { ArrowRight, ShieldCheck, Sparkles, Zap } from "lucide-react";
+import { ShieldCheck, User, Users } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { api } from "@/lib/api";
 import { useBranding } from "@/lib/branding";
@@ -14,13 +12,47 @@ import { destinoDaQuery } from "@/lib/destino-login";
 
 const DEV = process.env.NODE_ENV !== "production";
 
+// Só o E-MAIL é lembrado. Guardar a senha no navegador deixaria a credencial
+// em texto claro em `localStorage`, ao alcance de qualquer script da página.
+const CHAVE_EMAIL_LEMBRADO = "aprimora_login_email";
+
+const CAMPO =
+  "flex h-12 w-full rounded-full border border-input bg-card px-5 text-base text-foreground shadow-input transition-colors duration-fast placeholder:text-muted-foreground hover:border-border-strong focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+
+function emailLembrado(): string | null {
+  try {
+    return window.localStorage.getItem(CHAVE_EMAIL_LEMBRADO);
+  } catch {
+    return null;
+  }
+}
+
+function gravarEmailLembrado(email: string | null): void {
+  try {
+    if (email) window.localStorage.setItem(CHAVE_EMAIL_LEMBRADO, email);
+    else window.localStorage.removeItem(CHAVE_EMAIL_LEMBRADO);
+  } catch {
+    // Armazenamento bloqueado (aba anônima etc.): o login segue sem lembrar.
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const branding = useBranding();
   const [email, setEmail] = useState(DEV ? "admin@local.test" : "");
   const [senha, setSenha] = useState(DEV ? "admin123" : "");
+  const [lembrar, setLembrar] = useState(false);
+  const [ajudaSenha, setAjudaSenha] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const salvo = emailLembrado();
+    if (salvo) {
+      setEmail(salvo);
+      setLembrar(true);
+    }
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -34,6 +66,7 @@ export default function LoginPage() {
       // Sem must_change_password, o destino do login bem-sucedido é o
       // launcher de módulos (F2 Task 5) — não mais o dashboard fixo /home.
       const r = await api.login(email, senha);
+      gravarEmailLembrado(lembrar ? email : null);
       // `must_change_password` tem PRECEDÊNCIA sobre o `next` (SEC-1). O
       // destino guardado na URL é conveniência de navegação; a troca de senha
       // obrigatória é decisão do backend, e deixá-la ser pulada por um
@@ -54,201 +87,191 @@ export default function LoginPage() {
     }
   }
 
+  const nome = branding?.nome ?? "Aprimora";
+  // Cor do tenant quando houver; senão, a da marca. Vai por `style` porque
+  // vem do banco — não há classe do Tailwind para um valor só conhecido em runtime.
+  const cor = branding?.cor_primaria ?? "hsl(var(--brand))";
+
   return (
     <main className="grid min-h-dvh lg:grid-cols-2">
-      {/* === Hero (esquerda) — só desktop === */}
+      {/* === Painel da cidade (esquerda) — só desktop === */}
       <aside
-        className="
-          relative hidden flex-col justify-between overflow-hidden p-12 text-white lg:flex
-        "
-        style={{
-          background: branding?.cor_primaria
-            ? `linear-gradient(135deg, ${branding.cor_primaria} 0%, ${branding.cor_primaria}dd 50%, hsl(var(--accent)) 200%)`
-            : "linear-gradient(135deg, hsl(var(--brand)) 0%, hsl(var(--brand-light)) 60%, hsl(var(--accent)) 200%)",
-        }}
+        className="relative hidden overflow-hidden lg:block"
+        style={{ backgroundColor: cor }}
+        aria-hidden="true"
       >
-        {/* Dot grid decorativo */}
-        <div
-          className="absolute inset-0 opacity-[0.08]"
-          style={{
-            backgroundImage:
-              "radial-gradient(white 1.5px, transparent 1.5px)",
-            backgroundSize: "24px 24px",
-          }}
-          aria-hidden="true"
-        />
-        {/* Glow round decorativo */}
-        <div
-          className="absolute -right-32 -top-32 h-96 w-96 rounded-full opacity-25 blur-3xl"
-          style={{ background: "hsl(var(--accent))" }}
-          aria-hidden="true"
-        />
-
-        {/* Brand mark */}
-        <div className="relative z-10 flex items-center gap-3">
-          {branding?.logo_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
+        {branding?.imagem_login_url ? (
+          <>
+            {/* Duotone na cor do tenant: a foto em tons de cinza é multiplicada
+                pela cor de fundo (claros viram a cor, escuros ficam escuros). */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={branding.logo_url}
-              alt={branding.nome}
-              className="h-12 w-12 rounded-lg object-cover ring-1 ring-white/20"
+              src={branding.imagem_login_url}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover opacity-90 mix-blend-multiply grayscale"
             />
-          ) : (
-            <div className="inline-flex h-12 w-12 items-center justify-center rounded-lg bg-white/10 backdrop-blur ring-1 ring-white/20">
-              <span className="text-lg font-bold tracking-tight">A</span>
-            </div>
-          )}
-          <div>
-            <div className="text-sm font-semibold tracking-tight">
-              {branding?.nome ?? "Aprimora"}
-            </div>
-            <div className="text-[11px] uppercase tracking-wider opacity-70">
-              Plataforma de Gestão
-            </div>
-          </div>
-        </div>
-
-        {/* Tagline */}
-        <div className="relative z-10 max-w-md space-y-6">
-          <h1 className="text-4xl font-bold leading-tight tracking-tight">
-            Processos administrativos,{" "}
-            <span className="text-accent-light">com fluidez de software moderno.</span>
-          </h1>
-          <p className="text-base leading-relaxed opacity-80">
-            Workflow visual, SLA por etapa, notificações multi-canal e
-            auditoria completa — feito sob medida para prefeituras.
-          </p>
-
-          {/* Pills com features-chave */}
-          <ul className="flex flex-wrap gap-2 pt-2">
-            {[
-              { icon: Zap, label: "Workflow visual" },
-              { icon: ShieldCheck, label: "Auditoria completa" },
-              { icon: Sparkles, label: "BI executivo" },
-            ].map(({ icon: Icon, label }) => (
-              <li
-                key={label}
-                className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-medium backdrop-blur ring-1 ring-white/15"
-              >
-                <Icon className="h-3 w-3" aria-hidden="true" />
-                {label}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Footer credit */}
-        <div className="relative z-10 text-[10px] uppercase tracking-wider opacity-50">
-          © {new Date().getFullYear()} Aprimora — todos os direitos reservados
-        </div>
+            <div className="absolute inset-0 bg-gradient-to-t from-black/25 to-white/10" />
+          </>
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-white/15 to-black/25" />
+        )}
       </aside>
 
-      {/* === Form (direita) === */}
-      <section className="flex items-center justify-center bg-background p-6 sm:p-12">
-        <div className="w-full max-w-sm">
-          {/* Brand mark mobile-only */}
-          <div className="mb-8 flex items-center gap-3 lg:hidden">
-            {branding?.logo_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={branding.logo_url}
-                alt={branding.nome}
-                className="h-11 w-11 rounded-lg object-cover"
-              />
-            ) : (
-              <div className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-brand-gradient text-base font-bold text-white shadow-brand">
-                A
-              </div>
-            )}
-            <div>
-              <div className="text-base font-semibold tracking-tight">
-                {branding?.nome ?? "Aprimora"}
-              </div>
-              <div className="text-[10px] uppercase tracking-wider text-foreground-subtle">
-                Gestão de processos
-              </div>
-            </div>
-          </div>
-
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground">
-            Bem-vindo de volta
-          </h2>
-          <p className="mt-1 text-sm text-foreground-muted">
-            Entre com seu acesso institucional pra continuar.
-          </p>
-
-          <form onSubmit={handleSubmit} className="mt-8 space-y-4" noValidate>
-            <div>
-              <Label htmlFor="email" required>
-                E-mail
-              </Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="username"
-                inputMode="email"
-                placeholder="seu.nome@prefeitura.gov.br"
-                required
-              />
-            </div>
-            <div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="senha" required>
-                  Senha
-                </Label>
-                {/* Slot pra "Esqueci minha senha" futuro */}
-                {/* <Link className="text-xs text-brand hover:underline" href="/recuperar-senha">
-                  Esqueci minha senha
-                </Link> */}
-              </div>
-              <PasswordInput
-                id="senha"
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                autoComplete="current-password"
-                required
-              />
-            </div>
-
-            {error && (
-              <div
-                role="alert"
-                className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
-              >
-                {error}
-              </div>
-            )}
-
-            <Button
-              type="submit"
-              disabled={loading}
-              size="lg"
-              className="w-full justify-center gap-2"
-            >
-              {loading ? (
-                "Entrando..."
+      {/* === Formulário (direita) === */}
+      <section className="flex flex-col bg-background p-6 sm:p-12">
+        <div className="flex flex-1 items-center justify-center">
+          <div className="w-full max-w-sm">
+            <div className="flex flex-col items-center text-center">
+              {branding?.logo_login_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={branding.logo_login_url}
+                  alt={nome}
+                  className="max-h-32 w-auto max-w-full object-contain"
+                />
               ) : (
-                <>
-                  Entrar
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </>
+                <div className="flex items-center gap-3">
+                  {branding?.logo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={branding.logo_url}
+                      alt=""
+                      className="h-14 w-14 rounded-lg object-contain"
+                    />
+                  ) : (
+                    <div className="inline-flex h-14 w-14 items-center justify-center rounded-lg bg-brand-gradient text-xl font-bold text-white shadow-brand">
+                      A
+                    </div>
+                  )}
+                  <div className="text-left text-lg font-semibold tracking-tight text-foreground">
+                    {nome}
+                  </div>
+                </div>
               )}
-            </Button>
+              <h1 className="mt-6 text-2xl font-medium tracking-tight text-foreground">
+                Login
+              </h1>
+            </div>
 
-            {DEV && (
-              <p className="text-center text-[11px] text-foreground-subtle">
-                Modo dev — credenciais pré-preenchidas
-              </p>
-            )}
-          </form>
+            <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
+              <div>
+                <label htmlFor="email" className="sr-only">
+                  E-mail
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="username"
+                  inputMode="email"
+                  placeholder="E-mail"
+                  required
+                  className={CAMPO}
+                />
+              </div>
+              <div>
+                <label htmlFor="senha" className="sr-only">
+                  Senha
+                </label>
+                <PasswordInput
+                  id="senha"
+                  value={senha}
+                  onChange={(e) => setSenha(e.target.value)}
+                  autoComplete="current-password"
+                  placeholder="Senha"
+                  required
+                  // `!`: o `rounded-input` do componente vem depois no CSS e venceria.
+                  className="!h-12 !rounded-full !px-5"
+                />
+              </div>
 
-          <p className="mt-8 text-center text-[11px] text-foreground-subtle">
-            Acesso seguro com auditoria de ações. Em caso de problemas, contate a
-            TI da prefeitura.
-          </p>
+              <div className="flex items-center justify-between gap-3 px-2 text-sm">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-foreground-muted">
+                  <input
+                    type="checkbox"
+                    checked={lembrar}
+                    onChange={(e) => setLembrar(e.target.checked)}
+                    className="peer sr-only"
+                  />
+                  <ShieldCheck
+                    className="h-5 w-5 text-foreground-subtle transition-colors duration-fast peer-checked:text-success peer-focus-visible:ring-2 peer-focus-visible:ring-ring"
+                    aria-hidden="true"
+                  />
+                  Lembrar meu usuário
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setAjudaSenha((v) => !v)}
+                  aria-expanded={ajudaSenha}
+                  className="rounded text-foreground-muted underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  Não lembro a senha
+                </button>
+              </div>
+
+              {ajudaSenha && (
+                <p className="rounded-2xl border border-border bg-surface-1 px-4 py-3 text-sm text-foreground-muted">
+                  <strong className="font-medium text-foreground">Servidor:</strong>{" "}
+                  peça a redefinição da senha ao administrador do sistema na sua
+                  secretaria.
+                </p>
+              )}
+
+              {error && (
+                <div
+                  role="alert"
+                  className="rounded-2xl border border-danger/30 bg-danger-soft px-4 py-2 text-sm text-danger-soft-foreground"
+                >
+                  {error}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  aria-label="Entrar como servidor"
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-success px-4 text-base font-medium text-success-foreground transition-colors duration-fast hover:bg-success/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Users className="h-5 w-5" aria-hidden="true" />
+                  {loading ? "Entrando..." : "Servidor"}
+                </button>
+                <Link
+                  href="/cidadao/login"
+                  aria-label="Entrar como solicitante (portal do cidadão)"
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full border-2 bg-card px-4 text-base font-medium transition-colors duration-fast hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  style={{ borderColor: cor, color: cor }}
+                >
+                  <User className="h-5 w-5" aria-hidden="true" />
+                  Solicitante
+                </Link>
+              </div>
+
+              {DEV && (
+                <p className="text-center text-[11px] text-foreground-subtle">
+                  Modo dev — credenciais pré-preenchidas
+                </p>
+              )}
+            </form>
+
+            <p className="mt-8 text-center text-sm text-foreground-muted">
+              Ainda não tem acesso?{" "}
+              <Link
+                href="/cidadao/cadastrar"
+                className="font-semibold underline-offset-2 hover:underline"
+                style={{ color: cor }}
+              >
+                Crie uma conta
+              </Link>
+            </p>
+          </div>
         </div>
+
+        <p className="pt-8 text-center text-xs text-foreground-subtle">
+          Sistema desenvolvido por:{" "}
+          <span className="font-semibold tracking-wide text-foreground-muted">APRIMORA</span>
+        </p>
       </section>
     </main>
   );

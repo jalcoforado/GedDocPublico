@@ -25,6 +25,9 @@ export interface BrandingResponse {
   nome: string;
   cor_primaria: string | null;
   logo_url: string | null;
+  /** Tela de login: marca própria (qualquer proporção) e foto do painel esquerdo. */
+  logo_login_url: string | null;
+  imagem_login_url: string | null;
 }
 
 export interface MeResponse {
