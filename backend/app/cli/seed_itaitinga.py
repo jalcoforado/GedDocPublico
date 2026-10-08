@@ -261,8 +261,23 @@ async def _aplicar_identidade(db: AsyncSession, tenant_id: int) -> dict[str, Any
         setattr(tenant, campo, valor)
     tenant.id_cidade = id_cidade
     tenant.atualizado_em = datetime.utcnow()
+
+    # O admin padrão nasceu como "Admin Sobral" (seed_bootstrap antigo, que é
+    # get-or-create e por isso não renomeia quem já existe). O nome aparece no
+    # canto da tela e nos históricos.
+    renomeados = await db.execute(
+        text(
+            "UPDATE utils.usuario SET nome = 'Administrador' "
+            "WHERE tenant_id = :t AND nome ILIKE '%sobral%'"
+        ),
+        {"t": tenant_id},
+    )
     await db.commit()
-    return {"tenant_nome": IDENTIDADE["nome"], "id_cidade": id_cidade}
+    return {
+        "tenant_nome": IDENTIDADE["nome"],
+        "id_cidade": id_cidade,
+        "usuarios_renomeados": renomeados.rowcount,
+    }
 
 
 # ---------------------------------------------------------------------------
