@@ -3,7 +3,6 @@
   "total": 119,
   "arquivos": {
     "app/(app)/dashboard/page.tsx": 9,
-    "app/(app)/m/administracao/configuracoes/page.tsx": 2,
     "app/(app)/m/administracao/organograma/page.tsx": 3,
     "app/(app)/m/frota/solicitacoes/page.tsx": 1,
     "app/(app)/m/pagamentos/dashboard/page.tsx": 4,

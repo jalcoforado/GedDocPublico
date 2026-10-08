@@ -75,7 +75,7 @@ export function CoresDoTema({ valores, onChange, disabled }: CoresDoTemaProps) {
     <div className="md:col-span-2">
       <div className="flex items-center gap-2">
         <Palette className="h-4 w-4 text-foreground-muted" aria-hidden="true" />
-        <h3 className="text-sm font-semibold tracking-tight">Cores do sistema</h3>
+        <h3 className="text-sm font-semibold">Cores do sistema</h3>
       </div>
       <p className="mt-0.5 text-xs text-foreground-muted">
         Definem a aparência do sistema para todos os usuários do município. A
