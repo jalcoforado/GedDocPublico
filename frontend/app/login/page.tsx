@@ -17,7 +17,7 @@ const DEV = process.env.NODE_ENV !== "production";
 const CHAVE_EMAIL_LEMBRADO = "aprimora_login_email";
 
 const CAMPO =
-  "flex h-12 w-full rounded-full border border-input bg-card px-5 text-base text-foreground shadow-input transition-colors duration-fast placeholder:text-muted-foreground hover:border-border-strong focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "flex h-12 w-full rounded-full border border-border-strong bg-transparent px-6 text-base text-foreground shadow-input transition-colors duration-fast placeholder:text-muted-foreground hover:border-border-strong focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 function emailLembrado(): string | null {
   try {
@@ -88,58 +88,57 @@ export default function LoginPage() {
   }
 
   const nome = branding?.nome ?? "Aprimora";
-  // Cor do tenant quando houver; senão, a da marca. Vai por `style` porque
-  // vem do banco — não há classe do Tailwind para um valor só conhecido em runtime.
-  const cor = branding?.cor_primaria ?? "hsl(var(--brand))";
+  // Tinta do painel da cidade: a cor de destaque do município, senão a
+  // primária, senão a marca. Vai por `style` porque vem do banco — não há
+  // classe do Tailwind para um valor só conhecido em runtime.
+  const tinta = branding?.cor_destaque ?? branding?.cor_primaria ?? "hsl(var(--brand))";
 
+
+  // Layout de referência: protótipo Figma "Sistema - Aprimora" (tela de login).
   return (
     <main className="grid min-h-dvh lg:grid-cols-2">
-      {/* === Painel da cidade (esquerda) — só desktop === */}
+      {/* === Painel da cidade (esquerda) — só desktop ===
+          Empilhamento pela ORDEM do DOM (foto → véu → crédito), sem z-index
+          local: cada camada posicionada cobre a anterior. */}
       <aside
         className="relative hidden overflow-hidden lg:block"
-        style={{ backgroundColor: cor }}
+        style={{ backgroundColor: tinta }}
       >
         {branding?.imagem_login_url ? (
-          <>
-            {/* Duotone na cor do tenant: a foto em tons de cinza é multiplicada
-                pela cor de fundo (claros viram a cor, escuros ficam escuros). */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={branding.imagem_login_url}
-              alt=""
-              className="absolute inset-0 h-full w-full object-cover opacity-90 mix-blend-multiply grayscale"
-            />
-            <div
-              className="absolute inset-0 bg-gradient-to-t from-black/25 to-white/10"
-              aria-hidden="true"
-            />
-            {branding.imagem_login_credito ? (
-              // Atribuição exigida pela licença da foto: fica legível, não
-              // escondida de leitor de tela.
-              <p className="absolute bottom-3 left-4 right-4 text-[11px] text-white/80">
-                {branding.imagem_login_credito}
-              </p>
-            ) : null}
-          </>
-        ) : (
-          <div
-            className="absolute inset-0 bg-gradient-to-br from-white/15 to-black/25"
-            aria-hidden="true"
+          // Duotone na cor do município: a foto em tons de cinza é
+          // multiplicada pela cor de fundo (claros viram a cor, escuros ficam
+          // escuros).
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={branding.imagem_login_url}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover opacity-90 mix-blend-multiply grayscale"
           />
-        )}
+        ) : null}
+        <div
+          className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-white/10"
+          aria-hidden="true"
+        />
+        {branding?.imagem_login_credito ? (
+          // Atribuição exigida pela licença da foto: fica legível, não
+          // escondida de leitor de tela.
+          <p className="absolute bottom-3 left-4 right-4 text-[11px] text-white/80">
+            {branding.imagem_login_credito}
+          </p>
+        ) : null}
       </aside>
 
       {/* === Formulário (direita) === */}
       <section className="flex flex-col bg-background p-6 sm:p-12">
         <div className="flex flex-1 items-center justify-center">
-          <div className="w-full max-w-sm">
+          <div className="w-full max-w-sm motion-safe:animate-slide-up">
             <div className="flex flex-col items-center text-center">
               {branding?.logo_login_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={branding.logo_login_url}
                   alt={nome}
-                  className="max-h-32 w-auto max-w-full object-contain"
+                  className="max-h-28 w-auto max-w-full object-contain"
                 />
               ) : (
                 <div className="flex items-center gap-3">
@@ -151,21 +150,19 @@ export default function LoginPage() {
                       className="h-14 w-14 rounded-lg object-contain"
                     />
                   ) : (
-                    <div className="inline-flex h-14 w-14 items-center justify-center rounded-lg bg-brand-gradient text-xl font-bold text-white shadow-brand">
+                    <div className="inline-flex h-14 w-14 items-center justify-center rounded-lg bg-brand-gradient font-display text-xl font-bold text-white shadow-brand">
                       A
                     </div>
                   )}
-                  <div className="text-left text-lg font-semibold tracking-tight text-foreground">
+                  <div className="text-left font-display text-lg font-semibold tracking-tight text-foreground">
                     {nome}
                   </div>
                 </div>
               )}
-              <h1 className="mt-6 text-2xl font-medium tracking-tight text-foreground">
-                Login
-              </h1>
+              <h1 className="mt-8 text-2xl font-normal text-foreground-muted">Login</h1>
             </div>
 
-            <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
+            <form onSubmit={handleSubmit} className="mt-5 space-y-3.5" noValidate>
               <div>
                 <label htmlFor="email" className="sr-only">
                   E-mail
@@ -193,12 +190,13 @@ export default function LoginPage() {
                   autoComplete="current-password"
                   placeholder="Senha"
                   required
-                  // `!`: o `rounded-input` do componente vem depois no CSS e venceria.
-                  className="!h-12 !rounded-full !px-5"
+                  // `!`: as classes de raio/altura/fundo do componente vêm
+                  // depois no CSS e venceriam.
+                  className="!h-12 !rounded-full !border-border-strong !bg-transparent !px-6"
                 />
               </div>
 
-              <div className="flex items-center justify-between gap-3 px-2 text-sm">
+              <div className="flex items-center justify-between gap-3 px-4 pt-1 text-sm">
                 <label className="inline-flex cursor-pointer items-center gap-2 text-foreground-muted">
                   <input
                     type="checkbox"
@@ -207,7 +205,7 @@ export default function LoginPage() {
                     className="peer sr-only"
                   />
                   <ShieldCheck
-                    className="h-5 w-5 text-foreground-subtle transition-colors duration-fast peer-checked:text-success peer-focus-visible:ring-2 peer-focus-visible:ring-ring"
+                    className="h-5 w-5 text-accent opacity-50 transition-opacity duration-fast peer-checked:opacity-100 peer-focus-visible:ring-2 peer-focus-visible:ring-ring"
                     aria-hidden="true"
                   />
                   Lembrar meu usuário
@@ -239,21 +237,20 @@ export default function LoginPage() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3 pt-1">
+              <div className="grid grid-cols-2 gap-3 pt-3">
                 <button
                   type="submit"
                   disabled={loading}
                   aria-label="Entrar como servidor"
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-success px-4 text-base font-medium text-success-foreground transition-colors duration-fast hover:bg-success/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-success px-4 font-display text-base font-medium text-success-foreground shadow-sm transition-all duration-fast hover:bg-success/90 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Users className="h-5 w-5" aria-hidden="true" />
                   {loading ? "Entrando..." : "Servidor"}
                 </button>
                 <Link
                   href="/cidadao/login"
-                  aria-label="Entrar como solicitante (portal do cidadão)"
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full border-2 bg-card px-4 text-base font-medium transition-colors duration-fast hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                  style={{ borderColor: cor, color: cor }}
+                  aria-label="Acessar como solicitante (portal do cidadão)"
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-accent px-4 font-display text-base font-medium text-accent-dark transition-colors duration-fast hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <User className="h-5 w-5" aria-hidden="true" />
                   Solicitante
@@ -267,12 +264,11 @@ export default function LoginPage() {
               )}
             </form>
 
-            <p className="mt-8 text-center text-sm text-foreground-muted">
+            <p className="mt-8 px-2 text-sm text-foreground-muted">
               Ainda não tem acesso?{" "}
               <Link
                 href="/cidadao/cadastrar"
-                className="font-semibold underline-offset-2 hover:underline"
-                style={{ color: cor }}
+                className="font-semibold text-accent-dark underline-offset-2 hover:underline"
               >
                 Crie uma conta
               </Link>
@@ -282,7 +278,9 @@ export default function LoginPage() {
 
         <p className="pt-8 text-center text-xs text-foreground-subtle">
           Sistema desenvolvido por:{" "}
-          <span className="font-semibold tracking-wide text-foreground-muted">APRIMORA</span>
+          <span className="font-display font-bold tracking-[0.12em] text-foreground-muted">
+            APRIMORA
+          </span>
         </p>
       </section>
     </main>

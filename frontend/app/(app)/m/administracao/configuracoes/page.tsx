@@ -14,6 +14,7 @@ import {
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { CoresDoTema } from "@/components/admin/CoresDoTema";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +30,7 @@ import {
   type TenantInstitucionalUpdate,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useRecarregarBranding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 
 // Deep-links do checklist para áreas já existentes (só as que têm página).
@@ -54,6 +56,8 @@ interface InstitucionalForm {
   texto_boas_vindas_portal: string;
   logo_url: string;
   cor_primaria: string;
+  cor_destaque: string;
+  cor_lateral: string;
   id_unidade_padrao: number | null;
 }
 
@@ -68,6 +72,8 @@ const EMPTY_INSTITUCIONAL: InstitucionalForm = {
   texto_boas_vindas_portal: "",
   logo_url: "",
   cor_primaria: "",
+  cor_destaque: "",
+  cor_lateral: "",
   id_unidade_padrao: null,
 };
 
@@ -232,10 +238,14 @@ function InstitucionalSection({ canEdit }: { canEdit: boolean }) {
         texto_boas_vindas_portal: t.texto_boas_vindas_portal ?? "",
         logo_url: t.logo_url ?? "",
         cor_primaria: t.cor_primaria ?? "",
+        cor_destaque: t.cor_destaque ?? "",
+        cor_lateral: t.cor_lateral ?? "",
         id_unidade_padrao: t.id_unidade_padrao ?? null,
       });
     }
   }, [tenantQ.data]);
+
+  const recarregarBranding = useRecarregarBranding();
 
   const saveM = useMutation({
     mutationFn: (payload: TenantInstitucionalUpdate) =>
@@ -243,6 +253,8 @@ function InstitucionalSection({ canEdit }: { canEdit: boolean }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tenant-me"] });
       qc.invalidateQueries({ queryKey: ["tenant-onboarding"] });
+      // As cores salvas passam a valer já, sem recarregar a página.
+      recarregarBranding();
       toast.success("Dados institucionais salvos.");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -264,6 +276,8 @@ function InstitucionalSection({ canEdit }: { canEdit: boolean }) {
       texto_boas_vindas_portal: nullify(form.texto_boas_vindas_portal),
       logo_url: nullify(form.logo_url),
       cor_primaria: nullify(form.cor_primaria),
+      cor_destaque: nullify(form.cor_destaque),
+      cor_lateral: nullify(form.cor_lateral),
       id_unidade_padrao: form.id_unidade_padrao,
     });
   }
@@ -403,28 +417,15 @@ function InstitucionalSection({ canEdit }: { canEdit: boolean }) {
                   disabled={!canEdit}
                 />
               </div>
-              <div>
-                <Label htmlFor="cor">Cor primária</Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    aria-label="Cor primária"
-                    value={/^#[0-9a-fA-F]{6}$/.test(form.cor_primaria) ? form.cor_primaria : "#1e3a8a"}
-                    onChange={(e) => set("cor_primaria", e.target.value)}
-                    disabled={!canEdit}
-                    className="h-10 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-card disabled:cursor-not-allowed disabled:opacity-50"
-                  />
-                  <Input
-                    id="cor"
-                    value={form.cor_primaria}
-                    placeholder="#1e3a8a"
-                    maxLength={7}
-                    onChange={(e) => set("cor_primaria", e.target.value)}
-                    disabled={!canEdit}
-                    className="font-mono"
-                  />
-                </div>
-              </div>
+              <CoresDoTema
+                valores={{
+                  cor_primaria: form.cor_primaria,
+                  cor_destaque: form.cor_destaque,
+                  cor_lateral: form.cor_lateral,
+                }}
+                onChange={(campo, valor) => set(campo, valor)}
+                disabled={!canEdit}
+              />
               <div className="md:col-span-2">
                 <Label htmlFor="boas-vindas">Mensagem de boas-vindas do portal</Label>
                 <Textarea

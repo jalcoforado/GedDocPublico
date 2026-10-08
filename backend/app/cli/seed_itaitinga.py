@@ -78,8 +78,13 @@ IDENTIDADE = {
     "nome": "Prefeitura de Itaitinga",
     "sigla": "PMI",
     "cnpj": "41.563.628/0001-82",
-    # Laranja do layout de apresentação: tinge o painel da cidade no login.
-    "cor_primaria": "#E5451F",
+    # Tema do município (0131), tirado do layout de referência (protótipo
+    # Figma "Sistema - Aprimora"): laranja como marca e destaque — é ele que
+    # tinge o painel da cidade no login — e o azul-marinho dos textos do
+    # layout na barra lateral.
+    "cor_primaria": "#F05A28",
+    "cor_destaque": "#F05A28",
+    "cor_lateral": "#14204A",
     "logo_url": "/brand/itaitinga-brasao.png",
     "logo_login_url": "/brand/itaitinga-logo.png",
     # Serra de Itaitinga (as pedreiras), do Wikimedia Commons — CC BY-SA 3.0,

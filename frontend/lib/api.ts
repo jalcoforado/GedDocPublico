@@ -24,6 +24,9 @@ export interface BrandingResponse {
   slug: string;
   nome: string;
   cor_primaria: string | null;
+  /** Tema do município: com `cor_primaria`, `lib/tema-cores.ts` deriva a paleta. */
+  cor_destaque: string | null;
+  cor_lateral: string | null;
   logo_url: string | null;
   /** Tela de login: marca própria (qualquer proporção) e foto do painel esquerdo. */
   logo_login_url: string | null;
@@ -5254,6 +5257,8 @@ export interface TenantMe {
   nome: string;
   plano: string;
   cor_primaria: string | null;
+  cor_destaque: string | null;
+  cor_lateral: string | null;
   logo_url: string | null;
   /** Fase P2 — código do órgão (5 dígitos) atribuído pelo SIORG/MP */
   codigo_orgao_nup: string | null;
@@ -5287,6 +5292,8 @@ export interface TenantInstitucionalUpdate {
   texto_boas_vindas_portal?: string | null;
   logo_url?: string | null;
   cor_primaria?: string | null;
+  cor_destaque?: string | null;
+  cor_lateral?: string | null;
   id_unidade_padrao?: number | null;
 }
 

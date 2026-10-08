@@ -367,6 +367,17 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* Títulos na fonte display (Montserrat). Só h1 e h2: de h3 para baixo
+     o tamanho já é de corpo (13–14px), onde a display fica apertada — com
+     `tracking-tight` as palavras chegavam a colar — e duas famílias no mesmo
+     tamanho leem como ruído. Sem `letter-spacing` aqui: quem aperta é a classe
+     do próprio título. */
+  h1,
+  h2 {
+    font-family: var(--font-display, var(--font-sans)), ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: normal; /* os `ss01`/`cv11` do body são do Inter */
+  }
+
   /* Foco global: outline não deforma o controle nem empilha com o ring-* dos componentes */
   :focus-visible {
     outline: 2px solid hsl(var(--ring));

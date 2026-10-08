@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+COR_HEX = r"^#[0-9A-Fa-f]{6}$"
+
 
 class TenantMeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -9,6 +11,8 @@ class TenantMeResponse(BaseModel):
     nome: str
     plano: str
     cor_primaria: str | None = None
+    cor_destaque: str | None = None
+    cor_lateral: str | None = None
     logo_url: str | None = None
     # Fase P2 — NUP federal
     codigo_orgao_nup: str | None = None
@@ -54,7 +58,11 @@ class TenantInstitucionalUpdate(BaseModel):
     horario_atendimento: str | None = Field(default=None, max_length=255)
     texto_boas_vindas_portal: str | None = None
     logo_url: str | None = Field(default=None, max_length=500)
-    cor_primaria: str | None = Field(default=None, max_length=7)
+    # Tema do município. `#RRGGBB` e nada além: o valor vira CSS no navegador
+    # de todo usuário do tenant.
+    cor_primaria: str | None = Field(default=None, pattern=COR_HEX)
+    cor_destaque: str | None = Field(default=None, pattern=COR_HEX)
+    cor_lateral: str | None = Field(default=None, pattern=COR_HEX)
     id_unidade_padrao: int | None = None
 
 
