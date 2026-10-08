@@ -329,7 +329,7 @@ async def seed(db: AsyncSession) -> dict:
     if usuario is None:
         usuario = Usuario(
             tenant_id=tenant_id,
-            nome="Admin Sobral",
+            nome="Administrador",
             email=ADMIN_EMAIL,
             senha="",
             senha_bcrypt=hash_password(ADMIN_SENHA),

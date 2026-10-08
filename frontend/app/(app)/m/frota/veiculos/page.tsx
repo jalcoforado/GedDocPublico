@@ -48,6 +48,7 @@ const SITUACAO_LABEL: Record<string, string> = Object.fromEntries(
 
 interface VeiculoForm {
   placa: string;
+  numero_tombo: string;
   renavam: string;
   chassi: string;
   marca: string;
@@ -67,6 +68,7 @@ interface VeiculoForm {
 
 const EMPTY: VeiculoForm = {
   placa: "",
+  numero_tombo: "",
   renavam: "",
   chassi: "",
   marca: "",
@@ -121,7 +123,7 @@ export default function VeiculosPage() {
     return veiculos.filter((v) => {
       if (situacaoFiltro && v.situacao !== situacaoFiltro) return false;
       if (!q) return true;
-      return [v.placa, v.marca, v.modelo, v.renavam, v.chassi]
+      return [v.placa, v.numero_tombo, v.marca, v.modelo, v.renavam, v.chassi]
         .some((campo) => campo?.toLowerCase().includes(q));
     });
   }, [veiculos, busca, situacaoFiltro]);
@@ -164,6 +166,7 @@ export default function VeiculosPage() {
     setEditing(v);
     setForm({
       placa: v.placa,
+      numero_tombo: v.numero_tombo ?? "",
       renavam: v.renavam ?? "",
       chassi: v.chassi ?? "",
       marca: v.marca ?? "",
@@ -194,6 +197,7 @@ export default function VeiculosPage() {
     setErr(null);
     const payload = {
       placa: form.placa.trim(),
+      numero_tombo: nullify(form.numero_tombo),
       renavam: nullify(form.renavam),
       chassi: nullify(form.chassi),
       marca: nullify(form.marca),
@@ -253,7 +257,7 @@ export default function VeiculosPage() {
               id="f_busca"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
-              placeholder="Placa, marca, modelo, RENAVAM ou chassi"
+              placeholder="Placa, tombo, marca, modelo, RENAVAM ou chassi"
             />
           </div>
         </div>
@@ -295,6 +299,7 @@ export default function VeiculosPage() {
           <THead>
             <TR>
               <TH>Placa</TH>
+              <TH>Tombo</TH>
               <TH>Marca / Modelo</TH>
               <TH>Situação</TH>
               <TH>Unidade</TH>
@@ -305,7 +310,7 @@ export default function VeiculosPage() {
           <TBody>
             {veiculosQ.isLoading && (
               <TR>
-                <TD colSpan={6} className="text-center text-muted-foreground">
+                <TD colSpan={7} className="text-center text-muted-foreground">
                   Carregando veículos...
                 </TD>
               </TR>
@@ -313,6 +318,7 @@ export default function VeiculosPage() {
             {filtrados.map((v) => (
               <TR key={v.id}>
                 <TD className="font-mono">{v.placa}</TD>
+                <TD className="tabular-nums text-muted-foreground">{v.numero_tombo ?? "—"}</TD>
                 <TD>{[v.marca, v.modelo].filter(Boolean).join(" ") || "—"}</TD>
                 <TD>
                   <Badge intent={v.situacao === "disponivel" ? "success" : "neutral"}>
@@ -393,6 +399,16 @@ export default function VeiculosPage() {
                   onChange={(e) => set("placa", e.target.value)}
                   className="font-mono uppercase"
                   placeholder="ABC1D23"
+                />
+              </div>
+              <div>
+                <Label htmlFor="numero_tombo">Número de tombo</Label>
+                <Input
+                  id="numero_tombo"
+                  value={form.numero_tombo}
+                  onChange={(e) => set("numero_tombo", e.target.value)}
+                  maxLength={30}
+                  placeholder="Tombo patrimonial do bem"
                 />
               </div>
               <div>

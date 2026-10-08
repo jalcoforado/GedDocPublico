@@ -14,7 +14,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import select, text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth.perms import require_permission
@@ -99,6 +99,100 @@ async def test_placa_unica_por_tenant(admin_engine):
                 s, tenant_id=tenant.id, payload=VeiculoCreate(placa="DUP1234")
             )
         assert exc.value.status_code == 409
+
+
+# ---------- número de tombo (0128) ----------
+async def test_tombo_normalizado_e_vazio_vira_nulo(admin_engine):
+    tenant = await _provisionar(admin_engine)
+    async with _sessionmaker(admin_engine)() as s:
+        v = await frota_svc.criar_veiculo(
+            s,
+            tenant_id=tenant.id,
+            payload=VeiculoCreate(placa="TMB1A01", numero_tombo="  2026/000123 "),
+        )
+        assert v.numero_tombo == "2026/000123"
+        sem = await frota_svc.criar_veiculo(
+            s, tenant_id=tenant.id, payload=VeiculoCreate(placa="TMB1A02", numero_tombo="  ")
+        )
+        assert sem.numero_tombo is None
+
+
+async def test_tombo_unico_por_tenant_e_a_mensagem_diz_onde(admin_engine):
+    """O tombo é a chave da futura ligação com o patrimônio: repetido, a
+    ligação ficaria ambígua. Vale na criação e na edição."""
+    a = await _provisionar(admin_engine)
+    b = await _provisionar(admin_engine)
+    async with _sessionmaker(admin_engine)() as s:
+        await frota_svc.criar_veiculo(
+            s, tenant_id=a.id, payload=VeiculoCreate(placa="TMB2A01", numero_tombo="T-1")
+        )
+        outro = await frota_svc.criar_veiculo(
+            s, tenant_id=a.id, payload=VeiculoCreate(placa="TMB2A02")
+        )
+        # Dois veículos SEM tombo convivem: o índice é parcial.
+        await frota_svc.criar_veiculo(
+            s, tenant_id=a.id, payload=VeiculoCreate(placa="TMB2A03")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.criar_veiculo(
+                s, tenant_id=a.id, payload=VeiculoCreate(placa="TMB2A04", numero_tombo="T-1")
+            )
+        assert exc.value.status_code == 409
+        assert "TMB2A01" in exc.value.detail
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(HTTPException) as exc:
+            await frota_svc.atualizar_veiculo(
+                s, tenant_id=a.id, veiculo_id=outro.id,
+                payload=VeiculoUpdate(numero_tombo="T-1"),
+            )
+        assert exc.value.status_code == 409
+    # Regravar o próprio tombo não é conflito, e outro tenant pode usar o mesmo número.
+    async with _sessionmaker(admin_engine)() as s:
+        mesmo = await frota_svc.atualizar_veiculo(
+            s, tenant_id=a.id, veiculo_id=outro.id, payload=VeiculoUpdate(numero_tombo="T-2")
+        )
+        mesmo = await frota_svc.atualizar_veiculo(
+            s, tenant_id=a.id, veiculo_id=outro.id, payload=VeiculoUpdate(numero_tombo="T-2")
+        )
+        assert mesmo.numero_tombo == "T-2"
+        vb = await frota_svc.criar_veiculo(
+            s, tenant_id=b.id, payload=VeiculoCreate(placa="TMB2A01", numero_tombo="T-1")
+        )
+        assert vb.numero_tombo == "T-1"
+
+
+async def test_tombo_reutilizavel_apos_soft_delete(admin_engine):
+    tenant = await _provisionar(admin_engine)
+    async with _sessionmaker(admin_engine)() as s:
+        v = await frota_svc.criar_veiculo(
+            s, tenant_id=tenant.id, payload=VeiculoCreate(placa="TMB3A01", numero_tombo="T-9")
+        )
+        await frota_svc.excluir_veiculo(s, tenant_id=tenant.id, veiculo_id=v.id)
+        novo = await frota_svc.criar_veiculo(
+            s, tenant_id=tenant.id, payload=VeiculoCreate(placa="TMB3A02", numero_tombo="T-9")
+        )
+        assert novo.numero_tombo == "T-9"
+
+
+async def test_o_banco_barra_tombo_repetido_sem_passar_pelo_servico(admin_engine):
+    """Prova de que a unicidade mora no índice da 0128, e não só no `if` do
+    serviço — entre o SELECT e o INSERT de uma checagem não há nada segurando."""
+    tenant = await _provisionar(admin_engine)
+    async with _sessionmaker(admin_engine)() as s:
+        await frota_svc.criar_veiculo(
+            s, tenant_id=tenant.id, payload=VeiculoCreate(placa="TMB4A01", numero_tombo="T-7")
+        )
+    async with _sessionmaker(admin_engine)() as s:
+        with pytest.raises(IntegrityError):
+            await s.execute(
+                text(
+                    "INSERT INTO frota.veiculo (tenant_id, placa, numero_tombo, situacao, "
+                    "quilometragem_atual, forma_posse, criado_em, excluido) "
+                    "VALUES (:t, 'TMB4A02', 'T-7', 'disponivel', 0, 'proprio', now(), false)"
+                ),
+                {"t": tenant.id},
+            )
 
 
 async def test_mesma_placa_em_tenants_diferentes_ok(admin_engine):

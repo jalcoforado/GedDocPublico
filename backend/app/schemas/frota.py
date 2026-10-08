@@ -20,7 +20,16 @@ def _normalizar_placa(v: str) -> str:
     return v.replace("-", "").replace(" ", "").strip().upper()
 
 
+def _normalizar_tombo(v: object) -> object:
+    """Tombo é chave de ligação com o patrimônio: espaço sobrando faria dois
+    cadastros do mesmo bem passarem pela unicidade. Vazio vira `None`."""
+    if not isinstance(v, str):
+        return v
+    return v.strip() or None
+
+
 class VeiculoBase(BaseModel):
+    numero_tombo: str | None = Field(default=None, max_length=30)
     renavam: str | None = Field(default=None, max_length=20)
     chassi: str | None = Field(default=None, max_length=30)
     marca: str | None = Field(default=None, max_length=60)
@@ -36,6 +45,8 @@ class VeiculoBase(BaseModel):
     data_aquisicao: date | None = None
     forma_posse: FormaPosse = "proprio"
     observacoes: str | None = None
+
+    _tombo = field_validator("numero_tombo", mode="before")(_normalizar_tombo)
 
 
 class VeiculoCreate(VeiculoBase):
@@ -62,6 +73,7 @@ class VeiculoUpdate(BaseModel):
     """Whitelist de edição — `tenant_id`/`id`/`excluido` nunca aceitos."""
 
     placa: str | None = None
+    numero_tombo: str | None = Field(default=None, max_length=30)
     renavam: str | None = Field(default=None, max_length=20)
     chassi: str | None = Field(default=None, max_length=30)
     marca: str | None = Field(default=None, max_length=60)
@@ -77,6 +89,8 @@ class VeiculoUpdate(BaseModel):
     data_aquisicao: date | None = None
     forma_posse: FormaPosse | None = None
     observacoes: str | None = None
+
+    _tombo = field_validator("numero_tombo", mode="before")(_normalizar_tombo)
 
     @field_validator("placa", mode="before")
     @classmethod
@@ -98,6 +112,7 @@ class VeiculoOut(BaseModel):
 
     id: int
     placa: str
+    numero_tombo: str | None = None
     renavam: str | None = None
     chassi: str | None = None
     marca: str | None = None

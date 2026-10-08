@@ -70,6 +70,30 @@ async def _validar_placa_unica(
         )
 
 
+async def _validar_tombo_unico(
+    db: AsyncSession, *, tenant_id: int, numero_tombo: str | None,
+    excluir_id: int | None = None,
+) -> None:
+    if numero_tombo is None:
+        return
+    stmt = select(Veiculo.placa).where(
+        Veiculo.tenant_id == tenant_id,
+        Veiculo.numero_tombo == numero_tombo,
+        Veiculo.excluido.is_(False),
+    )
+    if excluir_id is not None:
+        stmt = stmt.where(Veiculo.id != excluir_id)
+    placa = (await db.execute(stmt)).scalar_one_or_none()
+    if placa is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"O número de tombo '{numero_tombo}' já está no veículo de placa "
+                f"'{placa}'."
+            ),
+        )
+
+
 async def _validar_unidade(
     db: AsyncSession, *, tenant_id: int, id_unidade: int | None
 ) -> None:
@@ -122,6 +146,9 @@ async def criar_veiculo(
 ) -> Veiculo:
     dados = payload.model_dump()
     await _validar_placa_unica(db, tenant_id=tenant_id, placa=dados["placa"])
+    await _validar_tombo_unico(
+        db, tenant_id=tenant_id, numero_tombo=dados.get("numero_tombo")
+    )
     await _validar_unidade(
         db, tenant_id=tenant_id, id_unidade=dados.get("id_unidade_responsavel")
     )
@@ -141,6 +168,13 @@ async def atualizar_veiculo(
     if "placa" in dados:
         await _validar_placa_unica(
             db, tenant_id=tenant_id, placa=dados["placa"], excluir_id=veiculo_id
+        )
+    if "numero_tombo" in dados:
+        await _validar_tombo_unico(
+            db,
+            tenant_id=tenant_id,
+            numero_tombo=dados["numero_tombo"],
+            excluir_id=veiculo_id,
         )
     if "id_unidade_responsavel" in dados:
         await _validar_unidade(
