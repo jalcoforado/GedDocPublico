@@ -107,6 +107,7 @@ Quando a documentação e uma destas discordarem, a guarda está certa:
 | `test_guarda_reparar_grants.py` | O reparo de GRANTs bate com as revogações das migrations. |
 | `test_guarda_status_legado.py` | `Debito.status` é sempre derivado, nunca escrito direto. |
 | `test_guarda_processo_rascunho.py` | `situacao='rascunho' <=> numero_processo IS NULL`. |
+| `test_guarda_contrato_derivado.py` | Valor e vigência originais do contrato não são reescritos por aditivo ou apostila. |
 | `frontend/__tests__/rotas-modulo.test.ts` | Prefixo `/m/`, 308s, página órfã. |
 | `frontend/__tests__/menus.test.tsx` | Permissão esperada por item de menu. |
 

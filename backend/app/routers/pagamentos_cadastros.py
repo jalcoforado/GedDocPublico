@@ -1,7 +1,7 @@
 """Rotas dos cadastros de Pagamentos (PAG-1) — só Fornecedor por enquanto."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import require_tenant_id
@@ -18,6 +18,7 @@ from ..schemas.pagamentos import (
     FonteCreate, FonteOut, FonteUpdate, NaturezaCreate, NaturezaOut, NaturezaUpdate,
     SistemaIntegradoCreate, SistemaIntegradoCriadoOut, SistemaIntegradoOut,
 )
+from ..services import contratos as contratos_svc
 from ..services import pagamentos_cadastros as svc
 from ..services import pagamentos_checklist as checklist_svc
 from ..services import pagamentos_sistemas as sistemas_svc
@@ -224,6 +225,30 @@ async def delete_conta(conta_id: int,
 contratos_router = APIRouter(prefix="/pagamentos/contratos", tags=["pagamentos-cadastros"])
 
 
+async def _recusa_escrita_com_modulo_contratos(
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Convivência com o módulo `contratos` (spec Contratos G1, §5.2).
+
+    Este cadastro simples continua existindo para o município que tem
+    pagamentos e NÃO tem o módulo de contratos — ele precisa de um contrato
+    para vincular débito. Com o módulo contratado, a escrita por aqui é
+    recusada: haveria dois caminhos para mudar valor e vigência, e este
+    ignora aditivo, apostila e o congelamento da assinatura. A leitura segue.
+
+    É dependência do ROUTER, e não regra do service, de propósito: o seed e a
+    suíte de pagamentos criam contrato pelo service, em tenant que tem os dois
+    módulos, e não são o caminho que esta regra quer fechar.
+    """
+    if await contratos_svc.modulo_contratado(db, tenant_id=tenant_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Este município gerencia contratos no módulo Contratos. "
+                   "Cadastre e altere por lá.",
+        )
+
+
 @contratos_router.get("", response_model=list[ContratoOut])
 async def list_contratos(_: Usuario = Depends(require_permission("pagamento_cadastro")),
                          tenant_id: int = Depends(require_tenant_id),
@@ -243,6 +268,7 @@ async def get_contrato(contrato_id: int,
 @contratos_router.post("", response_model=ContratoOut, status_code=status.HTTP_201_CREATED)
 async def create_contrato(payload: ContratoCreate,
                           _: Usuario = Depends(require_permission("pagamento_cadastro", "inserir")),
+                          __: None = Depends(_recusa_escrita_com_modulo_contratos),
                           tenant_id: int = Depends(require_tenant_id),
                           db: AsyncSession = Depends(get_db)):
     return ContratoOut.model_validate(await svc.criar_contrato(db, tenant_id=tenant_id, payload=payload))
@@ -251,6 +277,7 @@ async def create_contrato(payload: ContratoCreate,
 @contratos_router.put("/{contrato_id}", response_model=ContratoOut)
 async def update_contrato(contrato_id: int, payload: ContratoUpdate,
                           _: Usuario = Depends(require_permission("pagamento_cadastro", "atualizar")),
+                          __: None = Depends(_recusa_escrita_com_modulo_contratos),
                           tenant_id: int = Depends(require_tenant_id),
                           db: AsyncSession = Depends(get_db)):
     return ContratoOut.model_validate(
@@ -260,6 +287,7 @@ async def update_contrato(contrato_id: int, payload: ContratoUpdate,
 @contratos_router.delete("/{contrato_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_contrato(contrato_id: int,
                           _: Usuario = Depends(require_permission("pagamento_cadastro", "excluir")),
+                          __: None = Depends(_recusa_escrita_com_modulo_contratos),
                           tenant_id: int = Depends(require_tenant_id),
                           db: AsyncSession = Depends(get_db)):
     await svc.excluir_contrato(db, tenant_id=tenant_id, contrato_id=contrato_id)

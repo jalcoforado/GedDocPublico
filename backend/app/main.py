@@ -20,6 +20,7 @@ from .routers import (
     busca,
     catalogo,
     cidadao,
+    contratos,
     dashboard,
     frota,
     frota_telemetria,
@@ -160,6 +161,7 @@ app.include_router(pagamentos_cadastros.alcadas_router, prefix="/api/v2")
 app.include_router(pagamentos_cadastros.checklist_router, prefix="/api/v2")
 app.include_router(pagamentos_cadastros.sistemas_integrados_router, prefix="/api/v2")
 app.include_router(pagamentos_cadastros.enums_router, prefix="/api/v2")
+app.include_router(contratos.router, prefix="/api/v2")
 app.include_router(pagamentos_caixa.caixa_router, prefix="/api/v2")
 app.include_router(pagamentos_conciliacao.router, prefix="/api/v2")
 app.include_router(pagamentos_contabil.contabil_router, prefix="/api/v2")

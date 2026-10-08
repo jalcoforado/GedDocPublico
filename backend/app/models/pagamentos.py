@@ -127,13 +127,90 @@ class Contrato(Base):
     numero: Mapped[str] = mapped_column(String(50), nullable=False)
     id_fornecedor: Mapped[int] = mapped_column(ForeignKey("pagamentos.fornecedor.id"), nullable=False)
     id_unidade: Mapped[int] = mapped_column(ForeignKey("utils.unidade_trabalho.id"), nullable=False)
-    objeto: Mapped[str] = mapped_column(String(255), nullable=False)
+    objeto: Mapped[str] = mapped_column(String(3000), nullable=False)
     vigencia_inicio: Mapped[date] = mapped_column(Date, nullable=False)
     vigencia_fim: Mapped[date] = mapped_column(Date, nullable=False)
     valor_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     # Categoria para a fila cronológica (F3). Nullable de propósito: obrigar o
     # ente a classificar todo o histórico no dia do deploy travaria o módulo.
     categoria: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # --- Contratos G1 (migration 0132) -------------------------------------
+    # `valor_total`, `vigencia_inicio` e `vigencia_fim` acima são OS ORIGINAIS,
+    # congelados na assinatura. Valor atualizado e vigência atual são DERIVADOS
+    # dos aditivos e apostilas (services/contratos.calcular) e nunca gravados
+    # aqui — tests/test_guarda_contrato_derivado.py reprova quem escrever nesses
+    # três campos fora de services/contratos.py e do cadastro simples de
+    # pagamentos, que só existe para município sem o módulo `contratos`.
+    situacao: Mapped[str] = mapped_column(
+        String(15), nullable=False, default="VIGENTE", server_default="VIGENTE")
+    # Ano da celebração. O SIM (tabela 511) exige número único POR exercício.
+    exercicio: Mapped[int] = mapped_column(Integer, nullable=False)
+    data_celebracao: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Uma das 18 categorias (A–R) do campo 6 da tabela 511 do SIM.
+    tipo_objeto: Mapped[str | None] = mapped_column(String(1), nullable=True)
+    # ESCOPO | CONTINUO — arts. 106, 107 e 111 da Lei 14.133 dão regra de
+    # vigência diferente a cada um.
+    natureza_duracao: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Reforma de edifício ou equipamento: limite de acréscimo de 50% (art. 125).
+    reforma: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("FALSE"))
+    id_processo: Mapped[int | None] = mapped_column(
+        ForeignKey("protocolos.processo.id"), nullable=True)
+    processo_numero: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    processo_data_autuacao: Mapped[date | None] = mapped_column(Date, nullable=True)
+    pncp_id: Mapped[str | None] = mapped_column(String(25), nullable=True)
+    pncp_publicado_em: Mapped[date | None] = mapped_column(Date, nullable=True)
+    data_encerramento: Mapped[date | None] = mapped_column(Date, nullable=True)
+    motivo_rescisao: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class ContratoAditivo(Base):
+    """Termo aditivo (migration 0133). `tipo` usa os códigos do campo 7 da
+    tabela 511 do SIM; `valor` é sempre a diferença POSITIVA, inclusive em
+    redução. Só os de situação VIGENTE entram no cálculo do contrato."""
+    __tablename__ = "contrato_aditivo"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_contrato: Mapped[int] = mapped_column(ForeignKey("pagamentos.contrato.id"), nullable=False)
+    sequencial: Mapped[int] = mapped_column(Integer, nullable=False)
+    numero: Mapped[str] = mapped_column(String(15), nullable=False)
+    exercicio: Mapped[int] = mapped_column(Integer, nullable=False)
+    tipo: Mapped[str] = mapped_column(String(2), nullable=False)
+    data_assinatura: Mapped[date] = mapped_column(Date, nullable=False)
+    valor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    nova_vigencia_fim: Mapped[date | None] = mapped_column(Date, nullable=True)
+    justificativa: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    situacao: Mapped[str] = mapped_column(String(10), nullable=False, default="RASCUNHO")
+    motivo_anulacao: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    pncp_id: Mapped[str | None] = mapped_column(String(25), nullable=True)
+    pncp_publicado_em: Mapped[date | None] = mapped_column(Date, nullable=True)
+    id_usuario_registro: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class ContratoApostila(Base):
+    """Apostilamento (migration 0133) — o que o art. 136 da Lei 14.133 dispensa
+    de termo aditivo. Sem rascunho: registra fato já ocorrido."""
+    __tablename__ = "contrato_apostila"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_contrato: Mapped[int] = mapped_column(ForeignKey("pagamentos.contrato.id"), nullable=False)
+    sequencial: Mapped[int] = mapped_column(Integer, nullable=False)
+    tipo: Mapped[str] = mapped_column(String(15), nullable=False)
+    data: Mapped[date] = mapped_column(Date, nullable=False)
+    valor_delta: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    indice: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    descricao: Mapped[str] = mapped_column(String(1000), nullable=False)
+    id_usuario_registro: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

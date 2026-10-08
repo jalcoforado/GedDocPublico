@@ -1237,6 +1237,16 @@ RESET_PAGAMENTOS = [
         DELETE FROM pagamentos.alcada WHERE tenant_id = :t
           AND id_usuario IN (SELECT id FROM utils.usuario WHERE tenant_id = :t
                              AND email LIKE '%@ops.demo.test')"""),
+    # Filhas do contrato (migration 0133, Contratos G1) antes dele: um contrato
+    # demo aditado pela tela deixaria o DELETE abaixo morrer na FK.
+    ("contrato_apostilas", """
+        DELETE FROM pagamentos.contrato_apostila WHERE tenant_id = :t
+          AND id_contrato IN (SELECT id FROM pagamentos.contrato
+                              WHERE tenant_id = :t AND numero LIKE 'DEMO-%')"""),
+    ("contrato_aditivos", """
+        DELETE FROM pagamentos.contrato_aditivo WHERE tenant_id = :t
+          AND id_contrato IN (SELECT id FROM pagamentos.contrato
+                              WHERE tenant_id = :t AND numero LIKE 'DEMO-%')"""),
     ("contratos", """
         DELETE FROM pagamentos.contrato WHERE tenant_id = :t
           AND numero LIKE 'DEMO-%'"""),

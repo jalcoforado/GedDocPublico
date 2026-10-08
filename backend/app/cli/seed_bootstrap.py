@@ -71,6 +71,9 @@ MODULO_TRANSACOES: dict[str, tuple[str, ...]] = {
     ),
     "frota": ("frota",),
     "transporte": ("transporte_regulado",),
+    # Sexto módulo (migration 0131, Contratos G1). Uma transação só nesta
+    # fatia; as seguintes trazem as suas (`contrato_fiscalizar` na G2).
+    "contratos": ("contrato",),
     # `auditoria` (migration 0090, item 1.0.8) fica em administração: a trilha
     # atravessa todos os módulos, mas quem a lê é quem administra o município.
     "administracao": ("usuario", "unidadeTrabalho", "configuracao", "auditoria"),
