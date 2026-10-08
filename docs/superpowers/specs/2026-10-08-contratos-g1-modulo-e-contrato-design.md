@@ -1,7 +1,8 @@
 # Contratos G1 — módulo e contrato (desenho)
 
-**Status:** desenho concluído, **aguardando aprovação para implementar**. Nenhuma linha de código
-foi escrita.
+**Status:** desenho aprovado pelo Jorge em 2026-10-08 ("pode ir"), com as cinco recomendações da
+seção 10. **Backend implementado e NÃO executado contra banco** — ver a seção 12. Frontend por
+fazer.
 **Autoridade:** este documento, sobre o *como* da fatia G1. O *o quê* está em
 [`2026-10-08-contratos-convenios-planejamento-escopo.md`](2026-10-08-contratos-convenios-planejamento-escopo.md)
 (seção 9, fatia G1; decisões D1–D11 na seção 10).
@@ -430,6 +431,8 @@ vai como aditivo de acréscimo, ou não vai. A resposta não muda a G1 — muda 
 
 ## 11. Ordem de implementação sugerida
 
+> Estado em 2026-10-08: itens 1 a 4 e 6 escritos (branch `feat/contratos-g1`); 5 e 7 por fazer.
+
 Um PR só, mas nesta sequência de commits, cada um verde:
 
 1. Migrations e modelos; `MODULO_TRANSACOES`.
@@ -443,3 +446,53 @@ Um PR só, mas nesta sequência de commits, cada um verde:
 
 O item 7 não é enfeite: `CLAUDE.md` diz hoje que são **cinco** módulos contratáveis, e é o
 documento carregado em toda sessão.
+
+## 12. O que a implementação mudou no desenho, e o que ainda não foi provado
+
+Registrado em 2026-10-08, ao fim da implementação do backend.
+
+### 12.1 Quatro desvios
+
+| O desenho dizia | O que foi feito | Por quê |
+|---|---|---|
+| §3.2 — schema novo `contratos` para `aditivo` e `apostila` | Ficam em `pagamentos`, como `contrato_aditivo` e `contrato_apostila` | A migration `0078` distribui `USAGE`/`CREATE`, grants e `ALTER DEFAULT PRIVILEGES` de `aprimora_migrator` e `aprimora_worker` por uma **lista fechada de schemas**, e `test_rls_papeis_minimos.py` varre a mesma lista. Schema novo teria de repetir tudo à mão, e o que faltasse só quebraria no seed seguinte. É a mesma razão da decisão Q1. |
+| §5 — toda rota com `require_modulo("contratos")` **e** `require_permission` | Só `require_permission("contrato")` | É o arranjo de frota e pagamentos: transação de módulo não contratado é bloqueada dentro de `require_permission`, antes do bypass de super-usuário. `require_modulo` existe para GET que não tinha transação nenhuma. Há teste HTTP provando que o SU de tenant sem o módulo leva 403. |
+| §7 — mais um `--modulo` do `seed_demo_operacional` | CLI próprio, `app.cli.seed_demo_contratos` | Lá, `MODULOS` define o que é "todos" e condiciona o reset de usuários; um quarto módulo mudaria o comportamento de um seed que já tem teste. |
+| §5 — 16 rotas | 18: entraram `GET` e `POST /contratos/fornecedores` e `GET /contratos/catalogos` | Consequência direta da decisão Q2: quem tem só a transação `contrato` precisa escolher e criar o contratado, e `/pagamentos/fornecedores` está bloqueado para ele. Devolvem só identificação, sem dado bancário. |
+
+Um quinto ponto, menor: a lista do que se edita em contrato vigente (§5.1) virou **lista de
+permitidos**, não de proibidos — coluna nova nasce travada. `natureza_duracao` entrou nos
+permitidos; `reforma` e `id_unidade` ficaram travados, porque mudam o limite e o órgão da despesa.
+
+### 12.2 O que foi verificado, e o que não foi
+
+O Docker da máquina de desenvolvimento não subiu durante a implementação ("access is denied…
+another user has already started Docker Desktop"), e não há Python com dependências nem Node fora
+dele. **Nenhuma migration foi aplicada e a suíte não rodou.**
+
+Verificado, com arneses que simulam `fastapi`/`sqlalchemy`:
+
+- `py_compile` de todos os arquivos tocados;
+- os 27 casos de `test_contratos_calculo.py` (a função `calcular` é pura);
+- `test_guarda_contrato_derivado.py`, verde e depois **invertida de três formas** — atribuição
+  direta num service, `UPDATE` em massa num router, e o aditivo escrevendo no contrato. Reprovou
+  nas três;
+- o roteiro do seed contra as regras puras do service: os 20 contratos e seus atos passam, e o
+  painel resultante tem 16 vigentes, 1 vencido, 1 acima do limite.
+
+**Nunca rodou:** as três migrations (inclusive `downgrade`), `test_contratos_servico.py`,
+`test_contratos_http.py`, `test_contratos_rls.py`, o seed contra banco, e o efeito das mudanças
+sobre a suíte existente de pagamentos. O primeiro verde de verdade vem do CI, que só roda em PR.
+
+Três pontos onde é mais provável aparecer erro na primeira execução, por terem sido escritos sem
+retorno do banco:
+
+1. a subconsulta correlacionada de `_vigencia_atual_sql` (filtro e ordenação da listagem);
+2. `ContratoOut.model_validate(dict, from_attributes=True)` com o `Calculo` (dataclass) e os
+   modelos ORM aninhados;
+3. o `downgrade` da `0131`, que apaga a transação só se nenhum grupo **e** nenhum sistema a
+   referenciam — depois do `seed_bootstrap`, ela fica.
+
+Uma lacuna de teste declarada: o vínculo com processo sigiloso só tem o caminho da **recusa**
+coberto (com `assert_acesso_processo` trocado por um que nega). O caminho em que o usuário tem
+credencial exige um processo real e ficou para a G3.
