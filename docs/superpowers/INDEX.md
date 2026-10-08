@@ -60,6 +60,7 @@ Para saber se algo está de pé, a resposta está no código e em
 | [`2026-08-24-pagamentos-c2-integracoes-design.md`](specs/2026-08-24-pagamentos-c2-integracoes-design.md) | 2026-08-24 | [plano](plans/2026-08-24-pagamentos-c2-integracoes.md) | — |
 | [`2026-08-28-reuniao-as-is-to-be-design.md`](specs/2026-08-28-reuniao-as-is-to-be-design.md) | 2026-09-16 | — | — |
 | [`2026-10-08-contratos-convenios-planejamento-escopo.md`](specs/2026-10-08-contratos-convenios-planejamento-escopo.md) | 2026-10-08 | — | — |
+| [`2026-10-08-contratos-g1-modulo-e-contrato-design.md`](specs/2026-10-08-contratos-g1-modulo-e-contrato-design.md) | 2026-10-08 | — | — |
 
 ## Planos sem spec pareado
 
