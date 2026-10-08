@@ -243,9 +243,28 @@ A costura entre os dois lados tem três pontos, e os três passam por **número*
 3. **Saldo do contrato.** Empenhado, liquidado e pago são fatos da ASPEC. Para mostrar saldo por
    contrato (fatia G4) é preciso importar a execução ou digitá-la em dobro.
 
-Ficou uma pergunta nova: **quem gera hoje os arquivos 501–513 do SIM de Itaitinga**, se a ASPEC
-não tem o dado de licitação? Ou alguém digita esses dados no contábil só para a remessa, ou há
-outro sistema na cadeia. A resposta diz contra o quê a fatia G6 confere — ver D10.
+**Quem envia o SIM hoje, e o que isso significa** (informado pelo Jorge em 2026-10-08):
+
+- **A ASPEC gera os arquivos 501–513 do SIM.** Como Itaitinga não usa o módulo de licitação dela,
+  os dados de processo, contrato e aditivo são **digitados na ASPEC para a remessa**. O dado
+  nasce em outro lugar (papel, planilha, PDF) e é redigitado no contábil uma vez por mês.
+- **A ASPEC exporta orçamento e execução da despesa.** Dotação e saldo de contrato deixam de ser
+  digitação em dobro e viram **importação periódica**. O formato da exportação não foi visto.
+
+Duas consequências:
+
+1. **A fatia G6 ganha um alvo concreto.** Conferir passa a ser comparar o que o módulo tem com o
+   arquivo `.LCO` que a ASPEC gerou naquele mês — diferença de número, valor, vigência, fiscal.
+   O layout é público e estável (seção 3.1), então a leitura do arquivo não depende da ASPEC.
+2. **A redigitação não some sozinha.** Enquanto a remessa sair da ASPEC, alguém continua
+   digitando lá o que já está aqui. Eliminar isso exige um destes caminhos, e nenhum está
+   decidido: o módulo gerar os arquivos 501–513 (o que a D3 adiou de propósito), ou a ASPEC
+   **importar** do módulo. Ver D12.
+
+Uma hipótese a testar antes de pedir qualquer coisa à ASPEC: os próprios arquivos mensais do SIM
+(601 empenhos, 612 liquidações, 604 pagamentos, 202–204 orçamento) já são uma exportação que a
+ASPEC produz todo mês, em layout documentado. Se a granularidade mensal bastar para o saldo de
+contrato, a importação pode ler esses arquivos e dispensar formato próprio.
 
 ## 4. Diagnóstico — o que o sistema tem e o que falta
 
@@ -406,7 +425,7 @@ Observações de ordem:
   (órgão, unidade, função, subfunção, programa, projeto ou atividade, elemento, fonte), e o
   orçamento mora no sistema contábil do município, não aqui. Ou digitamos a classificação como
   texto validado por formato, ou importamos o orçamento. Não decidir isso às cegas: depende de
-  D11.
+  D13.
 - **G6 é conferência, não remessa** (decisão D3). O sistema contábil continua enviando; nós
   entregamos o que ele deveria estar enviando, para comparar. Gerar arquivo de envio só entra em
   pauta depois de sabermos qual é esse sistema e de um ciclo de conferência sem divergência.
@@ -439,6 +458,8 @@ subir para o módulo novo ou para `comum`.
 | **D7** | Fiscal e gestor são usuários? | **Sim.** Cada um entra com o próprio login e registra as próprias ocorrências. |
 | **D8** | Quais módulos ASPEC Itaitinga usa? | **Só contabilidade e execução da despesa.** Sem Aspec Licitação. |
 | **D2-b** | Manter o processo de contratação completo? | **Sim, D2 mantida.** A dúvida era duplicar o Aspec Licitação; ele não está em uso. |
+| **D10** | Quem gera os arquivos 501–513 do SIM? | **A ASPEC**, com os dados redigitados nela para a remessa. |
+| **D11** | A ASPEC exporta orçamento e execução? | **Sim.** Formato ainda não visto (D13). |
 
 Consequência de D7: fiscal é usuário comum, não super-usuário. O módulo será o primeiro a
 depender de verdade de grupo não-SU — o gate de permissão que hoje está inerte passa a valer, e a
@@ -449,8 +470,8 @@ contratos que fiscaliza: é um quinto eixo de acesso, além de tenant, módulo, 
 
 | # | Decisão | Por que importa |
 |---|---|---|
-| **D10** | Quem gera hoje os arquivos 501–513 do SIM de Itaitinga? | A ASPEC em uso lá não tem o dado de licitação. Saber quem digita, e onde, define contra o quê a G6 confere — e mostra o retrabalho que o módulo elimina. |
-| **D11** | A ASPEC exporta orçamento e execução da despesa? | Sem exportação, dotação e saldo de contrato são digitados em dobro (seção 3.3). Com exportação, viram importação periódica. |
+| **D12** | Como acabar com a redigitação na ASPEC para a remessa do SIM? | **(a)** o módulo passa a gerar os arquivos 501–513 e a ASPEC deixa de enviá-los; **(b)** a ASPEC importa do módulo; **(c)** conviver com a redigitação e só conferir. A D3 escolheu conferência primeiro — então **(c) agora**, e (a) ou (b) depois de um ciclo de conferência sem divergência. Vale perguntar à ASPEC se (b) existe. |
+| **D13** | Em que formato a ASPEC exporta orçamento e execução, e com que frequência? | Define a importação da G3 (dotação) e da G4 (saldo). Testar antes se os arquivos mensais do SIM já servem (seção 3.3). |
 | **D9** | Carga inicial: os 1.019 contratos do portal entram? | Com o município inteiro como piloto, cadastrar o estoque à mão é inviável. Só os vigentes já reduz muito. |
 
 ## 11. O que este documento não é
