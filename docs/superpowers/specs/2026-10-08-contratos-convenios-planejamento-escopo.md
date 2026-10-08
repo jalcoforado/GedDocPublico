@@ -208,7 +208,9 @@ Levantado em 2026-10-08, por fontes públicas. Nada aqui foi confirmado com a pr
   registro de ocorrências, medições, alertas de vigência, garantias, sanções. Também não há
   produto de convênios nem menção a API ou exportação de dados. Ausência em página de divulgação
   não prova ausência no sistema — é o primeiro item a confirmar com a prefeitura.
-- **Não sabemos quais módulos ASPEC Itaitinga contratou.** "Usam ASPEC" pode ser só o contábil.
+- **Itaitinga usa da ASPEC só a contabilidade e a execução da despesa** (informado pelo Jorge em
+  2026-10-08). O Aspec Licitação **não** está em uso lá: o processo de contratação e a gestão de
+  contratos estão fora da ASPEC.
 - **Há estoque público de contratos.** O portal do município lista 1.019 contratos e aditivos de
   2013 a 2026, em 14 secretarias, com número, contratado, CNPJ, objeto, valor e vigência. O portal
   é de outro fornecedor (Assesi), não da ASPEC.
@@ -220,12 +222,30 @@ Levantado em 2026-10-08, por fontes públicas. Nada aqui foi confirmado com a pr
 - **Regulamento da Lei 13.019: não localizado.** O município celebra termos de fomento citando
   diretamente o art. 16 da lei federal. Pode haver decreto que a busca não alcançou.
 
-**O que isso muda no plano.** A decisão D2 (processo de contratação completo) foi tomada antes
-deste levantamento. Se Itaitinga usa o Aspec Licitação, a fatia G3 **reconstrói o que a prefeitura
-já opera** — com PNCP e integração contábil que nós não teríamos — e pede ao servidor que digite a
-mesma licitação em dois sistemas. O espaço que a ASPEC aparentemente deixa vazio é exatamente o
-das fatias G2, G4, G5 e G7: pessoas e prazos, execução, convênios, sanções. A seção 10 reabre D2
-com essa informação.
+**O que isso muda no plano.** A dúvida era se a fatia G3 (processo de contratação completo)
+reconstruiria algo que a prefeitura já opera no Aspec Licitação. Não reconstrói: Itaitinga não usa
+esse módulo. **A decisão D2 fica como está**, e a fronteira com a ASPEC passa a ser nítida:
+
+| Fica na ASPEC | Fica no módulo `contratos` |
+|---|---|
+| Orçamento e dotações | Processo de contratação (tabelas 501–507) |
+| Empenho, liquidação, pagamento | Contrato, aditivo, apostila (511, 513) |
+| Balancetes e demais arquivos contábeis do SIM | Fiscal, gestor, ocorrências, medições, recebimento |
+| | Convênios e parcerias (807, 531–538) |
+
+A costura entre os dois lados tem três pontos, e os três passam por **número**:
+
+1. **Dotação.** O processo de contratação precisa indicar a dotação (tabela 507), e o orçamento é
+   da ASPEC. Sem importação, a classificação é digitada — com validação de formato, não de saldo.
+2. **Empenho.** A nota de empenho sai da ASPEC e carrega o número do contrato e do processo
+   (tabela 601, campos 24 a 29). O número que o módulo gera tem de ser **exatamente** o que o
+   contador digita no empenho, nos 15 caracteres do SIM.
+3. **Saldo do contrato.** Empenhado, liquidado e pago são fatos da ASPEC. Para mostrar saldo por
+   contrato (fatia G4) é preciso importar a execução ou digitá-la em dobro.
+
+Ficou uma pergunta nova: **quem gera hoje os arquivos 501–513 do SIM de Itaitinga**, se a ASPEC
+não tem o dado de licitação? Ou alguém digita esses dados no contábil só para a remessa, ou há
+outro sistema na cadeia. A resposta diz contra o quê a fatia G6 confere — ver D10.
 
 ## 4. Diagnóstico — o que o sistema tem e o que falta
 
@@ -386,7 +406,7 @@ Observações de ordem:
   (órgão, unidade, função, subfunção, programa, projeto ou atividade, elemento, fonte), e o
   orçamento mora no sistema contábil do município, não aqui. Ou digitamos a classificação como
   texto validado por formato, ou importamos o orçamento. Não decidir isso às cegas: depende de
-  D3-b.
+  D11.
 - **G6 é conferência, não remessa** (decisão D3). O sistema contábil continua enviando; nós
   entregamos o que ele deveria estar enviando, para comparar. Gerar arquivo de envio só entra em
   pauta depois de sabermos qual é esse sistema e de um ciclo de conferência sem divergência.
@@ -417,6 +437,8 @@ subir para o módulo novo ou para `comum`.
 | **D5** | Piloto? | **Itaitinga, o município inteiro** — todas as secretarias, não uma só. |
 | **D6** | Há regulamento municipal? | Da 14.133, **sim em parte**: Decreto 010/2023, texto não localizado. Da 13.019, **não localizado**. |
 | **D7** | Fiscal e gestor são usuários? | **Sim.** Cada um entra com o próprio login e registra as próprias ocorrências. |
+| **D8** | Quais módulos ASPEC Itaitinga usa? | **Só contabilidade e execução da despesa.** Sem Aspec Licitação. |
+| **D2-b** | Manter o processo de contratação completo? | **Sim, D2 mantida.** A dúvida era duplicar o Aspec Licitação; ele não está em uso. |
 
 Consequência de D7: fiscal é usuário comum, não super-usuário. O módulo será o primeiro a
 depender de verdade de grupo não-SU — o gate de permissão que hoje está inerte passa a valer, e a
@@ -427,8 +449,8 @@ contratos que fiscaliza: é um quinto eixo de acesso, além de tenant, módulo, 
 
 | # | Decisão | Por que importa |
 |---|---|---|
-| **D2-b** | Mantemos o processo de contratação completo, sabendo que o Aspec Licitação já o cobre? | Três caminhos: **(a)** manter G3 como decidido, aceitando a dupla digitação; **(b)** trocar G3 por **importação** do que a ASPEC já tem — contrato nasce do dado importado, e nós cuidamos do que vem depois; **(c)** adiar G3 até saber quais módulos ASPEC Itaitinga usa. Recomendação: **(c) agora, tendendo a (b)**. Não muda G1, G2, G4 nem G5. |
-| **D8** | Quais módulos ASPEC Itaitinga contratou, e a ASPEC exporta dados? | Pergunta para a prefeitura, não para nós. Define D2-b e contra o quê a G6 confere. |
+| **D10** | Quem gera hoje os arquivos 501–513 do SIM de Itaitinga? | A ASPEC em uso lá não tem o dado de licitação. Saber quem digita, e onde, define contra o quê a G6 confere — e mostra o retrabalho que o módulo elimina. |
+| **D11** | A ASPEC exporta orçamento e execução da despesa? | Sem exportação, dotação e saldo de contrato são digitados em dobro (seção 3.3). Com exportação, viram importação periódica. |
 | **D9** | Carga inicial: os 1.019 contratos do portal entram? | Com o município inteiro como piloto, cadastrar o estoque à mão é inviável. Só os vigentes já reduz muito. |
 
 ## 11. O que este documento não é
