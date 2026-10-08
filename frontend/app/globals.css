@@ -367,7 +367,7 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Títulos na fonte display (Plus Jakarta Sans). Só h1 e h2: de h3 para baixo
+  /* Títulos na fonte display (Montserrat). Só h1 e h2: de h3 para baixo
      o tamanho já é de corpo (13–14px), onde a display fica apertada — com
      `tracking-tight` as palavras chegavam a colar — e duas famílias no mesmo
      tamanho leem como ruído. Sem `letter-spacing` aqui: quem aperta é a classe

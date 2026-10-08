@@ -16,13 +16,14 @@ const fontSans = localFont({
   weight: "100 900",
 });
 
-// Títulos: Plus Jakarta Sans. O corpo segue Inter, que é quem lê bem a 13–14px
-// em tabela densa; a display entra onde há tamanho para ela ter caráter.
+// Títulos: Montserrat, a fonte do layout de referência (Figma). O corpo segue
+// Inter, que é quem lê bem a 13–14px em tabela densa; a display entra onde há
+// tamanho para ela ter caráter.
 const fontDisplay = localFont({
-  src: "./fonts/plus-jakarta-sans.woff2",
+  src: "./fonts/montserrat.woff2",
   variable: "--font-display",
   display: "swap",
-  weight: "200 800",
+  weight: "100 900",
 });
 
 const fontMono = localFont({
