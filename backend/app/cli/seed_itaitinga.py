@@ -82,9 +82,12 @@ IDENTIDADE = {
     "cor_primaria": "#E5451F",
     "logo_url": "/brand/itaitinga-brasao.png",
     "logo_login_url": "/brand/itaitinga-logo.png",
-    # A foto do portal da cidade entra em `frontend/public/brand/` quando a
-    # prefeitura a fornecer; até lá o painel fica liso na cor acima.
-    "imagem_login_url": None,
+    # Serra de Itaitinga (as pedreiras), do Wikimedia Commons — CC BY-SA 3.0,
+    # que exige o crédito abaixo. Origem e licença em
+    # `frontend/public/brand/CREDITOS.md`. A foto do portal da cidade a
+    # substitui quando a prefeitura a fornecer.
+    "imagem_login_url": "/brand/itaitinga-serra.jpg",
+    "imagem_login_credito": "Foto: Lourenco e Silva / Wikimedia Commons (CC BY-SA 3.0)",
     "email_institucional": "prefeito@itaitinga.ce.gov.br",
     "telefone_institucional": "(85) 3513-2002",
     "endereco": "Av. Cel. Virgílio Távora, 1710 - Centro, Itaitinga - CE, 61.880-000",
