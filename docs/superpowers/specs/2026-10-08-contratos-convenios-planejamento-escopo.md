@@ -403,8 +403,8 @@ contratação entra **completo**, o que acrescentou a fatia G3 e a base de agent
 
 | Fatia | Entrega | Depende de |
 |---|---|---|
-| **G0 — Escopo** | Decisões D5–D7; regulamentos municipais levantados; amostra real de contratos e de um processo licitatório de uma secretaria | Seção 10 |
-| **G1 — Módulo e contrato** | Módulo `contratos` contratável; contrato com todos os campos da tabela 511; aditivos e apostilas como registros próprios; valor e vigência atualizados calculados; `pagamentos.contrato` passa a apontar para cá | G0 |
+| **G0 — Escopo** | **Fechada em 2026-10-08.** Decisões D1–D11 tomadas (seção 10); o que segue aberto (D12–D14) não bloqueia a G1 | — |
+| **G1 — Módulo e contrato** | Módulo `contratos` contratável; contrato com todos os campos da tabela 511; aditivos e apostilas como registros próprios; valor e vigência atualizados calculados; `pagamentos.contrato` passa a apontar para cá; seed de demonstração com contratos e aditivos de Itaitinga | G0 |
 | **G2 — Pessoas e prazos** | Cadastro de agentes públicos (o subconjunto da tabela 951 que o SIM referencia por CPF); gestor e fiscal com portaria e ciência; alertas de vigência, garantia e PNCP — contrato **e** aditivo; painel do gabinete | G1 |
 | **G3 — Contratações** | O processo completo das tabelas 501–507: espécie e modalidade, publicações, agente ou comissão de contratação e seus membros, licitantes, itens com valor estimado e proposto, dotações, homologação ou ratificação; contrato nasce do processo | G2 |
 | **G4 — Execução** | Registro de ocorrências, medições, recebimento provisório e definitivo; liquidação do módulo de pagamentos exigindo o atesto; saldo por contrato | G2 |
@@ -458,6 +458,8 @@ subir para o módulo novo ou para `comum`.
 | **D7** | Fiscal e gestor são usuários? | **Sim.** Cada um entra com o próprio login e registra as próprias ocorrências. |
 | **D8** | Quais módulos ASPEC Itaitinga usa? | **Só contabilidade e execução da despesa.** Sem Aspec Licitação. |
 | **D2-b** | Manter o processo de contratação completo? | **Sim, D2 mantida.** A dúvida era duplicar o Aspec Licitação; ele não está em uso. |
+| **D9** | Carga inicial? | **Dados criados para demonstração**, por seed. O estoque real do portal (1.019 registros) não entra agora. |
+| **D6-b** | Esperar o texto do Decreto 010/2023? | **Não — seguimos sem ele.** Atribuições de fiscal e gestor saem do art. 117 da Lei 14.133 e ficam configuráveis, para ajustar quando o decreto aparecer. |
 | **D10** | Quem gera os arquivos 501–513 do SIM? | **A ASPEC**, com os dados redigitados nela para a remessa. |
 | **D11** | A ASPEC exporta orçamento e execução? | **Sim.** Formato ainda não visto (D13). |
 
@@ -472,7 +474,7 @@ contratos que fiscaliza: é um quinto eixo de acesso, além de tenant, módulo, 
 |---|---|---|
 | **D12** | Como acabar com a redigitação na ASPEC para a remessa do SIM? | **(a)** o módulo passa a gerar os arquivos 501–513 e a ASPEC deixa de enviá-los; **(b)** a ASPEC importa do módulo; **(c)** conviver com a redigitação e só conferir. A D3 escolheu conferência primeiro — então **(c) agora**, e (a) ou (b) depois de um ciclo de conferência sem divergência. Vale perguntar à ASPEC se (b) existe. |
 | **D13** | Em que formato a ASPEC exporta orçamento e execução, e com que frequência? | Define a importação da G3 (dotação) e da G4 (saldo). Testar antes se os arquivos mensais do SIM já servem (seção 3.3). |
-| **D9** | Carga inicial: os 1.019 contratos do portal entram? | Com o município inteiro como piloto, cadastrar o estoque à mão é inviável. Só os vigentes já reduz muito. |
+| **D14** | Quando o piloto sair da demonstração, como entra o estoque real? | A D9 resolve a demonstração, não a operação. Com o município inteiro como piloto, cadastrar à mão os contratos vigentes é inviável; a fonte mais barata é o arquivo 511 que a ASPEC já gera. Não bloqueia nenhuma fatia. |
 
 ## 11. O que este documento não é
 
