@@ -1,8 +1,9 @@
 # Contratos G1 — módulo e contrato (desenho)
 
 **Status:** desenho aprovado pelo Jorge em 2026-10-08 ("pode ir"), com as cinco recomendações da
-seção 10. **Backend e frontend implementados e NÃO executados** — nem banco, nem `tsc`, nem `vitest`. Ver a
-seção 12.
+seção 10. **Backend e frontend implementados e EXECUTADOS em 2026-10-09** num ambiente isolado que espelha o
+CI — migrations, suíte completa do backend, `tsc` e `vitest`. A seção 12.4 traz os números e os
+cinco defeitos que a execução encontrou. Falta o CI de verdade (só roda em PR) e validação em tela.
 **Autoridade:** este documento, sobre o *como* da fatia G1. O *o quê* está em
 [`2026-10-08-contratos-convenios-planejamento-escopo.md`](2026-10-08-contratos-convenios-planejamento-escopo.md)
 (seção 9, fatia G1; decisões D1–D11 na seção 10).
@@ -432,7 +433,7 @@ vai como aditivo de acréscimo, ou não vai. A resposta não muda a G1 — muda 
 
 ## 11. Ordem de implementação sugerida
 
-> Estado em 2026-10-08: os sete itens escritos, na branch `feat/contratos-g1`. Nenhum executado.
+> Estado em 2026-10-09: os sete itens escritos e executados (§12.4), na branch `feat/contratos-g1`.
 
 Um PR só, mas nesta sequência de commits, cada um verde:
 
@@ -524,3 +525,53 @@ objeto) só se alteram pela API. Entra junto com a G2, que mexe nessa mesma tela
 Dependência que o frontend herda: a lista de unidades vem de `/unidades-trabalho`, que exige a
 transação `unidadeTrabalho`, do módulo de administração. Um usuário só com `contrato` não consegue
 preencher a unidade contratante — é o mesmo aviso do `CLAUDE.md` sobre o primeiro grupo não-SU.
+
+### 12.4 Primeira execução real — 2026-10-09
+
+As seções 12.2 e 12.3 descrevem o estado de 2026-10-08, quando nada rodava. No dia seguinte o
+Docker voltou e a fatia foi executada num ambiente **isolado** — Postgres 16 e Redis próprios, a
+imagem do backend construída desta branch, sem tocar a stack de desenvolvimento — seguindo passo a
+passo o `backend-tests.yml`: stubs, dump legado, papel `aprimora_app`, `alembic stamp 0020`,
+`upgrade head`, `ci/seed-e2e.sql`, `seed_bootstrap`.
+
+| Verificação | Resultado |
+|---|---|
+| `alembic upgrade head` em banco limpo | passou; head único em `0134` |
+| `downgrade` até `0131` e `upgrade` de volta | passou; conferido que módulo, transação, colunas e tabelas somem e o índice antigo volta |
+| Testes da G1 (cálculo, service, HTTP, RLS, guarda) | 66 passaram |
+| Os mesmos, com a aplicação conectando como `aprimora_app` | passaram, junto com `test_pagamentos_cadastros.py` |
+| Suíte completa do backend | 1968 passaram na primeira rodada; os 7 que falharam eram tabelas de teste que enumeravam cinco módulos (abaixo) e passaram depois do ajuste |
+| `seed_demo_contratos`: apply, reapply, status, reset, apply | passou; 20 contratos, 8 aditivos, 3 apostilas; a segunda aplicação não cria nada |
+| `tsc --noEmit` | sem erro |
+| `vitest` | 704 passaram de 705; o único que falha é anterior à fatia — ver a ressalva abaixo |
+
+**Os três pontos que a seção 12.2 apontou como mais prováveis de falhar não falharam**: a
+subconsulta correlacionada da listagem, a validação do detalhe com dataclass e ORM aninhados, e o
+`downgrade` da `0132`. O que falhou foi outra coisa — vale o registro, porque é o retrato do que
+escrever sem executar deixa passar:
+
+1. **A aplicação não subia.** `from __future__ import annotations` transforma `-> None` na string
+   `"None"`, e o FastAPI a lê como response model de uma rota 204. `AssertionError` já no import
+   de `app.main` — todo teste que tocasse a app morria na coleta. Nenhuma leitura de código pegaria:
+   os outros routers simplesmente não anotam o retorno das rotas de exclusão.
+2. **Sete testes de módulo** enumeravam os cinco contratáveis por literal (`test_modulos_admin`,
+   `_me`, `_migration`, `_provisionamento`). Passaram a seis. Em `test_modulos_migration.py` o
+   número agora acompanha o catálogo, e o teste foi renomeado — o nome antigo falava em "backfill"
+   de uma migration que não é a que contrata.
+3. **`page-size-teto.test.ts`** reprova recurso chamado com `page_size` literal e ausente da tabela
+   `ONDE`. Faltava `contratos`.
+4. **`menus.test.tsx`** compara os grupos de cada módulo contra `ORDEM_ESPERADA`. Faltava
+   `contratos`.
+
+Os itens 2 a 4 são a mesma lição: **tabela de decisão humana em teste só aparece quando o teste
+roda**. A busca por "cinco módulos" que eu fiz no código achou o `CLAUDE.md` e não achou nenhuma
+das quatro.
+
+**Ressalva sobre o `vitest`.** `__tests__/processo-abas-aria.test.tsx` falha neste ambiente com
+`Test timed out in 5000ms` — e falha **igual em `main` sem nenhuma alteração desta fatia**
+(conferido num worktree de `origin/main`, com o mesmo `node_modules`). É lentidão do bind mount do
+Docker no Windows, não regressão; o CI é quem diz se o teste está de pé.
+
+O que continua sem verificação: o CI de verdade, que só roda em PR, e **ninguém abriu as telas num
+navegador** — `tsc` e `vitest` verdes dizem que compila e que os testes existentes não quebraram,
+não que o painel, o formulário e o detalhe se comportam como deveriam.

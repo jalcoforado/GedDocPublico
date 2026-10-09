@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.services.modulos import contratar_modulos_iniciais, slugs_contratados
 from app.services.provisioning_tenant import provisionar_tenant
 
-CONTRATAVEIS = {"protocolo", "pagamentos", "frota", "transporte", "administracao"}
+CONTRATAVEIS = {"protocolo", "pagamentos", "frota", "transporte", "administracao", "contratos"}
 
 
 def _sm(engine):

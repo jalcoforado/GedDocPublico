@@ -141,7 +141,7 @@ async def test_platform_admin_lista_catalogo(client_plataforma, tenant_id_defaul
     r = await client_plataforma.get(f"/api/v2/admin/tenants/{tenant_id_default}/modulos")
     assert r.status_code == 200
     itens = r.json()
-    assert len(itens) == 5, "o catálogo contratável tem 5 módulos"
+    assert len(itens) == 6, "o catálogo contratável tem 6 módulos (0132 trouxe `contratos`)"
     assert all(i["contratado"] for i in itens), "backfill deveria ter contratado tudo"
 
 
@@ -192,7 +192,9 @@ async def test_descontratar_e_recontratar(client_plataforma, two_tenants_com_aud
 
     r = await client_plataforma.put(
         f"/api/v2/admin/tenants/{tenant_id}/modulos",
-        json={"slugs": ["protocolo", "pagamentos", "frota", "transporte", "administracao"]},
+        json={"slugs": [
+            "protocolo", "pagamentos", "frota", "transporte", "administracao", "contratos",
+        ]},
     )
     assert all(i["contratado"] for i in r.json())
 

@@ -99,6 +99,6 @@ async def test_me_devolve_apenas_contratados(admin_engine, http_client):
         "neste projeto — não deixe a asserção aceitar de novo."
     )
     assert "comum" not in slugs, "'comum' não é módulo de launcher"
-    catalogo = ["protocolo", "pagamentos", "frota", "transporte", "administracao"]
+    catalogo = ["protocolo", "pagamentos", "frota", "transporte", "administracao", "contratos"]
     assert slugs == sorted(slugs, key=catalogo.index), "itens fora da ordem do catálogo"
     assert set(slugs) <= set(catalogo)
