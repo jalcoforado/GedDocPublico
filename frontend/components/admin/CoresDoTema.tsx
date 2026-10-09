@@ -34,7 +34,8 @@ const CAMPOS: { campo: Campo; rotulo: string; ajuda: string; token: string }[] =
   {
     campo: "cor_lateral",
     rotulo: "Cor da barra lateral",
-    ajuda: "Fundo do menu. Em branco, acompanha a cor primária.",
+    ajuda:
+      "Fundo do menu. O texto clareia ou escurece sozinho para continuar legível. Em branco, acompanha a cor primária.",
     token: "--sidebar",
   },
 ];
