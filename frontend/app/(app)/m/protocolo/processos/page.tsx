@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { CaixasProcessos, caixaDaUrl, rotuloDaCaixa } from "@/components/CaixasProcessos";
 import { FavoritoStar } from "@/components/FavoritoStar";
+import { TabelaCaixaProcessos } from "@/components/TabelaCaixaProcessos";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -125,6 +126,9 @@ export default function ProcessosPage() {
     queryFn: () =>
       api.processos.list({
         ...filters,
+        // Caixa de trabalho abre pelo que espera há mais tempo; a lista geral
+        // mantém a ordem de sempre (abertura, do mais novo).
+        ordem: filters.caixa ? "parados" : undefined,
         page,
         page_size: PAGE_SIZE,
       }),
@@ -343,139 +347,146 @@ export default function ProcessosPage() {
             </CardContent>
           </Card>
 
-          <Table>
-            <THead>
-              <TR>
-                <TH>Número</TH>
-                <TH>Aberto em</TH>
-                <TH>Manifestante</TH>
-                <TH>Assunto</TH>
-                <TH>Local atual</TH>
-                <TH>Responsável</TH>
-                <TH>Status</TH>
-                <TH className="text-right">Ações</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {processosQ.isLoading &&
-                Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} cols={7} />)}
-              {!processosQ.isLoading && (processosQ.data?.items.length ?? 0) === 0 && (
+          {filters.caixa ? (
+            <TabelaCaixaProcessos
+              itens={processosQ.data?.items}
+              carregando={processosQ.isLoading}
+            />
+          ) : (
+            <Table>
+              <THead>
                 <TR>
-                  <TD colSpan={8} className="p-0">
-                    <EmptyState
-                      icon={SearchX}
-                      title={filters.caixa ? "Nenhum processo nesta caixa" : "Nenhum processo encontrado"}
-                      description={
-                        filters.caixa
-                          ? "Quando houver, eles aparecem aqui."
-                          : "Ajuste os filtros ou crie um novo processo."
-                      }
-                      className="border-0 bg-transparent"
-                    />
-                  </TD>
+                  <TH>Número</TH>
+                  <TH>Aberto em</TH>
+                  <TH>Manifestante</TH>
+                  <TH>Assunto</TH>
+                  <TH>Local atual</TH>
+                  <TH>Responsável</TH>
+                  <TH>Status</TH>
+                  <TH className="text-right">Ações</TH>
                 </TR>
-              )}
-              {processosQ.data?.items.map((p) => (
-                <TR key={p.id}>
-                  <TD className="font-mono text-xs tabular-nums">
-                    <div className="flex items-center gap-1">
-                      <FavoritoStar processo={p} size="sm" />
-                      <div>
-                        {p.situacao === "rascunho" ? (
-                          <span className="font-sans italic text-muted-foreground">
+              </THead>
+              <TBody>
+                {processosQ.isLoading &&
+                  Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} cols={7} />)}
+                {!processosQ.isLoading && (processosQ.data?.items.length ?? 0) === 0 && (
+                  <TR>
+                    <TD colSpan={8} className="p-0">
+                      <EmptyState
+                        icon={SearchX}
+                        title={filters.caixa ? "Nenhum processo nesta caixa" : "Nenhum processo encontrado"}
+                        description={
+                          filters.caixa
+                            ? "Quando houver, eles aparecem aqui."
+                            : "Ajuste os filtros ou crie um novo processo."
+                        }
+                        className="border-0 bg-transparent"
+                      />
+                    </TD>
+                  </TR>
+                )}
+                {processosQ.data?.items.map((p) => (
+                  <TR key={p.id}>
+                    <TD className="font-mono text-xs tabular-nums">
+                      <div className="flex items-center gap-1">
+                        <FavoritoStar processo={p} size="sm" />
+                        <div>
+                          {p.situacao === "rascunho" ? (
+                            <span className="font-sans italic text-muted-foreground">
+                              Rascunho
+                            </span>
+                          ) : p.nup ? (
+                            <>
+                              <div>{p.nup}</div>
+                              <div className="text-[10px] text-foreground-muted">
+                                {p.numero_processo}
+                              </div>
+                            </>
+                          ) : (
+                            p.numero_processo
+                          )}
+                        </div>
+                      </div>
+                      {p.marcadores.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {p.marcadores.map((mk) => (
+                            <Badge
+                              key={mk.id}
+                              style={{ backgroundColor: `${mk.cor}22`, color: mk.cor }}
+                              className="font-sans font-normal normal-case"
+                            >
+                              {mk.nome}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </TD>
+                    <TD className="text-xs tabular-nums">
+                      {fmtDate(p.data_hora_abertura)}
+                      {/* F1 — a data sozinha obriga quem lê a fazer a conta de
+                          cabeça para saber se o processo é de ontem ou do ano
+                          passado. O decorrido é calculado no cliente: a lista não
+                          carrega o bloco de permanência, que só existe no detalhe. */}
+                      <span className="block text-muted-foreground">
+                        {decorridoDesde(p.data_hora_abertura)}
+                      </span>
+                    </TD>
+                    <TD>
+                      <div className="text-sm text-foreground">{p.manifestante ?? "—"}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {p.manifestante_cpf_cnpj ?? ""}
+                      </div>
+                    </TD>
+                    <TD>
+                      <div className="line-clamp-1 text-sm">{p.assunto ?? "—"}</div>
+                      <div className="text-xs text-muted-foreground">{p.tipo_processo ?? ""}</div>
+                    </TD>
+                    <TD className="text-sm">{p.local_atual ?? "—"}</TD>
+                    <TD className="text-sm">
+                      {p.responsavel ?? (
+                        // Não é "—": sem responsável é um ESTADO, e a tela tem de
+                        // dizer qual. Travessão leria como "dado faltando".
+                        <span className="text-warning-soft-foreground">
+                          Sem responsável
+                        </span>
+                      )}
+                    </TD>
+                    <TD>
+                      <div className="flex flex-wrap gap-1">
+                        {p.situacao === "rascunho" && (
+                          <Badge intent="warning" icon={Pencil}>
                             Rascunho
-                          </span>
-                        ) : p.nup ? (
-                          <>
-                            <div>{p.nup}</div>
-                            <div className="text-[10px] text-foreground-muted">
-                              {p.numero_processo}
-                            </div>
-                          </>
+                          </Badge>
+                        )}
+                        {p.ativo ? (
+                          <Badge intent="success" icon={CheckCircle2}>
+                            Ativo
+                          </Badge>
                         ) : (
-                          p.numero_processo
+                          <Badge intent="neutral" icon={Pause}>
+                            Inativo
+                          </Badge>
+                        )}
+                        {!p.publico && (
+                          <Badge intent="warning" icon={Lock}>
+                            {NIVEL_SIGILO_LABEL[p.nivel_sigilo]}
+                          </Badge>
                         )}
                       </div>
-                    </div>
-                    {p.marcadores.length > 0 && (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {p.marcadores.map((mk) => (
-                          <Badge
-                            key={mk.id}
-                            style={{ backgroundColor: `${mk.cor}22`, color: mk.cor }}
-                            className="font-sans font-normal normal-case"
-                          >
-                            {mk.nome}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </TD>
-                  <TD className="text-xs tabular-nums">
-                    {fmtDate(p.data_hora_abertura)}
-                    {/* F1 — a data sozinha obriga quem lê a fazer a conta de
-                        cabeça para saber se o processo é de ontem ou do ano
-                        passado. O decorrido é calculado no cliente: a lista não
-                        carrega o bloco de permanência, que só existe no detalhe. */}
-                    <span className="block text-muted-foreground">
-                      {decorridoDesde(p.data_hora_abertura)}
-                    </span>
-                  </TD>
-                  <TD>
-                    <div className="text-sm text-foreground">{p.manifestante ?? "—"}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {p.manifestante_cpf_cnpj ?? ""}
-                    </div>
-                  </TD>
-                  <TD>
-                    <div className="line-clamp-1 text-sm">{p.assunto ?? "—"}</div>
-                    <div className="text-xs text-muted-foreground">{p.tipo_processo ?? ""}</div>
-                  </TD>
-                  <TD className="text-sm">{p.local_atual ?? "—"}</TD>
-                  <TD className="text-sm">
-                    {p.responsavel ?? (
-                      // Não é "—": sem responsável é um ESTADO, e a tela tem de
-                      // dizer qual. Travessão leria como "dado faltando".
-                      <span className="text-warning-soft-foreground">
-                        Sem responsável
-                      </span>
-                    )}
-                  </TD>
-                  <TD>
-                    <div className="flex flex-wrap gap-1">
-                      {p.situacao === "rascunho" && (
-                        <Badge intent="warning" icon={Pencil}>
-                          Rascunho
-                        </Badge>
-                      )}
-                      {p.ativo ? (
-                        <Badge intent="success" icon={CheckCircle2}>
-                          Ativo
-                        </Badge>
-                      ) : (
-                        <Badge intent="neutral" icon={Pause}>
-                          Inativo
-                        </Badge>
-                      )}
-                      {!p.publico && (
-                        <Badge intent="warning" icon={Lock}>
-                          {NIVEL_SIGILO_LABEL[p.nivel_sigilo]}
-                        </Badge>
-                      )}
-                    </div>
-                  </TD>
-                  <TD className="text-right">
-                    <Link
-                      href={`/m/protocolo/processos/${p.id}`}
-                      className="inline-flex h-9 items-center rounded-md border border-transparent px-3 text-xs font-medium text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      Abrir →
-                    </Link>
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
+                    </TD>
+                    <TD className="text-right">
+                      <Link
+                        href={`/m/protocolo/processos/${p.id}`}
+                        className="inline-flex h-9 items-center rounded-md border border-transparent px-3 text-xs font-medium text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        Abrir →
+                      </Link>
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          )}
 
           {processosQ.data && processosQ.data.total > 0 && (
             <div className="flex flex-col items-start justify-between gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center">

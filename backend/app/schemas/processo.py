@@ -79,6 +79,12 @@ class ProcessoListItem(BaseModel):
     numero_origem: str | None
     situacao: str = "protocolado"
     data_hora_abertura: datetime
+    # Desde quando o processo está no estado em que está: a data da ÚLTIMA
+    # movimentação (abertura, encaminhamento, recebimento, arquivamento), ou a
+    # de abertura quando não há nenhuma. É o "tempo na caixa" da listagem.
+    # Opcional só para schema montado à mão (teste, fixture); a listagem
+    # sempre preenche.
+    parado_desde: datetime | None = None
     ativo: bool
     publico: bool
     nivel_sigilo: str = "ostensivo"
@@ -117,6 +123,18 @@ class EscopoProcesso(str, Enum):
     meus = "meus"
     unidade = "unidade"
     unidade_e_subordinadas = "unidade_e_subordinadas"
+
+
+class OrdemProcesso(str, Enum):
+    """Ordenação da listagem.
+
+    `recentes` é o comportamento de sempre (abertura, do mais novo). `parados`
+    põe no topo o que está há mais tempo sem movimentação — é a ordem de uma
+    caixa de trabalho, onde o que importa é o que está esperando há mais tempo.
+    """
+
+    recentes = "recentes"
+    parados = "parados"
 
 
 class CaixaProcesso(str, Enum):
