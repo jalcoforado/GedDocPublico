@@ -9,8 +9,8 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
@@ -24,7 +24,28 @@ import { SidebarModuloHeader } from "./SidebarModuloHeader";
 import { ThemeToggle } from "./ThemeToggle";
 
 function isPathActive(href: string, pathname: string): boolean {
-  return pathname === href || pathname.startsWith(href + "/");
+  // O `href` pode carregar query (as caixas de Processos); para o CAMINHO
+  // ela não conta.
+  const caminho = href.split("?")[0];
+  return pathname === caminho || pathname.startsWith(caminho + "/");
+}
+
+/**
+ * Qual subitem está aberto, quando vários compartilham o caminho e só a query
+ * os distingue. Item com `filtro` é ativo quando a URL tem aquele parâmetro
+ * com aquele valor; item sem `filtro` é "o resto" — ativo quando o caminho
+ * casa e nenhum irmão com filtro casa.
+ */
+function filhoAtivo(
+  filho: NavItem,
+  irmaos: NavItem[],
+  pathname: string,
+  busca: URLSearchParams,
+): boolean {
+  if (!isPathActive(filho.href, pathname)) return false;
+  const casa = (i: NavItem) => !!i.filtro && busca.get(i.filtro.chave) === i.filtro.valor;
+  if (filho.filtro) return casa(filho);
+  return !irmaos.some((i) => i !== filho && isPathActive(i.href, pathname) && casa(i));
 }
 
 /** True se o item OU algum descendente corresponde ao pathname atual. */
@@ -402,39 +423,11 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                             id={subSlugId}
                             className={cn("ml-3 flex flex-col gap-0.5 border-l border-sidebar-border pl-2", !subIsOpen && "hidden")}
                           >
-                            {item.children.map((child) => {
-                              const ChildIcon = child.icon;
-                              const childActive = isPathActive(child.href, pathname);
-                              return (
-                                <Link
-                                  key={child.href}
-                                  href={child.href}
-                                  aria-current={childActive ? "page" : undefined}
-                                  className={cn(
-                                    "group relative flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-fast",
-                                    childActive
-                                      ? "bg-sidebar-active text-sidebar-foreground"
-                                      : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",
-                                  )}
-                                >
-                                  <span
-                                    aria-hidden="true"
-                                    className={cn(
-                                      "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full transition-all duration-fast",
-                                      childActive ? "bg-accent" : "bg-transparent group-hover:bg-sidebar-border",
-                                    )}
-                                  />
-                                  <ChildIcon
-                                    className={cn(
-                                      "h-4 w-4 shrink-0 transition-colors",
-                                      childActive ? "text-accent" : "",
-                                    )}
-                                    aria-hidden="true"
-                                  />
-                                  <span className="flex-1">{child.label}</span>
-                                </Link>
-                              );
-                            })}
+                            {/* `useSearchParams` exige fronteira de Suspense para a
+                                página poder ser pré-renderizada. */}
+                            <Suspense fallback={null}>
+                              <Subitens item={item} pathname={pathname} />
+                            </Suspense>
                           </div>
                         </div>
                       );
@@ -563,6 +556,11 @@ function ItemColapsadoComFilhos({
   const gatilhoRef = useRef<HTMLButtonElement>(null);
   const ativo = item.children!.some((c) => isPathActive(c.href, pathname));
   const Icon = item.icon;
+  // O flyout só existe depois de um clique, então ler a URL na hora basta —
+  // dispensa `useSearchParams` (e a fronteira de Suspense) aqui.
+  const busca = new URLSearchParams(
+    typeof window === "undefined" ? "" : window.location.search,
+  );
 
   const fechar = () => {
     setAberto(false);
@@ -601,7 +599,7 @@ function ItemColapsadoComFilhos({
         <nav aria-label={item.label}>
           {item.children!.map((child) => {
             const ChildIcon = child.icon;
-            const childActive = isPathActive(child.href, pathname);
+            const childActive = filhoAtivo(child, item.children!, pathname, busca);
             return (
               <Link
                 key={child.href}
@@ -623,5 +621,82 @@ function ItemColapsadoComFilhos({
         </nav>
       </Popover>
     </div>
+  );
+}
+
+/**
+ * Filhos de um subgrupo do menu. Componente próprio porque é o único ponto da
+ * barra lateral que lê a QUERY da URL — as caixas de Processos compartilham o
+ * caminho e só `?caixa=` diz qual está aberta.
+ */
+function Subitens({ item, pathname }: { item: NavItem; pathname: string }) {
+  const busca = useSearchParams();
+  const filhos = item.children ?? [];
+  const temContador = filhos.some((c) => c.contador);
+
+  // Contadores das caixas. Falha aqui não derruba o menu: os itens continuam
+  // navegáveis, só sem número.
+  const caixasQ = useQuery({
+    queryKey: ["processos-caixas"],
+    queryFn: () => api.processos.caixas(),
+    enabled: temContador,
+    staleTime: 0,
+  });
+  // A barra lateral não desmonta entre telas, então o `staleTime` sozinho não
+  // refaz nada. Encaminhar e receber acontecem no detalhe do processo: refaz a
+  // contagem a cada navegação, que é quando o número pode ter mudado.
+  const onde = `${pathname}?${busca.toString()}`;
+  const { refetch } = caixasQ;
+  useEffect(() => {
+    if (temContador) void refetch();
+  }, [onde, temContador, refetch]);
+
+  return (
+    <>
+      {filhos.map((child) => {
+        const ChildIcon = child.icon;
+        const childActive = filhoAtivo(child, filhos, pathname, busca);
+        const n = child.contador ? caixasQ.data?.[child.contador] : undefined;
+        return (
+          <Link
+            key={child.href}
+            href={child.href}
+            aria-current={childActive ? "page" : undefined}
+            className={cn(
+              "group relative flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-fast",
+              childActive
+                ? "bg-sidebar-active text-sidebar-foreground"
+                : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+            )}
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full transition-all duration-fast",
+                childActive ? "bg-accent" : "bg-transparent group-hover:bg-sidebar-border",
+              )}
+            />
+            <ChildIcon
+              className={cn("h-4 w-4 shrink-0 transition-colors", childActive ? "text-accent" : "")}
+              aria-hidden="true"
+            />
+            <span className="flex-1">{child.label}</span>
+            {n !== undefined ? (
+              // Zero não pede atenção: fica apagado, e o que tem processo
+              // salta sem precisar de cor de alerta.
+              <span
+                className={cn(
+                  "text-xs tabular-nums",
+                  n === 0 ? "text-sidebar-muted" : "font-semibold text-sidebar-foreground",
+                )}
+              >
+                {n}
+                <span className="sr-only"> {n === 1 ? "processo" : "processos"}</span>
+              </span>
+            ) : null}
+          </Link>
+        );
+      })}
+    </>
   );
 }
