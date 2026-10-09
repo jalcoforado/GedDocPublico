@@ -524,3 +524,91 @@ async def test_http_sem_a_transacao_processo_e_403(admin_engine, cen):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get("/api/v2/processos/caixas")
         assert r.status_code == 403, r.text
+
+
+# --------------------------------------------------------------------------
+# Tempo na caixa — `parado_desde` e a ordem `parados`
+# --------------------------------------------------------------------------
+
+
+async def _envelhece(engine, cen, **dias_por_rotulo: int) -> None:
+    """Recuar a abertura de alguns processos, para a ordem ter o que ordenar."""
+    async with _sm(engine)() as s:
+        for rotulo, dias in dias_por_rotulo.items():
+            await s.execute(
+                text(
+                    "UPDATE protocolos.processo "
+                    "SET data_hora_abertura = now() - make_interval(days => :d) WHERE id=:p"
+                ),
+                {"d": dias, "p": cen["procs"][rotulo]},
+            )
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_parado_desde_e_a_ultima_movimentacao_nao_a_abertura(admin_engine, cen):
+    """`arquivado` foi aberto "há 40 dias" e arquivado agora: está nesse
+    estado desde AGORA. Usar a abertura diria que o arquivo tem 40 dias."""
+    from app.schemas.processo import OrdemProcesso  # noqa: F401 — só garante o import
+
+    await _envelhece(admin_engine, cen, arquivado=40, na_mesa=10)
+    async with _sm(admin_engine)() as s:
+        items, _ = await list_processos(
+            s, tenant_id=cen["tenant"].id, page=1, page_size=100, situacao="todos",
+            id_usuario_contexto=cen["operador"], id_unidade_contexto=cen["a"],
+        )
+    por_id = {i.id: i for i in items}
+    agora = datetime.now()
+
+    arquivado = por_id[cen["procs"]["arquivado"]]
+    assert (agora - arquivado.data_hora_abertura).days >= 39
+    assert abs((agora - arquivado.parado_desde).total_seconds()) < 600
+
+    # Sem movimentação nenhuma, cai na abertura — nunca fica nulo.
+    na_mesa = por_id[cen["procs"]["na_mesa"]]
+    assert na_mesa.parado_desde == na_mesa.data_hora_abertura
+    assert all(i.parado_desde is not None for i in items)
+
+
+@pytest.mark.asyncio
+async def test_ordem_parados_poe_no_topo_o_que_espera_ha_mais_tempo(admin_engine, cen):
+    from app.schemas.processo import OrdemProcesso
+
+    await _envelhece(admin_engine, cen, cancelado=30, externo=20, na_mesa=10)
+    async with _sm(admin_engine)() as s:
+        parados, _ = await list_processos(
+            s, tenant_id=cen["tenant"].id, page=1, page_size=100,
+            caixa=CaixaProcesso.analise, ordem=OrdemProcesso.parados,
+            id_usuario_contexto=cen["operador"], id_unidade_contexto=cen["a"],
+        )
+        recentes, _ = await list_processos(
+            s, tenant_id=cen["tenant"].id, page=1, page_size=100,
+            caixa=CaixaProcesso.analise,
+            id_usuario_contexto=cen["operador"], id_unidade_contexto=cen["a"],
+        )
+    por_id = {v: k for k, v in cen["procs"].items()}
+    assert [por_id[i.id] for i in parados][:3] == ["cancelado", "externo", "na_mesa"]
+    datas = [i.parado_desde for i in parados]
+    assert datas == sorted(datas)
+    # O padrão não mudou: abertura, do mais novo — os três envelhecidos no fim.
+    assert [por_id[i.id] for i in recentes][-3:] == ["na_mesa", "externo", "cancelado"]
+
+
+@pytest.mark.asyncio
+async def test_http_ordem_parados_e_o_campo_chegam_pela_borda(admin_engine, cen):
+    t = cen["tenant"]
+    await _envelhece(admin_engine, cen, cancelado=30)
+    app.dependency_overrides[get_current_user] = _como(admin_engine, cen["operador"])
+    arreio_tenant_http(t.id, t.slug)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v2/processos", params={"caixa": "analise", "ordem": "parados"}
+        )
+        assert r.status_code == 200, r.text
+        itens = r.json()["items"]
+        assert itens[0]["id"] == cen["procs"]["cancelado"]
+        assert itens[0]["parado_desde"] is not None
+
+        r2 = await client.get("/api/v2/processos", params={"ordem": "aleatoria"})
+        assert r2.status_code == 422, r2.text

@@ -31,6 +31,7 @@ from ..schemas.processo import (
     EncaminharRequest,
     EscopoProcesso,
     EncaminhamentoOut as _EncaminhamentoOut,
+    OrdemProcesso,
     ProcessoCreate,
     ProcessoDetail,
     ProcessoListItem,
@@ -208,6 +209,13 @@ async def list_endpoint(
             "arquivados. Ausente = sem recorte."
         ),
     ),
+    ordem: OrdemProcesso = Query(
+        OrdemProcesso.recentes,
+        description=(
+            "recentes (abertura, do mais novo — padrão) | parados (há mais "
+            "tempo sem movimentação primeiro)."
+        ),
+    ),
 ) -> Paginated[ProcessoListItem]:
     items, total = await list_processos(
         db,
@@ -227,6 +235,7 @@ async def list_endpoint(
         id_marcador=id_marcador,
         situacao=situacao,
         caixa=caixa,
+        ordem=ordem,
         id_usuario_contexto=usuario.id,
         # A lotação PRINCIPAL. Lotação neste sistema tem duas representações
         # simultâneas — esta e a N:N `utils.usuario_unidade_trabalho` —, então

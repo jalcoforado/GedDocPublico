@@ -39,6 +39,7 @@ from ..schemas.processo import (
     CaixaProcesso,
     CaixasContagem,
     CotaAnexacaoOut,
+    OrdemProcesso,
     DespachoOut,
     EscopoProcesso,
     EncaminhamentoOut,
@@ -53,6 +54,17 @@ from . import cota_anexacao
 from .permanencia import No as NoDaLinha
 from .permanencia import calcular as calcular_permanencia
 from .prazos import calcular_prazo
+
+
+# "Tempo na caixa": desde a última movimentação, ou desde a abertura quando o
+# processo não tem nenhuma. `Processo.id_ultima_movimentacao` é mantido por
+# abertura, encaminhar, receber e arquivar — por isso basta um JOIN, sem
+# subconsulta por linha. Alias próprio: `Movimentacao` crua entra nos EXISTS
+# de `_predicado_caixa`, correlacionada, e reusá-la aqui misturaria as duas.
+_UltimaMov = aliased(Movimentacao, name="ultima_movimentacao")
+_PARADO_DESDE = func.coalesce(
+    _UltimaMov.data_hora_movimentacao, Processo.data_hora_abertura
+)
 
 
 def _base_select(tenant_id: int, *, usuario_id: int | None = None):
@@ -85,6 +97,7 @@ def _base_select(tenant_id: int, *, usuario_id: int | None = None):
             LocalAtual.unidade_trabalho.label("local_atual_nome"),
             Responsavel.nome.label("responsavel_nome"),
             favorito_expr,
+            _PARADO_DESDE.label("parado_desde"),
         )
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
@@ -95,6 +108,14 @@ def _base_select(tenant_id: int, *, usuario_id: int | None = None):
             isouter=True,
         )
         .join(LocalAtual, LocalAtual.id == Processo.id_local_atual, isouter=True)
+        .join(
+            _UltimaMov,
+            and_(
+                _UltimaMov.id == Processo.id_ultima_movimentacao,
+                _UltimaMov.tenant_id == tenant_id,
+            ),
+            isouter=True,
+        )
         .join(
             Responsavel,
             Responsavel.id == Processo.id_usuario_responsavel,
@@ -330,6 +351,7 @@ async def list_processos(
     # E2: oculto até pedir. "rascunho" só rascunhos. "todos" sem filtro.
     situacao: str | None = None,
     caixa: CaixaProcesso | None = None,
+    ordem: OrdemProcesso = OrdemProcesso.recentes,
 ) -> tuple[list[ProcessoListItem], int]:
     base = _base_select(tenant_id, usuario_id=id_usuario_contexto)
 
@@ -452,7 +474,15 @@ async def list_processos(
 
     rows = (
         await db.execute(
-            base.order_by(Processo.data_hora_abertura.desc())
+            # `Processo.id` desempata: sem ele, linhas com a mesma data
+            # trocariam de página entre uma consulta e outra.
+            base.order_by(
+                *(
+                    (_PARADO_DESDE.asc(), Processo.id.asc())
+                    if ordem is OrdemProcesso.parados
+                    else (Processo.data_hora_abertura.desc(), Processo.id.desc())
+                )
+            )
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -476,6 +506,7 @@ def _row_to_list(r) -> ProcessoListItem:
         numero_origem=p.numero_origem,
         situacao=p.situacao,
         data_hora_abertura=p.data_hora_abertura,
+        parado_desde=r.parado_desde,
         ativo=p.ativo,
         publico=p.publico,
         nivel_sigilo=p.nivel_sigilo,

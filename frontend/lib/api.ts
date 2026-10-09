@@ -254,6 +254,11 @@ export interface ProcessoListItem {
   /** E3 — 'rascunho' | 'protocolado' */
   situacao: "rascunho" | "protocolado";
   data_hora_abertura: string;
+  /** Desde quando está no estado atual: última movimentação, ou a abertura
+   * quando não há nenhuma. É o "tempo na caixa". A LISTAGEM sempre preenche;
+   * o detalhe (`ProcessoDetail` herda este tipo) não o calcula e manda null —
+   * lá a informação é o bloco de permanência. */
+  parado_desde?: string | null;
   ativo: boolean;
   publico: boolean;
   /** Sigilo gradual (LAI): ostensivo|interno|reservado|secreto|ultrassecreto */
@@ -529,6 +534,9 @@ export interface ProcessoListFilters {
   situacao?: "rascunho" | "protocolado" | "todos";
   /** Caixa de trabalho. Ausente = sem recorte. */
   caixa?: CaixaProcesso;
+  /** "recentes" (abertura, do mais novo — padrão) | "parados" (há mais tempo
+   * sem movimentação primeiro). */
+  ordem?: "recentes" | "parados";
 }
 
 export interface ProcessoCreateInput {
