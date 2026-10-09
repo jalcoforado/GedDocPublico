@@ -61,12 +61,53 @@ describe("derivarTema", () => {
     expect(Math.abs(marca.h - original.h)).toBeLessThanOrEqual(1);
   });
 
-  it("a barra lateral é sempre escura — os itens do menu são claros", () => {
-    for (const cor of ["#ffffff", "#ffd400", "#12305a"]) {
-      for (const modo of ["light", "dark"] as const) {
-        const fundo = tokenComoHsl(derivarTema({ cor_lateral: cor }, modo)["--sidebar"]);
-        expect(fundo.l, `${cor} ${modo}`).toBeLessThanOrEqual(20);
+  // Até 2026-10-09 a barra era forçada a escura, e quem escolhia branco ou um
+  // azul vivo recebia um quase preto: a tela parecia ignorar a escolha.
+  it("a cor lateral ESCOLHIDA é a que vai para a tela, clara ou escura", () => {
+    for (const cor of ["#ffffff", "#f3f4f6", "#ffd400", "#1d6fe0", "#12305a", "#000000"]) {
+      const tema = derivarTema({ cor_lateral: cor }, "light");
+      const [esperado, obtido] = [hexParaHsl(cor), tokenComoHsl(tema["--sidebar"])];
+      expect(Math.abs(obtido.l - esperado.l), `${cor} luminosidade`).toBeLessThanOrEqual(1);
+      expect(Math.abs(obtido.s - esperado.s), `${cor} saturação`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("o texto do menu se adapta ao fundo e lê em AA — inclusive o apagado", () => {
+    const cores = ["#ffffff", "#f3f4f6", "#ffd400", "#f05a28", "#808080", "#1d6fe0", "#12305a", "#000000"];
+    for (const cor of cores) {
+      const tema = derivarTema({ cor_lateral: cor }, "light");
+      const fundo = tokenComoHsl(tema["--sidebar"]);
+      for (const nome of ["--sidebar-foreground", "--sidebar-muted-foreground"]) {
+        expect(contraste(tokenComoHsl(tema[nome]), fundo), `${cor} ${nome}`).toBeGreaterThanOrEqual(4.5);
       }
+    }
+  });
+
+  it("fundo claro recebe texto escuro, e fundo escuro, texto claro", () => {
+    const clara = derivarTema({ cor_lateral: "#ffffff" }, "light");
+    expect(tokenComoHsl(clara["--sidebar-foreground"]).l).toBeLessThan(30);
+    const escura = derivarTema({ cor_lateral: "#12305a" }, "light");
+    expect(tokenComoHsl(escura["--sidebar-foreground"]).l).toBeGreaterThan(80);
+  });
+
+  it("hover e item ativo se afastam do fundo no sentido certo", () => {
+    const clara = derivarTema({ cor_lateral: "#f3f4f6" }, "light");
+    expect(tokenComoHsl(clara["--sidebar-active"]).l).toBeLessThan(tokenComoHsl(clara["--sidebar"]).l);
+    const escura = derivarTema({ cor_lateral: "#12305a" }, "light");
+    expect(tokenComoHsl(escura["--sidebar-active"]).l).toBeGreaterThan(tokenComoHsl(escura["--sidebar"]).l);
+  });
+
+  it("no tema escuro a barra continua escura, mesmo com cor clara escolhida", () => {
+    for (const cor of ["#ffffff", "#ffd400", "#12305a"]) {
+      const fundo = tokenComoHsl(derivarTema({ cor_lateral: cor }, "dark")["--sidebar"]);
+      expect(fundo.l, cor).toBeLessThanOrEqual(14);
+    }
+  });
+
+  it("sem cor lateral própria, a barra derivada da primária continua escura", () => {
+    for (const cor of ["#f05a28", "#ffd400", "#1b4f8f"]) {
+      const fundo = tokenComoHsl(derivarTema({ cor_primaria: cor }, "light")["--sidebar"]);
+      expect(fundo.l, cor).toBeLessThanOrEqual(20);
     }
   });
 

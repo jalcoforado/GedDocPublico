@@ -123,15 +123,42 @@ const token = ({ h, s, l }: Hsl) =>
 const comL = (cor: Hsl, l: number): Hsl => ({ ...cor, l: limitar(l, 0, 100) });
 
 /**
+ * Texto que LÊ sobre `fundo`: anda a luminosidade no sentido `passo` até AA
+ * e, se nem assim chegar, cai no preto ou branco puro.
+ *
+ * O último degrau existe por causa do cinza médio. `ajustarAteContrastar`
+ * para em l=2/98 e o token é arredondado para inteiro; num fundo cinza médio
+ * isso deixa o texto em 4.49 — abaixo de AA por um arredondamento. Preto ou
+ * branco puros sempre resolvem: o produto dos dois contrastes é 21, então um
+ * deles passa de 4.5.
+ */
+function textoLegivel(cor: Hsl, fundo: Hsl, passo: number): Hsl {
+  const ajustado = ajustarAteContrastar(cor, fundo, passo);
+  const arredondado: Hsl = {
+    h: Math.round(ajustado.h),
+    s: Math.round(ajustado.s),
+    l: Math.round(ajustado.l),
+  };
+  if (contraste(arredondado, fundo) >= CONTRASTE_AA) return ajustado;
+  return { h: 0, s: 0, l: passo < 0 ? 0 : 100 };
+}
+
+/**
  * Deriva os tokens de tema. Devolve só o que as cores informadas determinam.
  *
  * - **primária** → `--brand*`. No claro escurece até texto branco ler sobre
  *   ela; no escuro clareia até ela ler sobre o fundo.
  * - **destaque** → `--accent*`, e o texto sobre ela (claro ou escuro, o que
  *   contrastar mais).
- * - **lateral** → `--sidebar*`. Sempre escura: os itens do menu são claros.
- *   Sem `cor_lateral`, a barra lateral acompanha o matiz da primária — um
- *   município que define uma cor só já sai com o sistema coerente.
+ * - **lateral** → `--sidebar*`. A cor ESCOLHIDA é respeitada como está, clara
+ *   ou escura, e o texto do menu é que se adapta (claro sobre fundo escuro,
+ *   escuro sobre fundo claro), até ler em AA. Até 2026-10-09 a barra era
+ *   forçada a escura: quem escolhia branco ou um azul vivo recebia um quase
+ *   preto, e a tela parecia ignorar a escolha.
+ *   Duas exceções continuam escurecendo: o tema ESCURO (uma faixa clara ao
+ *   lado de uma tela escura ofusca) e a barra SEM cor própria, que acompanha
+ *   o matiz da primária — ali ninguém escolheu a cor do menu, e a primária
+ *   pura como fundo de menu grita.
  */
 export function derivarTema(cores: CoresDoTema, modo: ModoTema): TokensDeTema {
   const tokens: TokensDeTema = {};
@@ -165,17 +192,42 @@ export function derivarTema(cores: CoresDoTema, modo: ModoTema): TokensDeTema {
       ? hexParaHsl(cores.cor_primaria)
       : null;
   if (lateral) {
+    const escolhida = corValida(cores.cor_lateral) && modo === "light";
+    const bruto: Hsl = escolhida
+      ? lateral
+      : {
+          h: lateral.h,
+          s: limitar(lateral.s, 0, 62),
+          l: limitar(lateral.l, 8, modo === "light" ? 20 : 14),
+        };
+    // O token é gravado com HSL inteiro. O contraste do texto tem de ser
+    // medido contra o fundo que VAI PARA A TELA, não contra o de antes do
+    // arredondamento — a diferença é pequena, mas decide o caso no limite.
     const fundo: Hsl = {
-      h: lateral.h,
-      s: limitar(lateral.s, 0, 62),
-      l: limitar(lateral.l, 8, modo === "light" ? 20 : 14),
+      h: Math.round(bruto.h),
+      s: Math.round(bruto.s),
+      l: Math.round(bruto.l),
     };
+    // Texto: o lado que contrastar mais com o fundo, levado até AA. Num
+    // cinza médio nem o quase-branco nem o quase-preto chegam a 4.5 (dão
+    // ~4.4), mas branco ou preto PUROS sempre chegam — o produto dos dois
+    // contrastes é 21. Por isso o ajuste final, e não só a escolha do lado.
+    const textoClaro: Hsl = { h: fundo.h, s: 18, l: 94 };
+    const textoEscuro: Hsl = { h: fundo.h, s: 30, l: 12 };
+    const fundoClaro = contraste(fundo, textoEscuro) > contraste(fundo, textoClaro);
+    // Sobre fundo claro tudo anda para o ESCURO (hover, borda, texto apagado);
+    // sobre fundo escuro, para o claro. `d` é esse sentido.
+    const d = fundoClaro ? -1 : 1;
     tokens["--sidebar"] = token(fundo);
-    tokens["--sidebar-accent"] = token(comL(fundo, fundo.l + 4));
-    tokens["--sidebar-active"] = token(comL(fundo, fundo.l + 7));
-    tokens["--sidebar-border"] = token({ ...fundo, s: fundo.s * 0.75, l: fundo.l + 7 });
-    tokens["--sidebar-foreground"] = token({ h: fundo.h, s: 18, l: 92 });
-    tokens["--sidebar-muted-foreground"] = token({ h: fundo.h, s: 16, l: 70 });
+    tokens["--sidebar-accent"] = token(comL(fundo, fundo.l + 4 * d));
+    tokens["--sidebar-active"] = token(comL(fundo, fundo.l + 7 * d));
+    tokens["--sidebar-border"] = token({ ...fundo, s: fundo.s * 0.75, l: limitar(fundo.l + 9 * d, 0, 100) });
+    tokens["--sidebar-foreground"] = token(
+      textoLegivel(fundoClaro ? textoEscuro : textoClaro, fundo, 2 * d),
+    );
+    tokens["--sidebar-muted-foreground"] = token(
+      textoLegivel({ h: fundo.h, s: 16, l: fundoClaro ? 40 : 70 }, fundo, 2 * d),
+    );
   }
 
   return tokens;
