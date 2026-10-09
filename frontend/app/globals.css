@@ -161,6 +161,15 @@
 
     /* Classes legacy bg-aprimora* vêm do tailwind.config direto de --brand. */
 
+    /* === Assinatura do produto (Aprimora) ===
+       O laranja do logo. NÃO é `--brand`: `--brand` é do município e o tema
+       do tenant o sobrescreve; estes dois ficam fixos, e só aparecem onde o
+       produto se assina (rodapé do login, launcher, admin de plataforma).
+       O laranja puro dá ~3:1 sobre o canvas — serve para borda e detalhe,
+       nunca para texto. Texto usa `--assinatura-texto`. */
+    --assinatura: 18 95% 53%; /* #F95C17, medido no logo */
+    --assinatura-texto: 18 90% 38%; /* ~5.2:1 sobre --bg, ~5.6:1 sobre card */
+
     /* === Surfaces (tonal) === */
     --bg: var(--neutral-25); /* canvas geral — off-white, viés frio/verde */
     --surface-1: var(--neutral-0); /* cards */
@@ -305,6 +314,7 @@
     --brand-dark: var(--green-600);
     --accent: 32 95% 60%; /* âmbar clareia */
     --accent-light: 38 92% 70%;
+    --assinatura-texto: 18 95% 62%; /* clareia: o tom de texto do light some no fundo escuro */
     --primary: var(--brand);
     --primary-foreground: 158 20% 10%;
     --ring: var(--brand-light);

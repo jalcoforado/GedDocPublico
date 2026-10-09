@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
 import { PasswordInput } from "@/components/ui/password-input";
 import { api } from "@/lib/api";
 import { useBranding } from "@/lib/branding";
@@ -276,12 +277,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="pt-8 text-center text-xs text-foreground-subtle">
-          Sistema desenvolvido por:{" "}
-          <span className="font-display font-bold tracking-[0.12em] text-foreground-muted">
-            APRIMORA
-          </span>
-        </p>
+        <AssinaturaAprimora className="pt-8" />
       </section>
     </main>
   );
