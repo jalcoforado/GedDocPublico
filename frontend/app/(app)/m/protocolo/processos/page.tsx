@@ -6,7 +6,6 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { CaixasProcessos, caixaDaUrl, rotuloDaCaixa } from "@/components/CaixasProcessos";
 import { FavoritoStar } from "@/components/FavoritoStar";
 import { TabelaCaixaProcessos } from "@/components/TabelaCaixaProcessos";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +21,7 @@ import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import type { EscopoProcesso } from "@/lib/api";
 import { api, NIVEL_SIGILO_LABEL, type ProcessoListFilters } from "@/lib/api";
+import { caixaDaUrl, rotuloDaCaixa } from "@/lib/caixas-processos";
 import { useAssuntosAll } from "@/lib/assuntos";
 import { decorridoDesde } from "@/lib/duracao";
 
@@ -134,16 +134,6 @@ export default function ProcessosPage() {
       }),
   });
 
-  // Contadores das caixas. Falha aqui não derruba a tela: a coluna continua
-  // navegável, só sem os números.
-  const caixasQ = useQuery({
-    queryKey: ["processos-caixas"],
-    queryFn: () => api.processos.caixas(),
-    // Sempre refaz ao voltar para a lista: encaminhar e receber acontecem no
-    // detalhe do processo, e o contador velho mentiria por 30 s.
-    staleTime: 0,
-  });
-
   function navigate(f: ProcessoListFilters, p: number) {
     const q = urlDosFiltros(f, p);
     router.push(q ? `${pathname}?${q}` : pathname, { scroll: false });
@@ -154,7 +144,7 @@ export default function ProcessosPage() {
   }
 
   function clearFilters() {
-    // Limpa os filtros DENTRO da caixa aberta — sair dela é pela coluna.
+    // Limpa os filtros DENTRO da caixa aberta — sair dela é pelo menu lateral.
     navigate({ apenas_ativos: false, caixa: filters.caixa }, 1);
   }
 
@@ -178,343 +168,336 @@ export default function ProcessosPage() {
         }
       />
 
-      {/* Layout de referência (Figma): caixas à esquerda, lista à direita.
-          A coluna fica DENTRO da tela — a barra lateral é o menu do módulo. */}
-      <div className="grid gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <CaixasProcessos base={pathname} ativa={filters.caixa} contagem={caixasQ.data} />
-        <div className="min-w-0 space-y-4">
-          <Card>
-            <CardContent>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-                <div className="md:col-span-2">
-                  <Label htmlFor="q">Busca (número / manifestante / assunto)</Label>
-                  <Input
-                    id="q"
-                    value={draft.q ?? ""}
-                    onChange={(e) => setDraft({ ...draft, q: e.target.value })}
-                    placeholder="Ex: 2026/000001 ou José"
-                    inputMode="search"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="assunto">Assunto</Label>
-                  <Select
-                    id="assunto"
-                    value={draft.id_assunto ?? ""}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        id_assunto: e.target.value ? Number(e.target.value) : undefined,
-                      })
-                    }
-                  >
-                    <option value="">Todos</option>
-                    {assuntosQ.data?.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.assunto.length > 60 ? a.assunto.slice(0, 60) + "…" : a.assunto}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="unidade">Unidade (proprietária ou local atual)</Label>
-                  <Select
-                    id="unidade"
-                    value={draft.id_unidade ?? ""}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        id_unidade: e.target.value ? Number(e.target.value) : undefined,
-                      })
-                    }
-                  >
-                    <option value="">Todas</option>
-                    {unidadesQ.data?.items.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.unidade_trabalho}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="desde">Aberto desde</Label>
-                  <Input
-                    id="desde"
-                    type="date"
-                    value={draft.desde?.slice(0, 10) ?? ""}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        desde: e.target.value ? `${e.target.value}T00:00:00` : undefined,
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="ate">Aberto até</Label>
-                  <Input
-                    id="ate"
-                    type="date"
-                    value={draft.ate?.slice(0, 10) ?? ""}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        ate: e.target.value ? `${e.target.value}T23:59:59` : undefined,
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="escopo">Escopo</Label>
-                  {/* F2 — o recorte por responsabilidade. "Da minha unidade"
-                      INCLUI os processos sem responsável: são os que precisam que
-                      alguém os assuma, e escondê-los seria esconder o trabalho que
-                      ninguém pegou. A unidade usada é a LOTAÇÃO PRINCIPAL de quem
-                      está logado; com lotação secundária ainda não há como
-                      escolher qual delas vale (depende do seletor de contexto). */}
-                  <select
-                    id="escopo"
-                    value={draft.escopo ?? ""}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        escopo: (e.target.value || undefined) as
-                          | EscopoProcesso
-                          | undefined,
-                      })
-                    }
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <option value="">Todos</option>
-                    {ESCOPOS.map((e) => (
-                      <option key={e} value={e}>
-                        {ESCOPO_LABEL[e]}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <Label htmlFor="situacao">Situação</Label>
-                  {/* E3 — ausente = protocolados (comportamento de hoje). Rascunho
-                      é workflow interno: não some da tela, só não entra na conta
-                      padrão de "processos" que o resto do sistema já espera. */}
-                  <select
-                    id="situacao"
-                    value={draft.situacao ?? ""}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        situacao: (e.target.value || undefined) as
-                          | ProcessoListFilters["situacao"],
-                      })
-                    }
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <option value="">Protocolados (padrão)</option>
-                    <option value="rascunho">Rascunhos</option>
-                    <option value="todos">Todos</option>
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="ativos"
-                    checked={!!draft.apenas_ativos}
-                    onChange={(e) => setDraft({ ...draft, apenas_ativos: e.target.checked })}
-                  />
-                  <Label htmlFor="ativos" className="!mb-0">
-                    Apenas ativos
-                  </Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="favoritos"
-                    checked={!!draft.favoritos}
-                    onChange={(e) =>
-                      setDraft({ ...draft, favoritos: e.target.checked || undefined })
-                    }
-                  />
-                  <Label htmlFor="favoritos" className="!mb-0">
-                    Só favoritos
-                  </Label>
-                </div>
-                <div className="flex flex-wrap items-end gap-2">
-                  <Button onClick={applyFilters}>Filtrar</Button>
-                  <Button variant="ghost" onClick={clearFilters}>
-                    Limpar
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {filters.caixa ? (
-            <TabelaCaixaProcessos
-              itens={processosQ.data?.items}
-              carregando={processosQ.isLoading}
-            />
-          ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Número</TH>
-                  <TH>Aberto em</TH>
-                  <TH>Manifestante</TH>
-                  <TH>Assunto</TH>
-                  <TH>Local atual</TH>
-                  <TH>Responsável</TH>
-                  <TH>Status</TH>
-                  <TH className="text-right">Ações</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {processosQ.isLoading &&
-                  Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} cols={7} />)}
-                {!processosQ.isLoading && (processosQ.data?.items.length ?? 0) === 0 && (
-                  <TR>
-                    <TD colSpan={8} className="p-0">
-                      <EmptyState
-                        icon={SearchX}
-                        title={filters.caixa ? "Nenhum processo nesta caixa" : "Nenhum processo encontrado"}
-                        description={
-                          filters.caixa
-                            ? "Quando houver, eles aparecem aqui."
-                            : "Ajuste os filtros ou crie um novo processo."
-                        }
-                        className="border-0 bg-transparent"
-                      />
-                    </TD>
-                  </TR>
-                )}
-                {processosQ.data?.items.map((p) => (
-                  <TR key={p.id}>
-                    <TD className="font-mono text-xs tabular-nums">
-                      <div className="flex items-center gap-1">
-                        <FavoritoStar processo={p} size="sm" />
-                        <div>
-                          {p.situacao === "rascunho" ? (
-                            <span className="font-sans italic text-muted-foreground">
-                              Rascunho
-                            </span>
-                          ) : p.nup ? (
-                            <>
-                              <div>{p.nup}</div>
-                              <div className="text-[10px] text-foreground-muted">
-                                {p.numero_processo}
-                              </div>
-                            </>
-                          ) : (
-                            p.numero_processo
-                          )}
-                        </div>
-                      </div>
-                      {p.marcadores.length > 0 && (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {p.marcadores.map((mk) => (
-                            <Badge
-                              key={mk.id}
-                              style={{ backgroundColor: `${mk.cor}22`, color: mk.cor }}
-                              className="font-sans font-normal normal-case"
-                            >
-                              {mk.nome}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                    </TD>
-                    <TD className="text-xs tabular-nums">
-                      {fmtDate(p.data_hora_abertura)}
-                      {/* F1 — a data sozinha obriga quem lê a fazer a conta de
-                          cabeça para saber se o processo é de ontem ou do ano
-                          passado. O decorrido é calculado no cliente: a lista não
-                          carrega o bloco de permanência, que só existe no detalhe. */}
-                      <span className="block text-muted-foreground">
-                        {decorridoDesde(p.data_hora_abertura)}
-                      </span>
-                    </TD>
-                    <TD>
-                      <div className="text-sm text-foreground">{p.manifestante ?? "—"}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {p.manifestante_cpf_cnpj ?? ""}
-                      </div>
-                    </TD>
-                    <TD>
-                      <div className="line-clamp-1 text-sm">{p.assunto ?? "—"}</div>
-                      <div className="text-xs text-muted-foreground">{p.tipo_processo ?? ""}</div>
-                    </TD>
-                    <TD className="text-sm">{p.local_atual ?? "—"}</TD>
-                    <TD className="text-sm">
-                      {p.responsavel ?? (
-                        // Não é "—": sem responsável é um ESTADO, e a tela tem de
-                        // dizer qual. Travessão leria como "dado faltando".
-                        <span className="text-warning-soft-foreground">
-                          Sem responsável
-                        </span>
-                      )}
-                    </TD>
-                    <TD>
-                      <div className="flex flex-wrap gap-1">
-                        {p.situacao === "rascunho" && (
-                          <Badge intent="warning" icon={Pencil}>
-                            Rascunho
-                          </Badge>
-                        )}
-                        {p.ativo ? (
-                          <Badge intent="success" icon={CheckCircle2}>
-                            Ativo
-                          </Badge>
-                        ) : (
-                          <Badge intent="neutral" icon={Pause}>
-                            Inativo
-                          </Badge>
-                        )}
-                        {!p.publico && (
-                          <Badge intent="warning" icon={Lock}>
-                            {NIVEL_SIGILO_LABEL[p.nivel_sigilo]}
-                          </Badge>
-                        )}
-                      </div>
-                    </TD>
-                    <TD className="text-right">
-                      <Link
-                        href={`/m/protocolo/processos/${p.id}`}
-                        className="inline-flex h-9 items-center rounded-md border border-transparent px-3 text-xs font-medium text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        Abrir →
-                      </Link>
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-          )}
-
-          {processosQ.data && processosQ.data.total > 0 && (
-            <div className="flex flex-col items-start justify-between gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center">
-              <span className="tabular-nums">
-                {processosQ.data.total} processos — página {page} de {totalPages}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={page === 1}
-                  onClick={() => navigate(filters, page - 1)}
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={page >= totalPages}
-                  onClick={() => navigate(filters, page + 1)}
-                >
-                  Próxima
-                </Button>
-              </div>
+      <Card>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div className="md:col-span-2">
+              <Label htmlFor="q">Busca (número / manifestante / assunto)</Label>
+              <Input
+                id="q"
+                value={draft.q ?? ""}
+                onChange={(e) => setDraft({ ...draft, q: e.target.value })}
+                placeholder="Ex: 2026/000001 ou José"
+                inputMode="search"
+              />
             </div>
-          )}
+            <div>
+              <Label htmlFor="assunto">Assunto</Label>
+              <Select
+                id="assunto"
+                value={draft.id_assunto ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    id_assunto: e.target.value ? Number(e.target.value) : undefined,
+                  })
+                }
+              >
+                <option value="">Todos</option>
+                {assuntosQ.data?.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.assunto.length > 60 ? a.assunto.slice(0, 60) + "…" : a.assunto}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="unidade">Unidade (proprietária ou local atual)</Label>
+              <Select
+                id="unidade"
+                value={draft.id_unidade ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    id_unidade: e.target.value ? Number(e.target.value) : undefined,
+                  })
+                }
+              >
+                <option value="">Todas</option>
+                {unidadesQ.data?.items.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.unidade_trabalho}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="desde">Aberto desde</Label>
+              <Input
+                id="desde"
+                type="date"
+                value={draft.desde?.slice(0, 10) ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    desde: e.target.value ? `${e.target.value}T00:00:00` : undefined,
+                  })
+                }
+              />
+            </div>
+            <div>
+              <Label htmlFor="ate">Aberto até</Label>
+              <Input
+                id="ate"
+                type="date"
+                value={draft.ate?.slice(0, 10) ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    ate: e.target.value ? `${e.target.value}T23:59:59` : undefined,
+                  })
+                }
+              />
+            </div>
+            <div>
+              <Label htmlFor="escopo">Escopo</Label>
+              {/* F2 — o recorte por responsabilidade. "Da minha unidade"
+                  INCLUI os processos sem responsável: são os que precisam que
+                  alguém os assuma, e escondê-los seria esconder o trabalho que
+                  ninguém pegou. A unidade usada é a LOTAÇÃO PRINCIPAL de quem
+                  está logado; com lotação secundária ainda não há como
+                  escolher qual delas vale (depende do seletor de contexto). */}
+              <select
+                id="escopo"
+                value={draft.escopo ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    escopo: (e.target.value || undefined) as
+                      | EscopoProcesso
+                      | undefined,
+                  })
+                }
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Todos</option>
+                {ESCOPOS.map((e) => (
+                  <option key={e} value={e}>
+                    {ESCOPO_LABEL[e]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="situacao">Situação</Label>
+              {/* E3 — ausente = protocolados (comportamento de hoje). Rascunho
+                  é workflow interno: não some da tela, só não entra na conta
+                  padrão de "processos" que o resto do sistema já espera. */}
+              <select
+                id="situacao"
+                value={draft.situacao ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    situacao: (e.target.value || undefined) as
+                      | ProcessoListFilters["situacao"],
+                  })
+                }
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Protocolados (padrão)</option>
+                <option value="rascunho">Rascunhos</option>
+                <option value="todos">Todos</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="ativos"
+                checked={!!draft.apenas_ativos}
+                onChange={(e) => setDraft({ ...draft, apenas_ativos: e.target.checked })}
+              />
+              <Label htmlFor="ativos" className="!mb-0">
+                Apenas ativos
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="favoritos"
+                checked={!!draft.favoritos}
+                onChange={(e) =>
+                  setDraft({ ...draft, favoritos: e.target.checked || undefined })
+                }
+              />
+              <Label htmlFor="favoritos" className="!mb-0">
+                Só favoritos
+              </Label>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <Button onClick={applyFilters}>Filtrar</Button>
+              <Button variant="ghost" onClick={clearFilters}>
+                Limpar
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {filters.caixa ? (
+        <TabelaCaixaProcessos
+          itens={processosQ.data?.items}
+          carregando={processosQ.isLoading}
+        />
+      ) : (
+        <Table>
+          <THead>
+            <TR>
+              <TH>Número</TH>
+              <TH>Aberto em</TH>
+              <TH>Manifestante</TH>
+              <TH>Assunto</TH>
+              <TH>Local atual</TH>
+              <TH>Responsável</TH>
+              <TH>Status</TH>
+              <TH className="text-right">Ações</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {processosQ.isLoading &&
+              Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} cols={7} />)}
+            {!processosQ.isLoading && (processosQ.data?.items.length ?? 0) === 0 && (
+              <TR>
+                <TD colSpan={8} className="p-0">
+                  <EmptyState
+                    icon={SearchX}
+                    title={filters.caixa ? "Nenhum processo nesta caixa" : "Nenhum processo encontrado"}
+                    description={
+                      filters.caixa
+                        ? "Quando houver, eles aparecem aqui."
+                        : "Ajuste os filtros ou crie um novo processo."
+                    }
+                    className="border-0 bg-transparent"
+                  />
+                </TD>
+              </TR>
+            )}
+            {processosQ.data?.items.map((p) => (
+              <TR key={p.id}>
+                <TD className="font-mono text-xs tabular-nums">
+                  <div className="flex items-center gap-1">
+                    <FavoritoStar processo={p} size="sm" />
+                    <div>
+                      {p.situacao === "rascunho" ? (
+                        <span className="font-sans italic text-muted-foreground">
+                          Rascunho
+                        </span>
+                      ) : p.nup ? (
+                        <>
+                          <div>{p.nup}</div>
+                          <div className="text-[10px] text-foreground-muted">
+                            {p.numero_processo}
+                          </div>
+                        </>
+                      ) : (
+                        p.numero_processo
+                      )}
+                    </div>
+                  </div>
+                  {p.marcadores.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {p.marcadores.map((mk) => (
+                        <Badge
+                          key={mk.id}
+                          style={{ backgroundColor: `${mk.cor}22`, color: mk.cor }}
+                          className="font-sans font-normal normal-case"
+                        >
+                          {mk.nome}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </TD>
+                <TD className="text-xs tabular-nums">
+                  {fmtDate(p.data_hora_abertura)}
+                  {/* F1 — a data sozinha obriga quem lê a fazer a conta de
+                      cabeça para saber se o processo é de ontem ou do ano
+                      passado. O decorrido é calculado no cliente: a lista não
+                      carrega o bloco de permanência, que só existe no detalhe. */}
+                  <span className="block text-muted-foreground">
+                    {decorridoDesde(p.data_hora_abertura)}
+                  </span>
+                </TD>
+                <TD>
+                  <div className="text-sm text-foreground">{p.manifestante ?? "—"}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {p.manifestante_cpf_cnpj ?? ""}
+                  </div>
+                </TD>
+                <TD>
+                  <div className="line-clamp-1 text-sm">{p.assunto ?? "—"}</div>
+                  <div className="text-xs text-muted-foreground">{p.tipo_processo ?? ""}</div>
+                </TD>
+                <TD className="text-sm">{p.local_atual ?? "—"}</TD>
+                <TD className="text-sm">
+                  {p.responsavel ?? (
+                    // Não é "—": sem responsável é um ESTADO, e a tela tem de
+                    // dizer qual. Travessão leria como "dado faltando".
+                    <span className="text-warning-soft-foreground">
+                      Sem responsável
+                    </span>
+                  )}
+                </TD>
+                <TD>
+                  <div className="flex flex-wrap gap-1">
+                    {p.situacao === "rascunho" && (
+                      <Badge intent="warning" icon={Pencil}>
+                        Rascunho
+                      </Badge>
+                    )}
+                    {p.ativo ? (
+                      <Badge intent="success" icon={CheckCircle2}>
+                        Ativo
+                      </Badge>
+                    ) : (
+                      <Badge intent="neutral" icon={Pause}>
+                        Inativo
+                      </Badge>
+                    )}
+                    {!p.publico && (
+                      <Badge intent="warning" icon={Lock}>
+                        {NIVEL_SIGILO_LABEL[p.nivel_sigilo]}
+                      </Badge>
+                    )}
+                  </div>
+                </TD>
+                <TD className="text-right">
+                  <Link
+                    href={`/m/protocolo/processos/${p.id}`}
+                    className="inline-flex h-9 items-center rounded-md border border-transparent px-3 text-xs font-medium text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    Abrir →
+                  </Link>
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      )}
+
+      {processosQ.data && processosQ.data.total > 0 && (
+        <div className="flex flex-col items-start justify-between gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center">
+          <span className="tabular-nums">
+            {processosQ.data.total} processos — página {page} de {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page === 1}
+              onClick={() => navigate(filters, page - 1)}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => navigate(filters, page + 1)}
+            >
+              Próxima
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

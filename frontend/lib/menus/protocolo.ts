@@ -11,9 +11,12 @@ import {
   Map,
   MapPin,
   Paperclip,
+  Rows3,
   Tag,
   UserCircle,
 } from "lucide-react";
+
+import { CAIXAS, ROTA_PROCESSOS, hrefDaCaixa } from "@/lib/caixas-processos";
 
 import type { MenuModulo } from "./tipos";
 
@@ -34,7 +37,27 @@ export const menuProtocolo: MenuModulo = {
       title: "Processos",
       defaultOpen: true,
       items: [
-        { label: "Processos", href: "/m/protocolo/processos", icon: FileText, perm: "processo" },
+        {
+          label: "Processos",
+          href: ROTA_PROCESSOS,
+          icon: FileText,
+          perm: "processo",
+          // As caixas de trabalho são uma subdivisão de Processos, e não um
+          // segundo menu ao lado deste: o layout de referência as põe na
+          // lateral, e duas colunas de navegação lado a lado disputavam o
+          // mesmo papel.
+          children: [
+            { label: "Todos os processos", href: ROTA_PROCESSOS, icon: Rows3, perm: "processo" },
+            ...CAIXAS.map(({ caixa, rotulo, icone }) => ({
+              label: rotulo,
+              href: hrefDaCaixa(caixa),
+              icon: icone,
+              perm: "processo",
+              filtro: { chave: "caixa", valor: caixa },
+              contador: caixa,
+            })),
+          ],
+        },
         { label: "Workflows", href: "/m/protocolo/workflow", icon: GitBranch },
         { label: "Relatórios", href: "/m/protocolo/relatorios", icon: BarChart3, perm: "processo" },
       ],
