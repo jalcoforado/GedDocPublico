@@ -93,6 +93,24 @@ export const ICONES_MODULO: Record<string, React.ComponentType<{ className?: str
 };
 
 /**
+ * Nome de exibição de cada módulo, para onde não dá para esperar a API — a
+ * trilha do topo da tela é desenhada na primeira pintura. O launcher e o
+ * seletor continuam usando o nome que vem de `/modulos/me`.
+ */
+export const NOME_MODULO: Record<string, string> = {
+  protocolo: "Protocolo",
+  pagamentos: "Pagamentos",
+  frota: "Frota",
+  transporte: "Transporte Regulado",
+  administracao: "Administração",
+};
+
+/** Nome do módulo; slug desconhecido volta como veio, em vez de sumir. */
+export function nomeDoModulo(slug: string): string {
+  return NOME_MODULO[slug] ?? slug;
+}
+
+/**
  * Descrições curtas para o launcher (UX-11.2). O catálogo (`ModuloOut`) não
  * expõe descrição, e o conjunto de módulos é fixo e pequeno — um mapa local
  * evita mexer no backend por um texto de vitrine. Slug fora do mapa cai no
