@@ -4,6 +4,8 @@ import { AlertOctagon, FileText, LogOut, PenSquare } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
+import { MarcaDoMunicipio } from "@/components/MarcaDoMunicipio";
 import { CidadaoAuthProvider, useCidadao } from "@/lib/cidadao-auth";
 import { Providers } from "@/lib/providers";
 import { cn } from "@/lib/utils";
@@ -20,9 +22,9 @@ function CidadaoHeader() {
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-4 py-3 sm:px-6">
         <Link
           href={cidadao ? "/cidadao/processos" : "/cidadao/login"}
-          className="flex items-baseline gap-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex items-center gap-3 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <span className="text-xl font-bold text-primary">Aprimora</span>
+          <MarcaDoMunicipio />
           <span className="hidden text-xs text-muted-foreground sm:inline">
             Portal do Cidadão
           </span>
@@ -171,6 +173,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="min-h-dvh bg-background pb-16 sm:pb-0">
       <CidadaoHeader />
       <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">{children}</main>
+      <AssinaturaAprimora className="px-4 pb-6 pt-2" />
       <BottomNav />
     </div>
   );

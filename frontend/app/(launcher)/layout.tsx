@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { LogOut, Shield } from "lucide-react";
 import Link from "next/link";
 
+import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
 import { api } from "@/lib/api";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { Providers } from "@/lib/providers";
@@ -83,9 +84,10 @@ function Shell({ children }: { children: React.ReactNode }) {
         <div className="absolute inset-0 bg-dot-grid opacity-40 [mask-image:linear-gradient(to_bottom,black,transparent)]" />
       </div>
       <BarraDeSaida />
-      <main className="relative flex min-h-dvh flex-col items-center justify-center p-6">
+      <main className="relative flex min-h-dvh flex-col items-center justify-center p-6 pb-16">
         {children}
       </main>
+      <AssinaturaAprimora className="absolute inset-x-0 bottom-5" />
     </div>
   );
 }

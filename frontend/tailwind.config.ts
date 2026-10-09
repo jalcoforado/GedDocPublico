@@ -58,6 +58,11 @@ const config: Config = {
           dark: "hsl(var(--accent-dark) / <alpha-value>)",
           foreground: "hsl(var(--accent-foreground) / <alpha-value>)",
         },
+        // Marca do PRODUTO — fixa, o tema do município não a alcança.
+        assinatura: {
+          DEFAULT: "hsl(var(--assinatura) / <alpha-value>)",
+          texto: "hsl(var(--assinatura-texto) / <alpha-value>)",
+        },
         // Semantic surfaces
         background: "hsl(var(--background) / <alpha-value>)",
         foreground: "hsl(var(--foreground) / <alpha-value>)",

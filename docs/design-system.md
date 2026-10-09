@@ -35,6 +35,7 @@ Escalas que **não** têm token próprio (o Tailwind é a fonte): espaçamento
 |---|---|---|---|
 | Marca | verde-petróleo `--green-700` | `--green-400` (clareia p/ AA) | `bg-brand`, `text-brand` |
 | Acento | âmbar `--amber-600` | âmbar clareado | `bg-accent` + `text-accent-foreground` |
+| Assinatura do produto | laranja do logo `--assinatura` (só borda/detalhe) + `--assinatura-texto` (texto, AA) | texto clareia | `border-assinatura`, `text-assinatura-texto` — fixa, o tema do município não a sobrescreve; só em login (rodapé), launcher e admin de plataforma, via `components/AssinaturaAprimora.tsx` |
 | Canvas | `--neutral-25` off-white | verde-escuro profundo | `bg-background` |
 | Superfícies | `--surface-1..3` (card → popover) | elevação tonal invertida | `bg-surface-1..3` (tailwind.config, aceita `/alpha`) |
 | Status | `danger` / `success` / `warning` / `info`, cada um com par `-soft` | fundos `-soft` escurecem, texto clareia | `bg-danger-soft text-danger-soft-foreground` |
