@@ -175,6 +175,7 @@ describe("split dos menus", () => {
       frota: ["Frota"],
       transporte: ["Transporte Regulado"],
       pagamentos: ["Pagamentos"],
+      contratos: ["Contratos"],
       administracao: ["Administração"],
     };
     for (const [slug, menu] of Object.entries(MENUS)) {

@@ -32,6 +32,7 @@ const ONDE: Record<string, { arquivo: string; funcao: string }> = {
   unidades: { arquivo: "unidades.py", funcao: "list_unidades" },
   usuarios: { arquivo: "usuarios.py", funcao: "list_usuarios" },
   processos: { arquivo: "processos.py", funcao: "list_endpoint" },
+  contratos: { arquivo: "contratos.py", funcao: "list_contratos" },
 };
 
 function tetoNoBackend(recurso: string): number {
