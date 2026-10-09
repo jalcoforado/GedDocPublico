@@ -491,6 +491,24 @@ export interface ClassificarSigiloInput {
  */
 export type EscopoProcesso = "meus" | "unidade" | "unidade_e_subordinadas";
 
+/**
+ * Caixa de trabalho: posse cruzada com o estado da tramitação. As cinco
+ * primeiras são da unidade de lotação PRINCIPAL de quem consulta; as duas de
+ * assinatura são da pessoa. Não existe "recusados": o sistema não tem recusa
+ * de encaminhamento. Definições em `services/processos.py::_predicado_caixa`.
+ */
+export type CaixaProcesso =
+  | "entrada"
+  | "saida"
+  | "analise"
+  | "externos"
+  | "aguardando_assinatura"
+  | "enviado_para_assinatura"
+  | "arquivados";
+
+/** Quantos processos em cada caixa — espelha `CaixasContagem` do backend. */
+export type CaixasContagem = Record<CaixaProcesso, number>;
+
 export interface ProcessoListFilters {
   page?: number;
   page_size?: number;
@@ -509,6 +527,8 @@ export interface ProcessoListFilters {
   id_marcador?: number;
   /** E3 — "rascunho" | "protocolado" | "todos". Ausente = exclui rascunho. */
   situacao?: "rascunho" | "protocolado" | "todos";
+  /** Caixa de trabalho. Ausente = sem recorte. */
+  caixa?: CaixaProcesso;
 }
 
 export interface ProcessoCreateInput {
@@ -4670,6 +4690,8 @@ export const api = {
         // o cast widening é seguro — todos os campos cabem em QsValue.
         `/processos${qs((params ?? {}) as Record<string, QsValue>)}`,
       ),
+    /** Contadores das caixas de quem consulta (mesmo gate e sigilo da lista). */
+    caixas: () => request<CaixasContagem>("/processos/caixas"),
     get: (id: number) => request<ProcessoDetail>(`/processos/${id}`),
     create: (data: ProcessoCreateInput) =>
       request<ProcessoDetail>("/processos", {
