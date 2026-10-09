@@ -15,7 +15,6 @@ import { useQuery } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useBranding } from "@/lib/branding";
 import { canSeeItem, MENUS, menuDoModulo, type NavGroup, type NavItem } from "@/lib/menus";
 import { cn } from "@/lib/utils";
 import { DensityToggle } from "./DensityToggle";
@@ -69,7 +68,6 @@ const FOCUSABLE =
 export function Sidebar({ modulo, open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { can } = useAuth();
-  const branding = useBranding();
   // Transversais (comum) sempre primeiro — é a ordem do NAV original ("Geral"
   // abria a lista) e continua sendo o caminho de volta para /home e
   // /dashboard, agora no topo em vez do fim. Depois vêm os grupos do módulo
@@ -271,46 +269,16 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
           open ? "translate-x-0 shadow-xl" : "-translate-x-full shadow-none md:translate-x-0",
         )}
       >
-        {/* Brand block */}
-        <div className="flex items-center justify-between gap-2 border-b border-sidebar-border px-3 py-4">
-          <Link
-            href="/home"
-            className={cn(
-              "flex items-center gap-2.5 rounded px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              colapsada && "md:justify-center md:gap-0",
-            )}
-            aria-label="Início"
-            title={colapsada ? branding?.nome ?? "Aprimora" : undefined}
-          >
-            {branding?.logo_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={branding.logo_url}
-                alt={branding.nome ?? "Aprimora"}
-                className="h-9 w-9 rounded-md object-cover"
-              />
-            ) : (
-              <div
-                aria-hidden="true"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-brand-gradient text-base font-bold text-white shadow-brand"
-              >
-                A
-              </div>
-            )}
-            <div className={cn(colapsada && "md:hidden")}>
-              <div className="text-base font-semibold leading-tight tracking-tight">
-                {branding?.nome ?? "Aprimora"}
-              </div>
-              <div className="text-[10px] uppercase tracking-wider text-sidebar-muted">
-                Gestão de processos
-              </div>
-            </div>
-          </Link>
+        {/* A marca do município NÃO se repete aqui: ela já está no cabeçalho
+            do sistema, logo ao lado, e duas marcas na mesma faixa de tela eram
+            redundância (o layout de referência também a põe só no cabeçalho).
+            Sobra o botão de fechar, que só existe na gaveta do celular. */}
+        <div className="flex justify-end border-b border-sidebar-border px-3 py-2 md:hidden">
           <button
             type="button"
             onClick={onClose}
             aria-label="Fechar menu"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground md:hidden"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
