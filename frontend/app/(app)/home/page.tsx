@@ -6,18 +6,20 @@ import {
   Archive,
   ArrowRight,
   Bell,
-  Building2,
+  CalendarDays,
   FileSignature,
+  Home as HomeIcon,
   Inbox,
+  Layers,
   Loader2,
+  Package,
   PenSquare,
   RefreshCw,
   Search,
-  Sparkles,
   TrendingUp,
+  UserRound,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo } from "react";
 
 import {
   api,
@@ -25,46 +27,10 @@ import {
   notificacoesApi,
   temporalidadeApi,
   workflowApi,
+  type PendenciaAssinatura,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useBranding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
-
-const DIAS_SEMANA = [
-  "domingo",
-  "segunda-feira",
-  "terça-feira",
-  "quarta-feira",
-  "quinta-feira",
-  "sexta-feira",
-  "sábado",
-];
-const MESES = [
-  "janeiro",
-  "fevereiro",
-  "março",
-  "abril",
-  "maio",
-  "junho",
-  "julho",
-  "agosto",
-  "setembro",
-  "outubro",
-  "novembro",
-  "dezembro",
-];
-
-function dataExtensa(d: Date): string {
-  return `${DIAS_SEMANA[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()]}`;
-}
-
-function saudacaoPorHora(d: Date): string {
-  const h = d.getHours();
-  if (h < 6) return "Boa madrugada";
-  if (h < 12) return "Bom dia";
-  if (h < 18) return "Boa tarde";
-  return "Boa noite";
-}
 
 function fmtDataCurta(s: string | null): string {
   if (!s) return "—";
@@ -74,10 +40,9 @@ function fmtDataCurta(s: string | null): string {
 
 export default function HomePage() {
   const { user, perms } = useAuth();
-  const branding = useBranding();
 
   const idUnidadeUser = user?.id_unidade_trabalho;
-  const agora = useMemo(() => new Date(), []);
+  const primeiroNome = (user?.nome ?? "").split(/\s+/)[0] || "—";
 
   // ---- Action counters --------------------------------------------------
   const assinaturasQ = useQuery({
@@ -122,11 +87,8 @@ export default function HomePage() {
   const alertasPendentes = alertasQ.data?.length ?? 0;
   const vencendoPrazo = vencendoQ.data?.length ?? 0;
 
-  const algumaPendencia =
-    assinaturasPendentes > 0 ||
-    alertasPendentes > 0 ||
-    vencendoPrazo > 0 ||
-    naoLidas > 0;
+  const totalPendencias = assinaturasPendentes + alertasPendentes + vencendoPrazo + naoLidas;
+  const algumaPendencia = totalPendencias > 0;
 
   // Com qualquer contador falho, "sem pendências" seria uma afirmação falsa:
   // o número pode existir e não ter carregado.
@@ -135,17 +97,47 @@ export default function HomePage() {
 
   return (
     <div className="space-y-7">
-      <GreetingSection
-        userName={user?.nome ?? "—"}
-        isSuperUser={perms?.is_super_usuario ?? false}
-        tenantName={branding?.nome ?? null}
-        agora={agora}
-        algumaPendencia={algumaPendencia}
-        algumaFalha={algumaFalha}
-      />
+      {/* === Menu principal — layout de referência: protótipo Figma
+          "Sistema - Aprimora" === */}
+      <div>
+        <p className="flex items-center gap-2.5 font-display text-sm font-semibold text-brand">
+          <HomeIcon className="h-5 w-5 text-foreground-subtle" aria-hidden="true" />
+          Menu principal
+        </p>
+        <h1 className="mt-5 border-b border-border-strong pb-2 text-xl font-normal text-brand">
+          Olá, {primeiroNome}
+          {perms?.is_super_usuario ? (
+            <span className="ml-3 align-middle font-sans text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
+              super usuário
+            </span>
+          ) : null}
+        </h1>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_17rem]">
+        <div className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <BotaoDoMenu href="/perfil" icon={UserRound} rotulo="Meu perfil" />
+            <BotaoDoMenu href="/modulos" icon={Layers} rotulo="Meus módulos" />
+            <BotaoDoMenu
+              href="#pendencias"
+              icon={Package}
+              rotulo="Minhas pendências"
+              contador={algumaPendencia ? totalPendencias : undefined}
+            />
+          </div>
+          <DocumentosAguardandoAssinatura
+            pendencias={assinaturasQ.data ?? []}
+            loading={assinaturasQ.isLoading}
+            error={assinaturasQ.isError}
+            onRetry={() => assinaturasQ.refetch()}
+          />
+        </div>
+        <MeusCompromissos />
+      </div>
 
       {/* Ações pendentes */}
-      <section>
+      <section id="pendencias" className="scroll-mt-4">
         <header className="mb-3 flex items-baseline justify-between">
           <h2 className="font-display text-lg font-semibold tracking-tight text-foreground">
             O que precisa de você
@@ -240,83 +232,147 @@ export default function HomePage() {
 }
 
 // ============================================================================
-// GreetingSection — Cabeçalho hero com saudação + meta
+// Menu principal — blocos do layout de referência (Figma "Sistema - Aprimora")
 // ============================================================================
 
-function GreetingSection({
-  userName,
-  isSuperUser,
-  tenantName,
-  agora,
-  algumaPendencia,
-  algumaFalha,
+/** Botão largo em gradiente da marca, com o ícone num disco mais escuro. */
+function BotaoDoMenu({
+  href,
+  icon: Icon,
+  rotulo,
+  contador,
 }: {
-  userName: string;
-  isSuperUser: boolean;
-  tenantName: string | null;
-  agora: Date;
-  algumaPendencia: boolean;
-  algumaFalha: boolean;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  rotulo: string;
+  /** Quantidade a destacar (pendências); omitido = sem selo. */
+  contador?: number;
 }) {
-  const primeiroNome = userName.split(/\s+/)[0] || userName;
-  const saudacao = saudacaoPorHora(agora);
-  const dataStr = dataExtensa(agora);
-
   return (
-    <section
-      className={cn(
-        "relative overflow-hidden rounded-2xl border border-border",
-        "bg-gradient-to-br from-brand/10 via-card to-surface-1",
-        "px-6 py-7 shadow-xs",
-      )}
+    <Link
+      href={href}
+      className="group flex h-14 items-center gap-3 rounded-2xl bg-gradient-to-r from-brand-dark to-brand-light px-3 text-primary-foreground shadow-brand transition-all duration-fast hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:hover:translate-y-0"
     >
-      {/* Mesh decoration sutil */}
-      <div
+      <span
+        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/20"
         aria-hidden="true"
-        className="pointer-events-none absolute -right-32 -top-32 h-72 w-72 rounded-full bg-brand/15 blur-3xl"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -bottom-20 -left-10 h-44 w-44 rounded-full bg-accent/10 blur-2xl"
-      />
+      >
+        <Icon className="h-5 w-5" />
+      </span>
+      <span className="min-w-0 flex-1 truncate font-display text-md font-medium">{rotulo}</span>
+      {contador !== undefined ? (
+        <span className="rounded-full bg-card px-2 py-0.5 text-xs font-semibold tabular-nums text-brand">
+          {contador}
+          <span className="sr-only"> pendências</span>
+        </span>
+      ) : null}
+    </Link>
+  );
+}
 
-      <div className="relative flex flex-wrap items-end justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-foreground-muted">
-            {dataStr}
-          </p>
-          <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            {saudacao},{" "}
-            <span className="bg-gradient-to-r from-brand to-accent bg-clip-text text-transparent">
-              {primeiroNome}
-            </span>
-            <span className="text-foreground-muted">.</span>
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-foreground-muted">
-            {algumaPendencia
-              ? "Algumas coisas precisam de você hoje. Comece por onde fizer sentido."
-              : algumaFalha
-                ? "Não foi possível carregar algumas pendências. Verifique os cartões abaixo."
-                : "Sem pendências críticas no momento. Bom trabalho."}
-          </p>
-        </div>
+function DocumentosAguardandoAssinatura({
+  pendencias,
+  loading,
+  error,
+  onRetry,
+}: {
+  pendencias: PendenciaAssinatura[];
+  loading: boolean;
+  error: boolean;
+  onRetry: () => void;
+}) {
+  const visiveis = pendencias.slice(0, 5);
+  return (
+    <section className="rounded-2xl bg-muted p-5">
+      <header className="flex items-baseline justify-between gap-3 border-b border-border-strong pb-3">
+        <h2 className="text-md font-medium text-foreground">Documentos aguardando assinatura</h2>
+        {pendencias.length > 0 ? (
+          <Link
+            href="/para-assinar"
+            className="shrink-0 text-xs font-medium text-brand underline-offset-2 hover:underline"
+          >
+            Ver {pendencias.length === 1 ? "o documento" : `os ${pendencias.length}`}
+          </Link>
+        ) : null}
+      </header>
 
-        <div className="flex flex-col items-end gap-1.5">
-          {isSuperUser && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-accent-dark">
-              <Sparkles className="h-3 w-3" aria-hidden="true" />
-              Super usuário
-            </span>
-          )}
-          {tenantName && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-[10px] font-medium text-brand">
-              <Building2 className="h-3 w-3" aria-hidden="true" />
-              {tenantName}
-            </span>
-          )}
+      {loading ? (
+        <p className="flex items-center gap-2 py-6 text-sm text-foreground-muted">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          Carregando…
+        </p>
+      ) : error ? (
+        <div className="flex items-center gap-3 py-6 text-sm text-foreground-muted">
+          Não foi possível carregar os documentos.
+          <button
+            type="button"
+            onClick={onRetry}
+            className="font-medium text-brand underline-offset-2 hover:underline"
+          >
+            Tentar de novo
+          </button>
         </div>
-      </div>
+      ) : visiveis.length === 0 ? (
+        <p className="py-6 text-sm text-foreground-muted">
+          Nenhum documento aguardando a sua assinatura.
+        </p>
+      ) : (
+        <table className="mt-3 w-full text-left text-sm">
+          <thead>
+            <tr className="font-display text-foreground">
+              <th scope="col" className="px-3 py-2 font-medium">Documento</th>
+              <th scope="col" className="px-3 py-2 font-medium">Solicitante</th>
+              <th scope="col" className="px-3 py-2 font-medium">Data do envio</th>
+              <th scope="col" className="px-3 py-2 font-medium">Nº do processo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visiveis.map((p) => (
+              <tr key={p.id_assinatura_anexo} className="text-foreground-muted even:[&>td]:bg-card">
+                <td className="rounded-l-full px-3 py-1.5">
+                  <Link href="/para-assinar" className="underline-offset-2 hover:underline">
+                    {p.anexo_descricao ?? `Anexo ${p.id_anexo}`}
+                  </Link>
+                </td>
+                <td className="px-3 py-1.5">{p.nome_solicitante}</td>
+                <td className="px-3 py-1.5 tabular-nums">
+                  {new Date(p.dt_inicio).toLocaleDateString("pt-BR")}
+                </td>
+                <td className="rounded-r-full px-3 py-1.5 tabular-nums">
+                  {p.numero_processo ?? "rascunho"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
+  );
+}
+
+/**
+ * "Meus compromissos" do layout de referência. O sistema ainda não tem agenda:
+ * o painel ocupa o lugar previsto e diz a verdade — não há compromisso porque
+ * não há de onde vir. Quando a agenda existir, é aqui que ela entra.
+ */
+function MeusCompromissos() {
+  return (
+    <aside className="flex flex-col rounded-2xl bg-muted p-4" aria-labelledby="compromissos-titulo">
+      <div className="flex items-center gap-3">
+        <span
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-dark text-primary-foreground"
+          aria-hidden="true"
+        >
+          <CalendarDays className="h-5 w-5" />
+        </span>
+        <h2 id="compromissos-titulo" className="text-md font-medium text-foreground">
+          Meus compromissos
+        </h2>
+      </div>
+      <div className="mt-4 flex min-h-[11rem] flex-1 items-center justify-center rounded-xl border border-border-strong px-4 text-center">
+        <p className="font-display text-md text-brand-dark">Sem compromissos pendentes</p>
+      </div>
+    </aside>
   );
 }
 

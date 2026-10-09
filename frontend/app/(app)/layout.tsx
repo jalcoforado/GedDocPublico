@@ -36,9 +36,15 @@ function Shell({ children }: { children: React.ReactNode }) {
         Pular para o conteúdo
       </a>
       <LoadingBar />
-      <Sidebar modulo={modulo} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      {/* Layout de referência (Figma): as telas transversais — início, perfil,
+          para assinar, dashboard — não têm barra lateral; a navegação delas é
+          o cabeçalho e o próprio "Menu principal". O menu lateral aparece
+          dentro de um módulo, onde há menu de módulo para mostrar. */}
+      {modulo ? (
+        <Sidebar modulo={modulo} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      ) : null}
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Header onOpenSidebar={() => setSidebarOpen(true)} />
+        <Header onOpenSidebar={modulo ? () => setSidebarOpen(true) : undefined} />
         <main
           id="conteudo"
           className="flex-1 overflow-y-auto p-4 sm:p-[var(--density-space)]"
