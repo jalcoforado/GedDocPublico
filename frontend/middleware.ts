@@ -3,7 +3,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { DESTINO_PADRAO, destinoSeguro } from "@/lib/destino-login";
 
 // `/brand` são os logos de tenant (`tenant.logo_url`), exibidos já na tela de login.
-const PUBLIC_PATHS = ["/login", "/cidadao", "/_next", "/favicon.ico", "/brand"];
+// `/validar` é a conferência pública de assinatura: o link `/validar/<codigo>`
+// vai impresso no documento assinado, para QUALQUER pessoa abrir. Ficou fora
+// desta lista e redirecionava para o login — o terceiro que recebia o documento
+// não tinha como conferi-lo. A API que a página consome já era pública.
+const PUBLIC_PATHS = ["/login", "/cidadao", "/validar", "/_next", "/favicon.ico", "/brand"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
