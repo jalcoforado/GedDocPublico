@@ -8,46 +8,63 @@ import { BuscaGlobal } from "@/components/BuscaGlobal";
 import { useCommandPalette } from "@/components/CommandPalette";
 import { ModuloSwitcher } from "@/components/ModuloSwitcher";
 import { NotificacoesBell } from "@/components/NotificacoesBell";
+import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
 
 interface HeaderProps {
-  onOpenSidebar: () => void;
+  /** Ausente nas telas sem barra lateral (início, perfil): some o hambúrguer. */
+  onOpenSidebar?: () => void;
 }
 
+/**
+ * Cabeçalho do sistema — layout de referência: protótipo Figma
+ * "Sistema - Aprimora". Faixa na cor da marca do município, com a marca dele
+ * num cartão branco, a busca em pílula e a conta à direita.
+ *
+ * Os controles da direita (módulos, notificações, conta) ficam DENTRO de um
+ * cartão branco, e não soltos sobre a faixa: eles e seus popovers são
+ * desenhados para fundo claro, e reestilizá-los para fundo de marca exigiria
+ * uma segunda versão de cada um.
+ */
 export function Header({ onOpenSidebar }: HeaderProps) {
   const cmd = useCommandPalette();
+  const { user } = useAuth();
   return (
     <header
       aria-label="Cabeçalho do sistema"
       className="
         sticky top-0 z-sticky
-        flex items-center gap-3 border-b border-border
-        bg-surface-1/85 px-4 py-2.5 pt-safe backdrop-blur-md
-        sm:px-6
+        flex items-center gap-3 bg-gradient-to-r from-brand-dark via-brand to-brand-light
+        px-4 py-3 pt-safe shadow-md
+        sm:gap-5 sm:px-6
       "
     >
-      {/* Mobile menu trigger */}
-      <button
-        type="button"
-        onClick={onOpenSidebar}
-        aria-label="Abrir menu"
-        className="
-          inline-flex h-10 w-10 items-center justify-center rounded-md
-          text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground
-          md:hidden
-        "
-      >
-        <Menu className="h-5 w-5" aria-hidden="true" />
-      </button>
+      {onOpenSidebar ? (
+        <button
+          type="button"
+          onClick={onOpenSidebar}
+          aria-label="Abrir menu"
+          className="
+            inline-flex h-10 w-10 items-center justify-center rounded-md
+            text-primary-foreground transition-colors duration-fast hover:bg-white/15
+            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white
+            md:hidden
+          "
+        >
+          <Menu className="h-5 w-5" aria-hidden="true" />
+        </button>
+      ) : null}
 
-      {/* Brand mark — visível em mobile (sidebar tem o logo grande no desktop) */}
       <Link
         href="/home"
-        className="flex items-center gap-2 md:hidden"
         aria-label="Início"
+        className="
+          flex h-11 shrink-0 items-center rounded-lg bg-card px-3 shadow-sm
+          transition-shadow duration-fast hover:shadow-md
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white
+        "
       >
-        <BrandMark />
-        <span className="text-sm font-semibold tracking-tight">Aprimora</span>
+        <MarcaDoMunicipio />
       </Link>
 
       {/* Busca global ocupa o centro */}
@@ -56,48 +73,46 @@ export function Header({ onOpenSidebar }: HeaderProps) {
       </div>
       <div className="flex-1 md:hidden" />
 
-      {/* Right cluster */}
-      <div className="flex items-center gap-1.5">
-        {/* Busca no mobile (fatia 3.4): abaixo de md o campo some — este
-            ícone mantém o palette a um toque. */}
-        <button
-          type="button"
-          onClick={() => cmd?.open()}
-          aria-label="Buscar"
-          className="inline-flex h-10 w-10 items-center justify-center rounded-md text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
-        >
-          <Search className="h-5 w-5" aria-hidden="true" />
-        </button>
-        <ModuloSwitcher />
-        <NotificacoesBell />
-        <AvatarDropdown />
+      <div className="flex items-center gap-3">
+        {user ? (
+          <div className="hidden min-w-0 text-right text-primary-foreground lg:block">
+            <div className="truncate font-display text-sm font-semibold leading-tight">
+              {user.nome}
+            </div>
+            <div className="truncate text-xs leading-tight opacity-90">{user.email}</div>
+          </div>
+        ) : null}
+        <div className="flex items-center gap-1 rounded-full bg-card px-1.5 py-0.5 shadow-sm">
+          {/* Busca no mobile (fatia 3.4): abaixo de md o campo some — este
+              ícone mantém o palette a um toque. */}
+          <button
+            type="button"
+            onClick={() => cmd?.open()}
+            aria-label="Buscar"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+          >
+            <Search className="h-5 w-5" aria-hidden="true" />
+          </button>
+          <ModuloSwitcher />
+          <NotificacoesBell />
+          <AvatarDropdown />
+        </div>
       </div>
     </header>
   );
 }
 
-/** Marca pequena: monogram do tenant ou ícone gradient. */
-function BrandMark() {
+/** Marca do município: a de login (horizontal) se houver, senão a quadrada. */
+function MarcaDoMunicipio() {
   const branding = useBranding();
-  if (branding?.logo_url) {
+  const src = branding?.logo_login_url ?? branding?.logo_url;
+  if (src) {
     // eslint-disable-next-line @next/next/no-img-element
-    return (
-      <img
-        src={branding.logo_url}
-        alt={branding.nome ?? "Aprimora"}
-        className="h-7 w-7 rounded-md object-cover"
-      />
-    );
+    return <img src={src} alt={branding?.nome ?? "Aprimora"} className="h-8 w-auto object-contain" />;
   }
   return (
-    <div
-      className="
-        inline-flex h-7 w-7 items-center justify-center rounded-md
-        bg-brand-gradient text-[11px] font-bold text-white shadow-brand
-      "
-      aria-hidden="true"
-    >
-      A
-    </div>
+    <span className="font-display text-sm font-semibold text-brand">
+      {branding?.nome ?? "Aprimora"}
+    </span>
   );
 }
