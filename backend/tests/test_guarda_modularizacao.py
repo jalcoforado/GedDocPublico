@@ -481,6 +481,7 @@ ROTAS_POR_MODULO: dict[tuple[str, str], str | tuple[str, ...]] = {
     ("GET", "/api/v2/marcadores"): "protocolo",
     ("GET", "/api/v2/processos"): "protocolo",
     ("GET", "/api/v2/processos/apensamentos/{apensamento_id}/termo.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/caixas"): "protocolo",
     ("GET", "/api/v2/processos/encaminhamentos/{encaminhamento_id}/comprovante.pdf"): "protocolo",
     ("GET", "/api/v2/processos/{processo_id}"): "protocolo",
     ("GET", "/api/v2/processos/{processo_id}/anexos/{anexo_processo_id}/termo-desentranhamento.pdf"): "protocolo",

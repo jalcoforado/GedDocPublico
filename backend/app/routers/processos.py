@@ -23,6 +23,8 @@ from ..schemas.complementacao_documental import (
 from ..schemas.processo import (
     ArquivarRequest,
     AtribuirResponsavelRequest,
+    CaixaProcesso,
+    CaixasContagem,
     CancelarEncaminhamentoRequest,
     ClassificarSigiloRequest,
     DestinosPermitidosOut,
@@ -54,7 +56,7 @@ from ..services.pdf_montagem import gerar_processo_completo_pdf
 from ..services.checklist_documentos import calcular_checklist
 from ..services import complementacao_documental as _comp_svc
 from ..services.complementacao_documental import ComplementacaoError
-from ..services.processos import get_processo_detail, list_processos
+from ..services.processos import contar_caixas, get_processo_detail, list_processos
 from ..schemas.ccd import TemporalidadeOut
 from ..services.temporalidade import calcular_temporalidade
 
@@ -198,6 +200,14 @@ async def list_endpoint(
         None,
         description="rascunho | protocolado | todos. Ausente = exclui rascunho (E3).",
     ),
+    caixa: CaixaProcesso | None = Query(
+        None,
+        description=(
+            "Caixa de trabalho de quem consulta: entrada | saida | analise | "
+            "externos | aguardando_assinatura | enviado_para_assinatura | "
+            "arquivados. Ausente = sem recorte."
+        ),
+    ),
 ) -> Paginated[ProcessoListItem]:
     items, total = await list_processos(
         db,
@@ -216,6 +226,7 @@ async def list_endpoint(
         favoritos=favoritos,
         id_marcador=id_marcador,
         situacao=situacao,
+        caixa=caixa,
         id_usuario_contexto=usuario.id,
         # A lotação PRINCIPAL. Lotação neste sistema tem duas representações
         # simultâneas — esta e a N:N `utils.usuario_unidade_trabalho` —, então
@@ -229,6 +240,35 @@ async def list_endpoint(
         id_unidade_contexto=usuario.id_unidade_trabalho,
     )
     return Paginated(items=items, total=total, page=page, page_size=page_size)
+
+
+# Literal ANTES da paramétrica `/{processo_id}`: o FastAPI casa na ordem de
+# declaração, e a paramétrica engoliria "caixas" e morreria em 422
+# (`tests/test_guarda_ordem_rotas.py`).
+@router.get(
+    "/caixas",
+    response_model=CaixasContagem,
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
+)
+async def caixas_endpoint(
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
+    usuario: Usuario = Depends(get_current_user),
+) -> CaixasContagem:
+    """Contadores das caixas de trabalho de quem consulta.
+
+    Mesmo gate e mesmo recorte de sigilo da listagem, de propósito: o número
+    de cada caixa é o `total` que `GET /processos?caixa=...` devolve. A
+    unidade é a lotação PRINCIPAL, como no `escopo` (ver o comentário lá).
+    """
+    return await contar_caixas(
+        db,
+        tenant_id=tenant_id,
+        niveis_permitidos=niveis,
+        id_usuario_contexto=usuario.id,
+        id_unidade_contexto=usuario.id_unidade_trabalho,
+    )
 
 
 @router.get(

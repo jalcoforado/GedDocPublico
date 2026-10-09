@@ -119,6 +119,45 @@ class EscopoProcesso(str, Enum):
     unidade_e_subordinadas = "unidade_e_subordinadas"
 
 
+class CaixaProcesso(str, Enum):
+    """Caixa de trabalho — o recorte "o que está comigo e em que estado".
+
+    Diferente de `EscopoProcesso`, que só diz DE QUEM é o processo: a caixa
+    cruza posse com o estado da tramitação. As cinco primeiras são da UNIDADE
+    de lotação principal de quem consulta; as duas de assinatura são da PESSOA.
+
+    As definições moram em `services/processos.py::_predicado_caixa`, e são
+    disjuntas onde o operador espera que sejam: um processo encaminhado e ainda
+    não recebido está na SAÍDA da origem e na ENTRADA do destino, e sai da
+    ANÁLISE da origem — embora `id_local_atual` continue apontando para ela
+    até o recebimento.
+
+    Não existe `recusados`: o sistema não tem recusa de encaminhamento, só
+    cancelamento por quem enviou. Uma caixa sempre zerada seria pior que
+    nenhuma.
+    """
+
+    entrada = "entrada"
+    saida = "saida"
+    analise = "analise"
+    externos = "externos"
+    aguardando_assinatura = "aguardando_assinatura"
+    enviado_para_assinatura = "enviado_para_assinatura"
+    arquivados = "arquivados"
+
+
+class CaixasContagem(BaseModel):
+    """Quantos processos em cada caixa — uma chave por `CaixaProcesso`."""
+
+    entrada: int = 0
+    saida: int = 0
+    analise: int = 0
+    externos: int = 0
+    aguardando_assinatura: int = 0
+    enviado_para_assinatura: int = 0
+    arquivados: int = 0
+
+
 class CotaAnexacaoOut(BaseModel):
     """F6 — orçamento de anexação do processo, mostrado ANTES de tentar
     anexar (barra de progresso), não só quando o upload já falhou."""

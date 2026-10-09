@@ -17,6 +17,7 @@ from ..models import (
     Acao,
     Anexo,
     AnexoProcesso,
+    AssinaturaAnexo,
     Assunto,
     Despacho,
     Encaminhamento,
@@ -25,14 +26,18 @@ from ..models import (
     Prioridade,
     Processo,
     ProcessoFavorito,
+    SolicitacaoAssinatura,
     TipoAnexo,
     TipoProcesso,
     UnidadeTrabalho,
     Usuario,
+    UsuarioAssinatura,
 )
 from ..schemas.marcador import MarcadorMini
 from ..schemas.processo import (
     AnexoNoProcesso,
+    CaixaProcesso,
+    CaixasContagem,
     CotaAnexacaoOut,
     DespachoOut,
     EscopoProcesso,
@@ -158,6 +163,150 @@ def _ids_unidade_e_subordinadas(tenant_id: int, raiz: int):
     return select(raiz_cte.c.id)
 
 
+def _predicado_caixa(
+    caixa: CaixaProcesso,
+    *,
+    tenant_id: int,
+    id_usuario: int | None,
+    id_unidade: int | None,
+):
+    """Condição SQL, sobre `Processo`, de "está na caixa X de quem consulta".
+
+    Fonte única das definições: a listagem filtra por ela e `contar_caixas`
+    conta por ela. Duas cópias divergiriam, e o sintoma seria o contador da
+    lateral dizer 18 e a lista abrir com 17.
+
+    Contexto ausente devolve NADA, pelo mesmo motivo registrado no bloco de
+    escopo de `list_processos`: `coluna == None` compila para `IS NULL`, e um
+    usuário sem lotação veria na "entrada" tudo o que não tem destino.
+
+    O que cada caixa lê, e por quê:
+
+    - Encaminhamento PENDENTE é `recebido = false AND cancelado = false`. O
+      `id_local_atual` só muda no recebimento (`acoes_processo.receber`), então
+      é o encaminhamento, e não o local, que diz que o processo está em
+      trânsito.
+    - ARQUIVADO é `Movimentacao.id_arquivamento IS NOT NULL`, o critério de
+      `acoes_processo.arquivar` e do dashboard. `Processo.ativo` não serve:
+      nenhum caminho o escreve.
+    """
+    pendente = and_(
+        Encaminhamento.id_processo == Processo.id,
+        Encaminhamento.tenant_id == tenant_id,
+        Encaminhamento.excluido.is_(False),
+        Encaminhamento.recebido.is_(False),
+        Encaminhamento.cancelado.is_(False),
+    )
+    em_transito = select(Encaminhamento.id).where(pendente).exists()
+    arquivado = (
+        select(Movimentacao.id)
+        .where(
+            Movimentacao.id_processo == Processo.id,
+            Movimentacao.tenant_id == tenant_id,
+            Movimentacao.id_arquivamento.is_not(None),
+            Movimentacao.excluido.is_(False),
+        )
+        .exists()
+    )
+
+    if caixa in (
+        CaixaProcesso.aguardando_assinatura,
+        CaixaProcesso.enviado_para_assinatura,
+    ):
+        if id_usuario is None:
+            return false()
+        # Mesmas condições de `assinaturas.listar_minhas_pendentes`: documento
+        # ainda não assinado, em solicitação viva. Muda só de QUEM é a ponta —
+        # quem assina (aguardando) ou quem pediu (enviado).
+        de_quem = (
+            UsuarioAssinatura.id_assinante == id_usuario
+            if caixa is CaixaProcesso.aguardando_assinatura
+            else SolicitacaoAssinatura.id_solicitante == id_usuario
+        )
+        return (
+            select(AssinaturaAnexo.id)
+            .join(
+                UsuarioAssinatura,
+                UsuarioAssinatura.id == AssinaturaAnexo.id_usuario_assinatura,
+            )
+            .join(
+                SolicitacaoAssinatura,
+                SolicitacaoAssinatura.id == UsuarioAssinatura.id_solicitacao_assinatura,
+            )
+            .where(
+                SolicitacaoAssinatura.id_processo == Processo.id,
+                AssinaturaAnexo.tenant_id == tenant_id,
+                AssinaturaAnexo.assinado.is_not(True),
+                AssinaturaAnexo.excluido.is_(False),
+                SolicitacaoAssinatura.cancelada.is_(False),
+                SolicitacaoAssinatura.excluido.is_(False),
+                de_quem,
+            )
+            .exists()
+        )
+
+    if id_unidade is None:
+        return false()
+    if caixa is CaixaProcesso.entrada:
+        return (
+            select(Encaminhamento.id)
+            .where(pendente, Encaminhamento.id_unidade_destino == id_unidade)
+            .exists()
+        )
+    if caixa is CaixaProcesso.saida:
+        return (
+            select(Encaminhamento.id)
+            .where(pendente, Encaminhamento.id_unidade_origem == id_unidade)
+            .exists()
+        )
+    na_unidade = Processo.id_local_atual == id_unidade
+    if caixa is CaixaProcesso.arquivados:
+        return and_(na_unidade, arquivado)
+    na_mesa = and_(na_unidade, ~em_transito, ~arquivado)
+    if caixa is CaixaProcesso.externos:
+        return and_(na_mesa, Processo.externo.is_(True))
+    return na_mesa  # analise
+
+
+async def contar_caixas(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    niveis_permitidos: list[str] | None = None,
+    id_usuario_contexto: int | None = None,
+    id_unidade_contexto: int | None = None,
+) -> CaixasContagem:
+    """Quantidade em cada caixa, numa consulta só (`count(*) FILTER`).
+
+    Respeita o que a listagem respeita sem filtro nenhum — tenant, sigilo e a
+    exclusão de rascunho —, para que o número da lateral seja o mesmo `total`
+    que a lista devolve ao abrir a caixa.
+    """
+    colunas = [
+        func.count()
+        .filter(
+            _predicado_caixa(
+                caixa,
+                tenant_id=tenant_id,
+                id_usuario=id_usuario_contexto,
+                id_unidade=id_unidade_contexto,
+            )
+        )
+        .label(caixa.value)
+        for caixa in CaixaProcesso
+    ]
+    stmt = (
+        select(*colunas)
+        .select_from(Processo)
+        .where(Processo.excluido.is_(False), Processo.situacao != "rascunho")
+    )
+    stmt = tenant_filter(stmt, Processo, tenant_id)
+    if niveis_permitidos is not None:
+        stmt = stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
+    linha = (await db.execute(stmt)).one()
+    return CaixasContagem(**{c.value: getattr(linha, c.value) for c in CaixaProcesso})
+
+
 async def list_processos(
     db: AsyncSession,
     *,
@@ -180,8 +329,21 @@ async def list_processos(
     # E3 — None (default) exclui rascunho, mesmo espírito de apenas_raiz em
     # E2: oculto até pedir. "rascunho" só rascunhos. "todos" sem filtro.
     situacao: str | None = None,
+    caixa: CaixaProcesso | None = None,
 ) -> tuple[list[ProcessoListItem], int]:
     base = _base_select(tenant_id, usuario_id=id_usuario_contexto)
+
+    # Caixa de trabalho. Soma-se a escopo e sigilo, como eles se somam entre
+    # si: nenhum afrouxa o outro.
+    if caixa is not None:
+        base = base.where(
+            _predicado_caixa(
+                caixa,
+                tenant_id=tenant_id,
+                id_usuario=id_usuario_contexto,
+                id_unidade=id_unidade_contexto,
+            )
+        )
 
     # Sigilo gradual — None = sem restrição (super-usuário); senão filtra pelos
     # níveis que a credencial do servidor alcança.
