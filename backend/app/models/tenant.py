@@ -24,6 +24,10 @@ class Tenant(Base):
     # destaque = acento e painel do login; lateral = fundo da barra lateral.
     cor_destaque: Mapped[str | None] = mapped_column(String(7), nullable=True)
     cor_lateral: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # 0132 — títulos: cor (`#RRGGBB`) e fonte, esta de uma lista fechada
+    # (`schemas/tenant.py::FONTES_DE_TITULO`), com CHECK no banco.
+    cor_titulos: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    fonte_titulos: Mapped[str | None] = mapped_column(String(20), nullable=True)
     logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # 0129 — identidade da tela de login: marca (qualquer proporção) e foto do
     # painel esquerdo. Definidas pela plataforma; o runtime municipal não tem

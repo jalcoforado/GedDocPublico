@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 
 import { api, type BrandingResponse } from "@/lib/api";
-import { aplicarTema, derivarTema, guardarTema } from "@/lib/tema-cores";
+import { aplicarFonte, aplicarTema, derivarTema, guardarTema } from "@/lib/tema-cores";
 import { useModoTema } from "@/lib/modo-tema";
 
 const BrandingContext = createContext<BrandingResponse | null>(null);
@@ -37,6 +37,7 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!branding) return;
     aplicarTema(document.documentElement, derivarTema(branding, theme));
+    aplicarFonte(document.documentElement, branding.fonte_titulos);
     guardarTema(branding);
   }, [branding, theme]);
 

@@ -20,6 +20,38 @@ export interface CoresDoTema {
   cor_primaria?: string | null;
   cor_destaque?: string | null;
   cor_lateral?: string | null;
+  /** Cor dos títulos de página. Ausente = cada título segue o seu padrão. */
+  cor_titulos?: string | null;
+  /** Chave de `FONTES`. Ausente ou desconhecida = a fonte padrão dos títulos. */
+  fonte_titulos?: string | null;
+}
+
+/**
+ * Fontes de título que o município pode escolher — lista FECHADA.
+ *
+ * `css` é o valor de `--font-display`: sempre uma `var()` de fonte que o
+ * `app/layout.tsx` hospeda, nunca um nome de fonte. `null` é a padrão (não há
+ * o que sobrescrever). Tem de casar com `FONTES_DE_TITULO` do backend e com o
+ * CHECK da migration 0132 — fonte nova pede arquivo, declaração no layout e
+ * migration.
+ */
+export const FONTES: { chave: string; rotulo: string; css: string | null }[] = [
+  { chave: "montserrat", rotulo: "Montserrat (padrão)", css: null },
+  { chave: "inter", rotulo: "Inter", css: "var(--font-sans)" },
+  { chave: "roboto_slab", rotulo: "Roboto Slab (com serifa)", css: "var(--font-roboto-slab)" },
+  { chave: "nunito", rotulo: "Nunito (arredondada)", css: "var(--font-nunito)" },
+];
+
+/** Valor de `--font-display` para a chave, ou `null` se for a padrão/desconhecida. */
+export function cssDaFonte(chave: string | null | undefined): string | null {
+  return FONTES.find((f) => f.chave === chave)?.css ?? null;
+}
+
+/** Aplica (ou remove) a fonte dos títulos num elemento. */
+export function aplicarFonte(el: HTMLElement, chave: string | null | undefined): void {
+  const css = cssDaFonte(chave);
+  if (css) el.style.setProperty("--font-display", css);
+  else el.style.removeProperty("--font-display");
 }
 
 /** Mapa `--token` → valor HSL sem `hsl()`, pronto para `style.setProperty`. */
@@ -36,6 +68,8 @@ const CONTRASTE_AA = 4.5;
 const BRANCO: Hsl = { h: 0, s: 0, l: 100 };
 // Fundo do modo escuro (`--bg` em `:root.dark`), contra o qual a marca clareia.
 const FUNDO_ESCURO: Hsl = { h: 158, s: 20, l: 8 };
+// Canvas do tema claro (`--bg` = `--neutral-25`): é sobre ele que os títulos leem.
+const FUNDO_CLARO: Hsl = { h: 120, s: 6, l: 97 };
 
 export function corValida(cor: string | null | undefined): cor is string {
   return typeof cor === "string" && HEX.test(cor);
@@ -186,6 +220,20 @@ export function derivarTema(cores: CoresDoTema, modo: ModoTema): TokensDeTema {
     );
   }
 
+  // Títulos: a cor escolhida, andando só o necessário para ler sobre o canvas
+  // do modo (escurece no claro, clareia no escuro). Os dois tokens recebem o
+  // mesmo valor — sem a cor, cada um volta ao seu padrão do `globals.css`
+  // (texto para o título de tela, marca para o do "Menu principal").
+  if (corValida(cores.cor_titulos)) {
+    const titulo = textoLegivel(
+      hexParaHsl(cores.cor_titulos),
+      modo === "light" ? FUNDO_CLARO : FUNDO_ESCURO,
+      modo === "light" ? -2 : 2,
+    );
+    tokens["--titulo"] = token(titulo);
+    tokens["--titulo-destaque"] = token(titulo);
+  }
+
   const lateral = corValida(cores.cor_lateral)
     ? hexParaHsl(cores.cor_lateral)
     : corValida(cores.cor_primaria)
@@ -248,6 +296,8 @@ export const TOKENS_DE_TEMA = [
   "--sidebar-border",
   "--sidebar-foreground",
   "--sidebar-muted-foreground",
+  "--titulo",
+  "--titulo-destaque",
 ] as const;
 
 /** Aplica o tema num elemento, removendo o que a paleta nova não define. */
@@ -268,7 +318,13 @@ export const STORAGE_TEMA = "aprimora.tema-cores";
 
 export function guardarTema(cores: CoresDoTema): void {
   try {
-    const temas = { light: derivarTema(cores, "light"), dark: derivarTema(cores, "dark") };
+    const temas = {
+      light: derivarTema(cores, "light"),
+      dark: derivarTema(cores, "dark"),
+      // Só a CHAVE vai para o cache; o script de `<head>` a traduz por uma
+      // tabela própria. Guardar o valor de CSS seria confiar no localStorage.
+      fonte: cssDaFonte(cores.fonte_titulos) ? cores.fonte_titulos : null,
+    };
     window.localStorage.setItem(STORAGE_TEMA, JSON.stringify(temas));
   } catch {
     // Armazenamento bloqueado: o tema só chega depois do fetch, como antes.
@@ -278,8 +334,12 @@ export function guardarTema(cores: CoresDoTema): void {
 /**
  * Roda no `<head>`, depois do `THEME_INIT_SCRIPT` (que já pôs a classe `dark`).
  * Só aceita nome começando por `--` e valor no formato de token HSL: o conteúdo
- * do `localStorage` não é confiável o bastante para virar CSS sem filtro.
+ * do `localStorage` não é confiável o bastante para virar CSS sem filtro. A
+ * fonte segue a mesma regra por outro caminho: do cache sai só a CHAVE, e o
+ * valor de CSS vem da tabela embutida aqui.
  */
 export const TEMA_CORES_INIT_SCRIPT = `(function(){try{var t=JSON.parse(localStorage.getItem(${JSON.stringify(
   STORAGE_TEMA,
-)})||"null");if(!t)return;var r=document.documentElement,m=t[r.classList.contains("dark")?"dark":"light"]||{};for(var k in m){if(/^--[a-z-]+$/.test(k)&&/^\\d{1,3} \\d{1,3}% \\d{1,3}%$/.test(m[k]))r.style.setProperty(k,m[k]);}}catch(e){}})();`;
+)})||"null");if(!t)return;var r=document.documentElement,m=t[r.classList.contains("dark")?"dark":"light"]||{};for(var k in m){if(/^--[a-z-]+$/.test(k)&&/^\\d{1,3} \\d{1,3}% \\d{1,3}%$/.test(m[k]))r.style.setProperty(k,m[k]);}var F=${JSON.stringify(
+  Object.fromEntries(FONTES.filter((f) => f.css).map((f) => [f.chave, f.css])),
+)};if(typeof t.fonte==="string"&&Object.prototype.hasOwnProperty.call(F,t.fonte))r.style.setProperty("--font-display",F[t.fonte]);}catch(e){}})();`;

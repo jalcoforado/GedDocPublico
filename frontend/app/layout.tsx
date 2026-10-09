@@ -26,6 +26,26 @@ const fontDisplay = localFont({
   weight: "100 900",
 });
 
+// Fontes de título OPCIONAIS do tema por município (`lib/tema-cores.ts::FONTES`).
+// `preload: false`: só o município que escolher uma delas a baixa — o
+// `@font-face` fica declarado, e o navegador busca o arquivo quando alguma
+// regra passa a usá-lo.
+const fontRobotoSlab = localFont({
+  src: "./fonts/roboto-slab.woff2",
+  variable: "--font-roboto-slab",
+  display: "swap",
+  weight: "100 900",
+  preload: false,
+});
+
+const fontNunito = localFont({
+  src: "./fonts/nunito.woff2",
+  variable: "--font-nunito",
+  display: "swap",
+  weight: "200 1000",
+  preload: false,
+});
+
 const fontMono = localFont({
   src: "./fonts/jetbrains-mono.woff2",
   variable: "--font-mono",
@@ -42,7 +62,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="pt-BR"
-      className={`${fontSans.variable} ${fontDisplay.variable} ${fontMono.variable}`}
+      className={`${fontSans.variable} ${fontDisplay.variable} ${fontMono.variable} ${fontRobotoSlab.variable} ${fontNunito.variable}`}
       suppressHydrationWarning
     >
       <head>

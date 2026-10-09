@@ -120,7 +120,7 @@ export function PageHeader({
             </div>
           )}
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold tracking-tight text-foreground">
+            <h1 className="text-xl font-semibold tracking-tight text-titulo">
               {title}
             </h1>
             {description && (

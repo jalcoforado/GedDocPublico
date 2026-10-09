@@ -1,24 +1,28 @@
 "use client";
 
-import { Palette, RotateCcw } from "lucide-react";
+import { Palette, RotateCcw, Type } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import {
+  FONTES,
   corValida,
+  cssDaFonte,
   derivarTema,
   hslParaHex,
   tokenParaHex,
-  type CoresDoTema as Cores,
 } from "@/lib/tema-cores";
 import { useModoTema } from "@/lib/modo-tema";
 
 
-type Campo = keyof Cores;
+/** Os campos de COR. A fonte é o outro campo do tema, e não é uma cor. */
+type CampoCor = "cor_primaria" | "cor_destaque" | "cor_lateral" | "cor_titulos";
+type Campo = CampoCor | "fonte_titulos";
 
-const CAMPOS: { campo: Campo; rotulo: string; ajuda: string; token: string }[] = [
+const CAMPOS: { campo: CampoCor; rotulo: string; ajuda: string; token: string }[] = [
   {
     campo: "cor_primaria",
     rotulo: "Cor primária",
@@ -37,6 +41,13 @@ const CAMPOS: { campo: Campo; rotulo: string; ajuda: string; token: string }[] =
     ajuda:
       "Fundo do menu. O texto clareia ou escurece sozinho para continuar legível. Em branco, acompanha a cor primária.",
     token: "--sidebar",
+  },
+  {
+    campo: "cor_titulos",
+    rotulo: "Cor dos títulos",
+    ajuda:
+      "Títulos das telas. Em branco, cada título mantém a cor padrão (texto ou cor primária).",
+    token: "--titulo-destaque",
   },
 ];
 
@@ -69,14 +80,19 @@ export function CoresDoTema({ valores, onChange, disabled }: CoresDoTemaProps) {
     );
   }, [theme]);
 
-  const previa = useMemo(() => derivarTema(valores, theme), [valores, theme]);
+  // Cores E fonte: a pré-visualização tem de mostrar o título como ele vai
+  // ficar, e a fonte é metade disso.
+  const previa = useMemo(() => {
+    const css = cssDaFonte(valores.fonte_titulos);
+    return { ...derivarTema(valores, theme), ...(css ? { "--font-display": css } : {}) };
+  }, [valores, theme]);
   const neutro = hslParaHex({ h: 0, s: 0, l: 50 });
 
   return (
     <div className="md:col-span-2">
       <div className="flex items-center gap-2">
         <Palette className="h-4 w-4 text-foreground-muted" aria-hidden="true" />
-        <h3 className="text-sm font-semibold">Cores do sistema</h3>
+        <h3 className="text-sm font-semibold">Cores e fonte do sistema</h3>
       </div>
       <p className="mt-0.5 text-xs text-foreground-muted">
         Definem a aparência do sistema para todos os usuários do município. A
@@ -134,11 +150,38 @@ export function CoresDoTema({ valores, onChange, disabled }: CoresDoTemaProps) {
               </div>
             );
           })}
+
+          <div>
+            <Label htmlFor="fonte_titulos">
+              <Type className="mr-1 inline h-3.5 w-3.5 text-foreground-muted" aria-hidden="true" />
+              Fonte dos títulos
+            </Label>
+            <Select
+              id="fonte_titulos"
+              value={valores.fonte_titulos}
+              onChange={(e) => onChange("fonte_titulos", e.target.value)}
+              disabled={disabled}
+              aria-describedby="fonte_titulos-ajuda"
+            >
+              {/* A padrão é a opção VAZIA: gravar "montserrat" seria o mesmo
+                  resultado, mas prenderia o município a ela se o padrão do
+                  produto mudar. */}
+              {FONTES.map((f) => (
+                <option key={f.chave} value={f.css ? f.chave : ""}>
+                  {f.rotulo}
+                </option>
+              ))}
+            </Select>
+            <p id="fonte_titulos-ajuda" className="mt-1 text-xs text-foreground-muted">
+              Vale para os títulos. O texto corrido e as tabelas continuam na
+              fonte padrão, que é a que lê bem em tamanho pequeno.
+            </p>
+          </div>
         </div>
 
         {/* Pré-visualização: os tokens derivados valem só dentro deste quadro. */}
         <div
-          aria-label="Pré-visualização das cores"
+          aria-label="Pré-visualização das cores e da fonte"
           role="img"
           className="flex overflow-hidden rounded-lg border border-border bg-background shadow-xs"
           style={previa as React.CSSProperties}
@@ -150,7 +193,9 @@ export function CoresDoTema({ valores, onChange, disabled }: CoresDoTemaProps) {
             <div className="rounded px-2 py-1 text-sidebar-muted">Frota</div>
           </div>
           <div className="min-w-0 flex-1 space-y-2.5 p-3">
-            <div className="text-xs font-semibold text-foreground">Exemplo de tela</div>
+            <div className="font-display text-sm font-semibold text-titulo-destaque">
+              Título da tela
+            </div>
             <div className="inline-flex rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-primary-foreground">
               Botão principal
             </div>

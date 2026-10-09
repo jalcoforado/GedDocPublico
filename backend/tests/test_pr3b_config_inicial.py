@@ -374,6 +374,8 @@ async def test_config_institucional_grava_pelo_orm_sob_aprimora_app(
         cor_primaria="#0055aa",
         cor_destaque="#e5451f",
         cor_lateral="#12305a",
+        cor_titulos="#7a1f1f",
+        fonte_titulos="roboto_slab",
         id_unidade_padrao=uid,
     )
     enviados = set(payload.model_dump(exclude_unset=True))
@@ -408,13 +410,16 @@ async def test_config_institucional_grava_pelo_orm_sob_aprimora_app(
             await s.execute(select(Tenant).where(Tenant.id == tenant.id))
         ).scalar_one()
     assert (
-        t.nome, t.sigla, t.cor_primaria, t.cor_destaque, t.cor_lateral, t.id_unidade_padrao
+        t.nome, t.sigla, t.cor_primaria, t.cor_destaque, t.cor_lateral,
+        t.cor_titulos, t.fonte_titulos, t.id_unidade_padrao
     ) == (
         "Prefeitura ORM",
         "PORM",
         "#0055aa",
         "#e5451f",
         "#12305a",
+        "#7a1f1f",
+        "roboto_slab",
         uid,
     ), "o UPDATE passou pelo grant mas os valores não chegaram à linha."
 
@@ -426,9 +431,38 @@ def test_cor_do_tema_so_aceita_hex_de_seis_digitos():
 
     assert TenantInstitucionalUpdate(cor_lateral="#12305A").cor_lateral == "#12305A"
     for ruim in ("12305a", "#123", "red", "#12305a; background:url(x)", "#12305g"):
-        for campo in ("cor_primaria", "cor_destaque", "cor_lateral"):
+        for campo in ("cor_primaria", "cor_destaque", "cor_lateral", "cor_titulos"):
             with pytest.raises(ValidationError):
                 TenantInstitucionalUpdate(**{campo: ruim})
+
+
+def test_fonte_dos_titulos_so_aceita_chave_da_lista():
+    """O valor vira `font-family` no navegador de todo usuário do município.
+    Só entra chave da lista fechada — nunca nome de fonte, e nunca CSS."""
+    from pydantic import ValidationError
+
+    from app.schemas.tenant import FONTES_DE_TITULO
+
+    for chave in FONTES_DE_TITULO:
+        assert TenantInstitucionalUpdate(fonte_titulos=chave).fonte_titulos == chave
+    for ruim in ("Comic Sans MS", "Roboto Slab", "roboto-slab", "arial; }", ""):
+        with pytest.raises(ValidationError):
+            TenantInstitucionalUpdate(fonte_titulos=ruim)
+
+
+async def test_check_do_banco_recusa_fonte_e_cor_fora_do_formato(admin_engine):
+    """A borda valida, mas o valor vira CSS: o banco garante por CHECK, para
+    quem escrever sem passar pelo schema (seed, SQL à mão)."""
+    from sqlalchemy.exc import IntegrityError
+
+    for coluna, valor in (("fonte_titulos", "comic_sans"), ("cor_titulos", "1234567")):
+        async with async_sessionmaker(admin_engine, expire_on_commit=False)() as s:
+            with pytest.raises(IntegrityError):
+                await s.execute(
+                    text(f"UPDATE aprimora_py.tenant SET {coluna} = :v WHERE id = 1"),
+                    {"v": valor},
+                )
+            await s.rollback()
 
 
 async def test_nup_config_grava_pelo_orm_sob_aprimora_app(admin_engine, app_session):
