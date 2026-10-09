@@ -1,24 +1,27 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { LogOut, Shield } from "lucide-react";
+import { Home as HomeIcon, LogOut, Shield } from "lucide-react";
 import Link from "next/link";
 
 import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
+import { MarcaDoMunicipio } from "@/components/MarcaDoMunicipio";
 import { api } from "@/lib/api";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { Providers } from "@/lib/providers";
 
 /**
- * Barra de saída sempre visível no launcher. Sem ela, um usuário sem nenhum
- * módulo (lista vazia) ou com falha de rede na `/modulos/me` ficava preso
- * numa tela sem Sidebar/Header e sem NENHUM jeito de sair pela interface — e
- * um platform admin sem transação no tenant perdia o link "Plataforma" que
- * via em `/home` antes desta fatia (ver Sidebar.tsx, mesmo critério
- * `admin-me`/`is_platform_admin`).
+ * Cabeçalho do launcher — mesma faixa do `Header` do sistema (layout de
+ * referência: protótipo Figma "Sistema - Aprimora"), mas PRÓPRIO, e de
+ * propósito: o `Header` monta busca, sino e troca de módulo, cada um com a
+ * sua chamada de API. Aqui a saída tem de aparecer mesmo com usuário sem
+ * nenhum módulo ou com a `/modulos/me` fora do ar — sem ela a pessoa ficava
+ * presa numa tela sem jeito de sair, e um platform admin sem transação no
+ * tenant perdia o link "Plataforma" (mesmo critério `admin-me` do Sidebar).
+ * Por isso este cabeçalho só depende do que já está em memória.
  */
-function BarraDeSaida() {
-  const { logout } = useAuth();
+function CabecalhoDoLauncher() {
+  const { logout, user } = useAuth();
   const adminMeQ = useQuery({
     queryKey: ["admin-me"],
     queryFn: () => api.admin.me(),
@@ -27,40 +30,52 @@ function BarraDeSaida() {
   });
   const isPlatformAdmin = adminMeQ.data?.is_platform_admin ?? false;
 
+  const acao =
+    "inline-flex h-10 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
   return (
-    <div className="absolute right-4 top-4 flex items-center gap-2">
-      {isPlatformAdmin && (
-        <Link
-          href="/admin/tenants"
-          className="
-            inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium
-            text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground
-          "
-        >
-          <Shield className="h-4 w-4" aria-hidden="true" />
-          Plataforma
-        </Link>
-      )}
-      <button
-        type="button"
-        onClick={() => logout()}
-        className="
-          inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium
-          text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground
-        "
+    <header
+      aria-label="Cabeçalho do sistema"
+      className="flex items-center gap-3 bg-gradient-to-r from-brand-dark via-brand to-brand-light px-4 py-3 pt-safe shadow-md sm:gap-5 sm:px-6"
+    >
+      <Link
+        href="/home"
+        aria-label="Início"
+        className="flex h-11 shrink-0 items-center rounded-lg bg-card px-3 shadow-sm transition-shadow duration-fast hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
       >
-        <LogOut className="h-4 w-4" aria-hidden="true" />
-        Sair
-      </button>
-    </div>
+        <MarcaDoMunicipio />
+      </Link>
+      <div className="flex-1" />
+      {user ? (
+        <div className="hidden min-w-0 text-right text-primary-foreground lg:block">
+          <div className="truncate font-display text-sm font-semibold leading-tight">
+            {user.nome}
+          </div>
+          <div className="truncate text-xs leading-tight opacity-90">{user.email}</div>
+        </div>
+      ) : null}
+      <div className="flex items-center gap-1 rounded-full bg-card px-1.5 py-0.5 shadow-sm">
+        {isPlatformAdmin && (
+          <Link href="/admin/tenants" className={acao}>
+            <Shield className="h-4 w-4" aria-hidden="true" />
+            Plataforma
+          </Link>
+        )}
+        <button type="button" onClick={() => logout()} className={acao}>
+          <LogOut className="h-4 w-4" aria-hidden="true" />
+          Sair
+        </button>
+      </div>
+    </header>
   );
 }
 
 /**
  * Layout do launcher (`/modulos`). Autenticado como o `(app)`, mas SEM
- * Sidebar nem Header de módulo — mostrar o menu de um módulo numa tela cuja
- * função é escolher o módulo seria circular. Mantém, porém, uma saída
- * sempre disponível (ver `BarraDeSaida`).
+ * Sidebar nem o Header de módulo — mostrar o menu de um módulo numa tela cuja
+ * função é escolher o módulo seria circular. Veste, porém, a mesma moldura do
+ * "Menu principal": faixa do município, trilha de volta e a assinatura do
+ * produto no rodapé.
  */
 function Shell({ children }: { children: React.ReactNode }) {
   const { loading, user } = useAuth();
@@ -75,19 +90,21 @@ function Shell({ children }: { children: React.ReactNode }) {
   if (!user) return null;
 
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-background">
-      {/* Fundo decorativo (UX-11.2): faixa superior com gradiente sutil da
-          marca + dot-grid, atrás de todo o conteúdo. aria-hidden + pointer-events
-          -none: é puro acabamento. */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-80">
-        <div className="absolute inset-0 bg-gradient-to-b from-brand/10 via-brand/[0.04] to-transparent" />
-        <div className="absolute inset-0 bg-dot-grid opacity-40 [mask-image:linear-gradient(to_bottom,black,transparent)]" />
-      </div>
-      <BarraDeSaida />
-      <main className="relative flex min-h-dvh flex-col items-center justify-center p-6 pb-16">
-        {children}
+    <div className="flex min-h-dvh flex-col bg-background">
+      <CabecalhoDoLauncher />
+      <main className="flex-1 p-4 sm:p-[var(--density-space)]">
+        <div className="mx-auto w-full max-w-7xl">
+          <Link
+            href="/home"
+            className="inline-flex items-center gap-2.5 rounded font-display text-sm font-semibold text-brand underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <HomeIcon className="h-5 w-5 text-foreground-subtle" aria-hidden="true" />
+            Menu principal
+          </Link>
+          <div className="mt-5">{children}</div>
+        </div>
       </main>
-      <AssinaturaAprimora className="absolute inset-x-0 bottom-5" />
+      <AssinaturaAprimora className="px-4 pb-5 pt-2" />
     </div>
   );
 }

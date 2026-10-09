@@ -29,7 +29,7 @@ import { descricaoDoModulo, iconeDoModulo } from "@/lib/modulos";
  */
 export default function Launcher() {
   const router = useRouter();
-  const { user, can } = useAuth();
+  const { can } = useAuth();
   const {
     data,
     isLoading,
@@ -90,18 +90,19 @@ export default function Launcher() {
     return <p className="text-foreground-muted">Entrando...</p>;
   }
 
-  const hoje = new Intl.DateTimeFormat("pt-BR", { dateStyle: "full" }).format(new Date());
-
+  // Layout de referência (protótipo Figma "Sistema - Aprimora"): mesmo título
+  // com linha do "Menu principal" e cartões na linguagem dos botões dele —
+  // ícone num disco em gradiente da marca, à esquerda do rótulo. A saudação
+  // saiu: ela já está no Menu principal, e aqui o título diz onde se está.
   return (
-    <div className="w-full max-w-4xl animate-fade-in">
-      <p className="mb-1 text-sm capitalize text-foreground-subtle">{hoje}</p>
-      <h1 className="mb-1 text-3xl font-semibold tracking-tight text-foreground">
-        {user?.nome ? `Bem-vindo(a), ${user.nome}` : "Escolha um módulo"}
+    <div className="animate-fade-in motion-reduce:animate-none">
+      <h1 className="border-b border-border-strong pb-2 text-xl font-normal text-brand">
+        Meus módulos
       </h1>
-      <p className="mb-8 text-md text-foreground-muted">
+      <p className="mt-3 text-sm text-foreground-muted">
         Selecione o módulo em que deseja trabalhar.
       </p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {ordenados.map((m) => {
           const Icone = iconeDoModulo(m.icone);
           // Módulo cujo slug não está em MENUS não some da tela: cai em
@@ -115,23 +116,23 @@ export default function Launcher() {
             <Link
               key={m.slug}
               href={raiz}
-              className="group flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-xs transition-all duration-base hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="group flex items-center gap-4 rounded-2xl bg-muted p-4 transition-all duration-fast hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:hover:translate-y-0"
             >
-              <div className="flex items-start justify-between">
-                <span className="inline-flex h-12 w-12 items-center justify-center rounded-lg bg-brand-gradient text-white shadow-brand">
-                  <Icone className="h-6 w-6" aria-hidden="true" />
+              <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-brand-dark to-brand-light text-primary-foreground shadow-brand">
+                <Icone className="h-6 w-6" aria-hidden="true" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-display text-md font-medium text-foreground">
+                  {m.nome}
                 </span>
-                <ArrowRight
-                  className="h-4 w-4 translate-x-0 text-foreground-subtle opacity-0 transition-all duration-fast group-hover:translate-x-1 group-hover:text-brand group-hover:opacity-100"
-                  aria-hidden="true"
-                />
-              </div>
-              <div>
-                <div className="text-md font-semibold text-foreground">{m.nome}</div>
-                <p className="mt-1 text-sm leading-relaxed text-foreground-muted">
+                <span className="mt-0.5 block text-sm text-foreground-muted">
                   {descricaoDoModulo(m.slug)}
-                </p>
-              </div>
+                </span>
+              </span>
+              <ArrowRight
+                className="h-4 w-4 shrink-0 text-foreground-subtle transition-transform duration-fast group-hover:translate-x-1 group-hover:text-brand motion-reduce:group-hover:translate-x-0"
+                aria-hidden="true"
+              />
             </Link>
           );
         })}
