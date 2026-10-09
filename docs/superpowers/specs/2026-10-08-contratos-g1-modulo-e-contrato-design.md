@@ -1,8 +1,8 @@
 # Contratos G1 — módulo e contrato (desenho)
 
 **Status:** desenho aprovado pelo Jorge em 2026-10-08 ("pode ir"), com as cinco recomendações da
-seção 10. **Backend implementado e NÃO executado contra banco** — ver a seção 12. Frontend por
-fazer.
+seção 10. **Backend e frontend implementados e NÃO executados** — nem banco, nem `tsc`, nem `vitest`. Ver a
+seção 12.
 **Autoridade:** este documento, sobre o *como* da fatia G1. O *o quê* está em
 [`2026-10-08-contratos-convenios-planejamento-escopo.md`](2026-10-08-contratos-convenios-planejamento-escopo.md)
 (seção 9, fatia G1; decisões D1–D11 na seção 10).
@@ -432,7 +432,7 @@ vai como aditivo de acréscimo, ou não vai. A resposta não muda a G1 — muda 
 
 ## 11. Ordem de implementação sugerida
 
-> Estado em 2026-10-08: itens 1 a 4 e 6 escritos (branch `feat/contratos-g1`); 5 e 7 por fazer.
+> Estado em 2026-10-08: os sete itens escritos, na branch `feat/contratos-g1`. Nenhum executado.
 
 Um PR só, mas nesta sequência de commits, cada um verde:
 
@@ -497,3 +497,30 @@ retorno do banco:
 Uma lacuna de teste declarada: o vínculo com processo sigiloso só tem o caminho da **recusa**
 coberto (com `assert_acesso_processo` trocado por um que nega). O caminho em que o usuário tem
 credencial exige um processo real e ficou para a G3.
+
+### 12.3 Frontend — escrito sem `tsc` e sem `vitest`
+
+A máquina não tem Node. As quatro telas, o menu, o ajuste do slug e os tipos de `api.ts` foram
+escritos lendo os componentes e as telas existentes, e **nunca passaram por type-check nem por
+teste**. É a parte da fatia com maior chance de erro na primeira execução do CI.
+
+O que foi feito:
+
+- `SLUGS_SEM_ROTA_LEGADA` em `lib/modulos.ts` e quatro asserções novas em
+  `__tests__/rotas-modulo.test.ts` (módulo com menu é reconhecido em `/m/<slug>`; slug sem rota
+  legada não aparece em `ROTA_MODULO`; a lista não guarda entrada morta; slug inventado continua
+  não sendo módulo);
+- `lib/menus/contratos.ts`, com os dois itens em `PERMISSOES_ESPERADAS`;
+- telas em `app/(app)/m/contratos/`: painel, lista, novo e detalhe;
+- o link para o detalhe usa o caminho **literal** — com a constante, a guarda de página órfã só
+  passaria por casar com `/novo`, verde pelo motivo errado;
+- "Novo fornecedor" dentro do formulário de contrato, só com identificação;
+- aviso na tela antiga de pagamentos quando o município tem o módulo novo.
+
+Fora desta fatia, e registrado para não se perder: **não há tela de edição do contrato**. Em
+rascunho, quem errou exclui e recria; em vigente, os campos livres (PNCP, processo, tipo de
+objeto) só se alteram pela API. Entra junto com a G2, que mexe nessa mesma tela.
+
+Dependência que o frontend herda: a lista de unidades vem de `/unidades-trabalho`, que exige a
+transação `unidadeTrabalho`, do módulo de administração. Um usuário só com `contrato` não consegue
+preencher a unidade contratante — é o mesmo aviso do `CLAUDE.md` sobre o primeiro grupo não-SU.

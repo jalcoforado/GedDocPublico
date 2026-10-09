@@ -1432,6 +1432,222 @@ export interface Contrato {
   atualizado_em: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Contratos (módulo `contratos`, G1) — espelham backend/app/schemas/contratos.py.
+//
+// `Contrato`, logo acima, é o cadastro SIMPLES de pagamentos (`/pagamentos/
+// contratos`) e continua existindo para o município sem o módulo. Os tipos
+// abaixo são os do módulo novo (`/contratos`); por isso o prefixo `Contrato…`
+// com sufixo, e não um segundo `Contrato`.
+//
+// Valores monetários e percentuais chegam como STRING (Decimal do backend).
+// ---------------------------------------------------------------------------
+export type SituacaoContrato = "RASCUNHO" | "VIGENTE" | "ENCERRADO" | "RESCINDIDO";
+export type SituacaoAditivo = "RASCUNHO" | "VIGENTE" | "ANULADO";
+export type NaturezaDuracaoContrato = "ESCOPO" | "CONTINUO";
+/** Códigos do campo 7 da tabela 511 do SIM (TCE-CE). */
+export type TipoAditivo = "AA" | "AR" | "AP" | "PA" | "PR" | "RE";
+export type TipoApostila = "REAJUSTE" | "REPACTUACAO" | "RAZAO_SOCIAL" | "DOTACAO" | "OUTRO";
+
+export const SITUACAO_CONTRATO_LABEL: Record<SituacaoContrato, string> = {
+  RASCUNHO: "Rascunho",
+  VIGENTE: "Vigente",
+  ENCERRADO: "Encerrado",
+  RESCINDIDO: "Rescindido",
+};
+
+export const TIPO_APOSTILA_LABEL: Record<TipoApostila, string> = {
+  REAJUSTE: "Reajuste",
+  REPACTUACAO: "Repactuação",
+  RAZAO_SOCIAL: "Razão social",
+  DOTACAO: "Dotação orçamentária",
+  OUTRO: "Outro",
+};
+
+/** Os derivados do contrato — calculados no backend, nunca gravados. */
+export interface ContratoCalculo {
+  valor_inicial: string;
+  valor_inicial_atualizado: string;
+  acrescimos: string;
+  supressoes: string;
+  renovacoes: string;
+  valor_atualizado: string;
+  vigencia_fim_atual: string;
+  percentual_acrescimo: string;
+  percentual_supressao: string;
+  limite_acrescimo: string;
+  limite_supressao: string;
+  acima_do_limite: boolean;
+  /** `null` fora de VIGENTE; negativo quando vencido. */
+  dias_para_vencer: number | null;
+}
+
+/** Linha da listagem (`GET /contratos`). */
+export interface ContratoResumo {
+  id: number;
+  numero: string;
+  exercicio: number;
+  situacao: SituacaoContrato;
+  id_fornecedor: number;
+  fornecedor_nome: string | null;
+  id_unidade: number;
+  unidade_nome: string | null;
+  objeto: string;
+  tipo_objeto: string | null;
+  valor_inicial: string;
+  valor_atualizado: string;
+  vigencia_inicio: string;
+  vigencia_fim_atual: string;
+  percentual_acrescimo: string;
+  acima_do_limite: boolean;
+  dias_para_vencer: number | null;
+}
+
+export interface ContratoAditivo {
+  id: number;
+  id_contrato: number;
+  sequencial: number;
+  numero: string;
+  exercicio: number;
+  tipo: TipoAditivo;
+  data_assinatura: string;
+  valor: string;
+  nova_vigencia_fim: string | null;
+  justificativa: string | null;
+  situacao: SituacaoAditivo;
+  motivo_anulacao: string | null;
+  pncp_id: string | null;
+  pncp_publicado_em: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+}
+
+export interface ContratoApostila {
+  id: number;
+  id_contrato: number;
+  sequencial: number;
+  tipo: TipoApostila;
+  data: string;
+  valor_delta: string | null;
+  indice: string | null;
+  descricao: string;
+  criado_em: string;
+}
+
+/** Detalhe (`GET /contratos/{id}`): contrato + derivados + atos. */
+export interface ContratoDetalhe {
+  id: number;
+  numero: string;
+  exercicio: number;
+  situacao: SituacaoContrato;
+  id_fornecedor: number;
+  fornecedor_nome: string | null;
+  id_unidade: number;
+  unidade_nome: string | null;
+  objeto: string;
+  /** Vigência e valor ORIGINAIS — os atuais estão em `calculo`. */
+  vigencia_inicio: string;
+  vigencia_fim: string;
+  valor_total: string;
+  categoria: CategoriaContrato | null;
+  data_celebracao: string | null;
+  tipo_objeto: string | null;
+  natureza_duracao: NaturezaDuracaoContrato | null;
+  reforma: boolean;
+  /** `null` também quando o usuário não tem credencial de sigilo para o processo. */
+  processo: { id: number; numero_processo: string | null } | null;
+  processo_numero: string | null;
+  processo_data_autuacao: string | null;
+  pncp_id: string | null;
+  pncp_publicado_em: string | null;
+  data_encerramento: string | null;
+  motivo_rescisao: string | null;
+  criado_em: string;
+  atualizado_em: string | null;
+  calculo: ContratoCalculo;
+  aditivos: ContratoAditivo[];
+  apostilas: ContratoApostila[];
+}
+
+export interface ContratoInput {
+  numero: string;
+  id_fornecedor: number;
+  id_unidade: number;
+  objeto: string;
+  vigencia_inicio: string;
+  vigencia_fim: string;
+  valor_total: string;
+  categoria: CategoriaContrato;
+  data_celebracao: string | null;
+  tipo_objeto: string | null;
+  natureza_duracao: NaturezaDuracaoContrato | null;
+  reforma: boolean;
+  processo_numero: string | null;
+  processo_data_autuacao: string | null;
+  pncp_id: string | null;
+  pncp_publicado_em: string | null;
+}
+
+export interface ContratoAditivoInput {
+  numero: string;
+  tipo: TipoAditivo;
+  data_assinatura: string;
+  valor: string;
+  nova_vigencia_fim: string | null;
+  justificativa: string | null;
+}
+
+export interface ContratoApostilaInput {
+  tipo: TipoApostila;
+  data: string;
+  valor_delta: string | null;
+  indice: string | null;
+  descricao: string;
+}
+
+export interface ContratosPainel {
+  vigentes: number;
+  rascunhos: number;
+  vencidos: number;
+  vencendo_30: number;
+  vencendo_60: number;
+  vencendo_90: number;
+  vencendo_120: number;
+  acima_do_limite: number;
+  valor_vigente_total: string;
+}
+
+export interface ContratoOpcao {
+  codigo: string;
+  rotulo: string;
+}
+
+export interface ContratoCatalogos {
+  tipos_objeto: ContratoOpcao[];
+  tipos_aditivo: ContratoOpcao[];
+}
+
+/** Fornecedor visto pelo módulo de contratos: identificação, sem dado bancário. */
+export interface ContratoFornecedor {
+  id: number;
+  tipo_pessoa: string;
+  cnpj_cpf: string;
+  nome: string;
+  situacao_cadastral: string;
+}
+
+export interface ContratosListParams {
+  page?: number;
+  page_size?: number;
+  situacao?: SituacaoContrato | "";
+  id_unidade?: number;
+  id_fornecedor?: number;
+  exercicio?: number;
+  q?: string;
+  /** aaaa-mm-dd — só contratos VIGENTES que vencem até a data. */
+  vence_ate?: string;
+}
+
 export interface Alcada {
   id: number;
   id_usuario: number;
@@ -3256,6 +3472,70 @@ export const api = {
       request<ResetSenhaResponse>(`/usuarios/${id}/resetar-senha`, {
         method: "POST",
       }),
+  },
+
+  // Módulo Contratos (G1). A listagem devolve `Paginated` — a tela consome
+  // `.items`; `tests/test_guarda_contrato_paginado.py` reprova tipar como array.
+  contratos: {
+    list: (params?: ContratosListParams) =>
+      request<Paginated<ContratoResumo>>(`/contratos${qs({ ...params })}`),
+    painel: () => request<ContratosPainel>("/contratos/resumo"),
+    catalogos: () => request<ContratoCatalogos>("/contratos/catalogos"),
+    fornecedores: (q?: string) =>
+      request<ContratoFornecedor[]>(`/contratos/fornecedores${qs({ q })}`),
+    criarFornecedor: (data: { tipo_pessoa: string; cnpj_cpf: string; nome: string }) =>
+      request<ContratoFornecedor>("/contratos/fornecedores", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    get: (id: number) => request<ContratoDetalhe>(`/contratos/${id}`),
+    create: (data: ContratoInput) =>
+      request<ContratoDetalhe>("/contratos", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: number, data: Partial<ContratoInput>) =>
+      request<ContratoDetalhe>(`/contratos/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) => request<void>(`/contratos/${id}`, { method: "DELETE" }),
+    assinar: (id: number) =>
+      request<ContratoDetalhe>(`/contratos/${id}/assinar`, { method: "POST" }),
+    encerrar: (id: number, data: { data_encerramento: string }) =>
+      request<ContratoDetalhe>(`/contratos/${id}/encerrar`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    rescindir: (id: number, data: { data_encerramento: string; motivo: string }) =>
+      request<ContratoDetalhe>(`/contratos/${id}/rescindir`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    aditivos: {
+      create: (id: number, data: ContratoAditivoInput) =>
+        request<ContratoAditivo>(`/contratos/${id}/aditivos`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      remove: (id: number, aditivoId: number) =>
+        request<void>(`/contratos/${id}/aditivos/${aditivoId}`, { method: "DELETE" }),
+      assinar: (id: number, aditivoId: number) =>
+        request<ContratoAditivo>(`/contratos/${id}/aditivos/${aditivoId}/assinar`, {
+          method: "POST",
+        }),
+      anular: (id: number, aditivoId: number, data: { motivo: string }) =>
+        request<ContratoAditivo>(`/contratos/${id}/aditivos/${aditivoId}/anular`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+    },
+    apostilas: {
+      create: (id: number, data: ContratoApostilaInput) =>
+        request<ContratoApostila>(`/contratos/${id}/apostilas`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      remove: (id: number, apostilaId: number) =>
+        request<void>(`/contratos/${id}/apostilas/${apostilaId}`, { method: "DELETE" }),
+    },
   },
 
   unidades: {

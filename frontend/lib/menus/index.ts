@@ -1,5 +1,6 @@
 import { menuAdministracao } from "./administracao";
 import { menuComum } from "./comum";
+import { menuContratos } from "./contratos";
 import { menuFrota } from "./frota";
 import { menuPagamentos } from "./pagamentos";
 import { canSeeItem } from "./permissoes";
@@ -16,6 +17,7 @@ export const MENUS: Record<string, MenuModulo> = {
   pagamentos: menuPagamentos,
   frota: menuFrota,
   transporte: menuTransporte,
+  contratos: menuContratos,
   administracao: menuAdministracao,
   comum: menuComum,
 };

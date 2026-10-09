@@ -48,6 +48,8 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/protocolo/cidades": { perm: "cidade" },
   "/m/protocolo/bairros": { perm: "endereco" },
   "/m/protocolo/enderecos": { perm: "endereco" },
+  "/m/contratos": { perm: "contrato" },
+  "/m/contratos/contratos": { perm: "contrato" },
   "/m/frota": { perm: "frota" },
   "/m/frota/veiculos": { perm: "frota" },
   "/m/frota/motoristas": { perm: "frota" },
@@ -112,7 +114,7 @@ describe("split dos menus", () => {
     // Sem isto, todas as asserções abaixo passam vacuamente.
     expect(TODOS.length).toBeGreaterThan(40);
     expect(Object.keys(MENUS).sort()).toEqual([
-      "administracao", "comum", "frota", "pagamentos", "protocolo", "transporte",
+      "administracao", "comum", "contratos", "frota", "pagamentos", "protocolo", "transporte",
     ]);
   });
 

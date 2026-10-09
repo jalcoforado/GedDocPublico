@@ -1,4 +1,4 @@
-import { Bus, FileText, LayoutGrid, Settings, Truck, Wallet } from "lucide-react";
+import { Bus, FileSignature, FileText, LayoutGrid, Settings, Truck, Wallet } from "lucide-react";
 import type React from "react";
 
 /**
@@ -41,10 +41,27 @@ export const ROTA_MODULO: ReadonlyArray<readonly [string, string]> = [
 /** Prefixo canônico das rotas de módulo desde a F3. */
 export const PREFIXO_MODULO = "/m";
 
-/** Slugs válidos, derivados do próprio mapa — não uma segunda lista a manter. */
-export const SLUGS_MODULO: ReadonlySet<string> = new Set(
-  ROTA_MODULO.map(([, slug]) => slug),
-);
+/**
+ * Módulos que nasceram DEPOIS da F3 e por isso nunca tiveram URL legada.
+ *
+ * `ROTA_MODULO` lista prefixos ANTIGOS; um módulo novo não tem nenhum. Sem esta
+ * lista, `/m/contratos` cairia como slug desconhecido: `moduloDoPathname`
+ * devolveria `null` e a Sidebar e o guard o tratariam como rota transversal.
+ *
+ * NÃO resolva isso pondo `["/contratos", "contratos"]` em `ROTA_MODULO`: aquilo
+ * declararia uma URL legada que nunca existiu, com 308 obrigatório em
+ * `next.config.js` e token novo na regex do nginx — para sempre.
+ */
+export const SLUGS_SEM_ROTA_LEGADA: readonly string[] = ["contratos"];
+
+/**
+ * Slugs válidos: os do mapa de rotas legadas mais os nascidos depois da F3.
+ * `__tests__/rotas-modulo.test.ts` reprova módulo com menu que fique de fora.
+ */
+export const SLUGS_MODULO: ReadonlySet<string> = new Set([
+  ...ROTA_MODULO.map(([, slug]) => slug),
+  ...SLUGS_SEM_ROTA_LEGADA,
+]);
 
 /**
  * Slug do módulo dono da rota, ou `null` se a rota é transversal.
@@ -90,6 +107,7 @@ export const ICONES_MODULO: Record<string, React.ComponentType<{ className?: str
   Truck,
   Bus,
   Settings,
+  FileSignature,
 };
 
 /**
@@ -105,6 +123,7 @@ export const DESCRICAO_MODULO: Record<string, string> = {
   frota: "Veículos, motoristas, solicitações e viagens.",
   transporte: "Permissionários, alvarás e transporte regulado.",
   administracao: "Usuários, grupos, organograma e configurações do órgão.",
+  contratos: "Contratos, aditivos, apostilas, vigências e limites legais.",
 };
 
 const DESCRICAO_GENERICA = "Acesse as funções deste módulo.";

@@ -8,7 +8,12 @@ import {
   KEYWORDS_POR_HREF,
 } from "@/components/CommandPalette";
 import { MENUS, type NavItem } from "@/lib/menus";
-import { ROTA_MODULO, SLUGS_MODULO } from "@/lib/modulos";
+import {
+  ROTA_MODULO,
+  SLUGS_MODULO,
+  SLUGS_SEM_ROTA_LEGADA,
+  moduloDoPathname,
+} from "@/lib/modulos";
 
 /**
  * Guardas estruturais da F3. Não testam comportamento — testam que ninguém
@@ -98,6 +103,45 @@ describe("F3 — nenhuma tela de módulo fora de /m", () => {
       desconhecidos,
       "pasta em `m/` que não é slug de `ROTA_MODULO` — `moduloDoPathname` devolveria null e o guard mandaria para o launcher",
     ).toEqual([]);
+  });
+});
+
+describe("Contratos G1 — módulo sem rota legada continua sendo módulo", () => {
+  // `SLUGS_MODULO` era derivado SÓ de `ROTA_MODULO`, que lista prefixos antigos.
+  // Um módulo nascido depois da F3 não tem prefixo antigo: ficava fora do
+  // conjunto, `moduloDoPathname("/m/<slug>")` devolvia `null`, e a Sidebar
+  // tratava o módulo inteiro como rota transversal — sem erro em lugar nenhum.
+
+  it("todo módulo com menu é reconhecido na forma canônica /m/<slug>", () => {
+    const naoReconhecidos = Object.keys(MENUS)
+      .filter((slug) => slug !== "comum")
+      .filter(
+        (slug) =>
+          moduloDoPathname(`/m/${slug}`) !== slug ||
+          moduloDoPathname(`/m/${slug}/qualquer/coisa`) !== slug,
+      );
+    expect(
+      naoReconhecidos,
+      "módulo com menu que `moduloDoPathname` não reconhece. Se nasceu depois da F3, " +
+        "acrescente o slug a `SLUGS_SEM_ROTA_LEGADA` em lib/modulos.ts — NÃO a `ROTA_MODULO`.",
+    ).toEqual([]);
+  });
+
+  it("slug sem rota legada não aparece em ROTA_MODULO", () => {
+    // Se aparecesse, passaria a exigir redirect 308 e token no nginx por uma
+    // URL que nunca existiu.
+    const comLegado = new Set(ROTA_MODULO.map(([, slug]) => slug));
+    expect(SLUGS_SEM_ROTA_LEGADA.filter((s) => comLegado.has(s))).toEqual([]);
+  });
+
+  it("slug sem rota legada tem menu — a lista não guarda entrada morta", () => {
+    expect(SLUGS_SEM_ROTA_LEGADA.filter((s) => !(s in MENUS))).toEqual([]);
+  });
+
+  it("slug inventado continua não sendo módulo", () => {
+    // Controle: a correção não pode ter virado "qualquer coisa depois de /m/".
+    expect(moduloDoPathname("/m/nao-existe")).toBeNull();
+    expect(moduloDoPathname("/m/contratosx")).toBeNull();
   });
 });
 

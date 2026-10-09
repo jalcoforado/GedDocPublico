@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
+import Link from "next/link";
 
 import { CrudPage } from "@/components/CrudPage";
 import { CATEGORIA_CONTRATO_LABEL, api, type Contrato } from "@/lib/api";
@@ -23,6 +24,11 @@ export default function ContratosPage() {
   // Defensivo: `ContratoCreate` já exige categoria desde a 0107/Task 2, então
   // isto só deveria aparecer para contratos legados sem backfill.
   const semCategoria = (contratosQ.data ?? []).filter((c) => !c.categoria);
+  // Contratos G1: com o módulo `contratos` contratado, este cadastro simples
+  // fica só para consulta — o backend recusa criar e alterar por aqui (409).
+  // O aviso é UX; quem barra é a API.
+  const modulosQ = useQuery({ queryKey: ["modulos-me"], queryFn: api.modulos });
+  const temModuloContratos = (modulosQ.data?.itens ?? []).some((m) => m.slug === "contratos");
 
   return (
     <CrudPage<Contrato>
@@ -34,7 +40,18 @@ export default function ContratosPage() {
       deleteFn={api.pagamentos.cadastros.contratos.remove}
       dialogSize="lg"
       toolbar={
-        semCategoria.length > 0 ? (
+        temModuloContratos ? (
+          <div className="mb-3 flex items-start gap-2 rounded-lg border border-info bg-info-soft px-3 py-2 text-sm text-info-soft-foreground">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>
+              Este município gerencia contratos no módulo Contratos e Convênios. Aqui a lista é
+              só para consulta: criar e alterar é por lá.{" "}
+              <Link href="/m/contratos/contratos" className="font-medium underline">
+                Abrir Contratos
+              </Link>
+            </span>
+          </div>
+        ) : semCategoria.length > 0 ? (
           <div className="mb-3 flex items-start gap-2 rounded-lg border border-warning bg-warning-soft px-3 py-2 text-sm text-warning-soft-foreground">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             <span>

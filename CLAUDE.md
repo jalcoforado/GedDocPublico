@@ -12,9 +12,10 @@ Módulos de negócio já entregues: protocolo/processos, anexos, assinatura elet
 
 ### Modularização — o sistema é contratável por módulo
 
-Desde 2026-07-30 (fatia F1, `c4dcb53`) o sistema é dividido em **cinco módulos contratáveis** —
-`protocolo`, `pagamentos`, `frota`, `transporte`, `administracao` — mais `comum`, que não é
-contratável e nunca é bloqueado. O catálogo é global (`aprimora_py.modulo`, `modulo_transacao`); a
+Desde 2026-07-30 (fatia F1, `c4dcb53`) o sistema é dividido em módulos contratáveis — hoje
+**seis**: `protocolo`, `pagamentos`, `frota`, `transporte`, `administracao` e, desde a migration
+`0132`, `contratos` (ver "O módulo Contratos") — mais `comum`, que não é contratável e nunca é
+bloqueado. O catálogo é global (`aprimora_py.modulo`, `modulo_transacao`); a
 contratação é por tenant (`aprimora_py.tenant_modulo`, **sem RLS** por decisão: é tabela de
 plataforma, escrita pelo platform admin operando sobre outros tenants). Como não há RLS, o `GRANT`
 é a única barreira, e desde a migration `0079` (`SEC-RLS-00C`) o papel do runtime municipal
@@ -68,13 +69,50 @@ Duas consequências que valem lembrar antes de mexer em permissão:
   (`require_modulo`) e sigilo (`assert_acesso_processo`) são independentes dele; nenhum substitui
   outro.
 
+### O módulo Contratos (G1)
+
+Gestão de contratos e convênios, em fatias. O plano está em
+`docs/superpowers/specs/2026-10-08-contratos-convenios-planejamento-escopo.md`; a G1, em
+`docs/superpowers/specs/2026-10-08-contratos-g1-modulo-e-contrato-design.md` — a seção 12 dele
+diz o que foi verificado e o que não foi.
+
+Quatro coisas a não quebrar:
+
+- **Valor e vigência do contrato são DERIVADOS.** `pagamentos.contrato.valor_total`,
+  `vigencia_inicio` e `vigencia_fim` são os **originais**, congelados na assinatura. O valor
+  atualizado e a vigência atual saem de `services.contratos.calcular`, a partir dos aditivos e
+  apostilas, e nunca são gravados. Não "conserte" um contrato aditivado dando UPDATE na coluna: a
+  base do percentual muda, o limite do art. 125 some e a remessa do SIM sai errada sem erro.
+  `tests/test_guarda_contrato_derivado.py` reprova.
+- **Aditivo e apostila são atos, não edição.** O aditivo usa os seis códigos da tabela 511 do SIM
+  do TCE-CE e guarda sempre a **diferença positiva**, inclusive em redução. Contrato e aditivo
+  dividem a numeração do exercício — o banco tem um índice por tabela; a regra cruzada só existe
+  no service.
+- **O limite do art. 125 sinaliza, não bloqueia.** Acima dele o aditivo exige justificativa. Não
+  transforme em recusa: há alteração consensual e hipótese excepcional que o sistema não julga.
+- **`/pagamentos/contratos` continua existindo**, para o município que tem pagamentos e não tem
+  este módulo. Com o módulo contratado, a **escrita** por lá devolve 409 — a regra é do router, de
+  propósito: o seed e a suíte de pagamentos criam contrato pelo service.
+
+As tabelas `contrato_aditivo` e `contrato_apostila` ficam no schema **`pagamentos`**, não num
+`contratos` próprio: a `0078` distribui grants e default privileges por lista fechada de schemas.
+Não crie schema novo para o módulo sem repetir aquilo.
+
+O módulo **não tem rota legada**. O slug entra em `SLUGS_SEM_ROTA_LEGADA` (`frontend/lib/modulos.ts`),
+**não** em `ROTA_MODULO` — lá ele passaria a exigir redirect 308 e token no nginx por uma URL que
+nunca existiu. Módulo novo daqui em diante segue o mesmo caminho.
+
+A migration `0132` **não contrata o módulo para ninguém**. Banco limpo recebe pelo `seed_bootstrap`;
+tenant existente, pelo `seed_demo_contratos` ou pela aba Módulos.
+
 ### A interface (fatia F2, PR #17, em `main` desde 2026-07-31)
 
 Até aqui a modularização era invisível: a Sidebar mostrava o menu inteiro e o usuário só descobria
 que não tinha o módulo ao clicar e tomar 403. A F2 é a fatia que o **usuário vê**.
 
-- **`frontend/lib/menus/`** — o `NAV` monolítico da Sidebar virou seis arquivos, um por módulo
-  (`protocolo`, `pagamentos`, `frota`, `transporte`, `administracao`, `comum`). É a **fonte única**
+- **`frontend/lib/menus/`** — o `NAV` monolítico da Sidebar virou um arquivo por módulo
+  (`protocolo`, `pagamentos`, `frota`, `transporte`, `administracao`, `comum`; `contratos` entrou
+  depois). É a **fonte única**
   de navegação: a Sidebar e o Ctrl+K (`CommandPalette`) consomem daqui, e `canSeeItem`
   (`lib/menus/permissoes.ts`) é compartilhado pelos dois — duas cópias divergiriam, e o sintoma
   seria item aparecendo num lugar e não no outro.
@@ -172,7 +210,7 @@ overlay `docker-compose.dev.yml`, que usa base absoluta.
 
 ### Seeds
 
-São **quatro**, com papéis distintos:
+São **cinco**, com papéis distintos:
 
 ```bash
 # 1. Pré-requisitos globais — roda a cada deploy, idempotente. Garante
@@ -199,6 +237,13 @@ docker exec aprimora-py-backend python -m app.cli.seed_demo_operacional apply --
 #    secretarias reais. O mapa da frota mostra 24h, então repita
 #    `--parte demo` no dia da apresentação.
 docker exec aprimora-py-backend python -m app.cli.seed_itaitinga apply --tenant sobral --allow-non-demo
+
+# 5. Contratos: contrata o módulo no tenant e cria 20 contratos fictícios, com
+#    aditivos e apostilas, distribuídos pelas unidades que existirem — por isso
+#    DEPOIS do seed_itaitinga. Passa pelos serviços. As datas são relativas ao
+#    dia, para o painel ter sempre contrato vencendo: `reset` e `apply` no dia
+#    da apresentação.
+docker exec aprimora-py-backend python -m app.cli.seed_demo_contratos apply --tenant sobral --allow-non-demo
 ```
 
 `--allow-non-demo` é obrigatório fora de um tenant `demo*`. Na VPS o alvo tem de ser **`sobral`**: o acesso é por IP e o `TenantMiddleware` resolve tudo para o tenant padrão, então dados em outro tenant ficariam invisíveis.
