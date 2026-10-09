@@ -179,7 +179,7 @@ async def delete_contrato(
     _: Usuario = Depends(require_permission(TRANSACAO, "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> None:
+):
     await svc.excluir(db, tenant_id=tenant_id, contrato_id=contrato_id)
 
 
@@ -259,7 +259,7 @@ async def delete_aditivo(
     _: Usuario = Depends(require_permission(TRANSACAO, "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> None:
+):
     await svc.excluir_aditivo(
         db, tenant_id=tenant_id, contrato_id=contrato_id, aditivo_id=aditivo_id)
 
@@ -313,6 +313,6 @@ async def delete_apostila(
     _: Usuario = Depends(require_permission(TRANSACAO, "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-) -> None:
+):
     await svc.excluir_apostila(
         db, tenant_id=tenant_id, contrato_id=contrato_id, apostila_id=apostila_id)
