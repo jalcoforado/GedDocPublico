@@ -6,10 +6,10 @@ import Link from "next/link";
 import { AvatarDropdown } from "@/components/AvatarDropdown";
 import { BuscaGlobal } from "@/components/BuscaGlobal";
 import { useCommandPalette } from "@/components/CommandPalette";
+import { MarcaDoMunicipio } from "@/components/MarcaDoMunicipio";
 import { ModuloSwitcher } from "@/components/ModuloSwitcher";
 import { NotificacoesBell } from "@/components/NotificacoesBell";
 import { useAuth } from "@/lib/auth";
-import { useBranding } from "@/lib/branding";
 
 interface HeaderProps {
   /** Ausente nas telas sem barra lateral (início, perfil): some o hambúrguer. */
@@ -99,20 +99,5 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         </div>
       </div>
     </header>
-  );
-}
-
-/** Marca do município: a de login (horizontal) se houver, senão a quadrada. */
-function MarcaDoMunicipio() {
-  const branding = useBranding();
-  const src = branding?.logo_login_url ?? branding?.logo_url;
-  if (src) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={src} alt={branding?.nome ?? "Aprimora"} className="h-8 w-auto object-contain" />;
-  }
-  return (
-    <span className="font-display text-sm font-semibold text-brand">
-      {branding?.nome ?? "Aprimora"}
-    </span>
   );
 }
