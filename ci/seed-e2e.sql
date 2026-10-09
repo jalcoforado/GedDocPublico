@@ -114,3 +114,15 @@ SELECT setval(pg_get_serial_sequence('protocolos.acao', 'id'), GREATEST((SELECT 
 
 SET session_replication_role = DEFAULT;
 COMMIT;
+
+-- Catálogo global de prioridades de encaminhamento. Espelha
+-- `seed_bootstrap.py::garantir_prioridades` (o e2e-assinatura NÃO roda o
+-- seed_bootstrap): sem prioridade ativa não se encaminha processo. Só semeia
+-- se o catálogo não tiver nenhuma ativa.
+INSERT INTO protocolos.prioridade (prioridade, fator, cor, ativo, excluido)
+SELECT v.prioridade, v.fator, v.cor, true, false
+FROM (VALUES ('Normal', 1, '#6B7280'), ('Alta', 2, '#D97706'), ('Urgente', 3, '#DC2626'))
+     AS v(prioridade, fator, cor)
+WHERE NOT EXISTS (
+    SELECT 1 FROM protocolos.prioridade WHERE ativo = true AND excluido = false
+);

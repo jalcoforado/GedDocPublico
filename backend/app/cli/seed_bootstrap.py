@@ -7,7 +7,9 @@ Idempotente. Cria (get_or_create):
   4. utils.grupo (nível 0, sistema do app_name) + utils.usuario_grupo (tenant 1)
   5. Segredo KEY_LOGIN_GLOBAL_JWT em utils.sistema_constante
   6. Catálogo global protocolos.acao (ABERTURA/ENCAMINHAMENTO/RECEBIMENTO) —
-     sem ele não se abre nem tramita processo
+     sem ele não se abre nem tramita processo — e protocolos.prioridade
+     (Normal/Alta/Urgente), sem o qual não se ENCAMINHA: o encaminhamento
+     exige uma prioridade, e o catálogo nasce vazio
   7. Contratação inicial de módulos do tenant (aprimora_py.tenant_modulo) —
      só se o tenant não tiver NENHUMA linha ainda; não ressuscita
      descontratação deliberada do platform admin (ver
@@ -278,6 +280,50 @@ async def garantir_workflows_transporte(db: AsyncSession) -> list[str]:
     return criadas
 
 
+# Prioridades padrão de encaminhamento: (nome, fator, cor). `fator` ordena
+# a lista da tela (`/catalogo/prioridades` devolve por fator crescente), então
+# a primeira opção do seletor é a Normal.
+PRIORIDADES_PADRAO: tuple[tuple[str, int, str], ...] = (
+    ("Normal", 1, "#6B7280"),
+    ("Alta", 2, "#D97706"),
+    ("Urgente", 3, "#DC2626"),
+)
+
+
+async def garantir_prioridades(db: AsyncSession) -> int:
+    """Garante o catálogo global `protocolos.prioridade`. Devolve quantas criou.
+
+    `protocolos.encaminhamento.id_prioridade` é NOT NULL com FK para cá, e a
+    tela de encaminhar lista as prioridades ATIVAS num seletor obrigatório. O
+    catálogo vem vazio do schema e nenhum seed o preenchia: em banco limpo
+    ninguém conseguia tramitar processo — a homologação passou meses sem um
+    único encaminhamento por causa disso, e o sintoma era só um seletor vazio.
+
+    Só semeia quando não há NENHUMA prioridade ativa. Se o município já tem as
+    suas (ou desativou alguma destas de propósito), nada é recriado — mesmo
+    critério de `garantir_contratacao_inicial`.
+    """
+    existe = (
+        await db.execute(
+            text(
+                "SELECT 1 FROM protocolos.prioridade "
+                "WHERE excluido = false AND ativo = true LIMIT 1"
+            )
+        )
+    ).first()
+    if existe is not None:
+        return 0
+    for nome, fator, cor in PRIORIDADES_PADRAO:
+        await db.execute(
+            text(
+                "INSERT INTO protocolos.prioridade (prioridade, fator, cor, ativo, excluido) "
+                "VALUES (:n, :f, :c, true, false)"
+            ),
+            {"n": nome, "f": fator, "c": cor},
+        )
+    return len(PRIORIDADES_PADRAO)
+
+
 async def seed(db: AsyncSession) -> dict:
     # 1. Catálogo global (sistema app=aprimora + nível 0). O stub
     # sistema_chamados.tipo_chamado (Task 1) deixa o trigger legado passar.
@@ -476,6 +522,8 @@ async def seed(db: AsyncSession) -> dict:
             )
         )
 
+    prioridades_criadas = await garantir_prioridades(db)
+
     vinculos_sistema = await garantir_sistema_transacao(db)
     resultado_modulos = await semear_modulos(db)
     contratados = await garantir_contratacao_inicial(db, tenant_id)
@@ -489,6 +537,7 @@ async def seed(db: AsyncSession) -> dict:
         "modulos": resultado_modulos,
         "modulos_contratados": contratados,
         "workflows_transporte_criados": workflows_transporte,
+        "prioridades_criadas": prioridades_criadas,
     }
 
 
