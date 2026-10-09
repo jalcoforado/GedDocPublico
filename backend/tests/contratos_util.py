@@ -39,7 +39,7 @@ def numero() -> str:
 
 async def provisionar(engine, prefixo: str = "ctg1"):
     """Tenant novo. `provisionar_tenant` contrata TODOS os módulos contratáveis
-    e ativos — inclusive `contratos`, desde a migration 0131."""
+    e ativos — inclusive `contratos`, desde a migration 0132."""
     slug = f"{prefixo}-{uuid.uuid4().hex[:8]}"
     async with sm(engine)() as s:
         tenant, _senha = await provisionar_tenant(

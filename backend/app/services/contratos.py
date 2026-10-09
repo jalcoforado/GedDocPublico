@@ -631,7 +631,7 @@ def _validar_data_fim(c: Contrato, data_encerramento: date) -> None:
 # ============================ aditivo ==========================================
 
 def validar_combinacao_aditivo(tipo: str, valor: Decimal, nova_vigencia_fim: date | None) -> None:
-    """A tabela do §2.2 do spec — a mesma dos CHECKs da migration 0133.
+    """A tabela do §2.2 do spec — a mesma dos CHECKs da migration 0134.
 
     Validar aqui dá mensagem que o usuário entende; o CHECK do banco é a
     última linha, para o que não passar por este service.

@@ -223,7 +223,8 @@ FK, índices `(tenant_id, …)`, `ENABLE + FORCE ROW LEVEL SECURITY`, as duas po
 ### 3.4 Migrations
 
 Três, na ordem. **Numeração: o próximo livre na hora de implementar.** `main` está em `0130`, e a
-branch `feat/tema-por-prefeitura` já usa `0131` — quem mesclar depois renumera.
+branch `feat/tema-por-prefeitura` já usa `0131` — quem mesclar depois renumera. (Foi o caso: o tema
+entrou em `main` primeiro e as três ficaram **`0132`, `0133` e `0134`**.)
 
 1. Catálogo: módulo `contratos` e transação `contrato`. `downgrade` remove a transação só se
    nenhum grupo a recebeu (padrão da `0074`).
@@ -490,7 +491,7 @@ retorno do banco:
 1. a subconsulta correlacionada de `_vigencia_atual_sql` (filtro e ordenação da listagem);
 2. `ContratoOut.model_validate(dict, from_attributes=True)` com o `Calculo` (dataclass) e os
    modelos ORM aninhados;
-3. o `downgrade` da `0131`, que apaga a transação só se nenhum grupo **e** nenhum sistema a
+3. o `downgrade` da `0132`, que apaga a transação só se nenhum grupo **e** nenhum sistema a
    referenciam — depois do `seed_bootstrap`, ela fica.
 
 Uma lacuna de teste declarada: o vínculo com processo sigiloso só tem o caminho da **recusa**

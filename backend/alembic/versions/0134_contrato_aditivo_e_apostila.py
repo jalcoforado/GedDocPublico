@@ -1,7 +1,7 @@
 """Contratos G1 — `pagamentos.contrato_aditivo` e `pagamentos.contrato_apostila`.
 
-Revision ID: 0133
-Revises: 0132
+Revision ID: 0134
+Revises: 0133
 Create Date: 2026-10-08
 
 Spec: `docs/superpowers/specs/2026-10-08-contratos-g1-modulo-e-contrato-design.md`
@@ -34,8 +34,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0133"
-down_revision: str | Sequence[str] | None = "0132"
+revision: str = "0134"
+down_revision: str | Sequence[str] | None = "0133"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

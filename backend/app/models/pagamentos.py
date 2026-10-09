@@ -134,7 +134,7 @@ class Contrato(Base):
     # Categoria para a fila cronológica (F3). Nullable de propósito: obrigar o
     # ente a classificar todo o histórico no dia do deploy travaria o módulo.
     categoria: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    # --- Contratos G1 (migration 0132) -------------------------------------
+    # --- Contratos G1 (migration 0133) -------------------------------------
     # `valor_total`, `vigencia_inicio` e `vigencia_fim` acima são OS ORIGINAIS,
     # congelados na assinatura. Valor atualizado e vigência atual são DERIVADOS
     # dos aditivos e apostilas (services/contratos.calcular) e nunca gravados
@@ -168,7 +168,7 @@ class Contrato(Base):
 
 
 class ContratoAditivo(Base):
-    """Termo aditivo (migration 0133). `tipo` usa os códigos do campo 7 da
+    """Termo aditivo (migration 0134). `tipo` usa os códigos do campo 7 da
     tabela 511 do SIM; `valor` é sempre a diferença POSITIVA, inclusive em
     redução. Só os de situação VIGENTE entram no cálculo do contrato."""
     __tablename__ = "contrato_aditivo"
@@ -196,7 +196,7 @@ class ContratoAditivo(Base):
 
 
 class ContratoApostila(Base):
-    """Apostilamento (migration 0133) — o que o art. 136 da Lei 14.133 dispensa
+    """Apostilamento (migration 0134) — o que o art. 136 da Lei 14.133 dispensa
     de termo aditivo. Sem rascunho: registra fato já ocorrido."""
     __tablename__ = "contrato_apostila"
     __table_args__ = {"schema": "pagamentos"}

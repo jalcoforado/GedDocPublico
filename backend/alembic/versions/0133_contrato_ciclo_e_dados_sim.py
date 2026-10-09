@@ -1,7 +1,7 @@
 """Contratos G1 — `pagamentos.contrato` ganha situação, exercício e os dados do SIM.
 
-Revision ID: 0132
-Revises: 0131
+Revision ID: 0133
+Revises: 0132
 Create Date: 2026-10-08
 
 Spec: `docs/superpowers/specs/2026-10-08-contratos-g1-modulo-e-contrato-design.md`
@@ -10,7 +10,7 @@ transação, não o nome do schema.
 
 O que muda de significado sem mudar de nome: `valor_total`, `vigencia_inicio` e
 `vigencia_fim` passam a ser **os originais**, congelados na assinatura. Valor
-atualizado e vigência atual são derivados dos aditivos e apostilas (0133) e
+atualizado e vigência atual são derivados dos aditivos e apostilas (0134) e
 nunca gravados aqui — `tests/test_guarda_contrato_derivado.py` trava.
 
 Backfill:
@@ -36,8 +36,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0132"
-down_revision: str | Sequence[str] | None = "0131"
+revision: str = "0133"
+down_revision: str | Sequence[str] | None = "0132"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

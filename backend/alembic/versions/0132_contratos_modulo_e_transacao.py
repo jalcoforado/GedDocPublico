@@ -1,7 +1,7 @@
 """Contratos G1 — módulo `contratos` no catálogo e transação `contrato`.
 
-Revision ID: 0131
-Revises: 0130
+Revision ID: 0132
+Revises: 0131
 Create Date: 2026-10-08
 
 Sexto módulo contratável. Spec:
@@ -27,8 +27,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0131"
-down_revision: str | Sequence[str] | None = "0130"
+revision: str = "0132"
+down_revision: str | Sequence[str] | None = "0131"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

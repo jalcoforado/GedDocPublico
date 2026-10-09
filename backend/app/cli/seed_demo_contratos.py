@@ -17,7 +17,7 @@ Decisões de projeto:
       comportamento de um seed que já tem teste, por causa de um que ainda não
       tem. Os helpers de sessão e de guarda são reaproveitados de lá.
     - **Contrata o módulo no tenant alvo** (decisão Q4 do spec): a migration
-      0131 não contrata ninguém, de propósito.
+      0132 não contrata ninguém, de propósito.
     - **Passa pelos serviços.** Cada contrato é criado em rascunho, assinado e
       aditado pelo mesmo caminho da tela — então situação, numeração, limite
       do art. 125 e cálculo saem coerentes, e um seed que quebre é sinal de
@@ -186,7 +186,7 @@ async def _contratar_modulo(tenant_id: int) -> bool:
         if modulo is None:
             print(
                 "[seed_demo_contratos] Módulo 'contratos' não está no catálogo. "
-                "Rode `alembic upgrade head` (migration 0131).", file=sys.stderr)
+                "Rode `alembic upgrade head` (migration 0132).", file=sys.stderr)
             sys.exit(5)
         vinculo = (await db.execute(select(TenantModulo).where(
             TenantModulo.tenant_id == tenant_id,

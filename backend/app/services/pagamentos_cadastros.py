@@ -384,7 +384,7 @@ async def criar_contrato(db: AsyncSession, *, tenant_id: int, payload: ContratoC
     await _numero_unico(db, tenant_id=tenant_id, numero=payload.numero)
     await obter_fornecedor(db, tenant_id=tenant_id, fornecedor_id=payload.id_fornecedor)
     await _validar_unidade(db, tenant_id=tenant_id, id_unidade=payload.id_unidade)
-    # `exercicio` (0132) é NOT NULL e este cadastro simples não tem data de
+    # `exercicio` (0133) é NOT NULL e este cadastro simples não tem data de
     # celebração: vale o ano do início da vigência, o mesmo critério do backfill.
     # `situacao` fica no default VIGENTE — por aqui não existe rascunho.
     c = Contrato(tenant_id=tenant_id, criado_em=_utcnow(),

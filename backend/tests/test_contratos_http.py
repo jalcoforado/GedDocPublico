@@ -236,7 +236,7 @@ async def test_sem_o_modulo_o_cadastro_de_pagamentos_segue_funcionando(admin_eng
     finally:
         await _limpar()
 
-    # Nasceu como o backfill da 0132 trata o legado: vigente, exercício pela vigência.
+    # Nasceu como o backfill da 0133 trata o legado: vigente, exercício pela vigência.
     async with sm(admin_engine)() as s:
         c = await svc.obter(s, tenant_id=tenant.id, contrato_id=criado["id"])
     assert (c.situacao, c.exercicio) == ("VIGENTE", 2026)
