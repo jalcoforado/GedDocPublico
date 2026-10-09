@@ -20,6 +20,7 @@ vi.mock("@/components/AvatarDropdown", () => ({
   AvatarDropdown: () => <div data-testid="avatar" />,
 }));
 vi.mock("@/lib/branding", () => ({ useBranding: () => null }));
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: null }) }));
 
 import { Header } from "@/components/Header";
 
