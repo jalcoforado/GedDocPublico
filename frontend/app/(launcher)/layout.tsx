@@ -96,7 +96,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <div className="mx-auto w-full max-w-7xl">
           <Link
             href="/home"
-            className="inline-flex items-center gap-2.5 rounded font-display text-sm font-semibold text-brand underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex items-center gap-2.5 rounded font-display text-sm font-semibold text-titulo-destaque underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <HomeIcon className="h-5 w-5 text-foreground-subtle" aria-hidden="true" />
             Menu principal

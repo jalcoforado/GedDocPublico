@@ -12,6 +12,9 @@ class BrandingResponse(BaseModel):
     # Tema do município (0131): com `cor_primaria`, o frontend deriva a paleta.
     cor_destaque: str | None = None
     cor_lateral: str | None = None
+    # Títulos (0132): cor e fonte (chave de uma lista fechada).
+    cor_titulos: str | None = None
+    fonte_titulos: str | None = None
     logo_url: str | None = None
     # Tela de login (0129): marca própria e foto do painel esquerdo.
     logo_login_url: str | None = None

@@ -96,7 +96,7 @@ export default function Launcher() {
   // saiu: ela já está no Menu principal, e aqui o título diz onde se está.
   return (
     <div className="animate-fade-in motion-reduce:animate-none">
-      <h1 className="border-b border-border-strong pb-2 text-xl font-normal text-brand">
+      <h1 className="border-b border-border-strong pb-2 text-xl font-normal text-titulo-destaque">
         Meus módulos
       </h1>
       <p className="mt-3 text-sm text-foreground-muted">

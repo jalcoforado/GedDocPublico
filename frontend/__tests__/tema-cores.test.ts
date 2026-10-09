@@ -6,10 +6,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  FONTES,
   STORAGE_TEMA,
   TEMA_CORES_INIT_SCRIPT,
   TOKENS_DE_TEMA,
+  aplicarFonte,
   aplicarTema,
+  cssDaFonte,
   contraste,
   derivarTema,
   guardarTema,
@@ -135,10 +138,106 @@ describe("derivarTema", () => {
 
   it("todo token que deriva está na lista usada para limpar", () => {
     const todos = derivarTema(
-      { cor_primaria: "#1b4f8f", cor_destaque: "#e5451f", cor_lateral: "#12305a" },
+      {
+        cor_primaria: "#1b4f8f",
+        cor_destaque: "#e5451f",
+        cor_lateral: "#12305a",
+        cor_titulos: "#7a1f1f",
+      },
       "dark",
     );
     expect(Object.keys(todos).sort()).toEqual([...TOKENS_DE_TEMA].sort());
+  });
+});
+
+describe("títulos", () => {
+  const CANVAS: Record<"light" | "dark", Hsl> = {
+    light: { h: 120, s: 6, l: 97 },
+    dark: { h: 158, s: 20, l: 8 },
+  };
+
+  it("a cor dos títulos lê sobre o canvas nos dois temas, seja qual for", () => {
+    // Do amarelo (ilegível no claro) ao azul-marinho (ilegível no escuro).
+    for (const cor of ["#ffd400", "#ffffff", "#f05a28", "#7a1f1f", "#12305a", "#000000"]) {
+      for (const modo of ["light", "dark"] as const) {
+        const tema = derivarTema({ cor_titulos: cor }, modo);
+        expect(
+          contraste(tokenComoHsl(tema["--titulo"]), CANVAS[modo]),
+          `${cor} ${modo}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("os dois papéis de título recebem a mesma cor", () => {
+    const tema = derivarTema({ cor_titulos: "#7a1f1f" }, "light");
+    expect(tema["--titulo"]).toBe(tema["--titulo-destaque"]);
+  });
+
+  it("cor que já lê é mantida — o ajuste não mexe no que não precisa", () => {
+    const tema = derivarTema({ cor_titulos: "#7a1f1f" }, "light");
+    expect(hslParaHex(tokenComoHsl(tema["--titulo"]))).toBe(
+      hslParaHex(tokenComoHsl(`${Math.round(hexParaHsl("#7a1f1f").h)} ${Math.round(hexParaHsl("#7a1f1f").s)}% ${Math.round(hexParaHsl("#7a1f1f").l)}%`)),
+    );
+  });
+
+  it("sem cor de títulos não há token — cada título fica no seu padrão", () => {
+    const tema = derivarTema({ cor_primaria: "#1b4f8f" }, "light");
+    expect(tema["--titulo"]).toBeUndefined();
+    expect(tema["--titulo-destaque"]).toBeUndefined();
+  });
+});
+
+describe("fonte dos títulos", () => {
+  it("a lista é fechada e todo valor de CSS é uma var() hospedada no layout", () => {
+    for (const f of FONTES) {
+      if (f.css !== null) expect(f.css, f.chave).toMatch(/^var\(--font-[a-z-]+\)$/);
+    }
+    // A padrão não sobrescreve nada: é a opção sem CSS.
+    expect(FONTES.filter((f) => f.css === null).map((f) => f.chave)).toEqual(["montserrat"]);
+  });
+
+  it("chave fora da lista não vira font-family", () => {
+    for (const ruim of ["Comic Sans MS", "roboto-slab", "arial; }", "constructor", "", null, undefined]) {
+      expect(cssDaFonte(ruim), String(ruim)).toBeNull();
+    }
+    expect(cssDaFonte("roboto_slab")).toBe("var(--font-roboto-slab)");
+  });
+
+  it("aplica a fonte escolhida e a remove ao voltar para a padrão", () => {
+    const el = document.documentElement;
+    aplicarFonte(el, "nunito");
+    expect(el.style.getPropertyValue("--font-display")).toBe("var(--font-nunito)");
+    aplicarFonte(el, "montserrat");
+    expect(el.style.getPropertyValue("--font-display")).toBe("");
+    aplicarFonte(el, "nunito");
+    aplicarFonte(el, null);
+    expect(el.style.getPropertyValue("--font-display")).toBe("");
+  });
+
+  it("o cache guarda só a CHAVE, e o script de <head> a traduz pela própria tabela", () => {
+    guardarTema({ cor_primaria: "#1b4f8f", fonte_titulos: "roboto_slab" });
+    const guardado = JSON.parse(window.localStorage.getItem(STORAGE_TEMA) ?? "{}");
+    expect(guardado.fonte).toBe("roboto_slab");
+    new Function(TEMA_CORES_INIT_SCRIPT)();
+    expect(document.documentElement.style.getPropertyValue("--font-display")).toBe(
+      "var(--font-roboto-slab)",
+    );
+  });
+
+  it("o script não transforma em CSS uma fonte que não esteja na tabela", () => {
+    for (const ruim of ["constructor", "__proto__", "var(--x); background:url(x)", 42, { a: 1 }]) {
+      document.documentElement.removeAttribute("style");
+      window.localStorage.setItem(
+        STORAGE_TEMA,
+        JSON.stringify({ light: {}, dark: {}, fonte: ruim }),
+      );
+      new Function(TEMA_CORES_INIT_SCRIPT)();
+      expect(
+        document.documentElement.style.getPropertyValue("--font-display"),
+        JSON.stringify(ruim),
+      ).toBe("");
+    }
   });
 });
 

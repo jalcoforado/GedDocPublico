@@ -63,6 +63,11 @@ const config: Config = {
           DEFAULT: "hsl(var(--assinatura) / <alpha-value>)",
           texto: "hsl(var(--assinatura-texto) / <alpha-value>)",
         },
+        // Títulos de página — o município pode trocar a cor (`cor_titulos`).
+        titulo: {
+          DEFAULT: "hsl(var(--titulo) / <alpha-value>)",
+          destaque: "hsl(var(--titulo-destaque) / <alpha-value>)",
+        },
         // Semantic surfaces
         background: "hsl(var(--background) / <alpha-value>)",
         foreground: "hsl(var(--foreground) / <alpha-value>)",

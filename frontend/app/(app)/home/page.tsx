@@ -100,11 +100,11 @@ export default function HomePage() {
       {/* === Menu principal — layout de referência: protótipo Figma
           "Sistema - Aprimora" === */}
       <div>
-        <p className="flex items-center gap-2.5 font-display text-sm font-semibold text-brand">
+        <p className="flex items-center gap-2.5 font-display text-sm font-semibold text-titulo-destaque">
           <HomeIcon className="h-5 w-5 text-foreground-subtle" aria-hidden="true" />
           Menu principal
         </p>
-        <h1 className="mt-5 border-b border-border-strong pb-2 text-xl font-normal text-brand">
+        <h1 className="mt-5 border-b border-border-strong pb-2 text-xl font-normal text-titulo-destaque">
           Olá, {primeiroNome}
           {perms?.is_super_usuario ? (
             <span className="ml-3 align-middle font-sans text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">

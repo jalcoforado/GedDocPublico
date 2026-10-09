@@ -159,6 +159,13 @@
        o TEXTO mantém a cor da marca intacta; escurecer o fundo a mudaria. */
     --accent-foreground: 24 75% 12%; /* 5.10:1 sobre --accent */
 
+    /* === Títulos de página ===
+       Dois papéis, dois padrões: o título de tela é texto; o do "Menu
+       principal" e do launcher é marca. O município pode trocar os dois de uma
+       vez por `cor_titulos` (`lib/tema-cores.ts`). */
+    --titulo: var(--foreground);
+    --titulo-destaque: var(--brand);
+
     /* Classes legacy bg-aprimora* vêm do tailwind.config direto de --brand. */
 
     /* === Assinatura do produto (Aprimora) ===
