@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
+import { AtalhosPublicos, CAMPO_LOGIN, CAMPO_SENHA_LOGIN } from "@/components/login/comum";
 import { PasswordInput } from "@/components/ui/password-input";
 import { api } from "@/lib/api";
 import { useBranding } from "@/lib/branding";
@@ -16,9 +17,6 @@ const DEV = process.env.NODE_ENV !== "production";
 // Só o E-MAIL é lembrado. Guardar a senha no navegador deixaria a credencial
 // em texto claro em `localStorage`, ao alcance de qualquer script da página.
 const CHAVE_EMAIL_LEMBRADO = "aprimora_login_email";
-
-const CAMPO =
-  "flex h-12 w-full rounded-full border border-border-strong bg-transparent px-6 text-base text-foreground shadow-input transition-colors duration-fast placeholder:text-muted-foreground hover:border-border-strong focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 function emailLembrado(): string | null {
   try {
@@ -204,7 +202,7 @@ export default function LoginPage() {
                   inputMode="email"
                   placeholder="E-mail"
                   required
-                  className={CAMPO}
+                  className={CAMPO_LOGIN}
                 />
               </div>
               <div>
@@ -218,9 +216,7 @@ export default function LoginPage() {
                   autoComplete="current-password"
                   placeholder="Senha"
                   required
-                  // `!`: as classes de raio/altura/fundo do componente vêm
-                  // depois no CSS e venceriam.
-                  className="!h-12 !rounded-full !border-border-strong !bg-transparent !px-6"
+                  className={CAMPO_SENHA_LOGIN}
                 />
               </div>
 
@@ -301,6 +297,8 @@ export default function LoginPage() {
                 Crie uma conta
               </Link>
             </p>
+
+            <AtalhosPublicos className="mt-8" />
           </div>
         </div>
 
