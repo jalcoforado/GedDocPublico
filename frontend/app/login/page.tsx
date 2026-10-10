@@ -3,7 +3,7 @@
 import { ShieldCheck, User, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -46,6 +46,16 @@ export default function LoginPage() {
   const [ajudaSenha, setAjudaSenha] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A foto entra com fade quando termina de carregar. Sem isso, em conexão
+  // lenta ela era pintada de cima para baixo, aos pedaços, por vários
+  // segundos. O `ref` cobre o caso em que o navegador já a tinha em cache e o
+  // `load` dispara antes de o React anexar o `onLoad`.
+  const fotoRef = useRef<HTMLImageElement>(null);
+  const [fotoPronta, setFotoPronta] = useState(false);
+  const fotoUrl = branding?.imagem_login_url ?? null;
+  useEffect(() => {
+    setFotoPronta(fotoRef.current?.complete === true && fotoRef.current.naturalWidth > 0);
+  }, [fotoUrl]);
 
   useEffect(() => {
     const salvo = emailLembrado();
@@ -99,25 +109,42 @@ export default function LoginPage() {
   return (
     <main className="grid min-h-dvh lg:grid-cols-2">
       {/* === Painel da cidade (esquerda) — só desktop ===
-          Empilhamento pela ORDEM do DOM (foto → véu → crédito), sem z-index
-          local: cada camada posicionada cobre a anterior. */}
+          Empilhamento pela ORDEM do DOM (foto → véus → crédito), sem z-index
+          local: cada camada posicionada cobre a anterior.
+
+          A foto vai em COR. Até 2026-10-10 era um duotone (tons de cinza
+          multiplicados pela cor do município), que só funcionava com cor
+          escura e saturada: com uma cor clara a cidade virava uma mancha
+          desbotada. A cor do município continua presente, como um véu que
+          sobe da base — onde não disputa com a foto. */}
       <aside
         className="relative hidden overflow-hidden lg:block"
         style={{ backgroundColor: tinta }}
       >
-        {branding?.imagem_login_url ? (
-          // Duotone na cor do município: a foto em tons de cinza é
-          // multiplicada pela cor de fundo (claros viram a cor, escuros ficam
-          // escuros).
+        {fotoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={branding.imagem_login_url}
+            ref={fotoRef}
+            src={fotoUrl}
             alt=""
-            className="absolute inset-0 h-full w-full object-cover opacity-90 mix-blend-multiply grayscale"
+            // É a maior imagem da tela: pede prioridade de rede.
+            fetchPriority="high"
+            decoding="async"
+            onLoad={() => setFotoPronta(true)}
+            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-slow motion-reduce:transition-none ${
+              fotoPronta ? "opacity-100" : "opacity-0"
+            }`}
           />
         ) : null}
+        {/* Véu na cor do município, da base até pouco mais da metade. */}
         <div
-          className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-white/10"
+          className="absolute inset-0 opacity-70"
+          style={{ backgroundImage: `linear-gradient(to top, ${tinta}, transparent 62%)` }}
+          aria-hidden="true"
+        />
+        {/* Faixa escura só no rodapé, para o crédito ler sobre qualquer cor. */}
+        <div
+          className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent"
           aria-hidden="true"
         />
         {branding?.imagem_login_credito ? (

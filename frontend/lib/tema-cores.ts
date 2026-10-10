@@ -24,7 +24,17 @@ export interface CoresDoTema {
   cor_titulos?: string | null;
   /** Chave de `FONTES`. Ausente ou desconhecida = a fonte padrão dos títulos. */
   fonte_titulos?: string | null;
+  /** Foto do painel do login. Não é do tema; entra aqui só para o cache local
+   * poder adiantar o download dela (ver `TEMA_CORES_INIT_SCRIPT`). */
+  imagem_login_url?: string | null;
 }
+
+/**
+ * Só caminho local de `/brand/` vira `<link rel="preload">`: o valor sai do
+ * localStorage, e um endereço qualquer ali faria o navegador de toda visita
+ * buscar um recurso de terceiro.
+ */
+export const FOTO_LOGIN_PERMITIDA = /^\/brand\/[A-Za-z0-9._-]+$/;
 
 /**
  * Fontes de título que o município pode escolher — lista FECHADA.
@@ -324,6 +334,13 @@ export function guardarTema(cores: CoresDoTema): void {
       // Só a CHAVE vai para o cache; o script de `<head>` a traduz por uma
       // tabela própria. Guardar o valor de CSS seria confiar no localStorage.
       fonte: cssDaFonte(cores.fonte_titulos) ? cores.fonte_titulos : null,
+      // A foto do login só chega pelo branding, depois do JS carregar e da API
+      // responder. Guardada aqui, o script de `<head>` já pede o download na
+      // visita seguinte, antes de qualquer JS.
+      foto:
+        cores.imagem_login_url && FOTO_LOGIN_PERMITIDA.test(cores.imagem_login_url)
+          ? cores.imagem_login_url
+          : null,
     };
     window.localStorage.setItem(STORAGE_TEMA, JSON.stringify(temas));
   } catch {
@@ -337,9 +354,12 @@ export function guardarTema(cores: CoresDoTema): void {
  * do `localStorage` não é confiável o bastante para virar CSS sem filtro. A
  * fonte segue a mesma regra por outro caminho: do cache sai só a CHAVE, e o
  * valor de CSS vem da tabela embutida aqui.
+ *
+ * Na tela de login adianta também o download da foto do painel, se o caminho
+ * guardado for um arquivo local de `/brand/`.
  */
 export const TEMA_CORES_INIT_SCRIPT = `(function(){try{var t=JSON.parse(localStorage.getItem(${JSON.stringify(
   STORAGE_TEMA,
 )})||"null");if(!t)return;var r=document.documentElement,m=t[r.classList.contains("dark")?"dark":"light"]||{};for(var k in m){if(/^--[a-z-]+$/.test(k)&&/^\\d{1,3} \\d{1,3}% \\d{1,3}%$/.test(m[k]))r.style.setProperty(k,m[k]);}var F=${JSON.stringify(
   Object.fromEntries(FONTES.filter((f) => f.css).map((f) => [f.chave, f.css])),
-)};if(typeof t.fonte==="string"&&Object.prototype.hasOwnProperty.call(F,t.fonte))r.style.setProperty("--font-display",F[t.fonte]);}catch(e){}})();`;
+)};if(typeof t.fonte==="string"&&Object.prototype.hasOwnProperty.call(F,t.fonte))r.style.setProperty("--font-display",F[t.fonte]);if(typeof t.foto==="string"&&${FOTO_LOGIN_PERMITIDA}.test(t.foto)&&location.pathname==="/login"){var l=document.createElement("link");l.setAttribute("rel","preload");l.setAttribute("as","image");l.setAttribute("href",t.foto);l.setAttribute("fetchpriority","high");document.head.appendChild(l);}}catch(e){}})();`;
