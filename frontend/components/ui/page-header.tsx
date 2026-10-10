@@ -4,6 +4,7 @@ import { ChevronRight, Home } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 
+import { useModuloAtual } from "@/lib/modulo-atual";
 import { cn } from "@/lib/utils";
 
 export interface BreadcrumbItem {
@@ -48,6 +49,12 @@ export function PageHeader({
   className,
 }: PageHeaderProps) {
   const isHero = variant === "hero";
+  const modulo = useModuloAtual();
+  // Dentro de um módulo a trilha é a do layout de referência: "Menu principal
+  // › Meus módulos › Módulo", e só depois as migalhas da própria página. A
+  // migalha que a página declarava para a raiz do módulo ("Frota Pública" →
+  // /m/frota) sai, porque a trilha já a traz.
+  const migalhas = (breadcrumbs ?? []).filter((bc) => !modulo || bc.href !== modulo.raiz);
 
   // document.title por rota (fatia 3.5): o PageHeader está em toda tela — é o
   // lugar natural do título da aba enquanto o PageShell (UX-04) não existe.
@@ -70,8 +77,58 @@ export function PageHeader({
         className,
       )}
     >
-      {/* Breadcrumb */}
-      {(breadcrumbs?.length ?? 0) > 0 && (
+      {/* Trilha do módulo — layout de referência (Figma "Sistema - Aprimora") */}
+      {modulo && (
+        <nav
+          aria-label="Trilha"
+          className="mb-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 pt-2 font-display text-sm text-titulo-destaque"
+        >
+          <Home className="mr-1 h-4 w-4 shrink-0 text-foreground-subtle" aria-hidden="true" />
+          {[
+            { label: "Menu principal", href: "/home" },
+            { label: "Meus módulos", href: "/modulos" },
+          ].map((bc) => (
+            <React.Fragment key={bc.href}>
+              <Link
+                href={bc.href}
+                className="rounded underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {bc.label}
+              </Link>
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
+            </React.Fragment>
+          ))}
+          {/* Sem migalhas da página, o módulo é o fim da trilha: fica em
+              negrito, como no protótipo. Com migalhas, o fim é a última. */}
+          <Link
+            href={modulo.raiz}
+            className={cn(
+              "rounded underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              migalhas.length === 0 && "font-bold",
+            )}
+          >
+            {modulo.nome}
+          </Link>
+          {migalhas.map((bc, i) => (
+            <React.Fragment key={i}>
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
+              {bc.href ? (
+                <Link
+                  href={bc.href}
+                  className="rounded underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {bc.label}
+                </Link>
+              ) : (
+                <span className={cn(i === migalhas.length - 1 && "font-bold")}>{bc.label}</span>
+              )}
+            </React.Fragment>
+          ))}
+        </nav>
+      )}
+
+      {/* Breadcrumb das telas FORA de módulo (transversais) */}
+      {!modulo && (breadcrumbs?.length ?? 0) > 0 && (
         <nav
           aria-label="Trilha"
           className="mb-2 flex items-center gap-1 pt-2 text-xs text-foreground-muted"
