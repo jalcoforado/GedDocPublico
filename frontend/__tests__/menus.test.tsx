@@ -113,6 +113,7 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/administracao/organograma": {},
   "/m/administracao/grupos": {},
   "/m/administracao/configuracoes": { perm: "usuario" },
+  "/m/administracao/aparencia": { perm: "usuario" },
   "/m/administracao/auditoria": {},
   "/m/administracao/jobs": {},
 };

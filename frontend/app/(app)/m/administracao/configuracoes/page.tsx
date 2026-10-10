@@ -14,7 +14,6 @@ import {
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { CoresDoTema } from "@/components/admin/CoresDoTema";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,11 +54,6 @@ interface InstitucionalForm {
   horario_atendimento: string;
   texto_boas_vindas_portal: string;
   logo_url: string;
-  cor_primaria: string;
-  cor_destaque: string;
-  cor_lateral: string;
-  cor_titulos: string;
-  fonte_titulos: string;
   id_unidade_padrao: number | null;
 }
 
@@ -73,11 +67,6 @@ const EMPTY_INSTITUCIONAL: InstitucionalForm = {
   horario_atendimento: "",
   texto_boas_vindas_portal: "",
   logo_url: "",
-  cor_primaria: "",
-  cor_destaque: "",
-  cor_lateral: "",
-  cor_titulos: "",
-  fonte_titulos: "",
   id_unidade_padrao: null,
 };
 
@@ -241,11 +230,6 @@ function InstitucionalSection({ canEdit }: { canEdit: boolean }) {
         horario_atendimento: t.horario_atendimento ?? "",
         texto_boas_vindas_portal: t.texto_boas_vindas_portal ?? "",
         logo_url: t.logo_url ?? "",
-        cor_primaria: t.cor_primaria ?? "",
-        cor_destaque: t.cor_destaque ?? "",
-        cor_lateral: t.cor_lateral ?? "",
-        cor_titulos: t.cor_titulos ?? "",
-        fonte_titulos: t.fonte_titulos ?? "",
         id_unidade_padrao: t.id_unidade_padrao ?? null,
       });
     }
@@ -259,7 +243,7 @@ function InstitucionalSection({ canEdit }: { canEdit: boolean }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tenant-me"] });
       qc.invalidateQueries({ queryKey: ["tenant-onboarding"] });
-      // As cores salvas passam a valer já, sem recarregar a página.
+      // Nome e logo aparecem no cabeçalho e no login: valem já.
       recarregarBranding();
       toast.success("Dados institucionais salvos.");
     },
@@ -281,11 +265,8 @@ function InstitucionalSection({ canEdit }: { canEdit: boolean }) {
       horario_atendimento: nullify(form.horario_atendimento),
       texto_boas_vindas_portal: nullify(form.texto_boas_vindas_portal),
       logo_url: nullify(form.logo_url),
-      cor_primaria: nullify(form.cor_primaria),
-      cor_destaque: nullify(form.cor_destaque),
-      cor_lateral: nullify(form.cor_lateral),
-      cor_titulos: nullify(form.cor_titulos),
-      fonte_titulos: nullify(form.fonte_titulos),
+      // As cores e a fonte NÃO vão neste payload: são da tela Aparência, e
+      // mandá-las daqui regravaria por cima o que foi salvo lá.
       id_unidade_padrao: form.id_unidade_padrao,
     });
   }
@@ -425,17 +406,16 @@ function InstitucionalSection({ canEdit }: { canEdit: boolean }) {
                   disabled={!canEdit}
                 />
               </div>
-              <CoresDoTema
-                valores={{
-                  cor_primaria: form.cor_primaria,
-                  cor_destaque: form.cor_destaque,
-                  cor_lateral: form.cor_lateral,
-                  cor_titulos: form.cor_titulos,
-                  fonte_titulos: form.fonte_titulos,
-                }}
-                onChange={(campo, valor) => set(campo, valor)}
-                disabled={!canEdit}
-              />
+              <p className="text-sm text-foreground-muted md:col-span-2">
+                As cores e a fonte do sistema ficam em{" "}
+                <Link
+                  href="/m/administracao/aparencia"
+                  className="font-medium text-brand underline-offset-2 hover:underline"
+                >
+                  Aparência
+                </Link>
+                .
+              </p>
               <div className="md:col-span-2">
                 <Label htmlFor="boas-vindas">Mensagem de boas-vindas do portal</Label>
                 <Textarea
