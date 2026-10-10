@@ -147,7 +147,7 @@ async def _setup_debito(engine, tenant_id: int, usuario_id: int):
         debito = await svc.criar_debito(
             s, tenant_id=tenant_id, usuario_id=usuario_id,
             payload=DebitoCreate(
-                numero_nf="NF123456", id_fornecedor=fornecedor.id,
+                numero_nf="NF123456", numero_ne="NE-2026-0001", id_fornecedor=fornecedor.id,
                 id_natureza=natureza.id, id_contrato=contrato.id,
                 id_fonte_recursos=fonte.id, id_unidade=unidade.id,
                 valor_total=Decimal("1000.00"), descricao="Débito de Teste",
@@ -339,10 +339,20 @@ async def test_autoridade_aprovar_success(admin_engine):
             usuario_id=validador_id, lock_version=debito.lock_version,
         )
 
-        # Autoridade aprova
-        result = await svc.autoridade_aprovar(
-            s, tenant_id=tenant.id, debito_id=debito.id,
-            usuario_id=autoridade_id, lock_version=debito.lock_version,
+        # Autoridade aprova: escolhe a conta pagadora da fonte do débito e
+        # precisa de alçada — é o mesmo caminho da autorização em lote.
+        from sqlalchemy import select
+        from app.models import ContaBancaria
+        from app.schemas.pagamentos import AlcadaCreate
+        from app.services import pagamentos_autorizacao as aut
+        conta_id = (await s.execute(select(ContaBancaria.id).where(
+            ContaBancaria.tenant_id == tenant.id,
+            ContaBancaria.id_fonte_recursos == debito.id_fonte_recursos))).scalar_one()
+        await cad.criar_alcada(s, tenant_id=tenant.id, payload=AlcadaCreate(
+            id_usuario=autoridade_id, id_natureza=None, valor_maximo="999999.00"))
+        result = await aut.autorizar_debito(
+            s, tenant_id=tenant.id, debito_id=debito.id, usuario_id=autoridade_id,
+            lock_version=debito.lock_version, id_conta_pagadora=conta_id,
         )
 
     assert result.situacao_tramitacao == "AUTORIZADA"

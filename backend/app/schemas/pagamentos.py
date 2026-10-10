@@ -479,6 +479,18 @@ class DecisaoJustificadaIn(DecisaoIn):
     justificativa: str = Field(min_length=1, max_length=255)
 
 
+class AutoridadeAprovarIn(DecisaoIn):
+    """Aprovação de UM débito pela autoridade, a partir do detalhe.
+
+    Carrega o mesmo que um grupo de `AutorizarLoteIn` (a fonte vem do próprio
+    débito): aprovar é escolher a conta pagadora e ordenar o pagamento. Sem a
+    conta não há ordem de pagamento, e débito autorizado sem ordem não é
+    pagável."""
+    id_conta_pagadora: int
+    permitir_saldo_insuficiente: bool = False
+    justificativa_excecao: str | None = Field(default=None, max_length=255)
+
+
 class SolicitarAjusteIn(DecisaoIn):
     """Solicitação de ajuste na despesa, a partir de qualquer etapa decisória
     (F2). Substitui o `justificativa` solto da F1 por um pedido estruturado:

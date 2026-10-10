@@ -23,7 +23,7 @@ from datetime import date
 from pydantic import BaseModel, Field
 
 from ..schemas.pagamentos import (
-    AnexoDebitoOut, AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
+    AnexoDebitoOut, AutoridadeAprovarIn, AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
     DebitoHistoricoOut, DebitoOut, DebitoUpdate, DecisaoIn, DecisaoJustificadaIn,
     ExcecaoCronologicaIn, ExcecaoCronologicaOut, FichaFonteOut,
     FilaAutorizacaoFonteGrupo, ChecklistDebitoItemOut, FilaLiberacaoGrupo,
@@ -640,14 +640,18 @@ async def validar(debito_id: int, payload: DecisaoIn, request: Request,
 
 
 @debitos_router.post("/{debito_id}/autoridade-aprovar", response_model=DebitoOut)
-async def autoridade_aprovar(debito_id: int, payload: DecisaoIn, request: Request,
+async def autoridade_aprovar(debito_id: int, payload: AutoridadeAprovarIn, request: Request,
                              usuario: Usuario = Depends(require_permission("pagamento_autorizar")),
                              tenant_id: int = Depends(require_tenant_id),
                              db: AsyncSession = Depends(get_db)):
-    """Autoridade competente aprova a despesa; segue para o pagador."""
-    d = await svc.autoridade_aprovar(db, tenant_id=tenant_id, debito_id=debito_id,
-                                     usuario_id=usuario.id, lock_version=payload.lock_version,
-                                     ip=_ip(request))
+    """Autoridade competente aprova a despesa e ordena o pagamento.
+
+    Mesmo caminho de `POST /pagamentos/autorizacoes` (lote), para um débito."""
+    d = await aut.autorizar_debito(
+        db, tenant_id=tenant_id, debito_id=debito_id, usuario_id=usuario.id,
+        lock_version=payload.lock_version, id_conta_pagadora=payload.id_conta_pagadora,
+        permitir_saldo_insuficiente=payload.permitir_saldo_insuficiente,
+        justificativa_excecao=payload.justificativa_excecao, ip=_ip(request))
     return (await _out(db, tenant_id, [d]))[0]
 
 

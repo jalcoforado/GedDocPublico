@@ -22,7 +22,7 @@ from .pagamentos_debitos import (
     PagamentoDebitoError, _registrar_transicao, listar_parcelas, obter_debito,
     validadores_do_debito,
 )
-from .pagamentos_guardas import assert_segregacao
+from .pagamentos_guardas import assert_lock_version, assert_segregacao
 
 # Traduções de status legado (§4.5) para as três dimensões — F5. Só o que
 # este arquivo precisa; não viraram funções compartilhadas em
@@ -121,6 +121,33 @@ async def _obter_conta_pagadora(db, *, tenant_id: int, conta_id: int) -> ContaBa
             f"Conta {conta_id} não admite pagamento (modo '{c.modo_movimentacao}').",
             status.HTTP_422_UNPROCESSABLE_ENTITY)
     return c
+
+
+async def autorizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
+                           usuario_id: int, lock_version: int, id_conta_pagadora: int,
+                           permitir_saldo_insuficiente: bool = False,
+                           justificativa_excecao: str | None = None,
+                           ip: str | None = None) -> Debito:
+    """Autoridade aprova UM débito a partir do detalhe — um lote de um.
+
+    Existe para que haja uma porta só. Até 2026-10-10 o detalhe chamava
+    `pagamentos_debitos.autoridade_aprovar`, que levava o débito a AUTORIZADA
+    sem conta pagadora, sem ordem de pagamento e sem conferir alçada, saldo,
+    empenho ou situação do fornecedor. O débito ficava autorizado e impagável,
+    e `autorizar_lote` já não o aceitava (só parte de AGUARDANDO_AUTORIDADE).
+
+    Tudo o que decide está em `autorizar_lote`; aqui só se confere a versão
+    otimista, que a tela de lote não usa."""
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id, for_update=True)
+    assert_lock_version(d, esperado=lock_version)
+    await autorizar_lote(
+        db, tenant_id=tenant_id, usuario_id=usuario_id, ip=ip,
+        grupos=[GrupoAutorizacaoIn(
+            id_fonte=d.id_fonte_recursos, id_conta_pagadora=id_conta_pagadora,
+            debito_ids=[d.id], permitir_saldo_insuficiente=permitir_saldo_insuficiente,
+            justificativa_excecao=justificativa_excecao)])
+    await db.refresh(d)
+    return d
 
 
 async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
