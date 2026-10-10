@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   FONTES,
+  FOTO_LOGIN_PERMITIDA,
   STORAGE_TEMA,
   TEMA_CORES_INIT_SCRIPT,
   TOKENS_DE_TEMA,
@@ -30,6 +31,8 @@ function tokenComoHsl(valor: string): Hsl {
 }
 
 afterEach(() => {
+  document.head.querySelectorAll('link[rel="preload"][as="image"]').forEach((l) => l.remove());
+  window.history.replaceState(null, "", "/");
   window.localStorage.clear();
   document.documentElement.removeAttribute("style");
   document.documentElement.classList.remove("dark");
@@ -289,5 +292,47 @@ describe("script de <head>", () => {
     expect(rodar).not.toThrow();
     window.localStorage.setItem(STORAGE_TEMA, "{nao-e-json");
     expect(rodar).not.toThrow();
+  });
+});
+
+describe("pré-carga da foto do login", () => {
+  const preloads = () =>
+    Array.from(document.head.querySelectorAll('link[rel="preload"][as="image"]')).map((l) =>
+      l.getAttribute("href"),
+    );
+
+  it("na tela de login, o script de <head> já pede a foto guardada", () => {
+    window.history.replaceState(null, "", "/login");
+    guardarTema({ cor_primaria: "#1b4f8f", imagem_login_url: "/brand/itaitinga-matriz.webp" });
+    new Function(TEMA_CORES_INIT_SCRIPT)();
+    expect(preloads()).toEqual(["/brand/itaitinga-matriz.webp"]);
+  });
+
+  it("fora do login não adianta download nenhum", () => {
+    window.history.replaceState(null, "", "/home");
+    guardarTema({ imagem_login_url: "/brand/itaitinga-matriz.webp" });
+    new Function(TEMA_CORES_INIT_SCRIPT)();
+    expect(preloads()).toEqual([]);
+  });
+
+  it("só arquivo local de /brand/ é aceito — nada de endereço de terceiro", () => {
+    for (const ruim of [
+      "https://evil.example/x.jpg",
+      "//evil.example/x.jpg",
+      "/brand/../api/v2/x",
+      "/brand/a b.jpg",
+      "/outra/pasta.jpg",
+      "javascript:alert(1)",
+    ]) {
+      expect(FOTO_LOGIN_PERMITIDA.test(ruim), ruim).toBe(false);
+      // Nem ao guardar…
+      guardarTema({ imagem_login_url: ruim });
+      expect(JSON.parse(window.localStorage.getItem(STORAGE_TEMA) ?? "{}").foto).toBeNull();
+      // …nem se o localStorage tiver sido adulterado por fora.
+      window.history.replaceState(null, "", "/login");
+      window.localStorage.setItem(STORAGE_TEMA, JSON.stringify({ light: {}, dark: {}, foto: ruim }));
+      new Function(TEMA_CORES_INIT_SCRIPT)();
+      expect(preloads(), ruim).toEqual([]);
+    }
   });
 });
