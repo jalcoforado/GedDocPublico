@@ -1,4 +1,4 @@
-import { Building2, Cog, Settings, Shield, Users } from "lucide-react";
+import { Building2, Cog, Palette, Settings, Shield, Users } from "lucide-react";
 
 import type { MenuModulo } from "./tipos";
 
@@ -20,6 +20,9 @@ export const menuAdministracao: MenuModulo = {
         { label: "Organograma", href: "/m/administracao/organograma", icon: Building2 },
         { label: "Grupos & Permissões", href: "/m/administracao/grupos", icon: Shield },
         { label: "Configurações", href: "/m/administracao/configuracoes", icon: Settings, perm: "usuario" },
+        // Cores e fonte do sistema. Mesma permissão de Configurações, de onde
+        // o editor saiu: lá ele ficava no meio do formulário de identidade.
+        { label: "Aparência", href: "/m/administracao/aparencia", icon: Palette, perm: "usuario" },
         { label: "Auditoria", href: "/m/administracao/auditoria", icon: Shield },
         { label: "Jobs em background", href: "/m/administracao/jobs", icon: Cog },
       ],

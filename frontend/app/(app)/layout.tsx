@@ -8,6 +8,7 @@ import { CommandPaletteProvider } from "@/components/CommandPalette";
 import { Header } from "@/components/Header";
 import { LoadingBar } from "@/components/LoadingBar";
 import { Sidebar } from "@/components/Sidebar";
+import { TrilhaDoModulo } from "@/components/TrilhaDoModulo";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { MENUS } from "@/lib/menus";
 import { ModuloAtualProvider } from "@/lib/modulo-atual";
@@ -65,6 +66,9 @@ function Shell({ children }: { children: React.ReactNode }) {
               key={pathname}
               className="mx-auto w-full max-w-7xl animate-page-in motion-reduce:animate-none has-[[data-full-width]]:max-w-none"
             >
+              {/* No shell, e não no PageHeader: várias telas de módulo
+                  desenham o próprio título sem ele, e ficavam sem trilha. */}
+              {moduloAtual ? <TrilhaDoModulo modulo={moduloAtual} /> : null}
               {children}
             </div>
             {/* Layout de referência: a assinatura do produto fecha toda tela

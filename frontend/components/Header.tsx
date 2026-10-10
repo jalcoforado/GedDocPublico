@@ -55,14 +55,18 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         </button>
       ) : null}
 
+      {/* A marca do município mora no topo do menu lateral. Aqui ela só
+          aparece quando não há menu ao lado: nas telas sem barra lateral
+          (início, perfil) e no celular, onde a barra é uma gaveta fechada.
+          As duas juntas, lado a lado, eram redundância. */}
       <Link
         href="/home"
         aria-label="Início"
-        className="
+        className={`${onOpenSidebar ? "md:hidden " : ""}
           flex h-11 shrink-0 items-center rounded-lg bg-card px-3 shadow-sm
           transition-shadow duration-fast hover:shadow-md
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white
-        "
+        `}
       >
         <MarcaDoMunicipio />
       </Link>

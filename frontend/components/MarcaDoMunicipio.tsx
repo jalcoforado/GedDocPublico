@@ -9,9 +9,26 @@ import { cn } from "@/lib/utils";
  * sistema e das telas públicas — a marca do PRODUTO é outra coisa e mora em
  * `AssinaturaAprimora`.
  */
-export function MarcaDoMunicipio({ className }: { className?: string }) {
+export function MarcaDoMunicipio({
+  className,
+  quadrada = false,
+}: {
+  className?: string;
+  /** Só a marca quadrada (o brasão), para onde a horizontal não cabe. */
+  quadrada?: boolean;
+}) {
   const branding = useBranding();
-  const src = branding?.logo_login_url ?? branding?.logo_url;
+  const src = quadrada
+    ? branding?.logo_url
+    : (branding?.logo_login_url ?? branding?.logo_url);
+  if (quadrada && !src) {
+    // Sem brasão: a inicial do município, para a barra recolhida não ficar muda.
+    return (
+      <span className="font-display text-sm font-bold text-brand" aria-hidden="true">
+        {(branding?.nome ?? "A").trim().charAt(0).toUpperCase()}
+      </span>
+    );
+  }
   if (src) {
     return (
       // eslint-disable-next-line @next/next/no-img-element

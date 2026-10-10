@@ -18,6 +18,7 @@ import { useAuth } from "@/lib/auth";
 import { canSeeItem, MENUS, menuDoModulo, type NavGroup, type NavItem } from "@/lib/menus";
 import { cn } from "@/lib/utils";
 import { DensityToggle } from "./DensityToggle";
+import { MarcaDoMunicipio } from "./MarcaDoMunicipio";
 import { Popover } from "@/components/ui/popover";
 import { SidebarModuloHeader } from "./SidebarModuloHeader";
 import { ThemeToggle } from "./ThemeToggle";
@@ -269,16 +270,32 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
           open ? "translate-x-0 shadow-xl" : "-translate-x-full shadow-none md:translate-x-0",
         )}
       >
-        {/* A marca do município NÃO se repete aqui: ela já está no cabeçalho
-            do sistema, logo ao lado, e duas marcas na mesma faixa de tela eram
-            redundância (o layout de referência também a põe só no cabeçalho).
-            Sobra o botão de fechar, que só existe na gaveta do celular. */}
-        <div className="flex justify-end border-b border-sidebar-border px-3 py-2 md:hidden">
+        {/* Marca do município — é AQUI que ela mora quando há menu lateral; o
+            cabeçalho só a mostra onde não há menu ao lado. Num cartão claro,
+            como no cabeçalho: a marca de prefeitura costuma ter texto escuro,
+            e a barra pode ser de qualquer cor. Recolhida, a barra tem 68px e
+            a marca horizontal não cabe: entra a quadrada (o brasão). */}
+        <div className="flex items-center justify-between gap-2 border-b border-sidebar-border px-3 py-3">
+          <Link
+            href="/home"
+            aria-label="Início"
+            className={cn(
+              "flex h-11 min-w-0 items-center rounded-lg bg-card px-3 shadow-sm transition-shadow duration-fast hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              colapsada && "md:w-11 md:justify-center md:px-1",
+            )}
+          >
+            <span className={cn("flex min-w-0 items-center", colapsada && "md:hidden")}>
+              <MarcaDoMunicipio />
+            </span>
+            <span className={cn("hidden", colapsada && "md:flex")}>
+              <MarcaDoMunicipio quadrada />
+            </span>
+          </Link>
           <button
             type="button"
             onClick={onClose}
             aria-label="Fechar menu"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground md:hidden"
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>

@@ -2,73 +2,108 @@
  * Trilha do topo das telas de módulo — "Menu principal › Meus módulos ›
  * Módulo", do layout de referência.
  *
- * Dois modos de falha que importam: a migalha do módulo aparecer DUAS vezes
- * (as telas da frota já declaravam "Frota Pública → /m/frota" por conta
- * própria), e a trilha sumir das telas transversais que tinham a sua.
+ * A trilha mora no SHELL. A primeira versão ficava no `PageHeader`, e uma em
+ * cada três telas de módulo (Usuários, Grupos, Relatórios…) desenha o próprio
+ * título sem ele: nessas a trilha não aparecia, e nenhum teste via, porque os
+ * testes só exercitavam telas COM `PageHeader`.
  */
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { TrilhaDoModulo } from "@/components/TrilhaDoModulo";
 import { PageHeader } from "@/components/ui/page-header";
+import { MENUS } from "@/lib/menus";
 import { ModuloAtualProvider } from "@/lib/modulo-atual";
 import { NOME_MODULO, SLUGS_MODULO, nomeDoModulo } from "@/lib/modulos";
 
 const FROTA = { slug: "frota", nome: "Frota", raiz: "/m/frota" };
 
-function links() {
-  return within(screen.getByRole("navigation", { name: "Trilha" }))
+const links = (nav: HTMLElement) =>
+  within(nav)
     .getAllByRole("link")
     .map((a) => [a.textContent, a.getAttribute("href")]);
-}
 
-describe("trilha do módulo", () => {
-  it("dentro de um módulo: Menu principal › Meus módulos › Módulo", () => {
-    render(
-      <ModuloAtualProvider value={FROTA}>
-        <PageHeader title="Veículos" />
-      </ModuloAtualProvider>,
-    );
-    expect(links()).toEqual([
+describe("trilha do módulo (shell)", () => {
+  it("Menu principal › Meus módulos › Módulo, cada parte um link", () => {
+    render(<TrilhaDoModulo modulo={FROTA} />);
+    expect(links(screen.getByRole("navigation", { name: "Trilha" }))).toEqual([
       ["Menu principal", "/home"],
       ["Meus módulos", "/modulos"],
       ["Frota", "/m/frota"],
     ]);
   });
 
-  it("a migalha que a página declarava para a raiz do módulo não se repete", () => {
+  it("não depende de a tela usar PageHeader — vale para tela com <h1> próprio", () => {
     render(
       <ModuloAtualProvider value={FROTA}>
-        <PageHeader
-          title="Motoristas"
-          breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Motoristas" }]}
-        />
+        <TrilhaDoModulo modulo={FROTA} />
+        <h1>Usuários</h1>
       </ModuloAtualProvider>,
     );
-    const trilha = screen.getByRole("navigation", { name: "Trilha" });
-    expect(links().filter(([, href]) => href === "/m/frota")).toHaveLength(1);
-    expect(within(trilha).queryByText("Frota Pública")).toBeNull();
-    // A migalha própria da página continua, no fim.
-    expect(within(trilha).getByText("Motoristas")).toBeTruthy();
-  });
-
-  it("tela transversal com migalhas mantém a trilha que já tinha", () => {
-    render(<PageHeader title="Notificações" breadcrumbs={[{ label: "Perfil", href: "/perfil" }]} />);
-    const hrefs = links().map(([, href]) => href);
-    expect(hrefs).toEqual(["/home", "/perfil"]);
-    expect(screen.queryByText("Meus módulos")).toBeNull();
-  });
-
-  it("tela transversal sem migalhas não ganha trilha", () => {
-    render(<PageHeader title="Meu perfil" />);
-    expect(screen.queryByRole("navigation", { name: "Trilha" })).toBeNull();
+    expect(screen.getByRole("navigation", { name: "Trilha" })).toBeTruthy();
   });
 });
 
-describe("nome dos módulos", () => {
+describe("PageHeader dentro de um módulo", () => {
+  function renderEmFrota(ui: React.ReactNode) {
+    return render(<ModuloAtualProvider value={FROTA}>{ui}</ModuloAtualProvider>);
+  }
+
+  it("não desenha uma segunda trilha de módulo — isso é do shell", () => {
+    renderEmFrota(<PageHeader title="Veículos" />);
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(screen.queryByText("Meus módulos")).toBeNull();
+  });
+
+  it("some a migalha que só repetiria o módulo e o nome da própria tela", () => {
+    renderEmFrota(
+      <PageHeader
+        title="Motoristas"
+        breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Motoristas" }]}
+      />,
+    );
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(screen.queryByText("Frota Pública")).toBeNull();
+  });
+
+  it("mantém o nível intermediário de verdade — o link de volta para a lista", () => {
+    renderEmFrota(
+      <PageHeader
+        title="Solicitação 12"
+        breadcrumbs={[
+          { label: "Frota Pública", href: "/m/frota" },
+          { label: "Solicitações", href: "/m/frota/solicitacoes" },
+          { label: "Solicitação 12" },
+        ]}
+      />,
+    );
+    const nav = screen.getByRole("navigation", { name: "Trilha da tela" });
+    expect(links(nav)).toEqual([["Solicitações", "/m/frota/solicitacoes"]]);
+    // Sem o atalho de Início: ele já está na trilha do shell.
+    expect(within(nav).queryByRole("link", { name: "Início" })).toBeNull();
+  });
+});
+
+describe("PageHeader fora de módulo (telas transversais)", () => {
+  it("com migalhas mantém a trilha que já tinha, com o atalho de Início", () => {
+    render(<PageHeader title="Notificações" breadcrumbs={[{ label: "Perfil", href: "/perfil" }]} />);
+    const nav = screen.getByRole("navigation", { name: "Trilha" });
+    expect(links(nav).map(([, href]) => href)).toEqual(["/home", "/perfil"]);
+  });
+
+  it("sem migalhas não ganha trilha", () => {
+    render(<PageHeader title="Meu perfil" />);
+    expect(screen.queryByRole("navigation")).toBeNull();
+  });
+});
+
+describe("nome e raiz dos módulos", () => {
   it("todo módulo com rota tem nome de exibição — senão a trilha mostra o slug", () => {
-    for (const slug of SLUGS_MODULO) {
-      expect(NOME_MODULO[slug], slug).toBeTruthy();
-    }
+    for (const slug of SLUGS_MODULO) expect(NOME_MODULO[slug], slug).toBeTruthy();
+  });
+
+  it("todo módulo com rota tem menu, de onde sai o destino do último item da trilha", () => {
+    for (const slug of SLUGS_MODULO) expect(MENUS[slug]?.raiz, slug).toMatch(/^\/m\//);
   });
 
   it("slug desconhecido volta como veio, em vez de sumir", () => {
