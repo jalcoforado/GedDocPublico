@@ -37,27 +37,19 @@ export const menuProtocolo: MenuModulo = {
       title: "Processos",
       defaultOpen: true,
       items: [
-        {
-          label: "Processos",
-          href: ROTA_PROCESSOS,
-          icon: FileText,
+        // As caixas de trabalho ficam DIRETO no grupo. Chegaram a ser subitens
+        // de um item "Processos" — dentro de um grupo que já se chama
+        // "Processos": o nome aparecia duas vezes, uma em cima da outra, e as
+        // caixas ficavam um nível mais fundo do que precisavam.
+        { label: "Todos os processos", href: ROTA_PROCESSOS, icon: Rows3, perm: "processo" },
+        ...CAIXAS.map(({ caixa, rotulo, icone }) => ({
+          label: rotulo,
+          href: hrefDaCaixa(caixa),
+          icon: icone,
           perm: "processo",
-          // As caixas de trabalho são uma subdivisão de Processos, e não um
-          // segundo menu ao lado deste: o layout de referência as põe na
-          // lateral, e duas colunas de navegação lado a lado disputavam o
-          // mesmo papel.
-          children: [
-            { label: "Todos os processos", href: ROTA_PROCESSOS, icon: Rows3, perm: "processo" },
-            ...CAIXAS.map(({ caixa, rotulo, icone }) => ({
-              label: rotulo,
-              href: hrefDaCaixa(caixa),
-              icon: icone,
-              perm: "processo",
-              filtro: { chave: "caixa", valor: caixa },
-              contador: caixa,
-            })),
-          ],
-        },
+          filtro: { chave: "caixa", valor: caixa },
+          contador: caixa,
+        })),
         { label: "Workflows", href: "/m/protocolo/workflow", icon: GitBranch },
         { label: "Relatórios", href: "/m/protocolo/relatorios", icon: BarChart3, perm: "processo" },
       ],

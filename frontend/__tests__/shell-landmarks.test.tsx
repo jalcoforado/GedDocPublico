@@ -7,6 +7,8 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
+  // A barra lateral lê a query da URL (qual caixa de Processos está aberta).
+  useSearchParams: () => new URLSearchParams(),
   usePathname: () => "/m/frota/veiculos",
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
 }));

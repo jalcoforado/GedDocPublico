@@ -1,5 +1,5 @@
 /**
- * As caixas de trabalho como subitens de "Processos" no menu lateral.
+ * As caixas de trabalho no menu lateral, direto no grupo "Processos".
  *
  * As oito entradas compartilham o CAMINHO (`/m/protocolo/processos`) e só a
  * query as distingue. O modo de falha que importa é o menu marcar todas como
@@ -11,7 +11,7 @@
 import type { ComponentProps } from "react";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const onde = { pathname: "/m/protocolo/processos", busca: "" };
@@ -77,15 +77,12 @@ function renderSidebar(props: ComponentProps<typeof Sidebar>) {
   );
 }
 
-/** Os links do subgrupo de Processos, depois que ele abre sozinho. */
+/** Os links da tela de Processos no menu: "Todos os processos" e as caixas. */
 async function subitens() {
-  const grupo = await waitFor(() => {
-    const el = document.getElementById("nav-sub-processos");
-    expect(el).not.toBeNull();
-    expect(within(el as HTMLElement).getAllByRole("link").length).toBeGreaterThan(0);
-    return el as HTMLElement;
-  });
-  return within(grupo).getAllByRole("link");
+  await waitFor(() => expect(screen.getByRole("link", { name: /Todos os processos/ })).toBeTruthy());
+  return screen
+    .getAllByRole("link")
+    .filter((a) => (a.getAttribute("href") ?? "").split("?")[0] === "/m/protocolo/processos");
 }
 
 const atuais = (links: HTMLElement[]) =>
@@ -99,7 +96,18 @@ beforeEach(() => {
 });
 
 describe("caixas no menu lateral", () => {
-  it("são subitens de Processos: 'Todos os processos' e as sete caixas, na ordem", async () => {
+  it("'Processos' aparece UMA vez — o título do grupo, sem item repetindo o nome", async () => {
+    // As caixas chegaram a ser subitens de um item "Processos" dentro do grupo
+    // "Processos": o nome aparecia duas vezes, uma em cima da outra.
+    renderSidebar({ modulo: "protocolo", open: true, onClose: () => {} });
+    await subitens();
+    expect(screen.getAllByText("Processos")).toHaveLength(1);
+    expect(screen.queryByRole("link", { name: "Processos" })).toBeNull();
+    // E não há um nível a mais: as caixas são itens do próprio grupo.
+    expect(document.getElementById("nav-sub-processos")).toBeNull();
+  });
+
+  it("'Todos os processos' e as sete caixas, na ordem", async () => {
     renderSidebar({ modulo: "protocolo", open: true, onClose: () => {} });
     const links = await subitens();
     expect(links.map((a) => a.getAttribute("href"))).toEqual([

@@ -13,7 +13,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { api } from "@/lib/api";
+import { api, type CaixasContagem } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canSeeItem, MENUS, menuDoModulo, type NavGroup, type NavItem } from "@/lib/menus";
 import { cn } from "@/lib/utils";
@@ -81,6 +81,33 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
     ...MENUS.comum.grupos,
     ...(menu && menu.slug !== "comum" ? menu.grupos : []),
   ];
+  // A QUERY da URL, que é o que distingue as caixas de Processos entre si
+  // (todas têm o mesmo caminho). Quem a lê é `LeitorDaBusca`, lá embaixo,
+  // dentro de Suspense — `useSearchParams` chamado direto aqui obrigaria toda
+  // página do shell a abrir mão da pré-renderização.
+  const [buscaStr, setBuscaStr] = useState("");
+  const busca = useMemo(() => new URLSearchParams(buscaStr), [buscaStr]);
+
+  // Contadores das caixas, para os itens do menu que declaram `contador`.
+  // Falha aqui não derruba o menu: os itens continuam navegáveis, sem número.
+  const temContador = NAV.some((g) =>
+    g.items.some((i) => i.contador || i.children?.some((c) => c.contador)),
+  );
+  const caixasQ = useQuery({
+    queryKey: ["processos-caixas"],
+    queryFn: () => api.processos.caixas(),
+    enabled: temContador,
+    staleTime: 0,
+  });
+  // A barra não desmonta entre telas, então o `staleTime` sozinho não refaz
+  // nada. Encaminhar e receber acontecem no detalhe do processo: refaz a
+  // contagem a cada navegação, que é quando o número pode ter mudado.
+  const { refetch: recontarCaixas } = caixasQ;
+  useEffect(() => {
+    if (temContador) void recontarCaixas();
+  }, [pathname, buscaStr, temContador, recontarCaixas]);
+  const contagem = caixasQ.data;
+
   // PR3a — link de plataforma só aparece para admin de plataforma (allowlist).
   const adminMeQ = useQuery({
     queryKey: ["admin-me"],
@@ -301,6 +328,10 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
           </button>
         </div>
 
+        <Suspense fallback={null}>
+          <LeitorDaBusca aoMudar={setBuscaStr} />
+        </Suspense>
+
         {/* Cabeçalho de módulo — onde o usuário está e o caminho de volta a
             /modulos. Acima de todos os grupos, de propósito (ver componente). */}
         <SidebarModuloHeader modulo={modulo} collapsed={colapsada} />
@@ -374,7 +405,9 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                 >
                   {visible.map((item) => {
                     const Icon = item.icon;
-                    const active = isPathActive(item.href, pathname);
+                    // Mesma regra dos subitens: itens que compartilham o
+                    // caminho (as caixas) são distinguidos pela query.
+                    const active = filhoAtivo(item, visible, pathname, busca);
 
                     if (item.children && item.children.length > 0 && !colapsada) {
                       const subIsOpen = subOpen[item.label] ?? false;
@@ -408,11 +441,12 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                             id={subSlugId}
                             className={cn("ml-3 flex flex-col gap-0.5 border-l border-sidebar-border pl-2", !subIsOpen && "hidden")}
                           >
-                            {/* `useSearchParams` exige fronteira de Suspense para a
-                                página poder ser pré-renderizada. */}
-                            <Suspense fallback={null}>
-                              <Subitens item={item} pathname={pathname} />
-                            </Suspense>
+                            <Subitens
+                              item={item}
+                              pathname={pathname}
+                              busca={busca}
+                              contagem={contagem}
+                            />
                           </div>
                         </div>
                       );
@@ -466,6 +500,10 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                         <span className={cn("flex-1", colapsada && "md:sr-only")}>
                           {item.label}
                         </span>
+                        <Contador
+                          n={item.contador ? contagem?.[item.contador] : undefined}
+                          className={cn(colapsada && "md:sr-only")}
+                        />
                       </Link>
                     );
                   })}
@@ -610,38 +648,55 @@ function ItemColapsadoComFilhos({
 }
 
 /**
- * Filhos de um subgrupo do menu. Componente próprio porque é o único ponto da
- * barra lateral que lê a QUERY da URL — as caixas de Processos compartilham o
- * caminho e só `?caixa=` diz qual está aberta.
+ * Único ponto da barra que lê a QUERY da URL. Não desenha nada: só publica a
+ * busca para o componente pai. Fica dentro de Suspense, que é o que
+ * `useSearchParams` exige para a página poder ser pré-renderizada.
  */
-function Subitens({ item, pathname }: { item: NavItem; pathname: string }) {
-  const busca = useSearchParams();
-  const filhos = item.children ?? [];
-  const temContador = filhos.some((c) => c.contador);
-
-  // Contadores das caixas. Falha aqui não derruba o menu: os itens continuam
-  // navegáveis, só sem número.
-  const caixasQ = useQuery({
-    queryKey: ["processos-caixas"],
-    queryFn: () => api.processos.caixas(),
-    enabled: temContador,
-    staleTime: 0,
-  });
-  // A barra lateral não desmonta entre telas, então o `staleTime` sozinho não
-  // refaz nada. Encaminhar e receber acontecem no detalhe do processo: refaz a
-  // contagem a cada navegação, que é quando o número pode ter mudado.
-  const onde = `${pathname}?${busca.toString()}`;
-  const { refetch } = caixasQ;
+function LeitorDaBusca({ aoMudar }: { aoMudar: (busca: string) => void }) {
+  const busca = useSearchParams().toString();
   useEffect(() => {
-    if (temContador) void refetch();
-  }, [onde, temContador, refetch]);
+    aoMudar(busca);
+  }, [busca, aoMudar]);
+  return null;
+}
 
+/** Quantidade ao lado do rótulo de um item (as caixas de Processos). */
+function Contador({ n, className }: { n: number | undefined; className?: string }) {
+  if (n === undefined) return null;
+  return (
+    // Zero não pede atenção: fica apagado, e o que tem processo salta sem
+    // precisar de cor de alerta.
+    <span
+      className={cn(
+        "text-xs tabular-nums",
+        n === 0 ? "text-sidebar-muted" : "font-semibold text-sidebar-foreground",
+        className,
+      )}
+    >
+      {n}
+      <span className="sr-only"> {n === 1 ? "processo" : "processos"}</span>
+    </span>
+  );
+}
+
+/** Filhos de um subgrupo do menu (item com `children`). */
+function Subitens({
+  item,
+  pathname,
+  busca,
+  contagem,
+}: {
+  item: NavItem;
+  pathname: string;
+  busca: URLSearchParams;
+  contagem: CaixasContagem | undefined;
+}) {
+  const filhos = item.children ?? [];
   return (
     <>
       {filhos.map((child) => {
         const ChildIcon = child.icon;
         const childActive = filhoAtivo(child, filhos, pathname, busca);
-        const n = child.contador ? caixasQ.data?.[child.contador] : undefined;
         return (
           <Link
             key={child.href}
@@ -666,19 +721,7 @@ function Subitens({ item, pathname }: { item: NavItem; pathname: string }) {
               aria-hidden="true"
             />
             <span className="flex-1">{child.label}</span>
-            {n !== undefined ? (
-              // Zero não pede atenção: fica apagado, e o que tem processo
-              // salta sem precisar de cor de alerta.
-              <span
-                className={cn(
-                  "text-xs tabular-nums",
-                  n === 0 ? "text-sidebar-muted" : "font-semibold text-sidebar-foreground",
-                )}
-              >
-                {n}
-                <span className="sr-only"> {n === 1 ? "processo" : "processos"}</span>
-              </span>
-            ) : null}
+            <Contador n={child.contador ? contagem?.[child.contador] : undefined} />
           </Link>
         );
       })}
