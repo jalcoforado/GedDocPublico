@@ -112,7 +112,11 @@ function TrendBadge({
 /**
  * Card de KPI premium pra dashboards. Diferenças vs antigo:
  * - Borda gradient sutil ao hover (brand→accent)
- * - Número grande em font-mono pra alinhamento entre cards
+ * - Número grande na fonte dos títulos (`font-display`), que é a do tema do
+ *   município: padrão Montserrat, a do protótipo, e trocável em Aparência.
+ *   Era `font-mono`: destoava do resto da tela e, por ser mais larga, cortava
+ *   valores em reais ao lado do ícone. Os algarismos seguem alinhados entre
+ *   cards por `tabular-nums`.
  * - Ícone num quadrado tinto identitário (mesmo do PageHeader)
  * - Trend badge em pill colorida com background sutil
  */
@@ -141,26 +145,15 @@ export function KpiCard({
         className,
       )}
     >
+      {/* O ícone divide a linha só com o rótulo. O valor fica abaixo, com a
+          largura inteira do card: ao lado do ícone, um valor em reais de sete
+          dígitos não cabia e era cortado. */}
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-foreground-muted">
-              {label}
-            </span>
-            <TrendBadge delta={delta} lowerIsBetter={lowerIsBetter} />
-          </div>
-          <div
-            className={cn(
-              "mt-2 text-[28px] font-bold leading-none tabular-nums tracking-tight",
-              "font-mono", // alinha melhor entre cards
-              i.valueColor,
-            )}
-          >
-            {value}
-          </div>
-          {hint && (
-            <div className="mt-2 text-xs text-foreground-subtle">{hint}</div>
-          )}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 pt-1">
+          <span className="text-[11px] font-medium uppercase tracking-wider text-foreground-muted">
+            {label}
+          </span>
+          <TrendBadge delta={delta} lowerIsBetter={lowerIsBetter} />
         </div>
         {Icon && (
           <div
@@ -173,6 +166,17 @@ export function KpiCard({
           </div>
         )}
       </div>
+      <div
+        data-testid="kpi-valor"
+        className={cn(
+          "mt-1 font-display text-[26px] font-bold leading-tight tabular-nums tracking-tight",
+          "[overflow-wrap:anywhere]",
+          i.valueColor,
+        )}
+      >
+        {value}
+      </div>
+      {hint && <div className="mt-2 text-xs text-foreground-subtle">{hint}</div>}
     </div>
   );
 }
