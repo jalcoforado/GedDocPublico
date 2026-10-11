@@ -33,6 +33,11 @@ import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
+  AcaoParcelaDialog,
+  RecolherRetencaoDialog,
+  type AcaoParcela,
+} from "@/components/pagamentos/AcoesFinanceirasDialogs";
+import {
   ChecklistDebito,
   chaveChecklist,
   pendentesDoChecklist,
@@ -56,6 +61,8 @@ import {
   type AnexoDebitoOut,
   type DebitoOut,
   type EtapaAjuste,
+  type Parcela,
+  type Retencao,
   type RetencaoInput,
   type SituacaoFila,
   type TipoAjuste,
@@ -108,6 +115,12 @@ export function DetalheDebitoContent({ id }: { id: number }) {
   const [contaPagadora, setContaPagadora] = useState("");
   const [semSaldoAutorizado, setSemSaldoAutorizado] = useState(false);
   const [justificativaExcecao, setJustificativaExcecao] = useState("");
+
+  // Estorno / revogação de liberação de uma parcela, e recolhimento de retenção.
+  const [acaoParcela, setAcaoParcela] = useState<{ acao: AcaoParcela; parcela: Parcela } | null>(
+    null,
+  );
+  const [retencaoARecolher, setRetencaoARecolher] = useState<Retencao | null>(null);
 
   // Resposta a um pedido de ajuste específico
   const [respostaPorPedido, setRespostaPorPedido] = useState<Record<number, string>>({});
@@ -677,6 +690,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                       <TH className="text-right">Valor</TH>
                       <TH>Vencimento</TH>
                       <TH>Status</TH>
+                      <TH className="text-right">Ações</TH>
                     </TR>
                   </THead>
                   <TBody>
@@ -687,6 +701,28 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                         <TD>{fmtData(p.vencimento)}</TD>
                         <TD>
                           <Badge intent="neutral">{p.status}</Badge>
+                        </TD>
+                        <TD className="text-right">
+                          {p.status === "PAGA" && can("pagamento_pagar") && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Estornar pagamento da parcela ${p.numero}`}
+                              onClick={() => setAcaoParcela({ acao: "estornar", parcela: p })}
+                            >
+                              Estornar
+                            </Button>
+                          )}
+                          {p.status === "LIBERADA" && can("pagamento_autorizar") && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Revogar liberação da parcela ${p.numero}`}
+                              onClick={() => setAcaoParcela({ acao: "revogar", parcela: p })}
+                            >
+                              Revogar liberação
+                            </Button>
+                          )}
                         </TD>
                       </TR>
                     ))}
@@ -751,6 +787,16 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                             )}
                           </TD>
                           <TD className="text-right">
+                            {can("pagamento_pagar") && !r.recolhido && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                aria-label={`Registrar recolhimento da retenção ${r.tipo}`}
+                                onClick={() => setRetencaoARecolher(r)}
+                              >
+                                Recolher
+                              </Button>
+                            )}
                             {can("pagamento_pagar") && !r.recolhido && (
                               <Button
                                 variant="ghost"
@@ -1390,6 +1436,17 @@ export function DetalheDebitoContent({ id }: { id: number }) {
           </div>
         )}
       </Dialog>
+
+      <AcaoParcelaDialog
+        alvo={acaoParcela}
+        onClose={() => setAcaoParcela(null)}
+        onFeito={invalidarTudo}
+      />
+      <RecolherRetencaoDialog
+        retencao={retencaoARecolher}
+        onClose={() => setRetencaoARecolher(null)}
+        onFeito={() => qc.invalidateQueries({ queryKey: ["pag-retencoes", id] })}
+      />
 
       {/* Lançar retenção (F4) — trava (409) enquanto a parcela estiver
           engajada num lote de pagamento; a mensagem do backend vira o toast. */}
