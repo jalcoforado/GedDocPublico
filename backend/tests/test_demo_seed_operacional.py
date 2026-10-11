@@ -185,6 +185,39 @@ async def test_debitos_percorrem_o_rito(admin_engine, tenant_ops):
 
 
 @pytest.mark.asyncio
+async def test_demo_tem_validacao_por_conferir_e_tesouraria_com_fila(admin_engine, tenant_ops):
+    """Os dois estados que as telas novas precisam para ter o que mostrar.
+
+    Sem um débito em AGUARDANDO_VALIDACAO com checklist pendente, a seção
+    "Conferência de documentos" nunca aparece editável na demonstração. Sem
+    parcela LIBERADA, a tesouraria abre vazia.
+    """
+    slug, tid = tenant_ops
+    await _apply(_ns(slug, modulo="pagamentos"))
+
+    from app.services import pagamentos_checklist as chk
+
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(f"SET LOCAL app.tenant_id = {int(tid)}"))
+        em_validacao = (await s.execute(text(
+            "SELECT id FROM pagamentos.debito WHERE tenant_id=:t AND excluido=false "
+            "AND situacao_tramitacao='AGUARDANDO_VALIDACAO'"), {"t": tid})).scalars().all()
+        assert len(em_validacao) >= 1
+        pendentes = await chk.checklist_pendente(s, tenant_id=tid, debito_id=em_validacao[0])
+        assert pendentes, "o débito em validação deveria ter checklist por conferir"
+
+        liberadas = (await s.execute(text(
+            "SELECT id_debito FROM pagamentos.parcela WHERE tenant_id=:t AND excluido=false "
+            "AND status='LIBERADA'"), {"t": tid})).scalars().all()
+        assert len(liberadas) >= 1
+        retencoes = (await s.execute(text(
+            "SELECT count(*) FROM pagamentos.retencao WHERE tenant_id=:t AND excluido=false "
+            "AND recolhido=false AND id_debito = ANY(:ids)"),
+            {"t": tid, "ids": list(set(liberadas))})).scalar_one()
+        assert retencoes >= 1
+
+
+@pytest.mark.asyncio
 async def test_conciliacao_tem_extrato_e_sugestoes(admin_engine, tenant_ops):
     slug, tid = tenant_ops
     await _apply(_ns(slug, modulo="pagamentos"))
@@ -331,6 +364,7 @@ async def test_reset_limpa_tudo(admin_engine, tenant_ops):
     for tabela in (
         "pagamentos.debito",
         "pagamentos.parcela",
+        "pagamentos.retencao",
         "pagamentos.fornecedor",
         "pagamentos.conta_bancaria",
         "frota.veiculo",
