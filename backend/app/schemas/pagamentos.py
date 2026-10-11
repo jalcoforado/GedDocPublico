@@ -567,6 +567,7 @@ class AnexoDebitoOut(BaseModel):
     versao_debito: int
     id_pedido_ajuste: int | None
     id_usuario: int | None
+    nome_usuario: str | None = None
     criado_em: datetime
 
 
@@ -878,6 +879,8 @@ class ExportContabilLoteOut(BaseModel):
     formato_versao: str; qtd_eventos: int
     hash_conteudo: str | None
     id_usuario: int | None
+    # Preenchido pelo router; a tela mostrava "Usuário #7".
+    nome_usuario: str | None = None
     gerado_em: datetime
 
 
@@ -985,6 +988,16 @@ class RetornoParcelaIn(BaseModel):
     resultado: Literal["PAGA", "FALHOU"]
     motivo_falha: str | None = Field(default=None, max_length=255)
     data_pagamento: date | None = None
+    # Como o banco pagou. Ausente = "TED", que era o valor gravado para todo
+    # retorno de lote, inclusive os pagos por PIX ou boleto.
+    forma_pagamento: FormaPagamento | None = None
+
+
+class ParcelaElegivelOut(ParcelaOut):
+    """Parcela que pode entrar num lote, com o que identifica a despesa para
+    quem monta o lote — a tela mostrava só "Débito #12"."""
+    nome_fornecedor: str | None = None
+    descricao_debito: str | None = None
 
 
 class RetornoLoteIn(BaseModel):

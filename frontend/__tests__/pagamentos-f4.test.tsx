@@ -7,7 +7,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 
 import type {
-  ContaBancaria, LoteDetalhe, LotePagamento, Parcela, RetencoesDebito,
+  ContaBancaria, LoteDetalhe, LotePagamento, ParcelaElegivel, RetencoesDebito,
 } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -20,7 +20,8 @@ const contaPrincipal: ContaBancaria = {
   saldo_inicial: "10000.00", saldo_minimo_alerta: "0", ativa: true,
 } as ContaBancaria;
 
-const parcelaElegivel: Parcela = {
+const parcelaElegivel: ParcelaElegivel = {
+  nome_fornecedor: "Papelaria Central", descricao_debito: "Material de expediente",
   id: 55, id_debito: 20, numero: 1, valor: "1000.00", vencimento: "2026-09-30",
   status: "LIBERADA", data_pagamento: null, forma_pagamento: null, id_movimentacao: null,
   data_prevista_pagamento: "2026-09-25",
@@ -172,7 +173,9 @@ describe("Central da tesouraria — selecionar e criar lote", () => {
     fireEvent.change(selectConta, { target: { value: "1" } });
 
     await waitFor(() => expect(elegiveisMock).toHaveBeenCalledWith(1));
-    expect(await screen.findByText(/débito #20 · parcela 1/i)).toBeInTheDocument();
+    // Quem monta o lote vê de quem é a parcela, não só o número do débito.
+    expect(await screen.findByText(/Papelaria Central · parcela 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Solicitação #20 — Material de expediente/)).toBeInTheDocument();
 
     const checkbox = screen.getByLabelText(/selecionar parcela 1 do débito #20/i);
     fireEvent.click(checkbox);
@@ -202,7 +205,9 @@ describe("Central da tesouraria — selecionar e criar lote", () => {
     // O lote mockado por `obter` está ENVIADO — aparece o passo de retorno.
     const botaoRegistrar = await screen.findByRole("button", { name: /registrar retorno/i });
 
-    const selectResultado = screen.getByRole("combobox");
+    // Dois seletores no passo de retorno: o resultado da parcela (na linha
+    // dela) e a forma de pagamento do lote.
+    const selectResultado = screen.getAllByRole("combobox")[0];
     fireEvent.change(selectResultado, { target: { value: "FALHOU" } });
 
     const inputMotivo = await screen.findByPlaceholderText(/motivo da falha/i);
@@ -213,6 +218,28 @@ describe("Central da tesouraria — selecionar e criar lote", () => {
     await waitFor(() =>
       expect(processarRetornoMock).toHaveBeenCalledWith(7, [
         { parcela_id: 55, resultado: "FALHOU", motivo_falha: "conta encerrada" },
+      ]),
+    );
+    // Parcela que falhou não foi paga por meio nenhum.
+    const enviado = processarRetornoMock.mock.calls.at(-1) as unknown as [number, Array<Record<string, unknown>>];
+    expect(enviado[1][0].forma_pagamento).toBeUndefined();
+  });
+
+  it("o retorno pago leva a forma de pagamento escolhida, e não mais sempre TED", async () => {
+    processarRetornoMock.mockClear();
+    const { default: Pagina } = await import("@/app/(app)/m/pagamentos/tesouraria/page");
+    renderComQueryClient(<Pagina />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /^lotes$/i }));
+    fireEvent.click(await screen.findByText(/L-2026-0001/i));
+    const botaoRegistrar = await screen.findByRole("button", { name: /registrar retorno/i });
+
+    fireEvent.change(screen.getByLabelText(/Forma de pagamento/), { target: { value: "PIX" } });
+    fireEvent.click(botaoRegistrar);
+
+    await waitFor(() =>
+      expect(processarRetornoMock).toHaveBeenCalledWith(7, [
+        { parcela_id: 55, resultado: "PAGA", forma_pagamento: "PIX" },
       ]),
     );
   });

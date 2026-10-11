@@ -124,6 +124,17 @@ async def parcelas_elegiveis_para_lote(db: AsyncSession, *, tenant_id: int,
         stmt.order_by(Parcela.data_prevista_pagamento, Parcela.vencimento))).scalars().all())
 
 
+async def debitos_das_parcelas(db: AsyncSession, *, tenant_id: int,
+                               parcelas: list[Parcela]) -> dict[int, Debito]:
+    """Débitos das parcelas dadas, por id — para o router dizer de quem é cada uma."""
+    ids = {p.id_debito for p in parcelas}
+    if not ids:
+        return {}
+    rows = (await db.execute(select(Debito).where(
+        Debito.tenant_id == tenant_id, Debito.id.in_(ids)))).scalars().all()
+    return {d.id: d for d in rows}
+
+
 async def _validar_parcelas_para_lote(db: AsyncSession, *, tenant_id: int,
                                       parcela_ids: list[int],
                                       id_conta_pagadora: int) -> tuple[
@@ -437,7 +448,7 @@ async def processar_retorno(db: AsyncSession, *, tenant_id: int, lote_id: int,
         db.add(mov)
         await db.flush()
         parcela.status = "PAGA"; parcela.data_pagamento = quando
-        parcela.forma_pagamento = "TED"; parcela.id_movimentacao = mov.id
+        parcela.forma_pagamento = r.forma_pagamento or "TED"; parcela.id_movimentacao = mov.id
         parcela.atualizado_em = _utcnow()
         v.situacao = "PAGA"
         v.atualizado_em = _utcnow()

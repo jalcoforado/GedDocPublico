@@ -24,7 +24,8 @@ import {
   type ContaBancaria,
   type LoteDetalhe,
   type LotePagamento,
-  type Parcela,
+  type FormaPagamentoLote,
+  type ParcelaElegivel,
   type RetornoParcelaInput,
   type SituacaoLote,
 } from "@/lib/api";
@@ -179,7 +180,7 @@ function TabSelecionar({ onLoteCriado }: { onLoteCriado: () => void }) {
         />
       ) : (
         <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface-1">
-          {elegiveis.map((p: Parcela) => (
+          {elegiveis.map((p: ParcelaElegivel) => (
             <div key={p.id} className="flex items-center gap-3 px-4 py-3">
               <input
                 type="checkbox"
@@ -190,8 +191,13 @@ function TabSelecionar({ onLoteCriado }: { onLoteCriado: () => void }) {
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-foreground">
-                  Débito #{p.id_debito} · parcela {p.numero}
+                  {p.nome_fornecedor ?? `Débito #${p.id_debito}`} · parcela {p.numero}
                 </p>
+                {p.descricao_debito && (
+                  <p className="truncate text-xs text-muted-foreground">
+                    Solicitação #{p.id_debito} — {p.descricao_debito}
+                  </p>
+                )}
                 <p className="truncate text-xs text-muted-foreground">
                   vencimento {fmtData(p.vencimento)}
                   {p.data_prevista_pagamento && <> · previsto {fmtData(p.data_prevista_pagamento)}</>}
@@ -280,6 +286,8 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
   const [dataProgramada, setDataProgramada] = useState("");
   const [retornos, setRetornos] = useState<Record<number, { resultado: "PAGA" | "FALHOU"; motivo: string }>>({});
   const [comprovanteArquivo, setComprovanteArquivo] = useState<File | null>(null);
+  // Um lote sai do banco por um meio só. Era gravado "TED" para todo retorno.
+  const [formaPagamento, setFormaPagamento] = useState<FormaPagamentoLote>("TED");
 
   const loteQ = useQuery({
     queryKey: ["pag-lote", loteId],
@@ -325,6 +333,7 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
           parcela_id: p.id_parcela,
           resultado: decisao.resultado,
           motivo_falha: decisao.resultado === "FALHOU" ? decisao.motivo : undefined,
+          forma_pagamento: decisao.resultado === "PAGA" ? formaPagamento : undefined,
         };
       });
       return api.pagamentos.lotes.processarRetorno(loteId, payload);
@@ -454,9 +463,22 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
 
       {lote.situacao === "ENVIADO" && (
         <div className="space-y-3 border-t border-border pt-3">
-          <Button onClick={() => retornoM.mutate()} disabled={retornoM.isPending}>
-            {retornoM.isPending ? "Registrando…" : "Registrar retorno"}
-          </Button>
+          <div className="flex flex-wrap items-end gap-2">
+            <FormField label="Forma de pagamento" hint="Como o banco pagou as parcelas deste lote">
+              <Select
+                value={formaPagamento}
+                onChange={(e) => setFormaPagamento(e.target.value as FormaPagamentoLote)}
+              >
+                <option value="TED">TED</option>
+                <option value="PIX">PIX</option>
+                <option value="BOLETO">Boleto</option>
+                <option value="OUTRO">Outro</option>
+              </Select>
+            </FormField>
+            <Button onClick={() => retornoM.mutate()} disabled={retornoM.isPending}>
+              {retornoM.isPending ? "Registrando…" : "Registrar retorno"}
+            </Button>
+          </div>
           <div className="flex flex-wrap items-end gap-2">
             <FormField label="Comprovante da remessa" hint="PDF do protocolo bancário, opcional">
               <input

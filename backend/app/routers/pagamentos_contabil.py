@@ -11,9 +11,21 @@ from ..database import get_db
 from ..models import Usuario
 from ..schemas.pagamentos import ExportContabilGerarIn, ExportContabilLoteOut
 from ..services import pagamentos_contabil as svc
+from ..services import pagamentos_debitos as debitos_svc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 contabil_router = APIRouter(prefix="/pagamentos/contabil", tags=["pagamentos-contabil"])
+
+
+async def _lotes_out(db: AsyncSession, tenant_id: int, lotes) -> list[ExportContabilLoteOut]:
+    nomes = await debitos_svc.nomes_usuarios(
+        db, tenant_id=tenant_id, ids={l.id_usuario for l in lotes if l.id_usuario})
+    out = []
+    for l in lotes:
+        item = ExportContabilLoteOut.model_validate(l)
+        item.nome_usuario = nomes.get(l.id_usuario)
+        out.append(item)
+    return out
 
 
 @contabil_router.post("/lotes", response_model=ExportContabilLoteOut, status_code=201)
@@ -21,14 +33,14 @@ async def gerar_lote(payload: ExportContabilGerarIn,
                      usuario: Usuario = Depends(require_permission("pagamento_cadastro", "inserir")),
                      tenant_id: int = Depends(require_tenant_id), db: AsyncSession = Depends(get_db)):
     lote = await svc.gerar_lote(db, tenant_id=tenant_id, ate=payload.ate, usuario_id=usuario.id)
-    return ExportContabilLoteOut.model_validate(lote)
+    return (await _lotes_out(db, tenant_id, [lote]))[0]
 
 
 @contabil_router.get("/lotes", response_model=list[ExportContabilLoteOut])
 async def listar_lotes(_: Usuario = Depends(require_permission("pagamento_cadastro")),
                        tenant_id: int = Depends(require_tenant_id), db: AsyncSession = Depends(get_db)):
     lotes = await svc.listar_lotes(db, tenant_id=tenant_id)
-    return [ExportContabilLoteOut.model_validate(l) for l in lotes]
+    return await _lotes_out(db, tenant_id, lotes)
 
 
 # Literal (`/{lote_id}/arquivo`) é sub-rota de um segmento paramétrico já
