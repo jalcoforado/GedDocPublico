@@ -68,11 +68,12 @@ async def excluir_retencao(retencao_id: int,
 
 @router.post("/retencoes/{retencao_id}/recolher", response_model=RetencaoOut)
 async def recolher_retencao(retencao_id: int, payload: RetencaoRecolherIn,
-                            _: Usuario = Depends(require_permission("pagamento_pagar")),
+                            usuario: Usuario = Depends(require_permission("pagamento_pagar")),
                             tenant_id: int = Depends(require_tenant_id),
                             db: AsyncSession = Depends(get_db)):
     return await ret.recolher_retencao(
         db, tenant_id=tenant_id, retencao_id=retencao_id,
         data_recolhimento=payload.data_recolhimento,
         documento_recolhimento=payload.documento_recolhimento,
+        usuario_id=usuario.id,
     )

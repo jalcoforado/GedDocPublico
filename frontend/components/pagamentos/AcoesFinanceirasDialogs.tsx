@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { fmtMoeda } from "@/components/pagamentos/format";
-import { api, type Parcela, type Retencao } from "@/lib/api";
+import { api, type FormaPagamentoLote, type Parcela, type Retencao } from "@/lib/api";
 
 export type AcaoParcela = "estornar" | "revogar";
 
@@ -104,6 +105,88 @@ export function AcaoParcelaDialog({
               placeholder="Explique o motivo..."
               className="min-h-24"
             />
+          </FormField>
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
+/**
+ * Baixa de UMA parcela liberada, fora de lote — o pagamento avulso. O endpoint
+ * existia sem tela: só se pagava montando lote, mesmo para um único boleto
+ * pago no caixa.
+ *
+ * O backend recusa (409) a parcela que está num lote ativo ou que furaria a
+ * ordem cronológica; a mensagem dele vira o aviso na tela.
+ */
+export function PagarParcelaDialog({
+  parcela,
+  onClose,
+  onFeito,
+}: {
+  parcela: Parcela | null;
+  onClose: () => void;
+  onFeito: () => void;
+}) {
+  const toast = useToast();
+  const [forma, setForma] = useState<FormaPagamentoLote>("PIX");
+  const [data, setData] = useState("");
+  useEffect(() => {
+    setForma("PIX");
+    setData("");
+  }, [parcela]);
+
+  const m = useMutation({
+    mutationFn: () => {
+      if (!parcela) throw new Error("Nenhuma parcela selecionada");
+      return api.pagamentos.parcelas.pagar(parcela.id, {
+        forma_pagamento: forma,
+        data_pagamento: data || null,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Pagamento registrado");
+      onFeito();
+      onClose();
+    },
+    onError: (err: Error) => toast.error(err.message || "Não foi possível registrar o pagamento"),
+  });
+
+  return (
+    <Dialog
+      open={!!parcela}
+      onClose={onClose}
+      size="sm"
+      title="Registrar pagamento"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button onClick={() => m.mutate()} disabled={m.isPending}>
+            {m.isPending ? "Registrando..." : "Registrar pagamento"}
+          </Button>
+        </>
+      }
+    >
+      {parcela && (
+        <div className="space-y-4">
+          <p className="text-sm text-foreground">
+            A parcela {parcela.numero} ({fmtMoeda(parcela.valor)}) passa a constar como paga e o
+            valor sai do saldo da conta pagadora. Use para pagamento feito fora de lote.
+          </p>
+          <FormField label="Forma de pagamento" required>
+            <Select value={forma} onChange={(e) => setForma(e.target.value as FormaPagamentoLote)}>
+              <option value="PIX">PIX</option>
+              <option value="TED">TED</option>
+              <option value="BOLETO">Boleto</option>
+              <option value="DINHEIRO">Dinheiro</option>
+              <option value="OUTRO">Outro</option>
+            </Select>
+          </FormField>
+          <FormField label="Data do pagamento" hint="Em branco, vale a data de hoje">
+            <Input type="date" value={data} onChange={(e) => setData(e.target.value)} />
           </FormField>
         </div>
       )}

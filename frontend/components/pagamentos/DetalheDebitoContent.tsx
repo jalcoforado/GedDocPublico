@@ -34,6 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
   AcaoParcelaDialog,
+  PagarParcelaDialog,
   RecolherRetencaoDialog,
   type AcaoParcela,
 } from "@/components/pagamentos/AcoesFinanceirasDialogs";
@@ -121,6 +122,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     null,
   );
   const [retencaoARecolher, setRetencaoARecolher] = useState<Retencao | null>(null);
+  const [parcelaAPagar, setParcelaAPagar] = useState<Parcela | null>(null);
 
   // Resposta a um pedido de ajuste específico
   const [respostaPorPedido, setRespostaPorPedido] = useState<Record<number, string>>({});
@@ -451,6 +453,17 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     onError: (err: any) => toast.error(err.message || "Erro ao cancelar"),
   });
 
+  // Etapa opcional da tesouraria: o pagamento foi despachado ao banco e
+  // aguarda confirmação. Só existe a partir de "programada".
+  const emProcessamentoM = useMutation({
+    mutationFn: () => api.pagamentos.debitos.emProcessamento(id),
+    onSuccess: () => {
+      toast.success("Marcado como enviado ao banco");
+      invalidarTudo();
+    },
+    onError: (err: any) => toast.error(err.message || "Erro ao marcar como enviado ao banco"),
+  });
+
   const confirmarLiquidacaoM = useMutation({
     mutationFn: () => api.pagamentos.debitos.confirmarLiquidacao(id),
     onSuccess: () => {
@@ -711,6 +724,16 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                               onClick={() => setAcaoParcela({ acao: "estornar", parcela: p })}
                             >
                               Estornar
+                            </Button>
+                          )}
+                          {p.status === "LIBERADA" && can("pagamento_pagar") && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Registrar pagamento da parcela ${p.numero}`}
+                              onClick={() => setParcelaAPagar(p)}
+                            >
+                              Pagar
                             </Button>
                           )}
                           {p.status === "LIBERADA" && can("pagamento_autorizar") && (
@@ -1195,6 +1218,16 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                 Confirmar liquidação
               </Button>
             )}
+          {debito.situacao_pagamento === "PROGRAMADA" && can("pagamento_pagar") && (
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={() => emProcessamentoM.mutate()}
+              disabled={emProcessamentoM.isPending}
+            >
+              Marcar como enviado ao banco
+            </Button>
+          )}
           <ProximaAcao
             tramitacao={debito.situacao_tramitacao}
             perfis={perfis}
@@ -1440,6 +1473,11 @@ export function DetalheDebitoContent({ id }: { id: number }) {
       <AcaoParcelaDialog
         alvo={acaoParcela}
         onClose={() => setAcaoParcela(null)}
+        onFeito={invalidarTudo}
+      />
+      <PagarParcelaDialog
+        parcela={parcelaAPagar}
+        onClose={() => setParcelaAPagar(null)}
         onFeito={invalidarTudo}
       />
       <RecolherRetencaoDialog

@@ -9,10 +9,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const estado = { perms: [] as string[] };
+const estado = { perms: [] as string[], pagamento: "PAGA_PARCIAL" };
 
 const estornarMock = vi.fn((_id: number, _j: string) => Promise.resolve({}));
 const revogarMock = vi.fn((_id: number, _j: string) => Promise.resolve({}));
+const pagarMock = vi.fn(
+  (_id: number, _d: { forma_pagamento: string; data_pagamento?: string | null }) =>
+    Promise.resolve({}),
+);
+const emProcessamentoMock = vi.fn((_id: number) => Promise.resolve({}));
 const recolherMock = vi.fn(
   (_id: number, _d: { data_recolhimento: string; documento_recolhimento: string }) =>
     Promise.resolve({}),
@@ -36,6 +41,7 @@ vi.mock("@/lib/api", async () => {
           ...actual.api.pagamentos.parcelas,
           estornar: estornarMock,
           revogarLiberacao: revogarMock,
+          pagar: pagarMock,
         },
         retencoes: {
           ...actual.api.pagamentos.retencoes,
@@ -61,7 +67,7 @@ vi.mock("@/lib/api", async () => {
             criticidade: "MEDIA", urgente: false, justificativa_urgencia: null,
             descricao: "Serviço de teste", status: "AUTORIZADO",
             situacao_tramitacao: "AUTORIZADA", situacao_fila: "ELEGIVEL",
-            situacao_pagamento: "PAGA_PARCIAL", id_unidade: 1, versao: 1, lock_version: 5,
+            situacao_pagamento: estado.pagamento, id_unidade: 1, versao: 1, lock_version: 5,
             id_gestor_decisor: null, id_validador: null, id_usuario_solicitante: 1,
             liquidacao_confirmada: true, data_liquidacao: "2026-09-01",
             criado_em: "2026-09-01T10:00:00Z", atualizado_em: null, historico: [],
@@ -72,6 +78,7 @@ vi.mock("@/lib/api", async () => {
           listarAnexos: () => Promise.resolve([]),
           listarExcecoes: () => Promise.resolve([]),
           checklist: () => Promise.resolve([]),
+          emProcessamento: emProcessamentoMock,
           posicaoDebito: () => Promise.reject(new actual.ApiError("Sem posição na fila.", 404)),
         },
       },
@@ -106,6 +113,9 @@ async function abrir() {
 
 beforeEach(() => {
   estado.perms = [];
+  estado.pagamento = "PAGA_PARCIAL";
+  pagarMock.mockClear();
+  emProcessamentoMock.mockClear();
   estornarMock.mockClear();
   revogarMock.mockClear();
   recolherMock.mockClear();
@@ -165,9 +175,54 @@ describe("ações financeiras no detalhe do débito", () => {
     );
   });
 
-  it("quem só solicita não vê nenhuma das três ações", async () => {
-    estado.perms = ["pagamento_solicitar"];
+  it("tesouraria: paga avulso só a parcela LIBERADA, com forma e data", async () => {
+    estado.perms = ["pagamento_pagar"];
     await abrir();
+    expect(screen.getAllByRole("button", { name: /^Registrar pagamento da parcela/ })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Registrar pagamento da parcela 2" }));
+    const dialogo = within(await screen.findByRole("dialog"));
+    fireEvent.change(dialogo.getByLabelText(/Forma de pagamento/), { target: { value: "BOLETO" } });
+    fireEvent.change(dialogo.getByLabelText(/Data do pagamento/), { target: { value: "2026-10-09" } });
+    fireEvent.click(dialogo.getByRole("button", { name: "Registrar pagamento" }));
+    await waitFor(() =>
+      expect(pagarMock).toHaveBeenCalledWith(52, {
+        forma_pagamento: "BOLETO", data_pagamento: "2026-10-09",
+      }),
+    );
+  });
+
+  it("sem data informada, manda nulo — o backend usa a data de hoje", async () => {
+    estado.perms = ["pagamento_pagar"];
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Registrar pagamento da parcela 2" }));
+    const dialogo = within(await screen.findByRole("dialog"));
+    fireEvent.click(dialogo.getByRole("button", { name: "Registrar pagamento" }));
+    await waitFor(() =>
+      expect(pagarMock).toHaveBeenCalledWith(52, { forma_pagamento: "PIX", data_pagamento: null }),
+    );
+  });
+
+  it("'Marcar como enviado ao banco' só aparece com o pagamento programado", async () => {
+    estado.perms = ["pagamento_pagar"];
+    await abrir();
+    expect(screen.queryByRole("button", { name: "Marcar como enviado ao banco" })).toBeNull();
+  });
+
+  it("com o pagamento programado, a tesouraria marca como enviado ao banco", async () => {
+    estado.perms = ["pagamento_pagar"];
+    estado.pagamento = "PROGRAMADA";
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como enviado ao banco" }));
+    await waitFor(() => expect(emProcessamentoMock).toHaveBeenCalledWith(20));
+  });
+
+  it("quem só solicita não vê nenhuma das ações financeiras", async () => {
+    estado.perms = ["pagamento_solicitar"];
+    estado.pagamento = "PROGRAMADA";
+    await abrir();
+    expect(screen.queryByRole("button", { name: /^Registrar pagamento da parcela/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Marcar como enviado ao banco" })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Estornar pagamento/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Revogar liberação/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Registrar recolhimento/ })).toBeNull();
