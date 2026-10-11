@@ -360,6 +360,70 @@ async def conciliar(db: AsyncSession, *, tenant_id: int, id_lancamento: int, id_
     return c
 
 
+async def desfazer_conciliacao(db: AsyncSession, *, tenant_id: int, id_lancamento: int,
+                               usuario_id: int | None, justificativa: str) -> LancamentoExtrato:
+    """Desfaz a baixa de um lançamento: o inverso de `conciliar`.
+
+    Não existia. Lançamento conciliado com a movimentação errada (a baixa
+    manual aceita qualquer movimentação da conta) ficava assim para sempre, e o
+    débito seguia como CONCILIADO sobre um casamento falso.
+
+    Efeitos, numa transação só:
+    - a linha de `conciliacao` é APAGADA. Não há soft-delete aqui porque as
+      duas unicidades da tabela (uma por lançamento, uma por movimentação) não
+      são parciais: uma linha "excluída" impediria conciliar de novo. O que foi
+      desfeito, por quem e por quê fica no `audit_log`;
+    - o lançamento volta a pendente;
+    - o débito que estava CONCILIADO volta a PAGO — ele só é conciliado
+      enquanto TODAS as movimentações de pagamento dele estiverem casadas.
+    """
+    justificativa = (justificativa or "").strip()
+    if not justificativa:
+        raise ConciliacaoError("Desfazer a conciliação exige justificativa.",
+                               status.HTTP_422_UNPROCESSABLE_ENTITY)
+    l = (await db.execute(select(LancamentoExtrato).where(
+        LancamentoExtrato.id == id_lancamento, LancamentoExtrato.tenant_id == tenant_id)
+        .with_for_update())).scalar_one_or_none()
+    if l is None:
+        raise ConciliacaoError("Lançamento não encontrado", status.HTTP_404_NOT_FOUND)
+    c = (await db.execute(select(Conciliacao).where(
+        Conciliacao.tenant_id == tenant_id, Conciliacao.id_lancamento == l.id)
+        .with_for_update())).scalar_one_or_none()
+    if c is None or not l.conciliado:
+        raise ConciliacaoError("Este lançamento não está conciliado.", status.HTTP_409_CONFLICT)
+
+    registro = {"id_conciliacao": c.id, "id_lancamento": l.id,
+                "id_movimentacao": c.id_movimentacao, "id_parcela": c.id_parcela,
+                "tipo_correspondencia": c.tipo_correspondencia,
+                "conciliado_por": c.id_usuario, "valor": str(l.valor),
+                "justificativa": justificativa}
+    id_parcela = c.id_parcela
+    await db.delete(c)
+    l.conciliado = False
+    await db.flush()
+
+    if id_parcela:
+        parc = (await db.execute(select(Parcela).where(
+            Parcela.id == id_parcela, Parcela.tenant_id == tenant_id))).scalar_one_or_none()
+        if parc is not None:
+            from .pagamentos_debitos import _registrar_transicao, obter_debito
+            d = await obter_debito(db, tenant_id=tenant_id, debito_id=parc.id_debito,
+                                   for_update=True)
+            if d.situacao_pagamento == est.CONCILIADA:
+                _registrar_transicao(
+                    db, debito=d, acao="CONCILIACAO_DESFEITA", pagamento=est.PAGA,
+                    usuario_id=usuario_id, justificativa=justificativa[:255])
+                d.atualizado_em = _utcnow()
+                registro["id_debito"] = d.id
+
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="pagamento.conciliacao_desfeita", entidade="lancamento_extrato",
+        id_entidade=l.id, payload=registro)
+    await db.commit(); await db.refresh(l)
+    return l
+
+
 async def baixa_automatica(db: AsyncSession, *, tenant_id: int, id_extrato: int,
                            usuario_id: int | None) -> int:
     """Concilia automaticamente todas as correspondências EXATAS (RF-EXT-06).
