@@ -14,8 +14,9 @@ from ..database import get_db
 from ..models import Usuario
 from ..schemas.pagamentos import (
     LoteCriarIn, LoteDetalheOut, LoteParcelaIn, LotePagamentoOut, LotePagamentoParcelaOut,
-    LoteProgramarIn, ParcelaOut, RetornoLoteIn,
+    LoteProgramarIn, ParcelaElegivelOut, RetornoLoteIn,
 )
+from ..services import pagamentos_debitos as debitos_svc
 from ..services import pagamentos_lotes as lotes
 
 router = APIRouter(prefix="/pagamentos", tags=["pagamentos-lotes"])
@@ -30,13 +31,25 @@ async def _detalhe(db: AsyncSession, *, tenant_id: int, lote_id: int) -> LoteDet
     )
 
 
-@router.get("/lotes/elegiveis", response_model=list[ParcelaOut])
+@router.get("/lotes/elegiveis", response_model=list[ParcelaElegivelOut])
 async def listar_elegiveis(id_conta_pagadora: int | None = None,
                            _: Usuario = Depends(require_permission("pagamento_pagar")),
                            tenant_id: int = Depends(require_tenant_id),
                            db: AsyncSession = Depends(get_db)):
-    return await lotes.parcelas_elegiveis_para_lote(
+    parcelas = await lotes.parcelas_elegiveis_para_lote(
         db, tenant_id=tenant_id, id_conta_pagadora=id_conta_pagadora)
+    debitos = await lotes.debitos_das_parcelas(db, tenant_id=tenant_id, parcelas=parcelas)
+    nomes = await debitos_svc.nomes_fornecedores(
+        db, tenant_id=tenant_id, ids={d.id_fornecedor for d in debitos.values()})
+    out = []
+    for p in parcelas:
+        item = ParcelaElegivelOut.model_validate(p)
+        d = debitos.get(p.id_debito)
+        if d is not None:
+            item.nome_fornecedor = nomes.get(d.id_fornecedor)
+            item.descricao_debito = d.descricao
+        out.append(item)
+    return out
 
 
 @router.post("/lotes", response_model=LotePagamentoOut, status_code=status.HTTP_201_CREATED)

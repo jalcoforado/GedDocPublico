@@ -515,6 +515,8 @@ async def _anexos_debito_out(db, tenant_id: int, tenant_slug: str, vinculos) -> 
     if anexo_ids:
         rows = (await db.execute(select(Anexo).where(Anexo.id.in_(anexo_ids)))).scalars()
         anexos_map = {a.id: a for a in rows}
+    nomes_u = await svc.nomes_usuarios(
+        db, tenant_id=tenant_id, ids={v.id_usuario for v in vinculos if v.id_usuario})
     out = []
     for v in vinculos:
         a = anexos_map.get(v.id_anexo)
@@ -533,7 +535,8 @@ async def _anexos_debito_out(db, tenant_id: int, tenant_slug: str, vinculos) -> 
         out.append(AnexoDebitoOut(
             id=v.id, id_anexo=v.id_anexo, nome=nome, tamanho=tamanho, tipo=tipo,
             versao_debito=v.versao_debito, id_pedido_ajuste=v.id_pedido_ajuste,
-            id_usuario=v.id_usuario, criado_em=v.criado_em))
+            id_usuario=v.id_usuario, nome_usuario=nomes_u.get(v.id_usuario),
+            criado_em=v.criado_em))
     return out
 
 

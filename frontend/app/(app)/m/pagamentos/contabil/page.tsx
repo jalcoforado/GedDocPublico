@@ -109,7 +109,7 @@ export default function ExportContabilPage() {
                   </TD>
                   <TD className="text-right tabular-nums">{l.qtd_eventos}</TD>
                   <TD>{fmtDataHora(l.gerado_em)}</TD>
-                  <TD>{l.id_usuario ? `Usuário #${l.id_usuario}` : "—"}</TD>
+                  <TD>{l.nome_usuario ?? (l.id_usuario ? `Usuário #${l.id_usuario}` : "—")}</TD>
                   <TD className="text-right">
                     <Button asChild variant="secondary" size="sm">
                       <a

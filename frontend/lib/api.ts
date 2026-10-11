@@ -1704,6 +1704,7 @@ export interface AnexoDebitoOut {
   versao_debito: number;
   id_pedido_ajuste: number | null;
   id_usuario: number | null;
+  nome_usuario?: string | null;
   criado_em: string;
 }
 
@@ -1730,7 +1731,7 @@ export interface ExportContabilLote {
   id: number; numero: number;
   periodo_inicio: string | null; periodo_fim: string | null;
   formato_versao: string; qtd_eventos: number; hash_conteudo: string | null;
-  id_usuario: number | null; gerado_em: string;
+  id_usuario: number | null; nome_usuario?: string | null; gerado_em: string;
 }
 
 // ---------- sistema integrado M2M (Onda C2, C2.3) ----------
@@ -1901,6 +1902,16 @@ export interface LoteDetalhe extends LotePagamento {
 export interface RetornoParcelaInput {
   parcela_id: number; resultado: "PAGA" | "FALHOU";
   motivo_falha?: string | null; data_pagamento?: string | null;
+  /** Como o banco pagou; ausente, o backend grava "TED". */
+  forma_pagamento?: FormaPagamentoLote | null;
+}
+
+export type FormaPagamentoLote = "PIX" | "TED" | "BOLETO" | "DINHEIRO" | "OUTRO";
+
+/** Parcela que pode entrar num lote, com fornecedor e descrição da despesa. */
+export interface ParcelaElegivel extends Parcela {
+  nome_fornecedor?: string | null;
+  descricao_debito?: string | null;
 }
 
 // ---------- dashboard financeiro ----------
@@ -4677,7 +4688,7 @@ export const api = {
     // programação, envio e retorno do lote de pagamento (spec §4.3, §7.6).
     lotes: {
       elegiveis: (idContaPagadora?: number) =>
-        request<Parcela[]>(`/pagamentos/lotes/elegiveis${qs({ id_conta_pagadora: idContaPagadora })}`),
+        request<ParcelaElegivel[]>(`/pagamentos/lotes/elegiveis${qs({ id_conta_pagadora: idContaPagadora })}`),
       criar: (data: { id_conta_pagadora: number; parcela_ids: number[] }) =>
         request<LotePagamento>("/pagamentos/lotes", {
           method: "POST", body: JSON.stringify(data) }),

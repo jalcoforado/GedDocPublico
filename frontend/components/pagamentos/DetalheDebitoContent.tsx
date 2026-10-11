@@ -1089,7 +1089,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                         <TR key={a.id}>
                           <TD>{a.nome ?? `Anexo #${a.id_anexo}`}</TD>
                           <TD>{fmtTamanho(a.tamanho)}</TD>
-                          <TD>{a.id_usuario ? `Usuário #${a.id_usuario}` : "—"}</TD>
+                          <TD>{a.nome_usuario ?? (a.id_usuario ? `Usuário #${a.id_usuario}` : "—")}</TD>
                           <TD>{fmtDataHora(a.criado_em)}</TD>
                           <TD>{a.versao_debito}</TD>
                           <TD className="text-right">
