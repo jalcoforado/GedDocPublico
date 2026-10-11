@@ -15,6 +15,7 @@ import {
   ListChecks,
   ListOrdered,
   Shield,
+  ShieldAlert,
   ShieldCheck,
   UserCircle,
   Wallet,
@@ -79,6 +80,10 @@ export const menuPagamentos: MenuModulo = {
         // (importar/baixar/conciliar) exige `pagamento_pagar`.
         { label: "Conciliação", href: "/m/pagamentos/conciliacao", icon: Landmark,
           anyOf: ["pagamento_pagar", "pagamento_autorizar", "pagamento_auditar", "pagamento_cadastro"] },
+        // Relatório de exceções: leitura ampla de propósito no router — quem
+        // audita não é necessariamente quem autoriza ou paga.
+        { label: "Exceções", href: "/m/pagamentos/excecoes", icon: ShieldAlert,
+          anyOf: PERMS_LEITURA_PAGAMENTOS },
         // Leitura e geração exigem `pagamento_cadastro`, mesmo gate do router
         // (`pagamentos_contabil.py`): POST pede action "inserir", GETs só a
         // transação.

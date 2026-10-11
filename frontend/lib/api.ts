@@ -1809,6 +1809,19 @@ export interface FichaFonte {
   disponivel_total: string; contas: FichaFonteConta[];
 }
 
+// Relatório de exceções (Onda C, C1.2). As linhas são heterogêneas: cada
+// regra devolve os campos que fazem sentido para ela.
+export interface RegraExcecao {
+  codigo: string; titulo: string; descricao: string;
+  severidade: "alta" | "media" | "baixa" | string;
+  /** Total real; `exibindo` é quantas linhas vieram em `itens`. */
+  total: number; exibindo: number;
+  itens: Record<string, unknown>[];
+}
+export interface RelatorioExcecoes {
+  gerado_em: string; total_excecoes: number; regras: RegraExcecao[];
+}
+
 // RF-VAL-06: item de checklist parametrizável (template)
 export interface ChecklistItemTemplate {
   id: number; descricao: string; obrigatorio: boolean;
@@ -4486,6 +4499,11 @@ export const api = {
           id_contrato: params?.id_contrato, urgente: params?.urgente,
           competencia: params?.competencia,
         })}`),
+      /** CSV no MESMO recorte da listagem (C1.1). */
+      exportarCsvUrl: (params?: { situacao_tramitacao?: string }) =>
+        `${BROWSER_API_URL}/pagamentos/debitos/exportar.csv${qs({
+          situacao_tramitacao: params?.situacao_tramitacao,
+        })}`,
       get: (id: number) => request<DebitoDetalhe>(`/pagamentos/debitos/${id}`),
       create: (data: unknown) =>
         request<Debito>("/pagamentos/debitos", { method: "POST", body: JSON.stringify(data) }),
@@ -4596,6 +4614,7 @@ export const api = {
     autorizar: (grupos: { id_fonte: number; id_conta_pagadora: number; debito_ids: number[] }[]) =>
       request<OrdemPagamento[]>("/pagamentos/autorizacoes", {
         method: "POST", body: JSON.stringify({ grupos }) }),
+    relatorioExcecoes: () => request<RelatorioExcecoes>("/pagamentos/relatorios/excecoes"),
     contasElegiveis: (fonteId: number) =>
       request<ContaElegivel[]>(`/pagamentos/fontes/${fonteId}/contas-elegiveis`),
     fichaFonte: (fonteId: number) =>
