@@ -5,11 +5,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import {
+  AtalhosPublicos,
+  BOTAO_LOGIN,
+  CAMPO_LOGIN,
+  CAMPO_SENHA_LOGIN,
+} from "@/components/login/comum";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
+import { cn } from "@/lib/utils";
 import { api, govbrLoginUrl } from "@/lib/api";
 
 const DESTINO = "/cidadao/processos";
@@ -51,87 +55,102 @@ export default function CidadaoLoginPage() {
     onError: (e: Error) => setErr(e.message),
   });
 
+  // Mesma linguagem do login do servidor (campos e botões em pílula, título
+  // leve), sem o cartão. Os rótulos ficam VISÍVEIS aqui, ao contrário de lá:
+  // o público desta tela é qualquer cidadão, e texto de preenchimento some
+  // quando se começa a digitar.
   return (
-    <div className="mx-auto max-w-md">
-      <Card>
-        <CardHeader>
-          <CardTitle>Entrar</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              setErr(null);
-              m.mutate();
-            }}
-            className="space-y-3"
-            noValidate
+    <div className="mx-auto w-full max-w-sm pt-4 motion-safe:animate-slide-up">
+      <h1 className="text-center text-2xl font-normal text-foreground-muted">Entrar</h1>
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          setErr(null);
+          m.mutate();
+        }}
+        className="mt-6 space-y-4"
+        noValidate
+      >
+        <div>
+          <Label htmlFor="cpf" required className="px-2">
+            CPF ou CNPJ
+          </Label>
+          <input
+            id="cpf"
+            value={cpf}
+            onChange={(e) => setCpf(e.target.value)}
+            placeholder="Apenas números ou com pontuação"
+            autoComplete="username"
+            inputMode="numeric"
+            required
+            autoFocus
+            className={CAMPO_LOGIN}
+          />
+        </div>
+        <div>
+          <Label htmlFor="senha" required className="px-2">
+            Senha
+          </Label>
+          <PasswordInput
+            id="senha"
+            value={senha}
+            onChange={(e) => setSenha(e.target.value)}
+            autoComplete="current-password"
+            required
+            className={CAMPO_SENHA_LOGIN}
+          />
+        </div>
+        {err && (
+          <div
+            role="alert"
+            className="rounded-2xl border border-danger/30 bg-danger-soft px-4 py-2 text-sm text-danger-soft-foreground"
           >
-            <div>
-              <Label htmlFor="cpf" required>
-                CPF ou CNPJ
-              </Label>
-              <Input
-                id="cpf"
-                value={cpf}
-                onChange={(e) => setCpf(e.target.value)}
-                placeholder="Apenas números ou com pontuação"
-                autoComplete="username"
-                inputMode="numeric"
-                required
-                autoFocus
-              />
-            </div>
-            <div>
-              <Label htmlFor="senha" required>
-                Senha
-              </Label>
-              <PasswordInput
-                id="senha"
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                autoComplete="current-password"
-                required
-              />
-            </div>
-            {err && (
-              <div
-                role="alert"
-                className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
-              >
-                {err}
-              </div>
-            )}
-            <Button type="submit" disabled={m.isPending} size="lg" className="w-full">
-              {m.isPending ? "Entrando..." : "Entrar"}
-            </Button>
-          </form>
-          {govbrQ.data?.disponivel && (
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <span className="h-px flex-1 bg-border" aria-hidden="true" />
-                ou
-                <span className="h-px flex-1 bg-border" aria-hidden="true" />
-              </div>
-              <a
-                href={govbrLoginUrl(DESTINO)}
-                className="flex h-11 w-full items-center justify-center rounded-md border border-border bg-card text-sm font-medium text-foreground hover:bg-muted"
-              >
-                Entrar com gov.br
-              </a>
-            </div>
+            {err}
+          </div>
+        )}
+        <button
+          type="submit"
+          disabled={m.isPending}
+          className={cn(
+            BOTAO_LOGIN,
+            "bg-primary text-primary-foreground shadow-sm hover:opacity-90 hover:shadow-md",
           )}
-          <p className="mt-4 text-center text-sm text-muted-foreground">
-            Ainda não tem cadastro?{" "}
-            <Link
-              href="/cidadao/cadastrar"
-              className="font-medium text-primary hover:underline"
-            >
-              Cadastre-se
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
+        >
+          {m.isPending ? "Entrando..." : "Entrar"}
+        </button>
+      </form>
+
+      {govbrQ.data?.disponivel && (
+        <div className="mt-4 space-y-3">
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="h-px flex-1 bg-border" aria-hidden="true" />
+            ou
+            <span className="h-px flex-1 bg-border" aria-hidden="true" />
+          </div>
+          <a
+            href={govbrLoginUrl(DESTINO)}
+            className={cn(
+              BOTAO_LOGIN,
+              "border border-border-strong text-foreground hover:bg-muted",
+            )}
+          >
+            Entrar com gov.br
+          </a>
+        </div>
+      )}
+
+      <p className="mt-6 px-2 text-sm text-foreground-muted">
+        Ainda não tem cadastro?{" "}
+        <Link
+          href="/cidadao/cadastrar"
+          className="font-semibold text-primary underline-offset-2 hover:underline"
+        >
+          Cadastre-se
+        </Link>
+      </p>
+
+      <AtalhosPublicos className="mt-8" />
     </div>
   );
 }
