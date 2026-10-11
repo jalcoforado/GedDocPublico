@@ -1483,6 +1483,9 @@ export interface Parcela {
   data_prevista_pagamento?: string | null;
 }
 
+/** Categoria da fila cronológica — espelha `CategoriaLit` (backend). */
+export type CategoriaDebito = "BENS" | "LOCACOES" | "SERVICOS" | "OBRAS";
+
 export interface Debito {
   id: number; id_fornecedor: number; nome_fornecedor: string; id_natureza: number;
   id_fonte_recursos: number; id_conta: number | null; id_conta_pagadora: number | null;
@@ -1491,6 +1494,8 @@ export interface Debito {
   justificativa_urgencia: string | null; descricao: string;
   id_usuario_solicitante: number;
   liquidacao_confirmada: boolean; data_liquidacao: string | null;
+  // Só relevante sem contrato: com contrato, a categoria é a dele.
+  categoria?: CategoriaDebito | null;
   criado_em: string; atualizado_em: string | null;
 }
 
