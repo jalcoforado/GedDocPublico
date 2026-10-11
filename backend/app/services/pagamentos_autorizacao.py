@@ -14,6 +14,7 @@ from ..models import (
     OrdemPagamento, OrdemPagamentoDebito, Parcela,
 )
 from ..schemas.pagamentos import ContaElegivelOut, GrupoAutorizacaoIn
+from . import audit
 from . import pagamentos_cadastros as cad
 from . import pagamentos_caixa as caixa
 from . import pagamentos_cronologia as cron
@@ -282,6 +283,16 @@ async def autorizar_lote(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         for d in debitos:
             await cron.reavaliar_debito(db, tenant_id=tenant_id, debito_id=d.id, usuario_id=usuario_id)
         ordens.append(op)
+        # Trilha de auditoria (aprimora_py.audit_log), na MESMA transação: o
+        # ato e o registro de quem o praticou entram ou saem juntos. O
+        # `debito_historico` conta a história de cada débito; esta linha é a
+        # que responde "quem ordenou qual pagamento" sem varrer débito a débito.
+        await audit.log(
+            db, tenant_id=tenant_id, id_usuario=usuario_id,
+            acao="pagamento.autorizado", entidade="ordem_pagamento", id_entidade=op.id,
+            payload={"numero": op.numero, "id_conta_pagadora": conta.id,
+                     "valor_total": str(total), "debito_ids": [d.id for d in debitos],
+                     "excecao_saldo": conta.id in excecao_por_conta})
     await db.commit()
     for op in ordens:
         await db.refresh(op)
@@ -395,6 +406,11 @@ async def liberar_parcelas(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         # débito do lote, dentro da mesma transação (ver docstring).
         await db.flush()
 
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="pagamento.parcelas_liberadas", entidade="parcela", id_entidade=None,
+        payload={"parcela_ids": sorted(parcela_ids),
+                 "debito_ids": sorted({parcelas_por_id[pid].id_debito for pid in parcela_ids})})
     await db.commit()
     for pid in parcela_ids:
         await db.refresh(parcelas_por_id[pid])
@@ -424,6 +440,11 @@ async def revogar_liberacao(db: AsyncSession, *, tenant_id: int, usuario_id: int
         _registrar_transicao(db, debito=d, acao="REVOGADO",
                              tramitacao=est.AUTORIZADA, pagamento=est.NAO_INICIADA,
                              usuario_id=usuario_id, justificativa="Todas as liberações revogadas", ip=ip)
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="pagamento.liberacao_revogada", entidade="parcela", id_entidade=p.id,
+        payload={"id_debito": d.id, "numero": p.numero, "valor": str(p.valor),
+                 "justificativa": justificativa})
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)
     return p
 
@@ -489,6 +510,13 @@ async def pagar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int, pa
         # Pagar consome comprometido e saldo bancário juntos — o disponível
         # de outros débitos da MESMA conta pode ter mudado.
         await cron.reavaliar_por_conta(db, tenant_id=tenant_id, conta_id=d.id_conta_pagadora)
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="pagamento.parcela_paga", entidade="parcela", id_entidade=p.id,
+        payload={"id_debito": d.id, "numero": p.numero, "valor": str(p.valor),
+                 "forma_pagamento": p.forma_pagamento,
+                 "data_pagamento": p.data_pagamento.isoformat() if p.data_pagamento else None,
+                 "id_conta_pagadora": d.id_conta_pagadora, "id_movimentacao": p.id_movimentacao})
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)
     return p
 
@@ -544,5 +572,10 @@ async def estornar_parcela(db: AsyncSession, *, tenant_id: int, usuario_id: int,
         # Estorno devolve saldo à conta — pode reabilitar outros débitos que
         # estavam AGUARDANDO_DISPONIBILIDADE ali.
         await cron.reavaliar_por_conta(db, tenant_id=tenant_id, conta_id=d.id_conta_pagadora)
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="pagamento.parcela_estornada", entidade="parcela", id_entidade=p.id,
+        payload={"id_debito": d.id, "numero": p.numero, "valor": str(p.valor),
+                 "id_conta_pagadora": d.id_conta_pagadora, "justificativa": justificativa})
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(p)
     return p

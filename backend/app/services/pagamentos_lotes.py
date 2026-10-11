@@ -30,6 +30,7 @@ from ..models import (
     MovimentacaoConta, Parcela,
 )
 from ..schemas.pagamentos import RetornoParcelaIn
+from . import audit
 from . import pagamentos_cronologia as cron
 from . import pagamentos_estados as est
 from . import pagamentos_retencoes as ret
@@ -355,6 +356,12 @@ async def enviar_lote(db: AsyncSession, *, tenant_id: int, lote_id: int,
         _registrar_transicao(db, debito=d, acao="LOTE_ENVIADO", pagamento=est.ENVIADA_BANCO,
                              usuario_id=usuario_id, justificativa=f"Lote {lote.numero} enviado")
         d.atualizado_em = _utcnow()
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="pagamento.lote_enviado", entidade="lote_pagamento", id_entidade=lote.id,
+        payload={"numero": lote.numero, "id_conta_pagadora": lote.id_conta_pagadora,
+                 "valor_total": str(lote.valor_total),
+                 "parcela_ids": sorted(v.id_parcela for v in vinculos)})
     await db.commit()
     await db.refresh(lote)
     return lote
@@ -482,6 +489,13 @@ async def processar_retorno(db: AsyncSession, *, tenant_id: int, lote_id: int,
         lote.situacao = "PROCESSADO"
         lote.processado_em = _utcnow()
     lote.atualizado_em = _utcnow()
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="pagamento.lote_retorno", entidade="lote_pagamento", id_entidade=lote.id,
+        payload={"numero": lote.numero, "situacao_lote": lote.situacao,
+                 "retornos": [{"parcela_id": r.parcela_id, "resultado": r.resultado,
+                               "forma_pagamento": r.forma_pagamento,
+                               "motivo_falha": r.motivo_falha} for r in retornos]})
     await db.commit()
     await db.refresh(lote)
     return lote
