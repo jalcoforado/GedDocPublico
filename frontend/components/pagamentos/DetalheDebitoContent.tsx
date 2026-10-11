@@ -15,6 +15,7 @@ import {
   Receipt,
   Trash2,
 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +37,9 @@ import {
   chaveChecklist,
   pendentesDoChecklist,
 } from "@/components/pagamentos/ChecklistDebito";
+import { TRAMITACOES_EDITAVEIS } from "@/components/pagamentos/EditarDebitoContent";
 import { EtapasFluxo } from "@/components/pagamentos/EtapasFluxo";
+import { CATEGORIAS_DEBITO } from "@/components/pagamentos/FormularioDebito";
 import { ProximaAcao } from "@/components/pagamentos/ProximaAcao";
 import { SituacoesDebito } from "@/components/pagamentos/SituacoesDebito";
 import {
@@ -583,6 +586,8 @@ export function DetalheDebitoContent({ id }: { id: number }) {
   // antes poupa o clique e diz exatamente o que falta.
   const validacaoTravadaPeloChecklist =
     acaoSelecionada === "validar" && checklistPendente.length > 0;
+  const podeEditar =
+    TRAMITACOES_EDITAVEIS.includes(debito.situacao_tramitacao) && can("pagamento_solicitar");
   const podeConferirDocumentos =
     debito.situacao_tramitacao === "AGUARDANDO_VALIDACAO" && can("pagamento_validar");
 
@@ -593,7 +598,19 @@ export function DetalheDebitoContent({ id }: { id: number }) {
         title={`Solicitação #${debito.id}`}
         description={debito.nome_fornecedor}
         icon={FileText}
-        actions={<Badge intent={rotulo.intent} icon={rotulo.icon}>{rotulo.label}</Badge>}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge intent={rotulo.intent} icon={rotulo.icon}>{rotulo.label}</Badge>
+            {podeEditar && (
+              <Button asChild variant="secondary" size="sm">
+                <Link href={`/m/pagamentos/solicitacoes/${debito.id}/editar`}>
+                  <FileEdit className="h-4 w-4" aria-hidden="true" />
+                  Editar solicitação
+                </Link>
+              </Button>
+            )}
+          </div>
+        }
       />
 
       {/* Stepper */}
@@ -630,6 +647,14 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                 <div className="text-xs font-medium text-foreground-muted">Competência</div>
                 <div className="text-foreground">{debito.competencia}</div>
               </div>
+              {!debito.id_contrato && (
+                <div>
+                  <div className="text-xs font-medium text-foreground-muted">Categoria</div>
+                  <div className="text-foreground">
+                    {CATEGORIAS_DEBITO.find((c) => c.value === debito.categoria)?.label ?? "—"}
+                  </div>
+                </div>
+              )}
               <div>
                 <div className="text-xs font-medium text-foreground-muted">NE</div>
                 <div className="font-mono text-foreground">{debito.numero_ne || "—"}</div>
