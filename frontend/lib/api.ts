@@ -1619,6 +1619,14 @@ export interface DecisaoJustificadaPayload extends DecisaoPayload {
   justificativa: string;
 }
 
+// Aprovar pelo detalhe é ordenar o pagamento: exige a conta pagadora, como a
+// autorização em lote. A exceção de saldo (RN-15) só vale com justificativa.
+export interface AutoridadeAprovarPayload extends DecisaoPayload {
+  id_conta_pagadora: number;
+  permitir_saldo_insuficiente?: boolean;
+  justificativa_excecao?: string | null;
+}
+
 export type EtapaAjuste = "GESTOR" | "VALIDACAO" | "AUTORIDADE";
 export type TipoAjuste = "MATERIAL" | "NAO_MATERIAL";
 export type SituacaoPedidoAjuste = "ABERTO" | "RESPONDIDO" | "RESOLVIDO" | "CANCELADO";
@@ -4546,7 +4554,7 @@ export const api = {
       validar: (id: number, payload: DecisaoPayload) =>
         request<DebitoOut>(`/pagamentos/debitos/${id}/validar`, {
           method: "POST", body: JSON.stringify(payload) }),
-      autoridadeAprovar: (id: number, payload: DecisaoPayload) =>
+      autoridadeAprovar: (id: number, payload: AutoridadeAprovarPayload) =>
         request<DebitoOut>(`/pagamentos/debitos/${id}/autoridade-aprovar`, {
           method: "POST", body: JSON.stringify(payload) }),
       autoridadeIndeferir: (id: number, payload: DecisaoJustificadaPayload) =>

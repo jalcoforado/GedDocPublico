@@ -101,6 +101,11 @@ export function DetalheDebitoContent({ id }: { id: number }) {
   const [ajustePrazo, setAjustePrazo] = useState("");
   const [ajusteCampos, setAjusteCampos] = useState("");
 
+  // Aprovação pela autoridade: conta pagadora e, se faltar saldo, a exceção.
+  const [contaPagadora, setContaPagadora] = useState("");
+  const [semSaldoAutorizado, setSemSaldoAutorizado] = useState(false);
+  const [justificativaExcecao, setJustificativaExcecao] = useState("");
+
   // Resposta a um pedido de ajuste específico
   const [respostaPorPedido, setRespostaPorPedido] = useState<Record<number, string>>({});
 
@@ -184,6 +189,21 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     queryFn: () => api.pagamentos.debitos.checklist(id),
   });
   const checklistPendente = pendentesDoChecklist(checklistQ.data);
+
+  // Contas que podem pagar este débito: as da fonte dele. Só interessa a quem
+  // está com o diálogo de aprovação aberto.
+  const aprovando = openDialog && acaoSelecionada === "autoridade/aprovar";
+  const contasQ = useQuery({
+    queryKey: ["pag-contas-elegiveis", debito?.id_fonte_recursos],
+    queryFn: () => api.pagamentos.contasElegiveis(debito!.id_fonte_recursos),
+    enabled: aprovando && !!debito,
+  });
+  const contasElegiveis = contasQ.data ?? [];
+  const contaEscolhida = contasElegiveis.find((c) => String(c.id_conta) === contaPagadora);
+  const faltaSaldo =
+    !!contaEscolhida && !!debito && Number(contaEscolhida.disponivel) < Number(debito.valor_total);
+  const aprovacaoIncompleta =
+    !contaEscolhida || (faltaSaldo && (!semSaldoAutorizado || !justificativaExcecao.trim()));
 
   const pedidos = pedidosQ.data ?? [];
   const pedidosAbertos = pedidos.filter((p) => p.situacao === "ABERTO");
@@ -283,9 +303,13 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     mutationFn: () =>
       api.pagamentos.debitos.autoridadeAprovar(id, {
         lock_version: debito?.lock_version ?? 0,
+        id_conta_pagadora: Number(contaPagadora),
+        permitir_saldo_insuficiente: faltaSaldo && semSaldoAutorizado,
+        justificativa_excecao:
+          faltaSaldo && semSaldoAutorizado ? justificativaExcecao.trim() : null,
       }),
     onSuccess: () => {
-      toast.success("Aprovado pela autoridade");
+      toast.success("Pagamento autorizado e ordem de pagamento gerada");
       invalidarTudo();
       setOpenDialog(false);
     },
@@ -1106,6 +1130,9 @@ export function DetalheDebitoContent({ id }: { id: number }) {
             onAction={(acao, etapa) => {
               setJustificativa("");
               resetFormAjuste();
+              setContaPagadora("");
+              setSemSaldoAutorizado(false);
+              setJustificativaExcecao("");
               setAcaoSelecionada(acao);
               setEtapaSelecionada(
                 etapa === "GESTOR" || etapa === "VALIDACAO" || etapa === "AUTORIDADE"
@@ -1133,7 +1160,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                 : acaoSelecionada === "validar"
                   ? "Validar"
                   : acaoSelecionada === "autoridade/aprovar"
-                    ? "Aprovar"
+                    ? "Aprovar e ordenar pagamento"
                     : acaoSelecionada === "autoridade/indeferir"
                       ? "Indeferir"
                       : acaoSelecionada === "ajuste/solicitar"
@@ -1165,7 +1192,9 @@ export function DetalheDebitoContent({ id }: { id: number }) {
               disabled={
                 (dialogEhJustificativa && !justificativa.trim()) ||
                 (dialogEhFormularioRico && !formularioAjusteValido) ||
-                validacaoTravadaPeloChecklist
+                validacaoTravadaPeloChecklist ||
+                (acaoSelecionada === "autoridade/aprovar" &&
+                  (aprovacaoIncompleta || autoridadeAprovarM.isPending))
               }
             >
               Confirmar
@@ -1181,6 +1210,68 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                 <li key={i.id_checklist_item}>{i.descricao}</li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {acaoSelecionada === "autoridade/aprovar" && (
+          <div className="space-y-4">
+            <p className="text-sm text-foreground-muted">
+              Aprovar reserva {fmtMoeda(debito.valor_total)} na conta escolhida e gera a ordem de
+              pagamento. A conta não pode ser trocada depois.
+            </p>
+            {contasQ.isLoading ? (
+              <Skeleton className="h-10 w-full" />
+            ) : contasQ.isError ? (
+              <p role="alert" className="text-sm text-danger-soft-foreground">
+                Não foi possível carregar as contas desta fonte de recursos.
+              </p>
+            ) : contasElegiveis.length === 0 ? (
+              <p role="alert" className="text-sm text-foreground">
+                Nenhuma conta pagadora ativa na fonte de recursos desta solicitação. Cadastre ou
+                ative uma conta em Cadastros antes de aprovar.
+              </p>
+            ) : (
+              <FormField label="Conta pagadora" required>
+                <Select value={contaPagadora} onChange={(e) => setContaPagadora(e.target.value)}>
+                  <option value="">Selecione…</option>
+                  {contasElegiveis.map((c) => (
+                    <option key={c.id_conta} value={c.id_conta}>
+                      {c.nome} — disponível {fmtMoeda(c.disponivel)}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            )}
+            {faltaSaldo && contaEscolhida && (
+              <div
+                role="alert"
+                className="space-y-3 rounded-lg border border-warning/40 bg-warning-soft p-3 text-sm text-warning-soft-foreground"
+              >
+                <p>
+                  O disponível desta conta ({fmtMoeda(contaEscolhida.disponivel)}) não cobre o valor
+                  da solicitação ({fmtMoeda(debito.valor_total)}).
+                </p>
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={semSaldoAutorizado}
+                    onChange={(e) => setSemSaldoAutorizado(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 shrink-0"
+                  />
+                  Autorizar mesmo assim, como exceção registrada
+                </label>
+                {semSaldoAutorizado && (
+                  <FormField label="Justificativa da exceção" required>
+                    <Textarea
+                      value={justificativaExcecao}
+                      onChange={(e) => setJustificativaExcecao(e.target.value)}
+                      maxLength={255}
+                      className="min-h-20"
+                    />
+                  </FormField>
+                )}
+              </div>
+            )}
           </div>
         )}
 
