@@ -20,6 +20,7 @@ from ..models import (
     Conciliacao, ContaBancaria, Debito, Extrato, LancamentoExtrato, MovimentacaoConta, Parcela,
 )
 from ..schemas.pagamentos import ImportarExtratoIn, SugestaoBaixaOut
+from . import audit
 from . import pagamentos_estados as est
 from .pagamentos_extrato_parsers import Cnab240ParseError, OfxParseError, parse_cnab240, parse_ofx
 
@@ -348,6 +349,13 @@ async def conciliar(db: AsyncSession, *, tenant_id: int, id_lancamento: int, id_
     if m.id_parcela:
         await _talvez_conciliar_debito(db, tenant_id=tenant_id, id_parcela=m.id_parcela,
                                        usuario_id=usuario_id)
+    await db.flush()  # c.id
+    # `usuario_id` nulo = baixa automática, feita pelo sistema.
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="pagamento.conciliado", entidade="conciliacao", id_entidade=c.id,
+        payload={"id_lancamento": l.id, "id_movimentacao": m.id, "id_parcela": m.id_parcela,
+                 "id_conta": m.id_conta, "valor": str(m.valor), "tipo_correspondencia": tipo})
     await db.commit(); await db.refresh(c)
     return c
 
