@@ -8,6 +8,7 @@ import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { RitoPagamento } from "@/components/pagamentos/RitoPagamento";
 import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
 import { api, type Debito, type ParcelaFila, type PendenciaAjuste } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 // Filas podem ter dezenas de itens (massa real): cada card mostra os primeiros e
 // aponta para a lista completa, mantendo a home compacta.
@@ -40,7 +41,7 @@ function DebitoLista({ itens }: { itens: Debito[] }) {
         {itens.slice(0, MAX_ITENS_CARD).map((d) => (
           <li key={d.id} className="flex items-center justify-between gap-2 text-sm">
             <Link
-              href={`/m/pagamentos/contas-a-pagar/${d.id}`}
+              href={`/m/pagamentos/solicitacoes/${d.id}`}
               className="min-w-0 flex-1 truncate text-primary hover:underline"
             >
               {d.nome_fornecedor} — {d.descricao}
@@ -49,7 +50,7 @@ function DebitoLista({ itens }: { itens: Debito[] }) {
           </li>
         ))}
       </ul>
-      <VerTodas total={itens.length} href="/m/pagamentos/contas-a-pagar" />
+      <VerTodas total={itens.length} href="/m/pagamentos/solicitacoes" />
     </>
   );
 }
@@ -110,7 +111,7 @@ function CardParcelas({
                 }
               >
                 <Link
-                  href={`/m/pagamentos/contas-a-pagar/${p.id_debito}`}
+                  href={`/m/pagamentos/solicitacoes/${p.id_debito}`}
                   className="min-w-0 flex-1 truncate hover:underline"
                   title={`${p.nome_fornecedor} — ${p.descricao_debito} (parcela ${p.numero})`}
                 >
@@ -123,7 +124,7 @@ function CardParcelas({
               </li>
             ))}
           </ul>
-          <VerTodas total={itens.length} href="/m/pagamentos/contas-a-pagar" />
+          <VerTodas total={itens.length} href="/m/pagamentos/solicitacoes" />
         </>
       )}
       <AbrirTela href={abrirHref} label={abrirLabel} />
@@ -173,9 +174,15 @@ export default function PagamentosHomePage() {
     queryKey: ["pag-fila"],
     queryFn: () => api.pagamentos.minhaFila(),
   });
+  // O painel de caixa exige `pagamento_cadastro` no backend. Para os demais
+  // perfis a consulta devolvia 403 e a seção aparecia como "Nenhuma conta
+  // cadastrada" — informação falsa. Quem não pode ver não consulta nem vê.
+  const { can } = useAuth();
+  const veCaixa = can("pagamento_cadastro");
   const painelQ = useQuery({
     queryKey: ["pag-caixa-painel"],
     queryFn: () => api.pagamentos.caixa.painel(),
+    enabled: veCaixa,
   });
 
   const fila = filaQ.data;
@@ -236,6 +243,7 @@ export default function PagamentosHomePage() {
         </div>
       )}
 
+      {veCaixa && (
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">Caixa</h2>
@@ -273,6 +281,7 @@ export default function PagamentosHomePage() {
           </TBody>
         </Table>
       </div>
+      )}
     </div>
   );
 }

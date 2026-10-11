@@ -75,7 +75,9 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/transporte/recadastramento": { perm: "transporte_regulado" },
   "/m/transporte/relatorio": { perm: "transporte_regulado" },
   "/m/pagamentos": {
-    anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"],
+    anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar",
+            "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
+            "pagamento_cadastro"],
   },
   "/m/pagamentos/solicitacoes": {
     anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar"],
@@ -94,11 +96,14 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
     anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar"],
   },
   "/m/pagamentos/dashboard": {
-    anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"],
+    anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar",
+            "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
+            "pagamento_cadastro"],
   },
   "/m/pagamentos/conciliacao": {
     anyOf: ["pagamento_pagar", "pagamento_autorizar", "pagamento_auditar", "pagamento_cadastro"],
   },
+  "/m/pagamentos/caixa": { perm: "pagamento_cadastro" },
   "/m/pagamentos/contabil": { perm: "pagamento_cadastro" },
   "/m/pagamentos/cadastros/fornecedores": { perm: "pagamento_cadastro" },
   "/m/pagamentos/cadastros/naturezas": { perm: "pagamento_cadastro" },
