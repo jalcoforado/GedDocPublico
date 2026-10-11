@@ -173,6 +173,11 @@ DEBITOS = [
      Decimal("124000.00"), 1, "encaminhado"),
     ("Aquisição de mobiliário escolar", 1, 2, 1, 2, None,
      Decimal("63200.00"), 2, "encaminhado"),
+    # Parado na validação financeira COM o checklist por conferir: é o único
+    # estado em que a seção "Conferência de documentos" do detalhe é editável.
+    # Sem ele a demonstração não tinha onde mostrar a validação acontecendo.
+    ("Limpeza de fossas — unidades rurais de saúde", 5, 1, 1, 2, None,
+     Decimal("6400.00"), 1, "aguardando_validacao"),
     # F3 (ordem cronológica): os débitos que vão até "pago" precisam ser
     # liquidados ANTES dos que param em "autorizado" — senão o autorizado fica
     # elegível à frente na fila e a guarda de preterição barra a liberação com
@@ -181,6 +186,12 @@ DEBITOS = [
      Decimal("11250.00"), 1, "pago"),
     ("Manutenção elétrica do prédio da Prefeitura", 2, 1, 0, 0, None,
      Decimal("16480.00"), 1, "pago"),
+    # Liberado e ainda não pago: é o que a tesouraria tem na fila ao abrir a
+    # tela, e o que mostra "Revogar liberação" e "Recolher" no detalhe. Fica na
+    # fonte de índice 1, onde nenhum outro débito chega a ELEGIVEL — na mesma
+    # chave de um "autorizado" a guarda de preterição barraria a liberação.
+    ("Recarga de extintores — prédios públicos", 5, 1, 1, 2, None,
+     Decimal("4800.00"), 2, "liberado"),
     ("Serviços gráficos — campanha de vacinação", 5, 1, 2, 3, None,
      Decimal("8900.00"), 1, "autorizado"),
     ("Suprimentos de informática — 1º trimestre", 2, 0, 0, 0, 2,
@@ -796,7 +807,8 @@ async def _levar_ao_estado(
     if ate == "rascunho":
         return
 
-    for item_id in itens_obrigatorios:
+    # "aguardando_validacao" fica com o checklist POR CONFERIR, de propósito.
+    for item_id in ([] if ate == "aguardando_validacao" else itens_obrigatorios):
         await chk_svc.marcar(
             db, tenant_id=tenant_id, debito_id=debito.id, id_checklist_item=item_id,
             usuario_id=usuarios["solicitante"], marcado=True,
@@ -829,6 +841,8 @@ async def _levar_ao_estado(
         db, tenant_id=tenant_id, debito_id=debito.id,
         usuario_id=usuarios["secretario"], lock_version=debito.lock_version,
     )
+    if ate == "aguardando_validacao":
+        return
     debito = await deb_svc.validar(
         db, tenant_id=tenant_id, debito_id=debito.id,
         usuario_id=usuarios["validador"], lock_version=debito.lock_version,
@@ -861,6 +875,26 @@ async def _levar_ao_estado(
         return
 
     parcelas = await deb_svc.listar_parcelas(db, tenant_id=tenant_id, debito_id=debito.id)
+    if ate == "liberado":
+        from ..schemas.pagamentos import RetencaoCreate
+        from ..services import pagamentos_retencoes as ret_svc
+
+        await aut_svc.liberar_parcelas(
+            db, tenant_id=tenant_id, usuario_id=usuarios["autorizador"],
+            parcela_ids=[p.id for p in parcelas],
+        )
+        contagens["parcelas_liberadas"] += len(parcelas)
+        # ISS de 5% sobre o valor do serviço, pendente de recolhimento.
+        await ret_svc.criar_retencao(
+            db, tenant_id=tenant_id, debito_id=debito.id,
+            payload=RetencaoCreate(
+                tipo="ISS", descricao="ISS retido na fonte",
+                base_calculo=debito.valor_total, aliquota=Decimal("5"),
+                valor=(debito.valor_total * Decimal("0.05")).quantize(Decimal("0.01")),
+            ),
+        )
+        contagens["retencoes"] += 1
+        return
     for p in parcelas:
         await aut_svc.liberar_parcelas(
             db, tenant_id=tenant_id, usuario_id=usuarios["autorizador"], parcela_ids=[p.id]
@@ -1170,6 +1204,9 @@ RESET_PAGAMENTOS = [
     ("extratos", """
         DELETE FROM pagamentos.extrato WHERE tenant_id = :t
           AND nome_arquivo LIKE 'demo-%'"""),
+    ("retencoes", f"""
+        DELETE FROM pagamentos.retencao WHERE tenant_id = :t
+          AND id_debito IN ({_DEBITOS_DEMO})"""),
     ("checklist_marcas", f"""
         DELETE FROM pagamentos.debito_checklist_marca WHERE tenant_id = :t
           AND id_debito IN ({_DEBITOS_DEMO})"""),
@@ -1355,7 +1392,8 @@ async def _apply(args: argparse.Namespace) -> int:
         k: 0 for k in (
             "usuarios_criados", "naturezas", "fontes", "contas", "fornecedores",
             "contratos", "alcadas", "checklist_itens", "movimentacoes", "debitos",
-            "ordens_pagamento", "parcelas_pagas", "extratos", "veiculos_frota",
+            "ordens_pagamento", "parcelas_liberadas", "retencoes", "parcelas_pagas",
+            "extratos", "veiculos_frota",
             "motoristas", "solicitacoes", "designacoes", "viagens_concluidas",
             "permissionarios", "veiculos_regulados", "alvaras",
         )
