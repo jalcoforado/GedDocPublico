@@ -134,7 +134,7 @@ async def list_debitos(situacao_tramitacao: str | None = None,
 # Onda C (C1.1). Precisa vir ANTES de `/{debito_id}`: registrada depois, a rota
 # dinâmica capturaria "exportar.csv" e devolveria 422 ao tentar convertê-la em int.
 @debitos_router.get("/exportar.csv")
-async def exportar_debitos_csv(meus: bool = False,
+async def exportar_debitos_csv(situacao_tramitacao: str | None = None, meus: bool = False,
                                id_fonte: int | None = None, id_natureza: int | None = None,
                                id_fornecedor: int | None = None, id_contrato: int | None = None,
                                urgente: bool | None = None, competencia: str | None = None,
@@ -148,6 +148,7 @@ async def exportar_debitos_csv(meus: bool = False,
     pt-BR (ver `services/pagamentos_export`).
     """
     filtros = dict(
+        tramitacao_f=situacao_tramitacao,
         solicitante_id=usuario.id if meus else None,
         id_fonte=id_fonte, id_natureza=id_natureza, id_fornecedor=id_fornecedor,
         id_contrato=id_contrato, urgente=urgente, competencia=competencia,

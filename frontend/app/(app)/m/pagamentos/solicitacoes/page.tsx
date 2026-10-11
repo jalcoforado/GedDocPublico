@@ -25,6 +25,7 @@ import { api, type DebitoOut, type SituacaoTramitacao } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
 import { getEtapaIndex } from "@/components/pagamentos/statusFluxo";
+import { BotaoExportarCsv } from "@/components/pagamentos/BotoesExportar";
 import { fmtMoeda } from "@/components/pagamentos/format";
 
 function StatusBadge({ situacao }: { situacao: SituacaoTramitacao }) {
@@ -94,11 +95,21 @@ export default function SolicitacoesPage() {
         description="Acompanhe as solicitações no fluxo de aprovação"
         icon={ClipboardList}
         actions={
-          can("pagamento_solicitar") && (
-            <Button asChild>
-              <Link href="/m/pagamentos/solicitacoes/novo">Nova Solicitação</Link>
-            </Button>
-          )
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Exporta pela etapa escolhida no seletor. A busca por texto e o
+                filtro dos cards são só da tela e não entram no arquivo. */}
+            <BotaoExportarCsv
+              csvUrl={api.pagamentos.debitos.exportarCsvUrl({
+                situacao_tramitacao: situacaoFiltro || undefined,
+              })}
+              rotulo="solicitações de pagamento"
+            />
+            {can("pagamento_solicitar") && (
+              <Button asChild>
+                <Link href="/m/pagamentos/solicitacoes/novo">Nova Solicitação</Link>
+              </Button>
+            )}
+          </div>
         }
       />
 
