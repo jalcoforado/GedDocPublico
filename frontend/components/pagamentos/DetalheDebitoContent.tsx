@@ -31,6 +31,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import {
+  ChecklistDebito,
+  chaveChecklist,
+  pendentesDoChecklist,
+} from "@/components/pagamentos/ChecklistDebito";
 import { EtapasFluxo } from "@/components/pagamentos/EtapasFluxo";
 import { ProximaAcao } from "@/components/pagamentos/ProximaAcao";
 import { SituacoesDebito } from "@/components/pagamentos/SituacoesDebito";
@@ -172,6 +177,14 @@ export function DetalheDebitoContent({ id }: { id: number }) {
   });
   const excecoes = excecoesQ.data ?? [];
 
+  // Mesma chave da seção "Conferência de documentos": uma requisição só, e o
+  // diálogo de validação enxerga a marcação assim que ela é feita.
+  const checklistQ = useQuery({
+    queryKey: chaveChecklist(id),
+    queryFn: () => api.pagamentos.debitos.checklist(id),
+  });
+  const checklistPendente = pendentesDoChecklist(checklistQ.data);
+
   const pedidos = pedidosQ.data ?? [];
   const pedidosAbertos = pedidos.filter((p) => p.situacao === "ABERTO");
   // Pedidos abertos que ESTE usuário pode responder — "o form de responder
@@ -201,6 +214,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     qc.invalidateQueries({ queryKey: ["pag-anexos", id] });
     qc.invalidateQueries({ queryKey: ["pag-posicao-fila", id] });
     qc.invalidateQueries({ queryKey: ["pag-excecoes", id] });
+    qc.invalidateQueries({ queryKey: chaveChecklist(id) });
   }
 
   // Mutations para ações
@@ -541,6 +555,12 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     acaoSelecionada === "ajuste/solicitar" || acaoSelecionada === "ajuste/adicional";
   const dialogEhJustificativa =
     ["gestor/rejeitar", "autoridade/indeferir", "cancelar"].includes(acaoSelecionada ?? "");
+  // O backend recusa a validação com item obrigatório pendente (422). Avisar
+  // antes poupa o clique e diz exatamente o que falta.
+  const validacaoTravadaPeloChecklist =
+    acaoSelecionada === "validar" && checklistPendente.length > 0;
+  const podeConferirDocumentos =
+    debito.situacao_tramitacao === "AGUARDANDO_VALIDACAO" && can("pagamento_validar");
 
   return (
     <div className="space-y-4">
@@ -902,6 +922,8 @@ export function DetalheDebitoContent({ id }: { id: number }) {
             )}
           </SectionCard>
 
+          <ChecklistDebito id={id} editavel={podeConferirDocumentos} />
+
           {/* Documentos (F2, Task 8) */}
           <SectionCard title="Documentos" icon={Paperclip}>
             <div className="space-y-4">
@@ -1142,7 +1164,8 @@ export function DetalheDebitoContent({ id }: { id: number }) {
               }}
               disabled={
                 (dialogEhJustificativa && !justificativa.trim()) ||
-                (dialogEhFormularioRico && !formularioAjusteValido)
+                (dialogEhFormularioRico && !formularioAjusteValido) ||
+                validacaoTravadaPeloChecklist
               }
             >
               Confirmar
@@ -1150,6 +1173,17 @@ export function DetalheDebitoContent({ id }: { id: number }) {
           </>
         }
       >
+        {validacaoTravadaPeloChecklist && (
+          <div role="alert" className="space-y-2 text-sm text-foreground">
+            <p>Antes de validar, confira na seção &ldquo;Conferência de documentos&rdquo;:</p>
+            <ul className="list-disc space-y-1 pl-5 text-foreground-muted">
+              {checklistPendente.map((i) => (
+                <li key={i.id_checklist_item}>{i.descricao}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {dialogEhJustificativa && (
           <div className="space-y-3">
             <Label>Justificativa</Label>
