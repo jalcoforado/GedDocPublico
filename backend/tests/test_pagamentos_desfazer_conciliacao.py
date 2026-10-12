@@ -5,8 +5,9 @@ débito seguia CONCILIADO sobre um casamento falso. O que se trava aqui:
 
 - desfazer devolve o lançamento a pendente e o débito de CONCILIADA a PAGA;
 - o saldo conciliado da conta volta a não contar aquele pagamento;
-- dá para conciliar DE NOVO (as unicidades da tabela não são parciais, por
-  isso a linha é apagada e não marcada);
+- a linha desfeita NÃO é apagada: fica marcada, com quem desfez e por quê;
+- dá para conciliar DE NOVO, porque as unicidades da tabela passaram a valer
+  só para conciliação vigente (migration 0133);
 - fica trilha de quem desfez e por quê;
 - sem justificativa, ou sobre lançamento pendente, nada muda.
 
@@ -54,9 +55,18 @@ async def _estado(engine, tenant_id, debito_id, conta_id, extrato_id):
         saldo = await caixa.saldo_conta(s, tenant_id=tenant_id, conta_id=conta_id)
         lanc = (await conc.listar_lancamentos(s, tenant_id=tenant_id, id_extrato=extrato_id))[0]
         n = (await s.execute(text(
-            "SELECT count(*) FROM pagamentos.conciliacao WHERE tenant_id=:t"),
+            "SELECT count(*) FROM pagamentos.conciliacao "
+            "WHERE tenant_id=:t AND excluido = false"),
             {"t": tenant_id})).scalar_one()
     return d.situacao_pagamento, saldo.saldo_conciliado, lanc.conciliado, n
+
+
+async def _desfeitas(engine, tenant_id):
+    async with _sm(engine)() as s:
+        return (await s.execute(text(
+            "SELECT id_lancamento, id_usuario_desfez, motivo_desfeita, desfeita_em IS NOT NULL "
+            "FROM pagamentos.conciliacao WHERE tenant_id=:t AND excluido = true ORDER BY id"),
+            {"t": tenant_id})).all()
 
 
 async def test_desfazer_devolve_lancamento_debito_e_saldo_e_permite_conciliar_de_novo(admin_engine):
@@ -72,6 +82,9 @@ async def test_desfazer_devolve_lancamento_debito_e_saldo_e_permite_conciliar_de
     # O pagamento continua feito; só deixou de estar conferido contra o extrato.
     assert await _estado(admin_engine, t.id, d.id, conta.id, ex.id) == (
         est.PAGA, Decimal("10000.00"), False, 0)
+    # A linha não some: fica marcada, com autor, momento e motivo.
+    assert [tuple(r) for r in await _desfeitas(admin_engine, t.id)] == [
+        (lanc.id, uid, "Casado com a movimentação errada", True)]
 
     async with _sm(admin_engine)() as s:
         trilha = (await s.execute(text(
@@ -94,6 +107,23 @@ async def test_desfazer_devolve_lancamento_debito_e_saldo_e_permite_conciliar_de
         assert await conc.baixa_automatica(s, tenant_id=t.id, id_extrato=ex.id, usuario_id=uid) == 1
     assert await _estado(admin_engine, t.id, d.id, conta.id, ex.id) == (
         est.CONCILIADA, Decimal("9000.00"), True, 1)
+    # A desfeita e a nova convivem: uma vigente, uma no registro.
+    assert len(await _desfeitas(admin_engine, t.id)) == 1
+
+
+async def test_duas_conciliacoes_vigentes_do_mesmo_lancamento_o_banco_recusa(admin_engine):
+    """RN-14 continua valendo no banco para a conciliação VIGENTE — a troca
+    das unicidades por índices parciais não pode ter afrouxado isso."""
+    from sqlalchemy.exc import IntegrityError
+
+    t, _d, _conta, _ex, lanc, _uid = await _conciliado(admin_engine)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(IntegrityError):
+            await s.execute(text(
+                "INSERT INTO pagamentos.conciliacao "
+                "(tenant_id, id_lancamento, tipo_correspondencia, criado_em) "
+                "VALUES (:t, :l, 'PROVAVEL', NOW())"), {"t": t.id, "l": lanc.id})
+            await s.commit()
 
 
 async def test_desfazer_sem_justificativa_ou_sobre_pendente_nao_muda_nada(admin_engine):

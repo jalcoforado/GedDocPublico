@@ -104,7 +104,9 @@ async def saldo_conta(db, *, tenant_id, conta_id) -> SaldoConta:
                 .join(Conciliacao, Conciliacao.id_movimentacao == MovimentacaoConta.id)
                 .where(MovimentacaoConta.tenant_id == tenant_id,
                        MovimentacaoConta.id_conta == conta_id, MovimentacaoConta.excluido.is_(False),
-                       MovimentacaoConta.tipo == tipo, Conciliacao.tenant_id == tenant_id))
+                       MovimentacaoConta.tipo == tipo, Conciliacao.tenant_id == tenant_id,
+                       # Baixa desfeita não é saldo conferido contra o extrato.
+                       Conciliacao.excluido.is_(False)))
     ent_conc = (await db.execute(_soma_conc("ENTRADA"))).scalar_one()
     sai_conc = (await db.execute(_soma_conc("SAIDA"))).scalar_one()
     saldo_conciliado = inicial + ent_conc - sai_conc

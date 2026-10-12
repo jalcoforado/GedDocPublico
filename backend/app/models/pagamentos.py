@@ -614,7 +614,12 @@ class Idempotencia(Base):
 
 class Conciliacao(Base):
     """Correspondência entre um lançamento do extrato e a movimentação da conta
-    (RF-EXT-04/05). Uma por lançamento e uma por movimentação (RN-14)."""
+    (RF-EXT-04/05). Uma VIGENTE por lançamento e uma por movimentação (RN-14).
+
+    Conciliação desfeita não é apagada: fica com `excluido=True` e os três
+    campos `desfeita_*` (migration 0133). TODA consulta que pergunta "está
+    conciliado?" tem de filtrar `excluido.is_(False)` — sem isso uma baixa
+    desfeita continua contando no saldo conciliado e bloqueando nova baixa."""
     __tablename__ = "conciliacao"
     __table_args__ = {"schema": "pagamentos"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -627,6 +632,11 @@ class Conciliacao(Base):
     tipo_correspondencia: Mapped[str] = mapped_column(String(15), nullable=False)
     id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    desfeita_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    id_usuario_desfez: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True)
+    motivo_desfeita: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class PosicaoCronologica(Base):
