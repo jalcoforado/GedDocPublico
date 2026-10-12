@@ -44,6 +44,7 @@ from ..services import pagamentos_estados as est
 from ..services import pagamentos_excecoes as excecoes
 from ..services import pagamentos_export as export
 from ..services import pagamentos_filas as filas
+from ..services import pagamentos_notificacoes as notif
 from ..services import audit
 from ..services.anexos import AnexoError
 from ..services.html_pdf import html_to_pdf_bytes
@@ -353,6 +354,18 @@ async def reativar_deprecated(debito_id: int,
 
 # ===== Fluxo completo com etapas de gestor, validação e autoridade (F1, Tarefa 7) =====
 
+async def _out_e_avisa(db: AsyncSession, tenant_id: int, d, usuario: Usuario) -> DebitoOut:
+    """Resposta do ato + aviso de quem passa a ter a vez.
+
+    A resposta é montada ANTES: `notificacoes.enviar` comita, e depois disso os
+    atributos de `d` estão expirados. O aviso nunca levanta (`apos_transicao`).
+    """
+    out = (await _out(db, tenant_id, [d]))[0]
+    await notif.apos_transicao(db, tenant_id=tenant_id, debito=d, ator_id=usuario.id,
+                               nome_fornecedor=out.nome_fornecedor)
+    return out
+
+
 # Endpoints do gestor (5 total)
 @debitos_router.post("/{debito_id}/enviar-gestor", response_model=DebitoOut)
 async def enviar_gestor(debito_id: int, payload: DecisaoIn, request: Request,
@@ -363,7 +376,7 @@ async def enviar_gestor(debito_id: int, payload: DecisaoIn, request: Request,
     d = await svc.enviar_para_gestor(db, tenant_id=tenant_id, debito_id=debito_id,
                                      usuario_id=usuario.id, lock_version=payload.lock_version,
                                      ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 @debitos_router.post("/{debito_id}/gestor-autorizar", response_model=DebitoOut)
@@ -375,7 +388,7 @@ async def gestor_autorizar(debito_id: int, payload: DecisaoIn, request: Request,
     d = await svc.gestor_autorizar(db, tenant_id=tenant_id, debito_id=debito_id,
                                    usuario_id=usuario.id, lock_version=payload.lock_version,
                                    ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 @debitos_router.post("/{debito_id}/gestor-rejeitar", response_model=DebitoOut)
@@ -387,7 +400,7 @@ async def gestor_rejeitar(debito_id: int, payload: DecisaoJustificadaIn, request
     d = await svc.gestor_rejeitar(db, tenant_id=tenant_id, debito_id=debito_id,
                                   usuario_id=usuario.id, lock_version=payload.lock_version,
                                   justificativa=payload.justificativa, ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 @debitos_router.post("/{debito_id}/solicitar-ajuste", response_model=DebitoOut)
@@ -408,7 +421,7 @@ async def solicitar_ajuste(debito_id: int, payload: SolicitarAjusteIn, request: 
         transacao_responsavel=payload.transacao_responsavel, tipo=payload.tipo,
         prazo=payload.prazo, campos_relacionados=payload.campos_relacionados,
         ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 @debitos_router.get("/{debito_id}/pedidos-ajuste", response_model=list[PedidoAjusteOut])
@@ -627,7 +640,7 @@ async def responder_ajuste(debito_id: int, payload: DecisaoIn, request: Request,
     d = await svc.responder_ajuste(db, tenant_id=tenant_id, debito_id=debito_id,
                                    usuario_id=usuario.id, lock_version=payload.lock_version,
                                    ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 # Endpoints de validação e autoridade (4 total)
@@ -640,7 +653,7 @@ async def validar(debito_id: int, payload: DecisaoIn, request: Request,
     d = await svc.validar(db, tenant_id=tenant_id, debito_id=debito_id,
                           usuario_id=usuario.id, lock_version=payload.lock_version,
                           ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 @debitos_router.post("/{debito_id}/autoridade-aprovar", response_model=DebitoOut)
@@ -656,7 +669,7 @@ async def autoridade_aprovar(debito_id: int, payload: AutoridadeAprovarIn, reque
         lock_version=payload.lock_version, id_conta_pagadora=payload.id_conta_pagadora,
         permitir_saldo_insuficiente=payload.permitir_saldo_insuficiente,
         justificativa_excecao=payload.justificativa_excecao, ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 @debitos_router.post("/{debito_id}/autoridade-indeferir", response_model=DebitoOut)
@@ -668,7 +681,7 @@ async def autoridade_indeferir(debito_id: int, payload: DecisaoJustificadaIn, re
     d = await svc.autoridade_indeferir(db, tenant_id=tenant_id, debito_id=debito_id,
                                        usuario_id=usuario.id, lock_version=payload.lock_version,
                                        justificativa=payload.justificativa, ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 # Endpoint deprecado: /autorizar (nunca existiu com novo serviço)
@@ -705,7 +718,15 @@ async def autorizar(payload: AutorizarLoteIn, request: Request,
                     db: AsyncSession = Depends(get_db)):
     ops = await aut.autorizar_lote(db, tenant_id=tenant_id, usuario_id=usuario.id,
                                    grupos=payload.grupos, ip=_ip(request))
-    return await _op_out(db, tenant_id, ops)
+    out = await _op_out(db, tenant_id, ops)
+    # Avisa o solicitante de cada débito autorizado. Ids lidos antes do
+    # primeiro aviso: o commit dele expira os objetos.
+    ids = [d.id for op_id in [o.id for o in ops]
+           for d in await aut.debitos_da_ordem(db, tenant_id=tenant_id, ordem_id=op_id)]
+    for debito_id in ids:
+        d = await svc.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+        await notif.apos_transicao(db, tenant_id=tenant_id, debito=d, ator_id=usuario.id)
+    return out
 
 
 # Onda C (C1.2) — relatório de exceções. Leitura ampla de propósito: quem
@@ -801,7 +822,10 @@ async def pagar(parcela_id: int, payload: PagarParcelaIn, request: Request,
     p = await aut.pagar_parcela(db, tenant_id=tenant_id, usuario_id=usuario.id,
                                 parcela_id=parcela_id, forma_pagamento=payload.forma_pagamento,
                                 data_pagamento=payload.data_pagamento, ip=_ip(request))
-    return ParcelaOut.model_validate(p)
+    out = ParcelaOut.model_validate(p)
+    d = await svc.obter_debito(db, tenant_id=tenant_id, debito_id=out.id_debito)
+    await notif.apos_pagamento(db, tenant_id=tenant_id, debito=d, ator_id=usuario.id)
+    return out
 
 
 @operacoes_router.post("/parcelas/{parcela_id}/estornar", response_model=ParcelaOut)

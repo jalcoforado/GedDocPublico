@@ -58,12 +58,19 @@ DEFAULT_PREFS = {
 # tela de preferências em vez de um toggle que não muda nada.
 EVENTOS_NOTIFICACAO: dict[str, tuple[str, ...]] = {
     "sla_estourado": ("in_app", "email", "whatsapp"),
+    # Rito de pagamentos (`services/pagamentos_notificacoes.py`) — só o sino.
+    "pagamento_pendente": ("in_app",),
+    "pagamento_devolvido": ("in_app",),
+    "pagamento_andamento": ("in_app",),
 }
 
 # Rótulo pra tela de preferências. Chave ausente cai no próprio código do
 # evento (feio, mas visível — melhor que quebrar por evento novo sem rótulo).
 EVENTO_LABEL: dict[str, str] = {
     "sla_estourado": "SLA de workflow estourado",
+    "pagamento_pendente": "Pagamentos: solicitação chegou para minha decisão",
+    "pagamento_devolvido": "Pagamentos: minha solicitação foi devolvida ou encerrada",
+    "pagamento_andamento": "Pagamentos: minha solicitação foi autorizada ou paga",
 }
 
 

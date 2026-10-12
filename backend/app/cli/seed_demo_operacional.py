@@ -1347,6 +1347,17 @@ RESET_USUARIOS = [
     # apagar a trilha antes, "usuarios_ops" abaixo esbarra em
     # audit_log_id_usuario_fkey e falha silenciosamente (savepoint por
     # bloco), deixando os usuários de demonstração para trás.
+    # Mesmo problema, mesma causa: o rito de pagamentos passou a notificar
+    # (`services/pagamentos_notificacoes.py`), e quem usa a demonstração pela
+    # tela gera linhas de `notificacao` para os usuários `@ops.demo.test`.
+    ("notificacoes_demo", """
+        DELETE FROM aprimora_py.notificacao WHERE tenant_id = :t
+          AND id_usuario IN (SELECT id FROM utils.usuario WHERE tenant_id = :t
+                             AND email LIKE '%@ops.demo.test')"""),
+    ("notificacao_preferencias_demo", """
+        DELETE FROM aprimora_py.notificacao_preferencia_evento WHERE tenant_id = :t
+          AND id_usuario IN (SELECT id FROM utils.usuario WHERE tenant_id = :t
+                             AND email LIKE '%@ops.demo.test')"""),
     ("audit_log_demo", """
         DELETE FROM aprimora_py.audit_log WHERE tenant_id = :t
           AND id_usuario IN (SELECT id FROM utils.usuario WHERE tenant_id = :t
