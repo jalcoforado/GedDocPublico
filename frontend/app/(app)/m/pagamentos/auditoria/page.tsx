@@ -17,7 +17,7 @@ import { fmtDataHora, fmtMoeda } from "@/components/pagamentos/format";
 import { api, type AuditLogItem as AuditLogOut } from "@/lib/api";
 
 /** Atos que o módulo grava na trilha, na ordem em que acontecem no rito. */
-export const ATOS_AUDITADOS: { acao: string; rotulo: string }[] = [
+const ATOS_AUDITADOS: { acao: string; rotulo: string }[] = [
   { acao: "debito.ajuste_solicitado", rotulo: "Ajuste solicitado" },
   { acao: "debito.ajuste_respondido", rotulo: "Ajuste respondido" },
   { acao: "debito.versao_criada", rotulo: "Alteração material (nova versão)" },
