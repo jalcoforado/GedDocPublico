@@ -22,6 +22,7 @@ from datetime import date
 
 from pydantic import BaseModel, Field
 
+from ..schemas.common import Paginated
 from ..schemas.pagamentos import (
     AnexoDebitoOut, AutoridadeAprovarIn, AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
     DebitoHistoricoOut, DebitoOut, DebitoUpdate, DecisaoIn, DecisaoJustificadaIn,
@@ -117,7 +118,7 @@ async def _out(db, tenant_id: int, debitos) -> list[DebitoOut]:
 
 
 @debitos_router.get("", response_model=list[DebitoOut])
-async def list_debitos(situacao_tramitacao: str | None = None,
+async def list_debitos(situacao_tramitacao: list[str] | None = Query(None),
                        meus: bool = False,
                        id_fonte: int | None = None, id_natureza: int | None = None,
                        id_fornecedor: int | None = None, id_contrato: int | None = None,
@@ -125,11 +126,43 @@ async def list_debitos(situacao_tramitacao: str | None = None,
                        usuario: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
                        tenant_id: int = Depends(require_tenant_id),
                        db: AsyncSession = Depends(get_db)):
+    # `situacao_tramitacao` aceita o parâmetro repetido: as filas por etapa
+    # (gestor, validação, autoridade, concluídas) pedem as situações delas, em
+    # vez de baixar a base inteira e filtrar no navegador.
     rows = await svc.listar_debitos(
-        db, tenant_id=tenant_id, tramitacao_f=situacao_tramitacao,
+        db, tenant_id=tenant_id, tramitacoes=situacao_tramitacao,
         solicitante_id=usuario.id if meus else None, id_fonte=id_fonte, id_natureza=id_natureza,
         id_fornecedor=id_fornecedor, id_contrato=id_contrato, urgente=urgente, competencia=competencia)
     return await _out(db, tenant_id, rows)
+
+
+# As duas rotas abaixo são literais e vêm ANTES de `/{debito_id}`, como
+# `/exportar.csv`: depois dela, "pagina" viraria um id inválido e 422.
+@debitos_router.get("/pagina", response_model=Paginated[DebitoOut])
+async def pagina_debitos(situacao_tramitacao: list[str] | None = Query(None),
+                         q: str | None = Query(None, max_length=120),
+                         page: int = Query(1, ge=1),
+                         page_size: int = Query(25, ge=1, le=100),
+                         usuario: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                         tenant_id: int = Depends(require_tenant_id),
+                         db: AsyncSession = Depends(get_db)):
+    """A listagem de solicitações, paginada no servidor, com busca por texto."""
+    rows, total = await svc.pagina_de_debitos(
+        db, tenant_id=tenant_id, page=page, page_size=page_size,
+        tramitacoes=situacao_tramitacao, q=q)
+    return Paginated(items=await _out(db, tenant_id, rows), total=total,
+                     page=page, page_size=page_size)
+
+
+@debitos_router.get("/contagem-por-situacao", response_model=dict[str, int])
+async def contagem_por_situacao(q: str | None = Query(None, max_length=120),
+                                usuario: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                                tenant_id: int = Depends(require_tenant_id),
+                                db: AsyncSession = Depends(get_db)):
+    """Quantas solicitações há em cada situação, na mesma busca da página. Não
+    recebe filtro de situação de propósito: os cartões por etapa mostram o
+    quadro inteiro, e é clicando neles que se filtra."""
+    return await svc.contar_por_tramitacao(db, tenant_id=tenant_id, q=q)
 
 
 # Onda C (C1.1). Precisa vir ANTES de `/{debito_id}`: registrada depois, a rota

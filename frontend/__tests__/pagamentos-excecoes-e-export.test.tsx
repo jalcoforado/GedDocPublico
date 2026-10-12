@@ -50,7 +50,11 @@ vi.mock("@/lib/api", async () => {
       pagamentos: {
         ...actual.api.pagamentos,
         relatorioExcecoes: relatorioMock,
-        debitos: { ...actual.api.pagamentos.debitos, list: listMock },
+        debitos: {
+          ...actual.api.pagamentos.debitos, list: listMock,
+          pagina: () => Promise.resolve({ items: [], total: 0, page: 1, page_size: 25 }),
+          contagemPorSituacao: () => Promise.resolve({}),
+        },
       },
     },
   };
@@ -119,7 +123,7 @@ describe("exportar solicitações", () => {
     });
     expect(exportar.getAttribute("href")).toMatch(/\/pagamentos\/debitos\/exportar\.csv$/);
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "AGUARDANDO_GESTOR" } });
+    fireEvent.change(screen.getByLabelText("Situação"), { target: { value: "AGUARDANDO_GESTOR" } });
     await waitFor(() =>
       expect(exportar.getAttribute("href")).toMatch(
         /\/pagamentos\/debitos\/exportar\.csv\?situacao_tramitacao=AGUARDANDO_GESTOR$/,

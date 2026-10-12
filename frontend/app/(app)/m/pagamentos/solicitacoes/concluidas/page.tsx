@@ -15,7 +15,11 @@ export default function ConcluidasPage() {
   const listQ = useQuery({
     queryKey: ["pag-solicitacoes-concluidas"],
     queryFn: async () => {
-      const debitos = await api.pagamentos.debitos.list();
+      // O servidor já devolve só as situações desta fila; o filtro abaixo
+      // fica como defesa, não como a regra.
+      const debitos = await api.pagamentos.debitos.list({
+        situacao_tramitacao: ["AUTORIZADA", "REJEITADA_GESTOR", "INDEFERIDA_AUTORIDADE", "CANCELADA"],
+      });
       return (debitos as DebitoOut[]).filter((d) =>
         ["AUTORIZADA", "REJEITADA_GESTOR", "INDEFERIDA_AUTORIDADE", "CANCELADA"].includes(
           d.situacao_tramitacao
