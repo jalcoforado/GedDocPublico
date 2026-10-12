@@ -81,7 +81,7 @@ const POR_PAGINA = 50;
 
 /**
  * Trilha de auditoria de pagamentos: quem fez qual ato financeiro, e quando.
- * A trilha é gravada desde o PR #113; atos anteriores não aparecem aqui.
+ * A trilha é gravada desde 2026-10-11 (PR 113); atos anteriores não aparecem aqui.
  */
 export default function AuditoriaPagamentosPage() {
   const [f, setF] = useState<Filtros>(FILTROS_VAZIOS);
