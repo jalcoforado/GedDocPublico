@@ -15,7 +15,11 @@ export default function ValidacaoPage() {
   const listQ = useQuery({
     queryKey: ["pag-solicitacoes-validacao"],
     queryFn: async () => {
-      const debitos = await api.pagamentos.debitos.list();
+      // O servidor já devolve só as situações desta fila; o filtro abaixo
+      // fica como defesa, não como a regra.
+      const debitos = await api.pagamentos.debitos.list({
+        situacao_tramitacao: ["AGUARDANDO_VALIDACAO", "AJUSTE_VALIDACAO"],
+      });
       return (debitos as DebitoOut[]).filter((d) =>
         ["AGUARDANDO_VALIDACAO", "AJUSTE_VALIDACAO"].includes(d.situacao_tramitacao)
       );

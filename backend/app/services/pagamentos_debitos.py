@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Debito, DebitoHistorico, Fornecedor, Parcela, Usuario
@@ -174,17 +174,33 @@ async def obter_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
     return d
 
 
-async def listar_debitos(db: AsyncSession, *, tenant_id: int,
-                         tramitacao_f: str | None = None,
-                         solicitante_id: int | None = None, id_fonte: int | None = None,
-                         id_natureza: int | None = None, id_fornecedor: int | None = None,
-                         id_contrato: int | None = None, urgente: bool | None = None,
-                         competencia: str | None = None) -> list[Debito]:
-    """Lista débitos com filtros do painel (RF-PNL-02): fonte, categoria (natureza),
-    credor, contrato, tramitação, urgência e competência."""
+def _filtro_debitos(*, tenant_id: int, tramitacao_f: str | None = None,
+                    tramitacoes: list[str] | None = None, q: str | None = None,
+                    solicitante_id: int | None = None, id_fonte: int | None = None,
+                    id_natureza: int | None = None, id_fornecedor: int | None = None,
+                    id_contrato: int | None = None, urgente: bool | None = None,
+                    competencia: str | None = None):
+    """O `SELECT` de débitos com os filtros do painel (RF-PNL-02), sem ordem
+    nem corte. Fonte única da listagem inteira, da página e da contagem — três
+    consultas com `WHERE` copiado divergiriam, e o sintoma seria total que não
+    bate com a lista."""
     stmt = select(Debito).where(Debito.tenant_id == tenant_id, Debito.excluido.is_(False))
     if tramitacao_f:
         stmt = stmt.where(Debito.situacao_tramitacao == tramitacao_f)
+    if tramitacoes:
+        stmt = stmt.where(Debito.situacao_tramitacao.in_(tramitacoes))
+    termo = (q or "").strip()
+    if termo:
+        # Mesmos campos que a tela buscava no navegador: descrição, fornecedor,
+        # NF e NE. `%` e `_` do usuário valem como texto, não como curinga.
+        like = "%" + termo.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        fornecedores = select(Fornecedor.id).where(
+            Fornecedor.tenant_id == tenant_id, Fornecedor.nome.ilike(like, escape="\\"))
+        stmt = stmt.where(or_(
+            Debito.descricao.ilike(like, escape="\\"),
+            Debito.numero_nf.ilike(like, escape="\\"),
+            Debito.numero_ne.ilike(like, escape="\\"),
+            Debito.id_fornecedor.in_(fornecedores)))
     if solicitante_id is not None:
         stmt = stmt.where(Debito.id_usuario_solicitante == solicitante_id)
     if id_fonte is not None:
@@ -199,7 +215,38 @@ async def listar_debitos(db: AsyncSession, *, tenant_id: int,
         stmt = stmt.where(Debito.urgente.is_(urgente))
     if competencia:
         stmt = stmt.where(Debito.competencia == competencia)
+    return stmt
+
+
+async def listar_debitos(db: AsyncSession, *, tenant_id: int, **filtros) -> list[Debito]:
+    """Lista débitos com filtros do painel (RF-PNL-02): fonte, categoria (natureza),
+    credor, contrato, tramitação, urgência e competência. Sem corte — é o que a
+    exportação e as filas por etapa usam."""
+    stmt = _filtro_debitos(tenant_id=tenant_id, **filtros)
     return list((await db.execute(stmt.order_by(Debito.id.desc()))).scalars().all())
+
+
+async def pagina_de_debitos(db: AsyncSession, *, tenant_id: int, page: int, page_size: int,
+                            **filtros) -> tuple[list[Debito], int]:
+    """Uma página da listagem e o total do recorte. Mais novos primeiro."""
+    stmt = _filtro_debitos(tenant_id=tenant_id, **filtros)
+    total = (await db.execute(
+        select(func.count()).select_from(stmt.subquery()))).scalar_one()
+    rows = (await db.execute(
+        stmt.order_by(Debito.id.desc()).offset((page - 1) * page_size).limit(page_size)
+    )).scalars().all()
+    return list(rows), int(total)
+
+
+async def contar_por_tramitacao(db: AsyncSession, *, tenant_id: int, **filtros) -> dict[str, int]:
+    """Quantos débitos há em cada situação de tramitação, no recorte dado. É o
+    que alimenta os cartões por etapa da tela — que antes contavam o que o
+    navegador tinha baixado."""
+    sub = _filtro_debitos(tenant_id=tenant_id, **filtros).subquery()
+    rows = (await db.execute(
+        select(sub.c.situacao_tramitacao, func.count()).group_by(sub.c.situacao_tramitacao)
+    )).all()
+    return {situacao: int(n) for situacao, n in rows}
 
 
 async def listar_parcelas(db: AsyncSession, *, tenant_id: int, debito_id: int) -> list[Parcela]:

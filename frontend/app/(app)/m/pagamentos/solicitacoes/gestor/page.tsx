@@ -15,7 +15,11 @@ export default function GestorPage() {
   const listQ = useQuery({
     queryKey: ["pag-solicitacoes-gestor"],
     queryFn: async () => {
-      const debitos = await api.pagamentos.debitos.list();
+      // O servidor já devolve só as situações desta fila; o filtro abaixo
+      // fica como defesa, não como a regra.
+      const debitos = await api.pagamentos.debitos.list({
+        situacao_tramitacao: ["AGUARDANDO_GESTOR", "AJUSTE_GESTOR"],
+      });
       return (debitos as DebitoOut[]).filter((d) =>
         ["AGUARDANDO_GESTOR", "AJUSTE_GESTOR"].includes(d.situacao_tramitacao)
       );

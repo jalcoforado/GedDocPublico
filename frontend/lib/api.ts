@@ -1982,10 +1982,16 @@ export interface MinutaUpdateInput {
 
 type QsValue = string | number | boolean | undefined | null;
 
-function qs(params: Record<string, QsValue>): string {
+/** Lista vira o parâmetro repetido (`k=a&k=b`), que é como o FastAPI lê
+ *  `list[str] = Query(...)`. Lista vazia não emite nada. */
+function qs(params: Record<string, QsValue | readonly QsValue[]>): string {
   const s = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== "") s.set(k, String(v));
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (item !== undefined && item !== null && item !== "") s.append(k, String(item));
+      }
+    } else if (v !== undefined && v !== null && v !== "") s.set(k, String(v));
   }
   const q = s.toString();
   return q ? `?${q}` : "";
@@ -4504,8 +4510,23 @@ export const api = {
         ),
     },
     debitos: {
+      /** Uma página da listagem, com busca por texto — a tela de Solicitações. */
+      pagina: (params?: {
+        situacao_tramitacao?: SituacaoTramitacao[]; q?: string;
+        page?: number; page_size?: number;
+      }) =>
+        request<Paginated<DebitoOut>>(`/pagamentos/debitos/pagina${qs({
+          situacao_tramitacao: params?.situacao_tramitacao, q: params?.q,
+          page: params?.page, page_size: params?.page_size,
+        })}`),
+      /** Quantas solicitações há em cada situação, na mesma busca da página. */
+      contagemPorSituacao: (q?: string) =>
+        request<Partial<Record<SituacaoTramitacao, number>>>(
+          `/pagamentos/debitos/contagem-por-situacao${qs({ q })}`),
+      /** A listagem INTEIRA do recorte, sem página. Para fila limitada por
+       *  natureza (as de etapa); a tela de Solicitações usa `pagina`. */
       list: (params?: {
-        situacao_tramitacao?: SituacaoTramitacao; meus?: boolean;
+        situacao_tramitacao?: SituacaoTramitacao | SituacaoTramitacao[]; meus?: boolean;
         id_fonte?: number; id_natureza?: number;
         id_fornecedor?: number; id_contrato?: number; urgente?: boolean; competencia?: string;
       }) =>

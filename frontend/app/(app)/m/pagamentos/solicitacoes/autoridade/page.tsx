@@ -15,7 +15,11 @@ export default function AutoridadePage() {
   const listQ = useQuery({
     queryKey: ["pag-solicitacoes-autoridade"],
     queryFn: async () => {
-      const debitos = await api.pagamentos.debitos.list();
+      // O servidor já devolve só as situações desta fila; o filtro abaixo
+      // fica como defesa, não como a regra.
+      const debitos = await api.pagamentos.debitos.list({
+        situacao_tramitacao: ["AGUARDANDO_AUTORIDADE", "AJUSTE_AUTORIDADE"],
+      });
       return (debitos as DebitoOut[]).filter((d) =>
         ["AGUARDANDO_AUTORIDADE", "AJUSTE_AUTORIDADE"].includes(d.situacao_tramitacao)
       );
