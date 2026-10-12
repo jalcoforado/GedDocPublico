@@ -4653,6 +4653,13 @@ export const api = {
       request<OrdemPagamento[]>("/pagamentos/autorizacoes", {
         method: "POST", body: JSON.stringify({ grupos }) }),
     relatorioExcecoes: () => request<RelatorioExcecoes>("/pagamentos/relatorios/excecoes"),
+    /** Trilha de auditoria SÓ de pagamentos (o recorte é do servidor). */
+    auditoria: (filtros?: {
+      acao?: string; id_usuario?: number; desde?: string; ate?: string;
+      page?: number; page_size?: number;
+    }) =>
+      request<AuditLogPage>(
+        `/pagamentos/auditoria${qs((filtros ?? {}) as Record<string, QsValue>)}`),
     contasElegiveis: (fonteId: number) =>
       request<ContaElegivel[]>(`/pagamentos/fontes/${fonteId}/contas-elegiveis`),
     fichaFonte: (fonteId: number) =>

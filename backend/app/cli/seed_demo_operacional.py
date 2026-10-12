@@ -75,6 +75,9 @@ USUARIOS_PAGAMENTOS = [
     ("secretario", "Sônia Bastos", "pag.secretario", "Secretária de Pasta"),
     ("autorizador", "Otávio Prado", "pag.autorizador", "Ordenador de Despesa"),
     ("tesoureiro", "Teresa Cordeiro", "pag.tesoureiro", "Tesoureira"),
+    # Não pratica ato nenhum do rito: existe para a demonstração ter quem abra
+    # a Trilha de auditoria e o relatório de Exceções só com a leitura.
+    ("auditor", "Carla Vasconcelos", "pag.auditor", "Controladora Interna"),
 ]
 
 # chave (de USUARIOS_PAGAMENTOS) -> codigo de utils.transacao que o papel
@@ -88,6 +91,7 @@ TRANSACAO_POR_PAPEL_PAGAMENTOS = {
     "secretario": "pagamento_gerir",
     "autorizador": "pagamento_autorizar",
     "tesoureiro": "pagamento_pagar",
+    "auditor": "pagamento_auditar",
 }
 
 USUARIOS_OPERACAO = [
