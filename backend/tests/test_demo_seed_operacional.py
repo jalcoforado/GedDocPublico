@@ -218,6 +218,32 @@ async def test_demo_tem_validacao_por_conferir_e_tesouraria_com_fila(admin_engin
 
 
 @pytest.mark.asyncio
+async def test_demo_tem_lote_enviado_e_parcela_fora_de_lote(admin_engine, tenant_ops):
+    """A aba de lotes abre com um lote aguardando retorno do banco, e a de
+    montagem de lote ainda tem parcela para escolher. Reaplicar não duplica."""
+    slug, tid = tenant_ops
+    await _apply(_ns(slug, modulo="pagamentos"))
+    await _apply(_ns(slug, modulo="pagamentos"))
+
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(f"SET LOCAL app.tenant_id = {int(tid)}"))
+        lotes = (await s.execute(text(
+            "SELECT situacao FROM pagamentos.lote_pagamento WHERE tenant_id=:t"),
+            {"t": tid})).scalars().all()
+        em_lote = (await s.execute(text(
+            "SELECT id_parcela FROM pagamentos.lote_pagamento_parcela WHERE tenant_id=:t"),
+            {"t": tid})).scalars().all()
+        fora = (await s.execute(text(
+            "SELECT count(*) FROM pagamentos.parcela p WHERE p.tenant_id=:t "
+            "AND p.excluido=false AND p.status='LIBERADA' AND NOT EXISTS ("
+            "SELECT 1 FROM pagamentos.lote_pagamento_parcela lp WHERE lp.id_parcela = p.id)"),
+            {"t": tid})).scalar_one()
+    assert lotes == ["ENVIADO"]
+    assert len(em_lote) == 1
+    assert fora >= 1
+
+
+@pytest.mark.asyncio
 async def test_conciliacao_tem_extrato_e_sugestoes(admin_engine, tenant_ops):
     slug, tid = tenant_ops
     await _apply(_ns(slug, modulo="pagamentos"))
@@ -365,6 +391,8 @@ async def test_reset_limpa_tudo(admin_engine, tenant_ops):
         "pagamentos.debito",
         "pagamentos.parcela",
         "pagamentos.retencao",
+        "pagamentos.lote_pagamento",
+        "pagamentos.lote_pagamento_parcela",
         "pagamentos.fornecedor",
         "pagamentos.conta_bancaria",
         "frota.veiculo",

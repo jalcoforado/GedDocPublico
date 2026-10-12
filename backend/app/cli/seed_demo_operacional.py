@@ -740,6 +740,11 @@ async def _apply_pagamentos(tenant_id: int, contagens: dict[str, int]) -> None:
                 pagos=pagos, favorecido=FORNECEDORES[f_idx][2],
             )
 
+    # --- lote de pagamento já enviado ao banco (F4) -----------------------
+    async with _sessao(tenant_id) as db:
+        await _garantir_lote_enviado(
+            db, tenant_id=tenant_id, usuarios=usuarios, contagens=contagens)
+
     # --- conciliação bancária (Onda B) -----------------------------------
     if pagos:
         async with _sessao(tenant_id) as db:
@@ -774,6 +779,61 @@ async def _apply_pagamentos(tenant_id: int, contagens: dict[str, int]) -> None:
                     contagens["extratos"] += 1
                 except Exception as e:  # noqa: BLE001
                     print(f"  ! extrato da conta {id_conta} não importado: {e}")
+
+
+# Débito cujas parcelas ficam LIBERADAS (estado "liberado" em DEBITOS).
+DEBITO_DO_LOTE = "Recarga de extintores — prédios públicos"
+
+
+async def _garantir_lote_enviado(
+    db: AsyncSession, *, tenant_id: int, usuarios: dict[str, int], contagens: dict[str, int],
+) -> None:
+    """Põe a PRIMEIRA parcela liberada do débito de demonstração num lote e o
+    leva até ENVIADO — o estado em que a tesouraria registra o retorno do
+    banco. A outra parcela fica liberada e fora de lote, para a tela de
+    montagem de lote também ter o que mostrar.
+
+    É um passo à parte, e não um estado de `DEBITOS`, de propósito: um débito
+    NOVO liberado esbarraria na guarda de ordem cronológica em base já
+    populada (há débito elegível à frente em toda fila de demonstração).
+    Reaproveitar as parcelas já liberadas funciona em base nova e na que já
+    tem a demonstração.
+
+    Idempotente: parcela que já esteve em lote não entra de novo. Falha aqui
+    vira aviso, não aborta o seed.
+    """
+    from ..services import pagamentos_lotes as lot_svc
+
+    linhas = (await db.execute(text("""
+        SELECT p.id, d.id_conta_pagadora
+          FROM pagamentos.parcela p
+          JOIN pagamentos.debito d ON d.id = p.id_debito
+         WHERE p.tenant_id = :t AND d.descricao = :d AND d.excluido = false
+           AND p.excluido = false AND p.status = 'LIBERADA'
+           AND NOT EXISTS (SELECT 1 FROM pagamentos.lote_pagamento_parcela lp
+                            WHERE lp.tenant_id = :t AND lp.id_parcela = p.id)
+           AND NOT EXISTS (SELECT 1 FROM pagamentos.lote_pagamento_parcela lp
+                            JOIN pagamentos.parcela p2 ON p2.id = lp.id_parcela
+                           WHERE lp.tenant_id = :t AND p2.id_debito = d.id)
+         ORDER BY p.numero LIMIT 1"""),
+        {"t": tenant_id, "d": f"{DEMO_PREFIX} {DEBITO_DO_LOTE}"})).all()
+    if not linhas:
+        return
+    id_parcela, id_conta = linhas[0]
+    try:
+        lote = await lot_svc.criar_lote(
+            db, tenant_id=tenant_id, id_conta_pagadora=id_conta,
+            parcela_ids=[id_parcela], usuario_id=usuarios["tesoureiro"])
+        lote = await lot_svc.programar_lote(
+            db, tenant_id=tenant_id, lote_id=lote.id,
+            data_programada=date.today() + timedelta(days=2),
+            usuario_id=usuarios["tesoureiro"])
+        await lot_svc.enviar_lote(
+            db, tenant_id=tenant_id, lote_id=lote.id, usuario_id=usuarios["tesoureiro"])
+        contagens["lotes_enviados"] += 1
+    except Exception as e:  # noqa: BLE001 — seed não deve abortar pelo lote
+        await db.rollback()
+        print(f"  ! lote de demonstração não criado: {e}")
 
 
 def _dividir(total: Decimal, n: int, hoje: date) -> list[tuple[Decimal, date]]:
@@ -1204,6 +1264,18 @@ RESET_PAGAMENTOS = [
     ("extratos", """
         DELETE FROM pagamentos.extrato WHERE tenant_id = :t
           AND nome_arquivo LIKE 'demo-%'"""),
+    # Lote de demonstração: o vínculo sai antes da parcela; o lote, depois do
+    # vínculo. Só se apaga lote que ficou SEM parcela e que paga por conta de
+    # demonstração — lote real com parcelas reais não é tocado.
+    ("lote_parcelas", f"""
+        DELETE FROM pagamentos.lote_pagamento_parcela WHERE tenant_id = :t
+          AND id_parcela IN (SELECT id FROM pagamentos.parcela
+                             WHERE id_debito IN ({_DEBITOS_DEMO}))"""),
+    ("lotes", f"""
+        DELETE FROM pagamentos.lote_pagamento l WHERE l.tenant_id = :t
+          AND l.id_conta_pagadora IN ({_CONTAS_DEMO})
+          AND NOT EXISTS (SELECT 1 FROM pagamentos.lote_pagamento_parcela lp
+                          WHERE lp.id_lote = l.id)"""),
     ("retencoes", f"""
         DELETE FROM pagamentos.retencao WHERE tenant_id = :t
           AND id_debito IN ({_DEBITOS_DEMO})"""),
@@ -1403,7 +1475,8 @@ async def _apply(args: argparse.Namespace) -> int:
         k: 0 for k in (
             "usuarios_criados", "naturezas", "fontes", "contas", "fornecedores",
             "contratos", "alcadas", "checklist_itens", "movimentacoes", "debitos",
-            "ordens_pagamento", "parcelas_liberadas", "retencoes", "parcelas_pagas",
+            "ordens_pagamento", "parcelas_liberadas", "retencoes", "lotes_enviados",
+            "parcelas_pagas",
             "extratos", "veiculos_frota",
             "motoristas", "solicitacoes", "designacoes", "viagens_concluidas",
             "permissionarios", "veiculos_regulados", "alvaras",
