@@ -8,6 +8,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import text
 
 from app.schemas.pagamentos import RetencaoCreate
 from app.services import pagamentos_retencoes as ret
@@ -44,7 +45,13 @@ async def test_http_tesouraria_comum_registra_o_recolhimento(admin_engine):
 
         async with _sm(admin_engine)() as s:
             pendentes = await ret.listar_pendentes_recolhimento(s, tenant_id=tenant.id)
+            # Quem recolheu fica na trilha de auditoria, como nos demais atos.
+            autores = (await s.execute(text(
+                "SELECT id_usuario FROM aprimora_py.audit_log WHERE tenant_id=:t "
+                "AND acao='pagamento.retencao_recolhida' AND id_entidade=:r"),
+                {"t": tenant.id, "r": r.id})).scalars().all()
         assert r.id not in [p.id for p in pendentes]
+        assert autores == [tesouraria]
     finally:
         await _cleanup(admin_engine, tenant.id)
 
