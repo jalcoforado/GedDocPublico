@@ -159,6 +159,43 @@ async def notificar_pagamento(db: AsyncSession, *, tenant_id: int, debito: Debit
         mensagem=f"A solicitação de pagamento #{debito_id} foi paga.")
 
 
+async def notificar_liberacao(db: AsyncSession, *, tenant_id: int, qtd_parcelas: int,
+                              ator_id: int | None) -> int:
+    """Avisa a tesouraria de que há parcelas liberadas para pagar.
+
+    UM aviso por liberação, não um por parcela: a autoridade libera em lote, e
+    vinte avisos iguais ensinariam a tesouraria a ignorar o sino. O link vai
+    para a Central da tesouraria, que é onde a fila está.
+    """
+    if qtd_parcelas <= 0:
+        return 0
+    quem = await usuarios_com_transacao(db, tenant_id=tenant_id, codigo="pagamento_pagar")
+    quem -= {ator_id}
+    if not quem:
+        return 0
+    quantas = "1 parcela foi liberada" if qtd_parcelas == 1 else (
+        f"{qtd_parcelas} parcelas foram liberadas")
+    criadas = await notificacoes.enviar(
+        db, tenant_id=tenant_id,
+        destinatarios=[Destinatario(id_usuario=u) for u in sorted(quem)],
+        canais=CANAIS, tipo=PENDENTE, titulo="Parcelas liberadas para pagamento",
+        mensagem=f"{quantas} para pagamento e aguarda a tesouraria.",
+        link_url="/m/pagamentos/tesouraria",
+        payload={"qtd_parcelas": qtd_parcelas},
+    )
+    return len(criadas)
+
+
+async def apos_liberacao(db: AsyncSession, *, tenant_id: int, qtd_parcelas: int,
+                         ator_id: int | None) -> None:
+    try:
+        await notificar_liberacao(db, tenant_id=tenant_id, qtd_parcelas=qtd_parcelas,
+                                  ator_id=ator_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("pagamento_notificacao_falhou", extra={"tenant_id": tenant_id})
+        await db.rollback()
+
+
 async def apos_transicao(db: AsyncSession, *, tenant_id: int, debito: Debito,
                          ator_id: int | None, nome_fornecedor: str | None = None) -> None:
     """`notificar_transicao` para ser chamada pelo router DEPOIS do ato: nunca

@@ -908,7 +908,10 @@ async def liberar_parcelas(payload: LiberarParcelasIn, request: Request,
     parcelas = await aut.liberar_parcelas(db, tenant_id=tenant_id, usuario_id=usuario.id,
                                           parcela_ids=payload.parcela_ids,
                                           data_prevista=payload.data_prevista, ip=_ip(request))
-    return [ParcelaOut.model_validate(p) for p in parcelas]
+    out = [ParcelaOut.model_validate(p) for p in parcelas]
+    await notif.apos_liberacao(db, tenant_id=tenant_id, qtd_parcelas=len(out),
+                               ator_id=usuario.id)
+    return out
 
 
 @operacoes_router.post("/parcelas/{parcela_id}/revogar-liberacao", response_model=ParcelaOut)

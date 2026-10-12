@@ -18,6 +18,7 @@ from ..schemas.pagamentos import (
 )
 from ..services import pagamentos_debitos as debitos_svc
 from ..services import pagamentos_lotes as lotes
+from ..services import pagamentos_notificacoes as notif
 
 router = APIRouter(prefix="/pagamentos", tags=["pagamentos-lotes"])
 
@@ -131,7 +132,16 @@ async def processar_retorno(lote_id: int, payload: RetornoLoteIn,
     await lotes.processar_retorno(
         db, tenant_id=tenant_id, lote_id=lote_id, retornos=payload.retornos,
         usuario_id=usuario.id)
-    return await _detalhe(db, tenant_id=tenant_id, lote_id=lote_id)
+    out = await _detalhe(db, tenant_id=tenant_id, lote_id=lote_id)
+    # Avisa o solicitante de cada débito que este retorno terminou de pagar —
+    # o mesmo aviso do pagamento avulso. `notificar_pagamento` só fala quando
+    # o débito está PAGA, então parcela que falhou ou pagamento parcial não avisa.
+    pagas = [r.parcela_id for r in payload.retornos if r.resultado == "PAGA"]
+    ids = await lotes.debitos_das_parcelas_por_id(db, tenant_id=tenant_id, parcela_ids=pagas)
+    for debito_id in ids:
+        d = await debitos_svc.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+        await notif.apos_pagamento(db, tenant_id=tenant_id, debito=d, ator_id=usuario.id)
+    return out
 
 
 @router.post("/lotes/{lote_id}/comprovante", response_model=LotePagamentoOut,
