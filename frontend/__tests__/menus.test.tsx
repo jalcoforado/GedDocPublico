@@ -109,6 +109,7 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
             "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
             "pagamento_cadastro"],
   },
+  "/m/pagamentos/auditoria": { perm: "pagamento_auditar" },
   "/m/pagamentos/contabil": { perm: "pagamento_cadastro" },
   "/m/pagamentos/cadastros/fornecedores": { perm: "pagamento_cadastro" },
   "/m/pagamentos/cadastros/naturezas": { perm: "pagamento_cadastro" },

@@ -36,6 +36,7 @@ from .routers import (
     organograma,
     pagamentos_cadastros,
     pagamentos_caixa,
+    pagamentos_auditoria,
     pagamentos_conciliacao,
     pagamentos_contabil,
     pagamentos_debitos,
@@ -161,6 +162,7 @@ app.include_router(pagamentos_cadastros.checklist_router, prefix="/api/v2")
 app.include_router(pagamentos_cadastros.sistemas_integrados_router, prefix="/api/v2")
 app.include_router(pagamentos_cadastros.enums_router, prefix="/api/v2")
 app.include_router(pagamentos_caixa.caixa_router, prefix="/api/v2")
+app.include_router(pagamentos_auditoria.router, prefix="/api/v2")
 app.include_router(pagamentos_conciliacao.router, prefix="/api/v2")
 app.include_router(pagamentos_contabil.contabil_router, prefix="/api/v2")
 app.include_router(pagamentos_debitos.debitos_router, prefix="/api/v2")

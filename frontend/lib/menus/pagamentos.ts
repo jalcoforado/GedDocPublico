@@ -14,6 +14,7 @@ import {
   Layers,
   ListChecks,
   ListOrdered,
+  ScrollText,
   Shield,
   ShieldAlert,
   ShieldCheck,
@@ -84,6 +85,9 @@ export const menuPagamentos: MenuModulo = {
         // audita não é necessariamente quem autoriza ou paga.
         { label: "Exceções", href: "/m/pagamentos/excecoes", icon: ShieldAlert,
           anyOf: PERMS_LEITURA_PAGAMENTOS },
+        // Mesmo gate do router (`pagamentos_auditoria.py`): só quem audita.
+        { label: "Trilha de auditoria", href: "/m/pagamentos/auditoria", icon: ScrollText,
+          perm: "pagamento_auditar" },
         // Leitura e geração exigem `pagamento_cadastro`, mesmo gate do router
         // (`pagamentos_contabil.py`): POST pede action "inserir", GETs só a
         // transação.
