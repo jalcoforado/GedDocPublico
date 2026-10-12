@@ -136,6 +136,16 @@ async def debitos_das_parcelas(db: AsyncSession, *, tenant_id: int,
     return {d.id: d for d in rows}
 
 
+async def debitos_das_parcelas_por_id(db: AsyncSession, *, tenant_id: int,
+                                      parcela_ids: list[int]) -> list[int]:
+    """Ids (distintos, ordenados) dos débitos das parcelas dadas."""
+    if not parcela_ids:
+        return []
+    rows = (await db.execute(select(Parcela.id_debito).distinct().where(
+        Parcela.tenant_id == tenant_id, Parcela.id.in_(parcela_ids)))).scalars().all()
+    return sorted(rows)
+
+
 async def _validar_parcelas_para_lote(db: AsyncSession, *, tenant_id: int,
                                       parcela_ids: list[int],
                                       id_conta_pagadora: int) -> tuple[
