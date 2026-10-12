@@ -20,6 +20,7 @@ vi.mock("@/lib/api", () => ({
         sugestoes: vi.fn(),
         baixaAutomatica: vi.fn(),
         conciliar: vi.fn(),
+        desfazer: vi.fn(),
       },
     },
   },
@@ -40,6 +41,7 @@ const lancamentosMock = api.pagamentos.conciliacao.lancamentos as ReturnType<typ
 const sugestoesMock = api.pagamentos.conciliacao.sugestoes as ReturnType<typeof vi.fn>;
 const baixaAutoMock = api.pagamentos.conciliacao.baixaAutomatica as ReturnType<typeof vi.fn>;
 const conciliarMock = api.pagamentos.conciliacao.conciliar as ReturnType<typeof vi.fn>;
+const desfazerMock = api.pagamentos.conciliacao.desfazer as ReturnType<typeof vi.fn>;
 
 const CONTA = {
   id_conta: 7, nome: "Conta Movimento", banco: "BB", grupo_despesa: "CUSTEIO",
@@ -101,6 +103,7 @@ beforeEach(() => {
   sugestoesMock.mockResolvedValue([SUGESTAO_EXATA, SUGESTAO_PROVAVEL]);
   baixaAutoMock.mockResolvedValue({ baixas: 1 });
   conciliarMock.mockResolvedValue({ id: 1 });
+  desfazerMock.mockResolvedValue({ ...LANC_CONCILIADO, conciliado: false });
 });
 
 describe("Conciliação bancária", () => {
@@ -152,6 +155,31 @@ describe("Conciliação bancária", () => {
     // Um pendente e um conciliado na lista → um único botão de manual.
     const botoes = screen.getAllByRole("button", { name: /Conciliar manualmente/i });
     expect(botoes).toHaveLength(1);
+  });
+
+  it("desfaz só o lançamento conciliado, e só com justificativa", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByText("extrato-julho.csv"));
+    await screen.findByText("TARIFA MANUTENCAO");
+
+    // Um conciliado na lista → um único "Desfazer"; o pendente não oferece.
+    const botoes = screen.getAllByRole("button", { name: /^Desfazer conciliação de /i });
+    expect(botoes).toHaveLength(1);
+    fireEvent.click(botoes[0]);
+
+    const dialogo = within(await screen.findByRole("dialog"));
+    const confirmar = dialogo.getByRole("button", { name: "Desfazer conciliação" });
+    expect(confirmar).toBeDisabled();
+    fireEvent.click(confirmar);
+    expect(desfazerMock).not.toHaveBeenCalled();
+
+    fireEvent.change(dialogo.getByLabelText(/Justificativa/), {
+      target: { value: "Casado com a movimentação errada" },
+    });
+    fireEvent.click(confirmar);
+    await waitFor(() =>
+      expect(desfazerMock).toHaveBeenCalledWith(12, "Casado com a movimentação errada"),
+    );
   });
 
   it("concilia a sugestão ligando lançamento e movimentação", async () => {

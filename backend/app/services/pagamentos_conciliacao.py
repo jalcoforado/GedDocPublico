@@ -227,7 +227,8 @@ async def listar_lancamentos(db: AsyncSession, *, tenant_id: int, id_extrato: in
 async def _movs_disponiveis(db: AsyncSession, *, tenant_id: int, conta_id: int) -> list[MovimentacaoConta]:
     """Pagamentos (SAIDA/PAGAMENTO) da conta ainda NÃO conciliados (RN-14)."""
     conciliadas = select(Conciliacao.id_movimentacao).where(
-        Conciliacao.tenant_id == tenant_id, Conciliacao.id_movimentacao.isnot(None))
+        Conciliacao.tenant_id == tenant_id, Conciliacao.id_movimentacao.isnot(None),
+        Conciliacao.excluido.is_(False))
     return list((await db.execute(select(MovimentacaoConta).where(
         MovimentacaoConta.tenant_id == tenant_id, MovimentacaoConta.id_conta == conta_id,
         MovimentacaoConta.tipo == "SAIDA", MovimentacaoConta.origem == "PAGAMENTO",
@@ -308,7 +309,8 @@ async def _talvez_conciliar_debito(db: AsyncSession, *, tenant_id: int, id_parce
     if not movs:
         return
     conc = (await db.execute(select(func.count()).select_from(Conciliacao).where(
-        Conciliacao.tenant_id == tenant_id, Conciliacao.id_movimentacao.in_(movs)))).scalar_one()
+        Conciliacao.tenant_id == tenant_id, Conciliacao.id_movimentacao.in_(movs),
+        Conciliacao.excluido.is_(False)))).scalar_one()
     if conc >= len(movs):
         _registrar_transicao(
             db, debito=d, acao="CONCILIADO", pagamento=est.CONCILIADA,
@@ -338,8 +340,8 @@ async def conciliar(db: AsyncSession, *, tenant_id: int, id_lancamento: int, id_
             "A movimentação não pertence à conta do extrato (RN-11).",
             status.HTTP_422_UNPROCESSABLE_ENTITY)
     ja = (await db.execute(select(Conciliacao.id).where(
-        Conciliacao.tenant_id == tenant_id, Conciliacao.id_movimentacao == id_movimentacao))
-        ).scalar_one_or_none()
+        Conciliacao.tenant_id == tenant_id, Conciliacao.id_movimentacao == id_movimentacao,
+        Conciliacao.excluido.is_(False)))).scalar_one_or_none()
     if ja is not None:
         raise ConciliacaoError("Movimentação já conciliada (RN-14).", status.HTTP_409_CONFLICT)
     c = Conciliacao(tenant_id=tenant_id, id_lancamento=l.id, id_movimentacao=m.id,
@@ -358,6 +360,74 @@ async def conciliar(db: AsyncSession, *, tenant_id: int, id_lancamento: int, id_
                  "id_conta": m.id_conta, "valor": str(m.valor), "tipo_correspondencia": tipo})
     await db.commit(); await db.refresh(c)
     return c
+
+
+async def desfazer_conciliacao(db: AsyncSession, *, tenant_id: int, id_lancamento: int,
+                               usuario_id: int | None, justificativa: str) -> LancamentoExtrato:
+    """Desfaz a baixa de um lançamento: o inverso de `conciliar`.
+
+    Não existia. Lançamento conciliado com a movimentação errada (a baixa
+    manual aceita qualquer movimentação da conta) ficava assim para sempre, e o
+    débito seguia como CONCILIADO sobre um casamento falso.
+
+    Efeitos, numa transação só:
+    - a linha de `conciliacao` fica com `excluido=True`, mais quem desfez,
+      quando e por quê (soft-delete, regra do projeto). Para isso a 0133
+      trocou as duas unicidades da tabela por índices parciais
+      `WHERE excluido = false` — senão a linha desfeita impediria conciliar
+      de novo;
+    - o lançamento volta a pendente;
+    - o débito que estava CONCILIADO volta a PAGO — ele só é conciliado
+      enquanto TODAS as movimentações de pagamento dele estiverem casadas.
+    """
+    justificativa = (justificativa or "").strip()
+    if not justificativa:
+        raise ConciliacaoError("Desfazer a conciliação exige justificativa.",
+                               status.HTTP_422_UNPROCESSABLE_ENTITY)
+    l = (await db.execute(select(LancamentoExtrato).where(
+        LancamentoExtrato.id == id_lancamento, LancamentoExtrato.tenant_id == tenant_id)
+        .with_for_update())).scalar_one_or_none()
+    if l is None:
+        raise ConciliacaoError("Lançamento não encontrado", status.HTTP_404_NOT_FOUND)
+    c = (await db.execute(select(Conciliacao).where(
+        Conciliacao.tenant_id == tenant_id, Conciliacao.id_lancamento == l.id,
+        Conciliacao.excluido.is_(False)).with_for_update())).scalar_one_or_none()
+    if c is None or not l.conciliado:
+        raise ConciliacaoError("Este lançamento não está conciliado.", status.HTTP_409_CONFLICT)
+
+    registro = {"id_conciliacao": c.id, "id_lancamento": l.id,
+                "id_movimentacao": c.id_movimentacao, "id_parcela": c.id_parcela,
+                "tipo_correspondencia": c.tipo_correspondencia,
+                "conciliado_por": c.id_usuario, "valor": str(l.valor),
+                "justificativa": justificativa}
+    id_parcela = c.id_parcela
+    c.excluido = True
+    c.desfeita_em = _utcnow()
+    c.id_usuario_desfez = usuario_id
+    c.motivo_desfeita = justificativa[:255]
+    l.conciliado = False
+    await db.flush()
+
+    if id_parcela:
+        parc = (await db.execute(select(Parcela).where(
+            Parcela.id == id_parcela, Parcela.tenant_id == tenant_id))).scalar_one_or_none()
+        if parc is not None:
+            from .pagamentos_debitos import _registrar_transicao, obter_debito
+            d = await obter_debito(db, tenant_id=tenant_id, debito_id=parc.id_debito,
+                                   for_update=True)
+            if d.situacao_pagamento == est.CONCILIADA:
+                _registrar_transicao(
+                    db, debito=d, acao="CONCILIACAO_DESFEITA", pagamento=est.PAGA,
+                    usuario_id=usuario_id, justificativa=justificativa[:255])
+                d.atualizado_em = _utcnow()
+                registro["id_debito"] = d.id
+
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="pagamento.conciliacao_desfeita", entidade="lancamento_extrato",
+        id_entidade=l.id, payload=registro)
+    await db.commit(); await db.refresh(l)
+    return l
 
 
 async def baixa_automatica(db: AsyncSession, *, tenant_id: int, id_extrato: int,

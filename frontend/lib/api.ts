@@ -4496,6 +4496,12 @@ export const api = {
           method: "POST",
           body: JSON.stringify(data),
         }),
+      /** Desfaz a baixa de um lançamento; ele volta a pendente. */
+      desfazer: (lancamentoId: number, justificativa: string) =>
+        request<LancamentoExtrato>(
+          `/pagamentos/lancamentos/${lancamentoId}/desfazer-conciliacao`,
+          { method: "POST", body: JSON.stringify({ justificativa }) },
+        ),
     },
     debitos: {
       list: (params?: {

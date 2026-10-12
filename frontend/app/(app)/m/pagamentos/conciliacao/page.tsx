@@ -78,6 +78,8 @@ export default function ConciliacaoPage() {
   const [relatoImport, setRelatoImport] = useState<ImportarExtratoResultado | null>(null);
   const [manual, setManual] = useState<LancamentoExtrato | null>(null);
   const [movEscolhida, setMovEscolhida] = useState<number | null>(null);
+  const [aDesfazer, setADesfazer] = useState<LancamentoExtrato | null>(null);
+  const [motivoDesfazer, setMotivoDesfazer] = useState("");
   const arquivoRef = useRef<HTMLInputElement>(null);
 
   const contasQ = useQuery({
@@ -184,6 +186,19 @@ export default function ConciliacaoPage() {
     },
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Falha ao conciliar."),
+  });
+
+  const desfazer = useMutation({
+    mutationFn: () =>
+      api.pagamentos.conciliacao.desfazer(aDesfazer!.id, motivoDesfazer.trim()),
+    onSuccess: () => {
+      setADesfazer(null);
+      setMotivoDesfazer("");
+      invalidar();
+      toast.success("Conciliação desfeita — o lançamento voltou a pendente.");
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Falha ao desfazer a conciliação."),
   });
 
   function lerArquivo(f: File) {
@@ -452,6 +467,19 @@ export default function ConciliacaoPage() {
                             Conciliar manualmente
                           </Button>
                         )}
+                        {l.conciliado && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Desfazer conciliação de ${l.historico}`}
+                            onClick={() => {
+                              setADesfazer(l);
+                              setMotivoDesfazer("");
+                            }}
+                          >
+                            Desfazer
+                          </Button>
+                        )}
                       </TD>
                     </TR>
                   ))}
@@ -641,6 +669,48 @@ export default function ConciliacaoPage() {
                 {erroImport}
               </p>
             )}
+          </div>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={!!aDesfazer}
+        onClose={() => setADesfazer(null)}
+        size="md"
+        title="Desfazer conciliação"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setADesfazer(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => desfazer.mutate()}
+              disabled={!motivoDesfazer.trim() || desfazer.isPending}
+            >
+              Desfazer conciliação
+            </Button>
+          </>
+        }
+      >
+        {aDesfazer && (
+          <div className="space-y-4">
+            <p className="text-sm text-foreground">
+              O lançamento &ldquo;{aDesfazer.historico}&rdquo; ({fmtMoeda(aDesfazer.valor)}) volta a
+              pendente e pode ser conciliado de novo. Se a solicitação de pagamento ligada a ele
+              estava como conciliada, ela volta a &ldquo;paga&rdquo;.
+            </p>
+            <div className="space-y-1">
+              <Label htmlFor="motivo-desfazer" required>Justificativa</Label>
+              <Textarea
+                id="motivo-desfazer"
+                value={motivoDesfazer}
+                onChange={(e) => setMotivoDesfazer(e.target.value)}
+                maxLength={255}
+                placeholder="Explique o motivo..."
+                className="min-h-24"
+              />
+            </div>
           </div>
         )}
       </Dialog>

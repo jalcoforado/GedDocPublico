@@ -10,7 +10,7 @@ from ..database import get_db
 from ..models import Usuario
 from ..schemas.pagamentos import (
     ConciliacaoOut, ConciliarIn, ExtratoOut, ImportarExtratoIn, ImportarExtratoResultadoOut,
-    LancamentoExtratoOut, SugestaoBaixaOut,
+    JustificativaIn, LancamentoExtratoOut, SugestaoBaixaOut,
 )
 from fastapi import Response
 
@@ -94,3 +94,16 @@ async def conciliar(payload: ConciliarIn,
     c = await conc.conciliar(db, tenant_id=tenant_id, id_lancamento=payload.id_lancamento,
                              id_movimentacao=payload.id_movimentacao, usuario_id=usuario.id)
     return ConciliacaoOut.model_validate(c)
+
+
+@router.post("/lancamentos/{lancamento_id}/desfazer-conciliacao",
+             response_model=LancamentoExtratoOut)
+async def desfazer_conciliacao(lancamento_id: int, payload: JustificativaIn,
+                               usuario: Usuario = Depends(require_permission("pagamento_pagar")),
+                               tenant_id: int = Depends(require_tenant_id),
+                               db: AsyncSession = Depends(get_db)):
+    """Desfaz a baixa de um lançamento. Mesmo gate de quem concilia."""
+    l = await conc.desfazer_conciliacao(
+        db, tenant_id=tenant_id, id_lancamento=lancamento_id, usuario_id=usuario.id,
+        justificativa=payload.justificativa)
+    return LancamentoExtratoOut.model_validate(l)
