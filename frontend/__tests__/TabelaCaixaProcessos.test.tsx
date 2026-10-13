@@ -12,10 +12,9 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/components/FavoritoStar", () => ({ FavoritoStar: () => null }));
 
 import {
-  DIAS_ATENCAO,
-  DIAS_CRITICO,
   TabelaCaixaProcessos,
   nivelDeEspera,
+  textoDoPrazo,
 } from "@/components/TabelaCaixaProcessos";
 import type { ProcessoListItem } from "@/lib/api";
 
@@ -59,16 +58,43 @@ function renderTabela(itens: ProcessoListItem[] | undefined, carregando = false)
 }
 
 describe("nível de espera", () => {
-  it("muda de faixa exatamente nos limiares", () => {
-    expect(nivelDeEspera(haDias(DIAS_ATENCAO - 1), AGORA)).toBe("normal");
-    expect(nivelDeEspera(haDias(DIAS_ATENCAO), AGORA)).toBe("atencao");
-    expect(nivelDeEspera(haDias(DIAS_CRITICO - 1), AGORA)).toBe("atencao");
-    expect(nivelDeEspera(haDias(DIAS_CRITICO), AGORA)).toBe("critico");
+  it("vem do prazo, não do tempo parado", () => {
+    expect(nivelDeEspera("atrasado")).toBe("critico");
+    expect(nivelDeEspera("vencendo")).toBe("atencao");
+    expect(nivelDeEspera("dentro_do_prazo")).toBe("normal");
   });
 
-  it("data ausente ou inválida não vira alarme", () => {
-    expect(nivelDeEspera(null, AGORA)).toBe("normal");
-    expect(nivelDeEspera("não é data", AGORA)).toBe("normal");
+  it("sem prazo, ou sem o campo, não vira alarme", () => {
+    expect(nivelDeEspera("sem_prazo")).toBe("normal");
+    expect(nivelDeEspera(undefined)).toBe("normal");
+    expect(nivelDeEspera(null)).toBe("normal");
+  });
+});
+
+describe("prazo em palavras", () => {
+  const em = (dias: number, hora = "23:59:59") => {
+    const d = new Date(AGORA.getTime() + dias * 86_400_000);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${hora}`;
+  };
+
+  it("conta dias de calendário até o vencimento", () => {
+    expect(textoDoPrazo("dentro_do_prazo", em(10), AGORA)).toBe("vence em 10 dias");
+    expect(textoDoPrazo("vencendo", em(1), AGORA)).toBe("vence amanhã");
+    expect(textoDoPrazo("vencendo", em(0), AGORA)).toBe("vence hoje");
+  });
+
+  it("diz há quanto tempo venceu", () => {
+    expect(textoDoPrazo("atrasado", em(-1), AGORA)).toBe("prazo vencido ontem");
+    expect(textoDoPrazo("atrasado", em(-6), AGORA)).toBe("prazo vencido há 6 dias");
+    // Prazo de serviço que venceu mais cedo no mesmo dia.
+    expect(textoDoPrazo("atrasado", em(0, "08:00:00"), AGORA)).toBe("prazo vencido hoje");
+  });
+
+  it("sem prazo não há o que dizer", () => {
+    expect(textoDoPrazo("sem_prazo", null, AGORA)).toBeNull();
+    expect(textoDoPrazo(undefined, em(3), AGORA)).toBeNull();
+    expect(textoDoPrazo("vencendo", "não é data", AGORA)).toBeNull();
   });
 });
 
@@ -92,15 +118,39 @@ describe("tabela da caixa", () => {
     expect(links).toEqual(["/m/protocolo/processos/42", "/m/protocolo/processos/42"]);
   });
 
-  it("quem espera há muito é dito em texto, não só em cor", () => {
-    const antigo = new Date(Date.now() - (DIAS_CRITICO + 5) * 86_400_000).toISOString();
-    renderTabela([item(1, { parado_desde: antigo })]);
-    expect(screen.getByText(/parado há muito tempo/)).toBeTruthy();
+  it("prazo vencido é dito em texto visível, não só em cor", () => {
+    const ha3dias = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    renderTabela([
+      item(1, {
+        prazo_caixa_status: "atrasado",
+        prazo_caixa_vence_em: ha3dias,
+        prazo_caixa_origem: "encaminhamento",
+      }),
+    ]);
+    const aviso = screen.getByText("prazo vencido há 3 dias");
+    expect(aviso.className).toContain("text-danger-soft-foreground");
+    expect(aviso.getAttribute("title")).toBe("Prazo fixado no encaminhamento");
   });
 
-  it("processo recente não carrega aviso nenhum", () => {
-    renderTabela([item(1, { parado_desde: new Date().toISOString() })]);
-    expect(screen.queryByText(/parado há muito tempo|atenção/)).toBeNull();
+  it("parado há muito, mas sem prazo, não é destacado", () => {
+    const antigo = new Date(Date.now() - 40 * 86_400_000).toISOString();
+    renderTabela([item(1, { parado_desde: antigo, prazo_caixa_status: "sem_prazo" })]);
+    expect(screen.queryByText(/vence|vencido/)).toBeNull();
+    expect(screen.getByText("40 d").className).not.toMatch(/danger|warning/);
+  });
+
+  it("dentro do prazo mostra quando vence, sem alarme", () => {
+    const em9dias = new Date(Date.now() + 9 * 86_400_000).toISOString();
+    renderTabela([
+      item(1, {
+        prazo_caixa_status: "dentro_do_prazo",
+        prazo_caixa_vence_em: em9dias,
+        prazo_caixa_origem: "servico",
+      }),
+    ]);
+    const aviso = screen.getByText("vence em 9 dias");
+    expect(aviso.className).not.toMatch(/danger|warning/);
+    expect(aviso.getAttribute("title")).toBe("Prazo do serviço, contado da abertura");
   });
 
   it("sem responsável é um estado nomeado, não um travessão", () => {
