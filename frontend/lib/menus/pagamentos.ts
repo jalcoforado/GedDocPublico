@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   UserCircle,
   Wallet,
+  Workflow,
 } from "lucide-react";
 
 import type { MenuModulo } from "./tipos";
@@ -51,6 +52,11 @@ export const menuPagamentos: MenuModulo = {
         { label: "Visão geral", href: "/m/pagamentos", icon: Inbox,
           anyOf: PERMS_LEITURA_PAGAMENTOS },
         { label: "Dashboard", href: "/m/pagamentos/dashboard", icon: BarChart3,
+          anyOf: PERMS_LEITURA_PAGAMENTOS },
+        // Mapa do processo inteiro, para quem opera entender o antes e o
+        // depois da própria mesa. As quantidades vêm de endpoints de leitura
+        // do módulo, daí o mesmo conjunto.
+        { label: "Fluxo do processo", href: "/m/pagamentos/fluxo", icon: Workflow,
           anyOf: PERMS_LEITURA_PAGAMENTOS },
         { label: "Solicitações", href: "/m/pagamentos/solicitacoes", icon: ClipboardList,
           anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar"] },

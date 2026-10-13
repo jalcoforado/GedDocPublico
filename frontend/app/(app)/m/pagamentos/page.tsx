@@ -197,8 +197,14 @@ export default function PagamentosHomePage() {
         </p>
       </div>
 
-      <div className="rounded-lg border border-border bg-surface-1 px-4 py-3">
+      <div className="space-y-2 rounded-lg border border-border bg-surface-1 px-4 py-3">
         <RitoPagamento />
+        <Link
+          href="/m/pagamentos/fluxo"
+          className="inline-block text-xs font-medium text-primary underline-offset-2 hover:underline"
+        >
+          Ver o fluxo completo do processo
+        </Link>
       </div>
 
       {fila && (
