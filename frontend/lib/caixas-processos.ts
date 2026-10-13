@@ -7,6 +7,7 @@ import {
   type LucideIcon,
   PenLine,
   Send,
+  Undo2,
 } from "lucide-react";
 
 import type { CaixaProcesso } from "@/lib/api";
@@ -23,6 +24,8 @@ export const ROTA_PROCESSOS = "/m/protocolo/processos";
 export const CAIXAS: { caixa: CaixaProcesso; rotulo: string; icone: LucideIcon }[] = [
   { caixa: "entrada", rotulo: "Caixa de entrada", icone: ArrowDownToLine },
   { caixa: "saida", rotulo: "Caixa de saída", icone: ArrowUpFromLine },
+  // O que enviei e o destino recusou: fica logo abaixo da saída, de onde veio.
+  { caixa: "recusados", rotulo: "Recusados", icone: Undo2 },
   { caixa: "analise", rotulo: "Análise", icone: FileSearch },
   { caixa: "externos", rotulo: "Externos", icone: FolderInput },
   { caixa: "aguardando_assinatura", rotulo: "Aguardando assinatura", icone: PenLine },

@@ -184,7 +184,7 @@ São **quatro**, com papéis distintos:
 docker exec aprimora-py-backend python -m app.cli.seed_bootstrap
 
 # 2. Protocolo: 12 processos, 15 anexos, 6 serviços, manifestantes, servidores,
-#    mais 7 processos tramitados pelos serviços (um em cada caixa de trabalho de
+#    mais 8 processos tramitados pelos serviços (um em cada caixa de trabalho de
 #    quem abre a demo, com prazos para o destaque da caixa ter o que mostrar).
 docker exec aprimora-py-backend python -m app.cli.seed_demo apply --tenant sobral --allow-non-demo
 #    Em tenant que JÁ tem a demonstração e passou pelo seed 4, rode só a parte

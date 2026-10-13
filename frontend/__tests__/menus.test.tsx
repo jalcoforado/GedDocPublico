@@ -37,6 +37,7 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   // teste concordar com qualquer coisa que o menu dissesse.
   "/m/protocolo/processos?caixa=entrada&ativos=0": { perm: "processo" },
   "/m/protocolo/processos?caixa=saida&ativos=0": { perm: "processo" },
+  "/m/protocolo/processos?caixa=recusados&ativos=0": { perm: "processo" },
   "/m/protocolo/processos?caixa=analise&ativos=0": { perm: "processo" },
   "/m/protocolo/processos?caixa=externos&ativos=0": { perm: "processo" },
   "/m/protocolo/processos?caixa=aguardando_assinatura&ativos=0": { perm: "processo" },

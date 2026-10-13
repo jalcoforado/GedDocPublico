@@ -51,6 +51,7 @@ const CONTAGEM = {
   aguardando_assinatura: 22,
   enviado_para_assinatura: 19,
   arquivados: 56,
+  recusados: 3,
 };
 
 window.matchMedia =
@@ -171,9 +172,10 @@ describe("caixas no menu lateral", () => {
 });
 
 describe("caixa ↔ URL", () => {
-  it("aceita só valor da lista — 'recusados' e lixo viram undefined, não 422", () => {
+  it("aceita só valor da lista — caixa inexistente e lixo viram undefined, não 422", () => {
     expect(caixaDaUrl("entrada")).toBe("entrada");
-    expect(caixaDaUrl("recusados")).toBeUndefined();
+    expect(caixaDaUrl("recusados")).toBe("recusados");
+    expect(caixaDaUrl("devolvidos")).toBeUndefined();
     expect(caixaDaUrl("")).toBeUndefined();
     expect(caixaDaUrl(null)).toBeUndefined();
   });

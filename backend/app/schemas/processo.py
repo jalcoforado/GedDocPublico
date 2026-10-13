@@ -2,7 +2,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .marcador import MarcadorMini
 
@@ -54,6 +54,21 @@ class EncaminharRequest(BaseModel):
     # Strict workflow override: super-usuário pode quebrar o trilho do
     # workflow informando motivo. Será auditado.
     override_motivo: str | None = Field(default=None, max_length=500)
+
+
+class RecusarEncaminhamentoRequest(BaseModel):
+    """Recusa pelo destino. Motivo obrigatório: é o que a origem lê para
+    decidir para onde mandar em seguida, e campo opcional vira campo vazio."""
+
+    motivo: str = Field(min_length=5, max_length=2000)
+
+    @field_validator("motivo")
+    @classmethod
+    def _motivo_nao_e_so_espaco(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 5:
+            raise ValueError("Informe o motivo da recusa (mínimo de 5 caracteres).")
+        return v
 
 
 class CancelarEncaminhamentoRequest(BaseModel):
@@ -159,9 +174,10 @@ class CaixaProcesso(str, Enum):
     ANÁLISE da origem — embora `id_local_atual` continue apontando para ela
     até o recebimento.
 
-    Não existe `recusados`: o sistema não tem recusa de encaminhamento, só
-    cancelamento por quem enviou. Uma caixa sempre zerada seria pior que
-    nenhuma.
+    `recusados` (migration 0135) é da unidade de ORIGEM: processos cujo último
+    encaminhamento foi recusado pelo destino. Reencaminhar tira o processo de
+    lá. Sobrepõe-se à análise de propósito, como `externos`: o processo
+    recusado está na mesa da origem, e é um subconjunto que pede decisão.
     """
 
     entrada = "entrada"
@@ -171,6 +187,7 @@ class CaixaProcesso(str, Enum):
     aguardando_assinatura = "aguardando_assinatura"
     enviado_para_assinatura = "enviado_para_assinatura"
     arquivados = "arquivados"
+    recusados = "recusados"
 
 
 class CaixasContagem(BaseModel):
@@ -183,6 +200,7 @@ class CaixasContagem(BaseModel):
     aguardando_assinatura: int = 0
     enviado_para_assinatura: int = 0
     arquivados: int = 0
+    recusados: int = 0
 
 
 class CotaAnexacaoOut(BaseModel):
@@ -270,6 +288,9 @@ class EncaminhamentoOut(BaseModel):
     recebido: bool
     data_hora_recebimento: datetime | None
     cancelado: bool
+    recusado: bool = False
+    data_hora_recusa: datetime | None = None
+    motivo_recusa: str | None = None
 
 
 class DespachoOut(BaseModel):

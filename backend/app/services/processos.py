@@ -306,6 +306,32 @@ def _predicado_caixa(
     if caixa is CaixaProcesso.arquivados:
         return and_(na_unidade, arquivado)
     na_mesa = and_(na_unidade, ~em_transito, ~arquivado)
+    if caixa is CaixaProcesso.recusados:
+        # O ÚLTIMO encaminhamento do processo foi recusado, e saiu desta
+        # unidade. "Último" é o que faz o reencaminhamento esvaziar a caixa: o
+        # encaminhamento novo passa a ser o mais recente. Sem `~em_transito`
+        # seria redundante, mas `~arquivado` não — processo recusado e depois
+        # arquivado já teve a sua decisão.
+        ultimo = (
+            select(func.max(Encaminhamento.id))
+            .where(
+                Encaminhamento.id_processo == Processo.id,
+                Encaminhamento.tenant_id == tenant_id,
+                Encaminhamento.excluido.is_(False),
+            )
+            .correlate(Processo)
+            .scalar_subquery()
+        )
+        recusado_na_origem = (
+            select(Encaminhamento.id)
+            .where(
+                Encaminhamento.id == ultimo,
+                Encaminhamento.recusado.is_(True),
+                Encaminhamento.id_unidade_origem == id_unidade,
+            )
+            .exists()
+        )
+        return and_(~arquivado, recusado_na_origem)
     if caixa is CaixaProcesso.externos:
         return and_(na_mesa, Processo.externo.is_(True))
     return na_mesa  # analise
@@ -749,6 +775,9 @@ async def _load_movimentacoes(
                 prioridade=prio.prioridade if prio else None,
                 quantidade_folhas=e.quantidade_folhas,
                 data_prazo=e.data_prazo,
+                recusado=e.recusado,
+                data_hora_recusa=e.data_hora_recusa,
+                motivo_recusa=e.motivo_recusa,
                 recebido=e.recebido,
                 data_hora_recebimento=e.data_hora_recebimento,
                 cancelado=e.cancelado,

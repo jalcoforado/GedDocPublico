@@ -3,7 +3,7 @@
 O `seed_demo` abre processos e para aí: nenhum é encaminhado, arquivado ou
 enviado para assinatura. Na tela, quatro das sete caixas ficavam em zero
 (Externos, Arquivados, Aguardando assinatura, Enviado para assinatura), e
-Entrada e Saída só tinham o que alguém tramitasse à mão. Sem prazo em nenhum
+Entrada, Saída e Recusados só tinham o que alguém tramitasse à mão. Sem prazo em nenhum
 encaminhamento, o destaque de prazo da caixa também não tinha o que mostrar.
 
 Este módulo põe ao menos um processo em cada caixa de QUEM ABRE A DEMONSTRAÇÃO
@@ -13,8 +13,8 @@ assinatura, à pessoa.
 
 Regras da casa:
 
-- **Passa pelos serviços** (`encaminhar`, `receber`, `arquivar`,
-  `solicitar_assinatura`): são eles que gravam a movimentação que as caixas
+- **Passa pelos serviços** (`encaminhar`, `receber`, `recusar_encaminhamento`,
+  `arquivar`, `solicitar_assinatura`): são eles que gravam a movimentação que as caixas
   leem. Montar as linhas à mão reproduziria o estado de hoje e envelheceria
   com a primeira mudança de regra.
 - **Não depende de nome de unidade.** O `seed_itaitinga` renomeia "Protocolo
@@ -74,6 +74,8 @@ CAIXAS: list[dict[str, Any]] = [
     # Recebido de outra unidade com o prazo do encaminhamento já vencido.
     {"origem": "demo-caixa-107", "passo": "analise_atrasada", "dias_atras": 15,
      "prazo_em_dias": -3},
+    # Enviado a outra unidade, que recusou: volta à minha mesa, em "Recusados".
+    {"origem": "demo-caixa-108", "passo": "recusado", "dias_atras": 3, "prazo_em_dias": 7},
 ]
 
 
@@ -168,7 +170,11 @@ async def _documento(db: AsyncSession, *, tenant_id: int, processo_id: int, ctx:
 async def _executar_passo(db: AsyncSession, *, tenant_id: int, processo_id: int,
                           spec: dict[str, Any], ctx: dict[str, Any]) -> None:
     from ..schemas.assinatura import SolicitarAssinaturaRequest
-    from ..schemas.processo import ArquivarRequest, EncaminharRequest
+    from ..schemas.processo import (
+        ArquivarRequest,
+        EncaminharRequest,
+        RecusarEncaminhamentoRequest,
+    )
     from ..services import acoes_processo as acoes
     from ..services import assinaturas
 
@@ -203,10 +209,16 @@ async def _executar_passo(db: AsyncSession, *, tenant_id: int, processo_id: int,
             SolicitarAssinaturaRequest(id_assinantes=[assinante], id_anexos=[anexo_id]),
             tenant_id=tenant_id, usuario_id=solicitante,
             unidade_solicitante_id=ctx["minha_unidade"])
-    elif passo == "saida":
+    elif passo in ("saida", "recusado"):
         await acoes.encaminhar(
             db, processo_id, _encaminhamento(ctx["outra_unidade"]),
             usuario_id=ctx["eu"], **comum)
+        if passo == "recusado":
+            await acoes.recusar_encaminhamento(
+                db, processo_id,
+                RecusarEncaminhamentoRequest(
+                    motivo="[demo] Assunto não é da competência desta unidade."),
+                tenant_id=tenant_id, usuario_id=ctx["colega"] or ctx["eu"])
     elif passo in ("entrada", "analise_atrasada"):
         # O processo nasce na outra unidade e vem para a minha.
         await acoes.encaminhar(
@@ -220,7 +232,7 @@ async def _executar_passo(db: AsyncSession, *, tenant_id: int, processo_id: int,
 
 def _o_que_falta(spec: dict[str, Any], ctx: dict[str, Any]) -> str | None:
     passo = spec["passo"]
-    if passo in ("entrada", "saida", "analise_atrasada"):
+    if passo in ("entrada", "saida", "analise_atrasada", "recusado"):
         if ctx["outra_unidade"] is None:
             return "o tenant só tem uma unidade ativa"
         if ctx["prioridade"] is None:
