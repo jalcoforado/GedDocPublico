@@ -14,6 +14,7 @@ import {
   Rows3,
   Tag,
   UserCircle,
+  Workflow,
 } from "lucide-react";
 
 import { CAIXAS, ROTA_PROCESSOS, hrefDaCaixa } from "@/lib/caixas-processos";
@@ -50,6 +51,9 @@ export const menuProtocolo: MenuModulo = {
           filtro: { chave: "caixa", valor: caixa },
           contador: caixa,
         })),
+        // Mapa do caminho de um processo, com as quantidades das caixas.
+        // "Workflows", logo abaixo, é outra coisa: o desenho de fluxos BPM.
+        { label: "Fluxo do processo", href: "/m/protocolo/fluxo", icon: Workflow, perm: "processo" },
         { label: "Workflows", href: "/m/protocolo/workflow", icon: GitBranch },
         { label: "Relatórios", href: "/m/protocolo/relatorios", icon: BarChart3, perm: "processo" },
       ],
