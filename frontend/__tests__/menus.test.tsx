@@ -43,6 +43,7 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/protocolo/processos?caixa=aguardando_assinatura&ativos=0": { perm: "processo" },
   "/m/protocolo/processos?caixa=enviado_para_assinatura&ativos=0": { perm: "processo" },
   "/m/protocolo/processos?caixa=arquivados&ativos=0": { perm: "processo" },
+  "/m/protocolo/fluxo": { perm: "processo" },
   "/m/protocolo/workflow": {},
   "/m/protocolo/relatorios": { perm: "processo" },
   "/m/protocolo/protocolo/balcao": { perm: "processo" },
