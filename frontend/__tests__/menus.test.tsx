@@ -64,6 +64,7 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/frota/veiculos": { perm: "frota" },
   "/m/frota/motoristas": { perm: "frota" },
   "/m/frota/solicitacoes": { perm: "frota" },
+  "/m/frota/fluxo": { perm: "frota" },
   "/m/frota/mapa": { perm: "frota" },
   "/m/transporte": { perm: "transporte_regulado" },
   "/m/transporte/permissionarios": { perm: "transporte_regulado" },
