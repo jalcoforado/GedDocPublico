@@ -438,6 +438,7 @@ async def test_apply_poe_processo_em_cada_caixa_de_quem_abre_a_demo(admin_engine
     assert caixas.arquivados == 1
     assert caixas.aguardando_assinatura == 1
     assert caixas.enviado_para_assinatura == 1
+    assert caixas.recusados == 1
 
     # E o destaque de prazo tem o que mostrar: um vencendo na entrada, um
     # atrasado e um vencendo (o externo, pelo prazo do serviço) na análise.
@@ -476,7 +477,7 @@ async def test_caixas_sozinho_e_idempotente_e_o_reset_leva_a_tramitacao(admin_en
                 Processo.tenant_id == tid, Processo.numero_origem.like("demo-caixa-%"))
         )).all()
     assert len(n_caixa) == len(CAIXAS)
-    assert antes == {"encaminhamento": 3, "solicitacao_assinatura": 2, "arquivamento": 1}
+    assert antes == {"encaminhamento": 4, "solicitacao_assinatura": 2, "arquivamento": 1}
 
     assert await _reset(_ns(demo_slug)) == 0
 

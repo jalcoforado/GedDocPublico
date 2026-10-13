@@ -26,6 +26,7 @@ from ..schemas.processo import (
     CaixaProcesso,
     CaixasContagem,
     CancelarEncaminhamentoRequest,
+    RecusarEncaminhamentoRequest,
     ClassificarSigiloRequest,
     DestinosPermitidosOut,
     EncaminharRequest,
@@ -44,7 +45,9 @@ from ..services.acoes_processo import (
     _get_processo,
     arquivar,
     atribuir_responsavel,
+    avisar_recusa,
     cancelar_encaminhamento,
+    recusar_encaminhamento,
     encaminhar,
     receber,
 )
@@ -720,6 +723,33 @@ async def receber_endpoint(
     detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    return detail
+
+
+@router.post(
+    "/{processo_id}/recusar-encaminhamento",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def recusar_encaminhamento_endpoint(
+    processo_id: int,
+    payload: RecusarEncaminhamentoRequest,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """O destino recusa o encaminhamento pendente. Mesmo gate de `receber`: é
+    a outra decisão de quem está com o processo chegando."""
+    try:
+        enc = await recusar_encaminhamento(
+            db, processo_id, payload, tenant_id=tenant_id, usuario_id=current.id
+        )
+    except AcaoError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    await avisar_recusa(db, tenant_id=tenant_id, enc=enc, numero_processo=detail.numero_processo)
     return detail
 
 

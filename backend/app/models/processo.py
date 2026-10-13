@@ -204,6 +204,15 @@ class Encaminhamento(Base):
     recebido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     data_hora_recebimento: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cancelado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Recusa pelo destino (migration 0135). Recusado é sempre também
+    # `cancelado` — é o que tira o processo do trânsito para todo predicado de
+    # "pendente" já existente; este campo diz QUEM desfez.
+    recusado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    data_hora_recusa: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    id_usuario_recusa: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
+    motivo_recusa: Mapped[str | None] = mapped_column(Text, nullable=True)
     id_usuario: Mapped[int] = mapped_column(
         ForeignKey("utils.usuario.id"), nullable=False
     )

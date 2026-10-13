@@ -31,6 +31,7 @@ from ..models import (
 from ..schemas.processo import (
     ArquivarRequest,
     CancelarEncaminhamentoRequest,
+    RecusarEncaminhamentoRequest,
     EncaminharRequest,
 )
 
@@ -326,6 +327,124 @@ async def receber(
     await disparar_evento(db, processo, "recebimento", usuario_id)
 
     return enc
+
+
+async def recusar_encaminhamento(
+    db: AsyncSession,
+    processo_id: int,
+    payload: RecusarEncaminhamentoRequest,
+    *,
+    tenant_id: int,
+    usuario_id: int,
+) -> Encaminhamento:
+    """O destino recusa o encaminhamento pendente, com motivo.
+
+    É a terceira saída de um encaminhamento, ao lado de `receber` (destino
+    aceita) e `cancelar_encaminhamento` (origem desiste). Sem ela, quem
+    recebia um processo que não era seu tinha de recebê-lo e encaminhá-lo de
+    volta — e a linha do tempo registrava uma passagem que nunca houve.
+
+    O que a recusa faz e o que deixa como está:
+
+    - marca `recusado` E `cancelado`. `cancelado` é o que todo predicado de
+      "pendente" do sistema já lê; `recusado` diz quem desfez;
+    - NÃO mexe em `id_local_atual`: o processo nunca saiu da origem (só o
+      recebimento o move), então ele volta a aparecer na mesa de quem enviou;
+    - grava o motivo como `Despacho` na movimentação do encaminhamento, que é
+      o que a linha do tempo já renderiza — mesmo mecanismo do cancelamento;
+    - não cria movimentação nova, pelo mesmo motivo do cancelamento: o processo
+      não mudou de lugar nem de estado de tramitação.
+    """
+    await _get_processo(db, processo_id, tenant_id)
+    enc = (
+        await db.execute(
+            select(Encaminhamento)
+            .where(
+                Encaminhamento.id_processo == processo_id,
+                Encaminhamento.tenant_id == tenant_id,
+                Encaminhamento.excluido.is_(False),
+                Encaminhamento.recebido.is_(False),
+                Encaminhamento.cancelado.is_(False),
+            )
+            .order_by(Encaminhamento.id.desc())
+        )
+    ).scalar_one_or_none()
+    if enc is None:
+        raise AcaoError("Nenhum encaminhamento pendente para este processo")
+
+    enc.recusado = True
+    enc.cancelado = True
+    enc.data_hora_recusa = datetime.now()
+    enc.id_usuario_recusa = usuario_id
+    enc.motivo_recusa = payload.motivo
+
+    db.add(
+        Despacho(
+            tenant_id=tenant_id,
+            id_processo=processo_id,
+            despacho=f"[Recusa de encaminhamento] {payload.motivo}",
+            id_usuario=usuario_id,
+            id_movimentacao=enc.id_movimentacao,
+            ativo=True,
+            excluido=False,
+        )
+    )
+
+    from .audit import log as audit_log
+
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="processo.encaminhamento_recusado",
+        entidade="processo",
+        id_entidade=processo_id,
+        payload={
+            "id_encaminhamento": enc.id,
+            "id_unidade_origem": enc.id_unidade_origem,
+            "id_unidade_destino": enc.id_unidade_destino,
+            "motivo": payload.motivo,
+        },
+    )
+
+    await db.commit()
+    await db.refresh(enc)
+    return enc
+
+
+async def avisar_recusa(
+    db: AsyncSession, *, tenant_id: int, enc: Encaminhamento, numero_processo: str | None
+) -> None:
+    """Avisa quem enviou que o encaminhamento foi recusado. Roda DEPOIS do
+    commit da recusa (`notificacoes.enviar` comita sozinho) e nunca a desfaz:
+    falha aqui vira log, a recusa já está gravada."""
+    import logging
+
+    from . import notificacoes
+    from .notificacoes import Destinatario
+
+    if enc.id_usuario == enc.id_usuario_recusa:
+        return  # quem recusou é quem enviou: não há o que avisar
+    try:
+        await notificacoes.enviar(
+            db,
+            tenant_id=tenant_id,
+            destinatarios=[Destinatario(id_usuario=enc.id_usuario)],
+            canais=("in_app",),
+            tipo="encaminhamento_recusado",
+            titulo="Encaminhamento recusado",
+            mensagem=(
+                f"O processo {numero_processo or f'#{enc.id_processo}'} foi recusado pela "
+                f"unidade de destino: {enc.motivo_recusa}"
+            )[:500],
+            link_url=f"/m/protocolo/processos/{enc.id_processo}",
+            payload={"id_processo": enc.id_processo, "id_encaminhamento": enc.id},
+        )
+    except Exception:  # noqa: BLE001 — notificação é cortesia
+        await db.rollback()
+        logging.getLogger(__name__).exception(
+            "falha ao notificar recusa do encaminhamento %s", enc.id
+        )
 
 
 async def cancelar_encaminhamento(

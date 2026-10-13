@@ -16,7 +16,7 @@ import {
   type ProcessoDetail,
 } from "@/lib/api";
 
-type ModalKind = null | "encaminhar" | "receber" | "cancelar" | "arquivar";
+type ModalKind = null | "encaminhar" | "receber" | "recusar" | "cancelar" | "arquivar";
 
 export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
   const qc = useQueryClient();
@@ -84,6 +84,17 @@ export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
           disabled={!podeReceber}
         >
           Receber
+        </Button>
+        {/* A outra decisão de quem está com o processo chegando. */}
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setErr(null);
+            setModal("recusar");
+          }}
+          disabled={!podeReceber}
+        >
+          Recusar
         </Button>
         <Button
           variant="secondary"
@@ -163,6 +174,16 @@ export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
           </p>
         )}
       </Dialog>
+
+      <RecusarDialog
+        open={modal === "recusar"}
+        onClose={() => setModal(null)}
+        processoId={processo.id}
+        unidadeOrigem={encaminhamentoPendente?.unidade_origem ?? null}
+        err={err}
+        setErr={setErr}
+        onDone={invalidate}
+      />
 
       <CancelarDialog
         open={modal === "cancelar"}
@@ -449,6 +470,90 @@ function CancelarDialog({
         >
           {err}
         </div>
+      )}
+    </Dialog>
+  );
+}
+
+/** Mínimo do motivo — o mesmo do backend (`RecusarEncaminhamentoRequest`). */
+const MOTIVO_MINIMO = 5;
+
+function RecusarDialog({
+  open,
+  onClose,
+  processoId,
+  unidadeOrigem,
+  err,
+  setErr,
+  onDone,
+}: {
+  open: boolean;
+  onClose: () => void;
+  processoId: number;
+  unidadeOrigem: string | null;
+  err: string | null;
+  setErr: (e: string | null) => void;
+  onDone: () => void;
+}) {
+  const [motivo, setMotivo] = useState("");
+  const motivoValido = motivo.trim().length >= MOTIVO_MINIMO;
+
+  const m = useMutation({
+    mutationFn: () => api.processos.recusarEncaminhamento(processoId, motivo.trim()),
+    onSuccess: () => {
+      onDone();
+      setMotivo("");
+      onClose();
+    },
+    onError: (e: Error) => setErr(e.message),
+  });
+
+  function fechar() {
+    setMotivo("");
+    onClose();
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onClose={fechar}
+      title="Recusar encaminhamento"
+      footer={
+        <>
+          <Button variant="secondary" onClick={fechar}>
+            Voltar
+          </Button>
+          <Button onClick={() => m.mutate()} disabled={m.isPending || !motivoValido}>
+            {m.isPending ? "Recusando..." : "Confirmar recusa"}
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm">
+        O processo não entra nesta unidade: volta para{" "}
+        <b>{unidadeOrigem ?? "a unidade de origem"}</b>, que é avisada e vê o motivo.
+      </p>
+      <div className="mt-3">
+        <Label htmlFor="recusamotivo">Motivo da recusa</Label>
+        <Textarea
+          id="recusamotivo"
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          rows={3}
+          maxLength={2000}
+          aria-describedby="recusamotivo-ajuda"
+        />
+        <p id="recusamotivo-ajuda" className="mt-1 text-xs text-muted-foreground">
+          Obrigatório. Diga por que o processo não é desta unidade ou o que falta.
+        </p>
+      </div>
+      {err && (
+        <p
+          role="alert"
+          className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+        >
+          {err}
+        </p>
       )}
     </Dialog>
   );

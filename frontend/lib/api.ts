@@ -371,6 +371,10 @@ export interface EncaminhamentoOut {
   recebido: boolean;
   data_hora_recebimento: string | null;
   cancelado: boolean;
+  /** Recusado pelo destino. Todo recusado é também `cancelado`. */
+  recusado?: boolean;
+  data_hora_recusa?: string | null;
+  motivo_recusa?: string | null;
 }
 
 export interface DespachoOut {
@@ -520,7 +524,8 @@ export type CaixaProcesso =
   | "externos"
   | "aguardando_assinatura"
   | "enviado_para_assinatura"
-  | "arquivados";
+  | "arquivados"
+  | "recusados";
 
 /** Quantos processos em cada caixa — espelha `CaixasContagem` do backend. */
 export type CaixasContagem = Record<CaixaProcesso, number>;
@@ -4804,6 +4809,12 @@ export const api = {
       request<DestinosPermitidosOut>(`/processos/${id}/destinos-permitidos`),
     receber: (id: number) =>
       request<ProcessoDetail>(`/processos/${id}/receber`, { method: "POST" }),
+    /** O destino recusa o encaminhamento pendente. Motivo obrigatório. */
+    recusarEncaminhamento: (id: number, motivo: string) =>
+      request<ProcessoDetail>(`/processos/${id}/recusar-encaminhamento`, {
+        method: "POST",
+        body: JSON.stringify({ motivo }),
+      }),
     /** F4 — encerra o processo. NÃO é idempotente: a segunda chamada dá 400. */
     arquivar: (id: number, data: ArquivarInput) =>
       request<ProcessoDetail>(`/processos/${id}/arquivar`, {

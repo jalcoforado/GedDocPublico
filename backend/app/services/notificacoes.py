@@ -62,6 +62,8 @@ EVENTOS_NOTIFICACAO: dict[str, tuple[str, ...]] = {
     "pagamento_pendente": ("in_app",),
     "pagamento_devolvido": ("in_app",),
     "pagamento_andamento": ("in_app",),
+    # Protocolo: o destino recusou o que eu encaminhei (`acoes_processo.avisar_recusa`).
+    "encaminhamento_recusado": ("in_app",),
 }
 
 # Rótulo pra tela de preferências. Chave ausente cai no próprio código do
@@ -71,6 +73,7 @@ EVENTO_LABEL: dict[str, str] = {
     "pagamento_pendente": "Pagamentos: solicitação chegou para minha decisão",
     "pagamento_devolvido": "Pagamentos: minha solicitação foi devolvida ou encerrada",
     "pagamento_andamento": "Pagamentos: minha solicitação foi autorizada ou paga",
+    "encaminhamento_recusado": "Protocolo: um encaminhamento que enviei foi recusado",
 }
 
 

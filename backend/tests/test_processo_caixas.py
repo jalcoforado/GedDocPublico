@@ -399,6 +399,7 @@ async def test_contador_e_o_total_da_lista_caixa_por_caixa(admin_engine, cen):
     assert contagem.model_dump() == {
         "entrada": 1, "saida": 1, "analise": 5, "externos": 1,
         "aguardando_assinatura": 1, "enviado_para_assinatura": 1, "arquivados": 1,
+        "recusados": 0,
     }
 
 
@@ -487,6 +488,7 @@ async def test_http_usuario_comum_le_contadores_e_abre_a_caixa(admin_engine, cen
         assert r.json() == {
             "entrada": 1, "saida": 1, "analise": 5, "externos": 1,
             "aguardando_assinatura": 1, "enviado_para_assinatura": 1, "arquivados": 1,
+            "recusados": 0,
         }
 
         r2 = await client.get("/api/v2/processos", params={"caixa": "entrada"})
@@ -497,14 +499,14 @@ async def test_http_usuario_comum_le_contadores_e_abre_a_caixa(admin_engine, cen
 
 @pytest.mark.asyncio
 async def test_http_caixa_invalida_e_422_e_nao_lista_tudo(admin_engine, cen):
-    """"recusados" não existe. Ignorar o valor devolveria a lista inteira sob
-    um rótulo que promete um recorte."""
+    """Caixa que não existe. Ignorar o valor devolveria a lista inteira sob um
+    rótulo que promete um recorte."""
     t = cen["tenant"]
     app.dependency_overrides[get_current_user] = _como(admin_engine, cen["operador"])
     arreio_tenant_http(t.id, t.slug)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        r = await client.get("/api/v2/processos", params={"caixa": "recusados"})
+        r = await client.get("/api/v2/processos", params={"caixa": "devolvidos"})
         assert r.status_code == 422, r.text
 
 
