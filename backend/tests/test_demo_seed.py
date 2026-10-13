@@ -31,6 +31,7 @@ from app.cli.seed_demo import (
     _apply,
     _reset,
 )
+from app.cli.seed_demo_caixas import CAIXAS
 from app.models import (
     Manifestante,
     Processo,
@@ -129,7 +130,7 @@ async def test_apply_idempotente(admin_engine, demo_slug):
             )
         ).scalar_one()
     assert n_serv == len(SERVICOS)
-    assert n_proc == len(PROCESSOS)
+    assert n_proc == len(PROCESSOS) + len(CAIXAS)
     assert n_manif == 12
 
 
@@ -172,7 +173,8 @@ async def test_apply_cria_servicos_esperados(admin_engine, demo_slug):
 
 async def test_apply_cria_processos_esperados(admin_engine, demo_slug):
     await _apply(_ns(demo_slug))
-    origens_esperadas = {p["origem"] for p in PROCESSOS}
+    # Os de `CAIXAS` são a tramitação de demonstração (`seed_demo_caixas`).
+    origens_esperadas = {p["origem"] for p in PROCESSOS} | {c["origem"] for c in CAIXAS}
     async with _sm(admin_engine)() as s:
         tid = (
             await s.execute(
@@ -392,5 +394,96 @@ async def test_apply_em_tenant_sem_provisionamento(
             )
         ).scalar_one_or_none()
 
-    assert len(n_proc) == len(PROCESSOS)
+    # Os de `CAIXAS` dependem do que o tenant tem (lotação do admin, segunda
+    # unidade, um colega): aqui só importa que o seed não morreu por causa deles.
+    origens = {p.numero_origem for p in n_proc}
+    assert {p["origem"] for p in PROCESSOS} <= origens
+    assert origens <= {p["origem"] for p in PROCESSOS} | {c["origem"] for c in CAIXAS}
     assert pg == 1, "seed deveria ter criado a unidade Protocolo Geral"
+
+
+# ----------------------------------------------------------------------
+# Tramitação de demonstração — um processo em cada caixa de trabalho
+# ----------------------------------------------------------------------
+
+
+async def test_apply_poe_processo_em_cada_caixa_de_quem_abre_a_demo(admin_engine, demo_slug):
+    """O seed só abria processos: Externos, Arquivados e as duas caixas de
+    assinatura ficavam em zero. A conferência é pelo MESMO contador que a tela
+    usa, do ponto de vista do admin."""
+    from app.schemas.processo import CaixaProcesso
+    from app.services.processos import contar_caixas, list_processos
+
+    await _apply(_ns(demo_slug))
+
+    async with _sm(admin_engine)() as s:
+        tid = (await s.execute(
+            text("SELECT id FROM aprimora_py.tenant WHERE slug=:s"), {"s": demo_slug}
+        )).scalar_one()
+        admin = (await s.execute(
+            select(Usuario).where(
+                Usuario.tenant_id == tid, Usuario.email == f"admin@{DEMO_EMAIL_DOMAIN}")
+        )).scalar_one()
+        contexto = {"id_usuario_contexto": admin.id,
+                    "id_unidade_contexto": admin.id_unidade_trabalho}
+        caixas = await contar_caixas(s, tenant_id=tid, **contexto)
+        entrada, _ = await list_processos(
+            s, tenant_id=tid, page=1, page_size=50, caixa=CaixaProcesso.entrada, **contexto)
+        analise, _ = await list_processos(
+            s, tenant_id=tid, page=1, page_size=50, caixa=CaixaProcesso.analise, **contexto)
+
+    assert caixas.entrada == 1
+    assert caixas.saida == 1
+    assert caixas.externos == 1
+    assert caixas.arquivados == 1
+    assert caixas.aguardando_assinatura == 1
+    assert caixas.enviado_para_assinatura == 1
+
+    # E o destaque de prazo tem o que mostrar: um vencendo na entrada, um
+    # atrasado e um vencendo (o externo, pelo prazo do serviço) na análise.
+    assert [(p.prazo_caixa_status, p.prazo_caixa_origem) for p in entrada] == [
+        ("vencendo", "encaminhamento")]
+    por_origem = {p.numero_origem: p for p in analise}
+    assert por_origem["demo-caixa-107"].prazo_caixa_status == "atrasado"
+    assert por_origem["demo-caixa-107"].prazo_caixa_origem == "encaminhamento"
+    assert (por_origem["demo-caixa-101"].prazo_caixa_status,
+            por_origem["demo-caixa-101"].prazo_caixa_origem) == ("vencendo", "servico")
+
+
+async def test_caixas_sozinho_e_idempotente_e_o_reset_leva_a_tramitacao(admin_engine, demo_slug):
+    """`caixas` é o que se roda em tenant que já tem a demonstração. Rodar de
+    novo não duplica, e o `reset` tem de conseguir apagar processo que agora
+    tem encaminhamento, assinatura e arquivamento pendurados."""
+    from app.cli.seed_demo import _caixas
+
+    await _apply(_ns(demo_slug))
+    assert await _caixas(_ns(demo_slug)) == 0
+
+    async with _sm(admin_engine)() as s:
+        tid = (await s.execute(
+            text("SELECT id FROM aprimora_py.tenant WHERE slug=:s"), {"s": demo_slug}
+        )).scalar_one()
+
+        async def _conta(tabela: str) -> int:
+            return (await s.execute(
+                text(f"SELECT count(*) FROM protocolos.{tabela} WHERE tenant_id=:t"),
+                {"t": tid})).scalar_one()
+
+        antes = {t: await _conta(t) for t in (
+            "encaminhamento", "solicitacao_assinatura", "arquivamento")}
+        n_caixa = (await s.execute(
+            select(Processo.id).where(
+                Processo.tenant_id == tid, Processo.numero_origem.like("demo-caixa-%"))
+        )).all()
+    assert len(n_caixa) == len(CAIXAS)
+    assert antes == {"encaminhamento": 3, "solicitacao_assinatura": 2, "arquivamento": 1}
+
+    assert await _reset(_ns(demo_slug)) == 0
+
+    async with _sm(admin_engine)() as s:
+        depois = {t: (await s.execute(
+            text(f"SELECT count(*) FROM protocolos.{t} WHERE tenant_id=:t"), {"t": tid}
+        )).scalar_one() for t in (
+            "processo", "encaminhamento", "solicitacao_assinatura", "arquivamento")}
+    assert depois == {
+        "processo": 0, "encaminhamento": 0, "solicitacao_assinatura": 0, "arquivamento": 0}
