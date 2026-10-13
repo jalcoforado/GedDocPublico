@@ -612,3 +612,115 @@ async def test_http_ordem_parados_e_o_campo_chegam_pela_borda(admin_engine, cen)
 
         r2 = await client.get("/api/v2/processos", params={"ordem": "aleatoria"})
         assert r2.status_code == 422, r2.text
+
+
+# ---------------------------------------------------------------------------
+# Prazo da caixa — o destaque sai do prazo real, não de dias sem movimentação
+# ---------------------------------------------------------------------------
+
+
+async def _fixa_prazos(engine, cen, *, servico: dict[str, tuple[int, int]] | None = None,
+                       encaminhamento: dict[str, int] | None = None) -> None:
+    """`servico`: rótulo → (aberto há N dias, prazo do serviço em dias).
+    `encaminhamento`: rótulo → prazo daqui a N dias (negativo = já venceu)."""
+    async with _sm(engine)() as s:
+        for rotulo, (aberto_ha, prazo) in (servico or {}).items():
+            await s.execute(text(
+                "UPDATE protocolos.processo SET prazo_servico_dias_snapshot=:z, "
+                "data_hora_abertura = now() - make_interval(days => :d) WHERE id=:p"),
+                {"z": prazo, "d": aberto_ha, "p": cen["procs"][rotulo]})
+        for rotulo, em_dias in (encaminhamento or {}).items():
+            await s.execute(text(
+                "UPDATE protocolos.encaminhamento "
+                "SET data_prazo = (current_date + make_interval(days => :d))::date "
+                "WHERE id_processo=:p"), {"d": em_dias, "p": cen["procs"][rotulo]})
+        await s.commit()
+
+
+async def _por_rotulo(engine, cen) -> dict:
+    async with _sm(engine)() as s:
+        items, _ = await list_processos(
+            s, tenant_id=cen["tenant"].id, page=1, page_size=100, situacao="todos",
+            id_usuario_contexto=cen["operador"], id_unidade_contexto=cen["a"],
+        )
+    por_id = {i.id: i for i in items}
+    return {rotulo: por_id[pid] for rotulo, pid in cen["procs"].items() if pid in por_id}
+
+
+@pytest.mark.asyncio
+async def test_sem_prazo_nenhum_a_linha_nao_e_destacada(admin_engine, cen):
+    """Processo parado há 40 dias, sem prazo de serviço nem de encaminhamento:
+    não há do que estar atrasado. Era o caso que os 7/15 dias fixos pintavam
+    de vermelho."""
+    await _envelhece(admin_engine, cen, na_mesa=40)
+    na_mesa = (await _por_rotulo(admin_engine, cen))["na_mesa"]
+    assert na_mesa.prazo_caixa_status == "sem_prazo"
+    assert na_mesa.prazo_caixa_vence_em is None
+    assert na_mesa.prazo_caixa_origem is None
+
+
+@pytest.mark.asyncio
+async def test_prazo_do_servico_conta_da_abertura(admin_engine, cen):
+    await _fixa_prazos(admin_engine, cen, servico={
+        "na_mesa": (40, 30),   # venceu há 10 dias
+        "externo": (25, 30),   # restam 5 de 30: dentro dos 20% finais
+        "de_b": (2, 30),       # folga
+    })
+    p = await _por_rotulo(admin_engine, cen)
+    assert (p["na_mesa"].prazo_caixa_status, p["na_mesa"].prazo_caixa_origem) == (
+        "atrasado", "servico")
+    assert p["externo"].prazo_caixa_status == "vencendo"
+    assert p["de_b"].prazo_caixa_status == "dentro_do_prazo"
+    vence = p["na_mesa"].prazo_caixa_vence_em
+    assert 9 <= (datetime.now() - vence).days <= 10
+
+
+@pytest.mark.asyncio
+async def test_prazo_do_encaminhamento_vigente_prevalece_sobre_o_do_servico(admin_engine, cen):
+    """`recebido` chegou por encaminhamento com prazo para depois de amanhã;
+    o serviço, contado da abertura, já estaria estourado. Vale o compromisso
+    de quem está com o processo."""
+    await _fixa_prazos(admin_engine, cen,
+                       servico={"recebido": (40, 30), "chegando": (1, 30)},
+                       encaminhamento={"recebido": 10, "chegando": -1, "saindo": 1})
+    p = await _por_rotulo(admin_engine, cen)
+    assert (p["recebido"].prazo_caixa_status, p["recebido"].prazo_caixa_origem) == (
+        "dentro_do_prazo", "encaminhamento")
+    # O inverso: serviço com folga, encaminhamento vencido ontem.
+    assert (p["chegando"].prazo_caixa_status, p["chegando"].prazo_caixa_origem) == (
+        "atrasado", "encaminhamento")
+    assert p["saindo"].prazo_caixa_status == "vencendo"
+
+
+@pytest.mark.asyncio
+async def test_encaminhamento_que_vence_hoje_ainda_nao_esta_atrasado(admin_engine, cen):
+    await _fixa_prazos(admin_engine, cen, encaminhamento={"recebido": 0})
+    recebido = (await _por_rotulo(admin_engine, cen))["recebido"]
+    assert recebido.prazo_caixa_status == "vencendo"
+    assert recebido.prazo_caixa_vence_em.date() == datetime.now().date()
+
+
+@pytest.mark.asyncio
+async def test_encaminhamento_cancelado_nao_obriga_e_arquivado_nao_e_cobrado(admin_engine, cen):
+    await _fixa_prazos(admin_engine, cen,
+                       servico={"arquivado": (40, 30)},
+                       encaminhamento={"cancelado": -5})
+    p = await _por_rotulo(admin_engine, cen)
+    # O único encaminhamento de `cancelado` foi cancelado: não há prazo.
+    assert p["cancelado"].prazo_caixa_status == "sem_prazo"
+    # Arquivado com o prazo de serviço estourado: a fila não cobra.
+    assert p["arquivado"].prazo_caixa_status == "sem_prazo"
+
+
+@pytest.mark.asyncio
+async def test_http_prazo_da_caixa_chega_pela_borda(admin_engine, cen):
+    await _fixa_prazos(admin_engine, cen, encaminhamento={"chegando": -1})
+    app.dependency_overrides[get_current_user] = _como(admin_engine, cen["operador"])
+    arreio_tenant_http(cen["tenant"].id, cen["tenant"].slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/api/v2/processos", params={"caixa": "entrada"})
+    assert resp.status_code == 200, resp.text
+    item = next(i for i in resp.json()["items"] if i["id"] == cen["procs"]["chegando"])
+    assert item["prazo_caixa_status"] == "atrasado"
+    assert item["prazo_caixa_origem"] == "encaminhamento"
+    assert item["prazo_caixa_vence_em"] is not None

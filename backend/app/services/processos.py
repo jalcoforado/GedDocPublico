@@ -53,7 +53,7 @@ from ..schemas.processo import (
 from . import cota_anexacao
 from .permanencia import No as NoDaLinha
 from .permanencia import calcular as calcular_permanencia
-from .prazos import calcular_prazo
+from .prazos import calcular_prazo, prazo_da_caixa
 
 
 # "Tempo na caixa": desde a última movimentação, ou desde a abertura quando o
@@ -64,6 +64,24 @@ from .prazos import calcular_prazo
 _UltimaMov = aliased(Movimentacao, name="ultima_movimentacao")
 _PARADO_DESDE = func.coalesce(
     _UltimaMov.data_hora_movimentacao, Processo.data_hora_abertura
+)
+
+
+# Prazo do encaminhamento VIGENTE: o mais recente que não foi cancelado, esteja
+# pendente (processo em trânsito) ou recebido (processo na mesa de quem o
+# recebeu). Encaminhamento cancelado não obriga ninguém.
+_PRAZO_ENCAMINHAMENTO = (
+    select(Encaminhamento.data_prazo)
+    .where(
+        Encaminhamento.id_processo == Processo.id,
+        Encaminhamento.tenant_id == Processo.tenant_id,
+        Encaminhamento.excluido.is_(False),
+        Encaminhamento.cancelado.is_(False),
+    )
+    .order_by(Encaminhamento.id.desc())
+    .limit(1)
+    .correlate(Processo)
+    .scalar_subquery()
 )
 
 
@@ -98,6 +116,10 @@ def _base_select(tenant_id: int, *, usuario_id: int | None = None):
             Responsavel.nome.label("responsavel_nome"),
             favorito_expr,
             _PARADO_DESDE.label("parado_desde"),
+            _PRAZO_ENCAMINHAMENTO.label("prazo_encaminhamento"),
+            # Arquivado = a última movimentação é um arquivamento. É o mesmo
+            # critério de `_predicado_caixa`, lido do JOIN que já existe.
+            func.coalesce(_UltimaMov.id_arquivamento.is_not(None), False).label("arquivado"),
         )
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
@@ -499,6 +521,14 @@ async def list_processos(
 
 def _row_to_list(r) -> ProcessoListItem:
     p: Processo = r[0]
+    # `datetime.now()` ingênuo, como o resto deste arquivo (ver `calcular_prazo`).
+    prazo = prazo_da_caixa(
+        data_abertura=p.data_hora_abertura,
+        prazo_snapshot_dias=p.prazo_servico_dias_snapshot,
+        prazo_encaminhamento=r.prazo_encaminhamento,
+        arquivado=bool(r.arquivado),
+        now=datetime.now(),
+    )
     return ProcessoListItem(
         id=p.id,
         numero_processo=p.numero_processo,
@@ -507,6 +537,9 @@ def _row_to_list(r) -> ProcessoListItem:
         situacao=p.situacao,
         data_hora_abertura=p.data_hora_abertura,
         parado_desde=r.parado_desde,
+        prazo_caixa_status=prazo.status,
+        prazo_caixa_vence_em=prazo.vence_em,
+        prazo_caixa_origem=prazo.origem,
         ativo=p.ativo,
         publico=p.publico,
         nivel_sigilo=p.nivel_sigilo,

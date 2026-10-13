@@ -85,6 +85,15 @@ class ProcessoListItem(BaseModel):
     # Opcional só para schema montado à mão (teste, fixture); a listagem
     # sempre preenche.
     parado_desde: datetime | None = None
+    # O prazo que decide o destaque da linha na caixa de trabalho
+    # (`services/prazos.py::prazo_da_caixa`): o do encaminhamento vigente ou,
+    # sem ele, o do serviço. A LISTAGEM preenche; o detalhe deixa o default e
+    # expõe o bloco `prazo`, mais completo.
+    prazo_caixa_status: Literal["sem_prazo", "dentro_do_prazo", "vencendo", "atrasado"] = (
+        "sem_prazo"
+    )
+    prazo_caixa_vence_em: datetime | None = None
+    prazo_caixa_origem: Literal["encaminhamento", "servico"] | None = None
     ativo: bool
     publico: bool
     nivel_sigilo: str = "ostensivo"

@@ -7,41 +7,66 @@ import { FavoritoStar } from "@/components/FavoritoStar";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import type { ProcessoListItem } from "@/lib/api";
+import type { PrazoCaixaStatus, ProcessoListItem } from "@/lib/api";
 import { decorridoDesde } from "@/lib/duracao";
 import { cn } from "@/lib/utils";
 
-/**
- * A partir de quantos dias sem movimentação a linha pede atenção.
- *
- * São limiares PROVISÓRIOS, escolhidos para a tela ter o que destacar — não
- * vêm de regra de negócio. O critério certo é o prazo do assunto ou do
- * encaminhamento (`data_prazo`), que a listagem ainda não carrega.
- */
-export const DIAS_ATENCAO = 7;
-export const DIAS_CRITICO = 15;
-
 export type NivelDeEspera = "normal" | "atencao" | "critico";
 
-export function nivelDeEspera(iso: string | null, agora: Date = new Date()): NivelDeEspera {
-  if (!iso) return "normal";
-  const inicio = new Date(iso).getTime();
-  if (Number.isNaN(inicio)) return "normal";
-  const dias = (agora.getTime() - inicio) / 86_400_000;
-  if (dias >= DIAS_CRITICO) return "critico";
-  if (dias >= DIAS_ATENCAO) return "atencao";
+/**
+ * O destaque da linha vem do PRAZO, calculado no servidor
+ * (`services/prazos.py::prazo_da_caixa`): o do encaminhamento vigente ou, sem
+ * ele, o do serviço. Até 2026-10-13 vinha de 7 e 15 dias sem movimentação,
+ * limiares escolhidos só para a tela ter o que pintar — um processo sem prazo
+ * nenhum ficava vermelho, e um vencido ontem ficava sem cor.
+ *
+ * Sem prazo, a linha não é destacada: o tempo na caixa continua à vista, mas
+ * não há do que estar atrasado.
+ */
+export function nivelDeEspera(status: PrazoCaixaStatus | null | undefined): NivelDeEspera {
+  if (status === "atrasado") return "critico";
+  if (status === "vencendo") return "atencao";
   return "normal";
 }
 
-const ESPERA: Record<NivelDeEspera, { classe: string; rotulo: string | null }> = {
-  normal: { classe: "text-foreground", rotulo: null },
+const DIA_MS = 86_400_000;
+
+/** Meia-noite local do dia de `d`, para contar dias de calendário. */
+function diaDe(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/**
+ * O prazo em palavras: "vence em 3 dias", "vence hoje", "prazo vencido há 2
+ * dias". Conta dias de CALENDÁRIO — "vence amanhã" às 23h não é "vence em 0
+ * dias". Devolve `null` quando não há prazo.
+ */
+export function textoDoPrazo(
+  status: PrazoCaixaStatus | null | undefined,
+  venceEm: string | null | undefined,
+  agora: Date = new Date(),
+): string | null {
+  if (!status || status === "sem_prazo" || !venceEm) return null;
+  const vence = new Date(venceEm);
+  if (Number.isNaN(vence.getTime())) return null;
+  const dias = Math.round((diaDe(vence) - diaDe(agora)) / DIA_MS);
+  if (status === "atrasado") {
+    if (dias >= 0) return "prazo vencido hoje";
+    return dias === -1 ? "prazo vencido ontem" : `prazo vencido há ${-dias} dias`;
+  }
+  if (dias <= 0) return "vence hoje";
+  return dias === 1 ? "vence amanhã" : `vence em ${dias} dias`;
+}
+
+const ESPERA: Record<NivelDeEspera, { classe: string; prazo: string }> = {
+  normal: { classe: "text-foreground", prazo: "text-muted-foreground" },
   atencao: {
     classe: "rounded-full bg-warning-soft px-2 py-0.5 font-medium text-warning-soft-foreground",
-    rotulo: "atenção",
+    prazo: "font-medium text-warning-soft-foreground",
   },
   critico: {
     classe: "rounded-full bg-danger-soft px-2 py-0.5 font-medium text-danger-soft-foreground",
-    rotulo: "parado há muito tempo",
+    prazo: "font-medium text-danger-soft-foreground",
   },
 };
 
@@ -90,7 +115,8 @@ export function TabelaCaixaProcessos({ itens, carregando }: Props) {
         )}
         {itens?.map((p) => {
           const href = `/m/protocolo/processos/${p.id}`;
-          const espera = ESPERA[nivelDeEspera(p.parado_desde ?? null)];
+          const espera = ESPERA[nivelDeEspera(p.prazo_caixa_status)];
+          const prazo = textoDoPrazo(p.prazo_caixa_status, p.prazo_caixa_vence_em);
           return (
             <TR key={p.id}>
               <TD className="font-mono text-xs tabular-nums">
@@ -110,14 +136,24 @@ export function TabelaCaixaProcessos({ itens, carregando }: Props) {
               </TD>
               <TD className="whitespace-nowrap text-right text-sm tabular-nums">
                 {p.parado_desde ? (
-                  <span className={cn(espera.classe)}>
-                    {decorridoDesde(p.parado_desde)}
-                    {/* A cor sozinha não informa quem não a enxerga. */}
-                    {espera.rotulo ? <span className="sr-only"> — {espera.rotulo}</span> : null}
-                  </span>
+                  <span className={cn(espera.classe)}>{decorridoDesde(p.parado_desde)}</span>
                 ) : (
                   "—"
                 )}
+                {/* O motivo do destaque vai em texto visível: a cor sozinha não
+                    informa quem não a enxerga, nem diz QUANDO vence. */}
+                {prazo ? (
+                  <span
+                    className={cn("mt-0.5 block text-xs", espera.prazo)}
+                    title={
+                      p.prazo_caixa_origem === "encaminhamento"
+                        ? "Prazo fixado no encaminhamento"
+                        : "Prazo do serviço, contado da abertura"
+                    }
+                  >
+                    {prazo}
+                  </span>
+                ) : null}
               </TD>
               <TD className="text-sm">{p.manifestante ?? "—"}</TD>
               <TD className="text-sm">

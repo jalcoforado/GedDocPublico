@@ -247,6 +247,8 @@ export interface AssuntoTipoAnexo {
 }
 
 // Fase 3
+export type PrazoCaixaStatus = "sem_prazo" | "dentro_do_prazo" | "vencendo" | "atrasado";
+
 export interface ProcessoListItem {
   id: number;
   /** E3 — null enquanto situacao='rascunho' (numerado só no primeiro encaminhamento) */
@@ -262,6 +264,12 @@ export interface ProcessoListItem {
    * o detalhe (`ProcessoDetail` herda este tipo) não o calcula e manda null —
    * lá a informação é o bloco de permanência. */
   parado_desde?: string | null;
+  /** O prazo que decide o destaque da linha na caixa de trabalho: o do
+   * encaminhamento vigente ou, sem ele, o do serviço. Só a LISTAGEM calcula;
+   * no detalhe vem o default e vale o bloco `prazo`. */
+  prazo_caixa_status?: PrazoCaixaStatus;
+  prazo_caixa_vence_em?: string | null;
+  prazo_caixa_origem?: "encaminhamento" | "servico" | null;
   ativo: boolean;
   publico: boolean;
   /** Sigilo gradual (LAI): ostensivo|interno|reservado|secreto|ultrassecreto */
