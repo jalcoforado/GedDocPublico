@@ -23,6 +23,7 @@ from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import AuditLog
+from ..observability.logging import client_ip_ctx, ip_do_request, request_id_ctx
 
 
 async def log(
@@ -43,15 +44,15 @@ async def log(
     `int | None` porque o `None` do `row.id` só some depois do flush; na
     prática, ou volta um id ou a chamada levanta.
     """
-    request_id = None
-    ip = None
+    # Sem `request` (ato auditado de dentro de um service), o IP e o
+    # `request_id` vêm das context vars que o `RequestLoggingMiddleware`
+    # popula. Fora de um request — task Celery, CLI de seed — as duas ficam
+    # `None`, que é a resposta honesta: ninguém fez aquele ato por HTTP.
+    request_id = request_id_ctx.get()
+    ip = client_ip_ctx.get()
     if request is not None:
-        request_id = getattr(request.state, "request_id", None)
-        # X-Forwarded-For (nginx) > client direto
-        forwarded = request.headers.get("x-forwarded-for", "")
-        ip = forwarded.split(",")[0].strip() if forwarded else (
-            request.client.host if request.client else None
-        )
+        request_id = getattr(request.state, "request_id", None) or request_id
+        ip = ip_do_request(request)
 
     row = AuditLog(
         tenant_id=tenant_id,
