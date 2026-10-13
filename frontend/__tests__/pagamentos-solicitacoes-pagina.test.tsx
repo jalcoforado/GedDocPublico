@@ -74,6 +74,10 @@ beforeEach(() => {
   listMock.mockClear();
 });
 
+// O primeiro teste paga a importação a frio da página; em máquina lenta isso
+// passa dos 5 s padrão e o estouro deixa a tela montada para o teste seguinte.
+vi.setConfig({ testTimeout: 20_000 });
+
 describe("solicitações — paginação no servidor", () => {
   it("pede UMA página ao servidor e não baixa a listagem inteira", async () => {
     await abrir();
