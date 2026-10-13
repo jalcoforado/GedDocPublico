@@ -100,6 +100,11 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
             "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
             "pagamento_cadastro"],
   },
+  "/m/pagamentos/fluxo": {
+    anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar",
+            "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
+            "pagamento_cadastro"],
+  },
   "/m/pagamentos/conciliacao": {
     anyOf: ["pagamento_pagar", "pagamento_autorizar", "pagamento_auditar", "pagamento_cadastro"],
   },
