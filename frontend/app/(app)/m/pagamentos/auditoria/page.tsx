@@ -202,6 +202,13 @@ export default function AuditoriaPagamentosPage() {
                         ) : (
                           <span className="text-foreground-muted">Sistema</span>
                         )}
+                        {/* De onde o ato partiu. Ausente nas linhas anteriores
+                            a 2026-10-13 e nos atos sem requisição (rotinas). */}
+                        {l.ip && (
+                          <span className="block text-xs tabular-nums text-foreground-muted">
+                            IP {l.ip}
+                          </span>
+                        )}
                       </TD>
                       <TD className="font-medium">{ROTULO.get(l.acao) ?? l.acao}</TD>
                       <TD>

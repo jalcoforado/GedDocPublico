@@ -16,7 +16,7 @@ const LINHAS = [
     payload: { numero: "OP-2026-0007", valor_total: "9000.00", debito_ids: [12, 15],
                excecao_saldo: true } },
   { id: 2, id_usuario: 52, nome_usuario: "Teresa Cordeiro", acao: "pagamento.parcela_estornada",
-    entidade: "parcela", id_entidade: 77, request_id: null, ip: null,
+    entidade: "parcela", id_entidade: 77, request_id: "r1", ip: "203.0.113.7",
     criado_em: "2026-10-11T15:30:00",
     payload: { id_debito: 12, valor: "150.50", justificativa: "Pago em duplicidade" } },
   { id: 1, id_usuario: null, nome_usuario: null, acao: "pagamento.conciliado",
@@ -52,6 +52,14 @@ const ultimaChamada = () => auditoriaMock.mock.calls.at(-1)?.[0] as Record<strin
 beforeEach(() => auditoriaMock.mockClear());
 
 describe("trilha de auditoria de pagamentos", () => {
+  it("mostra de que IP o ato partiu, e nada quando a linha não tem IP", async () => {
+    await abrir();
+    const linhaDe = (ato: string) =>
+      within(screen.getByRole("cell", { name: ato }).closest("tr") as HTMLElement);
+    expect(linhaDe("Pagamento estornado").getByText("IP 203.0.113.7")).toBeInTheDocument();
+    expect(linhaDe("Pagamento autorizado").queryByText(/^IP /)).toBeNull();
+  });
+
   it("mostra o ato em português, quem praticou e leva às solicitações", async () => {
     await abrir();
     const linha = within(screen.getByRole("cell", { name: "Pagamento autorizado" }).closest("tr") as HTMLElement);

@@ -22,6 +22,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 from ..observability.logging import (
+    client_ip_ctx,
+    ip_do_request,
     request_id_ctx,
     tenant_id_ctx,
     tenant_slug_ctx,
@@ -41,6 +43,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:16]
         request.state.request_id = request_id
         token_req = request_id_ctx.set(request_id)
+        token_ip = client_ip_ctx.set(ip_do_request(request))
         # tenant_id/slug/usuario_id são populados por middlewares/deps internos
         # — context vars são "set" lá. Aqui apenas garantimos baseline None.
         token_tid = tenant_id_ctx.set(None)
@@ -79,6 +82,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             )
             # Restaura context vars (importante em ambientes que reusam loop tasks).
             request_id_ctx.reset(token_req)
+            client_ip_ctx.reset(token_ip)
             tenant_id_ctx.reset(token_tid)
             tenant_slug_ctx.reset(token_slug)
             usuario_id_ctx.reset(token_uid)
