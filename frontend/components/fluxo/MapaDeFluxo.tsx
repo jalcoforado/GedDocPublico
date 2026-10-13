@@ -155,6 +155,12 @@ interface FasesDoFluxoProps<P extends PassoDoFluxo> {
   rotuloDoDestaque?: string;
   /** Unidade do que se conta quando o passo não diz a sua. */
   unidadePadrao: [string, string];
+  /** Como chamar cada seção no rótulo acessível. "Fase" quando as seções são
+   *  etapas de um mesmo caminho; "Fluxo" quando são caminhos independentes. */
+  rotuloDaSecao?: string;
+  /** Recomeça a numeração em cada seção. Para caminhos independentes: numerar
+   *  de 1 a N através deles sugeriria uma ordem que não existe. */
+  numerarPorSecao?: boolean;
 }
 
 /**
@@ -173,19 +179,25 @@ export function FasesDoFluxo<P extends PassoDoFluxo>({
   podeAbrir,
   rotuloDoDestaque = "Sua etapa",
   unidadePadrao,
+  rotuloDaSecao = "Fase",
+  numerarPorSecao = false,
 }: FasesDoFluxoProps<P>) {
   let numero = 0;
   return (
     <>
       {fases.map((fase) => (
-        <section key={fase.titulo} aria-label={`Fase: ${fase.titulo}`} className="space-y-3">
+        <section
+          key={fase.titulo}
+          aria-label={`${rotuloDaSecao}: ${fase.titulo}`}
+          className="space-y-3"
+        >
           <div>
             <h2 className="font-display text-base font-semibold text-foreground">{fase.titulo}</h2>
             <p className="text-sm text-foreground-muted">{fase.descricao}</p>
           </div>
           <ol className="flex flex-col lg:flex-row lg:items-stretch">
             {fase.passos.map((passo, idx) => {
-              numero += 1;
+              numero = numerarPorSecao ? idx + 1 : numero + 1;
               return (
                 <CartaoDoPasso
                   key={passo.key}

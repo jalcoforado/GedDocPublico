@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Route,
   ScrollText,
+  Workflow,
 } from "lucide-react";
 
 import type { MenuModulo } from "./tipos";
@@ -24,6 +25,13 @@ export const menuTransporte: MenuModulo = {
       defaultOpen: false,
       items: [
         { label: "Transporte Regulado", href: "/m/transporte", icon: Bus, perm: "transporte_regulado" },
+        // Mapa dos três caminhos do módulo: alvará, recadastramento e ocorrência.
+        {
+          label: "Fluxo do processo",
+          href: "/m/transporte/fluxo",
+          icon: Workflow,
+          perm: "transporte_regulado",
+        },
         {
           label: "Permissionários",
           href: "/m/transporte/permissionarios",
