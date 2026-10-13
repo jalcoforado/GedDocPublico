@@ -31,3 +31,33 @@ jobs:
       - name: Run vitest
         working-directory: frontend
         run: npm test
+
+  # O vitest e o `tsc --noEmit` aceitam coisas que o `next build` recusa — por
+  # exemplo, `page.tsx` exportando uma constante. Sem este job o erro só
+  # aparecia no deploy, ao montar a imagem do frontend na VPS, com os três
+  # workflows verdes. Roda em paralelo ao vitest: não soma tempo de espera.
+  # O portão do deploy confere a conclusão do workflow, então cobre os dois.
+  build:
+    name: next build (Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Mesma versão do estágio `builder` do frontend/Dockerfile.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install deps
+        working-directory: frontend
+        run: npm install --legacy-peer-deps
+
+      # Mesma base relativa que o docker-compose assa no bundle.
+      - name: Run next build
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: /api/v2
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build
