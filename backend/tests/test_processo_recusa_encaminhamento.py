@@ -154,10 +154,11 @@ def test_motivo_e_obrigatorio_e_espaco_nao_conta():
 
 @pytest.mark.asyncio
 async def test_http_usuario_comum_recusa_e_quem_enviou_e_avisado(admin_engine, cen):
-    """Pela borda, com operador não-SU. `chegando` foi enviado por `operador`
-    (é quem assina os encaminhamentos do cenário); quem recusa é `colega_b`."""
+    """Pela borda, com operador não-SU. `saindo` foi de A para B, enviado por
+    `operador` (quem assina os encaminhamentos do cenário); quem recusa é
+    `colega_b`, lotado em B."""
     t = cen["tenant"]
-    pid = cen["procs"]["chegando"]
+    pid = cen["procs"]["saindo"]
     app.dependency_overrides[get_current_user] = _como(admin_engine, cen["colega_b"])
     arreio_tenant_http(t.id, t.slug)
 
@@ -199,11 +200,95 @@ async def test_http_sem_a_transacao_processo_nao_recusa(admin_engine, cen):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.post(
-            f"/api/v2/processos/{cen['procs']['chegando']}/recusar-encaminhamento",
+            f"/api/v2/processos/{cen['procs']['saindo']}/recusar-encaminhamento",
             json={"motivo": MOTIVO})
     assert r.status_code == 403, r.text
     async with _sm(admin_engine)() as s:
         recusado = (await s.execute(text(
             "SELECT recusado FROM protocolos.encaminhamento WHERE id_processo=:p"),
-            {"p": cen["procs"]["chegando"]})).scalar_one()
+            {"p": cen["procs"]["saindo"]})).scalar_one()
     assert recusado is False
+
+
+# ---------------------------------------------------------------------------
+# Receber e recusar são da unidade de DESTINO
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_so_quem_e_do_destino_recebe_ou_recusa(admin_engine, cen):
+    """`saindo` vai de A para B. `operador` é de A: não recebe nem recusa. O
+    encaminhamento continua pendente depois das duas tentativas."""
+    from app.services.acoes_processo import NaoLotadoNoDestinoError, receber
+
+    pid = cen["procs"]["saindo"]
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(NaoLotadoNoDestinoError, match="lotado na unidade de destino"):
+            await receber(s, pid, tenant_id=cen["tenant"].id, usuario_id=cen["operador"])
+    with pytest.raises(NaoLotadoNoDestinoError):
+        await _recusa(admin_engine, cen, "saindo", por="operador")
+
+    async with _sm(admin_engine)() as s:
+        recebido, recusado = (await s.execute(text(
+            "SELECT recebido, recusado FROM protocolos.encaminhamento WHERE id_processo=:p"),
+            {"p": pid})).one()
+    assert (recebido, recusado) == (False, False)
+
+
+@pytest.mark.asyncio
+async def test_lotacao_secundaria_no_destino_vale(admin_engine, cen):
+    """Quem atua em dois setores tem a lotação extra em
+    `utils.usuario_unidade_trabalho`. Ela basta para receber."""
+    from app.services.acoes_processo import receber
+
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(
+            "INSERT INTO utils.usuario_unidade_trabalho (tenant_id, id_usuario, "
+            "id_unidade_trabalho, excluido) VALUES (:t, :u, :b, false)"),
+            {"t": cen["tenant"].id, "u": cen["operador"], "b": cen["b"]})
+        await s.commit()
+    try:
+        async with _sm(admin_engine)() as s:
+            enc = await receber(
+                s, cen["procs"]["saindo"], tenant_id=cen["tenant"].id,
+                usuario_id=cen["operador"])
+        assert enc.recebido is True
+    finally:
+        async with _sm(admin_engine)() as s:
+            await s.execute(text(
+                "DELETE FROM utils.usuario_unidade_trabalho WHERE id_usuario=:u"),
+                {"u": cen["operador"]})
+            await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_super_usuario_continua_passando(admin_engine, cen):
+    async with _sm(admin_engine)() as s:
+        enc = await recusar_encaminhamento(
+            s, cen["procs"]["saindo"], RecusarEncaminhamentoRequest(motivo=MOTIVO),
+            tenant_id=cen["tenant"].id, usuario_id=cen["operador"], is_super_usuario=True)
+    assert enc.recusado is True
+
+
+@pytest.mark.asyncio
+async def test_http_quem_nao_e_do_destino_leva_403(admin_engine, cen):
+    """Pela borda, com usuário comum: 403 com a unidade na mensagem, e não 400 —
+    é falta de competência para o ato, não estado inválido do processo."""
+    t = cen["tenant"]
+    pid = cen["procs"]["saindo"]
+    app.dependency_overrides[get_current_user] = _como(admin_engine, cen["operador"])
+    arreio_tenant_http(t.id, t.slug)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(f"/api/v2/processos/{pid}/receber")
+        assert r.status_code == 403, r.text
+        assert "unidade de destino" in r.json()["detail"]
+        r = await client.post(
+            f"/api/v2/processos/{pid}/recusar-encaminhamento", json={"motivo": MOTIVO})
+        assert r.status_code == 403, r.text
+
+    # Quem é de B recebe pela mesma porta.
+    app.dependency_overrides[get_current_user] = _como(admin_engine, cen["colega_b"])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(f"/api/v2/processos/{pid}/receber")
+        assert r.status_code == 200, r.text
