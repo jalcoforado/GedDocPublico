@@ -25,6 +25,7 @@ from ..models import (
     Processo,
     StatusArquivamento,
     Tenant,
+    UnidadeTrabalho,
     Usuario,
     UsuarioUnidadeTrabalho,
 )
@@ -38,6 +39,45 @@ from ..schemas.processo import (
 
 class AcaoError(Exception):
     pass
+
+
+class NaoLotadoNoDestinoError(AcaoError):
+    """Quem tenta receber ou recusar não é da unidade de destino. O router
+    devolve 403: é falta de competência para o ato, não estado inválido."""
+
+
+async def _assert_do_destino(
+    db: AsyncSession,
+    enc: Encaminhamento,
+    *,
+    usuario_id: int,
+    tenant_id: int,
+    is_super_usuario: bool,
+    ato: str,
+) -> None:
+    """Receber e recusar são decisões da unidade de DESTINO.
+
+    Até 2026-10-14 bastava a permissão `processo`: qualquer operador do tenant
+    recebia ou recusava processo endereçado a outra unidade, e o recebimento
+    movia o processo para uma mesa que não era a de quem o assumiu.
+    Super-usuário continua passando, como em todo gate do sistema.
+    """
+    if is_super_usuario:
+        return
+    if await _lotado_em(
+        db, id_usuario=usuario_id, id_unidade=enc.id_unidade_destino, tenant_id=tenant_id
+    ):
+        return
+    nome = (
+        await db.execute(
+            select(UnidadeTrabalho.unidade_trabalho).where(
+                UnidadeTrabalho.id == enc.id_unidade_destino
+            )
+        )
+    ).scalar_one_or_none()
+    raise NaoLotadoNoDestinoError(
+        f"Só quem é lotado na unidade de destino ({nome or 'destino'}) pode {ato} este processo."
+    )
 
 
 class WorkflowStrictBlock(AcaoError):
@@ -277,6 +317,10 @@ async def receber(
     ).scalar_one_or_none()
     if enc is None:
         raise AcaoError("Nenhum encaminhamento pendente para este processo")
+    await _assert_do_destino(
+        db, enc, usuario_id=usuario_id, tenant_id=tenant_id,
+        is_super_usuario=is_super_usuario, ato="receber",
+    )
 
     acao = await _get_acao(db, "RECEBIMENTO")
     now = datetime.now()
@@ -336,6 +380,7 @@ async def recusar_encaminhamento(
     *,
     tenant_id: int,
     usuario_id: int,
+    is_super_usuario: bool = False,
 ) -> Encaminhamento:
     """O destino recusa o encaminhamento pendente, com motivo.
 
@@ -371,6 +416,10 @@ async def recusar_encaminhamento(
     ).scalar_one_or_none()
     if enc is None:
         raise AcaoError("Nenhum encaminhamento pendente para este processo")
+    await _assert_do_destino(
+        db, enc, usuario_id=usuario_id, tenant_id=tenant_id,
+        is_super_usuario=is_super_usuario, ato="recusar",
+    )
 
     enc.recusado = True
     enc.cancelado = True

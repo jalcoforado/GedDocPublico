@@ -218,7 +218,8 @@ async def _executar_passo(db: AsyncSession, *, tenant_id: int, processo_id: int,
                 db, processo_id,
                 RecusarEncaminhamentoRequest(
                     motivo="[demo] Assunto não é da competência desta unidade."),
-                tenant_id=tenant_id, usuario_id=ctx["colega"] or ctx["eu"])
+                tenant_id=tenant_id, usuario_id=ctx["colega"] or ctx["eu"],
+                is_super_usuario=True)
     elif passo in ("entrada", "analise_atrasada"):
         # O processo nasce na outra unidade e vem para a minha.
         await acoes.encaminhar(
