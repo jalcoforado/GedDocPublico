@@ -32,6 +32,7 @@ const ONDE: Record<string, { arquivo: string; funcao: string }> = {
   unidades: { arquivo: "unidades.py", funcao: "list_unidades" },
   usuarios: { arquivo: "usuarios.py", funcao: "list_usuarios" },
   processos: { arquivo: "processos.py", funcao: "list_endpoint" },
+  ocorrenciasTransporte: { arquivo: "transporte_regulado.py", funcao: "list_ocorrencias" },
 };
 
 function tetoNoBackend(recurso: string): number {
@@ -39,7 +40,12 @@ function tetoNoBackend(recurso: string): number {
   const src = readFileSync(join(ROUTERS, arquivo), "utf-8");
   const ini = src.search(new RegExp(`def ${funcao}\\(`));
   expect(ini, `${arquivo}: função ${funcao} não encontrada`).toBeGreaterThan(-1);
-  const assinatura = src.slice(ini, src.indexOf("):", ini) + 2);
+  // A assinatura termina no `)` em início de linha — com ou sem `-> Tipo`.
+  // Cortar no primeiro `):` falhava em rota que declara o retorno
+  // (`) -> Paginated[...]:`): o recorte saía vazio.
+  const fim = src.indexOf("\n)", ini);
+  expect(fim, `${arquivo}::${funcao}: fim da assinatura não encontrado`).toBeGreaterThan(ini);
+  const assinatura = src.slice(ini, fim + 2);
   const m = assinatura.match(/page_size:\s*int\s*=\s*Query\([^\n]*le=(\d+)/);
   expect(m, `${arquivo}::${funcao} sem page_size com le=`).not.toBeNull();
   return Number(m![1]);
