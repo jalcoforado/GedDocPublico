@@ -46,8 +46,13 @@ export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
   const podeArquivar = !jaArquivado && !encaminhamentoPendente;
 
   const podeEncaminhar = processo.ativo && !encaminhamentoPendente;
-  const podeReceber = !!encaminhamentoPendente && processo.ativo;
-  const podeCancelar = !!encaminhamentoPendente && processo.ativo;
+  // Receber/recusar são da unidade de destino e cancelar, da de origem. O
+  // servidor diz se quem consulta pode; `false` explícito desabilita, ausente
+  // não restringe (o servidor continua sendo a barreira).
+  const doDestino = processo.pode_receber_encaminhamento !== false;
+  const daOrigem = processo.pode_cancelar_encaminhamento !== false;
+  const podeReceber = !!encaminhamentoPendente && processo.ativo && doDestino;
+  const podeCancelar = !!encaminhamentoPendente && processo.ativo && daOrigem;
 
   function invalidate() {
     qc.invalidateQueries({ queryKey: ["processo", processo.id] });
@@ -120,6 +125,11 @@ export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
         {encaminhamentoPendente && (
           <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-warning-soft px-2 py-0.5 text-xs font-semibold text-warning-soft-foreground">
             Aguardando recebimento
+          </span>
+        )}
+        {encaminhamentoPendente && !doDestino && (
+          <span className="text-xs text-muted-foreground">
+            Receber ou recusar cabe a quem é de {encaminhamentoPendente.unidade_destino}.
           </span>
         )}
       </div>

@@ -583,6 +583,39 @@ def _row_to_list(r) -> ProcessoListItem:
     )
 
 
+async def _competencia_no_pendente(
+    db: AsyncSession, processo_id: int, *, tenant_id: int, usuario_id: int | None,
+) -> tuple[bool | None, bool | None]:
+    """Quem consulta pode receber/recusar e cancelar o encaminhamento pendente?
+    `(None, None)` sem pendente ou sem usuário."""
+    if usuario_id is None:
+        return None, None
+    enc = (
+        await db.execute(
+            select(Encaminhamento)
+            .where(
+                Encaminhamento.id_processo == processo_id,
+                Encaminhamento.tenant_id == tenant_id,
+                Encaminhamento.excluido.is_(False),
+                Encaminhamento.recebido.is_(False),
+                Encaminhamento.cancelado.is_(False),
+            )
+            .order_by(Encaminhamento.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if enc is None:
+        return None, None
+    from .acoes_processo import pode_decidir_encaminhamento
+    from .permissoes import load_permissions
+
+    perms = await load_permissions(db, usuario_id, tenant_id=tenant_id)
+    return await pode_decidir_encaminhamento(
+        db, enc, usuario_id=usuario_id, tenant_id=tenant_id,
+        is_super_usuario=perms.is_super_usuario,
+    )
+
+
 async def get_processo_detail(
     db: AsyncSession,
     processo_id: int,
@@ -644,8 +677,13 @@ async def get_processo_detail(
         origem="servico" if calc.prazo_servico_dias_snapshot is not None else None,
     )
 
+    pode_receber, pode_cancelar = await _competencia_no_pendente(
+        db, processo_id, tenant_id=tenant_id, usuario_id=usuario_id)
+
     return ProcessoDetail(
         **base_item.model_dump(),
+        pode_receber_encaminhamento=pode_receber,
+        pode_cancelar_encaminhamento=pode_cancelar,
         observacao=p.observacao,
         corpo=p.corpo,
         virtual=p.virtual,

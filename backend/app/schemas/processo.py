@@ -394,3 +394,10 @@ class ProcessoDetail(ProcessoListItem):
 
     # F6 — orçamento de anexação, sempre presente.
     cota_anexacao: CotaAnexacaoOut
+
+    # O que QUEM CONSULTA pode decidir sobre o encaminhamento pendente
+    # (`acoes_processo.pode_decidir_encaminhamento`, a mesma regra dos atos).
+    # `None` quando não há pendente ou o detalhe foi montado sem usuário — a
+    # tela então não restringe, e o servidor continua sendo a barreira.
+    pode_receber_encaminhamento: bool | None = None
+    pode_cancelar_encaminhamento: bool | None = None

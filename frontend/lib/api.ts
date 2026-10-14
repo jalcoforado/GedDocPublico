@@ -448,6 +448,11 @@ export interface PrazoInfo {
 }
 
 export interface ProcessoDetail extends ProcessoListItem {
+  /** Quem consulta pode receber/recusar e cancelar o encaminhamento
+   *  pendente. `null`/ausente = sem pendente ou não informado: a tela não
+   *  restringe e o servidor decide. */
+  pode_receber_encaminhamento?: boolean | null;
+  pode_cancelar_encaminhamento?: boolean | null;
   observacao: string | null;
   corpo: string | null;
   virtual: boolean;
