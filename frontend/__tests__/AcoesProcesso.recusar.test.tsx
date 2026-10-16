@@ -27,8 +27,9 @@ vi.mock("@/components/ArquivarDialog", () => ({ ArquivarDialog: () => null }));
 import { AcoesProcesso } from "@/components/AcoesProcesso";
 import type { ProcessoDetail } from "@/lib/api";
 
-function processo(pendente: boolean): ProcessoDetail {
+function processo(pendente: boolean, extra: Partial<ProcessoDetail> = {}): ProcessoDetail {
   return {
+    ...extra,
     id: 77,
     numero_processo: "2026/000077",
     ativo: true,
@@ -46,11 +47,11 @@ function processo(pendente: boolean): ProcessoDetail {
   } as unknown as ProcessoDetail;
 }
 
-function abrir(pendente = true) {
+function abrir(pendente = true, extra: Partial<ProcessoDetail> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <AcoesProcesso processo={processo(pendente)} />
+      <AcoesProcesso processo={processo(pendente, extra)} />
     </QueryClientProvider>,
   );
 }
@@ -59,6 +60,21 @@ beforeEach(() => recusarMock.mockClear());
 afterEach(cleanup);
 
 describe("recusar encaminhamento", () => {
+  it("quem não é do destino não recebe nem recusa, e a tela diz de quem é a vez", () => {
+    abrir(true, { pode_receber_encaminhamento: false, pode_cancelar_encaminhamento: true });
+    expect(screen.getByRole("button", { name: "Receber" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Recusar" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancelar encaminhamento" })).toBeEnabled();
+    expect(screen.getByText("Receber ou recusar cabe a quem é de Procuradoria.")).toBeInTheDocument();
+  });
+
+  it("quem é do destino não cancela o que a origem enviou", () => {
+    abrir(true, { pode_receber_encaminhamento: true, pode_cancelar_encaminhamento: false });
+    expect(screen.getByRole("button", { name: "Recusar" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Cancelar encaminhamento" })).toBeDisabled();
+    expect(screen.queryByText(/cabe a quem é de/)).toBeNull();
+  });
+
   it("sem encaminhamento pendente não há o que recusar", () => {
     abrir(false);
     expect(screen.getByRole("button", { name: "Recusar" })).toBeDisabled();

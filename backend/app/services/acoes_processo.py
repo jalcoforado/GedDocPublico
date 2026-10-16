@@ -41,9 +41,33 @@ class AcaoError(Exception):
     pass
 
 
-class NaoLotadoNoDestinoError(AcaoError):
-    """Quem tenta receber ou recusar não é da unidade de destino. O router
-    devolve 403: é falta de competência para o ato, não estado inválido."""
+class ForaDaUnidadeError(AcaoError):
+    """Quem tenta o ato não é da unidade a que ele cabe. O router devolve 403:
+    é falta de competência para o ato, não estado inválido do processo."""
+
+
+class NaoLotadoNoDestinoError(ForaDaUnidadeError):
+    """Receber ou recusar sem ser da unidade de destino."""
+
+
+class NaoLotadoNaOrigemError(ForaDaUnidadeError):
+    """Cancelar encaminhamento sem ser da unidade de origem."""
+
+
+async def pode_decidir_encaminhamento(
+    db: AsyncSession, enc: Encaminhamento, *, usuario_id: int, tenant_id: int,
+    is_super_usuario: bool,
+) -> tuple[bool, bool]:
+    """(receber/recusar, cancelar) para este usuário e este encaminhamento
+    pendente. Mesma regra que os atos aplicam — é o que a tela usa para não
+    oferecer botão que vai dar 403."""
+    if is_super_usuario:
+        return True, True
+    destino = await _lotado_em(
+        db, id_usuario=usuario_id, id_unidade=enc.id_unidade_destino, tenant_id=tenant_id)
+    origem = enc.id_unidade_origem is None or await _lotado_em(
+        db, id_usuario=usuario_id, id_unidade=enc.id_unidade_origem, tenant_id=tenant_id)
+    return destino, origem
 
 
 async def _assert_do_destino(
@@ -503,6 +527,7 @@ async def cancelar_encaminhamento(
     *,
     tenant_id: int,
     usuario_id: int,
+    is_super_usuario: bool = False,
 ) -> Encaminhamento:
     enc = (
         await db.execute(
@@ -519,6 +544,26 @@ async def cancelar_encaminhamento(
         raise AcaoError("Não pode cancelar encaminhamento já recebido")
     if enc.cancelado:
         raise AcaoError("Encaminhamento já estava cancelado")
+    # Cancelar é desistir de mandar: decisão da unidade de ORIGEM, como
+    # receber e recusar são da de destino. Encaminhamento sem origem (legado)
+    # não tem de quem exigir lotação.
+    if (
+        not is_super_usuario
+        and enc.id_unidade_origem is not None
+        and not await _lotado_em(
+            db, id_usuario=usuario_id, id_unidade=enc.id_unidade_origem, tenant_id=tenant_id)
+    ):
+        nome = (
+            await db.execute(
+                select(UnidadeTrabalho.unidade_trabalho).where(
+                    UnidadeTrabalho.id == enc.id_unidade_origem
+                )
+            )
+        ).scalar_one_or_none()
+        raise NaoLotadoNaOrigemError(
+            f"Só quem é lotado na unidade de origem ({nome or 'origem'}) pode cancelar "
+            "este encaminhamento."
+        )
 
     enc.cancelado = True
     # Mantém id_local_atual onde estava (origem) — encaminhamento não chegou a mudar.

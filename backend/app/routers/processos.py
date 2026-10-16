@@ -45,7 +45,7 @@ from ..services.acoes_processo import (
     _get_processo,
     arquivar,
     atribuir_responsavel,
-    NaoLotadoNoDestinoError,
+    ForaDaUnidadeError,
     avisar_recusa,
     cancelar_encaminhamento,
     recusar_encaminhamento,
@@ -719,7 +719,7 @@ async def receber_endpoint(
             is_super_usuario=is_super,
             override_motivo=override_motivo,
         )
-    except NaoLotadoNoDestinoError as e:
+    except ForaDaUnidadeError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -748,7 +748,7 @@ async def recusar_encaminhamento_endpoint(
             db, processo_id, payload, tenant_id=tenant_id, usuario_id=current.id,
             is_super_usuario=await _is_super(db, current, tenant_id),
         )
-    except NaoLotadoNoDestinoError as e:
+    except ForaDaUnidadeError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -962,8 +962,11 @@ async def cancelar_encaminhamento_endpoint(
 ) -> ProcessoDetail:
     try:
         enc = await cancelar_encaminhamento(
-            db, encaminhamento_id, payload, tenant_id=tenant_id, usuario_id=current.id
+            db, encaminhamento_id, payload, tenant_id=tenant_id, usuario_id=current.id,
+            is_super_usuario=await _is_super(db, current, tenant_id),
         )
+    except ForaDaUnidadeError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     detail = await get_processo_detail(db, enc.id_processo, tenant_id=tenant_id, usuario_id=current.id)

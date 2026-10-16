@@ -292,3 +292,71 @@ async def test_http_quem_nao_e_do_destino_leva_403(admin_engine, cen):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.post(f"/api/v2/processos/{pid}/receber")
         assert r.status_code == 200, r.text
+
+
+# ---------------------------------------------------------------------------
+# Cancelar é da unidade de ORIGEM; o detalhe diz a cada um o que pode decidir
+# ---------------------------------------------------------------------------
+
+
+async def _enc_pendente(engine, cen, rotulo: str) -> int:
+    async with _sm(engine)() as s:
+        return (await s.execute(text(
+            "SELECT id FROM protocolos.encaminhamento WHERE id_processo=:p "
+            "AND recebido=false AND cancelado=false"),
+            {"p": cen["procs"][rotulo]})).scalar_one()
+
+
+@pytest.mark.asyncio
+async def test_so_quem_e_da_origem_cancela(admin_engine, cen):
+    """`saindo` vai de A para B. `colega_b` é do destino: não cancela; o
+    `operador`, de A, cancela."""
+    from app.schemas.processo import CancelarEncaminhamentoRequest
+    from app.services.acoes_processo import NaoLotadoNaOrigemError, cancelar_encaminhamento
+
+    enc_id = await _enc_pendente(admin_engine, cen, "saindo")
+    pedido = CancelarEncaminhamentoRequest(despacho=None)
+    async with _sm(admin_engine)() as s:
+        with pytest.raises(NaoLotadoNaOrigemError, match="lotado na unidade de origem"):
+            await cancelar_encaminhamento(
+                s, enc_id, pedido, tenant_id=cen["tenant"].id, usuario_id=cen["colega_b"])
+    async with _sm(admin_engine)() as s:
+        enc = await cancelar_encaminhamento(
+            s, enc_id, pedido, tenant_id=cen["tenant"].id, usuario_id=cen["operador"])
+    assert enc.cancelado is True
+
+
+@pytest.mark.asyncio
+async def test_detalhe_diz_a_cada_um_o_que_pode_decidir(admin_engine, cen):
+    pid = cen["procs"]["saindo"]
+    async with _sm(admin_engine)() as s:
+        da_origem = await get_processo_detail(
+            s, pid, tenant_id=cen["tenant"].id, usuario_id=cen["operador"])
+        do_destino = await get_processo_detail(
+            s, pid, tenant_id=cen["tenant"].id, usuario_id=cen["colega_b"])
+        sem_usuario = await get_processo_detail(s, pid, tenant_id=cen["tenant"].id)
+        sem_pendente = await get_processo_detail(
+            s, cen["procs"]["na_mesa"], tenant_id=cen["tenant"].id, usuario_id=cen["operador"])
+
+    assert (da_origem.pode_receber_encaminhamento,
+            da_origem.pode_cancelar_encaminhamento) == (False, True)
+    assert (do_destino.pode_receber_encaminhamento,
+            do_destino.pode_cancelar_encaminhamento) == (True, False)
+    # Sem usuário ou sem pendente: não se afirma nada.
+    assert (sem_usuario.pode_receber_encaminhamento,
+            sem_usuario.pode_cancelar_encaminhamento) == (None, None)
+    assert (sem_pendente.pode_receber_encaminhamento,
+            sem_pendente.pode_cancelar_encaminhamento) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_http_cancelar_de_fora_da_origem_e_403(admin_engine, cen):
+    t = cen["tenant"]
+    enc_id = await _enc_pendente(admin_engine, cen, "saindo")
+    app.dependency_overrides[get_current_user] = _como(admin_engine, cen["colega_b"])
+    arreio_tenant_http(t.id, t.slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            f"/api/v2/processos/encaminhamentos/{enc_id}/cancelar", json={})
+        assert r.status_code == 403, r.text
+        assert "unidade de origem" in r.json()["detail"]
