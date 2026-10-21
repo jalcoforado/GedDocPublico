@@ -7,6 +7,7 @@ import {
   FolderTree,
   GitBranch,
   Inbox,
+  LayoutDashboard,
   Layers,
   Map,
   MapPin,
@@ -32,7 +33,12 @@ import type { MenuModulo } from "./tipos";
  */
 export const menuProtocolo: MenuModulo = {
   slug: "protocolo",
-  raiz: "/m/protocolo/processos",
+  // A raiz é o painel, como no SEI: quem entra no módulo cai nos números da
+  // unidade. O launcher e o switcher vão para o primeiro item VISÍVEL (que é
+  // o painel, para quem tem `processo`); a raiz fica para a trilha do shell
+  // e para quem não vê item nenhum — e o painel, sem `processo`, ainda
+  // mostra a saudação e as notificações em vez de uma tela vazia.
+  raiz: "/m/protocolo/painel",
   grupos: [
     {
       title: "Processos",
@@ -42,6 +48,8 @@ export const menuProtocolo: MenuModulo = {
         // de um item "Processos" — dentro de um grupo que já se chama
         // "Processos": o nome aparecia duas vezes, uma em cima da outra, e as
         // caixas ficavam um nível mais fundo do que precisavam.
+        // O painel abre o grupo: é a porta do módulo (ver `raiz` acima).
+        { label: "Painel de controle", href: "/m/protocolo/painel", icon: LayoutDashboard, perm: "processo" },
         { label: "Todos os processos", href: ROTA_PROCESSOS, icon: Rows3, perm: "processo" },
         ...CAIXAS.map(({ caixa, rotulo, icone }) => ({
           label: rotulo,

@@ -552,7 +552,7 @@ export interface LoteResultado {
   falhas: number;
 }
 
-/** Painel de controle da tela inicial — espelha `PainelUnidade`. */
+/** Painel de controle do protocolo (`/m/protocolo/painel`) — espelha `PainelUnidade`. */
 export interface PainelUnidade {
   caixas: CaixasContagem;
   atribuidos_a_mim: number;
@@ -4827,7 +4827,7 @@ export const api = {
     /** A mesma ação sobre vários processos; responde um a um. */
     lote: (pedido: LoteRequest) =>
       request<LoteResultado>("/processos/lote", { method: "POST", body: JSON.stringify(pedido) }),
-    /** Números do painel de controle (tela inicial), no recorte das caixas. */
+    /** Números do painel de controle do protocolo, no recorte das caixas. */
     painel: () => request<PainelUnidade>("/processos/painel"),
     get: (id: number) => request<ProcessoDetail>(`/processos/${id}`),
     create: (data: ProcessoCreateInput) =>

@@ -360,7 +360,7 @@ async def painel_endpoint(
     usuario: Usuario = Depends(get_current_user),
     unidade_ativa: int | None = Depends(unidade_ativa_dep),
 ) -> PainelUnidade:
-    """Painel de controle da tela inicial: as caixas, quem está com o quê e
+    """Painel de controle do protocolo (`/m/protocolo/painel`): as caixas, quem está com o quê e
     os prazos da unidade ATIVA de quem consulta. Mesmo gate, recorte e
     unidade de `/caixas`."""
     return await painel_unidade(

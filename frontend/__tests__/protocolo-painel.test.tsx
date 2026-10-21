@@ -1,12 +1,15 @@
 /**
- * Tela inicial como "Painel de controle" (pedido da reunião de 2026-10-20,
- * referência: Painel de Controle do SEI). Cada quadro mostra o número da
- * unidade e leva à lista que o conta.
+ * "Painel de controle" do protocolo (pedido da reunião de 2026-10-20,
+ * referência: Painel de Controle do SEI), em `/m/protocolo/painel`. Morou na
+ * tela inicial até a decisão de 2026-10-21 de trazê-lo para o módulo; estes
+ * testes vieram junto. Cada quadro mostra o número da unidade e leva à lista
+ * que o conta.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ToastProvider } from "@/components/ui/toast";
 import type { LotacaoOut, PainelUnidade } from "@/lib/api";
 
 /** `perms` aceita "processo" (ler) e "processo:inserir" (abrir). */
@@ -60,11 +63,14 @@ function painelBase(): PainelUnidade {
 }
 
 async function abrir() {
-  const { default: Pagina } = await import("@/app/(app)/home/page");
+  const { default: Pagina } = await import("@/app/(app)/m/protocolo/painel/page");
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <Pagina />
+      {/* O `useLotacaoAtiva` (nome da unidade no subtítulo) pede o toast. */}
+      <ToastProvider>
+        <Pagina />
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }
@@ -418,18 +424,42 @@ describe("painel de controle — mais perto do SEI", () => {
     expect(screen.queryByRole("region", { name: "Primeiros passos" })).toBeNull();
   });
 
-  it("o subtítulo nomeia a unidade de lotação principal, que é a dos números", async () => {
+  it("o subtítulo nomeia a unidade ATIVA, que é a dos números", async () => {
     estado.lotacoes = [
       { id: 3, nome: "Secretaria de Administração", principal: true },
       { id: 9, nome: "Secretaria de Saúde", principal: false },
     ];
-    // Mesmo com outra lotação ativa: o painel conta pela principal.
+    // Com outra lotação ativa, o painel conta por ela — e é ela que se nomeia.
+    estado.unidadeContexto = 9;
+    await abrir();
+    expect(await screen.findByText(/números da unidade Secretaria de Saúde/)).toBeInTheDocument();
+    expect(screen.queryByText(/Secretaria de Administração/)).toBeNull();
+  });
+
+  it("sem lotação ativa escolhida, nomeia a principal", async () => {
+    estado.lotacoes = [
+      { id: 3, nome: "Secretaria de Administração", principal: true },
+      { id: 9, nome: "Secretaria de Saúde", principal: false },
+    ];
+    await abrir();
+    expect(
+      await screen.findByText(/números da unidade Secretaria de Administração/),
+    ).toBeInTheDocument();
+  });
+
+  it("ativa que deixou de ser lotação do usuário cai na principal, como no cabeçalho", async () => {
+    estado.lotacoes = [{ id: 3, nome: "Secretaria de Administração", principal: true }];
     estado.unidadeContexto = 9;
     await abrir();
     expect(
       await screen.findByText(/números da unidade Secretaria de Administração/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/Secretaria de Saúde/)).toBeNull();
+  });
+
+  it("o título vem do cabeçalho padrão das telas, e nomeia a aba", async () => {
+    await abrir();
+    expect(screen.getByRole("heading", { level: 1, name: "Painel de controle" })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("Painel de controle — Aprimora"));
   });
 
   it("sem o nome da unidade, mantém o texto genérico", async () => {

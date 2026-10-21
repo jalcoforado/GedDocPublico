@@ -16,16 +16,10 @@ import { moduloDoPathname, nomeDoModulo } from "@/lib/modulos";
 import { Providers } from "@/lib/providers";
 
 function Shell({ children }: { children: React.ReactNode }) {
-  const { loading, user, can } = useAuth();
+  const { loading, user } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
   const modulo = moduloDoPathname(pathname);
-  // A tela inicial é o painel de controle dos processos (pedido da reunião
-  // de 2026-10-20, referência: SEI), e mostra o menu do protocolo ao lado,
-  // com os contadores das caixas — como o SEI. Só para quem opera processos;
-  // a tela segue transversal (a trilha e o módulo atual não mudam).
-  const moduloDoMenu =
-    modulo ?? (pathname === "/home" && can("processo") ? "protocolo" : null);
 
   if (loading) {
     return (
@@ -56,11 +50,11 @@ function Shell({ children }: { children: React.ReactNode }) {
             para assinar, dashboard — não têm barra lateral; a navegação delas é
             o cabeçalho e o próprio "Menu principal". O menu lateral aparece
             dentro de um módulo, onde há menu de módulo para mostrar. */}
-        {moduloDoMenu ? (
-          <Sidebar modulo={moduloDoMenu} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        {modulo ? (
+          <Sidebar modulo={modulo} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         ) : null}
         <div className="flex flex-1 flex-col overflow-hidden">
-          <Header onOpenSidebar={moduloDoMenu ? () => setSidebarOpen(true) : undefined} />
+          <Header onOpenSidebar={modulo ? () => setSidebarOpen(true) : undefined} />
           <main
             id="conteudo"
             className="flex-1 overflow-y-auto p-4 sm:p-[var(--density-space)]"

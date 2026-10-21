@@ -1,7 +1,10 @@
 /**
- * A tela inicial (painel de controle) mostra o menu do protocolo ao lado,
- * como o SEI, para quem opera processos. As demais telas gerais seguem sem
- * menu lateral, como no protótipo.
+ * Menu lateral só dentro de módulo. A tela inicial chegou a mostrar o menu
+ * do protocolo para quem opera processos (PR #139), porque o painel de
+ * controle morava nela; com o painel em `/m/protocolo/painel`, a exceção
+ * perdeu o motivo e saiu. Este teste trava a regra de volta: `/home` sem
+ * menu lateral para todo mundo, e o painel com o menu do módulo, como
+ * qualquer tela do protocolo.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -61,16 +64,17 @@ function abrir(caminho: string, perms: string[]) {
 
 afterEach(cleanup);
 
-describe("menu lateral na tela inicial", () => {
-  it("quem opera processos vê o menu do protocolo, com as caixas", () => {
+describe("menu lateral só dentro de módulo", () => {
+  it("a tela inicial não tem menu lateral, nem para quem opera processos", () => {
     abrir("/home", ["processo"]);
-    expect(screen.getAllByRole("link", { name: /Caixa de entrada/ }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: /Análise/ }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: /Caixa de entrada/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Painel de controle/ })).toBeNull();
   });
 
-  it("quem não opera processos segue sem menu lateral", () => {
-    abrir("/home", []);
-    expect(screen.queryByRole("link", { name: /Caixa de entrada/ })).toBeNull();
+  it("o painel do protocolo mostra o menu do módulo, com o painel e as caixas", () => {
+    abrir("/m/protocolo/painel", ["processo"]);
+    expect(screen.getAllByRole("link", { name: /Painel de controle/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: /Caixa de entrada/ }).length).toBeGreaterThan(0);
   });
 
   it("as outras telas gerais seguem sem menu lateral", () => {

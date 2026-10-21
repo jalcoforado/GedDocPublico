@@ -61,6 +61,9 @@ export const ITENS_EXTRA: ReadonlyArray<{ item: NavItem; moduloSlug: string; gro
  */
 export const KEYWORDS_POR_HREF: Record<string, string[]> = {
   "/home": ["dashboard", "início"],
+  // O painel morou na `/home` até sair para o módulo: quem o procurava por
+  // "início" ou "caixas" continua achando.
+  "/m/protocolo/painel": ["sei", "quadros", "caixas", "prazos", "início"],
   "/m/protocolo/workflow": ["bpm", "fluxo"],
   "/m/administracao/organograma": ["unidades", "hierarquia"],
   "/m/administracao/auditoria": ["log", "histórico"],

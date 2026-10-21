@@ -39,7 +39,7 @@ function montar(lotacoes: { id: number; nome: string; principal: boolean }[], at
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // Queries que a troca precisa derrubar: painel da tela inicial, contadores
   // da lateral e a lista de processos.
-  for (const chave of [["home-painel"], ["processos-caixas"], ["processos", { caixa: "entrada" }]]) {
+  for (const chave of [["protocolo-painel"], ["processos-caixas"], ["processos", { caixa: "entrada" }]]) {
     client.setQueryData(chave, { qualquer: true });
   }
   const invalidar = vi.spyOn(client, "invalidateQueries");
@@ -87,7 +87,7 @@ describe("UnidadeAtiva — cabeçalho", () => {
 
     await waitFor(() => expect(trocarLotacaoMock).toHaveBeenCalledWith(20));
     await waitFor(() => expect(invalidar).toHaveBeenCalled());
-    for (const chave of [["home-painel"], ["processos-caixas"], ["processos", { caixa: "entrada" }]]) {
+    for (const chave of [["protocolo-painel"], ["processos-caixas"], ["processos", { caixa: "entrada" }]]) {
       expect(client.getQueryState(chave)?.isInvalidated, JSON.stringify(chave)).toBe(true);
     }
   });
