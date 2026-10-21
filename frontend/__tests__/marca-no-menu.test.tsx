@@ -41,6 +41,7 @@ vi.mock("@/components/BuscaGlobal", () => ({ BuscaGlobal: () => null }));
 vi.mock("@/components/ModuloSwitcher", () => ({ ModuloSwitcher: () => null }));
 vi.mock("@/components/NotificacoesBell", () => ({ NotificacoesBell: () => null }));
 vi.mock("@/components/AvatarDropdown", () => ({ AvatarDropdown: () => null }));
+vi.mock("@/components/UnidadeAtiva", () => ({ UnidadeAtiva: () => null }));
 vi.mock("@/components/CommandPalette", () => ({ useCommandPalette: () => null }));
 
 import { Header } from "@/components/Header";

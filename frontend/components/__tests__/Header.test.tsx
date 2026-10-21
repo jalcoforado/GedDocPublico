@@ -19,6 +19,9 @@ vi.mock("@/components/NotificacoesBell", () => ({
 vi.mock("@/components/AvatarDropdown", () => ({
   AvatarDropdown: () => <div data-testid="avatar" />,
 }));
+vi.mock("@/components/UnidadeAtiva", () => ({
+  UnidadeAtiva: () => <div data-testid="unidade" />,
+}));
 vi.mock("@/lib/branding", () => ({ useBranding: () => null }));
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: null }) }));
 
@@ -37,6 +40,22 @@ describe("Header — busca no mobile (UX-03 fatia 3.4)", () => {
     render(<Header onOpenSidebar={() => {}} />);
     // o wrapper da BuscaGlobal é hidden md:block
     expect(document.querySelector(".md\\:block")).not.toBeNull();
+  });
+});
+
+describe("Header — unidade ativa no celular", () => {
+  it("abaixo de sm a unidade vai para uma linha só dela; de sm em diante, na linha", () => {
+    // jsdom não calcula layout: o que dá para travar aqui é a intenção. Na
+    // mesma linha, a 390px, a pílula era o único item que encolhia e o nome
+    // virava só reticências.
+    render(<Header onOpenSidebar={() => {}} />);
+    const header = screen.getByRole("banner", { name: /cabeçalho do sistema/i });
+    expect(header.className).toContain("flex-wrap");
+    expect(header.className).toContain("sm:flex-nowrap");
+    const linha = screen.getByTestId("unidade").parentElement!;
+    for (const c of ["order-last", "basis-full", "sm:order-none", "sm:basis-auto"]) {
+      expect(linha.className).toContain(c);
+    }
   });
 });
 
