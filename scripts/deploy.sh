@@ -305,6 +305,29 @@ backup_database() {
   fi
 }
 
+# Limpa o que cada deploy deixa para trás.
+#
+# `build --no-cache` reconstrói as imagens com a MESMA tag; a anterior perde a
+# tag e fica órfã (`<none>`), e o cache de build acumula. Em 2026-10-21 isso
+# somava ~285 GB de imagens órfãs e ~313 GB de cache na VPS, com o disco em
+# 85% — e os anexos do sistema ocupavam 164 KB. Sem limpeza, o deploy
+# seguinte é o que enche o disco.
+#
+# Só depois do health check: se o deploy falhou, a imagem anterior ainda pode
+# servir para investigar. Nunca toca em volume — é lá que mora o banco
+# (`postgres_data`); `image prune` sem `-a` só remove imagem SEM tag, e
+# `builder prune` só cache. Falha aqui não derruba o deploy.
+CACHE_DE_BUILD_MANTIDO="${CACHE_DE_BUILD_MANTIDO:-72h}"
+
+limpar_sobras_de_build() {
+  log "Limpando imagens órfãs e cache de build com mais de ${CACHE_DE_BUILD_MANTIDO}..."
+  log "Disco antes: $(df -h / | awk 'NR==2 {print $3 " usados, " $4 " livres (" $5 ")"}')"
+  docker image prune -f >/dev/null 2>&1 || log "image prune falhou — seguir"
+  docker builder prune -f --filter "until=${CACHE_DE_BUILD_MANTIDO}" >/dev/null 2>&1 \
+    || log "builder prune falhou — seguir"
+  log "Disco depois: $(df -h / | awk 'NR==2 {print $3 " usados, " $4 " livres (" $5 ")"}')"
+}
+
 # Full deploy (pull + build + start + healthcheck)
 deploy_full() {
   log "=========================================="
@@ -321,6 +344,7 @@ deploy_full() {
   start_services
   run_migrations
   health_check
+  limpar_sobras_de_build
 
   log "=========================================="
   log "✓ DEPLOY COMPLETE"
