@@ -726,3 +726,73 @@ async def test_http_prazo_da_caixa_chega_pela_borda(admin_engine, cen):
     assert item["prazo_caixa_status"] == "atrasado"
     assert item["prazo_caixa_origem"] == "encaminhamento"
     assert item["prazo_caixa_vence_em"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Painel de controle da tela inicial
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_painel_conta_como_as_caixas_e_reparte_a_analise(admin_engine, cen):
+    """Visto de A: a Análise tem 5 processos (na_mesa, externo, recebido,
+    cancelado, sigiloso). Um é atribuído ao operador; os demais estão sem
+    responsável. Os prazos saem da mesma regra que pinta a linha na caixa."""
+    from app.services.processos import painel_unidade
+
+    await _fixa_prazos(admin_engine, cen,
+                       servico={"na_mesa": (40, 30), "externo": (25, 30)},
+                       encaminhamento={"recebido": 10, "saindo": -1})
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(
+            "UPDATE protocolos.processo SET id_usuario_responsavel=:u WHERE id=:p"),
+            {"u": cen["operador"], "p": cen["procs"]["recebido"]})
+        await s.commit()
+
+    async with _sm(admin_engine)() as s:
+        painel = await painel_unidade(
+            s, tenant_id=cen["tenant"].id,
+            id_usuario_contexto=cen["operador"], id_unidade_contexto=cen["a"])
+        caixas = await contar_caixas(
+            s, tenant_id=cen["tenant"].id,
+            id_usuario_contexto=cen["operador"], id_unidade_contexto=cen["a"])
+
+    assert painel.caixas == caixas
+    assert caixas.analise == 5
+    assert (painel.atribuidos_a_mim, painel.sem_responsavel) == (1, 4)
+    p = painel.prazos
+    assert (p.vencidos, p.vencendo, p.no_prazo, p.sem_prazo) == (1, 1, 1, 2)
+    assert p.vencidos + p.vencendo + p.no_prazo + p.sem_prazo == caixas.analise
+    # `saindo` foi para B com prazo vencido ontem e B ainda não recebeu.
+    assert (painel.aguardando_retorno.total, painel.aguardando_retorno.atrasados) == (1, 1)
+
+
+@pytest.mark.asyncio
+async def test_painel_respeita_o_sigilo_de_quem_consulta(admin_engine, cen):
+    from app.services.processos import painel_unidade
+
+    async with _sm(admin_engine)() as s:
+        tudo = await painel_unidade(
+            s, tenant_id=cen["tenant"].id,
+            id_usuario_contexto=cen["operador"], id_unidade_contexto=cen["a"])
+        ostensivo = await painel_unidade(
+            s, tenant_id=cen["tenant"].id, niveis_permitidos=["ostensivo"],
+            id_usuario_contexto=cen["operador"], id_unidade_contexto=cen["a"])
+    # O sigiloso some da Análise e do "sem responsável", junto.
+    assert ostensivo.caixas.analise == tudo.caixas.analise - 1
+    assert ostensivo.sem_responsavel == tudo.sem_responsavel - 1
+
+
+@pytest.mark.asyncio
+async def test_http_usuario_comum_le_o_painel(admin_engine, cen):
+    """`/painel` é literal e tem de casar antes de `/{processo_id}`."""
+    t = cen["tenant"]
+    app.dependency_overrides[get_current_user] = _como(admin_engine, cen["operador"])
+    arreio_tenant_http(t.id, t.slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.get("/api/v2/processos/painel")
+    assert r.status_code == 200, r.text
+    corpo = r.json()
+    assert set(corpo) == {
+        "caixas", "atribuidos_a_mim", "sem_responsavel", "prazos", "aguardando_retorno"}
+    assert corpo["caixas"]["saida"] == 1

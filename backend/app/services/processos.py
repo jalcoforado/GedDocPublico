@@ -37,6 +37,7 @@ from ..schemas.marcador import MarcadorMini
 from ..schemas.processo import (
     AnexoNoProcesso,
     CaixaProcesso,
+    AguardandoRetorno,
     CaixasContagem,
     CotaAnexacaoOut,
     OrdemProcesso,
@@ -45,8 +46,10 @@ from ..schemas.processo import (
     EncaminhamentoOut,
     MovimentacaoItem,
     PermanenciaNo,
+    PainelUnidade,
     PermanenciaProcesso,
     PrazoInfo,
+    PrazosDaUnidade,
     ProcessoDetail,
     ProcessoListItem,
 )
@@ -374,6 +377,95 @@ async def contar_caixas(
         stmt = stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
     linha = (await db.execute(stmt)).one()
     return CaixasContagem(**{c.value: getattr(linha, c.value) for c in CaixaProcesso})
+
+
+async def painel_unidade(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    niveis_permitidos: list[str] | None = None,
+    id_usuario_contexto: int | None = None,
+    id_unidade_contexto: int | None = None,
+) -> PainelUnidade:
+    """Os números do painel de controle (tela inicial), no mesmo recorte das
+    caixas: as definições vêm de `_predicado_caixa`, e o prazo de cada
+    processo, de `prazo_da_caixa` — o mesmo que pinta a linha na caixa. Duas
+    regras copiadas divergiriam, e o painel diria 5 vencidos com a caixa
+    mostrando 4."""
+    caixas = await contar_caixas(
+        db, tenant_id=tenant_id, niveis_permitidos=niveis_permitidos,
+        id_usuario_contexto=id_usuario_contexto, id_unidade_contexto=id_unidade_contexto,
+    )
+    contexto = {
+        "tenant_id": tenant_id,
+        "id_usuario": id_usuario_contexto,
+        "id_unidade": id_unidade_contexto,
+    }
+
+    def _base(caixa: CaixaProcesso):
+        stmt = (
+            select(
+                Processo.id,
+                Processo.data_hora_abertura,
+                Processo.prazo_servico_dias_snapshot,
+                Processo.id_usuario_responsavel,
+                _PRAZO_ENCAMINHAMENTO.label("prazo_encaminhamento"),
+            )
+            .where(
+                Processo.excluido.is_(False),
+                Processo.situacao != "rascunho",
+                _predicado_caixa(caixa, **contexto),
+            )
+        )
+        stmt = tenant_filter(stmt, Processo, tenant_id)
+        if niveis_permitidos is not None:
+            stmt = stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
+        return stmt
+
+    agora = datetime.now()
+    prazos = PrazosDaUnidade()
+    atribuidos = sem_responsavel = 0
+    for r in (await db.execute(_base(CaixaProcesso.analise))).all():
+        if r.id_usuario_responsavel is None:
+            sem_responsavel += 1
+        elif r.id_usuario_responsavel == id_usuario_contexto:
+            atribuidos += 1
+        # Na Análise nada está arquivado: o predicado já exclui.
+        status = prazo_da_caixa(
+            data_abertura=r.data_hora_abertura,
+            prazo_snapshot_dias=r.prazo_servico_dias_snapshot,
+            prazo_encaminhamento=r.prazo_encaminhamento,
+            arquivado=False,
+            now=agora,
+        ).status
+        if status == "atrasado":
+            prazos.vencidos += 1
+        elif status == "vencendo":
+            prazos.vencendo += 1
+        elif status == "dentro_do_prazo":
+            prazos.no_prazo += 1
+        else:
+            prazos.sem_prazo += 1
+
+    retorno = AguardandoRetorno()
+    for r in (await db.execute(_base(CaixaProcesso.saida))).all():
+        retorno.total += 1
+        if prazo_da_caixa(
+            data_abertura=r.data_hora_abertura,
+            prazo_snapshot_dias=r.prazo_servico_dias_snapshot,
+            prazo_encaminhamento=r.prazo_encaminhamento,
+            arquivado=False,
+            now=agora,
+        ).status == "atrasado":
+            retorno.atrasados += 1
+
+    return PainelUnidade(
+        caixas=caixas,
+        atribuidos_a_mim=atribuidos,
+        sem_responsavel=sem_responsavel,
+        prazos=prazos,
+        aguardando_retorno=retorno,
+    )
 
 
 async def list_processos(
