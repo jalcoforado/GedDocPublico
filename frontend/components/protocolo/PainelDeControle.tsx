@@ -74,7 +74,9 @@ type IdQuadro =
 interface DefQuadro {
   id: IdQuadro;
   rotulo: string;
-  href: string;
+  /** Para onde o quadro leva. Sem `href` o quadro é só número: melhor não
+   * ser link do que ser link para uma tela que não mostra o que ele conta. */
+  href?: string;
   /** Dica curta, visível sob o número. */
   dica: string;
   /** O que o número conta, por extenso: no `title` (mouse) e no
@@ -172,9 +174,12 @@ const QUADROS: DefQuadro[] = [
   {
     id: "notificacoes",
     rotulo: "Notificações",
-    href: "/perfil",
+    // Sem `href`: levava a /perfil, que não lista notificação nenhuma — o
+    // quadro prometia N não lidas e abria uma tela sem elas. A lista mora no
+    // sino do cabeçalho, que também marca como lida; a explicação diz isso.
     dica: "não lidas",
-    explicacao: "Notificações enviadas a você que ainda não foram marcadas como lidas.",
+    explicacao:
+      "Notificações enviadas a você que ainda não foram marcadas como lidas. O sino, no alto da tela, lista cada uma.",
     icon: Bell,
     alerta: true,
     sempreDisponivel: true,
@@ -253,7 +258,10 @@ export function PainelDeControle() {
     refetchInterval: INTERVALO_ATUALIZACAO,
   });
   const notifQ = useQuery({
-    queryKey: ["home-notif-unread"],
+    // Sob o prefixo `["notificacoes", "me"]`: é o que o sino e a tela inicial
+    // invalidam ao marcar como lida, e o quadro acompanha na hora, sem
+    // esperar o próximo ciclo de atualização.
+    queryKey: ["notificacoes", "me", "painel-nao-lidas"],
     queryFn: () => notificacoesApi.listarMinhas({ apenas_nao_lidas: true, limit: 1 }),
     staleTime: 30_000,
     refetchInterval: INTERVALO_ATUALIZACAO,
@@ -405,30 +413,39 @@ function Quadro({ def, dados }: { def: DefQuadro; dados: Dados }) {
   const base = def.base?.(dados);
   const temAlgo = (valor ?? 0) > 0;
   const intent = def.intent ?? "default";
+  const cartao = (
+    <KpiCard
+      label={def.rotulo}
+      value={valor ?? "—"}
+      hint={
+        <>
+          {def.dica}
+          {valor != null && base != null && base > 0 && (
+            <Proporcao parte={valor} total={base} />
+          )}
+        </>
+      }
+      icon={def.icon}
+      intent={def.alerta && temAlgo ? "danger" : intent}
+      className={cn("h-full", def.alerta && temAlgo && "border-l-4 border-l-danger")}
+    />
+  );
   return (
-    <div className="relative">
-      <Link
-        href={def.href}
-        title={def.explicacao}
-        aria-describedby={explicacaoId}
-        className="block h-full rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-      >
-        <KpiCard
-          label={def.rotulo}
-          value={valor ?? "—"}
-          hint={
-            <>
-              {def.dica}
-              {valor != null && base != null && base > 0 && (
-                <Proporcao parte={valor} total={base} />
-              )}
-            </>
-          }
-          icon={def.icon}
-          intent={def.alerta && temAlgo ? "danger" : intent}
-          className={cn("h-full", def.alerta && temAlgo && "border-l-4 border-l-danger")}
-        />
-      </Link>
+    <div className="relative" data-quadro={def.id}>
+      {def.href ? (
+        <Link
+          href={def.href}
+          title={def.explicacao}
+          aria-describedby={explicacaoId}
+          className="block h-full rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        >
+          {cartao}
+        </Link>
+      ) : (
+        <div title={def.explicacao} aria-describedby={explicacaoId} className="h-full">
+          {cartao}
+        </div>
+      )}
       <span id={explicacaoId} className="sr-only">
         {def.explicacao}
       </span>

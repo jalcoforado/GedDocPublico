@@ -77,8 +77,11 @@ async function abrir() {
 
 /** O link do quadro que tem aquele rótulo. */
 const quadro = (rotulo: string) => screen.getByText(rotulo).closest("a") as HTMLAnchorElement;
+/** O quadro inteiro, seja link ou não (o de Notificações não é). */
+const caixaDo = (rotulo: string) =>
+  screen.getByText(rotulo).closest("[data-quadro]") as HTMLElement;
 const valorDo = (rotulo: string) =>
-  within(quadro(rotulo)).getByTestId("kpi-valor").textContent;
+  within(caixaDo(rotulo)).getByTestId("kpi-valor").textContent;
 
 vi.setConfig({ testTimeout: 20_000 });
 
@@ -100,9 +103,9 @@ afterEach(() => {
 const CHAVE = "aprimora:painel-quadros:77";
 /** Rótulos dos quadros, na ordem em que aparecem. */
 const rotulosVisiveis = () =>
-  within(screen.getByRole("region", { name: "Quadros de processos" }))
-    .getAllByRole("link")
-    .map((a) => a.querySelector("span")?.textContent);
+  Array.from(
+    screen.getByRole("region", { name: "Quadros de processos" }).querySelectorAll("[data-quadro]"),
+  ).map((q) => q.firstElementChild?.querySelector("span")?.textContent);
 
 describe("painel de controle", () => {
   it("cada quadro mostra o número da unidade e leva à lista que o conta", async () => {
@@ -124,6 +127,10 @@ describe("painel de controle", () => {
     expect(quadro("Atribuídos a mim")).toHaveAttribute(
       "href", "/m/protocolo/processos?caixa=analise&escopo=meus&ativos=0");
     expect(quadro("Para assinar")).toHaveAttribute("href", "/para-assinar");
+    // Notificações não é link: levava a /perfil, que não lista nenhuma. A
+    // explicação aponta o sino, onde a lista está.
+    expect(quadro("Notificações")).toBeNull();
+    expect(caixaDo("Notificações").querySelector("[title]")?.getAttribute("title")).toMatch(/sino/);
   });
 
   it("recusados ficam em destaque quando há algum, e quietos quando não há", async () => {
