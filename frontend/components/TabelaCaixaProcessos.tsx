@@ -4,6 +4,7 @@ import { Inbox } from "lucide-react";
 import Link from "next/link";
 
 import { FavoritoStar } from "@/components/FavoritoStar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -73,6 +74,13 @@ const ESPERA: Record<NivelDeEspera, { classe: string; prazo: string }> = {
 interface Props {
   itens: ProcessoListItem[] | undefined;
   carregando: boolean;
+  /** Com seleção (caixas que têm ação em lote): uma coluna de caixas de
+   *  marcar à esquerda, e a do cabeçalho marca ou desmarca a página. */
+  selecao?: {
+    ids: Set<number>;
+    alternar: (id: number) => void;
+    alternarPagina: (marcar: boolean) => void;
+  };
 }
 
 /**
@@ -85,12 +93,29 @@ interface Props {
  * à esquerda e o tempo, que é o que se compara entre linhas, à direita com
  * algarismos de largura fixa.
  */
-export function TabelaCaixaProcessos({ itens, carregando }: Props) {
+export function TabelaCaixaProcessos({ itens, carregando, selecao }: Props) {
   const vazio = !carregando && (itens?.length ?? 0) === 0;
+  const colunas = selecao ? 7 : 6;
+  const todosMarcados =
+    !!selecao && (itens?.length ?? 0) > 0 && (itens ?? []).every((p) => selecao.ids.has(p.id));
+  const algumMarcado = !!selecao && (itens ?? []).some((p) => selecao.ids.has(p.id));
   return (
     <Table>
       <THead>
         <TR>
+          {selecao && (
+            <TH className="w-10">
+              <Checkbox
+                aria-label={todosMarcados ? "Desmarcar todos desta página" : "Marcar todos desta página"}
+                checked={todosMarcados}
+                ref={(el) => {
+                  if (el) el.indeterminate = algumMarcado && !todosMarcados;
+                }}
+                onChange={() => selecao.alternarPagina(!todosMarcados)}
+                disabled={(itens?.length ?? 0) === 0}
+              />
+            </TH>
+          )}
           <TH>Nº do processo</TH>
           <TH>Assunto</TH>
           <TH className="text-right">Tempo na caixa</TH>
@@ -100,10 +125,10 @@ export function TabelaCaixaProcessos({ itens, carregando }: Props) {
         </TR>
       </THead>
       <TBody>
-        {carregando && Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} cols={6} />)}
+        {carregando && Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} cols={colunas} />)}
         {vazio && (
           <TR>
-            <TD colSpan={6} className="p-0">
+            <TD colSpan={colunas} className="p-0">
               <EmptyState
                 icon={Inbox}
                 title="Nenhum processo nesta caixa"
@@ -119,6 +144,15 @@ export function TabelaCaixaProcessos({ itens, carregando }: Props) {
           const prazo = textoDoPrazo(p.prazo_caixa_status, p.prazo_caixa_vence_em);
           return (
             <TR key={p.id}>
+              {selecao && (
+                <TD className="w-10">
+                  <Checkbox
+                    aria-label={`Selecionar ${p.nup ?? p.numero_processo ?? "processo"}`}
+                    checked={selecao.ids.has(p.id)}
+                    onChange={() => selecao.alternar(p.id)}
+                  />
+                </TD>
+              )}
               <TD className="font-mono text-xs tabular-nums">
                 <div className="flex items-center gap-1">
                   <FavoritoStar processo={p} size="sm" />

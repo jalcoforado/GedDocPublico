@@ -2,7 +2,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .marcador import MarcadorMini
 
@@ -288,6 +288,52 @@ class AtribuirResponsavelRequest(BaseModel):
     """`id_usuario=None` desatribui — volta ao estado pendente de designação."""
 
     id_usuario: int | None = None
+
+
+AcaoDoLote = Literal["receber", "encaminhar", "atribuir_responsavel", "arquivar"]
+
+# Teto de um lote. Cada processo é um ato completo (workflow, auditoria,
+# notificação); acima disso a requisição fica longa demais para a tela esperar.
+MAXIMO_DO_LOTE = 100
+
+
+class LoteRequest(BaseModel):
+    """A mesma ação sobre vários processos (`services/processos_lote.py`).
+    Cada ação traz o seu corpo — o mesmo da rota individual — e só ele."""
+
+    ids: list[int] = Field(min_length=1, max_length=MAXIMO_DO_LOTE)
+    acao: AcaoDoLote
+    encaminhar: EncaminharRequest | None = None
+    arquivar: ArquivarRequest | None = None
+    responsavel: AtribuirResponsavelRequest | None = None
+
+    @model_validator(mode="after")
+    def _corpo_da_acao(self) -> "LoteRequest":
+        exigido = {
+            "encaminhar": self.encaminhar,
+            "arquivar": self.arquivar,
+            "atribuir_responsavel": self.responsavel,
+        }
+        if self.acao in exigido and exigido[self.acao] is None:
+            campo = "responsavel" if self.acao == "atribuir_responsavel" else self.acao
+            raise ValueError(f"A ação '{self.acao}' exige o campo '{campo}'.")
+        if len(set(self.ids)) != len(self.ids):
+            raise ValueError("A seleção tem processos repetidos.")
+        return self
+
+
+class ItemDoLote(BaseModel):
+    id: int
+    ok: bool
+    erro: str | None = None
+
+
+class LoteResultado(BaseModel):
+    """Um item por processo pedido, na ordem do pedido."""
+
+    itens: list[ItemDoLote]
+    concluidos: int
+    falhas: int
 
 
 class AnexoNoProcesso(BaseModel):
