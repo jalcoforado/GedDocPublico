@@ -3,6 +3,7 @@
 import { Inbox } from "lucide-react";
 import Link from "next/link";
 
+import { MarcadoresDaLinha } from "@/components/EtiquetaMarcador";
 import { FavoritoStar } from "@/components/FavoritoStar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -163,6 +164,10 @@ export function TabelaCaixaProcessos({ itens, carregando, selecao }: Props) {
                     {p.nup ?? p.numero_processo ?? "Rascunho"}
                   </Link>
                 </div>
+                {/* Junto ao número, como os ícones do SEI: é a coluna que o
+                    olho percorre para achar o processo, e o assunto já ocupa
+                    duas linhas (assunto e tipo). */}
+                <MarcadoresDaLinha marcadores={p.marcadores} />
               </TD>
               <TD>
                 <div className="line-clamp-1 text-sm">{p.assunto ?? "—"}</div>
