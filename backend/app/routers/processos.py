@@ -25,6 +25,7 @@ from ..schemas.processo import (
     AtribuirResponsavelRequest,
     CaixaProcesso,
     CaixasContagem,
+    PainelUnidade,
     CancelarEncaminhamentoRequest,
     RecusarEncaminhamentoRequest,
     ClassificarSigiloRequest,
@@ -61,7 +62,12 @@ from ..services.pdf_montagem import gerar_processo_completo_pdf
 from ..services.checklist_documentos import calcular_checklist
 from ..services import complementacao_documental as _comp_svc
 from ..services.complementacao_documental import ComplementacaoError
-from ..services.processos import contar_caixas, get_processo_detail, list_processos
+from ..services.processos import (
+    contar_caixas,
+    get_processo_detail,
+    list_processos,
+    painel_unidade,
+)
 from ..schemas.ccd import TemporalidadeOut
 from ..services.temporalidade import calcular_temporalidade
 
@@ -276,6 +282,29 @@ async def caixas_endpoint(
     unidade é a lotação PRINCIPAL, como no `escopo` (ver o comentário lá).
     """
     return await contar_caixas(
+        db,
+        tenant_id=tenant_id,
+        niveis_permitidos=niveis,
+        id_usuario_contexto=usuario.id,
+        id_unidade_contexto=usuario.id_unidade_trabalho,
+    )
+
+
+@router.get(
+    "/painel",
+    response_model=PainelUnidade,
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
+)
+async def painel_endpoint(
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
+    usuario: Usuario = Depends(get_current_user),
+) -> PainelUnidade:
+    """Painel de controle da tela inicial: as caixas, quem está com o quê e
+    os prazos da unidade de quem consulta. Mesmo gate e recorte de
+    `/caixas`."""
+    return await painel_unidade(
         db,
         tenant_id=tenant_id,
         niveis_permitidos=niveis,

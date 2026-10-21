@@ -203,6 +203,38 @@ class CaixasContagem(BaseModel):
     recusados: int = 0
 
 
+class PrazosDaUnidade(BaseModel):
+    """Processos na mesa da unidade (a caixa Análise), pelo prazo que vale para
+    cada um (`prazos.prazo_da_caixa`)."""
+
+    vencidos: int = 0
+    vencendo: int = 0
+    no_prazo: int = 0
+    sem_prazo: int = 0
+
+
+class AguardandoRetorno(BaseModel):
+    """O que a unidade enviou e o destino ainda não recebeu (a caixa Saída)."""
+
+    total: int = 0
+    atrasados: int = 0
+
+
+class PainelUnidade(BaseModel):
+    """Os números do painel de controle de quem consulta, numa chamada só.
+
+    Tudo é recortado como as caixas: unidade de lotação principal, sigilo de
+    quem consulta, sem rascunho. Cada número tem a caixa (ou a caixa + um
+    recorte) que o lista, para o painel levar a ela com um clique.
+    """
+
+    caixas: CaixasContagem
+    atribuidos_a_mim: int = 0
+    sem_responsavel: int = 0
+    prazos: PrazosDaUnidade
+    aguardando_retorno: AguardandoRetorno
+
+
 class CotaAnexacaoOut(BaseModel):
     """F6 — orçamento de anexação do processo, mostrado ANTES de tentar
     anexar (barra de progresso), não só quando o upload já falhou."""

@@ -535,6 +535,15 @@ export type CaixaProcesso =
 /** Quantos processos em cada caixa — espelha `CaixasContagem` do backend. */
 export type CaixasContagem = Record<CaixaProcesso, number>;
 
+/** Painel de controle da tela inicial — espelha `PainelUnidade`. */
+export interface PainelUnidade {
+  caixas: CaixasContagem;
+  atribuidos_a_mim: number;
+  sem_responsavel: number;
+  prazos: { vencidos: number; vencendo: number; no_prazo: number; sem_prazo: number };
+  aguardando_retorno: { total: number; atrasados: number };
+}
+
 export interface ProcessoListFilters {
   page?: number;
   page_size?: number;
@@ -4798,6 +4807,8 @@ export const api = {
       ),
     /** Contadores das caixas de quem consulta (mesmo gate e sigilo da lista). */
     caixas: () => request<CaixasContagem>("/processos/caixas"),
+    /** Números do painel de controle (tela inicial), no recorte das caixas. */
+    painel: () => request<PainelUnidade>("/processos/painel"),
     get: (id: number) => request<ProcessoDetail>(`/processos/${id}`),
     create: (data: ProcessoCreateInput) =>
       request<ProcessoDetail>("/processos", {
