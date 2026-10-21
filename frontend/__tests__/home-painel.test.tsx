@@ -306,6 +306,73 @@ describe("painel de controle — mais perto do SEI", () => {
       expect(screen.getByTestId("atualizado-ha")).toHaveTextContent("Atualizado agora"));
   });
 
+  it("painel em erro e notificações em dia não dizem “Atualizado agora”", async () => {
+    painelMock.mockRejectedValue(new Error("fora do ar"));
+    await abrir();
+    await screen.findByRole("alert");
+    await waitFor(() => expect(valorDo("Notificações")).toBe("4"));
+    expect(screen.queryByTestId("atualizado-ha")).toBeNull();
+    expect(screen.queryByText(/Atualizado agora/)).toBeNull();
+  });
+
+  it("a renovação do painel que falha esconde o rótulo, mesmo com as notificações renovadas", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await abrir();
+    await waitFor(() => expect(valorDo("Na unidade")).toBe("12"));
+    expect(screen.getByTestId("atualizado-ha")).toHaveTextContent("Atualizado agora");
+
+    painelMock.mockRejectedValue(new Error("fora do ar"));
+    await act(async () => {
+      vi.advanceTimersByTime(130_000);
+    });
+    await screen.findByRole("alert");
+    expect(notifMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    // Os quadros ainda mostram o número velho; o rótulo não pode avalizá-lo.
+    expect(valorDo("Na unidade")).toBe("12");
+    expect(screen.queryByTestId("atualizado-ha")).toBeNull();
+  });
+
+  it("quem não opera processos vê o horário das notificações", async () => {
+    estado.perms = [];
+    await abrir();
+    await waitFor(() => expect(valorDo("Notificações")).toBe("4"));
+    expect(screen.getByTestId("atualizado-ha")).toHaveTextContent("Atualizado agora");
+  });
+
+  it("reordenar pelo teclado não perde o foco e anuncia a nova posição", async () => {
+    await abrir();
+    await waitFor(() => expect(valorDo("Na unidade")).toBe("12"));
+    fireEvent.click(screen.getByRole("button", { name: "Configurar" }));
+    const dialogo = within(screen.getByRole("dialog", { name: "Configurar quadros" }));
+
+    // Descer: o <li> do próprio quadro muda de lugar no DOM.
+    const descer = dialogo.getByRole("button", { name: "Descer Na unidade" });
+    descer.focus();
+    fireEvent.click(descer);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(dialogo.getByRole("button", { name: "Descer Na unidade" })));
+    expect(screen.getByTestId("anuncio-posicao")).toHaveTextContent(
+      "Na unidade na posição 2 de 8");
+
+    // Subir até o topo: a seta fica inativa e o foco vai para a oposta.
+    const subir = dialogo.getByRole("button", { name: "Subir Na unidade" });
+    subir.focus();
+    fireEvent.click(subir);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(dialogo.getByRole("button", { name: "Descer Na unidade" })));
+    expect(dialogo.getByRole("button", { name: "Subir Na unidade" })).toBeDisabled();
+    expect(screen.getByTestId("anuncio-posicao")).toHaveTextContent(
+      "Na unidade na posição 1 de 8");
+
+    // Descer até o fim: o foco vai para "Subir".
+    const ultimo = dialogo.getByRole("button", { name: "Descer Para assinar" });
+    ultimo.focus();
+    fireEvent.click(ultimo);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(dialogo.getByRole("button", { name: "Subir Para assinar" })));
+    expect(dialogo.getByRole("button", { name: "Descer Para assinar" })).toBeDisabled();
+  });
+
   it("primeiro uso: unidade sem processo nenhum convida a abrir o primeiro", async () => {
     estado.perms = ["processo", "processo:inserir"];
     painel = {

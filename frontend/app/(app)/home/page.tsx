@@ -19,7 +19,7 @@ import {
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -269,10 +269,19 @@ export default function HomePage() {
     const t = window.setInterval(() => setAgora(Date.now()), 30_000);
     return () => window.clearInterval(t);
   }, []);
-  const atualizadoEm = Math.max(
-    operaProcessos ? painelQ.dataUpdatedAt : 0,
-    notifQ.dataUpdatedAt,
-  );
+  // O rótulo existe para dizer se os NÚMEROS são frescos, então vale o mais
+  // velho do que está na tela, nunca o mais novo: com o painel falhando e as
+  // notificações em dia, o maior dos dois diria "agora" sobre quadros de
+  // horas atrás, ao lado do aviso de erro. Com o painel em erro o rótulo some
+  // — o aviso já diz o que há para dizer. Sem o painel (quem não opera
+  // processos) só as notificações estão na tela, e elas mandam.
+  const atualizadoEm = (() => {
+    if (!operaProcessos) return notifQ.isError ? 0 : notifQ.dataUpdatedAt;
+    if (painelQ.isError || painelQ.dataUpdatedAt === 0) return 0;
+    return notifQ.dataUpdatedAt > 0
+      ? Math.min(painelQ.dataUpdatedAt, notifQ.dataUpdatedAt)
+      : painelQ.dataUpdatedAt;
+  })();
 
   const carregando = painelQ.isFetching || notifQ.isFetching;
   function atualizar() {
@@ -480,6 +489,19 @@ function ConfigurarQuadros({
 }) {
   const [rascunho, setRascunho] = useState<Preferencia>(atual);
   const ocultos = new Set(rascunho.ocultos);
+  // Foco pelo teclado ao reordenar. Sem isto ele se perdia de dois jeitos: o
+  // React reposiciona o `<li>` movido (e nó do DOM que muda de lugar perde o
+  // foco), e a seta que chega ao topo ou ao fim vira `disabled` com o foco
+  // dentro — que cai no body, e o próximo Tab recomeça do início do diálogo.
+  const botoes = useRef(new Map<string, HTMLButtonElement | null>());
+  const [focoPendente, setFocoPendente] = useState<string | null>(null);
+  const [anuncio, setAnuncio] = useState("");
+
+  useEffect(() => {
+    if (!focoPendente) return;
+    botoes.current.get(focoPendente)?.focus();
+    setFocoPendente(null);
+  }, [focoPendente]);
 
   function mover(i: number, delta: -1 | 1) {
     const ordem = [...rascunho.ordem];
@@ -487,6 +509,13 @@ function ConfigurarQuadros({
     if (j < 0 || j >= ordem.length) return;
     [ordem[i], ordem[j]] = [ordem[j], ordem[i]];
     setRascunho({ ...rascunho, ordem });
+    const id = ordem[j];
+    // Chegou à ponta: a mesma seta fica inativa, então o foco vai para a
+    // oposta do MESMO quadro, que é o que o usuário estava mexendo.
+    const naPonta = delta === -1 ? j === 0 : j === ordem.length - 1;
+    const direcao = naPonta ? (delta === -1 ? "descer" : "subir") : delta === -1 ? "subir" : "descer";
+    setFocoPendente(`${id}:${direcao}`);
+    setAnuncio(`${POR_ID.get(id)?.rotulo ?? ""} na posição ${j + 1} de ${ordem.length}`);
   }
 
   function alternar(id: IdQuadro, visivel: boolean) {
@@ -532,6 +561,9 @@ function ConfigurarQuadros({
               <Button
                 variant="ghost"
                 size="sm"
+                ref={(el) => {
+                  botoes.current.set(`${id}:subir`, el);
+                }}
                 aria-label={`Subir ${q.rotulo}`}
                 disabled={i === 0}
                 onClick={() => mover(i, -1)}
@@ -541,6 +573,9 @@ function ConfigurarQuadros({
               <Button
                 variant="ghost"
                 size="sm"
+                ref={(el) => {
+                  botoes.current.set(`${id}:descer`, el);
+                }}
                 aria-label={`Descer ${q.rotulo}`}
                 disabled={i === rascunho.ordem.length - 1}
                 onClick={() => mover(i, 1)}
@@ -551,6 +586,10 @@ function ConfigurarQuadros({
           );
         })}
       </ul>
+      {/* Quem usa leitor de tela não vê a lista mudar: ouve a nova posição. */}
+      <p aria-live="polite" className="sr-only" data-testid="anuncio-posicao">
+        {anuncio}
+      </p>
     </Dialog>
   );
 }
