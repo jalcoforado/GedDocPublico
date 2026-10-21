@@ -2,20 +2,28 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowDown,
   ArrowDownToLine,
+  ArrowUp,
   ArrowUpFromLine,
   Bell,
+  FilePlus2,
   FileSearch,
   type LucideIcon,
   PenLine,
   RefreshCw,
+  Settings2,
   Undo2,
   UserCheck,
   UserX,
+  Workflow,
 } from "lucide-react";
 import Link from "next/link";
+import { useEffect, useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog } from "@/components/ui/dialog";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { api, notificacoesApi, type PainelUnidade } from "@/lib/api";
@@ -35,30 +43,260 @@ import { cn } from "@/lib/utils";
  * `processo`, ou sem o módulo contratado) vê só a saudação e as
  * notificações.
  */
+
+/** O painel fica aberto o dia todo na mesa do servidor; sem isto, os números
+ * da manhã continuariam na tela à tarde, sem ninguém perceber. Dois minutos é
+ * o bastante para "chegou processo" aparecer sem martelar o backend. */
+const INTERVALO_ATUALIZACAO = 2 * 60_000;
+
+interface Dados {
+  painel: PainelUnidade | undefined;
+  naoLidas: number | undefined;
+}
+
+type IdQuadro =
+  | "analise"
+  | "entrada"
+  | "saida"
+  | "recusados"
+  | "atribuidos"
+  | "sem_responsavel"
+  | "assinar"
+  | "notificacoes";
+
+interface DefQuadro {
+  id: IdQuadro;
+  rotulo: string;
+  href: string;
+  /** Dica curta, visível sob o número. */
+  dica: string;
+  /** O que o número conta, por extenso: no `title` (mouse) e no
+   * `aria-describedby` (leitor de tela). Escrito a partir do que
+   * `painel_unidade`/`_predicado_caixa` contam no backend — uma explicação
+   * que prometesse mais que a consulta faria o servidor desconfiar do número. */
+  explicacao: string;
+  icon: LucideIcon;
+  intent?: "default" | "info" | "warning";
+  /** Fica vermelho quando há algo: recusados, notificações. */
+  alerta?: boolean;
+  /** Só quem não opera processos ainda vê este quadro. */
+  sempreDisponivel?: boolean;
+  valor: (d: Dados) => number | undefined;
+  /** Base da barra de proporção, como a barra fina do SEI. Só nos quadros
+   * que são PARTE de "Na unidade": nos outros não há total honesto para
+   * dividir, e uma barra com base inventada mentiria sobre a proporção. */
+  base?: (d: Dados) => number | undefined;
+}
+
+const QUADROS: DefQuadro[] = [
+  {
+    id: "analise",
+    rotulo: "Na unidade",
+    href: hrefDaCaixa("analise"),
+    dica: "processos na mesa da sua unidade",
+    explicacao:
+      "Processos que estão com a sua unidade e não foram enviados a outra nem arquivados. Rascunhos não entram.",
+    icon: FileSearch,
+    valor: (d) => d.painel?.caixas.analise,
+  },
+  {
+    id: "entrada",
+    rotulo: "A receber",
+    href: hrefDaCaixa("entrada"),
+    dica: "enviados para a sua unidade",
+    explicacao:
+      "Processos que outra unidade enviou para a sua e que ninguém da sua unidade recebeu ainda.",
+    icon: ArrowDownToLine,
+    intent: "info",
+    valor: (d) => d.painel?.caixas.entrada,
+  },
+  {
+    id: "saida",
+    rotulo: "Enviados",
+    href: hrefDaCaixa("saida"),
+    dica: "aguardando o destino receber",
+    explicacao:
+      "Processos que a sua unidade enviou e que a unidade de destino ainda não recebeu.",
+    icon: ArrowUpFromLine,
+    valor: (d) => d.painel?.caixas.saida,
+  },
+  {
+    id: "recusados",
+    rotulo: "Recusados",
+    href: hrefDaCaixa("recusados"),
+    dica: "devolvidos pelo destino",
+    explicacao:
+      "Processos cujo último envio, feito pela sua unidade, foi recusado pelo destino. Saem daqui quando forem reenviados ou arquivados.",
+    icon: Undo2,
+    alerta: true,
+    valor: (d) => d.painel?.caixas.recusados,
+  },
+  {
+    id: "atribuidos",
+    rotulo: "Atribuídos a mim",
+    href: `${ROTA_PROCESSOS}?caixa=analise&escopo=meus&ativos=0`,
+    dica: "na unidade, com você como responsável",
+    explicacao: "Dos processos contados em “Na unidade”, os que têm você como responsável.",
+    icon: UserCheck,
+    valor: (d) => d.painel?.atribuidos_a_mim,
+    base: (d) => d.painel?.caixas.analise,
+  },
+  {
+    id: "sem_responsavel",
+    rotulo: "Sem responsável",
+    href: hrefDaCaixa("analise"),
+    dica: "na unidade, sem ninguém designado",
+    explicacao: "Dos processos contados em “Na unidade”, os que não têm nenhum responsável designado.",
+    icon: UserX,
+    intent: "warning",
+    valor: (d) => d.painel?.sem_responsavel,
+    base: (d) => d.painel?.caixas.analise,
+  },
+  {
+    id: "assinar",
+    rotulo: "Para assinar",
+    href: "/para-assinar",
+    dica: "documentos aguardando sua assinatura",
+    explicacao:
+      "Processos com pelo menos um documento que você precisa assinar, numa solicitação de assinatura que não foi cancelada.",
+    icon: PenLine,
+    valor: (d) => d.painel?.caixas.aguardando_assinatura,
+  },
+  {
+    id: "notificacoes",
+    rotulo: "Notificações",
+    href: "/perfil",
+    dica: "não lidas",
+    explicacao: "Notificações enviadas a você que ainda não foram marcadas como lidas.",
+    icon: Bell,
+    alerta: true,
+    sempreDisponivel: true,
+    valor: (d) => d.naoLidas,
+  },
+];
+
+const IDS_PADRAO: IdQuadro[] = QUADROS.map((q) => q.id);
+const POR_ID = new Map(QUADROS.map((q) => [q.id, q]));
+
+/** O que o usuário escolheu no "Configurar". Guarda a ORDEM de todos e os
+ * OCULTOS à parte, em vez de só a lista dos visíveis: assim um quadro que
+ * nascer numa versão futura aparece para todo mundo, no fim, em vez de nascer
+ * escondido para quem já tinha configurado. */
+interface Preferencia {
+  ordem: IdQuadro[];
+  ocultos: IdQuadro[];
+}
+
+const PADRAO: Preferencia = { ordem: IDS_PADRAO, ocultos: [] };
+
+const chavePreferencia = (idUsuario: number) => `aprimora:painel-quadros:${idUsuario}`;
+
+/** Lê a preferência sem confiar nela: o armazenamento pode faltar (aba
+ * anônima, site bloqueado), vir vazio ou trazer id de quadro que já não
+ * existe. Qualquer coisa fora do esperado volta ao padrão, e a tela abre. */
+function lerPreferencia(idUsuario: number | undefined): Preferencia {
+  if (idUsuario == null) return PADRAO;
+  try {
+    const bruto = window.localStorage.getItem(chavePreferencia(idUsuario));
+    if (!bruto) return PADRAO;
+    const lido = JSON.parse(bruto) as Partial<Record<keyof Preferencia, unknown>>;
+    const conhecidos = (v: unknown): IdQuadro[] =>
+      Array.isArray(v) ? v.filter((id): id is IdQuadro => POR_ID.has(id as IdQuadro)) : [];
+    const ordem = Array.from(new Set(conhecidos(lido.ordem)));
+    for (const id of IDS_PADRAO) if (!ordem.includes(id)) ordem.push(id);
+    return { ordem, ocultos: conhecidos(lido.ocultos) };
+  } catch {
+    return PADRAO;
+  }
+}
+
+function gravarPreferencia(idUsuario: number | undefined, pref: Preferencia) {
+  if (idUsuario == null) return;
+  try {
+    window.localStorage.setItem(chavePreferencia(idUsuario), JSON.stringify(pref));
+  } catch {
+    // Sem armazenamento a escolha vale só até recarregar — melhor que erro.
+  }
+}
+
+/** "agora", "há 1 min", "há 2 h". Relativo, como no SEI: o servidor quer
+ * saber se o número é fresco, não a hora exata. */
+function haQuanto(desde: number, agora: number): string {
+  const min = Math.floor((agora - desde) / 60_000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  return `há ${Math.floor(min / 60)} h`;
+}
+
 export default function HomePage() {
   const { user, perms, can } = useAuth();
   const primeiroNome = (user?.nome ?? "").split(/\s+/)[0] || "—";
   const operaProcessos = can("processo");
+  // A unidade cujo número aparece é a de lotação PRINCIPAL: é ela que o
+  // `GET /processos/painel` usa (`id_unidade_trabalho`), não a lotação ativa
+  // de um "alterar setor". Nomear a ativa poria o nome de uma unidade sobre
+  // os números de outra.
+  const nomeUnidade = user?.lotacoes?.find((l) => l.id === user.id_unidade_trabalho)?.nome;
 
   const painelQ = useQuery({
     queryKey: ["home-painel"],
     queryFn: () => api.processos.painel(),
     enabled: operaProcessos,
     staleTime: 60_000,
+    refetchInterval: INTERVALO_ATUALIZACAO,
   });
   const notifQ = useQuery({
     queryKey: ["home-notif-unread"],
     queryFn: () => notificacoesApi.listarMinhas({ apenas_nao_lidas: true, limit: 1 }),
     staleTime: 30_000,
+    refetchInterval: INTERVALO_ATUALIZACAO,
   });
 
   const painel = painelQ.data;
-  const naoLidas = notifQ.data?.nao_lidas;
+  const dados: Dados = { painel, naoLidas: notifQ.data?.nao_lidas };
 
+  const [pref, setPref] = useState<Preferencia>(PADRAO);
+  const [configurando, setConfigurando] = useState(false);
+  // Lida no efeito, não no estado inicial: no SSR não há `window`, e ler lá
+  // daria uma tela no servidor e outra no navegador.
+  useEffect(() => {
+    setPref(lerPreferencia(user?.id));
+  }, [user?.id]);
+
+  // Relógio do "Atualizado há": sem ele o texto congelaria em "agora".
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setAgora(Date.now()), 30_000);
+    return () => window.clearInterval(t);
+  }, []);
+  const atualizadoEm = Math.max(
+    operaProcessos ? painelQ.dataUpdatedAt : 0,
+    notifQ.dataUpdatedAt,
+  );
+
+  const carregando = painelQ.isFetching || notifQ.isFetching;
   function atualizar() {
     void painelQ.refetch();
     void notifQ.refetch();
   }
+
+  const ocultos = new Set(pref.ocultos);
+  const visiveis = pref.ordem
+    .map((id) => POR_ID.get(id))
+    .filter((q): q is DefQuadro => !!q && !ocultos.has(q.id))
+    .filter((q) => operaProcessos || q.sempreDisponivel);
+
+  // "Primeiro uso": nenhuma caixa DA UNIDADE tem processo. As de assinatura
+  // ficam de fora porque são pessoais, não da unidade.
+  const unidadeVazia =
+    !!painel &&
+    painel.caixas.analise +
+      painel.caixas.entrada +
+      painel.caixas.saida +
+      painel.caixas.externos +
+      painel.caixas.arquivados +
+      painel.caixas.recusados ===
+      0;
 
   return (
     <div className="space-y-6">
@@ -74,21 +312,33 @@ export default function HomePage() {
                 super usuário
               </span>
             ) : null}
-            {operaProcessos ? " — os números são da sua unidade." : null}
+            {operaProcessos
+              ? nomeUnidade
+                ? ` — números da unidade ${nomeUnidade}`
+                : " — os números são da sua unidade."
+              : null}
           </p>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={atualizar}
-          disabled={painelQ.isFetching || notifQ.isFetching}
-        >
-          <RefreshCw
-            className={cn("mr-1.5 h-4 w-4", (painelQ.isFetching || notifQ.isFetching) && "animate-spin")}
-            aria-hidden="true"
-          />
-          Atualizar
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {atualizadoEm > 0 && (
+            <span className="text-xs text-foreground-subtle" data-testid="atualizado-ha">
+              Atualizado {haQuanto(atualizadoEm, Math.max(agora, atualizadoEm))}
+            </span>
+          )}
+          {operaProcessos && (
+            <Button variant="secondary" size="sm" onClick={() => setConfigurando(true)}>
+              <Settings2 className="mr-1.5 h-4 w-4" aria-hidden="true" />
+              Configurar
+            </Button>
+          )}
+          <Button variant="secondary" size="sm" onClick={atualizar} disabled={carregando}>
+            <RefreshCw
+              className={cn("mr-1.5 h-4 w-4", carregando && "animate-spin")}
+              aria-hidden="true"
+            />
+            Atualizar
+          </Button>
+        </div>
       </div>
 
       {operaProcessos && painelQ.isError && (
@@ -101,110 +351,207 @@ export default function HomePage() {
       )}
 
       <section aria-label="Quadros de processos" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {operaProcessos && (
-          <>
-            <Quadro
-              href={hrefDaCaixa("analise")}
-              rotulo="Na unidade"
-              valor={painel?.caixas.analise}
-              dica="processos na mesa da sua unidade"
-              icon={FileSearch}
-            />
-            <Quadro
-              href={hrefDaCaixa("entrada")}
-              rotulo="A receber"
-              valor={painel?.caixas.entrada}
-              dica="enviados para a sua unidade"
-              icon={ArrowDownToLine}
-              intent="info"
-            />
-            <Quadro
-              href={hrefDaCaixa("saida")}
-              rotulo="Enviados"
-              valor={painel?.caixas.saida}
-              dica="aguardando o destino receber"
-              icon={ArrowUpFromLine}
-            />
-            <Quadro
-              href={hrefDaCaixa("recusados")}
-              rotulo="Recusados"
-              valor={painel?.caixas.recusados}
-              dica="devolvidos pelo destino"
-              icon={Undo2}
-              alerta
-            />
-            <Quadro
-              href={`${ROTA_PROCESSOS}?caixa=analise&escopo=meus&ativos=0`}
-              rotulo="Atribuídos a mim"
-              valor={painel?.atribuidos_a_mim}
-              dica="na unidade, com você como responsável"
-              icon={UserCheck}
-            />
-            <Quadro
-              href={hrefDaCaixa("analise")}
-              rotulo="Sem responsável"
-              valor={painel?.sem_responsavel}
-              dica="na unidade, sem ninguém designado"
-              icon={UserX}
-              intent="warning"
-            />
-            <Quadro
-              href="/para-assinar"
-              rotulo="Para assinar"
-              valor={painel?.caixas.aguardando_assinatura}
-              dica="documentos aguardando sua assinatura"
-              icon={PenLine}
-            />
-          </>
+        {visiveis.map((q) => (
+          <Quadro key={q.id} def={q} dados={dados} />
+        ))}
+        {visiveis.length === 0 && (
+          <p className="col-span-full text-sm text-foreground-muted">
+            Nenhum quadro escolhido. Use &ldquo;Configurar&rdquo; para escolher o que aparece aqui.
+          </p>
         )}
-        <Quadro
-          href="/perfil"
-          rotulo="Notificações"
-          valor={naoLidas}
-          dica="não lidas"
-          icon={Bell}
-          alerta
-        />
       </section>
 
+      {operaProcessos && unidadeVazia && <PrimeiroUso podeAbrir={can("processo", "inserir")} />}
+
       {operaProcessos && painel && <Tabelas painel={painel} />}
+
+      {configurando && (
+        <ConfigurarQuadros
+          atual={pref}
+          onClose={() => setConfigurando(false)}
+          onSalvar={(nova) => {
+            setPref(nova);
+            gravarPreferencia(user?.id, nova);
+            setConfigurando(false);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function Quadro({
-  href,
-  rotulo,
-  valor,
-  dica,
-  icon,
-  intent = "default",
-  alerta = false,
-}: {
-  href: string;
-  rotulo: string;
-  valor: number | undefined;
-  dica: string;
-  icon: LucideIcon;
-  intent?: "default" | "info" | "warning";
-  /** Fica vermelho quando há algo: recusados, notificações. */
-  alerta?: boolean;
-}) {
+function Quadro({ def, dados }: { def: DefQuadro; dados: Dados }) {
+  const explicacaoId = useId();
+  const valor = def.valor(dados);
+  const base = def.base?.(dados);
   const temAlgo = (valor ?? 0) > 0;
+  const intent = def.intent ?? "default";
   return (
-    <Link
-      href={href}
-      className="rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    <div className="relative">
+      <Link
+        href={def.href}
+        title={def.explicacao}
+        aria-describedby={explicacaoId}
+        className="block h-full rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      >
+        <KpiCard
+          label={def.rotulo}
+          value={valor ?? "—"}
+          hint={
+            <>
+              {def.dica}
+              {valor != null && base != null && base > 0 && (
+                <Proporcao parte={valor} total={base} />
+              )}
+            </>
+          }
+          icon={def.icon}
+          intent={def.alerta && temAlgo ? "danger" : intent}
+          className={cn("h-full", def.alerta && temAlgo && "border-l-4 border-l-danger")}
+        />
+      </Link>
+      <span id={explicacaoId} className="sr-only">
+        {def.explicacao}
+      </span>
+    </div>
+  );
+}
+
+/** A barra fina sob o número, como a do SEI. O visual é decorativo; quem
+ * usa leitor de tela ouve o "x de y" por extenso. */
+function Proporcao({ parte, total }: { parte: number; total: number }) {
+  const pct = Math.min(100, Math.max(0, (parte / total) * 100));
+  return (
+    <span className="mt-2 block" data-testid="proporcao">
+      <span aria-hidden="true" className="block h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+      </span>
+      <span className="sr-only">
+        {parte} de {total} na unidade
+      </span>
+    </span>
+  );
+}
+
+function PrimeiroUso({ podeAbrir }: { podeAbrir: boolean }) {
+  return (
+    <section
+      aria-label="Primeiros passos"
+      className="rounded-card border border-border bg-info-soft px-4 py-3 text-sm text-info-soft-foreground"
     >
-      <KpiCard
-        label={rotulo}
-        value={valor ?? "—"}
-        hint={dica}
-        icon={icon}
-        intent={alerta && temAlgo ? "danger" : intent}
-        className={cn("h-full", alerta && temAlgo && "border-l-4 border-l-danger")}
-      />
-    </Link>
+      <p className="font-medium">Ainda não há nenhum processo na sua unidade.</p>
+      <p className="mt-1">
+        Os quadros acima se enchem conforme os processos chegam ou são abertos aqui.{" "}
+        {podeAbrir
+          ? "Comece abrindo o primeiro, ou veja antes o caminho que um processo percorre."
+          : "Enquanto isso, veja o caminho que um processo percorre."}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {podeAbrir && (
+          <Button asChild size="sm">
+            <Link href="/m/protocolo/processos/novo">
+              <FilePlus2 className="mr-1.5 h-4 w-4" aria-hidden="true" />
+              Abrir o primeiro processo
+            </Link>
+          </Button>
+        )}
+        <Button asChild size="sm" variant="secondary">
+          <Link href="/m/protocolo/fluxo">
+            <Workflow className="mr-1.5 h-4 w-4" aria-hidden="true" />
+            Ver o caminho do processo
+          </Link>
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/** "Configurar", como o botão do Painel de Controle do SEI: quais quadros
+ * aparecem e em que ordem. Edita um rascunho; só "Salvar" muda a tela, para
+ * que mexer e desistir não deixe nada pela metade. */
+function ConfigurarQuadros({
+  atual,
+  onClose,
+  onSalvar,
+}: {
+  atual: Preferencia;
+  onClose: () => void;
+  onSalvar: (p: Preferencia) => void;
+}) {
+  const [rascunho, setRascunho] = useState<Preferencia>(atual);
+  const ocultos = new Set(rascunho.ocultos);
+
+  function mover(i: number, delta: -1 | 1) {
+    const ordem = [...rascunho.ordem];
+    const j = i + delta;
+    if (j < 0 || j >= ordem.length) return;
+    [ordem[i], ordem[j]] = [ordem[j], ordem[i]];
+    setRascunho({ ...rascunho, ordem });
+  }
+
+  function alternar(id: IdQuadro, visivel: boolean) {
+    const novos = rascunho.ocultos.filter((o) => o !== id);
+    setRascunho({ ...rascunho, ocultos: visivel ? novos : [...novos, id] });
+  }
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title="Configurar quadros"
+      description="Escolha quais quadros aparecem no painel e em que ordem."
+      footer={
+        <>
+          <Button variant="ghost" size="sm" className="mr-auto" onClick={() => setRascunho(PADRAO)}>
+            Restaurar padrão
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button size="sm" onClick={() => onSalvar(rascunho)}>
+            Salvar
+          </Button>
+        </>
+      }
+    >
+      <ul className="divide-y divide-border" aria-label="Quadros do painel">
+        {rascunho.ordem.map((id, i) => {
+          const q = POR_ID.get(id);
+          if (!q) return null;
+          const inputId = `quadro-${id}`;
+          return (
+            <li key={id} className="flex items-center gap-3 py-2">
+              <Checkbox
+                id={inputId}
+                checked={!ocultos.has(id)}
+                onChange={(e) => alternar(id, e.target.checked)}
+              />
+              <label htmlFor={inputId} className="flex-1 text-sm text-foreground">
+                {q.rotulo}
+              </label>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`Subir ${q.rotulo}`}
+                disabled={i === 0}
+                onClick={() => mover(i, -1)}
+              >
+                <ArrowUp className="h-4 w-4" aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`Descer ${q.rotulo}`}
+                disabled={i === rascunho.ordem.length - 1}
+                onClick={() => mover(i, 1)}
+              >
+                <ArrowDown className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+    </Dialog>
   );
 }
 

@@ -4,19 +4,31 @@
  * unidade e leva à lista que o conta.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PainelUnidade } from "@/lib/api";
+import type { LotacaoOut, PainelUnidade } from "@/lib/api";
 
-const estado: { perms: string[] } = { perms: [] };
+/** `perms` aceita "processo" (ler) e "processo:inserir" (abrir). */
+const estado: { perms: string[]; lotacoes: LotacaoOut[]; unidadeContexto: number | null } = {
+  perms: [],
+  lotacoes: [],
+  unidadeContexto: null,
+};
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({
-    user: { nome: "Maria Souza", id_unidade_trabalho: 3 },
+    user: {
+      id: 77,
+      nome: "Maria Souza",
+      id_unidade_trabalho: 3,
+      unidade_contexto_id: estado.unidadeContexto,
+      lotacoes: estado.lotacoes,
+    },
     perms: { is_super_usuario: false },
     loading: false,
-    can: (codigo: string) => estado.perms.includes(codigo),
+    can: (codigo: string, action?: string) =>
+      estado.perms.includes(action ? `${codigo}:${action}` : codigo),
   }),
 }));
 
@@ -66,11 +78,25 @@ vi.setConfig({ testTimeout: 20_000 });
 
 beforeEach(() => {
   estado.perms = ["processo"];
+  estado.lotacoes = [];
+  estado.unidadeContexto = null;
   painel = painelBase();
   painelMock.mockClear();
   notifMock.mockClear();
+  window.localStorage.clear();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+const CHAVE = "aprimora:painel-quadros:77";
+/** Rótulos dos quadros, na ordem em que aparecem. */
+const rotulosVisiveis = () =>
+  within(screen.getByRole("region", { name: "Quadros de processos" }))
+    .getAllByRole("link")
+    .map((a) => a.querySelector("span")?.textContent);
 
 describe("painel de controle", () => {
   it("cada quadro mostra o número da unidade e leva à lista que o conta", async () => {
@@ -145,5 +171,202 @@ describe("painel de controle", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Não foi possível carregar os números da unidade.");
     expect(screen.getByRole("button", { name: "Tentar de novo" })).toBeInTheDocument();
+  });
+});
+
+describe("painel de controle — mais perto do SEI", () => {
+  it("barra de proporção só nas partes de “Na unidade”, com o “x de y” por extenso", async () => {
+    await abrir();
+    await waitFor(() => expect(valorDo("Na unidade")).toBe("12"));
+
+    expect(within(quadro("Atribuídos a mim")).getByText("4 de 12 na unidade")).toBeInTheDocument();
+    expect(within(quadro("Sem responsável")).getByText("6 de 12 na unidade")).toBeInTheDocument();
+    const barras = screen.getAllByTestId("proporcao");
+    expect(barras).toHaveLength(2);
+    // A parte visual é decorativa; o texto é que fala.
+    expect(barras[0].querySelector("[aria-hidden='true']")).not.toBeNull();
+    expect(within(quadro("A receber")).queryByTestId("proporcao")).toBeNull();
+  });
+
+  it("sem processo na unidade não há base, e a barra não aparece", async () => {
+    painel = { ...painelBase(), caixas: { ...painelBase().caixas, analise: 0 } };
+    await abrir();
+    await waitFor(() => expect(valorDo("Na unidade")).toBe("0"));
+    expect(screen.queryByTestId("proporcao")).toBeNull();
+  });
+
+  it("cada quadro explica o que conta, no title e para o leitor de tela", async () => {
+    await abrir();
+    await waitFor(() => expect(valorDo("Na unidade")).toBe("12"));
+    const link = quadro("A receber");
+    expect(link.getAttribute("title")).toMatch(/ninguém da sua unidade recebeu/);
+    expect(link).toHaveAccessibleDescription(link.getAttribute("title") as string);
+  });
+
+  it("configurar esconde e reordena quadros, e guarda a escolha por usuário", async () => {
+    await abrir();
+    await waitFor(() => expect(valorDo("Na unidade")).toBe("12"));
+    expect(rotulosVisiveis()[0]).toBe("Na unidade");
+
+    fireEvent.click(screen.getByRole("button", { name: "Configurar" }));
+    const dialogo = within(screen.getByRole("dialog", { name: "Configurar quadros" }));
+    fireEvent.click(dialogo.getByLabelText("Enviados"));
+    fireEvent.click(dialogo.getByRole("button", { name: "Subir A receber" }));
+    fireEvent.click(dialogo.getByRole("button", { name: "Salvar" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByText("Enviados")).toBeNull();
+    expect(rotulosVisiveis().slice(0, 2)).toEqual(["A receber", "Na unidade"]);
+
+    const salvo = JSON.parse(window.localStorage.getItem(CHAVE) as string);
+    expect(salvo.ocultos).toEqual(["saida"]);
+    expect(salvo.ordem.slice(0, 2)).toEqual(["entrada", "analise"]);
+
+    // Reabrir a tela lê a escolha de volta.
+    cleanup();
+    await abrir();
+    await waitFor(() => expect(valorDo("Na unidade")).toBe("12"));
+    expect(screen.queryByText("Enviados")).toBeNull();
+    expect(rotulosVisiveis()[0]).toBe("A receber");
+  });
+
+  it("restaurar padrão volta todos os quadros na ordem original", async () => {
+    window.localStorage.setItem(CHAVE, JSON.stringify({ ordem: ["notificacoes"], ocultos: ["analise"] }));
+    await abrir();
+    await waitFor(() => expect(rotulosVisiveis()[0]).toBe("Notificações"));
+    expect(screen.queryByText("Na unidade")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Configurar" }));
+    const dialogo = within(screen.getByRole("dialog"));
+    fireEvent.click(dialogo.getByRole("button", { name: "Restaurar padrão" }));
+    fireEvent.click(dialogo.getByRole("button", { name: "Salvar" }));
+
+    expect(rotulosVisiveis()).toEqual([
+      "Na unidade", "A receber", "Enviados", "Recusados",
+      "Atribuídos a mim", "Sem responsável", "Para assinar", "Notificações",
+    ]);
+  });
+
+  it("id de quadro desconhecido é ignorado e quadro novo entra no fim", async () => {
+    window.localStorage.setItem(
+      CHAVE,
+      JSON.stringify({ ordem: ["quadro_que_saiu", "recusados", "analise"], ocultos: ["outro_que_saiu"] }),
+    );
+    await abrir();
+    await waitFor(() => expect(valorDo("Na unidade")).toBe("12"));
+    const rotulos = rotulosVisiveis();
+    expect(rotulos.slice(0, 2)).toEqual(["Recusados", "Na unidade"]);
+    expect(rotulos).toHaveLength(8);
+  });
+
+  it("armazenamento quebrado ou lixo não derrubam a tela", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("bloqueado");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("bloqueado");
+    });
+    await abrir();
+    await waitFor(() => expect(valorDo("Na unidade")).toBe("12"));
+    expect(rotulosVisiveis()).toHaveLength(8);
+
+    // Salvar sem armazenamento ainda muda a tela, só não sobrevive ao recarregar.
+    fireEvent.click(screen.getByRole("button", { name: "Configurar" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByLabelText("Recusados"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Salvar" }));
+    expect(screen.queryByText("Recusados")).toBeNull();
+
+    vi.restoreAllMocks();
+    cleanup();
+    window.localStorage.setItem(CHAVE, "{isto não é json");
+    await abrir();
+    await waitFor(() => expect(valorDo("Na unidade")).toBe("12"));
+    expect(rotulosVisiveis()).toHaveLength(8);
+  });
+
+  it("diz há quanto tempo atualizou, e se atualiza sozinho", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await abrir();
+    await waitFor(() => expect(valorDo("Na unidade")).toBe("12"));
+    expect(screen.getByTestId("atualizado-ha")).toHaveTextContent("Atualizado agora");
+
+    await act(async () => {
+      vi.advanceTimersByTime(90_000);
+    });
+    expect(screen.getByTestId("atualizado-ha")).toHaveTextContent("Atualizado há 1 min");
+    expect(painelMock).toHaveBeenCalledTimes(1);
+
+    // Aos 2 minutos o painel e as notificações são pedidos de novo.
+    await act(async () => {
+      vi.advanceTimersByTime(40_000);
+    });
+    await waitFor(() => expect(painelMock).toHaveBeenCalledTimes(2));
+    expect(notifMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    await waitFor(() =>
+      expect(screen.getByTestId("atualizado-ha")).toHaveTextContent("Atualizado agora"));
+  });
+
+  it("primeiro uso: unidade sem processo nenhum convida a abrir o primeiro", async () => {
+    estado.perms = ["processo", "processo:inserir"];
+    painel = {
+      ...painelBase(),
+      caixas: {
+        entrada: 0, saida: 0, analise: 0, externos: 0, aguardando_assinatura: 2,
+        enviado_para_assinatura: 0, arquivados: 0, recusados: 0,
+      },
+    };
+    await abrir();
+    const aviso = within(await screen.findByRole("region", { name: "Primeiros passos" }));
+    expect(aviso.getByRole("link", { name: /Abrir o primeiro processo/ })).toHaveAttribute(
+      "href", "/m/protocolo/processos/novo");
+    expect(aviso.getByRole("link", { name: /Ver o caminho do processo/ })).toHaveAttribute(
+      "href", "/m/protocolo/fluxo");
+  });
+
+  it("primeiro uso: quem não pode inserir processo não recebe o link de abrir", async () => {
+    painel = {
+      ...painelBase(),
+      caixas: {
+        entrada: 0, saida: 0, analise: 0, externos: 0, aguardando_assinatura: 0,
+        enviado_para_assinatura: 0, arquivados: 0, recusados: 0,
+      },
+    };
+    await abrir();
+    const aviso = within(await screen.findByRole("region", { name: "Primeiros passos" }));
+    expect(aviso.queryByRole("link", { name: /Abrir o primeiro processo/ })).toBeNull();
+    expect(aviso.getByRole("link", { name: /Ver o caminho do processo/ })).toBeInTheDocument();
+  });
+
+  it("primeiro uso não aparece quando a unidade tem algum processo, nem arquivado", async () => {
+    estado.perms = ["processo", "processo:inserir"];
+    painel = {
+      ...painelBase(),
+      caixas: {
+        entrada: 0, saida: 0, analise: 0, externos: 0, aguardando_assinatura: 0,
+        enviado_para_assinatura: 0, arquivados: 1, recusados: 0,
+      },
+    };
+    await abrir();
+    await screen.findByRole("region", { name: "Controle de prazos" });
+    expect(screen.queryByRole("region", { name: "Primeiros passos" })).toBeNull();
+  });
+
+  it("o subtítulo nomeia a unidade de lotação principal, que é a dos números", async () => {
+    estado.lotacoes = [
+      { id: 3, nome: "Secretaria de Administração", principal: true },
+      { id: 9, nome: "Secretaria de Saúde", principal: false },
+    ];
+    // Mesmo com outra lotação ativa: o painel conta pela principal.
+    estado.unidadeContexto = 9;
+    await abrir();
+    expect(
+      await screen.findByText(/números da unidade Secretaria de Administração/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Secretaria de Saúde/)).toBeNull();
+  });
+
+  it("sem o nome da unidade, mantém o texto genérico", async () => {
+    await abrir();
+    expect(await screen.findByText(/os números são da sua unidade/)).toBeInTheDocument();
   });
 });
