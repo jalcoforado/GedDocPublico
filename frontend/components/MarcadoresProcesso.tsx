@@ -58,9 +58,10 @@ export function MarcadoresProcesso({
   return (
     <div className="flex flex-wrap items-center gap-1">
       {/* Mesma etiqueta das listagens: a cor do marcador só na bolinha, para
-          o nome não depender do contraste de uma cor escolhida no cadastro. */}
+          o nome não depender do contraste de uma cor escolhida no cadastro.
+          Aqui sem corte: o detalhe é o único lugar onde o nome aparece inteiro. */}
       {processo.marcadores.map((mk) => (
-        <EtiquetaMarcador key={mk.id} marcador={mk} />
+        <EtiquetaMarcador key={mk.id} marcador={mk} truncar={false} />
       ))}
       {podeEditar && (
         <>

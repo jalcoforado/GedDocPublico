@@ -10,19 +10,28 @@ import { cn } from "@/lib/utils";
  * escuro. Restringir a cor à bolinha mantém o reconhecimento de relance — que é
  * o que o ícone colorido do SEI dá — e deixa o contraste do nome por conta dos
  * tokens, que já são calibrados para os dois temas.
+ *
+ * `truncar` corta o nome em 10rem com reticências, e só serve à listagem, onde
+ * a linha não pode crescer. No detalhe do processo ele vai `false`: é para lá
+ * que a lista manda quem quer ler o nome inteiro, e o `title` não socorre —
+ * não aparece no toque (celular, tablet) nem para quem navega pelo teclado,
+ * porque o span não recebe foco.
  */
 export function EtiquetaMarcador({
   marcador,
   className,
+  truncar = true,
 }: {
   marcador: MarcadorMini;
   className?: string;
+  truncar?: boolean;
 }) {
   return (
     <span
-      title={marcador.nome}
+      title={truncar ? marcador.nome : undefined}
       className={cn(
-        "inline-flex max-w-[10rem] items-center gap-1 rounded-badge border border-border bg-muted px-1.5 py-0.5 font-sans text-[11px] font-medium normal-case leading-none text-foreground",
+        "inline-flex items-center gap-1 rounded-badge border border-border bg-muted px-1.5 py-0.5 font-sans text-[11px] font-medium normal-case leading-none text-foreground",
+        truncar && "max-w-[10rem]",
         className,
       )}
     >
@@ -31,7 +40,7 @@ export function EtiquetaMarcador({
         className="h-2 w-2 shrink-0 rounded-full border border-border"
         style={{ backgroundColor: marcador.cor }}
       />
-      <span className="truncate">{marcador.nome}</span>
+      <span className={truncar ? "truncate" : undefined}>{marcador.nome}</span>
     </span>
   );
 }

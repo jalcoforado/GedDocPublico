@@ -5,11 +5,14 @@
  * A cor do marcador vem do cadastro e pode ser qualquer uma — por isso ela vai
  * só na bolinha, e há teste de que o NOME não é pintado com ela.
  */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { EtiquetaMarcador, MarcadoresDaLinha } from "@/components/EtiquetaMarcador";
-import type { MarcadorMini } from "@/lib/api";
+import { MarcadoresProcesso } from "@/components/MarcadoresProcesso";
+import { ToastProvider } from "@/components/ui/toast";
+import type { MarcadorMini, ProcessoDetail } from "@/lib/api";
 
 const COR = "rgb(250, 220, 0)";
 const mk = (id: number, nome: string): MarcadorMini => ({ id, nome, cor: COR });
@@ -60,5 +63,31 @@ describe("MarcadoresDaLinha", () => {
     // As etiquetas visíveis ficam fora da árvore de acessibilidade, para não
     // serem lidas duas vezes.
     expect(screen.getByTitle("A").closest('[aria-hidden="true"]')).not.toBeNull();
+  });
+});
+
+describe("corte do nome: só na listagem", () => {
+  const LONGO = "Aguardando parecer da Procuradoria";
+
+  it("na listagem o nome é cortado e o inteiro fica no title", () => {
+    render(<EtiquetaMarcador marcador={mk(1, LONGO)} />);
+    expect(screen.getByTitle(LONGO).className).toContain("max-w-[10rem]");
+    expect(screen.getByText(LONGO).className).toContain("truncate");
+  });
+
+  it("no detalhe do processo o nome aparece inteiro, sem truncate", () => {
+    // O detalhe é para onde a lista manda quem quer ler o nome: lá não pode
+    // haver corte, porque o title não aparece no toque nem no teclado.
+    const processo = { marcadores: [mk(1, LONGO)] } as unknown as ProcessoDetail;
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ToastProvider>
+          <MarcadoresProcesso processo={processo} podeEditar={false} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    const nome = screen.getByText(LONGO);
+    expect(nome.className).not.toContain("truncate");
+    expect(nome.parentElement!.className).not.toContain("max-w-[10rem]");
   });
 });
