@@ -163,3 +163,25 @@ describe("tabela da caixa", () => {
     expect(screen.getByText("Nenhum processo nesta caixa")).toBeTruthy();
   });
 });
+
+describe("marcadores na linha da caixa", () => {
+  const mk = (id: number, nome: string) => ({ id, nome, cor: "rgb(200, 30, 30)" });
+
+  it("mostra a etiqueta com o nome do marcador", () => {
+    renderTabela([item(1, { marcadores: [mk(1, "Urgente")] })]);
+    expect(screen.getByTitle("Urgente").textContent).toBe("Urgente");
+    expect(screen.getByText("Marcadores: Urgente")).toBeTruthy();
+  });
+
+  it("mais de três vira +N na própria linha", () => {
+    renderTabela([
+      item(1, { marcadores: [mk(1, "A"), mk(2, "B"), mk(3, "C"), mk(4, "D")] }),
+    ]);
+    expect(screen.getByText("+1").getAttribute("title")).toBe("D");
+  });
+
+  it("sem marcadores não desenha etiqueta nenhuma", () => {
+    renderTabela([item(1)]);
+    expect(screen.queryByText(/^Marcadores:/)).toBeNull();
+  });
+});
