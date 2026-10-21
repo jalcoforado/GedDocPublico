@@ -28,7 +28,7 @@ from ..schemas.auth import (
 from ..services.conta import ContaError, alterar_senha
 from ..services.google_oauth_flow import GoogleOAuthFlow
 from ..services.minutas import criar_google_doc_para_minuta
-from ..services.permissoes import listar_lotacoes, load_permissions
+from ..services.permissoes import listar_lotacoes, load_permissions, resolver_unidade_ativa
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 _settings = get_settings()
@@ -131,6 +131,20 @@ async def me(
         db, user.id, tenant_id=tenant_id, id_unidade_contexto=unidade_contexto
     )
     lotacoes = await listar_lotacoes(db, tenant_id=tenant_id, usuario=user)
+    # A unidade que a TELA mostra tem de ser a que as caixas e o painel
+    # contam (`resolver_unidade_ativa`, em `processos.unidade_ativa_dep`).
+    # Devolver a claim crua quebraria o caso do token antigo: quem trocou
+    # para B e depois perdeu B segue com "B" no JWT, os números voltam para a
+    # principal, e o cabeçalho procuraria B numa lista de lotações que não a
+    # tem mais — sumindo a unidade justo quando ela mudou.
+    #
+    # As PERMISSÕES acima continuam pela claim crua, de propósito: é a mesma
+    # leitura do gate (`auth/perms.py`), e o menu que o frontend monta com
+    # elas tem de bater com o que o gate deixa passar. Reconferir a lotação
+    # também no gate é outra decisão (política de acesso), não desta fatia.
+    unidade_ativa = await resolver_unidade_ativa(
+        db, tenant_id=tenant_id, usuario=user, id_unidade_contexto=unidade_contexto
+    )
 
     return MeResponse(
         id=user.id,
@@ -150,7 +164,7 @@ async def me(
             )
             for item in perms.items
         ],
-        unidade_contexto_id=unidade_contexto,
+        unidade_contexto_id=unidade_ativa,
         lotacoes=[LotacaoOut(id=l.id, nome=l.nome, principal=l.principal) for l in lotacoes],
     )
 

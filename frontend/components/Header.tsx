@@ -9,6 +9,7 @@ import { useCommandPalette } from "@/components/CommandPalette";
 import { MarcaDoMunicipio } from "@/components/MarcaDoMunicipio";
 import { ModuloSwitcher } from "@/components/ModuloSwitcher";
 import { NotificacoesBell } from "@/components/NotificacoesBell";
+import { UnidadeAtiva } from "@/components/UnidadeAtiva";
 import { useAuth } from "@/lib/auth";
 
 interface HeaderProps {
@@ -29,16 +30,23 @@ interface HeaderProps {
 export function Header({ onOpenSidebar }: HeaderProps) {
   const cmd = useCommandPalette();
   const { user } = useAuth();
+  // `flex-wrap` só abaixo de sm, e só a unidade ativa quebra: ela vai para
+  // uma segunda linha (`order-last basis-full`). Na mesma linha não cabia —
+  // marca, hambúrguer e o cartão de controles já ocupam quase os 390px de um
+  // celular comum, e a pílula, único item que encolhia, ficava só com as
+  // reticências. O grupo da esquerda é `flex-1` com base zero, então ele
+  // nunca força a quebra do cartão da direita.
   return (
     <header
       aria-label="Cabeçalho do sistema"
       className="
         sticky top-0 z-sticky
-        flex items-center gap-3 bg-gradient-to-r from-brand-dark via-brand to-brand-light
+        flex flex-wrap items-center gap-x-3 gap-y-2 bg-gradient-to-r from-brand-dark via-brand to-brand-light
         px-4 py-3 pt-safe shadow-md
-        sm:gap-5 sm:px-6
+        sm:flex-nowrap sm:gap-5 sm:px-6
       "
     >
+      <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-5">
       {onOpenSidebar ? (
         <button
           type="button"
@@ -76,8 +84,17 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         <BuscaGlobal />
       </div>
       <div className="flex-1 md:hidden" />
+      </div>
 
-      <div className="flex items-center gap-3">
+      {/* A unidade ativa fica à vista em toda largura: é ela que as caixas e
+          o painel contam. No celular, numa linha só dela (ver o comentário do
+          `header`); de sm em diante, ao lado do nome. O nome e o e-mail, que
+          só informam, somem antes. */}
+      <div className="order-last flex min-w-0 basis-full sm:order-none sm:basis-auto">
+        <UnidadeAtiva />
+      </div>
+
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         {user ? (
           <div className="hidden min-w-0 text-right text-primary-foreground lg:block">
             <div className="truncate font-display text-sm font-semibold leading-tight">
@@ -86,7 +103,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
             <div className="truncate text-xs leading-tight opacity-90">{user.email}</div>
           </div>
         ) : null}
-        <div className="flex items-center gap-1 rounded-full bg-card px-1.5 py-0.5 shadow-sm">
+        <div className="flex shrink-0 items-center gap-1 rounded-full bg-card px-1.5 py-0.5 shadow-sm">
           {/* Busca no mobile (fatia 3.4): abaixo de md o campo some — este
               ícone mantém o palette a um toque. */}
           <button
