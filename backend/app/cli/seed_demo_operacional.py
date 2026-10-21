@@ -9,7 +9,7 @@ Onda B, por exemplo, subiu sem um único dado para exercitar).
 Uso:
     docker exec aprimora-py-backend python -m app.cli.seed_demo_operacional \\
         status --tenant sobral --allow-non-demo
-    ... apply --tenant sobral --allow-non-demo [--modulo pagamentos|frota|transporte|todos]
+    ... apply --tenant sobral --allow-non-demo [--modulo pagamentos|frota|transporte|protocolo|todos]
     ... reset --tenant sobral --allow-non-demo [--modulo ...]
 
 Decisões de projeto:
@@ -61,7 +61,7 @@ from ..models import (
 OPS_EMAIL_DOMAIN = "ops.demo.test"
 OPS_PASSWORD = "Demo@12345"
 DEMO_PREFIX = "DEMO"
-MODULOS = ("pagamentos", "frota", "transporte")
+MODULOS = ("pagamentos", "frota", "transporte", "protocolo")
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +93,16 @@ TRANSACAO_POR_PAPEL_PAGAMENTOS = {
     "tesoureiro": "pagamento_pagar",
     "auditor": "pagamento_auditar",
 }
+
+# Protocolo: um USUÁRIO COMUM, para mostrar a tela de quem não é
+# administrador (pedido da reunião de 2026-10-20, item 2.3). Até aqui todo
+# login da demonstração era super-usuário, e as telas de administrador e de
+# usuário saíam iguais. Este opera processos — abre, tramita, despacha,
+# arquiva — e só lê o resto: sem Administração, sem cadastros.
+USUARIOS_PROTOCOLO = [
+    ("protocolo_servidor", "Bruno Teixeira", "prot.servidor", "Agente Administrativo"),
+]
+TRANSACAO_POR_PAPEL_PROTOCOLO = {"protocolo_servidor": "processo"}
 
 USUARIOS_OPERACAO = [
     ("frota_gestor", "Marcos Aurélio Pinto", "frota.gestor", "Gestor de Frota"),
@@ -524,6 +534,31 @@ async def _criar_usuarios(
             )
     await db.commit()
     return ids
+
+
+# ---------------------------------------------------------------------------
+# Protocolo
+# ---------------------------------------------------------------------------
+
+
+async def _apply_protocolo(tenant_id: int, contagens: dict[str, int]) -> None:
+    """O servidor de setor fica na MESMA unidade do administrador: é ela que
+    tem os processos de demonstração nas caixas (`seed_demo_caixas`), e assim
+    os dois logins mostram a mesma mesa vista por perfis diferentes."""
+    from .seed_demo import _resolver_admin_id
+
+    async with _sessao(tenant_id) as db:
+        admin = (
+            await db.execute(
+                select(Usuario).where(Usuario.id == await _resolver_admin_id(db, tenant_id))
+            )
+        ).scalar_one()
+        id_unidade = admin.id_unidade_trabalho or await _unidade_padrao(db, tenant_id)
+        await _criar_usuarios(
+            db, tenant_id=tenant_id, id_unidade=id_unidade,
+            especificacao=USUARIOS_PROTOCOLO, cpf_base=99730000000,
+            contagens=contagens, transacao_por_chave=TRANSACAO_POR_PAPEL_PROTOCOLO,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1493,6 +1528,8 @@ async def _apply(args: argparse.Namespace) -> int:
         await _apply_frota(tid, contagens)
     if "transporte" in selecionados:
         await _apply_transporte(tid, contagens)
+    if "protocolo" in selecionados:
+        await _apply_protocolo(tid, contagens)
 
     _resumo("APPLY", args.tenant, tid, contagens, selecionados)
     return 0
@@ -1572,7 +1609,9 @@ def _resumo(acao: str, slug: str, tid: int, contagens: dict[str, Any],
     if acao == "APPLY":
         print()
         print(f"Usuários operacionais (senha {OPS_PASSWORD}):")
-        for _chave, nome, email_local, cargo in USUARIOS_PAGAMENTOS + USUARIOS_OPERACAO:
+        for _chave, nome, email_local, cargo in (
+            USUARIOS_PAGAMENTOS + USUARIOS_OPERACAO + USUARIOS_PROTOCOLO
+        ):
             print(f"  {email_local}@{OPS_EMAIL_DOMAIN:22} {nome} — {cargo}")
         print()
 

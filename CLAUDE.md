@@ -195,6 +195,8 @@ docker exec aprimora-py-backend python -m app.cli.seed_demo caixas --tenant sobr
 # 3. Pagamentos/frota/transporte. Passa pelos SERVIÇOS: os débitos percorrem o
 #    rito real e as baixas geram movimentação de conta — é disso que a
 #    conciliação vive. `--modulo` limita a um deles; `reset`/`status` também.
+#    `--modulo protocolo` cria só o usuário comum de demonstração
+#    (`prot.servidor@ops.demo.test`), para mostrar a tela de quem não é admin.
 docker exec aprimora-py-backend python -m app.cli.seed_demo_operacional apply --tenant sobral --allow-non-demo
 
 # 4. Apresentação como Prefeitura de Itaitinga/CE: identidade (nome, brasão,
