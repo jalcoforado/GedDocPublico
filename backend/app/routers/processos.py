@@ -25,6 +25,8 @@ from ..schemas.processo import (
     AtribuirResponsavelRequest,
     CaixaProcesso,
     CaixasContagem,
+    LoteRequest,
+    LoteResultado,
     PainelUnidade,
     CancelarEncaminhamentoRequest,
     RecusarEncaminhamentoRequest,
@@ -287,6 +289,28 @@ async def caixas_endpoint(
         niveis_permitidos=niveis,
         id_usuario_contexto=usuario.id,
         id_unidade_contexto=usuario.id_unidade_trabalho,
+    )
+
+
+@router.post("/lote", response_model=LoteResultado)
+async def lote_endpoint(
+    payload: LoteRequest,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> LoteResultado:
+    """A mesma ação sobre vários processos selecionados na lista.
+
+    Mesmo gate das rotas individuais (`processo` com `atualizar`); o sigilo é
+    conferido processo a processo dentro do serviço, como o
+    `require_acesso_processo` faz em cada rota individual. Responde 200 mesmo
+    com falhas parciais: o corpo diz, um a um, o que foi feito.
+    """
+    from ..services.processos_lote import executar_lote
+
+    return await executar_lote(
+        db, payload, tenant_id=tenant_id, usuario=current,
+        is_super_usuario=await _is_super(db, current, tenant_id),
     )
 
 

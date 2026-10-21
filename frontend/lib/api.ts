@@ -535,6 +535,23 @@ export type CaixaProcesso =
 /** Quantos processos em cada caixa — espelha `CaixasContagem` do backend. */
 export type CaixasContagem = Record<CaixaProcesso, number>;
 
+/** Ações em lote (`POST /processos/lote`) — espelha `LoteRequest`. Cada
+ *  ação leva o corpo da sua rota individual, e só ele. */
+export interface LoteRequest {
+  acao: "receber" | "encaminhar" | "atribuir_responsavel" | "arquivar";
+  ids: number[];
+  encaminhar?: EncaminharInput;
+  arquivar?: ArquivarInput;
+  responsavel?: { id_usuario: number | null };
+}
+
+/** Um item por processo pedido, na ordem do pedido. */
+export interface LoteResultado {
+  itens: { id: number; ok: boolean; erro: string | null }[];
+  concluidos: number;
+  falhas: number;
+}
+
 /** Painel de controle da tela inicial — espelha `PainelUnidade`. */
 export interface PainelUnidade {
   caixas: CaixasContagem;
@@ -4807,6 +4824,9 @@ export const api = {
       ),
     /** Contadores das caixas de quem consulta (mesmo gate e sigilo da lista). */
     caixas: () => request<CaixasContagem>("/processos/caixas"),
+    /** A mesma ação sobre vários processos; responde um a um. */
+    lote: (pedido: LoteRequest) =>
+      request<LoteResultado>("/processos/lote", { method: "POST", body: JSON.stringify(pedido) }),
     /** Números do painel de controle (tela inicial), no recorte das caixas. */
     painel: () => request<PainelUnidade>("/processos/painel"),
     get: (id: number) => request<ProcessoDetail>(`/processos/${id}`),

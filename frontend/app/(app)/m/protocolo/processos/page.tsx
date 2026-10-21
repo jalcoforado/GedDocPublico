@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { ACOES_POR_CAIXA, AcoesEmLote } from "@/components/AcoesEmLote";
 import { FavoritoStar } from "@/components/FavoritoStar";
 import { TabelaCaixaProcessos } from "@/components/TabelaCaixaProcessos";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +24,7 @@ import type { EscopoProcesso } from "@/lib/api";
 import { api, NIVEL_SIGILO_LABEL, type ProcessoListFilters } from "@/lib/api";
 import { caixaDaUrl, rotuloDaCaixa } from "@/lib/caixas-processos";
 import { useAssuntosAll } from "@/lib/assuntos";
+import { useAuth } from "@/lib/auth";
 import { decorridoDesde } from "@/lib/duracao";
 
 const PAGE_SIZE = 20;
@@ -114,6 +116,16 @@ export default function ProcessosPage() {
   useEffect(() => {
     setDraft(filters);
   }, [filters]);
+
+  const { user } = useAuth();
+  // Seleção para ações em lote. Vale para a página e a caixa abertas: trocar
+  // de página, de caixa ou de filtro a zera, para nunca agir sobre um
+  // processo que já não está na tela.
+  const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    setSelecionados(new Set());
+  }, [filters, page]);
+  const comLote = !!filters.caixa && (ACOES_POR_CAIXA[filters.caixa]?.length ?? 0) > 0;
 
   const assuntosQ = useAssuntosAll();
   const unidadesQ = useQuery({
@@ -332,10 +344,39 @@ export default function ProcessosPage() {
         </CardContent>
       </Card>
 
+      {filters.caixa && comLote && (
+        <AcoesEmLote
+          caixa={filters.caixa}
+          selecionados={(processosQ.data?.items ?? []).filter((p) => selecionados.has(p.id))}
+          idUsuario={user?.id}
+          onConcluido={() => setSelecionados(new Set())}
+        />
+      )}
+
       {filters.caixa ? (
         <TabelaCaixaProcessos
           itens={processosQ.data?.items}
           carregando={processosQ.isLoading}
+          selecao={
+            comLote
+              ? {
+                  ids: selecionados,
+                  alternar: (id) =>
+                    setSelecionados((atual) => {
+                      const novo = new Set(atual);
+                      if (novo.has(id)) novo.delete(id);
+                      else novo.add(id);
+                      return novo;
+                    }),
+                  alternarPagina: (marcar) =>
+                    setSelecionados(
+                      marcar
+                        ? new Set((processosQ.data?.items ?? []).map((p) => p.id))
+                        : new Set(),
+                    ),
+                }
+              : undefined
+          }
         />
       ) : (
         <Table>
