@@ -31,6 +31,7 @@ const TODOS = Object.values(MENUS).flatMap((m) => hrefs(m.grupos.flatMap((g) => 
  */
 const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> = {
   "/home": {},
+  "/m/protocolo/painel": { perm: "processo" },
   "/m/protocolo/processos": { perm: "processo" },
   // Caixas de trabalho — subitens de Processos. Literais de propósito: esta
   // tabela é a fonte INDEPENDENTE, e montá-la a partir de `CAIXAS` faria o

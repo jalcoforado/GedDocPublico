@@ -1,336 +1,182 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import {
-  ArrowDownToLine,
-  ArrowUpFromLine,
-  Bell,
-  FileSearch,
-  type LucideIcon,
-  PenLine,
-  RefreshCw,
-  Undo2,
-  UserCheck,
-  UserX,
-} from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bell, CheckCheck, LayoutGrid, PenLine } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
 import { KpiCard } from "@/components/ui/kpi-card";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import { api, notificacoesApi, type PainelUnidade } from "@/lib/api";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { api, notificacoesApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { ROTA_PROCESSOS, hrefDaCaixa } from "@/lib/caixas-processos";
 import { cn } from "@/lib/utils";
 
+/** Para onde vai quem opera processos. O painel mora no módulo Protocolo
+ * (decisão do produto, 2026-10-21); a tela inicial é só o caminho até ele. */
+const ROTA_PAINEL = "/m/protocolo/painel";
+
 /**
- * Painel de controle — a tela inicial no formato que a prefeitura pediu na
- * reunião de 2026-10-20, tendo o Painel de Controle do SEI como referência:
- * quadros de números no alto, cada um levando à lista que conta, e embaixo
- * três tabelas curtas (prazos, aguardando retorno, assinaturas).
+ * Tela inicial. Quem opera processos (transação `processo`) NUM TENANT QUE
+ * CONTRATOU O PROTOCOLO é levado ao painel de controle do módulo, que é o que
+ * ele abriria de qualquer jeito; os demais veem uma tela leve: saudação,
+ * notificações não lidas e o caminho para os módulos e as assinaturas.
  *
- * Os números vêm de `GET /processos/painel`, no mesmo recorte das caixas de
- * trabalho (unidade de lotação principal, sigilo de quem consulta): o quadro
- * diz 12 e a lista abre com 12. Quem não opera processos (sem a transação
- * `processo`, ou sem o módulo contratado) vê só a saudação e as
- * notificações.
+ * A contratação entra na decisão porque `can()` sozinho não basta: ele
+ * devolve `true` para todo super-usuário — e hoje todo grupo é SU —, então
+ * num tenant só de Frota a `/home` empurraria todo mundo para um módulo que o
+ * tenant não tem, com o menu do Protocolo e o painel negado pelo backend. E a
+ * `/home` é o destino de "Início"/"Menu principal": não haveria saída.
+ *
+ * `replace`, e não `push`: a `/home` não fica no histórico, senão o "voltar"
+ * do painel cairia aqui e seria empurrado de novo para o painel.
  */
 export default function HomePage() {
-  const { user, perms, can } = useAuth();
-  const primeiroNome = (user?.nome ?? "").split(/\s+/)[0] || "—";
+  const { can } = useAuth();
+  const router = useRouter();
+  // O shell só desenha a página depois de `/auth/me`, que traz usuário e
+  // permissões juntos: aqui `can` já é a resposta final, não um "ainda não
+  // sei" que viraria `false` por um instante.
   const operaProcessos = can("processo");
 
-  const painelQ = useQuery({
-    queryKey: ["home-painel"],
-    queryFn: () => api.processos.painel(),
+  // Mesma queryKey do guard de módulo, do launcher e do switcher: o cache é
+  // um só, e na maioria das vezes a resposta já está aqui.
+  const modulosQ = useQuery({
+    queryKey: ["modulos-me"],
+    queryFn: api.modulos,
     enabled: operaProcessos,
-    staleTime: 60_000,
   });
+  // `undefined` enquanto carrega — distinto de `false`, que é "não contratou".
+  const protocoloContratado = modulosQ.data
+    ? modulosQ.data.itens.some((i) => i.slug === "protocolo")
+    : undefined;
+  const vaiAoPainel = operaProcessos && protocoloContratado === true;
+  // Falha de `/modulos/me` não decide por ninguém: fica na tela simples, que
+  // funciona em qualquer tenant. Empurrar para o painel no escuro poderia
+  // levar a um módulo que o tenant não tem.
+  const decidindo = operaProcessos && !modulosQ.isError && protocoloContratado === undefined;
+
+  useEffect(() => {
+    if (vaiAoPainel) router.replace(ROTA_PAINEL);
+  }, [vaiAoPainel, router]);
+
+  // Enquanto decide ou redireciona, nada: desenhar a tela simples faria ela
+  // piscar antes do painel.
+  if (decidindo || vaiAoPainel) return null;
+  return <TelaInicialSimples />;
+}
+
+function TelaInicialSimples() {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const primeiroNome = (user?.nome ?? "").split(/\s+/)[0] || "—";
+
   const notifQ = useQuery({
-    queryKey: ["home-notif-unread"],
-    queryFn: () => notificacoesApi.listarMinhas({ apenas_nao_lidas: true, limit: 1 }),
+    // Sob `["notificacoes", "me"]`, o prefixo que o sino invalida: marcar
+    // como lida lá atualiza esta lista, e vice-versa.
+    queryKey: ["notificacoes", "me", "home-nao-lidas"],
+    queryFn: () => notificacoesApi.listarMinhas({ apenas_nao_lidas: true, limit: 5 }),
     staleTime: 30_000,
   });
-
-  const painel = painelQ.data;
   const naoLidas = notifQ.data?.nao_lidas;
+  const itens = notifQ.data?.items ?? [];
+  const temAlgo = (naoLidas ?? 0) > 0;
 
-  function atualizar() {
-    void painelQ.refetch();
-    void notifQ.refetch();
-  }
+  const recarregar = () => qc.invalidateQueries({ queryKey: ["notificacoes", "me"] });
+  // Abrir a notificação é lê-la, como no sino: sem isso ela continuaria na
+  // lista e no contador depois de aberta.
+  const marcarLida = useMutation({
+    mutationFn: (id: number) => notificacoesApi.marcarLida(id),
+    onSuccess: recarregar,
+  });
+  const marcarTodas = useMutation({
+    mutationFn: () => notificacoesApi.marcarTodasLidas(),
+    onSuccess: recarregar,
+  });
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border-strong pb-3">
-        <div>
-          <h1 className="font-display text-2xl font-semibold text-titulo-destaque">
-            Painel de controle
-          </h1>
-          <p className="mt-1 text-sm text-foreground-muted">
-            Olá, {primeiroNome}
-            {perms?.is_super_usuario ? (
-              <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
-                super usuário
-              </span>
-            ) : null}
-            {operaProcessos ? " — os números são da sua unidade." : null}
-          </p>
-        </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={atualizar}
-          disabled={painelQ.isFetching || notifQ.isFetching}
-        >
-          <RefreshCw
-            className={cn("mr-1.5 h-4 w-4", (painelQ.isFetching || notifQ.isFetching) && "animate-spin")}
-            aria-hidden="true"
-          />
-          Atualizar
-        </Button>
-      </div>
+      <PageHeader title="Início" description={`Olá, ${primeiroNome}.`} />
 
-      {operaProcessos && painelQ.isError && (
-        <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
-          Não foi possível carregar os números da unidade.{" "}
-          <button type="button" className="underline" onClick={() => painelQ.refetch()}>
-            Tentar de novo
-          </button>
-        </p>
-      )}
-
-      <section aria-label="Quadros de processos" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {operaProcessos && (
-          <>
-            <Quadro
-              href={hrefDaCaixa("analise")}
-              rotulo="Na unidade"
-              valor={painel?.caixas.analise}
-              dica="processos na mesa da sua unidade"
-              icon={FileSearch}
-            />
-            <Quadro
-              href={hrefDaCaixa("entrada")}
-              rotulo="A receber"
-              valor={painel?.caixas.entrada}
-              dica="enviados para a sua unidade"
-              icon={ArrowDownToLine}
-              intent="info"
-            />
-            <Quadro
-              href={hrefDaCaixa("saida")}
-              rotulo="Enviados"
-              valor={painel?.caixas.saida}
-              dica="aguardando o destino receber"
-              icon={ArrowUpFromLine}
-            />
-            <Quadro
-              href={hrefDaCaixa("recusados")}
-              rotulo="Recusados"
-              valor={painel?.caixas.recusados}
-              dica="devolvidos pelo destino"
-              icon={Undo2}
-              alerta
-            />
-            <Quadro
-              href={`${ROTA_PROCESSOS}?caixa=analise&escopo=meus&ativos=0`}
-              rotulo="Atribuídos a mim"
-              valor={painel?.atribuidos_a_mim}
-              dica="na unidade, com você como responsável"
-              icon={UserCheck}
-            />
-            <Quadro
-              href={hrefDaCaixa("analise")}
-              rotulo="Sem responsável"
-              valor={painel?.sem_responsavel}
-              dica="na unidade, sem ninguém designado"
-              icon={UserX}
-              intent="warning"
-            />
-            <Quadro
-              href="/para-assinar"
-              rotulo="Para assinar"
-              valor={painel?.caixas.aguardando_assinatura}
-              dica="documentos aguardando sua assinatura"
-              icon={PenLine}
-            />
-          </>
-        )}
-        <Quadro
-          href="/perfil"
-          rotulo="Notificações"
-          valor={naoLidas}
-          dica="não lidas"
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* Não é link: não há tela que liste notificações — /perfil, para
+            onde ia, só tem as preferências. A lista está logo abaixo. */}
+        <KpiCard
+          label="Notificações"
+          value={naoLidas ?? "—"}
+          hint="não lidas"
           icon={Bell}
-          alerta
+          intent={temAlgo ? "danger" : "default"}
+          className={cn("h-full", temAlgo && "border-l-4 border-l-danger")}
         />
-      </section>
 
-      {operaProcessos && painel && <Tabelas painel={painel} />}
-    </div>
-  );
-}
-
-function Quadro({
-  href,
-  rotulo,
-  valor,
-  dica,
-  icon,
-  intent = "default",
-  alerta = false,
-}: {
-  href: string;
-  rotulo: string;
-  valor: number | undefined;
-  dica: string;
-  icon: LucideIcon;
-  intent?: "default" | "info" | "warning";
-  /** Fica vermelho quando há algo: recusados, notificações. */
-  alerta?: boolean;
-}) {
-  const temAlgo = (valor ?? 0) > 0;
-  return (
-    <Link
-      href={href}
-      className="rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-    >
-      <KpiCard
-        label={rotulo}
-        value={valor ?? "—"}
-        hint={dica}
-        icon={icon}
-        intent={alerta && temAlgo ? "danger" : intent}
-        className={cn("h-full", alerta && temAlgo && "border-l-4 border-l-danger")}
-      />
-    </Link>
-  );
-}
-
-function Tabela({
-  titulo,
-  colunas,
-  children,
-}: {
-  titulo: string;
-  colunas: [string, string];
-  children: React.ReactNode;
-}) {
-  return (
-    <section aria-label={titulo} className="space-y-2">
-      <h2 className="font-display text-base font-semibold text-foreground">{titulo}</h2>
-      <div className="overflow-x-auto rounded-card border border-border bg-surface-1 shadow-card">
-        <Table>
-          <THead>
-            <TR>
-              <TH>{colunas[0]}</TH>
-              <TH className="w-32 text-right">{colunas[1]}</TH>
-            </TR>
-          </THead>
-          <TBody>{children}</TBody>
-        </Table>
+        <SectionCard title="Atalhos" className="lg:col-span-2">
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="secondary">
+              <Link href="/modulos">
+                <LayoutGrid className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                Meus módulos
+              </Link>
+            </Button>
+            <Button asChild variant="secondary">
+              <Link href="/para-assinar">
+                <PenLine className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                Para assinar
+              </Link>
+            </Button>
+          </div>
+        </SectionCard>
       </div>
-    </section>
-  );
-}
 
-function Linha({
-  rotulo,
-  valor,
-  href,
-  tom,
-}: {
-  rotulo: string;
-  valor: number;
-  href: string;
-  tom?: "danger" | "warning";
-}) {
-  return (
-    <TR>
-      <TD>
-        <span
-          className={cn(
-            valor > 0 && tom === "danger" && "font-medium text-danger-soft-foreground",
-            valor > 0 && tom === "warning" && "font-medium text-warning-soft-foreground",
+      <section aria-label="Notificações não lidas" className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-base font-semibold text-foreground">
+            Notificações não lidas
+          </h2>
+          {itens.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => marcarTodas.mutate()}
+              disabled={marcarTodas.isPending}
+            >
+              <CheckCheck className="h-4 w-4" aria-hidden="true" />
+              Marcar todas como lidas
+            </Button>
           )}
-        >
-          {rotulo}
-        </span>
-      </TD>
-      <TD className="text-right tabular-nums">
-        {valor > 0 ? (
-          // Cor neutra, sublinhada: a cor de link do tema (laranja em
-          // Itaitinga) fazia "No prazo: 3" parecer alarme. Vermelho e amarelo
-          // ficam só para vencido e vencendo.
-          <Link
-            href={href}
-            className={cn(
-              "font-medium underline underline-offset-2 hover:no-underline",
-              tom === "danger" && "text-danger-soft-foreground",
-              tom === "warning" && "text-warning-soft-foreground",
-              !tom && "text-foreground",
-            )}
-          >
-            {valor}
-          </Link>
+        </div>
+        {notifQ.isError ? (
+          <p role="alert" className="text-sm text-danger-soft-foreground">
+            Não foi possível carregar as notificações.
+          </p>
+        ) : !notifQ.data ? (
+          <p className="text-sm text-foreground-muted">Carregando…</p>
+        ) : itens.length === 0 ? (
+          <p className="text-sm text-foreground-muted">Nenhuma notificação nova.</p>
         ) : (
-          <span className="text-foreground-muted">0</span>
+          <ul className="divide-y divide-border rounded-card border border-border bg-surface-1">
+            {itens.map((n) => (
+              <li key={n.id} className="px-4 py-3 text-sm">
+                {n.link_url ? (
+                  <Link
+                    href={n.link_url}
+                    onClick={() => marcarLida.mutate(n.id)}
+                    className="font-medium text-foreground underline-offset-2 hover:underline"
+                  >
+                    {n.titulo}
+                  </Link>
+                ) : (
+                  <span className="font-medium text-foreground">{n.titulo}</span>
+                )}
+                <p className="mt-0.5 text-foreground-muted">{n.mensagem}</p>
+              </li>
+            ))}
+          </ul>
         )}
-      </TD>
-    </TR>
-  );
-}
-
-function Tabelas({ painel }: { painel: PainelUnidade }) {
-  const { prazos, aguardando_retorno: retorno, caixas } = painel;
-  const comPrazo = prazos.vencidos + prazos.vencendo + prazos.no_prazo;
-  // A caixa Análise abre pelo que espera há mais tempo, e o destaque de cada
-  // linha é o prazo: é lá que vencidos e vencendo aparecem marcados.
-  const analise = hrefDaCaixa("analise");
-
-  return (
-    <div className="grid gap-5 lg:grid-cols-3">
-      <Tabela titulo="Controle de prazos" colunas={["Situação", "Processos"]}>
-        {comPrazo === 0 ? (
-          <TR>
-            <TD colSpan={2} className="text-sm text-foreground-muted">
-              Nenhum processo com prazo na unidade.
-            </TD>
-          </TR>
-        ) : (
-          <>
-            <Linha rotulo="Prazo vencido" valor={prazos.vencidos} href={analise} tom="danger" />
-            <Linha rotulo="Vencendo" valor={prazos.vencendo} href={analise} tom="warning" />
-            <Linha rotulo="No prazo" valor={prazos.no_prazo} href={analise} />
-          </>
-        )}
-        <Linha rotulo="Sem prazo definido" valor={prazos.sem_prazo} href={analise} />
-      </Tabela>
-
-      <Tabela titulo="Aguardando retorno de outras unidades" colunas={["Situação", "Processos"]}>
-        <Linha
-          rotulo="Prazo vencido"
-          valor={retorno.atrasados}
-          href={hrefDaCaixa("saida")}
-          tom="danger"
-        />
-        <Linha rotulo="Total enviado" valor={retorno.total} href={hrefDaCaixa("saida")} />
-      </Tabela>
-
-      <Tabela titulo="Assinaturas" colunas={["Situação", "Processos"]}>
-        <Linha
-          rotulo="Aguardando a sua assinatura"
-          valor={caixas.aguardando_assinatura}
-          href="/para-assinar"
-          tom="warning"
-        />
-        <Linha
-          rotulo="Enviados por você, ainda não assinados"
-          valor={caixas.enviado_para_assinatura}
-          href={hrefDaCaixa("enviado_para_assinatura")}
-        />
-      </Tabela>
+      </section>
     </div>
   );
 }
