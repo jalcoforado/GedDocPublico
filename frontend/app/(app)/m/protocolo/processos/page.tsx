@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { ACOES_POR_CAIXA, AcoesEmLote } from "@/components/AcoesEmLote";
+import { MarcadoresDaLinha } from "@/components/EtiquetaMarcador";
 import { FavoritoStar } from "@/components/FavoritoStar";
 import { TabelaCaixaProcessos } from "@/components/TabelaCaixaProcessos";
 import { Badge } from "@/components/ui/badge";
@@ -433,19 +434,7 @@ export default function ProcessosPage() {
                       )}
                     </div>
                   </div>
-                  {p.marcadores.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {p.marcadores.map((mk) => (
-                        <Badge
-                          key={mk.id}
-                          style={{ backgroundColor: `${mk.cor}22`, color: mk.cor }}
-                          className="font-sans font-normal normal-case"
-                        >
-                          {mk.nome}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
+                  <MarcadoresDaLinha marcadores={p.marcadores} />
                 </TD>
                 <TD className="text-xs tabular-nums">
                   {fmtDate(p.data_hora_abertura)}
