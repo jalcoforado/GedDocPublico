@@ -260,7 +260,18 @@ function Linha({
       </TD>
       <TD className="text-right tabular-nums">
         {valor > 0 ? (
-          <Link href={href} className="text-primary underline-offset-2 hover:underline">
+          // Cor neutra, sublinhada: a cor de link do tema (laranja em
+          // Itaitinga) fazia "No prazo: 3" parecer alarme. Vermelho e amarelo
+          // ficam só para vencido e vencendo.
+          <Link
+            href={href}
+            className={cn(
+              "font-medium underline underline-offset-2 hover:no-underline",
+              tom === "danger" && "text-danger-soft-foreground",
+              tom === "warning" && "text-warning-soft-foreground",
+              !tom && "text-foreground",
+            )}
+          >
             {valor}
           </Link>
         ) : (
