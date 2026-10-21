@@ -417,3 +417,50 @@ async def test_reset_limpa_tudo(admin_engine, tenant_ops):
         "SELECT count(*) FROM utils.grupo WHERE tenant_id=:t AND grupo LIKE 'Demo — %'",
     )
     assert n_grupos == 0
+
+
+@pytest.mark.asyncio
+async def test_servidor_de_protocolo_e_usuario_comum(admin_engine, tenant_ops):
+    """Item 2.3 da reunião de 2026-10-20: a demonstração precisa de um login
+    que NÃO seja administrador. O servidor de protocolo opera processos
+    (inserir, atualizar) e só lê o resto: não é super-usuário, não gere
+    usuários nem cadastros, e fica na unidade do administrador."""
+    from app.services import modulos as modulos_svc
+    from app.services.permissoes import load_permissions
+
+    slug, tid = tenant_ops
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(f"SET LOCAL app.tenant_id = {int(tid)}"))
+        await s.execute(text(
+            "UPDATE utils.usuario SET id_unidade_trabalho = "
+            "(SELECT id FROM utils.unidade_trabalho WHERE tenant_id=:t LIMIT 1) "
+            "WHERE tenant_id=:t"), {"t": tid})
+        await modulos_svc.contratar(s, tid, ["protocolo", "administracao"])
+        await s.commit()
+
+    await _apply(_ns(slug, modulo="protocolo"))
+    await _apply(_ns(slug, modulo="protocolo"))  # idempotente
+
+    async with _sm(admin_engine)() as s:
+        await s.execute(text(f"SET LOCAL app.tenant_id = {int(tid)}"))
+        linhas = (await s.execute(text(
+            "SELECT id, id_unidade_trabalho FROM utils.usuario "
+            "WHERE tenant_id=:t AND email=:e"),
+            {"t": tid, "e": f"prot.servidor@{OPS_EMAIL_DOMAIN}"})).all()
+        assert len(linhas) == 1
+        uid, unidade = linhas[0]
+        unidade_admin = (await s.execute(text(
+            "SELECT id_unidade_trabalho FROM utils.usuario WHERE tenant_id=:t "
+            "AND email LIKE 'admin@%'"), {"t": tid})).scalar_one()
+        assert unidade == unidade_admin
+
+        perms = await load_permissions(s, uid, tenant_id=tid)
+        por_codigo = {p.codigo: p for p in perms.items}
+
+    assert perms.is_super_usuario is False
+    processo = por_codigo["processo"]
+    assert (processo.inserir, processo.atualizar) == (True, True)
+    # O resto, só leitura: vê quem é quem, não administra.
+    usuario = por_codigo["usuario"]
+    assert (usuario.inserir, usuario.atualizar, usuario.excluir) == (False, False, False)
+    assert "configuracao" not in por_codigo
