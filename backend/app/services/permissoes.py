@@ -226,3 +226,31 @@ async def listar_lotacoes(
         for uid, principal in ids_ordem
         if uid in nomes
     ]
+
+
+async def resolver_unidade_ativa(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    usuario: Usuario,
+    id_unidade_contexto: int | None,
+) -> int | None:
+    """A unidade em nome da qual o usuário está trabalhando AGORA — a que as
+    caixas e o painel contam.
+
+    É a claim `unidade_contexto_id` do token quando ela ainda é uma lotação
+    do usuário; senão, a principal. A claim já é assinada e só entra no token
+    por dois caminhos (login, com a principal; `POST /auth/lotacao-ativa`,
+    que recusa lotação alheia), mas o JWT vive até expirar: se o admin tirar
+    a lotação secundária no meio do expediente, o token continuaria dizendo
+    "B" por horas. Reconferir aqui custa uma consulta e fecha essa janela —
+    quem perdeu a lotação volta para a principal na próxima requisição, em
+    vez de seguir vendo a caixa de um setor que não é mais o seu.
+    """
+    principal = usuario.id_unidade_trabalho
+    if id_unidade_contexto is None or id_unidade_contexto == principal:
+        return principal
+    lotacoes = await listar_lotacoes(db, tenant_id=tenant_id, usuario=usuario)
+    if id_unidade_contexto in {l.id for l in lotacoes}:
+        return id_unidade_contexto
+    return principal

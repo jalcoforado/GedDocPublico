@@ -75,6 +75,7 @@ LIMPEZA = (
     "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
     "DELETE FROM utils.grupo WHERE tenant_id=:t",
     "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
+    "DELETE FROM utils.usuario_unidade_trabalho WHERE tenant_id=:t",
     "DELETE FROM utils.usuario WHERE tenant_id=:t",
     "DELETE FROM utils.unidade_trabalho WHERE tenant_id=:t",
     "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
@@ -796,3 +797,106 @@ async def test_http_usuario_comum_le_o_painel(admin_engine, cen):
     assert set(corpo) == {
         "caixas", "atribuidos_a_mim", "sem_responsavel", "prazos", "aguardando_retorno"}
     assert corpo["caixas"]["saida"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Lotação ATIVA — as caixas e o painel seguem a unidade escolhida no cabeçalho
+# ---------------------------------------------------------------------------
+
+
+async def _token_com_contexto(admin_engine, cen, unidade_id: int) -> str:
+    """Token no MESMO formato do login/`POST /auth/lotacao-ativa`, com a claim
+    `unidade_contexto_id` já preenchida. `get_current_user` está sobrescrito
+    por `_como`, então o token aqui só alimenta `ler_unidade_contexto` — que
+    é exatamente o caminho que esta seção quer exercitar."""
+    from app.auth.jwt import build_payload, encode_token, get_jwt_secret
+
+    async with _sm(admin_engine)() as s:
+        secret = await get_jwt_secret(s)
+    return encode_token(
+        build_payload(
+            cen["operador"], "operador@caixas.test", tenant_id=cen["tenant"].id,
+            unidade_contexto_id=unidade_id,
+        ),
+        secret,
+    )
+
+
+async def _lota_operador_tambem_em_b(admin_engine, cen) -> None:
+    from app.models import UsuarioUnidadeTrabalho
+
+    async with _sm(admin_engine)() as s:
+        s.add(UsuarioUnidadeTrabalho(
+            tenant_id=cen["tenant"].id, id_usuario=cen["operador"],
+            id_unidade_trabalho=cen["b"], excluido=False,
+        ))
+        await s.commit()
+
+
+async def _caixas_e_painel(client: AsyncClient) -> tuple[dict, dict, list[int]]:
+    r = await client.get("/api/v2/processos/caixas")
+    assert r.status_code == 200, r.text
+    p = await client.get("/api/v2/processos/painel")
+    assert p.status_code == 200, p.text
+    lista = await client.get("/api/v2/processos", params={"caixa": "entrada"})
+    assert lista.status_code == 200, lista.text
+    return r.json(), p.json(), sorted(i["id"] for i in lista.json()["items"])
+
+
+@pytest.mark.asyncio
+async def test_http_sem_contexto_as_caixas_sao_da_lotacao_principal(admin_engine, cen):
+    """Usuário comum lotado em A (principal) e B (secundária), sem token de
+    contexto: o comportamento de sempre — a principal."""
+    await _lota_operador_tambem_em_b(admin_engine, cen)
+    t = cen["tenant"]
+    app.dependency_overrides[get_current_user] = _como(admin_engine, cen["operador"])
+    arreio_tenant_http(t.id, t.slug)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        caixas, painel, entrada = await _caixas_e_painel(client)
+
+    assert (caixas["entrada"], caixas["saida"], caixas["analise"]) == (1, 1, 5)
+    assert painel["caixas"] == caixas
+    assert entrada == [cen["procs"]["chegando"]]
+
+
+@pytest.mark.asyncio
+async def test_http_com_contexto_b_as_caixas_e_o_painel_sao_de_b(admin_engine, cen):
+    """O "alterar setor" para B muda os números: o que era SAÍDA de A é
+    ENTRADA de B. Lista, contador e painel mudam juntos — se um deles ficasse
+    na principal, o número da lateral deixaria de bater com a caixa aberta."""
+    await _lota_operador_tambem_em_b(admin_engine, cen)
+    t = cen["tenant"]
+    app.dependency_overrides[get_current_user] = _como(admin_engine, cen["operador"])
+    arreio_tenant_http(t.id, t.slug)
+    token = await _token_com_contexto(admin_engine, cen, cen["b"])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        client.cookies.set("aprimora_token", token)
+        caixas, painel, entrada = await _caixas_e_painel(client)
+
+    assert (caixas["entrada"], caixas["saida"], caixas["analise"]) == (2, 1, 1)
+    assert caixas["arquivados"] == 0
+    assert painel["caixas"] == caixas
+    assert entrada == sorted([cen["procs"]["saindo"], cen["procs"]["orfao"]])
+
+
+@pytest.mark.asyncio
+async def test_http_contexto_de_lotacao_que_o_usuario_nao_tem_cai_na_principal(
+    admin_engine, cen
+):
+    """Token antigo: o usuário trocou para B e depois perdeu a lotação B (ou o
+    token traz uma unidade que nunca foi dele). O JWT segue válido até
+    expirar, mas a caixa de B não pode continuar aparecendo — volta para A."""
+    t = cen["tenant"]
+    app.dependency_overrides[get_current_user] = _como(admin_engine, cen["operador"])
+    arreio_tenant_http(t.id, t.slug)
+    token = await _token_com_contexto(admin_engine, cen, cen["b"])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        client.cookies.set("aprimora_token", token)
+        caixas, painel, entrada = await _caixas_e_painel(client)
+
+    assert (caixas["entrada"], caixas["saida"], caixas["analise"]) == (1, 1, 5)
+    assert painel["caixas"] == caixas
+    assert entrada == [cen["procs"]["chegando"]]

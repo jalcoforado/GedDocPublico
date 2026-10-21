@@ -9,6 +9,7 @@ import { useCommandPalette } from "@/components/CommandPalette";
 import { MarcaDoMunicipio } from "@/components/MarcaDoMunicipio";
 import { ModuloSwitcher } from "@/components/ModuloSwitcher";
 import { NotificacoesBell } from "@/components/NotificacoesBell";
+import { UnidadeAtiva } from "@/components/UnidadeAtiva";
 import { useAuth } from "@/lib/auth";
 
 interface HeaderProps {
@@ -77,7 +78,11 @@ export function Header({ onOpenSidebar }: HeaderProps) {
       </div>
       <div className="flex-1 md:hidden" />
 
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+        {/* A unidade ativa fica à vista em toda largura, inclusive no
+            celular (compacta): é ela que as caixas e o painel contam. O nome
+            e o e-mail, que só informam, somem antes. */}
+        <UnidadeAtiva />
         {user ? (
           <div className="hidden min-w-0 text-right text-primary-foreground lg:block">
             <div className="truncate font-display text-sm font-semibold leading-tight">

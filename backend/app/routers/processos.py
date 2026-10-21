@@ -1,11 +1,16 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from sqlalchemy import select as _select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
+from ..auth.deps import (
+    get_current_user,
+    ler_unidade_contexto,
+    require_tenant_id,
+    require_tenant_slug,
+)
 from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db
@@ -145,6 +150,34 @@ async def acesso_niveis_dep(
     return await _niveis_acesso(db, user, tenant_id)
 
 
+async def unidade_ativa_dep(
+    request: Request,
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> int | None:
+    """A "minha unidade" das caixas, do painel e do `escopo`: a lotação ATIVA
+    da sessão (o "alterar setor" do cabeçalho), caindo na principal.
+
+    Até a troca de lotação ser visível na tela, estes recortes usavam só a
+    principal, de propósito: com o seletor escondido no menu do avatar, contar
+    pela ativa faria os números mudarem sem que o usuário soubesse por quê.
+    Agora a unidade ativa aparece no cabeçalho, ao lado do nome, e é ela que
+    o usuário escolheu para trabalhar — contar pela principal mostraria a
+    caixa de um setor enquanto a tela diz que ele está em outro.
+
+    O recorte só REDUZ a lista (não concede acesso a nada que o gate e o
+    sigilo já não concedam), e `resolver_unidade_ativa` ainda reconfere a
+    claim contra as lotações vigentes.
+    """
+    from ..services.permissoes import resolver_unidade_ativa
+
+    return await resolver_unidade_ativa(
+        db, tenant_id=tenant_id, usuario=user,
+        id_unidade_contexto=await ler_unidade_contexto(request, db),
+    )
+
+
 async def require_acesso_processo(
     processo_id: int,
     user: Usuario = Depends(get_current_user),
@@ -190,6 +223,7 @@ async def list_endpoint(
     # depender do usuário. Continua sem gate novo: `require_permission` acima é
     # o mesmo de antes, e o recorte não concede acesso a nada — só reduz.
     usuario: Usuario = Depends(get_current_user),
+    unidade_ativa: int | None = Depends(unidade_ativa_dep),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     q: str | None = Query(None, description="Busca em número, manifestante, assunto"),
@@ -249,16 +283,13 @@ async def list_endpoint(
         caixa=caixa,
         ordem=ordem,
         id_usuario_contexto=usuario.id,
-        # A lotação PRINCIPAL. Lotação neste sistema tem duas representações
-        # simultâneas — esta e a N:N `utils.usuario_unidade_trabalho` —, então
-        # "minha unidade" é ambíguo para quem atua em dois setores.
-        #
-        # Escolher a principal é o padrão conservador: mantém o significado que
-        # a expressão já tem hoje. Somar todas as lotações mudaria o que o
-        # filtro quer dizer, e a decisão certa depende de existir um seletor de
-        # contexto ativo (o "alterar setor" do SUiTE), que ainda não existe
-        # aqui. Não resolver em silêncio é deliberado.
-        id_unidade_contexto=usuario.id_unidade_trabalho,
+        # A lotação ATIVA da sessão, caindo na principal. Lotação neste sistema
+        # tem duas representações simultâneas — a principal e a N:N
+        # `utils.usuario_unidade_trabalho` —, então "minha unidade" é ambíguo
+        # para quem atua em dois setores. Somar todas mudaria o que o filtro
+        # quer dizer; a resposta é a que o usuário escolheu no seletor do
+        # cabeçalho (o "alterar setor" do SUiTE). Ver `unidade_ativa_dep`.
+        id_unidade_contexto=unidade_ativa,
     )
     return Paginated(items=items, total=total, page=page, page_size=page_size)
 
@@ -276,19 +307,22 @@ async def caixas_endpoint(
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
     usuario: Usuario = Depends(get_current_user),
+    unidade_ativa: int | None = Depends(unidade_ativa_dep),
 ) -> CaixasContagem:
     """Contadores das caixas de trabalho de quem consulta.
 
-    Mesmo gate e mesmo recorte de sigilo da listagem, de propósito: o número
-    de cada caixa é o `total` que `GET /processos?caixa=...` devolve. A
-    unidade é a lotação PRINCIPAL, como no `escopo` (ver o comentário lá).
+    Mesmo gate, mesmo recorte de sigilo e mesma unidade da listagem, de
+    propósito: o número de cada caixa é o `total` que
+    `GET /processos?caixa=...` devolve. A unidade é a lotação ATIVA
+    (`unidade_ativa_dep`) — se a lista e o contador lessem unidades
+    diferentes, o número da lateral deixaria de bater com a caixa aberta.
     """
     return await contar_caixas(
         db,
         tenant_id=tenant_id,
         niveis_permitidos=niveis,
         id_usuario_contexto=usuario.id,
-        id_unidade_contexto=usuario.id_unidade_trabalho,
+        id_unidade_contexto=unidade_ativa,
     )
 
 
@@ -324,16 +358,17 @@ async def painel_endpoint(
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
     usuario: Usuario = Depends(get_current_user),
+    unidade_ativa: int | None = Depends(unidade_ativa_dep),
 ) -> PainelUnidade:
     """Painel de controle da tela inicial: as caixas, quem está com o quê e
-    os prazos da unidade de quem consulta. Mesmo gate e recorte de
-    `/caixas`."""
+    os prazos da unidade ATIVA de quem consulta. Mesmo gate, recorte e
+    unidade de `/caixas`."""
     return await painel_unidade(
         db,
         tenant_id=tenant_id,
         niveis_permitidos=niveis,
         id_usuario_contexto=usuario.id,
-        id_unidade_contexto=usuario.id_unidade_trabalho,
+        id_unidade_contexto=unidade_ativa,
     )
 
 
