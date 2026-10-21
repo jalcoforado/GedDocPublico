@@ -120,6 +120,20 @@ describe("UnidadeAtiva — cabeçalho", () => {
     expect(screen.queryByRole("radiogroup")).toBeNull();
   });
 
+  it("contexto de uma lotação que o usuário perdeu cai na principal (não some do cabeçalho)", () => {
+    // Token antigo: trocou para 30 e depois o admin tirou essa lotação. Os
+    // números já são da principal; o cabeçalho tem de dizer a principal, e a
+    // lista tem de ter um item marcado.
+    montar(DUAS, 30);
+    expect(screen.getByText("SEAS/ASCOI")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /trocar de unidade/i }));
+    const grupo = screen.getByRole("radiogroup", { name: /lotação ativa/i });
+    expect(within(grupo).getByRole("radio", { name: /SEAS\/ASCOI/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
   it("sem lotação nenhuma, não aparece", () => {
     const { client } = montar([], null);
     expect(client).toBeTruthy();

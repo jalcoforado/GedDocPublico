@@ -900,3 +900,38 @@ async def test_http_contexto_de_lotacao_que_o_usuario_nao_tem_cai_na_principal(
     assert (caixas["entrada"], caixas["saida"], caixas["analise"]) == (1, 1, 5)
     assert painel["caixas"] == caixas
     assert entrada == [cen["procs"]["chegando"]]
+
+
+async def _auth_me_com_contexto(admin_engine, cen, unidade_id: int) -> dict:
+    from app.auth.deps import get_current_user_no_password_gate
+
+    t = cen["tenant"]
+    app.dependency_overrides[get_current_user_no_password_gate] = _como(
+        admin_engine, cen["operador"])
+    arreio_tenant_http(t.id, t.slug)
+    token = await _token_com_contexto(admin_engine, cen, unidade_id)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        client.cookies.set("aprimora_token", token)
+        r = await client.get("/api/v2/auth/me")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+@pytest.mark.asyncio
+async def test_http_auth_me_devolve_a_unidade_que_as_caixas_contam(admin_engine, cen):
+    """Token antigo com contexto B, depois de o usuário perder B: as caixas
+    voltam para A (teste acima), e `/auth/me` tem de dizer A também. Se ele
+    devolvesse a claim crua, o cabeçalho procuraria B numa lista de lotações
+    sem B e sumiria com a unidade justo enquanto os números são de A."""
+    corpo = await _auth_me_com_contexto(admin_engine, cen, cen["b"])
+    assert corpo["unidade_contexto_id"] == cen["a"]
+    assert cen["b"] not in {l["id"] for l in corpo["lotacoes"]}
+
+
+@pytest.mark.asyncio
+async def test_http_auth_me_com_lotacao_b_vigente_devolve_b(admin_engine, cen):
+    """O caso normal não pode regredir: com B ainda vigente, `/auth/me` diz B."""
+    await _lota_operador_tambem_em_b(admin_engine, cen)
+    corpo = await _auth_me_com_contexto(admin_engine, cen, cen["b"])
+    assert corpo["unidade_contexto_id"] == cen["b"]

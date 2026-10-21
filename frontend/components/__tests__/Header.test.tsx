@@ -43,6 +43,22 @@ describe("Header — busca no mobile (UX-03 fatia 3.4)", () => {
   });
 });
 
+describe("Header — unidade ativa no celular", () => {
+  it("abaixo de sm a unidade vai para uma linha só dela; de sm em diante, na linha", () => {
+    // jsdom não calcula layout: o que dá para travar aqui é a intenção. Na
+    // mesma linha, a 390px, a pílula era o único item que encolhia e o nome
+    // virava só reticências.
+    render(<Header onOpenSidebar={() => {}} />);
+    const header = screen.getByRole("banner", { name: /cabeçalho do sistema/i });
+    expect(header.className).toContain("flex-wrap");
+    expect(header.className).toContain("sm:flex-nowrap");
+    const linha = screen.getByTestId("unidade").parentElement!;
+    for (const c of ["order-last", "basis-full", "sm:order-none", "sm:basis-auto"]) {
+      expect(linha.className).toContain(c);
+    }
+  });
+});
+
 describe("Header — alturas unificadas", () => {
   it("hambúrguer e botão de busca mobile são h-10", () => {
     render(<Header onOpenSidebar={() => {}} />);

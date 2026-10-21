@@ -29,15 +29,18 @@ export function UnidadeAtiva() {
   const conteudo = (
     <>
       <Building2 className="h-4 w-4 shrink-0 opacity-90" aria-hidden="true" />
-      {/* No celular o nome vai truncado; o completo fica no `title`. */}
-      <span className="min-w-0 max-w-[7rem] truncate sm:max-w-[14rem] lg:max-w-[18rem]">
+      {/* No celular a pílula tem uma linha do cabeçalho só para ela
+          (`Header`), então o nome não leva teto: só trunca se passar da
+          largura da tela. De sm em diante divide a linha e ganha um teto;
+          o nome completo fica no `title`. */}
+      <span className="min-w-0 truncate sm:max-w-[14rem] lg:max-w-[18rem]">
         {lotacao.ativa.nome}
       </span>
     </>
   );
 
   const pilula = cn(
-    "inline-flex h-9 min-w-0 items-center gap-1.5 rounded-full px-3",
+    "inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-full px-3",
     "bg-white/15 text-xs font-semibold text-primary-foreground sm:text-sm",
   );
 

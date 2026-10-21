@@ -41,8 +41,15 @@ export function useLotacaoAtiva(): LotacaoAtiva {
   // `?? []` porque telas/testes que montam `user` à mão nem sempre
   // preenchem o campo.
   const lotacoes = user?.lotacoes ?? [];
-  const ativaId = user?.unidade_contexto_id ?? user?.id_unidade_trabalho ?? null;
-  const ativa = lotacoes.find((l) => l.id === ativaId) ?? null;
+  // A unidade do token só vale se ainda for uma lotação do usuário; senão,
+  // a principal. O `/auth/me` já devolve a unidade reconferida
+  // (`resolver_unidade_ativa`), mas o `user` pode ser de antes de o admin
+  // tirar a lotação — e uma ativa que não está na lista some do cabeçalho e
+  // deixa a lista sem item marcado, enquanto os números já são da principal.
+  const pedida = user?.unidade_contexto_id ?? user?.id_unidade_trabalho ?? null;
+  const ativa =
+    lotacoes.find((l) => l.id === pedida) ?? lotacoes.find((l) => l.principal) ?? null;
+  const ativaId = ativa?.id ?? null;
 
   async function selecionar(id: number) {
     if (id === ativaId || trocando) return;
