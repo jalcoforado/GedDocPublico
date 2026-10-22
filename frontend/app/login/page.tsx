@@ -105,16 +105,22 @@ export default function LoginPage() {
 
   // Layout de referência: protótipo Figma "Sistema - Aprimora" (tela de login).
   return (
-    <main className="grid min-h-dvh lg:grid-cols-2">
+    // Painel da cidade a ~58% da largura, como na arte de Itaitinga
+    // (apresentação de 2026-10-21): a foto é quase quadrada, e com o painel a
+    // 50% o `cover` cortava as laterais. O formulário tem `max-w-sm` e cabe
+    // folgado nos 42% restantes.
+    <main className="grid min-h-dvh lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
       {/* === Painel da cidade (esquerda) — só desktop ===
-          Empilhamento pela ORDEM do DOM (foto → véus → crédito), sem z-index
+          Empilhamento pela ORDEM do DOM (foto → faixa → crédito), sem z-index
           local: cada camada posicionada cobre a anterior.
 
-          A foto vai em COR. Até 2026-10-10 era um duotone (tons de cinza
-          multiplicados pela cor do município), que só funcionava com cor
-          escura e saturada: com uma cor clara a cidade virava uma mancha
-          desbotada. A cor do município continua presente, como um véu que
-          sobe da base — onde não disputa com a foto. */}
+          A foto vai em COR e sem véu. Até 2026-10-10 era um duotone (tons de
+          cinza multiplicados pela cor do município), que só funcionava com cor
+          escura e saturada; depois virou um véu na cor do município subindo da
+          base. Saiu em 2026-10-21, quando Itaitinga mandou uma arte pronta, com
+          as cores dela: o véu laranja tingia o pórtico. A cor do município
+          continua no fundo do painel — é o que aparece enquanto a foto carrega
+          e quando o tenant não tem foto. */}
       <aside
         className="relative hidden overflow-hidden lg:block"
         style={{ backgroundColor: tinta }}
@@ -129,28 +135,27 @@ export default function LoginPage() {
             fetchPriority="high"
             decoding="async"
             onLoad={() => setFotoPronta(true)}
-            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-slow motion-reduce:transition-none ${
+            // Onde o painel é mais estreito que a foto (tela de 1024 px), o
+            // `cover` corta as laterais. Ancorar a 15% da largura poupa o texto
+            // da arte, à esquerda, e corta mais da borda direita.
+            className={`absolute inset-0 h-full w-full object-cover object-[15%_50%] transition-opacity duration-slow motion-reduce:transition-none ${
               fotoPronta ? "opacity-100" : "opacity-0"
             }`}
           />
         ) : null}
-        {/* Véu na cor do município, da base até pouco mais da metade. */}
-        <div
-          className="absolute inset-0 opacity-70"
-          style={{ backgroundImage: `linear-gradient(to top, ${tinta}, transparent 62%)` }}
-          aria-hidden="true"
-        />
-        {/* Faixa escura só no rodapé, para o crédito ler sobre qualquer cor. */}
-        <div
-          className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent"
-          aria-hidden="true"
-        />
         {branding?.imagem_login_credito ? (
-          // Atribuição exigida pela licença da foto: fica legível, não
-          // escondida de leitor de tela.
-          <p className="absolute bottom-3 left-4 right-4 text-[11px] text-white/80">
-            {branding.imagem_login_credito}
-          </p>
+          <>
+            {/* Faixa escura só no rodapé, para o crédito ler sobre qualquer cor. */}
+            <div
+              className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent"
+              aria-hidden="true"
+            />
+            {/* Atribuição exigida pela licença da foto: fica legível, não
+                escondida de leitor de tela. */}
+            <p className="absolute bottom-3 left-4 right-4 text-[11px] text-white/80">
+              {branding.imagem_login_credito}
+            </p>
+          </>
         ) : null}
       </aside>
 
