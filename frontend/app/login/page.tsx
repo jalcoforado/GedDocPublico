@@ -105,7 +105,11 @@ export default function LoginPage() {
 
   // Layout de referência: protótipo Figma "Sistema - Aprimora" (tela de login).
   return (
-    <main className="grid min-h-dvh lg:grid-cols-2">
+    // Painel da cidade a ~58% da largura, como na arte de Itaitinga
+    // (apresentação de 2026-10-21): a foto é quase quadrada, e com o painel a
+    // 50% o `cover` cortava as laterais. O formulário tem `max-w-sm` e cabe
+    // folgado nos 42% restantes.
+    <main className="grid min-h-dvh lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
       {/* === Painel da cidade (esquerda) — só desktop ===
           Empilhamento pela ORDEM do DOM (foto → faixa → crédito), sem z-index
           local: cada camada posicionada cobre a anterior.
@@ -131,10 +135,10 @@ export default function LoginPage() {
             fetchPriority="high"
             decoding="async"
             onLoad={() => setFotoPronta(true)}
-            // Em tela larga o painel é mais largo que a foto, e o `cover` corta
-            // em cima e embaixo. Ancorar a 30% da altura poupa o alto (serra,
-            // céu, torre) e corta mais do chão, que é o que menos diz da cidade.
-            className={`absolute inset-0 h-full w-full object-cover object-[50%_30%] transition-opacity duration-slow motion-reduce:transition-none ${
+            // Onde o painel é mais estreito que a foto (tela de 1024 px), o
+            // `cover` corta as laterais. Ancorar a 15% da largura poupa o texto
+            // da arte, à esquerda, e corta mais da borda direita.
+            className={`absolute inset-0 h-full w-full object-cover object-[15%_50%] transition-opacity duration-slow motion-reduce:transition-none ${
               fotoPronta ? "opacity-100" : "opacity-0"
             }`}
           />

@@ -88,7 +88,7 @@ IDENTIDADE = {
     "logo_url": "/brand/itaitinga-brasao.png",
     "logo_login_url": "/brand/itaitinga-logo.png",
     # Arte do município para a apresentação (pórtico, Ponta da Serra e Lagoa
-    # de Dentro), recortada do slide de login de 2026-10-21. Veio sem exigência
+    # de Dentro), o painel esquerdo do mockup de login de 2026-10-21. Veio sem exigência
     # de crédito — o `None` apaga o da foto anterior, a Matriz do
     # Wikimedia, que continua no repositório. Origem em
     # `frontend/public/brand/CREDITOS.md`.
