@@ -87,14 +87,13 @@ IDENTIDADE = {
     "cor_lateral": "#14204A",
     "logo_url": "/brand/itaitinga-brasao.png",
     "logo_login_url": "/brand/itaitinga-logo.png",
-    # Igreja Matriz de Santo Antônio, do Wikimedia Commons — CC BY-SA 3.0,
-    # que exige o crédito abaixo. Origem e licença em
-    # `frontend/public/brand/CREDITOS.md`. Substituiu a foto da Serra
-    # (`itaitinga-serra.jpg`, que continua no repositório): aquela é tremida e
-    # quase toda céu. A foto oficial do município entra no lugar desta quando
-    # a prefeitura a fornecer.
-    "imagem_login_url": "/brand/itaitinga-matriz.webp",
-    "imagem_login_credito": "Foto: Lourenco e Silva / Wikimedia Commons (CC BY-SA 3.0)",
+    # Arte do município para a apresentação (pórtico, Ponta da Serra e Lagoa
+    # de Dentro), recortada do slide de login de 2026-10-21. Veio sem exigência
+    # de crédito — o `None` apaga o da foto anterior, a Matriz do
+    # Wikimedia, que continua no repositório. Origem em
+    # `frontend/public/brand/CREDITOS.md`.
+    "imagem_login_url": "/brand/itaitinga-login.webp",
+    "imagem_login_credito": None,
     "email_institucional": "prefeito@itaitinga.ce.gov.br",
     "telefone_institucional": "(85) 3513-2002",
     "endereco": "Av. Cel. Virgílio Távora, 1710 - Centro, Itaitinga - CE, 61.880-000",
