@@ -82,6 +82,16 @@ export function aplicarMascara(m: Mascara, entrada: unknown): ValorMascarado {
   };
 }
 
+/**
+ * Telefone gravado só com dígitos (`85999998888`) → `(85) 99999-8888`.
+ * Cadastro anterior à regra, gravado como foi digitado, volta como está.
+ * Espelha `telefone_para_exibir` do backend.
+ */
+export function telefoneParaExibir(v: string | null | undefined): string {
+  if (!v) return "";
+  return /^\d{10,11}$/.test(v) ? aplicarMascara("telefone", v).valor : v;
+}
+
 // Mesma regra do backend (`schemas/manifestante.py::_EMAIL`): forma, não existência.
 export function emailValido(v: string): boolean {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim());

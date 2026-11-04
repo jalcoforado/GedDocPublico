@@ -5,7 +5,7 @@
   conforme o tipo escolhido.
 - Nome, CPF/CNPJ, celular e e-mail são obrigatórios no cadastro. Na edição,
   campo ausente fica como está, mas obrigatório não pode ser esvaziado.
-- Telefone é gravado formatado; e-mail, aparado e em minúsculas.
+- Telefone é gravado só com dígitos (como o CPF); e-mail, aparado e em minúsculas.
 - O tipo é FK "soft" quanto ao tenant: tipo de outra prefeitura dá 404.
 """
 from __future__ import annotations
@@ -131,7 +131,7 @@ async def test_email_e_opcional(admin_engine, valor):
 
 
 @pytest.mark.asyncio
-async def test_telefone_gravado_formatado_e_email_normalizado(admin_engine):
+async def test_telefone_gravado_so_com_digitos_e_email_normalizado(admin_engine):
     await _cliente(admin_engine)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
@@ -144,12 +144,25 @@ async def test_telefone_gravado_formatado_e_email_normalizado(admin_engine):
             ))
         assert r.status_code == 201, r.text
         m = r.json()
-        assert m["telefone_celular"] == "(85) 99999-8888"
-        assert m["telefone_residencial"] == "(85) 3333-4444"
+        assert m["telefone_celular"] == "85999998888"
+        assert m["telefone_residencial"] == "8533334444"
         assert m["telefone_comercial"] is None
         assert m["email"] == "maria@manifcad.test"
     finally:
         await _fechar()
+
+
+@pytest.mark.parametrize("gravado,exibido", [
+    ("85999998888", "(85) 99999-8888"),
+    ("8533334444", "(85) 3333-4444"),
+    # cadastro anterior à regra, gravado como foi digitado: volta como está
+    ("(85) 9999-8888 ramal 2", "(85) 9999-8888 ramal 2"),
+    (None, ""),
+])
+def test_telefone_para_exibir(gravado, exibido):
+    from app.schemas.manifestante import telefone_para_exibir
+
+    assert telefone_para_exibir(gravado) == exibido
 
 
 @pytest.mark.asyncio
@@ -201,7 +214,7 @@ async def test_edicao_parcial_nao_esvazia_obrigatorio(admin_engine):
         assert so_obs.status_code == 200, so_obs.text
         assert esvazia.status_code == 422, esvazia.text
         assert limpa_opcional.status_code == 200, limpa_opcional.text
-        assert limpa_opcional.json()["telefone_celular"] == "(85) 99999-8888"
+        assert limpa_opcional.json()["telefone_celular"] == "85999998888"
     finally:
         await _fechar()
 

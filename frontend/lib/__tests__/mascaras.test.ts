@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { aceitaLetras, aplicarMascara, emailValido, exemploDaMascara } from "@/lib/mascaras";
+import {
+  aceitaLetras,
+  aplicarMascara,
+  emailValido,
+  exemploDaMascara,
+  telefoneParaExibir,
+} from "@/lib/mascaras";
 
 describe("aplicarMascara", () => {
   it.each([
@@ -41,6 +47,15 @@ describe("aplicarMascara", () => {
 describe("exemploDaMascara e emailValido", () => {
   it("exemplo usa _ nas posições de dígito", () => {
     expect(exemploDaMascara("cnpj")).toBe("__.___.___/____-__");
+  });
+
+  it.each([
+    ["85999998888", "(85) 99999-8888"],
+    ["8533334444", "(85) 3333-4444"],
+    ["(85) 9999-8888 ramal 2", "(85) 9999-8888 ramal 2"],
+    [null, ""],
+  ])("telefoneParaExibir(%j) → %j", (gravado, exibido) => {
+    expect(telefoneParaExibir(gravado)).toBe(exibido);
   });
 
   it("só o CNPJ aceita letras", () => {

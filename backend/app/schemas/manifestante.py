@@ -42,23 +42,33 @@ def documento_valido(natureza: str, doc: str) -> bool:
     return len(doc) == 14 and doc[:12].isalnum() and doc[12:].isdigit()
 
 
-def telefone_formatado(v: object) -> object:
-    """Telefone é guardado no formato de exibição, `(85) 99999-9999`.
+def telefone_so_digitos(v: object) -> object:
+    """Telefone é guardado só com dígitos, como o CPF (decisão de 2026-11-04).
 
-    Ele aparece cru em outras telas (requerente do processo, documentos), então
-    gravar formatado poupa formatar em cada uma. Aceita fixo (10 dígitos) e
-    celular (11); vazio vira `None`.
+    A máscara é da tela; quem exibe o valor cru formata com
+    `telefone_para_exibir` (documentos gerados, prévia da abertura). Aceita
+    fixo (DDD + 8 dígitos) e celular (DDD + 9); vazio vira `None`.
     """
     if not isinstance(v, str):
         return v
     d = "".join(ch for ch in v if ch.isdigit())
     if not d:
         return None
-    if len(d) == 10:
-        return f"({d[:2]}) {d[2:6]}-{d[6:]}"
-    if len(d) == 11:
-        return f"({d[:2]}) {d[2:7]}-{d[7:]}"
-    raise ValueError("telefone deve ter DDD e 8 ou 9 dígitos")
+    if len(d) not in (10, 11):
+        raise ValueError("telefone deve ter DDD e 8 ou 9 dígitos")
+    return d
+
+
+def telefone_para_exibir(v: str | None) -> str:
+    """`85999998888` → `(85) 99999-8888`. Valor que não é só dígitos (cadastro
+    anterior a esta regra, gravado como foi digitado) volta como está."""
+    if not v:
+        return ""
+    if v.isdigit() and len(v) == 10:
+        return f"({v[:2]}) {v[2:6]}-{v[6:]}"
+    if v.isdigit() and len(v) == 11:
+        return f"({v[:2]}) {v[2:7]}-{v[7:]}"
+    return v
 
 
 def email_normalizado(v: object) -> object:
@@ -139,7 +149,7 @@ class ManifestanteCreate(ManifestanteBase):
     _texto = field_validator("nome", "responsavel", "organizacao", mode="before")(texto_aparado)
     _telefones = field_validator(
         "telefone_celular", "telefone_residencial", "telefone_comercial", mode="before"
-    )(telefone_formatado)
+    )(telefone_so_digitos)
     _email = field_validator("email", mode="before")(email_normalizado)
 
     @field_validator("nome", "cpf_cnpj", "telefone_celular")
@@ -170,7 +180,7 @@ class ManifestanteUpdate(BaseModel):
     _texto = field_validator("nome", "responsavel", "organizacao", mode="before")(texto_aparado)
     _telefones = field_validator(
         "telefone_celular", "telefone_residencial", "telefone_comercial", mode="before"
-    )(telefone_formatado)
+    )(telefone_so_digitos)
     _email = field_validator("email", mode="before")(email_normalizado)
 
     @field_validator("id_tipo_manifestante", "nome", "cpf_cnpj", "telefone_celular", "ativo")

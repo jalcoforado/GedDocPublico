@@ -36,6 +36,7 @@ import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useAssuntosAll } from "@/lib/assuntos";
 import { useManifestantesBusca } from "@/lib/manifestantes";
+import { telefoneParaExibir } from "@/lib/mascaras";
 
 /** Espelha o regex de `backend/app/services/placeholders.py::resolve()`. */
 const TOKEN_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
@@ -268,11 +269,11 @@ export default function NovoProcessoPage() {
       "requerente.nome": manifestante?.nome ?? "",
       "requerente.cpf_cnpj": manifestante?.cpf_cnpj ?? "",
       "requerente.email": manifestante?.email ?? "",
-      "requerente.telefone":
+      "requerente.telefone": telefoneParaExibir(
         manifestante?.telefone_celular ||
-        manifestante?.telefone_residencial ||
-        manifestante?.telefone_comercial ||
-        "",
+          manifestante?.telefone_residencial ||
+          manifestante?.telefone_comercial,
+      ),
       "processo.assunto": assunto?.assunto ?? "",
       "processo.observacao": form.observacao,
       "unidade.nome": unidade?.unidade_trabalho ?? "",
