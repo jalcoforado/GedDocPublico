@@ -87,7 +87,6 @@ export default function ManifestantesPage() {
           name: "email",
           label: "E-mail",
           type: "email",
-          required: true,
           placeholder: "nome@exemplo.com.br",
         },
         { name: "telefone_celular", label: "Celular", type: "text", required: true, mascara: "celular" },

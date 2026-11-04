@@ -118,7 +118,8 @@ class ManifestanteBase(BaseModel):
 
 
 class ManifestanteCreate(ManifestanteBase):
-    """Cadastro pela tela: nome, documento, celular e e-mail são obrigatórios.
+    """Cadastro pela tela: nome, documento e celular são obrigatórios. O e-mail
+    é opcional (decisão de 2026-11-04), mas, se vier, tem de ter forma de e-mail.
 
     A obrigatoriedade mora aqui e não em `ManifestanteBase`, que também molda
     `ManifestanteOut`: há cadastros antigos sem celular, e eles continuam
@@ -134,7 +135,6 @@ class ManifestanteCreate(ManifestanteBase):
     cpf_cnpj: str | None = Field(max_length=14)
     nome: str | None = Field(max_length=255)
     telefone_celular: str | None
-    email: str | None
 
     _texto = field_validator("nome", "responsavel", "organizacao", mode="before")(texto_aparado)
     _telefones = field_validator(
@@ -142,7 +142,7 @@ class ManifestanteCreate(ManifestanteBase):
     )(telefone_formatado)
     _email = field_validator("email", mode="before")(email_normalizado)
 
-    @field_validator("nome", "cpf_cnpj", "telefone_celular", "email")
+    @field_validator("nome", "cpf_cnpj", "telefone_celular")
     @classmethod
     def _obrigatorio(cls, v: object) -> object:
         if v is None:
@@ -173,7 +173,7 @@ class ManifestanteUpdate(BaseModel):
     )(telefone_formatado)
     _email = field_validator("email", mode="before")(email_normalizado)
 
-    @field_validator("id_tipo_manifestante", "nome", "cpf_cnpj", "telefone_celular", "email", "ativo")
+    @field_validator("id_tipo_manifestante", "nome", "cpf_cnpj", "telefone_celular", "ativo")
     @classmethod
     def _obrigatorio_nao_esvazia(cls, v: object) -> object:
         if v is None:

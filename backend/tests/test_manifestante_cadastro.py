@@ -63,7 +63,7 @@ async def test_tenant_novo_nasce_com_tipo_fisico_e_juridico(admin_engine):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("campo", ["nome", "cpf_cnpj", "telefone_celular", "email"])
+@pytest.mark.parametrize("campo", ["nome", "cpf_cnpj", "telefone_celular"])
 @pytest.mark.parametrize("valor", ["ausente", None, "", "   "])
 async def test_obrigatorios_do_cadastro(admin_engine, campo, valor):
     await _cliente(admin_engine)
@@ -104,6 +104,28 @@ async def test_documento_segue_a_natureza_do_tipo(admin_engine, natureza, doc, o
         else:
             assert r.status_code == 422, r.text
             assert ("CNPJ" if natureza == "J" else "CPF") in r.json()["detail"]
+    finally:
+        await _fechar()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("valor", ["ausente", None, "", "   "])
+async def test_email_e_opcional(admin_engine, valor):
+    """E-mail opcional (decisão de 2026-11-04): ausente ou vazio grava `None`;
+    na edição, dá para apagá-lo."""
+    await _cliente(admin_engine)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            body = _payload((await _tipos(c))["F"])
+            if valor == "ausente":
+                del body["email"]
+            else:
+                body["email"] = valor
+            r = await c.post(URL, json=body)
+            apaga = await c.put(f"{URL}/{r.json()['id']}", json={"email": ""})
+        assert r.status_code == 201, r.text
+        assert r.json()["email"] is None
+        assert apaga.status_code == 200 and apaga.json()["email"] is None
     finally:
         await _fechar()
 
