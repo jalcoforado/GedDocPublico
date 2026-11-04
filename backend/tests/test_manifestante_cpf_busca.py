@@ -58,6 +58,7 @@ async def _novo(c: AsyncClient, **campos) -> dict:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("natureza,digitado,gravado", [
     ("J", "12.345.678/0001-90", "12345678000190"),
+    ("J", "12.abc.345/01de-35", "12ABC34501DE35"),
     ("F", "123.456.789-09", "12345678909"),
     ("F", " 123 456 789 09 ", "12345678909"),
     ("F", "12345678909", "12345678909"),
@@ -109,6 +110,22 @@ async def test_busca_com_mascara_encontra_cadastro_so_com_digitos(admin_engine, 
             r = await c.get("/api/v2/manifestantes", params={"q": busca, "page_size": 20})
         assert r.status_code == 200, r.text
         assert [m["nome"] for m in r.json()["items"]] == ["Maria Busca"]
+    finally:
+        await _fechar()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("busca", ["12.ABC.345/01DE-35", "12.abc.345", "12ABC34501DE35", "01DE-35"])
+async def test_busca_acha_cnpj_alfanumerico_com_mascara(admin_engine, busca):
+    t = await _cliente(admin_engine)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            await c.post("/api/v2/manifestantes", json=await _novo(
+                c, natureza="J", nome="Empresa Alfa", cpf_cnpj="12ABC34501DE35"))
+            lista = await c.get("/api/v2/manifestantes", params={"q": busca, "page_size": 20})
+            global_ = await c.get("/api/v2/busca", params={"q": busca})
+        assert [m["nome"] for m in lista.json()["items"]] == ["Empresa Alfa"]
+        assert [m["nome"] for m in global_.json()["manifestantes"]] == ["Empresa Alfa"]
     finally:
         await _fechar()
 

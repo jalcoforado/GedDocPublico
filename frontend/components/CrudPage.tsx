@@ -16,6 +16,7 @@ import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
+  aceitaLetras,
   aplicarMascara,
   emailValido,
   exemploDaMascara,
@@ -106,7 +107,9 @@ function InputMascarado({
       <Input
         {...props}
         type="text"
-        inputMode="numeric"
+        // CNPJ alfanumérico precisa do teclado com letras no celular.
+        inputMode={aceitaLetras(mascara) ? "text" : "numeric"}
+        autoCapitalize={aceitaLetras(mascara) ? "characters" : undefined}
         autoComplete="off"
         value={valor}
         onChange={(e) => onChange(aplicarMascara(mascara, e.target.value).valor)}

@@ -5,8 +5,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # 'F' pessoa física, 'J' pessoa jurídica (migration 0136).
 Natureza = Literal["F", "J"]
-DIGITOS_DO_DOCUMENTO: dict[str, int] = {"F": 11, "J": 14}
 NOME_DO_DOCUMENTO: dict[str, str] = {"F": "CPF", "J": "CNPJ"}
+FORMATO_DO_DOCUMENTO: dict[str, str] = {
+    "F": "11 dígitos",
+    "J": "14 caracteres: 12 letras ou dígitos e 2 dígitos finais",
+}
 
 # Conferência de forma, não de existência: o e-mail de verdade só se prova
 # entregando. `EmailStr` não serve aqui — recusa os domínios reservados
@@ -14,17 +17,29 @@ NOME_DO_DOCUMENTO: dict[str, str] = {"F": "CPF", "J": "CNPJ"}
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-def so_digitos_cpf_cnpj(v: object) -> object:
-    """CPF/CNPJ é guardado só com dígitos, venha com máscara ou não.
+def normaliza_cpf_cnpj(v: object) -> object:
+    """CPF/CNPJ é guardado sem máscara, venha com ela ou não.
 
     O portal do cidadão liga cidadão a processo por igualdade exata de
     `cpf_cnpj`, e o do cidadão é guardado sem máscara: gravado com pontos e
     traço, o manifestante nunca aparecia para ele. Vazio vira `None`.
+
+    Fica só letra e dígito, em maiúsculas: o CNPJ alfanumérico (IN RFB
+    2.229/2024, emitido desde julho de 2026) tem letras nas 12 primeiras
+    posições. Se a tela mandar letra num CPF, `_conferir_documento` recusa.
     """
     if isinstance(v, str):
-        digitos = "".join(ch for ch in v if ch.isdigit())
-        return digitos or None
+        chave = "".join(ch for ch in v if ch.isascii() and ch.isalnum()).upper()
+        return chave or None
     return v
+
+
+def documento_valido(natureza: str, doc: str) -> bool:
+    """CPF: 11 dígitos. CNPJ: 12 posições de letra ou dígito + 2 dígitos
+    verificadores (o DV continua numérico também no alfanumérico)."""
+    if natureza == "F":
+        return len(doc) == 11 and doc.isdigit()
+    return len(doc) == 14 and doc[:12].isalnum() and doc[12:].isdigit()
 
 
 def telefone_formatado(v: object) -> object:
@@ -99,7 +114,7 @@ class ManifestanteBase(BaseModel):
     observacao: str | None = None
     ativo: bool = True
 
-    _cpf_cnpj = field_validator("cpf_cnpj", mode="before")(so_digitos_cpf_cnpj)
+    _cpf_cnpj = field_validator("cpf_cnpj", mode="before")(normaliza_cpf_cnpj)
 
 
 class ManifestanteCreate(ManifestanteBase):
@@ -109,8 +124,8 @@ class ManifestanteCreate(ManifestanteBase):
     `ManifestanteOut`: há cadastros antigos sem celular, e eles continuam
     sendo lidos. O portal do cidadão cria manifestante pelo serviço
     (`cidadao_processos`), sem passar por este schema.
-    Que o documento tenha 11 (CPF) ou 14 (CNPJ) dígitos depende do tipo, e
-    por isso é conferido no router, que carrega o tipo.
+    Se o documento é CPF ou CNPJ depende do tipo, e por isso o formato é
+    conferido no router, que carrega o tipo (`documento_valido`).
     """
 
     # Sem default: a chave ausente já é recusada. `| None` deixa o vazio
@@ -151,7 +166,7 @@ class ManifestanteUpdate(BaseModel):
     observacao: str | None = None
     ativo: bool | None = None
 
-    _cpf_cnpj = field_validator("cpf_cnpj", mode="before")(so_digitos_cpf_cnpj)
+    _cpf_cnpj = field_validator("cpf_cnpj", mode="before")(normaliza_cpf_cnpj)
     _texto = field_validator("nome", "responsavel", "organizacao", mode="before")(texto_aparado)
     _telefones = field_validator(
         "telefone_celular", "telefone_residencial", "telefone_comercial", mode="before"

@@ -11,7 +11,7 @@ from ..database import get_db, tenant_filter
 from ..models import Manifestante, TipoManifestante, Usuario
 from ..schemas.common import Paginated
 from ..schemas.manifestante import (
-    DIGITOS_DO_DOCUMENTO,
+    FORMATO_DO_DOCUMENTO,
     NOME_DO_DOCUMENTO,
     ManifestanteCreate,
     ManifestanteOut,
@@ -19,6 +19,7 @@ from ..schemas.manifestante import (
     TipoManifestanteCreate,
     TipoManifestanteOut,
     TipoManifestanteUpdate,
+    documento_valido,
 )
 from ._crud import get_or_404, paginated_list
 
@@ -105,10 +106,11 @@ async def list_manifestantes(
     q: str | None = None,
     id_tipo_manifestante: int | None = None,
 ):
-    # CPF/CNPJ é gravado só com dígitos: busca que parece documento com
-    # máscara ("123.456.789-09") procura pelos dígitos.
-    if q and re.fullmatch(r"[\d.\-/\s]+", q) and any(ch.isdigit() for ch in q):
-        q = re.sub(r"\D", "", q)
+    # CPF/CNPJ é gravado sem máscara: busca que parece documento com máscara
+    # ("123.456.789-09", "12.ABC.345/01DE-35") procura sem a pontuação. Ter
+    # dígito é o que separa documento de nome; e-mail tem "@" e fica de fora.
+    if q and re.fullmatch(r"[0-9A-Za-z.\-/\s]+", q) and any(ch.isdigit() for ch in q):
+        q = re.sub(r"[^0-9A-Za-z]", "", q)
     extra = (
         Manifestante.id_tipo_manifestante == id_tipo_manifestante
         if id_tipo_manifestante
@@ -129,16 +131,16 @@ async def list_manifestantes(
 
 
 def _conferir_documento(tipo: TipoManifestante, cpf_cnpj: str | None) -> None:
-    """CPF para tipo de pessoa física, CNPJ para jurídica — pela contagem de
-    dígitos (o schema já guardou só os dígitos)."""
+    """CPF para tipo de pessoa física, CNPJ (numérico ou alfanumérico) para
+    jurídica. O schema já tirou a máscara."""
     if cpf_cnpj is None:
         return
-    if len(cpf_cnpj) != DIGITOS_DO_DOCUMENTO[tipo.natureza]:
+    if not documento_valido(tipo.natureza, cpf_cnpj):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
                 f"{NOME_DO_DOCUMENTO[tipo.natureza]} deve ter "
-                f"{DIGITOS_DO_DOCUMENTO[tipo.natureza]} dígitos para o tipo "
+                f"{FORMATO_DO_DOCUMENTO[tipo.natureza]} para o tipo "
                 f"\"{tipo.tipo_manifestante}\"."
             ),
         )

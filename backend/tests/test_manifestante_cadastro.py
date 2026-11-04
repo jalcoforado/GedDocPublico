@@ -88,6 +88,11 @@ async def test_obrigatorios_do_cadastro(admin_engine, campo, valor):
     ("F", "1234567890", False),
     ("J", "12.345.678/0001-90", True),
     ("J", "123.456.789-09", False),
+    # CNPJ alfanumérico (IN RFB 2.229/2024): letra só nas 12 primeiras posições
+    ("J", "12.ABC.345/01DE-35", True),
+    ("J", "12.abc.345/01de-35", True),
+    ("J", "12.ABC.345/01DE-3X", False),
+    ("F", "123.ABC.789-09", False),
 ])
 async def test_documento_segue_a_natureza_do_tipo(admin_engine, natureza, doc, ok):
     await _cliente(admin_engine)

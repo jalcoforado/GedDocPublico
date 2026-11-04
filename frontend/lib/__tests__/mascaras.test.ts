@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { aplicarMascara, emailValido, exemploDaMascara } from "@/lib/mascaras";
+import { aceitaLetras, aplicarMascara, emailValido, exemploDaMascara } from "@/lib/mascaras";
 
 describe("aplicarMascara", () => {
   it.each([
@@ -15,6 +15,13 @@ describe("aplicarMascara", () => {
     ["celular", "85", "(85", ") _____-____", false],
     ["telefone", "8533334444", "(85) 3333-4444", "", true],
     ["telefone", "85333344445", "(85) 33334-4445", "", true],
+    // CNPJ alfanumérico: letra nas 12 primeiras posições, DV só número
+    ["cnpj", "12abc34501de35", "12.ABC.345/01DE-35", "", true],
+    ["cnpj", "12.ABC.345/01DE-35", "12.ABC.345/01DE-35", "", true],
+    ["cnpj", "12ABC34501DEX3", "12.ABC.345/01DE-3", "_", false],
+    ["cnpj", "12ABC34501DE", "12.ABC.345/01DE", "-__", false],
+    ["cpf", "123ABC456", "123.456", ".___-__", false],
+    ["cpf", "123", "123", ".___.___-__", false],
   ] as const)("%s %j → %j + guia %j", (m, entrada, valor, guia, completo) => {
     expect(aplicarMascara(m, entrada)).toEqual({ valor, guia, completo });
   });
@@ -34,6 +41,12 @@ describe("aplicarMascara", () => {
 describe("exemploDaMascara e emailValido", () => {
   it("exemplo usa _ nas posições de dígito", () => {
     expect(exemploDaMascara("cnpj")).toBe("__.___.___/____-__");
+  });
+
+  it("só o CNPJ aceita letras", () => {
+    expect(aceitaLetras("cnpj")).toBe(true);
+    expect(aceitaLetras("cpf")).toBe(false);
+    expect(aceitaLetras("celular")).toBe(false);
   });
 
   it.each([
