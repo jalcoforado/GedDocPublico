@@ -30,7 +30,6 @@ import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { SectionCard } from "@/components/ui/section-card";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
-import { UnidadePicker } from "@/components/UnidadePicker";
 import { api, organogramaApi, type ProcessoCreateInput } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -201,11 +200,21 @@ export default function NovoProcessoPage() {
     queryKey: ["templates-documento", "ativos"],
     queryFn: () => api.templatesDocumento.list({ apenas_ativos: true }),
   });
-  // Mesma queryKey do UnidadePicker — reaproveita o cache se ele já buscou.
+  // Mesma queryKey do UnidadePicker (balcão, dashboard) — cache compartilhado.
   const organogramaQ = useQuery({
     queryKey: ["organograma"],
     queryFn: () => organogramaApi.tree(),
   });
+
+  // Unidade proprietária na mesma lista com busca dos campos acima. Era o
+  // UnidadePicker (árvore do organograma num modal), que não tinha o X e, por
+  // só buscar as unidades ao abrir, mostrava o placeholder mesmo com a
+  // unidade sugerida já escolhida.
+  const unidadeOptions = useMemo<ComboboxOption[]>(() => {
+    return (organogramaQ.data ?? [])
+      .map((u) => ({ value: u.id, label: u.unidade_trabalho, hint: u.sigla ?? undefined }))
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  }, [organogramaQ.data]);
 
   const tipoOptions = useMemo<ComboboxOption<{ id: number }>[]>(() => {
     return (tiposProcessoQ.data ?? []).map((t) => ({
@@ -498,17 +507,24 @@ export default function NovoProcessoPage() {
           </div>
 
           <div>
-            <Label required>Unidade proprietária</Label>
-            <UnidadePicker
+            <Label htmlFor="unidade" required>
+              Unidade proprietária
+            </Label>
+            <Combobox
+              id="unidade"
+              options={unidadeOptions}
               value={
                 form.id_unidade_proprietaria === ""
                   ? null
                   : form.id_unidade_proprietaria
               }
               onChange={(v) =>
-                setForm({ ...form, id_unidade_proprietaria: v ?? "" })
+                setForm({ ...form, id_unidade_proprietaria: typeof v === "number" ? v : "" })
               }
-              placeholder="Escolher unidade proprietária no organograma"
+              placeholder="Buscar unidade…"
+              searchPlaceholder="Nome ou sigla da unidade…"
+              emptyText="Nenhuma unidade encontrada."
+              loading={organogramaQ.isLoading}
             />
             <p className="mt-1 text-xs text-foreground-subtle">
               Sugerida: sua unidade
