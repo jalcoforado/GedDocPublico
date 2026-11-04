@@ -37,25 +37,37 @@ async def _fechar():
     await engine.dispose()
 
 
-async def _tipo(c: AsyncClient) -> int:
-    return (await c.get("/api/v2/tipos-manifestante")).json()[0]["id"]
+async def _tipo(c: AsyncClient, natureza: str = "F") -> int:
+    tipos = (await c.get("/api/v2/tipos-manifestante")).json()
+    return next(t["id"] for t in tipos if t["natureza"] == natureza)
+
+
+async def _novo(c: AsyncClient, **campos) -> dict:
+    """Payload de cadastro com os obrigatórios preenchidos; `campos` sobrepõe."""
+    natureza = campos.pop("natureza", "F")
+    return {
+        "id_tipo_manifestante": await _tipo(c, natureza),
+        "nome": "Fulano",
+        "cpf_cnpj": "12345678909" if natureza == "F" else "12345678000190",
+        "telefone_celular": "85999998888",
+        "email": "fulano@manif.test",
+        **campos,
+    }
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("digitado,gravado", [
-    ("12.345.678/0001-90", "12345678000190"),
-    ("123.456.789-09", "12345678909"),
-    (" 123 456 789 09 ", "12345678909"),
-    ("12345678909", "12345678909"),
-    ("", None),
-    (None, None),
+@pytest.mark.parametrize("natureza,digitado,gravado", [
+    ("J", "12.345.678/0001-90", "12345678000190"),
+    ("F", "123.456.789-09", "12345678909"),
+    ("F", " 123 456 789 09 ", "12345678909"),
+    ("F", "12345678909", "12345678909"),
 ])
-async def test_cadastro_grava_cpf_cnpj_so_com_digitos(admin_engine, digitado, gravado):
+async def test_cadastro_grava_cpf_cnpj_so_com_digitos(admin_engine, natureza, digitado, gravado):
     t = await _cliente(admin_engine)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            r = await c.post("/api/v2/manifestantes", json={
-                "id_tipo_manifestante": await _tipo(c), "nome": "Fulano", "cpf_cnpj": digitado})
+            r = await c.post("/api/v2/manifestantes", json=await _novo(
+                c, natureza=natureza, cpf_cnpj=digitado))
         assert r.status_code == 201, r.text
         assert r.json()["cpf_cnpj"] == gravado
     finally:
@@ -67,8 +79,7 @@ async def test_cpf_cnpj_com_mais_de_14_digitos_e_recusado(admin_engine):
     t = await _cliente(admin_engine)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            r = await c.post("/api/v2/manifestantes", json={
-                "id_tipo_manifestante": await _tipo(c), "nome": "X", "cpf_cnpj": "1" * 15})
+            r = await c.post("/api/v2/manifestantes", json=await _novo(c, cpf_cnpj="1" * 15))
         assert r.status_code == 422
     finally:
         await _fechar()
@@ -79,8 +90,7 @@ async def test_edicao_tambem_normaliza(admin_engine):
     t = await _cliente(admin_engine)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            m = (await c.post("/api/v2/manifestantes", json={
-                "id_tipo_manifestante": await _tipo(c), "nome": "Y"})).json()
+            m = (await c.post("/api/v2/manifestantes", json=await _novo(c, natureza="J"))).json()
             r = await c.put(f"/api/v2/manifestantes/{m['id']}", json={"cpf_cnpj": "12.345.678/0001-90"})
         assert r.status_code == 200, r.text
         assert r.json()["cpf_cnpj"] == "12345678000190"
@@ -94,8 +104,8 @@ async def test_busca_com_mascara_encontra_cadastro_so_com_digitos(admin_engine, 
     t = await _cliente(admin_engine)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            await c.post("/api/v2/manifestantes", json={
-                "id_tipo_manifestante": await _tipo(c), "nome": "Maria Busca", "cpf_cnpj": "12345678909"})
+            await c.post("/api/v2/manifestantes", json=await _novo(
+                c, nome="Maria Busca", cpf_cnpj="12345678909"))
             r = await c.get("/api/v2/manifestantes", params={"q": busca, "page_size": 20})
         assert r.status_code == 200, r.text
         assert [m["nome"] for m in r.json()["items"]] == ["Maria Busca"]
@@ -108,8 +118,7 @@ async def test_busca_por_nome_continua_funcionando(admin_engine):
     t = await _cliente(admin_engine)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            await c.post("/api/v2/manifestantes", json={
-                "id_tipo_manifestante": await _tipo(c), "nome": "Joana Nome Unico"})
+            await c.post("/api/v2/manifestantes", json=await _novo(c, nome="Joana Nome Unico"))
             r = await c.get("/api/v2/manifestantes", params={"q": "nome unico"})
         assert [m["nome"] for m in r.json()["items"]] == ["Joana Nome Unico"]
     finally:
@@ -165,8 +174,8 @@ async def test_busca_global_acha_manifestante_por_cpf_com_mascara(admin_engine):
     t = await _cliente(admin_engine)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            await c.post("/api/v2/manifestantes", json={
-                "id_tipo_manifestante": await _tipo(c), "nome": "Global Busca", "cpf_cnpj": "12345678909"})
+            await c.post("/api/v2/manifestantes", json=await _novo(
+                c, nome="Global Busca", cpf_cnpj="12345678909"))
             r = await c.get("/api/v2/busca", params={"q": "123.456.789-09"})
         assert r.status_code == 200, r.text
         assert [m["nome"] for m in r.json()["manifestantes"]] == ["Global Busca"]

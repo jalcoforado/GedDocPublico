@@ -1,6 +1,6 @@
 import re
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,8 @@ from ..database import get_db, tenant_filter
 from ..models import Manifestante, TipoManifestante, Usuario
 from ..schemas.common import Paginated
 from ..schemas.manifestante import (
+    DIGITOS_DO_DOCUMENTO,
+    NOME_DO_DOCUMENTO,
     ManifestanteCreate,
     ManifestanteOut,
     ManifestanteUpdate,
@@ -126,6 +128,22 @@ async def list_manifestantes(
     )
 
 
+def _conferir_documento(tipo: TipoManifestante, cpf_cnpj: str | None) -> None:
+    """CPF para tipo de pessoa física, CNPJ para jurídica — pela contagem de
+    dígitos (o schema já guardou só os dígitos)."""
+    if cpf_cnpj is None:
+        return
+    if len(cpf_cnpj) != DIGITOS_DO_DOCUMENTO[tipo.natureza]:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"{NOME_DO_DOCUMENTO[tipo.natureza]} deve ter "
+                f"{DIGITOS_DO_DOCUMENTO[tipo.natureza]} dígitos para o tipo "
+                f"\"{tipo.tipo_manifestante}\"."
+            ),
+        )
+
+
 @router.post(
     "/manifestantes", response_model=ManifestanteOut, status_code=status.HTTP_201_CREATED
 )
@@ -135,6 +153,13 @@ async def create_manifestante(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
+    # O tipo é FK "soft" quanto ao tenant: a FK do Postgres aceitaria o tipo
+    # de outra prefeitura. Carregar com o tenant fecha isso e dá a natureza.
+    tipo = await get_or_404(
+        db, TipoManifestante, payload.id_tipo_manifestante,
+        tenant_id=tenant_id, label="Tipo de manifestante",
+    )
+    _conferir_documento(tipo, payload.cpf_cnpj)
     m = Manifestante(**payload.model_dump(), tenant_id=tenant_id, excluido=False)
     db.add(m)
     await db.commit()
@@ -151,7 +176,14 @@ async def update_manifestante(
     db: AsyncSession = Depends(get_db),
 ):
     m = await get_or_404(db, Manifestante, manif_id, tenant_id=tenant_id, label="Manifestante")
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    mudancas = payload.model_dump(exclude_unset=True)
+    if "id_tipo_manifestante" in mudancas or "cpf_cnpj" in mudancas:
+        tipo = await get_or_404(
+            db, TipoManifestante, mudancas.get("id_tipo_manifestante", m.id_tipo_manifestante),
+            tenant_id=tenant_id, label="Tipo de manifestante",
+        )
+        _conferir_documento(tipo, mudancas.get("cpf_cnpj", m.cpf_cnpj))
+    for k, v in mudancas.items():
         setattr(m, k, v)
     await db.commit()
     await db.refresh(m)
