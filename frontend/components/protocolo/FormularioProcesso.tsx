@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   Building2,
@@ -174,6 +174,7 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
   const toast = useToast();
   const confirm = useConfirm();
   const { user } = useAuth();
+  const qc = useQueryClient();
   const editando = rascunhoId !== undefined;
 
   const [form, setForm] = useState<FormState>({
@@ -352,6 +353,8 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
       } catch {
         // ignore
       }
+      // As listas (inclusive "Rascunhos") têm de mostrar o processo novo ao voltar.
+      qc.invalidateQueries({ queryKey: ["processos"] });
       // E3 — rascunho nasce sem número; a mensagem não pode prometer um.
       toast.success(
         p.numero_processo
@@ -376,6 +379,11 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
       return abrir ? api.processos.abrirRascunho(id) : salvo;
     },
     onSuccess: (p) => {
+      // A tela do processo lê o cache (staleTime de 30 s), que ainda guarda o
+      // rascunho de antes da edição — foi dele que este formulário se
+      // preencheu. Grava a resposta do servidor ali, e as listas recarregam.
+      qc.setQueryData(["processo", p.id], p);
+      qc.invalidateQueries({ queryKey: ["processos"] });
       toast.success(
         p.numero_processo
           ? `Processo ${p.numero_processo} aberto.`
