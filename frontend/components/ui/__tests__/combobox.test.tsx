@@ -26,6 +26,24 @@ describe("Combobox — regressão do fluxo básico", () => {
     expect(onChange).toHaveBeenCalledWith(2, expect.objectContaining({ value: 2 }));
   });
 
+  it("busca ignora acento e maiúsculas", async () => {
+    render(
+      <Combobox
+        options={[
+          { value: 1, label: "ATENÇÃO PRIMÁRIA À SAÚDE" },
+          { value: 2, label: "Ouvidoria" },
+        ]}
+        value={null}
+        onChange={() => {}}
+      />,
+    );
+    await userEvent.click(screen.getByRole("combobox"));
+    await userEvent.type(screen.getByPlaceholderText("Buscar…"), "atencao primaria a saude");
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "ATENÇÃO PRIMÁRIA À SAÚDE",
+    ]);
+  });
+
   it("navega com setas e seleciona com Enter", async () => {
     const onChange = vi.fn();
     render(<Combobox options={OPCOES} value={null} onChange={onChange} />);
@@ -80,6 +98,15 @@ describe("Combobox — limpar seleção acessível", () => {
     await userEvent.keyboard("{Enter}");
     expect(onChange).toHaveBeenCalledWith(null, null);
     expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("com seleção, a seta continua no canto: o espaço do X é recuo antes dela", () => {
+    // jsdom não calcula layout; a prova visual está no passeio Playwright.
+    // Aqui trava a causa: margem à direita da seta a desloca para baixo do X.
+    render(<Combobox options={OPCOES} value={1} onChange={() => {}} />);
+    const seta = screen.getByTestId("combobox-seta");
+    expect(seta.className).toContain("pl-7");
+    expect(seta.className).not.toMatch(/\bmr-/);
   });
 
   it("sem seleção (ou disabled) o limpar não existe", () => {

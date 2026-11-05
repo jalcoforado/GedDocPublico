@@ -322,14 +322,18 @@ async def _resolver_ou_criar_manifestante(
     if manifestante is not None:
         return manifestante
 
+    # O tipo segue o documento do cidadão (14 dígitos é CNPJ); sem tipo
+    # daquela natureza, cai no primeiro tipo ativo, como antes da 0136.
+    natureza = "J" if len(cidadao.cpf_cnpj or "") == 14 else "F"
     tipo_pf = (
         await db.execute(
             select(TipoManifestante)
             .where(
                 TipoManifestante.tenant_id == tenant_id,
                 TipoManifestante.ativo.is_(True),
+                TipoManifestante.excluido.is_(False),
             )
-            .order_by(TipoManifestante.id)
+            .order_by((TipoManifestante.natureza != natureza), TipoManifestante.id)
             .limit(1)
         )
     ).scalar_one_or_none()

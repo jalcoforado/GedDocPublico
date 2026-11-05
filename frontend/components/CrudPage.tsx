@@ -15,8 +15,16 @@ import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import {
+  aceitaLetras,
+  aplicarMascara,
+  documentoValido,
+  emailValido,
+  exemploDaMascara,
+  type Mascara,
+} from "@/lib/mascaras";
 
-export type FieldType = "text" | "number" | "select" | "checkbox" | "textarea";
+export type FieldType = "text" | "email" | "number" | "select" | "checkbox" | "textarea";
 
 export interface SelectOption {
   value: string | number;
@@ -25,12 +33,111 @@ export interface SelectOption {
 
 export interface CrudField<T = any> {
   name: keyof T & string;
-  label: string;
+  /** Função quando o rótulo depende do formulário (ex.: CPF × CNPJ pelo tipo). */
+  label: string | ((form: any) => string);
   type: FieldType;
   required?: boolean;
   options?: SelectOption[];
   placeholder?: string;
   colSpan?: 1 | 2;
+  /**
+   * Máscara de digitação (só `type: "text"`). Função quando depende do
+   * formulário. O valor vai formatado ao servidor; vazio vai como `null`.
+   */
+  mascara?: Mascara | ((form: any) => Mascara);
+  /** Checkbox: texto ao lado da caixa (o `label` fica como título acima). */
+  textoAoLado?: string;
+}
+
+function resolver<V>(v: V | ((form: any) => V), form: any): V {
+  return typeof v === "function" ? (v as (form: any) => V)(form) : v;
+}
+
+function vazio(v: unknown): boolean {
+  return v === null || v === undefined || (typeof v === "string" && v.trim() === "");
+}
+
+/**
+ * Documento que veio do cadastro e não foi tocado não é reconferido: há
+ * cadastro anterior à conferência do dígito verificador (a demonstração usa
+ * CPF fictício), e exigir a correção travaria trocar o telefone. O backend
+ * faz o mesmo (`routers/manifestantes.py::update_manifestante`).
+ */
+function docAlterado(m: Mascara, v: unknown, original: unknown): boolean {
+  return original === undefined || aplicarMascara(m, v).valor !== aplicarMascara(m, original).valor;
+}
+
+/**
+ * Erros por campo antes de enviar. `required` só valia no `<input>` nativo,
+ * e o Salvar do rodapé fica fora do `<form>`: o navegador nunca conferia, e
+ * campo obrigatório vazio chegava ao servidor. Na edição, `original` é o
+ * registro como abriu no formulário.
+ */
+function validar(fields: CrudField[], form: any, original?: any): Record<string, string> {
+  const erros: Record<string, string> = {};
+  for (const f of fields) {
+    if (f.type === "checkbox") continue;
+    const v = form[f.name];
+    if (vazio(v)) {
+      if (f.required) erros[f.name] = "Campo obrigatório.";
+      continue;
+    }
+    const m = f.mascara && resolver(f.mascara, form);
+    if (m && !aplicarMascara(m, v).completo) {
+      erros[f.name] = `Preencha no formato ${exemploDaMascara(m)}.`;
+    } else if ((m === "cpf" || m === "cnpj") && docAlterado(m, v, original?.[f.name]) && !documentoValido(m, v)) {
+      erros[f.name] = `${m.toUpperCase()} inválido: confira os dígitos.`;
+    } else if (f.type === "email" && !emailValido(String(v))) {
+      erros[f.name] = "E-mail inválido.";
+    }
+  }
+  return erros;
+}
+
+function campoMascarado(m: Mascara, v: unknown): string | null {
+  const { valor } = aplicarMascara(m, v);
+  return valor === "" ? null : valor;
+}
+
+/**
+ * Campo com máscara e guia no fundo: o texto digitado fica no `<input>`, e
+ * uma camada por cima, que não recebe clique, repete o digitado invisível
+ * seguido do resto do padrão em cinza. Mesma borda e padding do `Input`, para
+ * a guia começar exatamente onde o texto termina.
+ */
+function InputMascarado({
+  mascara,
+  value,
+  onChange,
+  ...props
+}: {
+  mascara: Mascara;
+  value: unknown;
+  onChange: (valor: string) => void;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">) {
+  const { valor, guia } = aplicarMascara(mascara, value);
+  return (
+    <div className="relative">
+      <Input
+        {...props}
+        type="text"
+        // CNPJ alfanumérico precisa do teclado com letras no celular.
+        inputMode={aceitaLetras(mascara) ? "text" : "numeric"}
+        autoCapitalize={aceitaLetras(mascara) ? "characters" : undefined}
+        autoComplete="off"
+        value={valor}
+        onChange={(e) => onChange(aplicarMascara(mascara, e.target.value).valor)}
+      />
+      <span
+        aria-hidden="true"
+        data-testid={`guia-${props.id}`}
+        className="pointer-events-none absolute inset-0 flex items-center whitespace-pre rounded-input border border-transparent px-3 text-base"
+      >
+        <span className="invisible">{valor}</span>
+        <span className="text-muted-foreground/70">{guia}</span>
+      </span>
+    </div>
+  );
 }
 
 export interface CrudColumn<T> {
@@ -90,6 +197,7 @@ export function CrudPage<T extends { id: number }>({
   const [editing, setEditing] = useState<T | null>(null);
   const [form, setForm] = useState<any>(emptyForm);
   const [err, setErr] = useState<string | null>(null);
+  const [erros, setErros] = useState<Record<string, string>>({});
   const [q, setQ] = useState("");
   // Termo efetivado após o debounce: o input responde a cada tecla via `q`,
   // mas quem dispara busca (onSearchChange → queryKey do caller) e reset de
@@ -152,12 +260,14 @@ export function CrudPage<T extends { id: number }>({
     setEditing(null);
     setForm(emptyForm);
     setErr(null);
+    setErros({});
   }
 
   function openNew() {
     setEditing(null);
     setForm(emptyForm);
     setErr(null);
+    setErros({});
     setOpen(true);
   }
 
@@ -165,14 +275,32 @@ export function CrudPage<T extends { id: number }>({
     setEditing(row);
     setForm(rowToForm ? rowToForm(row) : { ...row });
     setErr(null);
+    setErros({});
     setOpen(true);
+  }
+
+  function mudar(nome: string, valor: unknown) {
+    setForm((f: any) => ({ ...f, [nome]: valor }));
+    if (erros[nome]) setErros(({ [nome]: _, ...resto }) => resto);
   }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
-    if (editing) updateM.mutate({ id: editing.id, data: form });
-    else createM.mutate(form);
+    const original = editing ? (rowToForm ? rowToForm(editing) : editing) : undefined;
+    const encontrados = validar(fields, form, original);
+    setErros(encontrados);
+    if (Object.keys(encontrados).length > 0) {
+      document.getElementById(Object.keys(encontrados)[0])?.focus();
+      return;
+    }
+    const data = { ...form };
+    for (const f of fields) {
+      const m = f.mascara && resolver(f.mascara, form);
+      if (m) data[f.name] = campoMascarado(m, form[f.name]);
+    }
+    if (editing) updateM.mutate({ id: editing.id, data });
+    else createM.mutate(data);
   }
 
   const rows: T[] = Array.isArray(listQ.data)
@@ -325,26 +453,34 @@ export function CrudPage<T extends { id: number }>({
           </>
         }
       >
-        <form onSubmit={submit} className="grid grid-cols-2 gap-3">
-          {fields.map((f) => (
+        <form onSubmit={submit} noValidate className="grid grid-cols-2 gap-3">
+          {fields.map((f) => {
+            const erro = erros[f.name];
+            const mascara = f.mascara && f.type === "text" ? resolver(f.mascara, form) : undefined;
+            const aria = {
+              "aria-invalid": erro ? true : undefined,
+              "aria-describedby": erro ? `${f.name}-erro` : undefined,
+            };
+            return (
             <div
               key={f.name}
               className={f.colSpan === 2 ? "col-span-2" : "col-span-1"}
             >
               <Label htmlFor={f.name} required={f.required && f.type !== "checkbox"}>
-                {f.label}
+                {resolver(f.label, form)}
               </Label>
               {f.type === "select" ? (
                 <Select
                   id={f.name}
                   value={form[f.name] ?? ""}
                   onChange={(e) =>
-                    setForm({
-                      ...form,
-                      [f.name]: e.target.value === "" ? null : isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value),
-                    })
+                    mudar(
+                      f.name,
+                      e.target.value === "" ? null : isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value),
+                    )
                   }
                   required={f.required}
+                  {...aria}
                 >
                   <option value="">—</option>
                   {f.options?.map((o) => (
@@ -354,22 +490,37 @@ export function CrudPage<T extends { id: number }>({
                   ))}
                 </Select>
               ) : f.type === "checkbox" ? (
-                <div className="flex h-10 items-center">
+                <div className="flex h-[var(--density-row-h)] items-center gap-2">
                   <input
                     id={f.name}
                     type="checkbox"
                     checked={!!form[f.name]}
-                    onChange={(e) => setForm({ ...form, [f.name]: e.target.checked })}
+                    onChange={(e) => mudar(f.name, e.target.checked)}
                     className="h-4 w-4 rounded border-gray-300"
                   />
+                  {f.textoAoLado && (
+                    <label htmlFor={f.name} className="text-sm text-foreground">
+                      {f.textoAoLado}
+                    </label>
+                  )}
                 </div>
               ) : f.type === "textarea" ? (
                 <Textarea
                   id={f.name}
                   value={form[f.name] ?? ""}
-                  onChange={(e) => setForm({ ...form, [f.name]: e.target.value })}
+                  onChange={(e) => mudar(f.name, e.target.value)}
                   placeholder={f.placeholder}
                   rows={3}
+                  {...aria}
+                />
+              ) : mascara ? (
+                <InputMascarado
+                  id={f.name}
+                  mascara={mascara}
+                  value={form[f.name]}
+                  onChange={(v) => mudar(f.name, v)}
+                  required={f.required}
+                  {...aria}
                 />
               ) : (
                 <Input
@@ -377,22 +528,28 @@ export function CrudPage<T extends { id: number }>({
                   type={f.type}
                   value={form[f.name] ?? ""}
                   onChange={(e) =>
-                    setForm({
-                      ...form,
-                      [f.name]:
-                        f.type === "number"
-                          ? e.target.value === ""
-                            ? null
-                            : Number(e.target.value)
-                          : e.target.value,
-                    })
+                    mudar(
+                      f.name,
+                      f.type === "number"
+                        ? e.target.value === ""
+                          ? null
+                          : Number(e.target.value)
+                        : e.target.value,
+                    )
                   }
                   required={f.required}
                   placeholder={f.placeholder}
+                  {...aria}
                 />
               )}
+              {erro && (
+                <p id={`${f.name}-erro`} className="mt-1 text-sm text-danger">
+                  {erro}
+                </p>
+              )}
             </div>
-          ))}
+            );
+          })}
           {err && (
             <div
               role="alert"

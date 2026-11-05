@@ -440,7 +440,7 @@ describe("Detalhe servidor — estados vazios", () => {
       await screen.findByText(/Sem movimentações registradas/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Use 'Ações de tramitação'/i),
+      screen.getByText(/Use as ações no topo da página/i),
     ).toBeInTheDocument();
   });
 

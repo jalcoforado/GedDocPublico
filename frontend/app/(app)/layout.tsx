@@ -1,12 +1,13 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 
 import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
 import { CommandPaletteProvider } from "@/components/CommandPalette";
 import { Header } from "@/components/Header";
 import { LoadingBar } from "@/components/LoadingBar";
+import { RastreadorDeNavegacao } from "@/components/RastreadorDeNavegacao";
 import { Sidebar } from "@/components/Sidebar";
 import { TrilhaDoModulo } from "@/components/TrilhaDoModulo";
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -46,6 +47,11 @@ function Shell({ children }: { children: React.ReactNode }) {
           Pular para o conteúdo
         </a>
         <LoadingBar />
+        {/* SI-17/18 — anota o caminho percorrido, para a seta de voltar e os
+            links de volta às listas chegarem com os filtros de antes. */}
+        <Suspense fallback={null}>
+          <RastreadorDeNavegacao />
+        </Suspense>
         {/* Layout de referência (Figma): as telas transversais — início, perfil,
             para assinar, dashboard — não têm barra lateral; a navegação delas é
             o cabeçalho e o próprio "Menu principal". O menu lateral aparece

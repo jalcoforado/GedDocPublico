@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { CrudPage } from "@/components/CrudPage";
 import { api, type Manifestante } from "@/lib/api";
+import { aplicarMascara } from "@/lib/mascaras";
 
 export default function ManifestantesPage() {
   const [q, setQ] = useState("");
@@ -12,6 +13,12 @@ export default function ManifestantesPage() {
     queryKey: ["tipos-manifestante"],
     queryFn: () => api.tiposManifestante.list(),
   });
+
+  // Pessoa jurídica pelo tipo escolhido (`natureza`); sem tipo, física.
+  const juridica = (form: { id_tipo_manifestante?: number | null }) =>
+    tiposQ.data?.find((t) => t.id === form.id_tipo_manifestante)?.natureza === "J";
+  const tipoPadrao =
+    tiposQ.data?.find((t) => t.natureza === "F" && t.ativo) ?? tiposQ.data?.[0];
 
   return (
     <CrudPage<Manifestante>
@@ -25,7 +32,7 @@ export default function ManifestantesPage() {
       onSearchChange={setQ}
       dialogSize="lg"
       emptyForm={{
-        id_tipo_manifestante: tiposQ.data?.[0]?.id ?? null,
+        id_tipo_manifestante: tipoPadrao?.id ?? null,
         cpf_cnpj: "",
         nome: "",
         organizacao: "",
@@ -35,7 +42,13 @@ export default function ManifestantesPage() {
       }}
       columns={[
         { header: "Nome", render: (r) => r.nome ?? "—" },
-        { header: "CPF/CNPJ", render: (r) => r.cpf_cnpj ?? "—" },
+        {
+          header: "CPF/CNPJ",
+          render: (r) =>
+            r.cpf_cnpj
+              ? aplicarMascara(r.cpf_cnpj.length > 11 ? "cnpj" : "cpf", r.cpf_cnpj).valor
+              : "—",
+        },
         {
           header: "Tipo",
           render: (r) =>
@@ -46,24 +59,42 @@ export default function ManifestantesPage() {
         { header: "Ativo", render: (r) => (r.ativo ? "Sim" : "Não"), className: "w-20" },
       ]}
       fields={[
+        // Tipo e Situação na mesma linha: o Ativo ficava no fim do formulário,
+        // visível só rolando o popup.
         {
           name: "id_tipo_manifestante",
           label: "Tipo",
           type: "select",
           required: true,
-          colSpan: 2,
           options: tiposQ.data?.map((t) => ({ value: t.id, label: t.tipo_manifestante })),
         },
-        { name: "nome", label: "Nome", type: "text", colSpan: 2 },
-        { name: "cpf_cnpj", label: "CPF/CNPJ", type: "text" },
-        { name: "email", label: "E-mail", type: "text" },
-        { name: "telefone_celular", label: "Celular", type: "text" },
-        { name: "telefone_residencial", label: "Residencial", type: "text" },
-        { name: "telefone_comercial", label: "Comercial", type: "text" },
+        { name: "ativo", label: "Situação", type: "checkbox", textoAoLado: "Ativo" },
+        {
+          name: "nome",
+          label: (f) => (juridica(f) ? "Razão social" : "Nome"),
+          type: "text",
+          required: true,
+          colSpan: 2,
+        },
+        {
+          name: "cpf_cnpj",
+          label: (f) => (juridica(f) ? "CNPJ" : "CPF"),
+          type: "text",
+          required: true,
+          mascara: (f) => (juridica(f) ? "cnpj" : "cpf"),
+        },
+        {
+          name: "email",
+          label: "E-mail",
+          type: "email",
+          placeholder: "nome@exemplo.com.br",
+        },
+        { name: "telefone_celular", label: "Celular", type: "text", required: true, mascara: "celular" },
+        { name: "telefone_residencial", label: "Residencial", type: "text", mascara: "telefone" },
+        { name: "telefone_comercial", label: "Comercial", type: "text", mascara: "telefone" },
         { name: "organizacao", label: "Organização", type: "text" },
-        { name: "responsavel", label: "Responsável", type: "text" },
+        { name: "responsavel", label: "Responsável", type: "text", colSpan: 2 },
         { name: "observacao", label: "Observação", type: "textarea", colSpan: 2 },
-        { name: "ativo", label: "Ativo", type: "checkbox" },
       ]}
     />
   );

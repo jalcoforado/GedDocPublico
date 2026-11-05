@@ -95,7 +95,7 @@ describe("tela inicial", () => {
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/m/protocolo/painel"));
     // Nada da tela simples piscou antes, e as notificações nem foram pedidas.
     expect(screen.queryByText(/Olá/)).toBeNull();
-    expect(screen.queryByRole("link", { name: /Meus módulos/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Menu principal/ })).toBeNull();
     expect(notifMock).not.toHaveBeenCalled();
   });
 
@@ -187,7 +187,7 @@ describe("tela inicial", () => {
 
   it("a tela simples leva aos módulos e às assinaturas", async () => {
     await abrir();
-    expect(screen.getByRole("link", { name: /Meus módulos/ })).toHaveAttribute("href", "/modulos");
+    expect(screen.getByRole("link", { name: /Menu principal/ })).toHaveAttribute("href", "/modulos");
     expect(screen.getByRole("link", { name: /Para assinar/ })).toHaveAttribute("href", "/para-assinar");
   });
 });

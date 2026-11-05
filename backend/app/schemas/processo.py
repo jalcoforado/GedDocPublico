@@ -32,6 +32,27 @@ class ProcessoCreate(BaseModel):
     rascunho: bool = False
 
 
+class RascunhoUpdate(BaseModel):
+    """Edição do rascunho (SI-16): os mesmos campos do formulário de abertura.
+
+    Edição completa, não parcial — a tela manda o formulário inteiro, como na
+    abertura. Situação, número, autor e tenant ficam de fora: são do servidor.
+    Rascunho só nasce pela tela de abertura (o balcão e o portal não usam), por
+    isso o canal fica no mesmo domínio de `ProcessoCreate`.
+    """
+
+    id_assunto: int
+    id_manifestante: int
+    id_unidade_proprietaria: int
+    observacao: str | None = Field(default=None, max_length=10000)
+    corpo: str | None = Field(default=None, max_length=50000)
+    numero_origem: str | None = None
+    publico: bool = True
+    nivel_sigilo: str = "ostensivo"
+    externo: bool = False
+    canal_entrada: Literal["interno", "email"] = "interno"
+
+
 class ClassificarSigiloRequest(BaseModel):
     """Classifica/reclassifica o sigilo de um processo (LAI).
 
@@ -159,6 +180,21 @@ class OrdemProcesso(str, Enum):
 
     recentes = "recentes"
     parados = "parados"
+
+
+class OrdenarProcesso(str, Enum):
+    """SI-19 — coluna pela qual a listagem ordena (clique no título da
+    coluna). Lista fechada de propósito: o valor vira ORDER BY, e campo livre
+    vindo da URL não pode chegar ao SQL. Com `ordenar`, `ordem` é ignorada.
+    """
+
+    numero = "numero"
+    abertura = "abertura"
+    manifestante = "manifestante"
+    assunto = "assunto"
+    local_atual = "local_atual"
+    responsavel = "responsavel"
+    parado = "parado"
 
 
 class CaixaProcesso(str, Enum):
@@ -446,6 +482,12 @@ class PrazoInfo(BaseModel):
 
 
 class ProcessoDetail(ProcessoListItem):
+    # SI-16 — os ids do que o formulário de abertura escolhe, para a edição do
+    # rascunho se pré-preencher. Os nomes já vêm de `ProcessoListItem`.
+    id_assunto: int | None = None
+    id_tipo_processo: int | None = None
+    id_manifestante: int | None = None
+    id_unidade_proprietaria: int | None = None
     observacao: str | None
     corpo: str | None
     virtual: bool

@@ -1,24 +1,48 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FilePlus2, Pencil, Send, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ArquivarDialog } from "@/components/ArquivarDialog";
+import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/toast";
 import {
   api,
   type EncaminharInput,
   type ProcessoDetail,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 type ModalKind = null | "encaminhar" | "receber" | "recusar" | "cancelar" | "arquivar";
 
+/** Como o processo aparece em título de diálogo: rascunho não tem número. */
+function nomeDoProcesso(p: ProcessoDetail): string {
+  return p.numero_processo ? `processo ${p.numero_processo}` : "rascunho";
+}
+
+/**
+ * Barra de ações do processo, no topo da página (SI-16, modelo do SEI): o que
+ * se faz com o processo fica ao lado do número, não embaixo das abas.
+ *
+ * Rascunho tem outra barra (`AcoesRascunho`): editar, abrir, encaminhar e
+ * excluir. Receber, recusar e cancelar não se aplicam — rascunho nunca
+ * tramitou —, e arquivar o servidor recusa.
+ */
 export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
+  if (processo.situacao === "rascunho") return <AcoesRascunho processo={processo} />;
+  return <AcoesTramitacao processo={processo} />;
+}
+
+function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
   const qc = useQueryClient();
   const [modal, setModal] = useState<ModalKind>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -169,7 +193,7 @@ export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
       >
         <p className="text-sm">
           Confirma o recebimento do processo{" "}
-          <b className="font-mono">{processo.numero_processo}</b> na unidade{" "}
+          <b className="font-mono">{processo.numero_processo ?? "(sem número)"}</b> na unidade{" "}
           <b>{encaminhamentoPendente?.unidade_destino}</b>?
         </p>
         <p className="mt-2 text-xs text-muted-foreground">
@@ -199,6 +223,116 @@ export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
         open={modal === "cancelar"}
         onClose={() => setModal(null)}
         encaminhamentoId={encaminhamentoPendente?.id ?? 0}
+        err={err}
+        setErr={setErr}
+        onDone={invalidate}
+      />
+    </>
+  );
+}
+
+/**
+ * Ações do rascunho (SI-16). Só o autor chega a ver um rascunho — para os
+ * outros o servidor responde 404 —, então aqui não se pergunta "é meu?".
+ * As permissões seguem as do servidor: editar e encaminhar pedem `atualizar`,
+ * abrir pede `inserir` (é o ato da abertura), excluir pede `excluir`.
+ */
+function AcoesRascunho({ processo }: { processo: ProcessoDetail }) {
+  const qc = useQueryClient();
+  const router = useRouter();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const { can } = useAuth();
+  const [encaminhando, setEncaminhando] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function invalidate() {
+    qc.invalidateQueries({ queryKey: ["processo", processo.id] });
+    qc.invalidateQueries({ queryKey: ["processos"] });
+  }
+
+  async function abrir() {
+    try {
+      const ok = await confirm({
+        title: "Abrir o processo?",
+        message:
+          "O processo ganha número agora e passa a valer. Ele fica na sua unidade, e depois disso não volta a ser rascunho.",
+        confirmLabel: "Abrir processo",
+        onConfirm: async () => {
+          const p = await api.processos.abrirRascunho(processo.id);
+          toast.success(`Processo ${p.numero_processo} aberto.`);
+        },
+      });
+      if (ok) invalidate();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Não foi possível abrir o processo.");
+    }
+  }
+
+  async function excluir() {
+    try {
+      const ok = await confirm({
+        title: "Excluir o rascunho?",
+        message: "O rascunho some das suas listas. Esta ação não pode ser desfeita pela tela.",
+        confirmLabel: "Excluir rascunho",
+        intent: "danger",
+        onConfirm: () => api.processos.excluirRascunho(processo.id),
+      });
+      if (!ok) return;
+      qc.invalidateQueries({ queryKey: ["processos"] });
+      toast.success("Rascunho excluído.");
+      router.push("/m/protocolo/processos?situacao=rascunho");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Não foi possível excluir o rascunho.");
+    }
+  }
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        {can("processo", "atualizar") && (
+          <Button asChild variant="secondary">
+            <Link href={`/m/protocolo/processos/${processo.id}/editar`}>
+              <Pencil className="h-4 w-4" aria-hidden="true" />
+              Editar
+            </Link>
+          </Button>
+        )}
+        {can("processo", "inserir") && (
+          <Button onClick={abrir} title="Gera o número sem tramitar. O processo fica na sua unidade.">
+            <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+            Abrir processo
+          </Button>
+        )}
+        {can("processo", "atualizar") && (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setErr(null);
+              setEncaminhando(true);
+            }}
+            disabled={!processo.ativo}
+            title="Encaminhar também abre o processo: ele ganha número."
+          >
+            <Send className="h-4 w-4" aria-hidden="true" />
+            Encaminhar
+          </Button>
+        )}
+        {can("processo", "excluir") && (
+          <Button variant="ghost" onClick={excluir}>
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            Excluir rascunho
+          </Button>
+        )}
+        <span className="text-xs text-foreground-subtle">
+          Rascunho: sem número, e só você o vê.
+        </span>
+      </div>
+
+      <EncaminharDialog
+        open={encaminhando}
+        onClose={() => setEncaminhando(false)}
+        processo={processo}
         err={err}
         setErr={setErr}
         onDone={invalidate}
@@ -295,7 +429,7 @@ function EncaminharDialog({
         reset();
         onClose();
       }}
-      title={`Encaminhar processo ${processo.numero_processo}`}
+      title={`Encaminhar ${nomeDoProcesso(processo)}`}
       size="md"
       footer={
         <>
@@ -315,6 +449,11 @@ function EncaminharDialog({
       }
     >
       <form onSubmit={submit} className="space-y-3">
+        {processo.situacao === "rascunho" && (
+          <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning-soft-foreground">
+            Encaminhar abre o processo: ele ganha número agora e deixa de ser rascunho.
+          </p>
+        )}
         <div>
           <Label htmlFor="dest">Unidade destino *</Label>
           <Select
