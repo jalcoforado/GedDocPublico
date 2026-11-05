@@ -453,6 +453,12 @@ export interface ProcessoDetail extends ProcessoListItem {
    *  restringe e o servidor decide. */
   pode_receber_encaminhamento?: boolean | null;
   pode_cancelar_encaminhamento?: boolean | null;
+  /** SI-16 — os ids do que o formulário de abertura escolhe, para a edição
+   *  do rascunho se pré-preencher. Os nomes vêm de `ProcessoListItem`. */
+  id_assunto?: number | null;
+  id_tipo_processo?: number | null;
+  id_manifestante?: number | null;
+  id_unidade_proprietaria?: number | null;
   observacao: string | null;
   corpo: string | null;
   virtual: boolean;
@@ -600,9 +606,14 @@ export interface ProcessoCreateInput {
   virtual?: boolean;
   /** "balcao"/"portal" vêm dos fluxos dedicados; aqui só interno|email */
   canal_entrada?: "interno" | "email";
-  /** E3 — nasce sem número (situacao='rascunho'); emitido no 1º encaminhamento */
+  /** E3 — nasce sem número (situacao='rascunho'). Ganha número em "Abrir
+   *  processo" (SI-16) ou no 1º encaminhamento. */
   rascunho?: boolean;
 }
+
+/** SI-16 — edição do rascunho: o formulário de abertura inteiro, sem
+ *  `rascunho`/`virtual` (o rascunho continua rascunho até ser aberto). */
+export type RascunhoUpdateInput = Omit<ProcessoCreateInput, "rascunho" | "virtual">;
 
 export interface EncaminharInput {
   id_unidade_destino: number;
@@ -4835,6 +4846,18 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+    /** SI-16 — rascunho é do autor: para os outros, estes três dão 404. */
+    editarRascunho: (id: number, data: RascunhoUpdateInput) =>
+      request<ProcessoDetail>(`/processos/${id}/rascunho`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    /** Dá o número sem tramitar; o processo fica na unidade de quem abriu. */
+    abrirRascunho: (id: number) =>
+      request<ProcessoDetail>(`/processos/${id}/abrir`, { method: "POST" }),
+    /** Exclusão lógica. Só rascunho; processo aberto dá 409. */
+    excluirRascunho: (id: number) =>
+      request<void>(`/processos/${id}/rascunho`, { method: "DELETE" }),
     encaminhar: (id: number, data: EncaminharInput) =>
       request<ProcessoDetail>(`/processos/${id}/encaminhamentos`, {
         method: "POST",

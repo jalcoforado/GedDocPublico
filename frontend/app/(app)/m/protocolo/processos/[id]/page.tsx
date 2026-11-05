@@ -427,7 +427,7 @@ export default function ProcessoDetailPage() {
                   oferecer um botão que sempre falha. */}
               {p.situacao === "rascunho" ? (
                 <span className="text-xs text-foreground-subtle">
-                  Tramite o processo para habilitar a impressão.
+                  Abra o processo para habilitar a impressão.
                 </span>
               ) : (
                 <>
@@ -509,6 +509,17 @@ export default function ProcessoDetailPage() {
           </div>
         }
       />
+
+      {/* SI-16 — ações no topo, ao lado do número e acima das abas, como no
+          SEI: até aqui ficavam num card no fim da aba Visão geral, abaixo do
+          trajeto, e a pergunta "o que eu faço com este processo?" exigia
+          rolar a página. Valem para todas as abas. */}
+      <section
+        aria-label="Ações do processo"
+        className="rounded-lg border border-border bg-surface-1 px-3 py-2.5"
+      >
+        <AcoesProcesso processo={p} />
+      </section>
 
       <Tabs value={activeTab} onChange={(v) => setTab(v as TabId)}>
         <TabList
@@ -613,15 +624,6 @@ export default function ProcessoDetailPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Ações de tramitação</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <AcoesProcesso processo={p} />
-            </CardContent>
-          </Card>
-
           {/* IA-1 — na aba VISÃO, e não em Documentos, onde nasceu.
               As três perguntas que ele sugere ("resuma o andamento", "o que
               significa a última movimentação", "como está o prazo") são todas
@@ -649,7 +651,7 @@ export default function ProcessoDetailPage() {
                 <EmptyState
                   icon={Clock}
                   title="Sem movimentações registradas"
-                  description="Use 'Ações de tramitação' na aba Visão geral para registrar a primeira movimentação."
+                  description="Use as ações no topo da página para registrar a primeira movimentação."
                 />
               ) : (
                 <div className="space-y-5">
