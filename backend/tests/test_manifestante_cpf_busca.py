@@ -143,6 +143,21 @@ async def test_busca_por_nome_continua_funcionando(admin_engine):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("busca", ["Escola 10", "escola 10 de maio", "10 de Maio"])
+async def test_busca_por_nome_com_numero_nao_vira_documento(admin_engine, busca):
+    """Nome com número e espaço é nome: tirar a pontuação ("Escola10") fazia
+    a busca não achar nada."""
+    t = await _cliente(admin_engine)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            await c.post("/api/v2/manifestantes", json=await _novo(c, nome="Escola 10 de Maio"))
+            r = await c.get("/api/v2/manifestantes", params={"q": busca})
+        assert [m["nome"] for m in r.json()["items"]] == ["Escola 10 de Maio"]
+    finally:
+        await _fechar()
+
+
+@pytest.mark.asyncio
 async def test_migration_0125_tira_mascara_do_que_ja_estava_gravado(admin_engine):
     """Dados gravados antes da correção: a 0125 normaliza. O teste reaplica o
     SQL dela sobre linhas no formato antigo (a migration já rodou neste banco)."""

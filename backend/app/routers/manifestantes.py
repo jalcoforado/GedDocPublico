@@ -107,10 +107,16 @@ async def list_manifestantes(
     id_tipo_manifestante: int | None = None,
 ):
     # CPF/CNPJ é gravado sem máscara: busca que parece documento com máscara
-    # ("123.456.789-09", "12.ABC.345/01DE-35") procura sem a pontuação. Ter
-    # dígito é o que separa documento de nome; e-mail tem "@" e fica de fora.
-    if q and re.fullmatch(r"[0-9A-Za-z.\-/\s]+", q) and any(ch.isdigit() for ch in q):
-        q = re.sub(r"[^0-9A-Za-z]", "", q)
+    # procura sem a pontuação. Parece documento o que tem dígito e é feito só
+    # de dígitos e pontuação, com espaço ou não ("123 456 789-09"), ou o que
+    # mistura letra e dígito SEM espaço — o CNPJ alfanumérico
+    # ("12.ABC.345/01DE-35"). Com espaço e letra é nome: "Escola 10" virava
+    # "Escola10" e não achava nada. E-mail tem "@" e fica de fora.
+    if q and any(ch.isdigit() for ch in q):
+        if re.fullmatch(r"[\d.\-/\s]+", q):
+            q = re.sub(r"\D", "", q)
+        elif re.fullmatch(r"[0-9A-Za-z.\-/]+", q):
+            q = re.sub(r"[^0-9A-Za-z]", "", q)
     extra = (
         Manifestante.id_tipo_manifestante == id_tipo_manifestante
         if id_tipo_manifestante
