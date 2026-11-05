@@ -112,6 +112,7 @@ def _base_select(tenant_id: int, *, usuario_id: int | None = None):
             Processo,
             Assunto.assunto.label("assunto_nome"),
             TipoProcesso.tipo_processo.label("tipo_processo_nome"),
+            Assunto.id_tipo_processo.label("id_tipo_processo"),
             Manifestante.nome.label("manifestante_nome"),
             Manifestante.cpf_cnpj.label("manifestante_cpf"),
             UnidadeTrabalho.unidade_trabalho.label("unidade_propr"),
@@ -600,8 +601,19 @@ async def list_processos(
         )
     if situacao is None:
         base = base.where(Processo.situacao != "rascunho")
-    elif situacao != "todos":
-        base = base.where(Processo.situacao == situacao)
+    else:
+        if situacao != "todos":
+            base = base.where(Processo.situacao == situacao)
+        # Rascunho é de quem o criou (SI-16): os dos outros não aparecem nem
+        # em "Rascunhos" nem em "Todos". Sem usuário de contexto, nenhum.
+        base = base.where(
+            or_(
+                Processo.situacao != "rascunho",
+                Processo.id_usuario == id_usuario_contexto
+                if id_usuario_contexto is not None
+                else false(),
+            )
+        )
     if apenas_ativos:
         base = base.where(Processo.ativo.is_(True))
     if desde:
@@ -721,6 +733,14 @@ async def get_processo_detail(
     # vazar a existência do processo sigiloso.
     if niveis_permitidos is not None:
         stmt = stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
+    # Rascunho de outra pessoa também é 404 (SI-16), inclusive para
+    # super-usuário — mesma regra de `sigilo.assert_acesso_processo`.
+    stmt = stmt.where(
+        or_(
+            Processo.situacao != "rascunho",
+            Processo.id_usuario == usuario_id if usuario_id is not None else false(),
+        )
+    )
     row = (await db.execute(stmt)).first()
     if row is None:
         return None
@@ -776,6 +796,10 @@ async def get_processo_detail(
         **base_item.model_dump(),
         pode_receber_encaminhamento=pode_receber,
         pode_cancelar_encaminhamento=pode_cancelar,
+        id_assunto=p.id_assunto,
+        id_tipo_processo=row.id_tipo_processo,
+        id_manifestante=p.id_manifestante,
+        id_unidade_proprietaria=p.id_unidade_proprietaria,
         observacao=p.observacao,
         corpo=p.corpo,
         virtual=p.virtual,

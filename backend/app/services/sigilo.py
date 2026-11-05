@@ -107,30 +107,42 @@ async def assert_acesso_processo(
     processo_id: int | None,
     usuario,
 ) -> None:
-    """Guard reaproveitável de acesso a um processo pelo nível de sigilo.
+    """Guard reaproveitável de acesso a um processo.
 
-    Mesma lógica usada para acesso a processo: super-usuário passa; senão a
-    credencial do usuário precisa alcançar o nível do processo. Levanta
-    `SigiloAcessoError` (→ 404) caso contrário. `processo_id=None` = nada a checar.
+    Duas regras, as duas com `SigiloAcessoError` (→ 404, que não confirma a
+    existência). `processo_id=None` = nada a checar.
+
+    1. **Rascunho é de quem o criou** (SI-16, decisão de produto de
+       2026-11-05). Vale também para super-usuário: não é grau de acesso, é
+       autoria — como o rascunho de um e-mail. Fica aqui, e não em cada rota,
+       porque este guard já está em todo caminho que serve conteúdo ligado a
+       processo (anexo, assinatura, marcador, IA, lote): uma regra por rota
+       esqueceria uma, como o download de anexo esqueceu o sigilo.
+    2. **Sigilo:** super-usuário passa; senão a credencial do usuário precisa
+       alcançar o nível do processo.
     """
     if processo_id is None:
         return
     from .permissoes import load_permissions  # lazy: evita ciclo de import
 
-    perms = await load_permissions(db, usuario.id, tenant_id=tenant_id)
-    if perms.is_super_usuario:
-        return
-    credencial = getattr(usuario, "nivel_acesso_sigilo", CREDENCIAL_DEFAULT)
-    permitidos = niveis_permitidos(credencial)
-    nivel = (
+    row = (
         await db.execute(
-            select(Processo.nivel_sigilo).where(
+            select(Processo.nivel_sigilo, Processo.situacao, Processo.id_usuario).where(
                 Processo.id == processo_id,
                 Processo.tenant_id == tenant_id,
             )
         )
-    ).scalar_one_or_none()
-    if nivel is not None and nivel not in permitidos:
+    ).first()
+    if row is None:
+        return
+    if row.situacao == "rascunho" and row.id_usuario != usuario.id:
+        raise SigiloAcessoError("Processo não encontrado")
+
+    perms = await load_permissions(db, usuario.id, tenant_id=tenant_id)
+    if perms.is_super_usuario:
+        return
+    credencial = getattr(usuario, "nivel_acesso_sigilo", CREDENCIAL_DEFAULT)
+    if row.nivel_sigilo not in niveis_permitidos(credencial):
         raise SigiloAcessoError("Processo não encontrado")
 
 

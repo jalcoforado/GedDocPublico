@@ -44,6 +44,7 @@ from ..schemas.processo import (
     ProcessoCreate,
     ProcessoDetail,
     ProcessoListItem,
+    RascunhoUpdate,
 )
 from ..schemas.marcador import DefinirMarcadoresRequest
 from ..services.marcadores import MarcadorError, definir_marcadores, desfavoritar, favoritar
@@ -540,6 +541,91 @@ async def create_endpoint(
     return detail
 
 
+# ===== Rascunho: editar, abrir, excluir (SI-16) =====
+# Só o autor: `require_acesso_processo` já devolve 404 para rascunho alheio, e
+# o service confere de novo porque escreve. Ver `services/rascunho_processo.py`.
+
+
+def _erro_de_rascunho(e: Exception) -> HTTPException:
+    from ..services.rascunho_processo import RascunhoJaAbertoError, RascunhoNaoEncontradoError
+
+    if isinstance(e, RascunhoNaoEncontradoError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    if isinstance(e, RascunhoJaAbertoError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+async def _detalhe_ou_404(db: AsyncSession, processo_id: int, *, tenant_id: int, usuario_id: int):
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=usuario_id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    return detail
+
+
+@router.put(
+    "/{processo_id}/rascunho",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+)
+async def editar_rascunho_endpoint(
+    processo_id: int,
+    payload: RascunhoUpdate,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    from ..services.rascunho_processo import RascunhoError, editar_rascunho
+
+    try:
+        await editar_rascunho(db, processo_id, payload, tenant_id=tenant_id, usuario_id=current.id)
+    except RascunhoError as e:
+        raise _erro_de_rascunho(e)
+    return await _detalhe_ou_404(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+
+
+@router.post(
+    "/{processo_id}/abrir",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+)
+async def abrir_rascunho_endpoint(
+    processo_id: int,
+    current: Usuario = Depends(require_permission("processo", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """Abre o processo a partir do rascunho: é aqui que ele ganha número.
+    `inserir`, e não `atualizar`, porque é o mesmo ato da abertura direta."""
+    from ..services.rascunho_processo import RascunhoError, abrir_rascunho
+
+    try:
+        await abrir_rascunho(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    except RascunhoError as e:
+        raise _erro_de_rascunho(e)
+    return await _detalhe_ou_404(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+
+
+@router.delete(
+    "/{processo_id}/rascunho",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+)
+async def excluir_rascunho_endpoint(
+    processo_id: int,
+    current: Usuario = Depends(require_permission("processo", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    from ..services.rascunho_processo import RascunhoError, excluir_rascunho
+
+    try:
+        await excluir_rascunho(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    except RascunhoError as e:
+        raise _erro_de_rascunho(e)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get(
     "/{processo_id}/trail",
     dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
@@ -876,9 +962,11 @@ async def capa_pdf_endpoint(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    user: Usuario = Depends(get_current_user),
 ):
     detail = await get_processo_detail(
-        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis,
+        usuario_id=user.id,
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -898,10 +986,12 @@ async def folha_ocorrencias_pdf_endpoint(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    user: Usuario = Depends(get_current_user),
 ):
     """F7 — PDF legível da trilha do processo, pra anexar a um procedimento."""
     detail = await get_processo_detail(
-        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis,
+        usuario_id=user.id,
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -921,9 +1011,11 @@ async def etiqueta_unica_pdf(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    user: Usuario = Depends(get_current_user),
 ):
     detail = await get_processo_detail(
-        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis,
+        usuario_id=user.id,
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -944,9 +1036,11 @@ async def completo_pdf_endpoint(
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    user: Usuario = Depends(get_current_user),
 ):
     detail = await get_processo_detail(
-        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis,
+        usuario_id=user.id,
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -966,9 +1060,11 @@ async def etiqueta_dupla_pdf(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    user: Usuario = Depends(get_current_user),
 ):
     detail = await get_processo_detail(
-        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis,
+        usuario_id=user.id,
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -990,6 +1086,7 @@ async def comprovante_pdf_endpoint(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    user: Usuario = Depends(get_current_user),
 ):
     # Carrega encaminhamento + nomes via JOIN explícito.
     from sqlalchemy.orm import aliased
@@ -1013,7 +1110,8 @@ async def comprovante_pdf_endpoint(
 
     enc, uo, ud, prio = row
     detail = await get_processo_detail(
-        db, enc.id_processo, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, enc.id_processo, tenant_id=tenant_id, niveis_permitidos=niveis,
+        usuario_id=user.id,
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
