@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -333,6 +333,17 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
     toast.info(`Modelo "${template.nome}" carregado.`);
   }
 
+  // Trava contra clique duplo. O `isPending` da mutação só desabilita o botão
+  // depois que o React redesenha, e dois cliques rápidos passavam os dois:
+  // nasciam dois rascunhos iguais. A trava é síncrona; só o erro a solta (no
+  // sucesso a tela navega, e soltar antes abriria a mesma janela de novo).
+  const enviando = useRef(false);
+  function enviarUmaVez(enviar: () => void) {
+    if (enviando.current) return;
+    enviando.current = true;
+    enviar();
+  }
+
   const createM = useMutation({
     mutationFn: (data: ProcessoCreateInput) => api.processos.create(data),
     onSuccess: (p) => {
@@ -350,6 +361,7 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
       router.push(`/m/protocolo/processos/${p.id}`);
     },
     onError: (e: Error) => {
+      enviando.current = false;
       setErr(e.message);
       window.scrollTo({ top: 0, behavior: "smooth" });
     },
@@ -372,6 +384,7 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
       router.push(`/m/protocolo/processos/${p.id}`);
     },
     onError: (e: Error) => {
+      enviando.current = false;
       setErr(e.message);
       window.scrollTo({ top: 0, behavior: "smooth" });
     },
@@ -412,8 +425,11 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
     e.preventDefault();
     setErr(null);
     if (!validar()) return;
-    if (editando) salvarRascunhoM.mutate({ abrir: true });
-    else createM.mutate(montarPayload(false));
+    enviarUmaVez(() =>
+      editando
+        ? salvarRascunhoM.mutate({ abrir: true })
+        : createM.mutate(montarPayload(false)),
+    );
   }
 
   // E3 (benchmark SUiTE) — distinto do rascunho LOCAL acima (autosave no
@@ -423,8 +439,11 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
   function salvarComoRascunho() {
     setErr(null);
     if (!validar()) return;
-    if (editando) salvarRascunhoM.mutate({ abrir: false });
-    else createM.mutate(montarPayload(true));
+    enviarUmaVez(() =>
+      editando
+        ? salvarRascunhoM.mutate({ abrir: false })
+        : createM.mutate(montarPayload(true)),
+    );
   }
 
   function descartarRascunho() {
