@@ -1,78 +1,369 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, CheckCheck, LayoutGrid, PenLine } from "lucide-react";
+import {
+  ArrowRight,
+  Banknote,
+  Bus,
+  CheckCheck,
+  FilePlus2,
+  FileText,
+  LayoutGrid,
+  type LucideIcon,
+  PenLine,
+  Star,
+  Truck,
+} from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
-import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
-import { SectionCard } from "@/components/ui/section-card";
+import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { api, notificacoesApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { hrefDaCaixa } from "@/lib/caixas-processos";
+import { MENUS } from "@/lib/menus";
+import { PERMS_LEITURA_PAGAMENTOS } from "@/lib/menus/pagamentos";
 import { cn } from "@/lib/utils";
 
-/** Para onde vai quem opera processos. O painel mora no módulo Protocolo
- * (decisão do produto, 2026-10-21); a tela inicial é só o caminho até ele. */
-const ROTA_PAINEL = "/m/protocolo/painel";
-
 /**
- * Tela inicial. Quem opera processos (transação `processo`) NUM TENANT QUE
- * CONTRATOU O PROTOCOLO é levado ao painel de controle do módulo, que é o que
- * ele abriria de qualquer jeito; os demais veem uma tela leve: saudação,
- * notificações não lidas e o caminho para os módulos e as assinaturas.
+ * Início — a tela que atravessa os módulos: o que pede a pessoa HOJE, em
+ * todos os módulos que a prefeitura contratou e que ela alcança.
  *
- * A contratação entra na decisão porque `can()` sozinho não basta: ele
- * devolve `true` para todo super-usuário — e hoje todo grupo é SU —, então
- * num tenant só de Frota a `/home` empurraria todo mundo para um módulo que o
- * tenant não tem, com o menu do Protocolo e o painel negado pelo backend. E a
- * `/home` é o destino de "Início"/"Menu principal": não haveria saída.
+ * Até 2026-11-05 a `/home` empurrava quem opera processos para o painel do
+ * Protocolo (decisão de 2026-10-21, PR #142). Na prática "Início" virou um
+ * segundo link para "Painel de controle": clicado no painel, recarregava a
+ * mesma tela; clicado em Pagamentos, jogava a pessoa no Protocolo. O painel
+ * de cada módulo responde "como está a minha unidade NESTE módulo"; o Início
+ * responde "o que precisa de mim agora, em qualquer lugar".
  *
- * `replace`, e não `push`: a `/home` não fica no histórico, senão o "voltar"
- * do painel cairia aqui e seria empurrado de novo para o painel.
+ * Cada cartão só aparece se o módulo está contratado E a pessoa tem a
+ * leitura dele — as mesmas regras do menu —, e cada número leva à lista que
+ * o conta, na tela do próprio módulo. Número que não carregou diz isso, em
+ * vez de mostrar zero.
  */
-export default function HomePage() {
-  const { can } = useAuth();
-  const router = useRouter();
-  // O shell só desenha a página depois de `/auth/me`, que traz usuário e
-  // permissões juntos: aqui `can` já é a resposta final, não um "ainda não
-  // sei" que viraria `false` por um instante.
-  const operaProcessos = can("processo");
 
-  // Mesma queryKey do guard de módulo, do launcher e do switcher: o cache é
-  // um só, e na maioria das vezes a resposta já está aqui.
-  const modulosQ = useQuery({
-    queryKey: ["modulos-me"],
-    queryFn: api.modulos,
-    enabled: operaProcessos,
-  });
-  // `undefined` enquanto carrega — distinto de `false`, que é "não contratou".
-  const protocoloContratado = modulosQ.data
-    ? modulosQ.data.itens.some((i) => i.slug === "protocolo")
-    : undefined;
-  const vaiAoPainel = operaProcessos && protocoloContratado === true;
-  // Falha de `/modulos/me` não decide por ninguém: fica na tela simples, que
-  // funciona em qualquer tenant. Empurrar para o painel no escuro poderia
-  // levar a um módulo que o tenant não tem.
-  const decidindo = operaProcessos && !modulosQ.isError && protocoloContratado === undefined;
-
-  useEffect(() => {
-    if (vaiAoPainel) router.replace(ROTA_PAINEL);
-  }, [vaiAoPainel, router]);
-
-  // Enquanto decide ou redireciona, nada: desenhar a tela simples faria ela
-  // piscar antes do painel.
-  if (decidindo || vaiAoPainel) return null;
-  return <TelaInicialSimples />;
+interface LinhaDef {
+  rotulo: string;
+  valor: number | undefined;
+  href: string;
+  /** Só pinta quando há algo: zero nunca é alarme. */
+  tom?: "danger" | "warning";
 }
 
-function TelaInicialSimples() {
-  const { user } = useAuth();
-  const qc = useQueryClient();
-  const primeiroNome = (user?.nome ?? "").split(/\s+/)[0] || "—";
+function saudacao(agora: Date): string {
+  const h = agora.getHours();
+  if (h < 12) return "Bom dia";
+  if (h < 18) return "Boa tarde";
+  return "Boa noite";
+}
 
+export default function HomePage() {
+  const { user, can } = useAuth();
+  const primeiroNome = (user?.nome ?? "").split(/\s+/)[0] || "";
+  const agora = new Date();
+  const data = agora.toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
+  const hoje = data.charAt(0).toUpperCase() + data.slice(1);
+
+  // Mesma queryKey do guard de módulo, do launcher e do switcher.
+  const modulosQ = useQuery({ queryKey: ["modulos-me"], queryFn: api.modulos });
+  const contratado = (slug: string) => !!modulosQ.data?.itens.some((i) => i.slug === slug);
+
+  const veProtocolo = contratado("protocolo") && can("processo");
+  const vePagamentos = contratado("pagamentos") && PERMS_LEITURA_PAGAMENTOS.some((p) => can(p));
+  const veFrota = contratado("frota") && can("frota");
+  const veTransporte = contratado("transporte") && can("transporte_regulado");
+  const podeAbrir = veProtocolo && can("processo", "inserir");
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Início"
+        description={
+          <>
+            {saudacao(agora)}
+            {primeiroNome && `, ${primeiroNome}`} — {hoje}.
+          </>
+        }
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {podeAbrir && (
+              <Button asChild>
+                <Link href="/m/protocolo/processos/novo">
+                  <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+                  Abrir processo
+                </Link>
+              </Button>
+            )}
+            <Button asChild variant="secondary">
+              <Link href="/para-assinar">
+                <PenLine className="h-4 w-4" aria-hidden="true" />
+                Para assinar
+              </Link>
+            </Button>
+            <Button asChild variant="secondary">
+              <Link href="/modulos">
+                <LayoutGrid className="h-4 w-4" aria-hidden="true" />
+                Meus módulos
+              </Link>
+            </Button>
+          </div>
+        }
+      />
+
+      <section aria-labelledby="pendencias-titulo" className="space-y-3">
+        <h2 id="pendencias-titulo" className="font-display text-base font-semibold text-foreground">
+          O que precisa de você hoje
+        </h2>
+        {modulosQ.isError ? (
+          <p role="alert" className="text-sm text-danger-soft-foreground">
+            Não foi possível saber quais módulos a prefeitura contratou, então os resumos não
+            aparecem. As notificações abaixo continuam valendo.
+          </p>
+        ) : !modulosQ.data ? (
+          <p className="text-sm text-foreground-muted">Carregando…</p>
+        ) : !veProtocolo && !vePagamentos && !veFrota && !veTransporte ? (
+          <p className="text-sm text-foreground-muted">
+            Nenhum módulo com pendências para o seu perfil. Os módulos que você alcança estão em
+            &ldquo;Meus módulos&rdquo;.
+          </p>
+        ) : (
+          (() => {
+            // Um módulo só vira faixa de largura inteira: um cartão sozinho
+            // ocupava meia tela e deixava a outra metade em branco.
+            const faixa = [veProtocolo, vePagamentos, veFrota, veTransporte].filter(Boolean).length === 1;
+            return (
+              <div className={cn("grid gap-4", !faixa && "lg:grid-cols-2 2xl:grid-cols-4")}>
+                {veProtocolo && <CartaoProtocolo faixa={faixa} />}
+                {vePagamentos && <CartaoPagamentos faixa={faixa} />}
+                {veFrota && <CartaoFrota faixa={faixa} />}
+                {veTransporte && <CartaoTransporte faixa={faixa} />}
+              </div>
+            );
+          })()
+        )}
+      </section>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Notificacoes />
+        {veProtocolo && <Acompanhando />}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ cartões ---- */
+
+function Cartao({
+  titulo,
+  icone: Icone,
+  href,
+  linhas,
+  carregando,
+  erro,
+  faixa = false,
+}: {
+  titulo: string;
+  icone: LucideIcon;
+  href: string;
+  linhas: LinhaDef[];
+  carregando: boolean;
+  erro: boolean;
+  /** Largura inteira: as linhas viram blocos lado a lado (número em destaque). */
+  faixa?: boolean;
+}) {
+  return (
+    <section
+      aria-label={titulo}
+      className="flex flex-col rounded-card border border-border bg-surface-1 shadow-card"
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+        <h3 className="inline-flex items-center gap-2 font-display text-sm font-semibold text-foreground">
+          <Icone className="h-4 w-4 text-primary" aria-hidden="true" />
+          {titulo}
+        </h3>
+        <Link
+          href={href}
+          className="inline-flex items-center gap-1 rounded text-xs font-medium text-foreground-muted hover:text-foreground hover:underline"
+        >
+          Abrir módulo
+          <ArrowRight className="h-3 w-3" aria-hidden="true" />
+        </Link>
+      </div>
+      {erro ? (
+        <p className="px-4 py-3 text-sm text-danger-soft-foreground">
+          Não foi possível carregar os números deste módulo agora.
+        </p>
+      ) : faixa ? (
+        <ul className="grid grid-cols-2 divide-border lg:grid-cols-4 lg:divide-x">
+          {linhas.map((l) => (
+            <li key={l.rotulo} className="flex flex-col gap-1 px-4 py-3">
+              <span
+                className={cn(
+                  "text-xs uppercase tracking-wide text-foreground-subtle",
+                  (l.valor ?? 0) > 0 && l.tom === "danger" && "font-medium text-danger-soft-foreground",
+                  (l.valor ?? 0) > 0 && l.tom === "warning" && "font-medium text-warning-soft-foreground",
+                )}
+              >
+                {l.rotulo}
+              </span>
+              {carregando || l.valor === undefined ? (
+                <span className="font-display text-2xl text-foreground-subtle">…</span>
+              ) : l.valor > 0 ? (
+                <Link
+                  href={l.href}
+                  aria-label={`${l.rotulo}: ${l.valor} — abrir a lista`}
+                  className={cn(
+                    "self-start font-display text-2xl font-semibold tabular-nums underline-offset-4 hover:underline",
+                    l.tom === "danger" && "text-danger-soft-foreground",
+                    l.tom === "warning" && "text-warning-soft-foreground",
+                    !l.tom && "text-foreground",
+                  )}
+                >
+                  {l.valor}
+                </Link>
+              ) : (
+                <span className="font-display text-2xl tabular-nums text-foreground-subtle">0</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <ul className="divide-y divide-border">
+          {linhas.map((l) => (
+            <li key={l.rotulo} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+              <span
+                className={cn(
+                  "text-foreground",
+                  (l.valor ?? 0) > 0 && l.tom === "danger" && "font-medium text-danger-soft-foreground",
+                  (l.valor ?? 0) > 0 && l.tom === "warning" && "font-medium text-warning-soft-foreground",
+                )}
+              >
+                {l.rotulo}
+              </span>
+              {carregando || l.valor === undefined ? (
+                <span className="text-foreground-subtle">…</span>
+              ) : l.valor > 0 ? (
+                <Link
+                  href={l.href}
+                  aria-label={`${l.rotulo}: ${l.valor} — abrir a lista`}
+                  className={cn(
+                    "min-w-8 rounded-full px-2 text-center font-semibold tabular-nums underline-offset-2 hover:underline",
+                    l.tom === "danger" && "bg-danger-soft text-danger-soft-foreground",
+                    l.tom === "warning" && "bg-warning-soft text-warning-soft-foreground",
+                    !l.tom && "bg-muted text-foreground",
+                  )}
+                >
+                  {l.valor}
+                </Link>
+              ) : (
+                // Zero não leva a lugar nenhum: não há lista para abrir.
+                <span className="min-w-8 text-center tabular-nums text-foreground-subtle">0</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function CartaoProtocolo({ faixa }: { faixa: boolean }) {
+  // Sob `protocolo-painel`, a mesma chave do painel: o cache é um só, e trocar
+  // de unidade ativa invalida os dois juntos.
+  const q = useQuery({ queryKey: ["protocolo-painel"], queryFn: () => api.processos.painel(), staleTime: 60_000 });
+  const p = q.data;
+  return (
+    <Cartao
+      titulo="Protocolo"
+      icone={FileText}
+      href={MENUS.protocolo.raiz}
+      carregando={q.isLoading}
+      erro={q.isError}
+      faixa={faixa}
+      linhas={[
+        { rotulo: "A receber na unidade", valor: p?.caixas.entrada, href: hrefDaCaixa("entrada"), tom: "warning" },
+        { rotulo: "Na mesa da unidade", valor: p?.caixas.analise, href: hrefDaCaixa("analise") },
+        { rotulo: "Com prazo vencido", valor: p?.prazos.vencidos, href: hrefDaCaixa("analise"), tom: "danger" },
+        { rotulo: "Esperando a sua assinatura", valor: p?.caixas.aguardando_assinatura, href: "/para-assinar", tom: "warning" },
+      ]}
+    />
+  );
+}
+
+function CartaoPagamentos({ faixa }: { faixa: boolean }) {
+  const q = useQuery({
+    // A mesma chave do dashboard financeiro (com 12 meses, o padrão dele).
+    queryKey: ["pag-dashboard", 12],
+    queryFn: () => api.pagamentos.dashboard(12),
+    staleTime: 60_000,
+  });
+  const k = q.data?.kpis;
+  return (
+    <Cartao
+      titulo="Pagamentos"
+      icone={Banknote}
+      href={MENUS.pagamentos.raiz}
+      carregando={q.isLoading}
+      erro={q.isError}
+      faixa={faixa}
+      linhas={[
+        // Os mesmos destinos do dashboard financeiro ("ver fila →").
+        { rotulo: "Aguardando aprovação", valor: k?.aguardando_aprovacao_qtd, href: "/m/pagamentos", tom: "warning" },
+        { rotulo: "Aguardando autorização", valor: k?.aguardando_autorizacao_qtd, href: "/m/pagamentos", tom: "warning" },
+        { rotulo: "Parcelas vencidas", valor: k?.vencidas_qtd, href: "/m/pagamentos/dashboard", tom: "danger" },
+      ]}
+    />
+  );
+}
+
+function CartaoFrota({ faixa }: { faixa: boolean }) {
+  // A lista de solicitações não tem contagem própria nem filtro por situação
+  // no backend; é a mesma consulta da tela de Solicitações (cache comum).
+  const q = useQuery({ queryKey: ["frota-solicitacoes"], queryFn: () => api.solicitacoes.listAll(), staleTime: 60_000 });
+  const aguardando = q.data?.filter((s) => s.status === "solicitada").length;
+  return (
+    <Cartao
+      titulo="Frota"
+      icone={Truck}
+      href={MENUS.frota.raiz}
+      carregando={q.isLoading}
+      erro={q.isError}
+      faixa={faixa}
+      linhas={[
+        { rotulo: "Solicitações aguardando aprovação", valor: aguardando, href: "/m/frota/solicitacoes", tom: "warning" },
+      ]}
+    />
+  );
+}
+
+function CartaoTransporte({ faixa }: { faixa: boolean }) {
+  const q = useQuery({
+    queryKey: ["/transporte-regulado/alvaras/relatorio/kpis"],
+    queryFn: () => api.alvaras.relatorio.kpis(),
+    staleTime: 60_000,
+  });
+  const k = q.data;
+  return (
+    <Cartao
+      titulo="Transporte Regulado"
+      icone={Bus}
+      href={MENUS.transporte.raiz}
+      carregando={q.isLoading}
+      erro={q.isError}
+      faixa={faixa}
+      linhas={[
+        { rotulo: "Alvarás vencidos", valor: k?.vencidos, href: "/m/transporte/relatorio", tom: "danger" },
+        { rotulo: "Alvarás a renovar em 30 dias", valor: k?.a_renovar_30d, href: "/m/transporte/relatorio", tom: "warning" },
+      ]}
+    />
+  );
+}
+
+/* ------------------------------------------------------ notificações ---- */
+
+function Notificacoes() {
+  const qc = useQueryClient();
   const notifQ = useQuery({
     // Sob `["notificacoes", "me"]`, o prefixo que o sino invalida: marcar
     // como lida lá atualiza esta lista, e vice-versa.
@@ -80,13 +371,11 @@ function TelaInicialSimples() {
     queryFn: () => notificacoesApi.listarMinhas({ apenas_nao_lidas: true, limit: 5 }),
     staleTime: 30_000,
   });
-  const naoLidas = notifQ.data?.nao_lidas;
+  const naoLidas = notifQ.data?.nao_lidas ?? 0;
   const itens = notifQ.data?.items ?? [];
-  const temAlgo = (naoLidas ?? 0) > 0;
 
   const recarregar = () => qc.invalidateQueries({ queryKey: ["notificacoes", "me"] });
-  // Abrir a notificação é lê-la, como no sino: sem isso ela continuaria na
-  // lista e no contador depois de aberta.
+  // Abrir a notificação é lê-la, como no sino.
   const marcarLida = useMutation({
     mutationFn: (id: number) => notificacoesApi.marcarLida(id),
     onSuccess: recarregar,
@@ -97,86 +386,145 @@ function TelaInicialSimples() {
   });
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="Início" description={`Olá, ${primeiroNome}.`} />
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        {/* Não é link: não há tela que liste notificações — /perfil, para
-            onde ia, só tem as preferências. A lista está logo abaixo. */}
-        <KpiCard
-          label="Notificações"
-          value={naoLidas ?? "—"}
-          hint="não lidas"
-          icon={Bell}
-          intent={temAlgo ? "danger" : "default"}
-          className={cn("h-full", temAlgo && "border-l-4 border-l-danger")}
-        />
-
-        <SectionCard title="Atalhos" className="lg:col-span-2">
-          <div className="flex flex-wrap gap-2">
-            <Button asChild variant="secondary">
-              <Link href="/modulos">
-                <LayoutGrid className="mr-1.5 h-4 w-4" aria-hidden="true" />
-                Meus módulos
-              </Link>
-            </Button>
-            <Button asChild variant="secondary">
-              <Link href="/para-assinar">
-                <PenLine className="mr-1.5 h-4 w-4" aria-hidden="true" />
-                Para assinar
-              </Link>
-            </Button>
-          </div>
-        </SectionCard>
-      </div>
-
-      <section aria-label="Notificações não lidas" className="space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-display text-base font-semibold text-foreground">
-            Notificações não lidas
-          </h2>
-          {itens.length > 0 && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => marcarTodas.mutate()}
-              disabled={marcarTodas.isPending}
-            >
-              <CheckCheck className="h-4 w-4" aria-hidden="true" />
-              Marcar todas como lidas
-            </Button>
+    <section aria-label="Notificações não lidas" className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-display text-base font-semibold text-foreground">
+          Notificações não lidas
+          {naoLidas > 0 && (
+            <span className="ml-2 rounded-full bg-danger-soft px-2 text-xs font-semibold tabular-nums text-danger-soft-foreground">
+              {naoLidas}
+            </span>
           )}
-        </div>
-        {notifQ.isError ? (
-          <p role="alert" className="text-sm text-danger-soft-foreground">
-            Não foi possível carregar as notificações.
-          </p>
-        ) : !notifQ.data ? (
-          <p className="text-sm text-foreground-muted">Carregando…</p>
-        ) : itens.length === 0 ? (
-          <p className="text-sm text-foreground-muted">Nenhuma notificação nova.</p>
-        ) : (
-          <ul className="divide-y divide-border rounded-card border border-border bg-surface-1">
-            {itens.map((n) => (
-              <li key={n.id} className="px-4 py-3 text-sm">
-                {n.link_url ? (
-                  <Link
-                    href={n.link_url}
-                    onClick={() => marcarLida.mutate(n.id)}
-                    className="font-medium text-foreground underline-offset-2 hover:underline"
-                  >
-                    {n.titulo}
-                  </Link>
-                ) : (
-                  <span className="font-medium text-foreground">{n.titulo}</span>
-                )}
-                <p className="mt-0.5 text-foreground-muted">{n.mensagem}</p>
-              </li>
-            ))}
-          </ul>
+        </h2>
+        {itens.length > 0 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => marcarTodas.mutate()}
+            disabled={marcarTodas.isPending}
+          >
+            <CheckCheck className="h-4 w-4" aria-hidden="true" />
+            Marcar todas como lidas
+          </Button>
         )}
-      </section>
-    </div>
+      </div>
+      {notifQ.isError ? (
+        <p role="alert" className="text-sm text-danger-soft-foreground">
+          Não foi possível carregar as notificações.
+        </p>
+      ) : !notifQ.data ? (
+        <p className="text-sm text-foreground-muted">Carregando…</p>
+      ) : itens.length === 0 ? (
+        <p className="rounded-card border border-border bg-surface-1 px-4 py-3 text-sm text-foreground-muted">
+          Nenhuma notificação nova.
+        </p>
+      ) : (
+        <ul className="divide-y divide-border rounded-card border border-border bg-surface-1">
+          {itens.map((n) => (
+            <li key={n.id} className="px-4 py-3 text-sm">
+              {n.link_url ? (
+                <Link
+                  href={n.link_url}
+                  onClick={() => marcarLida.mutate(n.id)}
+                  className="font-medium text-foreground underline-offset-2 hover:underline"
+                >
+                  {n.titulo}
+                </Link>
+              ) : (
+                <span className="font-medium text-foreground">{n.titulo}</span>
+              )}
+              <p className="mt-0.5 text-foreground-muted">{n.mensagem}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/* ------------------------------------------------------ acompanhando ---- */
+
+/** Quantos favoritos aparecem; o resto está na lista filtrada. */
+const QUANTOS_ACOMPANHANDO = 5;
+
+/**
+ * Os processos que a pessoa marcou com estrela, e onde cada um está AGORA —
+ * inclusive os que já saíram da unidade dela. É o "Favoritos" do SUITE (CE):
+ * acompanhar sem precisar abrir um por um.
+ */
+function Acompanhando() {
+  const q = useQuery({
+    queryKey: ["processos", "home-favoritos"],
+    queryFn: () =>
+      api.processos.list({ favoritos: true, apenas_ativos: false, page: 1, page_size: QUANTOS_ACOMPANHANDO }),
+    staleTime: 60_000,
+  });
+  const itens = q.data?.items ?? [];
+  const total = q.data?.total ?? 0;
+
+  return (
+    <section aria-labelledby="acompanhando-titulo" className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="acompanhando-titulo" className="font-display text-base font-semibold text-foreground">
+          Processos que você acompanha
+        </h2>
+        {total > QUANTOS_ACOMPANHANDO && (
+          <Link
+            href="/m/protocolo/processos?favoritos=1&ativos=0"
+            className="inline-flex items-center gap-1 rounded text-sm font-medium text-foreground underline underline-offset-2 hover:no-underline"
+          >
+            Ver todos ({total})
+            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </Link>
+        )}
+      </div>
+      {q.isError ? (
+        <p role="alert" className="text-sm text-danger-soft-foreground">
+          Não foi possível carregar os processos acompanhados.
+        </p>
+      ) : !q.data ? (
+        <p className="text-sm text-foreground-muted">Carregando…</p>
+      ) : itens.length === 0 ? (
+        <p className="rounded-card border border-border bg-surface-1 px-4 py-3 text-sm text-foreground-muted">
+          <Star className="mr-1.5 inline h-4 w-4 align-[-3px]" aria-hidden="true" />
+          Nenhum processo acompanhado. Marque a estrela de um processo — na lista ou no detalhe — para
+          ver aqui onde ele está.
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-card border border-border bg-surface-1 shadow-card">
+          <Table>
+            <THead>
+              <TR>
+                <TH>Processo</TH>
+                <TH>Assunto</TH>
+                <TH>Onde está agora</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {itens.map((p) => (
+                <TR key={p.id}>
+                  <TD className="font-mono text-xs tabular-nums">
+                    <Link
+                      href={`/m/protocolo/processos/${p.id}`}
+                      className="font-medium text-foreground underline underline-offset-2 hover:no-underline"
+                    >
+                      {p.nup ?? p.numero_processo}
+                    </Link>
+                  </TD>
+                  <TD>
+                    <div className="line-clamp-1 text-sm">{p.assunto ?? "—"}</div>
+                  </TD>
+                  <TD className="text-sm">
+                    {p.local_atual ?? <span className="text-foreground-muted">sem unidade registrada</span>}
+                    {!p.ativo && <span className="ml-1 text-xs text-foreground-muted">(inativo)</span>}
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </div>
+      )}
+    </section>
   );
 }

@@ -1,8 +1,10 @@
 /**
- * Tela inicial depois que o painel de controle foi para o módulo Protocolo
- * (decisão de 2026-10-21): quem opera processos num tenant que contratou o
- * Protocolo é levado ao painel; os demais veem saudação, notificações e os
- * atalhos.
+ * Início (`/home`) — a tela que atravessa os módulos.
+ *
+ * Até 2026-11-05 ela redirecionava quem opera processos para o painel do
+ * Protocolo, e "Início" virou um segundo link para "Painel de controle". Hoje
+ * ela fica: um cartão por módulo contratado que a pessoa alcança, cada número
+ * levando à lista que o conta; notificações; e os processos acompanhados.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -14,6 +16,11 @@ const notifMock = vi.fn();
 const modulosMock = vi.fn();
 const marcarLidaMock = vi.fn();
 const marcarTodasMock = vi.fn();
+const painelMock = vi.fn();
+const listMock = vi.fn();
+const dashboardMock = vi.fn();
+const solicitacoesMock = vi.fn();
+const alvarasKpisMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace, prefetch: vi.fn() }),
@@ -26,14 +33,25 @@ vi.mock("@/lib/auth", () => ({
     perms: { is_super_usuario: estado.su },
     loading: false,
     // Como o `can` real: super-usuário responde `true` a qualquer código.
-    can: (codigo: string) => estado.su || estado.perms.includes(codigo),
+    can: (codigo: string, action?: string) =>
+      estado.su || estado.perms.includes(action ? `${codigo}:${action}` : codigo),
   }),
 }));
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
   return {
     ...actual,
-    api: { ...actual.api, modulos: () => modulosMock() },
+    api: {
+      ...actual.api,
+      modulos: () => modulosMock(),
+      processos: { ...actual.api.processos, painel: () => painelMock(), list: (f: unknown) => listMock(f) },
+      pagamentos: { ...actual.api.pagamentos, dashboard: () => dashboardMock() },
+      solicitacoes: { ...actual.api.solicitacoes, listAll: () => solicitacoesMock() },
+      alvaras: {
+        ...actual.api.alvaras,
+        relatorio: { ...actual.api.alvaras.relatorio, kpis: () => alvarasKpisMock() },
+      },
+    },
     notificacoesApi: {
       ...actual.notificacoesApi,
       listarMinhas: () => notifMock(),
@@ -57,12 +75,35 @@ async function abrir() {
   );
 }
 
+const cartao = async (nome: string) => within(await screen.findByRole("region", { name: nome }));
+
 beforeEach(() => {
   estado.perms = [];
   estado.su = false;
   replace.mockClear();
   modulosMock.mockReset();
   modulosMock.mockResolvedValue({ itens: [modulo("protocolo"), modulo("frota")] });
+  painelMock.mockReset();
+  painelMock.mockResolvedValue({
+    caixas: {
+      entrada: 3, saida: 0, analise: 12, externos: 0, aguardando_assinatura: 0,
+      enviado_para_assinatura: 0, arquivados: 0, recusados: 0,
+    },
+    atribuidos_a_mim: 0,
+    sem_responsavel: 0,
+    prazos: { vencidos: 2, vencendo: 0, no_prazo: 0, sem_prazo: 10 },
+    aguardando_retorno: { total: 0, atrasados: 0 },
+  });
+  listMock.mockReset();
+  listMock.mockResolvedValue({ items: [], total: 0 });
+  dashboardMock.mockReset();
+  dashboardMock.mockResolvedValue({
+    kpis: { aguardando_aprovacao_qtd: 5, aguardando_autorizacao_qtd: 0, vencidas_qtd: 1 },
+  });
+  solicitacoesMock.mockReset();
+  solicitacoesMock.mockResolvedValue([{ status: "solicitada" }, { status: "aprovada" }, { status: "solicitada" }]);
+  alvarasKpisMock.mockReset();
+  alvarasKpisMock.mockResolvedValue({ total_alvaras: 9, ativos: 6, vencidos: 1, a_renovar_30d: 2, indefinidos: 0 });
   marcarLidaMock.mockReset();
   marcarLidaMock.mockResolvedValue(undefined);
   marcarTodasMock.mockReset();
@@ -88,68 +129,121 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("tela inicial", () => {
-  it("quem opera processos vai direto para o painel do protocolo, sem ver a tela simples", async () => {
+describe("Início — não é mais um atalho para o painel", () => {
+  it("quem opera processos FICA no Início: nada de redirecionar", async () => {
     estado.perms = ["processo"];
     await abrir();
-    await waitFor(() => expect(replace).toHaveBeenCalledWith("/m/protocolo/painel"));
-    // Nada da tela simples piscou antes, e as notificações nem foram pedidas.
-    expect(screen.queryByText(/Olá/)).toBeNull();
-    expect(screen.queryByRole("link", { name: /Meus módulos/ })).toBeNull();
-    expect(notifMock).not.toHaveBeenCalled();
-  });
-
-  it("enquanto a contratação não chega, não desenha nada nem redireciona", async () => {
-    estado.perms = ["processo"];
-    modulosMock.mockReturnValue(new Promise(() => {}));
-    await abrir();
-    await waitFor(() => expect(modulosMock).toHaveBeenCalled());
-    expect(screen.queryByText(/Olá/)).toBeNull();
+    await screen.findByRole("region", { name: "Protocolo" });
     expect(replace).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Início" })).toBeInTheDocument();
+  });
+});
+
+describe("o que precisa de você hoje", () => {
+  it("um cartão por módulo contratado que a pessoa alcança — e só esses", async () => {
+    estado.perms = ["processo", "frota", "transporte_regulado", "pagamento_gerir"];
+    // Pagamentos e transporte NÃO contratados: não aparecem, mesmo com permissão.
+    await abrir();
+    await screen.findByRole("region", { name: "Protocolo" });
+    expect(screen.getByRole("region", { name: "Frota" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Pagamentos" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Transporte Regulado" })).toBeNull();
+    expect(dashboardMock).not.toHaveBeenCalled();
+    expect(alvarasKpisMock).not.toHaveBeenCalled();
   });
 
-  it("super-usuário num tenant sem o Protocolo fica na tela simples", async () => {
-    // `can()` é true para todo SU; sem olhar a contratação, a /home levaria
-    // todo mundo de um tenant só de Frota para um módulo que ele não tem.
+  it("módulo contratado sem a permissão de leitura não aparece", async () => {
+    estado.perms = ["processo"];
+    await abrir();
+    await screen.findByRole("region", { name: "Protocolo" });
+    expect(screen.queryByRole("region", { name: "Frota" })).toBeNull();
+    expect(solicitacoesMock).not.toHaveBeenCalled();
+  });
+
+  it("protocolo: cada número leva à lista que o conta", async () => {
+    estado.perms = ["processo"];
+    await abrir();
+    const p = await cartao("Protocolo");
+    expect(await p.findByRole("link", { name: /A receber na unidade: 3/ })).toHaveAttribute(
+      "href", "/m/protocolo/processos?caixa=entrada&ativos=0");
+    expect(p.getByRole("link", { name: /Na mesa da unidade: 12/ })).toHaveAttribute(
+      "href", "/m/protocolo/processos?caixa=analise&ativos=0");
+    expect(p.getByRole("link", { name: /Com prazo vencido: 2/ })).toBeInTheDocument();
+    // Zero não é link: não há lista para abrir.
+    expect(p.queryByRole("link", { name: /Esperando a sua assinatura/ })).toBeNull();
+  });
+
+  it("frota conta as solicitações aguardando aprovação; pagamentos e transporte usam os KPIs do módulo", async () => {
     estado.su = true;
-    modulosMock.mockResolvedValue({ itens: [modulo("frota")] });
+    modulosMock.mockResolvedValue({
+      itens: [modulo("protocolo"), modulo("frota"), modulo("pagamentos"), modulo("transporte")],
+    });
     await abrir();
-    expect(await screen.findByText("Olá, João.")).toBeInTheDocument();
-    expect(replace).not.toHaveBeenCalled();
+    expect(await (await cartao("Frota")).findByRole("link", { name: /aguardando aprovação: 2/ })).toBeInTheDocument();
+    expect(await (await cartao("Pagamentos")).findByRole("link", { name: /Aguardando aprovação: 5/ })).toBeInTheDocument();
+    expect((await cartao("Pagamentos")).getByRole("link", { name: /Parcelas vencidas: 1/ })).toBeInTheDocument();
+    expect(await (await cartao("Transporte Regulado")).findByRole("link", { name: /Alvarás vencidos: 1/ })).toBeInTheDocument();
   });
 
-  it("quem tem `processo` num tenant sem o Protocolo fica na tela simples", async () => {
+  it("número que não carregou diz isso, em vez de zero", async () => {
     estado.perms = ["processo"];
-    modulosMock.mockResolvedValue({ itens: [modulo("pagamentos")] });
+    painelMock.mockRejectedValue(new Error("fora do ar"));
     await abrir();
-    expect(await screen.findByText("Olá, João.")).toBeInTheDocument();
-    expect(replace).not.toHaveBeenCalled();
+    expect(
+      await (await cartao("Protocolo")).findByText(/Não foi possível carregar os números deste módulo/),
+    ).toBeInTheDocument();
   });
 
-  it("se a contratação não puder ser lida, fica na tela simples", async () => {
+  it("sem nenhum módulo ao alcance, explica onde estão os módulos", async () => {
+    modulosMock.mockResolvedValue({ itens: [modulo("protocolo")] });
+    await abrir();
+    expect(await screen.findByText(/Nenhum módulo com pendências para o seu perfil/)).toBeInTheDocument();
+  });
+
+  it("'Abrir processo' só para quem pode inserir", async () => {
     estado.perms = ["processo"];
-    modulosMock.mockRejectedValue(new Error("rede"));
     await abrir();
-    expect(await screen.findByText("Olá, João.")).toBeInTheDocument();
-    expect(replace).not.toHaveBeenCalled();
+    await screen.findByRole("region", { name: "Protocolo" });
+    expect(screen.queryByRole("link", { name: /Abrir processo/ })).toBeNull();
+    cleanup();
+    estado.perms = ["processo", "processo:inserir"];
+    await abrir();
+    expect(await screen.findByRole("link", { name: /Abrir processo/ })).toHaveAttribute(
+      "href", "/m/protocolo/processos/novo");
+  });
+});
+
+describe("processos que você acompanha", () => {
+  it("lista os favoritos e onde cada um está agora", async () => {
+    estado.perms = ["processo"];
+    listMock.mockResolvedValue({
+      items: [{ id: 9, nup: null, numero_processo: "P9", assunto: "Poda", local_atual: "Sec. de Obras", ativo: true }],
+      total: 1,
+    });
+    await abrir();
+    const secao = within(await screen.findByRole("region", { name: "Processos que você acompanha" }));
+    expect(await secao.findByRole("link", { name: "P9" })).toHaveAttribute("href", "/m/protocolo/processos/9");
+    expect(secao.getByText("Sec. de Obras")).toBeInTheDocument();
+    expect(listMock).toHaveBeenCalledWith(expect.objectContaining({ favoritos: true, apenas_ativos: false }));
   });
 
-  it("quem não opera processos fica na tela inicial, sem nem consultar os módulos", async () => {
+  it("sem favorito, ensina como acompanhar", async () => {
+    estado.perms = ["processo"];
     await abrir();
-    expect(await screen.findByText("Olá, João.")).toBeInTheDocument();
-    expect(replace).not.toHaveBeenCalled();
-    expect(modulosMock).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Marque a estrela de um processo/)).toBeInTheDocument();
   });
 
-  it("a tela simples mostra as notificações não lidas", async () => {
+  it("quem não opera processos não vê a seção", async () => {
     await abrir();
-    const kpi = screen.getByText("Notificações").closest("[data-testid], div") as HTMLElement;
-    await waitFor(() =>
-      expect(screen.getByTestId("kpi-valor").textContent).toBe("2"));
-    // O quadro não é link: não há tela que liste notificações (/perfil, para
-    // onde ia, só tem as preferências) — a lista está logo abaixo.
-    expect(kpi.closest("a")).toBeNull();
+    await screen.findByText("Processo recebido");
+    expect(screen.queryByRole("region", { name: "Processos que você acompanha" })).toBeNull();
+    expect(listMock).not.toHaveBeenCalled();
+  });
+});
 
+describe("notificações", () => {
+  it("mostra as não lidas, com link quando há", async () => {
+    await abrir();
     const lista = within(screen.getByRole("region", { name: "Notificações não lidas" }));
     expect(await lista.findByRole("link", { name: "Processo recebido" })).toHaveAttribute(
       "href", "/m/protocolo/processos/123");
@@ -175,7 +269,6 @@ describe("tela inicial", () => {
     fireEvent.click(lista.getByRole("button", { name: /Marcar todas como lidas/ }));
     await waitFor(() => expect(marcarTodasMock).toHaveBeenCalled());
     expect(await lista.findByText("Nenhuma notificação nova.")).toBeInTheDocument();
-    expect(screen.getByTestId("kpi-valor").textContent).toBe("0");
   });
 
   it("sem notificação nova, diz isso", async () => {
@@ -185,7 +278,7 @@ describe("tela inicial", () => {
     expect(screen.queryByRole("button", { name: /Marcar todas/ })).toBeNull();
   });
 
-  it("a tela simples leva aos módulos e às assinaturas", async () => {
+  it("leva aos módulos e às assinaturas", async () => {
     await abrir();
     expect(screen.getByRole("link", { name: /Meus módulos/ })).toHaveAttribute("href", "/modulos");
     expect(screen.getByRole("link", { name: /Para assinar/ })).toHaveAttribute("href", "/para-assinar");

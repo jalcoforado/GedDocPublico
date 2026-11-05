@@ -43,7 +43,9 @@ import { cn } from "@/lib/utils";
  *
  * Mora no módulo (`/m/protocolo/painel`), e não na tela inicial, por decisão
  * do produto: é o painel de quem opera processos, como no SEI é a porta do
- * sistema de processos. A `/home` leva quem opera processos até aqui.
+ * sistema de processos. A `/home` deixou de redirecionar para cá em
+ * 2026-11-05: virou o Início que atravessa os módulos, e um dos cartões dela
+ * resume este painel.
  *
  * Os números vêm de `GET /processos/painel`, no mesmo recorte das caixas de
  * trabalho (unidade ATIVA, sigilo de quem consulta): o quadro diz 12 e a
