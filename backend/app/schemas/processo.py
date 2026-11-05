@@ -182,6 +182,21 @@ class OrdemProcesso(str, Enum):
     parados = "parados"
 
 
+class OrdenarProcesso(str, Enum):
+    """SI-19 — coluna pela qual a listagem ordena (clique no título da
+    coluna). Lista fechada de propósito: o valor vira ORDER BY, e campo livre
+    vindo da URL não pode chegar ao SQL. Com `ordenar`, `ordem` é ignorada.
+    """
+
+    numero = "numero"
+    abertura = "abertura"
+    manifestante = "manifestante"
+    assunto = "assunto"
+    local_atual = "local_atual"
+    responsavel = "responsavel"
+    parado = "parado"
+
+
 class CaixaProcesso(str, Enum):
     """Caixa de trabalho — o recorte "o que está comigo e em que estado".
 

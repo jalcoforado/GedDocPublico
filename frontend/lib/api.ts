@@ -590,7 +590,21 @@ export interface ProcessoListFilters {
   /** "recentes" (abertura, do mais novo — padrão) | "parados" (há mais tempo
    * sem movimentação primeiro). */
   ordem?: "recentes" | "parados";
+  /** SI-19 — coluna clicada na tabela. Com ela, `ordem` é ignorada. */
+  ordenar?: ColunaProcesso;
+  direcao?: DirecaoOrdenacao;
 }
+
+/** SI-19 — colunas pelas quais o servidor ordena (`OrdenarProcesso`). */
+export type ColunaProcesso =
+  | "numero"
+  | "abertura"
+  | "manifestante"
+  | "assunto"
+  | "local_atual"
+  | "responsavel"
+  | "parado";
+export type DirecaoOrdenacao = "asc" | "desc";
 
 export interface ProcessoCreateInput {
   id_assunto: number;

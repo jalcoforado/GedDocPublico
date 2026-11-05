@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
@@ -41,6 +42,7 @@ from ..schemas.processo import (
     EscopoProcesso,
     EncaminhamentoOut as _EncaminhamentoOut,
     OrdemProcesso,
+    OrdenarProcesso,
     ProcessoCreate,
     ProcessoDetail,
     ProcessoListItem,
@@ -263,6 +265,15 @@ async def list_endpoint(
             "tempo sem movimentação primeiro)."
         ),
     ),
+    # SI-19 — ordenação pelo título da coluna. Com `ordenar`, `ordem` é ignorada.
+    ordenar: OrdenarProcesso | None = Query(
+        None,
+        description=(
+            "numero | abertura | manifestante | assunto | local_atual | "
+            "responsavel | parado. Ausente = segue `ordem`."
+        ),
+    ),
+    direcao: Literal["asc", "desc"] = Query("asc", description="asc | desc"),
 ) -> Paginated[ProcessoListItem]:
     items, total = await list_processos(
         db,
@@ -283,6 +294,8 @@ async def list_endpoint(
         situacao=situacao,
         caixa=caixa,
         ordem=ordem,
+        ordenar=ordenar,
+        direcao=direcao,
         id_usuario_contexto=usuario.id,
         # A lotação ATIVA da sessão, caindo na principal. Lotação neste sistema
         # tem duas representações simultâneas — a principal e a N:N

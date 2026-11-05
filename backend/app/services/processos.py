@@ -41,6 +41,7 @@ from ..schemas.processo import (
     CaixasContagem,
     CotaAnexacaoOut,
     OrdemProcesso,
+    OrdenarProcesso,
     DespachoOut,
     EscopoProcesso,
     EncaminhamentoOut,
@@ -493,6 +494,8 @@ async def list_processos(
     situacao: str | None = None,
     caixa: CaixaProcesso | None = None,
     ordem: OrdemProcesso = OrdemProcesso.recentes,
+    ordenar: OrdenarProcesso | None = None,
+    direcao: str = "asc",
 ) -> tuple[list[ProcessoListItem], int]:
     base = _base_select(tenant_id, usuario_id=id_usuario_contexto)
 
@@ -628,13 +631,7 @@ async def list_processos(
         await db.execute(
             # `Processo.id` desempata: sem ele, linhas com a mesma data
             # trocariam de página entre uma consulta e outra.
-            base.order_by(
-                *(
-                    (_PARADO_DESDE.asc(), Processo.id.asc())
-                    if ordem is OrdemProcesso.parados
-                    else (Processo.data_hora_abertura.desc(), Processo.id.desc())
-                )
-            )
+            base.order_by(*_ordenacao(base, ordem, ordenar, direcao))
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -647,6 +644,34 @@ async def list_processos(
     for item in items:
         item.marcadores = marcadores_por_processo.get(item.id, [])
     return items, total
+
+
+def _ordenacao(base, ordem: OrdemProcesso, ordenar: OrdenarProcesso | None, direcao: str):
+    """ORDER BY da listagem. `Processo.id` desempata: sem ele, linhas com o
+    mesmo valor trocariam de página entre uma consulta e outra.
+
+    SI-19 — com `ordenar`, a coluna escolhida na tela. Vazio (rascunho sem
+    número, processo sem responsável) vai para o fim nos dois sentidos: quem
+    ordena por responsável quer ver nomes primeiro.
+    """
+    if ordenar is None:
+        if ordem is OrdemProcesso.parados:
+            return (_PARADO_DESDE.asc(), Processo.id.asc())
+        return (Processo.data_hora_abertura.desc(), Processo.id.desc())
+    # Colunas que só existem como rótulo do SELECT (aliases de `_base_select`).
+    rotulo = base.selected_columns
+    coluna = {
+        OrdenarProcesso.numero: Processo.numero_processo,
+        OrdenarProcesso.abertura: Processo.data_hora_abertura,
+        OrdenarProcesso.manifestante: rotulo.manifestante_nome,
+        OrdenarProcesso.assunto: rotulo.assunto_nome,
+        OrdenarProcesso.local_atual: rotulo.local_atual_nome,
+        OrdenarProcesso.responsavel: rotulo.responsavel_nome,
+        OrdenarProcesso.parado: rotulo.parado_desde,
+    }[ordenar]
+    if direcao == "desc":
+        return (coluna.desc().nulls_last(), Processo.id.desc())
+    return (coluna.asc().nulls_last(), Processo.id.asc())
 
 
 def _row_to_list(r) -> ProcessoListItem:

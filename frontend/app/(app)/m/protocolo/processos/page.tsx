@@ -22,11 +22,17 @@ import { Select } from "@/components/ui/select";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import type { EscopoProcesso } from "@/lib/api";
-import { api, NIVEL_SIGILO_LABEL, type ProcessoListFilters } from "@/lib/api";
+import {
+  api,
+  NIVEL_SIGILO_LABEL,
+  type ColunaProcesso,
+  type ProcessoListFilters,
+} from "@/lib/api";
 import { caixaDaUrl, rotuloDaCaixa } from "@/lib/caixas-processos";
 import { useAssuntosAll } from "@/lib/assuntos";
 import { useAuth } from "@/lib/auth";
 import { decorridoDesde } from "@/lib/duracao";
+import { estadoDaColuna, proximaOrdenacao, type Ordenacao } from "@/lib/ordenacao";
 
 const PAGE_SIZE = 20;
 
@@ -48,6 +54,16 @@ const ESCOPO_LABEL: Record<EscopoProcesso, string> = {
   unidade: "Da minha unidade",
   unidade_e_subordinadas: "Unidade e subordinadas",
 };
+
+const COLUNAS: ColunaProcesso[] = [
+  "numero",
+  "abertura",
+  "manifestante",
+  "assunto",
+  "local_atual",
+  "responsavel",
+  "parado",
+];
 
 function filtrosDaUrl(sp: URLSearchParams): ProcessoListFilters {
   const num = (k: string) => {
@@ -77,6 +93,11 @@ function filtrosDaUrl(sp: URLSearchParams): ProcessoListFilters {
       : undefined,
     // Caixa — mesmo cuidado: valor fora da lista vira `undefined`, não 422.
     caixa: caixaDaUrl(sp.get("caixa")),
+    // SI-19 — idem: coluna fora da lista é ignorada, não vai ao servidor.
+    ordenar: COLUNAS.includes(sp.get("ordenar") as ColunaProcesso)
+      ? (sp.get("ordenar") as ColunaProcesso)
+      : undefined,
+    direcao: sp.get("direcao") === "desc" ? "desc" : undefined,
   };
 }
 
@@ -92,6 +113,10 @@ function urlDosFiltros(f: ProcessoListFilters, page: number): string {
   if (f.favoritos) sp.set("favoritos", "1");
   if (f.situacao) sp.set("situacao", f.situacao);
   if (f.caixa) sp.set("caixa", f.caixa);
+  if (f.ordenar) {
+    sp.set("ordenar", f.ordenar);
+    if (f.direcao === "desc") sp.set("direcao", "desc");
+  }
   if (page > 1) sp.set("page", String(page));
   return sp.toString();
 }
@@ -165,6 +190,21 @@ export default function ProcessosPage() {
   function applyFilters() {
     navigate({ ...draft, apenas_ativos: draft.apenas_ativos ?? false }, 1);
   }
+
+  // SI-19 — a ordenação vive na URL, como os filtros: a seta de voltar e o
+  // recarregar a preservam. Trocar a ordem volta para a página 1.
+  const ordenacao: Ordenacao<ColunaProcesso> | undefined = filters.ordenar
+    ? { campo: filters.ordenar, direcao: filters.direcao ?? "asc" }
+    : undefined;
+  function ordenarPor(campo: ColunaProcesso) {
+    const nova = proximaOrdenacao(ordenacao, campo);
+    navigate({ ...filters, ordenar: nova.campo, direcao: nova.direcao }, 1);
+  }
+  const colunaOrdenavel = (campo: ColunaProcesso) => ({
+    sortable: true,
+    sortState: estadoDaColuna(ordenacao, campo),
+    onSortToggle: () => ordenarPor(campo),
+  });
 
   function clearFilters() {
     // Limpa os filtros DENTRO da caixa aberta — sair dela é pelo menu lateral.
@@ -381,6 +421,7 @@ export default function ProcessosPage() {
         <TabelaCaixaProcessos
           itens={processosQ.data?.items}
           carregando={processosQ.isLoading}
+          colunaOrdenavel={colunaOrdenavel}
           selecao={
             comLote
               ? {
@@ -406,12 +447,12 @@ export default function ProcessosPage() {
         <Table>
           <THead>
             <TR>
-              <TH>Número</TH>
-              <TH>Aberto em</TH>
-              <TH>Manifestante</TH>
-              <TH>Assunto</TH>
-              <TH>Local atual</TH>
-              <TH>Responsável</TH>
+              <TH {...colunaOrdenavel("numero")}>Número</TH>
+              <TH {...colunaOrdenavel("abertura")}>Aberto em</TH>
+              <TH {...colunaOrdenavel("manifestante")}>Manifestante</TH>
+              <TH {...colunaOrdenavel("assunto")}>Assunto</TH>
+              <TH {...colunaOrdenavel("local_atual")}>Local atual</TH>
+              <TH {...colunaOrdenavel("responsavel")}>Responsável</TH>
               <TH>Status</TH>
               <TH className="text-right">Ações</TH>
             </TR>
