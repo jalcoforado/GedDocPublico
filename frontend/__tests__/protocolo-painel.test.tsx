@@ -38,13 +38,23 @@ vi.mock("@/lib/auth", () => ({
 let painel: PainelUnidade;
 const painelMock = vi.fn(() => Promise.resolve(painel));
 const notifMock = vi.fn(() => Promise.resolve({ items: [], nao_lidas: 4 }));
+/** "Parados há mais tempo": a caixa Análise, cinco primeiros. */
+let parados: { items: unknown[]; total: number } = { items: [], total: 0 };
+const listMock = vi.fn((_f: unknown) => Promise.resolve(parados));
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
   return {
     ...actual,
     // Preguiçosos: o `vi.mock` sobe para antes das declarações acima.
-    api: { ...actual.api, processos: { ...actual.api.processos, painel: () => painelMock() } },
+    api: {
+      ...actual.api,
+      processos: {
+        ...actual.api.processos,
+        painel: () => painelMock(),
+        list: (f: unknown) => listMock(f),
+      },
+    },
     notificacoesApi: { ...actual.notificacoesApi, listarMinhas: () => notifMock() },
   };
 });
@@ -92,6 +102,8 @@ beforeEach(() => {
   painel = painelBase();
   painelMock.mockClear();
   notifMock.mockClear();
+  parados = { items: [], total: 0 };
+  listMock.mockClear();
   window.localStorage.clear();
 });
 afterEach(() => {
@@ -472,5 +484,77 @@ describe("painel de controle — mais perto do SEI", () => {
   it("sem o nome da unidade, mantém o texto genérico", async () => {
     await abrir();
     expect(await screen.findByText(/os números são da sua unidade/)).toBeInTheDocument();
+  });
+});
+
+describe("parados há mais tempo na unidade", () => {
+  const item = (id: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    numero_processo: `P${id}`,
+    nup: null,
+    assunto: `Assunto ${id}`,
+    manifestante: `Fulano ${id}`,
+    responsavel: null,
+    parado_desde: "2026-10-01T10:00:00",
+    prazo_caixa_status: "sem_prazo",
+    prazo_caixa_vence_em: null,
+    ...extra,
+  });
+  const secao = () => screen.getByRole("region", { name: "Parados há mais tempo na unidade" });
+
+  it("são as cinco primeiras da caixa Análise, na ordem da caixa", async () => {
+    parados = { items: [item(1), item(2)], total: 12 };
+    await abrir();
+    await waitFor(() => expect(within(secao()).getByText("P1")).toBeInTheDocument());
+
+    // Mesmo recorte do quadro "Na unidade" e mesma ordem da caixa: as linhas
+    // são o começo da lista que "Ver a caixa" abre.
+    expect(listMock).toHaveBeenCalledWith(
+      expect.objectContaining({ caixa: "analise", ordem: "parados", page: 1, page_size: 5 }),
+    );
+    const ver = within(secao()).getByRole("link", { name: /Ver a caixa Análise \(12\)/ });
+    expect(ver.getAttribute("href")).toBe("/m/protocolo/processos?caixa=analise&ativos=0");
+    expect(within(secao()).getByRole("link", { name: "P1" }).getAttribute("href")).toBe(
+      "/m/protocolo/processos/1",
+    );
+  });
+
+  it("sem responsável é um estado, dito por extenso", async () => {
+    parados = { items: [item(1)], total: 1 };
+    await abrir();
+    await waitFor(() => expect(within(secao()).getByText("Sem responsável")).toBeInTheDocument());
+  });
+
+  it("a cor vem do prazo: vencido pinta, sem prazo não", async () => {
+    parados = {
+      items: [
+        item(1, { prazo_caixa_status: "atrasado", prazo_caixa_vence_em: "2026-10-02T10:00:00" }),
+        item(2),
+      ],
+      total: 2,
+    };
+    await abrir();
+    await waitFor(() => expect(within(secao()).getByText("P1")).toBeInTheDocument());
+    const linhas = within(secao()).getAllByRole("row").slice(1);
+    expect(linhas[0].querySelector(".bg-danger-soft")).not.toBeNull();
+    expect(linhas[0].textContent).toMatch(/prazo vencido/);
+    expect(linhas[1].querySelector(".bg-danger-soft, .bg-warning-soft")).toBeNull();
+  });
+
+  it("unidade sem processo nenhum não mostra a seção (o primeiro uso já fala)", async () => {
+    painel.caixas = { ...painel.caixas, analise: 0, entrada: 0, saida: 0, externos: 0, arquivados: 0, recusados: 0 };
+    await abrir();
+    await waitFor(() => expect(painelMock).toHaveBeenCalled());
+    await screen.findByText(/Ainda não há nenhum processo/);
+    expect(screen.queryByRole("region", { name: "Parados há mais tempo na unidade" })).toBeNull();
+  });
+
+  it("caixa Análise vazia diz por quê, em vez de uma tabela em branco", async () => {
+    parados = { items: [], total: 0 };
+    await abrir();
+    await waitFor(() =>
+      expect(within(secao()).getByText(/Nenhum processo na mesa da unidade agora/)).toBeInTheDocument(),
+    );
+    expect(within(secao()).queryByRole("link", { name: /Ver a caixa/ })).toBeNull();
   });
 });

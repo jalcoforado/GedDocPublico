@@ -17,7 +17,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const onde = { pathname: "/m/protocolo/processos", busca: "" };
+const onde = { pathname: "/m/protocolo/processos", busca: "", podeInserir: true };
 vi.mock("next/navigation", () => ({
   usePathname: () => onde.pathname,
   useSearchParams: () => new URLSearchParams(onde.busca),
@@ -28,7 +28,8 @@ vi.mock("@/lib/auth", () => ({
     user: { nome: "Teste", is_super_usuario: true },
     perms: [],
     loading: false,
-    can: () => true,
+    // Ler tudo pode; criar depende de `onde.podeInserir`.
+    can: (_codigo: string, action?: string) => (action === "inserir" ? onde.podeInserir : true),
     logout: vi.fn(),
   }),
 }));
@@ -85,7 +86,32 @@ const atuais = () =>
 beforeEach(() => {
   onde.pathname = "/m/protocolo/processos";
   onde.busca = "";
+  onde.podeInserir = true;
   caixasMock.mockReset();
+});
+
+describe("ação principal do módulo", () => {
+  it("o protocolo tem 'Abrir processo' no alto do menu, levando ao formulário", async () => {
+    renderSidebar({ modulo: "protocolo", open: true, onClose: () => {} });
+    const abrir = await screen.findByRole("link", { name: "Abrir processo" });
+    expect(abrir.getAttribute("href")).toBe("/m/protocolo/processos/novo");
+    // Não é uma tela para navegar: não disputa a marca de página atual.
+    expect(abrir.getAttribute("aria-current")).toBeNull();
+  });
+
+  it("quem só consulta (sem 'inserir') não vê o botão", async () => {
+    onde.podeInserir = false;
+    renderSidebar({ modulo: "protocolo", open: true, onClose: () => {} });
+    await screen.findByRole("link", { name: "Caixas de trabalho" });
+    expect(screen.queryByRole("link", { name: "Abrir processo" })).toBeNull();
+  });
+
+  it("módulo sem ação declarada não ganha botão", async () => {
+    onde.pathname = "/m/pagamentos";
+    renderSidebar({ modulo: "pagamentos", open: true, onClose: () => {} });
+    await screen.findByRole("link", { name: "Visão geral" });
+    expect(screen.queryByRole("link", { name: "Abrir processo" })).toBeNull();
+  });
 });
 
 describe("menu do protocolo — telas, não filtros", () => {

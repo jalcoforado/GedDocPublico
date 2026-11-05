@@ -3,6 +3,7 @@ import {
   BookOpen,
   CalendarClock,
   ClipboardList,
+  FilePlus2,
   FileText,
   FolderTree,
   GitBranch,
@@ -39,6 +40,16 @@ export const menuProtocolo: MenuModulo = {
   // e para quem não vê item nenhum — e o painel, sem `processo`, ainda
   // mostra a saudação e as notificações em vez de uma tela vazia.
   raiz: "/m/protocolo/painel",
+  // Abrir processo é o motivo de quem opera o protocolo entrar no módulo; fica
+  // a um clique de qualquer tela dele, como o "Abrir Processo" no topo do
+  // menu do SUITE (CE). Exige `inserir`: quem só consulta não vê o botão.
+  acaoPrincipal: {
+    label: "Abrir processo",
+    href: "/m/protocolo/processos/novo",
+    icon: FilePlus2,
+    perm: "processo",
+    action: "inserir",
+  },
   grupos: [
     {
       title: "Processos",

@@ -75,6 +75,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
   // pathname vier como "comum" por engano (hoje nenhuma entrada de
   // ROTA_MODULO mapeia para "comum" — é defesa, não caminho alcançável).
   const menu = menuDoModulo(modulo);
+  const acao = menu && menu.slug !== "comum" ? menu.acaoPrincipal : undefined;
   const NAV: NavGroup[] = [
     ...MENUS.comum.grupos,
     ...(menu && menu.slug !== "comum" ? menu.grupos : []),
@@ -302,6 +303,25 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         {/* Cabeçalho de módulo — onde o usuário está e o caminho de volta a
             /modulos. Acima de todos os grupos, de propósito (ver componente). */}
         <SidebarModuloHeader modulo={modulo} collapsed={colapsada} />
+
+        {/* Ação principal do módulo (`MenuModulo.acaoPrincipal`): fora dos
+            grupos, acima deles — não é uma tela para navegar, é o que se veio
+            fazer. Sem a permissão de criar, não aparece. */}
+        {acao && can(acao.perm, acao.action) && (
+          <div className={cn("px-2 pt-2", colapsada && "md:px-1")}>
+            <Link
+              href={acao.href}
+              title={colapsada ? acao.label : undefined}
+              className={cn(
+                "flex h-10 items-center justify-center gap-2 rounded-button bg-accent px-3 text-sm font-semibold text-accent-foreground shadow-button transition-colors duration-fast hover:bg-accent-light",
+                colapsada && "md:px-0",
+              )}
+            >
+              <acao.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className={cn(colapsada && "md:sr-only")}>{acao.label}</span>
+            </Link>
+          </div>
+        )}
 
         {/* Items */}
         <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 py-2">

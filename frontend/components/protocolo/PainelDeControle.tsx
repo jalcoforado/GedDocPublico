@@ -25,6 +25,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog } from "@/components/ui/dialog";
+import { ParadosHaMaisTempo } from "@/components/protocolo/ParadosHaMaisTempo";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -391,6 +392,10 @@ export function PainelDeControle() {
       {operaProcessos && unidadeVazia && <PrimeiroUso podeAbrir={can("processo", "inserir")} />}
 
       {operaProcessos && painel && <Tabelas painel={painel} />}
+
+      {operaProcessos && painel && !unidadeVazia && (
+        <ParadosHaMaisTempo intervalo={INTERVALO_ATUALIZACAO} />
+      )}
 
       {configurando && (
         <ConfigurarQuadros

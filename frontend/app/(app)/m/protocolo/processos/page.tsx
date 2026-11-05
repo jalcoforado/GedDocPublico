@@ -10,16 +10,12 @@ import { ACOES_POR_CAIXA, AcoesEmLote } from "@/components/AcoesEmLote";
 import { MarcadoresDaLinha } from "@/components/EtiquetaMarcador";
 import { FavoritoStar } from "@/components/FavoritoStar";
 import { AbasCaixas } from "@/components/protocolo/AbasCaixas";
+import { ESCOPOS, FiltrosProcessos } from "@/components/protocolo/FiltrosProcessos";
 import { TabelaCaixaProcessos } from "@/components/TabelaCaixaProcessos";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
-import { Select } from "@/components/ui/select";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import type { EscopoProcesso } from "@/lib/api";
@@ -34,22 +30,8 @@ const PAGE_SIZE = 20;
 // Filtros ↔ URL: a URL é a fonte de verdade, para que recarregar, compartilhar
 // e back/forward preservem a listagem. `ativos` ausente cai no default da
 // página (apenas ativos); links externos como `?id_unidade=` da home herdam
-// esse default sem precisar declará-lo.
-/**
- * F2 — os recortes por responsabilidade, na ordem em que aparecem na tela.
- *
- * "Da minha unidade" inclui os processos SEM responsável de propósito: são
- * justamente os que precisam que alguém os assuma, e escondê-los num filtro de
- * unidade seria esconder o trabalho que ninguém pegou.
- */
-const ESCOPOS: EscopoProcesso[] = ["meus", "unidade", "unidade_e_subordinadas"];
-
-const ESCOPO_LABEL: Record<EscopoProcesso, string> = {
-  meus: "Meus",
-  unidade: "Da minha unidade",
-  unidade_e_subordinadas: "Unidade e subordinadas",
-};
-
+// esse default sem precisar declará-lo. Os recortes de escopo (F2) e a barra
+// de busca/filtros moram em `components/protocolo/FiltrosProcessos.tsx`.
 function filtrosDaUrl(sp: URLSearchParams): ProcessoListFilters {
   const num = (k: string) => {
     const n = Number(sp.get(k));
@@ -113,11 +95,6 @@ export default function ProcessosPage() {
 
   const page = Math.max(1, Number(searchParams.get("page")) || 1);
   const filters = useMemo(() => filtrosDaUrl(searchParams), [searchParams]);
-  const [draft, setDraft] = useState<ProcessoListFilters>(filters);
-  // Reaproxima o formulário do que a URL diz após back/forward.
-  useEffect(() => {
-    setDraft(filters);
-  }, [filters]);
 
   const { user } = useAuth();
   // Seleção para ações em lote. Vale para a página e a caixa abertas: trocar
@@ -153,10 +130,6 @@ export default function ProcessosPage() {
     router.push(q ? `${pathname}?${q}` : pathname, { scroll: false });
   }
 
-  function applyFilters() {
-    navigate({ ...draft, apenas_ativos: draft.apenas_ativos ?? false }, 1);
-  }
-
   function clearFilters() {
     // Limpa os filtros DENTRO da caixa aberta — sair dela é pelas abas.
     navigate({ apenas_ativos: false, caixa: filters.caixa }, 1);
@@ -184,169 +157,14 @@ export default function ProcessosPage() {
 
       <AbasCaixas caixa={filters.caixa} />
 
-      <Card>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <div className="md:col-span-2">
-              <Label htmlFor="q">Busca (número / manifestante / assunto)</Label>
-              <Input
-                id="q"
-                value={draft.q ?? ""}
-                onChange={(e) => setDraft({ ...draft, q: e.target.value })}
-                placeholder="Ex: 2026/000001 ou José"
-                inputMode="search"
-              />
-            </div>
-            <div>
-              <Label htmlFor="assunto">Assunto</Label>
-              <Select
-                id="assunto"
-                value={draft.id_assunto ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    id_assunto: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-              >
-                <option value="">Todos</option>
-                {assuntosQ.data?.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.assunto.length > 60 ? a.assunto.slice(0, 60) + "…" : a.assunto}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="unidade">Unidade (proprietária ou local atual)</Label>
-              <Select
-                id="unidade"
-                value={draft.id_unidade ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    id_unidade: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-              >
-                <option value="">Todas</option>
-                {unidadesQ.data?.items.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.unidade_trabalho}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="desde">Aberto desde</Label>
-              <Input
-                id="desde"
-                type="date"
-                value={draft.desde?.slice(0, 10) ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    desde: e.target.value ? `${e.target.value}T00:00:00` : undefined,
-                  })
-                }
-              />
-            </div>
-            <div>
-              <Label htmlFor="ate">Aberto até</Label>
-              <Input
-                id="ate"
-                type="date"
-                value={draft.ate?.slice(0, 10) ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    ate: e.target.value ? `${e.target.value}T23:59:59` : undefined,
-                  })
-                }
-              />
-            </div>
-            <div>
-              <Label htmlFor="escopo">Escopo</Label>
-              {/* F2 — o recorte por responsabilidade. "Da minha unidade"
-                  INCLUI os processos sem responsável: são os que precisam que
-                  alguém os assuma, e escondê-los seria esconder o trabalho que
-                  ninguém pegou. A unidade usada é a LOTAÇÃO PRINCIPAL de quem
-                  está logado; com lotação secundária ainda não há como
-                  escolher qual delas vale (depende do seletor de contexto). */}
-              <select
-                id="escopo"
-                value={draft.escopo ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    escopo: (e.target.value || undefined) as
-                      | EscopoProcesso
-                      | undefined,
-                  })
-                }
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="">Todos</option>
-                {ESCOPOS.map((e) => (
-                  <option key={e} value={e}>
-                    {ESCOPO_LABEL[e]}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <Label htmlFor="situacao">Situação</Label>
-              {/* E3 — ausente = protocolados (comportamento de hoje). Rascunho
-                  é workflow interno: não some da tela, só não entra na conta
-                  padrão de "processos" que o resto do sistema já espera. */}
-              <select
-                id="situacao"
-                value={draft.situacao ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    situacao: (e.target.value || undefined) as
-                      | ProcessoListFilters["situacao"],
-                  })
-                }
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="">Protocolados (padrão)</option>
-                <option value="rascunho">Rascunhos</option>
-                <option value="todos">Todos</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="ativos"
-                checked={!!draft.apenas_ativos}
-                onChange={(e) => setDraft({ ...draft, apenas_ativos: e.target.checked })}
-              />
-              <Label htmlFor="ativos" className="!mb-0">
-                Apenas ativos
-              </Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="favoritos"
-                checked={!!draft.favoritos}
-                onChange={(e) =>
-                  setDraft({ ...draft, favoritos: e.target.checked || undefined })
-                }
-              />
-              <Label htmlFor="favoritos" className="!mb-0">
-                Só favoritos
-              </Label>
-            </div>
-            <div className="flex flex-wrap items-end gap-2">
-              <Button onClick={applyFilters}>Filtrar</Button>
-              <Button variant="ghost" onClick={clearFilters}>
-                Limpar
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <FiltrosProcessos
+        filtros={filters}
+        aoAplicar={(f) => navigate(f, 1)}
+        aoLimpar={clearFilters}
+        assuntos={(assuntosQ.data ?? []).map((a) => ({ id: a.id, nome: a.assunto }))}
+        unidades={(unidadesQ.data?.items ?? []).map((u) => ({ id: u.id, nome: u.unidade_trabalho }))}
+        total={processosQ.data?.total}
+      />
 
       {filters.caixa && comLote && (
         <AcoesEmLote
