@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Home as HomeIcon, LogOut, Shield } from "lucide-react";
+import { LogOut, Shield } from "lucide-react";
 import Link from "next/link";
 
 import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
@@ -73,9 +73,8 @@ function CabecalhoDoLauncher() {
 /**
  * Layout do launcher (`/modulos`). Autenticado como o `(app)`, mas SEM
  * Sidebar nem o Header de módulo — mostrar o menu de um módulo numa tela cuja
- * função é escolher o módulo seria circular. Veste, porém, a mesma moldura do
- * "Menu principal": faixa do município, trilha de volta e a assinatura do
- * produto no rodapé.
+ * função é escolher o módulo seria circular. É o "Menu principal" (SI-20):
+ * faixa do município no topo e a assinatura do produto no rodapé.
  */
 function Shell({ children }: { children: React.ReactNode }) {
   const { loading, user } = useAuth();
@@ -93,16 +92,10 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-dvh flex-col bg-background">
       <CabecalhoDoLauncher />
       <main className="flex-1 p-4 sm:p-[var(--density-space)]">
-        <div className="mx-auto w-full max-w-7xl">
-          <Link
-            href="/home"
-            className="inline-flex items-center gap-2.5 rounded font-display text-sm font-semibold text-titulo-destaque underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <HomeIcon className="h-5 w-5 text-foreground-subtle" aria-hidden="true" />
-            Menu principal
-          </Link>
-          <div className="mt-5">{children}</div>
-        </div>
+        {/* Sem link de volta no topo: esta tela É o "Menu principal" (SI-20).
+            O link antigo ia para /home, que devolvia quem opera processos ao
+            painel do Protocolo. O início continua no brasão do cabeçalho. */}
+        <div className="mx-auto w-full max-w-7xl">{children}</div>
       </main>
       <AssinaturaAprimora className="px-4 pb-5 pt-2" />
     </div>

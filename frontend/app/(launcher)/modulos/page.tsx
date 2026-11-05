@@ -90,14 +90,14 @@ export default function Launcher() {
     return <p className="text-foreground-muted">Entrando...</p>;
   }
 
-  // Layout de referência (protótipo Figma "Sistema - Aprimora"): mesmo título
-  // com linha do "Menu principal" e cartões na linguagem dos botões dele —
-  // ícone num disco em gradiente da marca, à esquerda do rótulo. A saudação
-  // saiu: ela já está no Menu principal, e aqui o título diz onde se está.
+  // Layout de referência (protótipo Figma "Sistema - Aprimora"): título com
+  // linha embaixo e cartões com o ícone num disco em gradiente da marca, à
+  // esquerda do rótulo. Esta tela É o "Menu principal" desde a SI-20
+  // (2026-11-05): a trilha das telas de módulo volta para cá.
   return (
     <div className="animate-fade-in motion-reduce:animate-none">
       <h1 className="border-b border-border-strong pb-2 text-xl font-normal text-titulo-destaque">
-        Meus módulos
+        Menu principal
       </h1>
       <p className="mt-3 text-sm text-foreground-muted">
         Selecione o módulo em que deseja trabalhar.

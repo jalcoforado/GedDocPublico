@@ -1,6 +1,6 @@
 /**
- * Trilha do topo das telas de módulo — "Menu principal › Meus módulos ›
- * Módulo", do layout de referência.
+ * Trilha do topo das telas de módulo — "Menu principal › Módulo". O "Menu
+ * principal" é a tela de módulos (SI-20); "Meus módulos" saiu por repetir.
  *
  * A trilha mora no SHELL. A primeira versão ficava no `PageHeader`, e uma em
  * cada três telas de módulo (Usuários, Grupos, Relatórios…) desenha o próprio
@@ -24,11 +24,10 @@ const links = (nav: HTMLElement) =>
     .map((a) => [a.textContent, a.getAttribute("href")]);
 
 describe("trilha do módulo (shell)", () => {
-  it("Menu principal › Meus módulos › Módulo, cada parte um link", () => {
+  it("Menu principal (a tela de módulos) › Módulo, cada parte um link", () => {
     render(<TrilhaDoModulo modulo={FROTA} />);
     expect(links(screen.getByRole("navigation", { name: "Trilha" }))).toEqual([
-      ["Menu principal", "/home"],
-      ["Meus módulos", "/modulos"],
+      ["Menu principal", "/modulos"],
       ["Frota", "/m/frota"],
     ]);
   });

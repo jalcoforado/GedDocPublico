@@ -117,7 +117,7 @@ function TelaInicialSimples() {
             <Button asChild variant="secondary">
               <Link href="/modulos">
                 <LayoutGrid className="mr-1.5 h-4 w-4" aria-hidden="true" />
-                Meus módulos
+                Menu principal
               </Link>
             </Button>
             <Button asChild variant="secondary">
