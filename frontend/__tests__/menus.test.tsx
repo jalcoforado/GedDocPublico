@@ -32,18 +32,9 @@ const TODOS = Object.values(MENUS).flatMap((m) => hrefs(m.grupos.flatMap((g) => 
 const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> = {
   "/home": {},
   "/m/protocolo/painel": { perm: "processo" },
+  // "Caixas de trabalho": UM item. As caixas são abas da tela, não itens do
+  // menu (`components/protocolo/AbasCaixas.tsx`).
   "/m/protocolo/processos": { perm: "processo" },
-  // Caixas de trabalho — subitens de Processos. Literais de propósito: esta
-  // tabela é a fonte INDEPENDENTE, e montá-la a partir de `CAIXAS` faria o
-  // teste concordar com qualquer coisa que o menu dissesse.
-  "/m/protocolo/processos?caixa=entrada&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=saida&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=recusados&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=analise&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=externos&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=aguardando_assinatura&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=enviado_para_assinatura&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=arquivados&ativos=0": { perm: "processo" },
   "/m/protocolo/fluxo": { perm: "processo" },
   "/m/protocolo/workflow": {},
   "/m/protocolo/relatorios": { perm: "processo" },

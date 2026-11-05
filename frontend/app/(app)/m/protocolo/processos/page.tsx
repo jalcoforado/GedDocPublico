@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ACOES_POR_CAIXA, AcoesEmLote } from "@/components/AcoesEmLote";
 import { MarcadoresDaLinha } from "@/components/EtiquetaMarcador";
 import { FavoritoStar } from "@/components/FavoritoStar";
+import { AbasCaixas } from "@/components/protocolo/AbasCaixas";
 import { TabelaCaixaProcessos } from "@/components/TabelaCaixaProcessos";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -157,7 +158,7 @@ export default function ProcessosPage() {
   }
 
   function clearFilters() {
-    // Limpa os filtros DENTRO da caixa aberta — sair dela é pelo menu lateral.
+    // Limpa os filtros DENTRO da caixa aberta — sair dela é pelas abas.
     navigate({ apenas_ativos: false, caixa: filters.caixa }, 1);
   }
 
@@ -169,8 +170,8 @@ export default function ProcessosPage() {
     <div className="space-y-4">
       <PageHeader
         icon={FileText}
-        title={filters.caixa ? `Processos — ${rotuloDaCaixa(filters.caixa)}` : "Processos"}
-        description="Liste, filtre e abra processos administrativos. Use a busca avançada nos filtros abaixo ou tecle / para busca global."
+        title={filters.caixa ? `Caixas de trabalho — ${rotuloDaCaixa(filters.caixa)}` : "Caixas de trabalho"}
+        description="Escolha a caixa nas abas abaixo; filtre dentro dela e abra o processo. Tecle / para busca global."
         actions={
           <Link href="/m/protocolo/processos/novo">
             <Button>
@@ -180,6 +181,8 @@ export default function ProcessosPage() {
           </Link>
         }
       />
+
+      <AbasCaixas caixa={filters.caixa} />
 
       <Card>
         <CardContent>

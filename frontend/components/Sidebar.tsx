@@ -9,11 +9,11 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { api, type CaixasContagem } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canSeeItem, MENUS, menuDoModulo, type NavGroup, type NavItem } from "@/lib/menus";
 import { cn } from "@/lib/utils";
@@ -24,28 +24,26 @@ import { SidebarModuloHeader } from "./SidebarModuloHeader";
 import { ThemeToggle } from "./ThemeToggle";
 
 function isPathActive(href: string, pathname: string): boolean {
-  // O `href` pode carregar query (as caixas de Processos); para o CAMINHO
-  // ela não conta.
+  // Query no `href` não conta para o CAMINHO.
   const caminho = href.split("?")[0];
   return pathname === caminho || pathname.startsWith(caminho + "/");
 }
 
 /**
- * Qual subitem está aberto, quando vários compartilham o caminho e só a query
- * os distingue. Item com `filtro` é ativo quando a URL tem aquele parâmetro
- * com aquele valor; item sem `filtro` é "o resto" — ativo quando o caminho
- * casa e nenhum irmão com filtro casa.
+ * Qual item do grupo está aberto. O caminho de um item casa também com as
+ * subpáginas dele, então irmãos aninhados casam juntos: em
+ * `/m/pagamentos/dashboard`, "Visão geral" (`/m/pagamentos`) e "Dashboard"
+ * casavam os dois, e o menu marcava duas páginas atuais. Vence o irmão de
+ * caminho MAIS LONGO — o mais específico. Sem irmão mais específico casando,
+ * o item continua aceso nas próprias subpáginas (o detalhe de um processo
+ * acende "Caixas de trabalho").
  */
-function filhoAtivo(
-  filho: NavItem,
-  irmaos: NavItem[],
-  pathname: string,
-  busca: URLSearchParams,
-): boolean {
+function filhoAtivo(filho: NavItem, irmaos: NavItem[], pathname: string): boolean {
   if (!isPathActive(filho.href, pathname)) return false;
-  const casa = (i: NavItem) => !!i.filtro && busca.get(i.filtro.chave) === i.filtro.valor;
-  if (filho.filtro) return casa(filho);
-  return !irmaos.some((i) => i !== filho && isPathActive(i.href, pathname) && casa(i));
+  const tamanho = (i: NavItem) => i.href.split("?")[0].length;
+  return !irmaos.some(
+    (i) => i !== filho && isPathActive(i.href, pathname) && tamanho(i) > tamanho(filho),
+  );
 }
 
 /** True se o item OU algum descendente corresponde ao pathname atual. */
@@ -81,33 +79,6 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
     ...MENUS.comum.grupos,
     ...(menu && menu.slug !== "comum" ? menu.grupos : []),
   ];
-  // A QUERY da URL, que é o que distingue as caixas de Processos entre si
-  // (todas têm o mesmo caminho). Quem a lê é `LeitorDaBusca`, lá embaixo,
-  // dentro de Suspense — `useSearchParams` chamado direto aqui obrigaria toda
-  // página do shell a abrir mão da pré-renderização.
-  const [buscaStr, setBuscaStr] = useState("");
-  const busca = useMemo(() => new URLSearchParams(buscaStr), [buscaStr]);
-
-  // Contadores das caixas, para os itens do menu que declaram `contador`.
-  // Falha aqui não derruba o menu: os itens continuam navegáveis, sem número.
-  const temContador = NAV.some((g) =>
-    g.items.some((i) => i.contador || i.children?.some((c) => c.contador)),
-  );
-  const caixasQ = useQuery({
-    queryKey: ["processos-caixas"],
-    queryFn: () => api.processos.caixas(),
-    enabled: temContador,
-    staleTime: 0,
-  });
-  // A barra não desmonta entre telas, então o `staleTime` sozinho não refaz
-  // nada. Encaminhar e receber acontecem no detalhe do processo: refaz a
-  // contagem a cada navegação, que é quando o número pode ter mudado.
-  const { refetch: recontarCaixas } = caixasQ;
-  useEffect(() => {
-    if (temContador) void recontarCaixas();
-  }, [pathname, buscaStr, temContador, recontarCaixas]);
-  const contagem = caixasQ.data;
-
   // PR3a — link de plataforma só aparece para admin de plataforma (allowlist).
   const adminMeQ = useQuery({
     queryKey: ["admin-me"],
@@ -328,10 +299,6 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
           </button>
         </div>
 
-        <Suspense fallback={null}>
-          <LeitorDaBusca aoMudar={setBuscaStr} />
-        </Suspense>
-
         {/* Cabeçalho de módulo — onde o usuário está e o caminho de volta a
             /modulos. Acima de todos os grupos, de propósito (ver componente). */}
         <SidebarModuloHeader modulo={modulo} collapsed={colapsada} />
@@ -405,9 +372,9 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                 >
                   {visible.map((item) => {
                     const Icon = item.icon;
-                    // Mesma regra dos subitens: itens que compartilham o
-                    // caminho (as caixas) são distinguidos pela query.
-                    const active = filhoAtivo(item, visible, pathname, busca);
+                    // Mesma regra dos subitens: entre irmãos aninhados,
+                    // vence o mais específico.
+                    const active = filhoAtivo(item, visible, pathname);
 
                     if (item.children && item.children.length > 0 && !colapsada) {
                       const subIsOpen = subOpen[item.label] ?? false;
@@ -441,12 +408,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                             id={subSlugId}
                             className={cn("ml-3 flex flex-col gap-0.5 border-l border-sidebar-border pl-2", !subIsOpen && "hidden")}
                           >
-                            <Subitens
-                              item={item}
-                              pathname={pathname}
-                              busca={busca}
-                              contagem={contagem}
-                            />
+                            <Subitens item={item} pathname={pathname} />
                           </div>
                         </div>
                       );
@@ -500,10 +462,6 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                         <span className={cn("flex-1", colapsada && "md:sr-only")}>
                           {item.label}
                         </span>
-                        <Contador
-                          n={item.contador ? contagem?.[item.contador] : undefined}
-                          className={cn(colapsada && "md:sr-only")}
-                        />
                       </Link>
                     );
                   })}
@@ -579,11 +537,6 @@ function ItemColapsadoComFilhos({
   const gatilhoRef = useRef<HTMLButtonElement>(null);
   const ativo = item.children!.some((c) => isPathActive(c.href, pathname));
   const Icon = item.icon;
-  // O flyout só existe depois de um clique, então ler a URL na hora basta —
-  // dispensa `useSearchParams` (e a fronteira de Suspense) aqui.
-  const busca = new URLSearchParams(
-    typeof window === "undefined" ? "" : window.location.search,
-  );
 
   const fechar = () => {
     setAberto(false);
@@ -622,7 +575,7 @@ function ItemColapsadoComFilhos({
         <nav aria-label={item.label}>
           {item.children!.map((child) => {
             const ChildIcon = child.icon;
-            const childActive = filhoAtivo(child, item.children!, pathname, busca);
+            const childActive = filhoAtivo(child, item.children!, pathname);
             return (
               <Link
                 key={child.href}
@@ -647,56 +600,14 @@ function ItemColapsadoComFilhos({
   );
 }
 
-/**
- * Único ponto da barra que lê a QUERY da URL. Não desenha nada: só publica a
- * busca para o componente pai. Fica dentro de Suspense, que é o que
- * `useSearchParams` exige para a página poder ser pré-renderizada.
- */
-function LeitorDaBusca({ aoMudar }: { aoMudar: (busca: string) => void }) {
-  const busca = useSearchParams().toString();
-  useEffect(() => {
-    aoMudar(busca);
-  }, [busca, aoMudar]);
-  return null;
-}
-
-/** Quantidade ao lado do rótulo de um item (as caixas de Processos). */
-function Contador({ n, className }: { n: number | undefined; className?: string }) {
-  if (n === undefined) return null;
-  return (
-    // Zero não pede atenção: fica apagado, e o que tem processo salta sem
-    // precisar de cor de alerta.
-    <span
-      className={cn(
-        "text-xs tabular-nums",
-        n === 0 ? "text-sidebar-muted" : "font-semibold text-sidebar-foreground",
-        className,
-      )}
-    >
-      {n}
-      <span className="sr-only"> {n === 1 ? "processo" : "processos"}</span>
-    </span>
-  );
-}
-
 /** Filhos de um subgrupo do menu (item com `children`). */
-function Subitens({
-  item,
-  pathname,
-  busca,
-  contagem,
-}: {
-  item: NavItem;
-  pathname: string;
-  busca: URLSearchParams;
-  contagem: CaixasContagem | undefined;
-}) {
+function Subitens({ item, pathname }: { item: NavItem; pathname: string }) {
   const filhos = item.children ?? [];
   return (
     <>
       {filhos.map((child) => {
         const ChildIcon = child.icon;
-        const childActive = filhoAtivo(child, filhos, pathname, busca);
+        const childActive = filhoAtivo(child, filhos, pathname);
         return (
           <Link
             key={child.href}
@@ -721,7 +632,6 @@ function Subitens({
               aria-hidden="true"
             />
             <span className="flex-1">{child.label}</span>
-            <Contador n={child.contador ? contagem?.[child.contador] : undefined} />
           </Link>
         );
       })}

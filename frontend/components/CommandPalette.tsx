@@ -22,6 +22,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api, buscaApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { CAIXAS, hrefDaCaixa } from "@/lib/caixas-processos";
 import { canSeeItem, itensNavegaveis, type NavItem } from "@/lib/menus";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,14 @@ export const ITENS_EXTRA: ReadonlyArray<{ item: NavItem; moduloSlug: string; gro
     group: "navegar",
     item: { label: "Preferências de notificações", href: "/perfil/notificacoes", icon: Bell },
   },
+  // As caixas de trabalho saíram do menu lateral (viraram abas da tela de
+  // Processos), mas continuam alcançáveis pelo teclado: "entrada" no Ctrl+K
+  // abre a caixa de entrada direto.
+  ...CAIXAS.map(({ caixa, rotulo, icone }) => ({
+    moduloSlug: "protocolo",
+    group: "navegar" as const,
+    item: { label: rotulo, href: hrefDaCaixa(caixa), icon: icone, perm: "processo" },
+  })),
   {
     moduloSlug: "protocolo",
     group: "criar",
@@ -64,6 +73,7 @@ export const KEYWORDS_POR_HREF: Record<string, string[]> = {
   // O painel morou na `/home` até sair para o módulo: quem o procurava por
   // "início" ou "caixas" continua achando.
   "/m/protocolo/painel": ["sei", "quadros", "caixas", "prazos", "início"],
+  "/m/protocolo/processos": ["processos", "todos", "lista", "caixas"],
   "/m/protocolo/workflow": ["bpm", "fluxo"],
   "/m/administracao/organograma": ["unidades", "hierarquia"],
   "/m/administracao/auditoria": ["log", "histórico"],

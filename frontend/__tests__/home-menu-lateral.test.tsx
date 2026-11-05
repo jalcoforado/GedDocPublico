@@ -67,18 +67,18 @@ afterEach(cleanup);
 describe("menu lateral só dentro de módulo", () => {
   it("a tela inicial não tem menu lateral, nem para quem opera processos", () => {
     abrir("/home", ["processo"]);
-    expect(screen.queryByRole("link", { name: /Caixa de entrada/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Caixas de trabalho/ })).toBeNull();
     expect(screen.queryByRole("link", { name: /Painel de controle/ })).toBeNull();
   });
 
-  it("o painel do protocolo mostra o menu do módulo, com o painel e as caixas", () => {
+  it("o painel do protocolo mostra o menu do módulo, com o painel e as caixas de trabalho", () => {
     abrir("/m/protocolo/painel", ["processo"]);
     expect(screen.getAllByRole("link", { name: /Painel de controle/ }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: /Caixa de entrada/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: /Caixas de trabalho/ }).length).toBeGreaterThan(0);
   });
 
   it("as outras telas gerais seguem sem menu lateral", () => {
     abrir("/perfil", ["processo"]);
-    expect(screen.queryByRole("link", { name: /Caixa de entrada/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Caixas de trabalho/ })).toBeNull();
   });
 });

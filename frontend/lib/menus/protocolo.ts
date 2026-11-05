@@ -18,7 +18,7 @@ import {
   Workflow,
 } from "lucide-react";
 
-import { CAIXAS, ROTA_PROCESSOS, hrefDaCaixa } from "@/lib/caixas-processos";
+import { ROTA_PROCESSOS } from "@/lib/caixas-processos";
 
 import type { MenuModulo } from "./tipos";
 
@@ -44,21 +44,14 @@ export const menuProtocolo: MenuModulo = {
       title: "Processos",
       defaultOpen: true,
       items: [
-        // As caixas de trabalho ficam DIRETO no grupo. Chegaram a ser subitens
-        // de um item "Processos" — dentro de um grupo que já se chama
-        // "Processos": o nome aparecia duas vezes, uma em cima da outra, e as
-        // caixas ficavam um nível mais fundo do que precisavam.
+        // O menu lista TELAS. As caixas de trabalho (entrada, saída, análise…)
+        // são recortes de uma tela só, e moram nela, como abas com contador
+        // (`components/protocolo/AbasCaixas.tsx`). Chegaram a ser oito itens
+        // aqui, todos apontando para o mesmo caminho: o menu virava o filtro
+        // de uma tela e empurrava as outras telas do módulo para baixo da dobra.
         // O painel abre o grupo: é a porta do módulo (ver `raiz` acima).
         { label: "Painel de controle", href: "/m/protocolo/painel", icon: LayoutDashboard, perm: "processo" },
-        { label: "Todos os processos", href: ROTA_PROCESSOS, icon: Rows3, perm: "processo" },
-        ...CAIXAS.map(({ caixa, rotulo, icone }) => ({
-          label: rotulo,
-          href: hrefDaCaixa(caixa),
-          icon: icone,
-          perm: "processo",
-          filtro: { chave: "caixa", valor: caixa },
-          contador: caixa,
-        })),
+        { label: "Caixas de trabalho", href: ROTA_PROCESSOS, icon: Rows3, perm: "processo" },
         // Mapa do caminho de um processo, com as quantidades das caixas.
         // "Workflows", logo abaixo, é outra coisa: o desenho de fluxos BPM.
         { label: "Fluxo do processo", href: "/m/protocolo/fluxo", icon: Workflow, perm: "processo" },
