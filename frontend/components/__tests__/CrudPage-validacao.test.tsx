@@ -95,6 +95,33 @@ describe("CrudPage — validação antes de enviar", () => {
     expect(createFn).not.toHaveBeenCalled();
   });
 
+  it("CPF completo com dígito verificador errado é recusado", async () => {
+    const { createFn } = renderizar();
+    digitar(rotulo("Nome"), "Maria");
+    digitar(rotulo("CPF"), "12345678900");
+    digitar(rotulo("E-mail"), "maria@exemplo.com.br");
+    salvar();
+
+    expect(await screen.findByText("CPF inválido: confira os dígitos.")).toBeInTheDocument();
+    expect(createFn).not.toHaveBeenCalled();
+  });
+
+  it("CNPJ alfanumérico com dígito errado é recusado, e o certo passa", async () => {
+    const { createFn } = renderizar();
+    digitar(rotulo("Nome"), "Empresa");
+    fireEvent.change(screen.getByLabelText(rotulo("Tipo")), { target: { value: "J" } });
+    digitar(rotulo("CNPJ"), "12ABC34501DE36");
+    digitar(rotulo("E-mail"), "contato@empresa.com.br");
+    salvar();
+    expect(await screen.findByText("CNPJ inválido: confira os dígitos.")).toBeInTheDocument();
+    expect(createFn).not.toHaveBeenCalled();
+
+    digitar(rotulo("CNPJ"), "12ABC34501DE35");
+    salvar();
+    await waitFor(() => expect(createFn).toHaveBeenCalled());
+    expect(createFn.mock.calls[0][0]).toMatchObject({ doc: "12.ABC.345/01DE-35" });
+  });
+
   it("corrigir o campo apaga o erro dele", async () => {
     renderizar();
     salvar();

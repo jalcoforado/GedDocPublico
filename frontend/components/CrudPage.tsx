@@ -18,6 +18,7 @@ import { useToast } from "@/components/ui/toast";
 import {
   aceitaLetras,
   aplicarMascara,
+  documentoValido,
   emailValido,
   exemploDaMascara,
   type Mascara,
@@ -57,11 +58,22 @@ function vazio(v: unknown): boolean {
 }
 
 /**
+ * Documento que veio do cadastro e não foi tocado não é reconferido: há
+ * cadastro anterior à conferência do dígito verificador (a demonstração usa
+ * CPF fictício), e exigir a correção travaria trocar o telefone. O backend
+ * faz o mesmo (`routers/manifestantes.py::update_manifestante`).
+ */
+function docAlterado(m: Mascara, v: unknown, original: unknown): boolean {
+  return original === undefined || aplicarMascara(m, v).valor !== aplicarMascara(m, original).valor;
+}
+
+/**
  * Erros por campo antes de enviar. `required` só valia no `<input>` nativo,
  * e o Salvar do rodapé fica fora do `<form>`: o navegador nunca conferia, e
- * campo obrigatório vazio chegava ao servidor.
+ * campo obrigatório vazio chegava ao servidor. Na edição, `original` é o
+ * registro como abriu no formulário.
  */
-function validar(fields: CrudField[], form: any): Record<string, string> {
+function validar(fields: CrudField[], form: any, original?: any): Record<string, string> {
   const erros: Record<string, string> = {};
   for (const f of fields) {
     if (f.type === "checkbox") continue;
@@ -73,6 +85,8 @@ function validar(fields: CrudField[], form: any): Record<string, string> {
     const m = f.mascara && resolver(f.mascara, form);
     if (m && !aplicarMascara(m, v).completo) {
       erros[f.name] = `Preencha no formato ${exemploDaMascara(m)}.`;
+    } else if ((m === "cpf" || m === "cnpj") && docAlterado(m, v, original?.[f.name]) && !documentoValido(m, v)) {
+      erros[f.name] = `${m.toUpperCase()} inválido: confira os dígitos.`;
     } else if (f.type === "email" && !emailValido(String(v))) {
       erros[f.name] = "E-mail inválido.";
     }
@@ -273,7 +287,8 @@ export function CrudPage<T extends { id: number }>({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
-    const encontrados = validar(fields, form);
+    const original = editing ? (rowToForm ? rowToForm(editing) : editing) : undefined;
+    const encontrados = validar(fields, form, original);
     setErros(encontrados);
     if (Object.keys(encontrados).length > 0) {
       document.getElementById(Object.keys(encontrados)[0])?.focus();

@@ -13,8 +13,14 @@ FORMATO_DO_DOCUMENTO: dict[str, str] = {
 
 # Conferência de forma, não de existência: o e-mail de verdade só se prova
 # entregando. `EmailStr` não serve aqui — recusa os domínios reservados
-# (`.test`) que a demonstração e os testes usam.
-_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# (`.test`) que a demonstração e os testes usam. A forma é a usual: usuário
+# sem ponto na ponta nem ponto duplo, domínio com rótulos de letra/dígito/hífen
+# e terminação de 2+ letras ("maria@gmail" e "maria@gmail.com." não passam).
+# Espelhada em `frontend/lib/mascaras.ts::emailValido`.
+_EMAIL = re.compile(
+    r"^[a-z0-9_%+-]+(?:\.[a-z0-9_%+-]+)*"
+    r"@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$"
+)
 
 
 def normaliza_cpf_cnpj(v: object) -> object:
@@ -34,12 +40,43 @@ def normaliza_cpf_cnpj(v: object) -> object:
     return v
 
 
+def _cpf_valido(doc: str) -> bool:
+    """11 dígitos com os dois verificadores (módulo 11). Sequência repetida
+    ("111.111.111-11") fecha a conta, mas a Receita não emite: recusada."""
+    if len(doc) != 11 or not doc.isdigit() or doc == doc[0] * 11:
+        return False
+    for n in (9, 10):
+        soma = sum(int(doc[i]) * (n + 1 - i) for i in range(n))
+        if soma * 10 % 11 % 10 != int(doc[n]):
+            return False
+    return True
+
+
+def _cnpj_valido(doc: str) -> bool:
+    """14 posições: 12 letras ou dígitos + 2 dígitos verificadores.
+
+    Mesma conta para o numérico e o alfanumérico (IN RFB 2.229/2024): cada
+    posição vale o código ASCII menos 48 — "0".."9" valem 0..9 e "A".."Z"
+    valem 17..42 —, pesos 2 a 9 da direita para a esquerda, módulo 11.
+    Exemplo oficial da Receita: 12.ABC.345/01DE-35.
+    """
+    if len(doc) != 14 or not doc[:12].isalnum() or not doc[12:].isdigit():
+        return False
+    if doc == doc[0] * 14:
+        return False
+    valores = [ord(ch) - 48 for ch in doc]
+    for n in (12, 13):
+        pesos = [i % 8 + 2 for i in range(n)][::-1]
+        resto = sum(v * p for v, p in zip(valores[:n], pesos)) % 11
+        if (0 if resto < 2 else 11 - resto) != valores[n]:
+            return False
+    return True
+
+
 def documento_valido(natureza: str, doc: str) -> bool:
-    """CPF: 11 dígitos. CNPJ: 12 posições de letra ou dígito + 2 dígitos
-    verificadores (o DV continua numérico também no alfanumérico)."""
-    if natureza == "F":
-        return len(doc) == 11 and doc.isdigit()
-    return len(doc) == 14 and doc[:12].isalnum() and doc[12:].isdigit()
+    """CPF para pessoa física, CNPJ para jurídica, ambos com dígito
+    verificador conferido. Espelhada em `frontend/lib/mascaras.ts`."""
+    return _cpf_valido(doc) if natureza == "F" else _cnpj_valido(doc)
 
 
 def telefone_so_digitos(v: object) -> object:

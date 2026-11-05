@@ -1,8 +1,9 @@
 """Manifestante — cadastro com tipo físico/jurídico e campos obrigatórios.
 
 - O tipo de manifestante diz se é pessoa física ou jurídica (`natureza`,
-  migration 0136); o documento tem de ter 11 dígitos (CPF) ou 14 (CNPJ)
-  conforme o tipo escolhido.
+  migration 0136); o documento tem de ser CPF ou CNPJ conforme o tipo
+  escolhido, com os dígitos verificadores certos. Na edição, documento que não
+  mudou não é reconferido (há cadastro anterior à regra).
 - Nome, CPF/CNPJ, celular e e-mail são obrigatórios no cadastro. Na edição,
   campo ausente fica como está, mas obrigatório não pode ser esvaziado.
 - Telefone é gravado só com dígitos (como o CPF); e-mail, aparado e em minúsculas.
@@ -84,15 +85,22 @@ async def test_obrigatorios_do_cadastro(admin_engine, campo, valor):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("natureza,doc,ok", [
     ("F", "123.456.789-09", True),
-    ("F", "12.345.678/0001-90", False),
+    ("F", "12.345.678/0001-95", False),
     ("F", "1234567890", False),
-    ("J", "12.345.678/0001-90", True),
+    ("J", "12.345.678/0001-95", True),
     ("J", "123.456.789-09", False),
     # CNPJ alfanumérico (IN RFB 2.229/2024): letra só nas 12 primeiras posições
     ("J", "12.ABC.345/01DE-35", True),
     ("J", "12.abc.345/01de-35", True),
     ("J", "12.ABC.345/01DE-3X", False),
     ("F", "123.ABC.789-09", False),
+    # dígito verificador errado, com o tamanho certo
+    ("F", "123.456.789-00", False),
+    ("J", "12.345.678/0001-90", False),
+    ("J", "12.ABC.345/01DE-36", False),
+    # sequência repetida fecha a conta, mas não existe
+    ("F", "111.111.111-11", False),
+    ("J", "00.000.000/0000-00", False),
 ])
 async def test_documento_segue_a_natureza_do_tipo(admin_engine, natureza, doc, ok):
     await _cliente(admin_engine)
@@ -171,6 +179,13 @@ def test_telefone_para_exibir(gravado, exibido):
     ("telefone_residencial", "123"),
     ("email", "maria@sem-ponto"),
     ("email", "maria.manifcad.test"),
+    ("email", "maria@gmail.com."),
+    ("email", "maria..silva@gmail.com"),
+    ("email", ".maria@gmail.com"),
+    ("email", "maria@gmail.c"),
+    ("email", "maria@-gmail.com"),
+    ("email", "maria@gmail,com"),
+    ("email", "maria silva@gmail.com"),
 ])
 async def test_formato_invalido_e_recusado(admin_engine, campo, valor):
     await _cliente(admin_engine)
@@ -230,10 +245,10 @@ async def test_trocar_tipo_confere_documento_ja_gravado(admin_engine):
             m = (await c.post(URL, json=_payload(tipos["F"]))).json()
             so_tipo = await c.put(f"{URL}/{m['id']}", json={"id_tipo_manifestante": tipos["J"]})
             os_dois = await c.put(f"{URL}/{m['id']}", json={
-                "id_tipo_manifestante": tipos["J"], "cpf_cnpj": "12.345.678/0001-90"})
+                "id_tipo_manifestante": tipos["J"], "cpf_cnpj": "12.345.678/0001-95"})
         assert so_tipo.status_code == 422, so_tipo.text
         assert os_dois.status_code == 200, os_dois.text
-        assert os_dois.json()["cpf_cnpj"] == "12345678000190"
+        assert os_dois.json()["cpf_cnpj"] == "12345678000195"
     finally:
         await _fechar()
 
@@ -277,3 +292,69 @@ async def test_natureza_do_tipo_e_editavel(admin_engine):
         assert muda.status_code == 200 and muda.json()["natureza"] == "F"
     finally:
         await _fechar()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("email", [
+    "maria.silva+protocolo@prefeitura.ce.gov.br",
+    "MARIA_2@Itaitinga.CE.gov.br",
+    "maria@manifcad.test",
+])
+async def test_email_valido_passa(admin_engine, email):
+    await _cliente(admin_engine)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(URL, json=_payload((await _tipos(c))["F"], email=email))
+        assert r.status_code == 201, r.text
+        assert r.json()["email"] == email.lower()
+    finally:
+        await _fechar()
+
+
+@pytest.mark.asyncio
+async def test_cadastro_antigo_com_cpf_invalido_continua_editavel(admin_engine):
+    """A demonstração e cadastros anteriores à regra têm CPF que não fecha o
+    dígito verificador. A tela manda o formulário inteiro na edição: trocar o
+    telefone não pode exigir corrigir o CPF. Trocar o CPF, sim, confere."""
+    t = await _cliente(admin_engine)
+    try:
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+        sm = async_sessionmaker(admin_engine, expire_on_commit=False, class_=AsyncSession)
+        async with sm() as s:
+            mid = (await s.execute(text(
+                "INSERT INTO protocolos.manifestante "
+                "(tenant_id, id_tipo_manifestante, nome, cpf_cnpj, telefone_celular, ativo, excluido) "
+                "SELECT :t, id, 'Antigo CPF Ficticio', '99900000017', '85999998888', true, false "
+                "FROM protocolos.tipo_manifestante WHERE tenant_id=:t AND natureza='F' RETURNING id"
+            ), {"t": t.id})).scalar_one()
+            await s.commit()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            tipo_f = (await _tipos(c))["F"]
+            mesmo_cpf = await c.put(f"{URL}/{mid}", json={
+                "id_tipo_manifestante": tipo_f, "cpf_cnpj": "999.000.000-17",
+                "telefone_celular": "(85) 98888-7777"})
+            outro_invalido = await c.put(f"{URL}/{mid}", json={"cpf_cnpj": "999.000.000-25"})
+            corrigido = await c.put(f"{URL}/{mid}", json={"cpf_cnpj": "123.456.789-09"})
+        assert mesmo_cpf.status_code == 200, mesmo_cpf.text
+        assert mesmo_cpf.json()["telefone_celular"] == "85988887777"
+        assert outro_invalido.status_code == 422, outro_invalido.text
+        assert corrigido.status_code == 200, corrigido.text
+    finally:
+        await _fechar()
+
+
+@pytest.mark.parametrize("natureza,doc,ok", [
+    ("F", "12345678909", True),
+    ("F", "52998224725", True),
+    ("F", "52998224724", False),
+    ("J", "11222333000181", True),
+    ("J", "12ABC34501DE35", True),
+    ("J", "12ABC34501DE53", False),
+    ("J", "1234567800019", False),
+])
+def test_documento_valido_confere_digito(natureza, doc, ok):
+    from app.schemas.manifestante import documento_valido
+
+    assert documento_valido(natureza, doc) is ok

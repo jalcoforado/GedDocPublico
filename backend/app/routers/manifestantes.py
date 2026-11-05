@@ -139,9 +139,10 @@ def _conferir_documento(tipo: TipoManifestante, cpf_cnpj: str | None) -> None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
-                f"{NOME_DO_DOCUMENTO[tipo.natureza]} deve ter "
-                f"{FORMATO_DO_DOCUMENTO[tipo.natureza]} para o tipo "
-                f"\"{tipo.tipo_manifestante}\"."
+                f"{NOME_DO_DOCUMENTO[tipo.natureza]} inválido para o tipo "
+                f"\"{tipo.tipo_manifestante}\": deve ter "
+                f"{FORMATO_DO_DOCUMENTO[tipo.natureza]}, com os dígitos "
+                "verificadores corretos."
             ),
         )
 
@@ -179,12 +180,18 @@ async def update_manifestante(
 ):
     m = await get_or_404(db, Manifestante, manif_id, tenant_id=tenant_id, label="Manifestante")
     mudancas = payload.model_dump(exclude_unset=True)
-    if "id_tipo_manifestante" in mudancas or "cpf_cnpj" in mudancas:
+    id_tipo = mudancas.get("id_tipo_manifestante", m.id_tipo_manifestante)
+    documento = mudancas.get("cpf_cnpj", m.cpf_cnpj)
+    # Só confere o que muda. A tela manda o formulário inteiro na edição, e há
+    # cadastro anterior à conferência do dígito verificador (a demonstração
+    # inteira usa CPF fictício): exigir correção dele travaria trocar o
+    # telefone. Mudou o tipo ou o documento, aí vale a regra toda.
+    if id_tipo != m.id_tipo_manifestante or documento != m.cpf_cnpj:
         tipo = await get_or_404(
-            db, TipoManifestante, mudancas.get("id_tipo_manifestante", m.id_tipo_manifestante),
+            db, TipoManifestante, id_tipo,
             tenant_id=tenant_id, label="Tipo de manifestante",
         )
-        _conferir_documento(tipo, mudancas.get("cpf_cnpj", m.cpf_cnpj))
+        _conferir_documento(tipo, documento)
     for k, v in mudancas.items():
         setattr(m, k, v)
     await db.commit()

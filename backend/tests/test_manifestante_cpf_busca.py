@@ -1,7 +1,7 @@
 """Manifestante — CPF/CNPJ só com dígitos e busca que aceita máscara.
 
 Dois defeitos vistos em homologação (2026-09-28):
-- cadastrar manifestante com CNPJ digitado com máscara (`12.345.678/0001-90`,
+- cadastrar manifestante com CNPJ digitado com máscara (`12.345.678/0001-95`,
   18 caracteres) dava 422 contra `max_length=14`; CPF com máscara passava por
   caber em 14, mas era gravado com pontos e traço;
 - gravado com máscara, o manifestante nunca era ligado ao cidadão no portal,
@@ -48,7 +48,7 @@ async def _novo(c: AsyncClient, **campos) -> dict:
     return {
         "id_tipo_manifestante": await _tipo(c, natureza),
         "nome": "Fulano",
-        "cpf_cnpj": "12345678909" if natureza == "F" else "12345678000190",
+        "cpf_cnpj": "12345678909" if natureza == "F" else "12345678000195",
         "telefone_celular": "85999998888",
         "email": "fulano@manif.test",
         **campos,
@@ -57,7 +57,7 @@ async def _novo(c: AsyncClient, **campos) -> dict:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("natureza,digitado,gravado", [
-    ("J", "12.345.678/0001-90", "12345678000190"),
+    ("J", "12.345.678/0001-95", "12345678000195"),
     ("J", "12.abc.345/01de-35", "12ABC34501DE35"),
     ("F", "123.456.789-09", "12345678909"),
     ("F", " 123 456 789 09 ", "12345678909"),
@@ -92,9 +92,9 @@ async def test_edicao_tambem_normaliza(admin_engine):
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             m = (await c.post("/api/v2/manifestantes", json=await _novo(c, natureza="J"))).json()
-            r = await c.put(f"/api/v2/manifestantes/{m['id']}", json={"cpf_cnpj": "12.345.678/0001-90"})
+            r = await c.put(f"/api/v2/manifestantes/{m['id']}", json={"cpf_cnpj": "12.345.678/0001-95"})
         assert r.status_code == 200, r.text
-        assert r.json()["cpf_cnpj"] == "12345678000190"
+        assert r.json()["cpf_cnpj"] == "12345678000195"
     finally:
         await _fechar()
 

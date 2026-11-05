@@ -92,7 +92,40 @@ export function telefoneParaExibir(v: string | null | undefined): string {
   return /^\d{10,11}$/.test(v) ? aplicarMascara("telefone", v).valor : v;
 }
 
-// Mesma regra do backend (`schemas/manifestante.py::_EMAIL`): forma, não existência.
+// Mesma regra do backend (`schemas/manifestante.py::_EMAIL`): forma, não
+// existência. Usuário sem ponto na ponta nem ponto duplo; domínio com rótulos
+// de letra/dígito/hífen e terminação de 2+ letras.
+const EMAIL =
+  /^[a-z0-9_%+-]+(?:\.[a-z0-9_%+-]+)*@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
+
 export function emailValido(v: string): boolean {
-  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim());
+  return EMAIL.test(v.trim().toLowerCase());
+}
+
+/**
+ * Dígito verificador (módulo 11) de CPF e CNPJ, numérico ou alfanumérico.
+ * Espelha `documento_valido` do backend. No CNPJ cada posição vale o código
+ * ASCII menos 48 ("0".."9" → 0..9, "A".."Z" → 17..42), com pesos 2 a 9 da
+ * direita para a esquerda; exemplo oficial da Receita: 12.ABC.345/01DE-35.
+ * Sequência repetida ("111.111.111-11") fecha a conta e é recusada.
+ */
+export function documentoValido(m: "cpf" | "cnpj", entrada: unknown): boolean {
+  const doc = caracteres(m, entrada);
+  const tamanho = m === "cpf" ? 11 : 14;
+  if (doc.length !== tamanho || doc === doc[0].repeat(tamanho)) return false;
+  if (!/^\d{2}$/.test(doc.slice(-2))) return false;
+  const valores = doc.split("").map((ch) => ch.charCodeAt(0) - 48);
+  const corpo = tamanho - 2;
+  for (const n of [corpo, corpo + 1]) {
+    let soma = 0;
+    for (let i = 0; i < n; i++) {
+      // CPF: pesos n+1 descendo até 2. CNPJ: 2..9 ciclando, da direita.
+      const peso = m === "cpf" ? n + 1 - i : ((n - 1 - i) % 8) + 2;
+      soma += valores[i] * peso;
+    }
+    const resto = soma % 11;
+    const dv = m === "cpf" ? (soma * 10) % 11 % 10 : resto < 2 ? 0 : 11 - resto;
+    if (dv !== valores[n]) return false;
+  }
+  return true;
 }

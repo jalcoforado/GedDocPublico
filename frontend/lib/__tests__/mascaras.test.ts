@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   aceitaLetras,
   aplicarMascara,
+  documentoValido,
   emailValido,
   exemploDaMascara,
   telefoneParaExibir,
@@ -70,7 +71,35 @@ describe("exemploDaMascara e emailValido", () => {
     ["maria@sem-ponto", false],
     ["maria.exemplo.com", false],
     ["ma ria@x.com", false],
+    ["maria.silva+protocolo@prefeitura.ce.gov.br", true],
+    ["MARIA@Gmail.COM", true],
+    ["maria@gmail.com.", false],
+    ["maria..silva@gmail.com", false],
+    [".maria@gmail.com", false],
+    ["maria@gmail.c", false],
+    ["maria@-gmail.com", false],
+    ["maria@gmail,com", false],
   ])("%j → %s", (v, ok) => {
     expect(emailValido(v)).toBe(ok);
+  });
+});
+
+describe("documentoValido (dígito verificador)", () => {
+  it.each([
+    ["cpf", "123.456.789-09", true],
+    ["cpf", "52998224725", true],
+    ["cpf", "123.456.789-00", false],
+    ["cpf", "111.111.111-11", false],
+    ["cpf", "1234567890", false],
+    ["cnpj", "11.222.333/0001-81", true],
+    ["cnpj", "12.345.678/0001-95", true],
+    ["cnpj", "12.345.678/0001-90", false],
+    // exemplo oficial da Receita do CNPJ alfanumérico
+    ["cnpj", "12.ABC.345/01DE-35", true],
+    ["cnpj", "12abc34501de35", true],
+    ["cnpj", "12.ABC.345/01DE-36", false],
+    ["cnpj", "00.000.000/0000-00", false],
+  ] as const)("%s %j → %s", (m, v, ok) => {
+    expect(documentoValido(m, v)).toBe(ok);
   });
 });
