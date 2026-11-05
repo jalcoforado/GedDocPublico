@@ -83,6 +83,49 @@ describe("PageHeader dentro de um módulo", () => {
   });
 });
 
+describe("PageHeader — seta de voltar (SI-18)", () => {
+  function renderEmFrota(ui: React.ReactNode) {
+    return render(<ModuloAtualProvider value={FROTA}>{ui}</ModuloAtualProvider>);
+  }
+  const DETALHE = {
+    title: "Solicitação 12",
+    breadcrumbs: [
+      { label: "Frota Pública", href: "/m/frota" },
+      { label: "Solicitações", href: "/m/frota/solicitacoes" },
+      { label: "Solicitação 12" },
+    ],
+  };
+
+  it("tela interna sem histórico na aba: a seta leva à tela-mãe", () => {
+    window.sessionStorage.clear();
+    renderEmFrota(<PageHeader {...DETALHE} />);
+    expect(screen.getByRole("link", { name: "Voltar" })).toHaveAttribute(
+      "href",
+      "/m/frota/solicitacoes",
+    );
+  });
+
+  it("veio da lista filtrada: seta e trilha voltam com os filtros", () => {
+    window.sessionStorage.setItem(
+      "aprimora.trilha.v1",
+      JSON.stringify(["/m/frota/solicitacoes?status=pendente"]),
+    );
+    renderEmFrota(<PageHeader {...DETALHE} />);
+    expect(screen.getByRole("link", { name: "Voltar" })).toHaveAttribute(
+      "href",
+      "/m/frota/solicitacoes?status=pendente",
+    );
+    const nav = screen.getByRole("navigation", { name: "Trilha da tela" });
+    expect(links(nav)).toEqual([["Solicitações", "/m/frota/solicitacoes?status=pendente"]]);
+    window.sessionStorage.clear();
+  });
+
+  it("tela de topo (sem nível acima) não ganha seta", () => {
+    renderEmFrota(<PageHeader title="Veículos" />);
+    expect(screen.queryByRole("link", { name: "Voltar" })).toBeNull();
+  });
+});
+
 describe("PageHeader fora de módulo (telas transversais)", () => {
   it("com migalhas mantém a trilha que já tinha, com o atalho de Início", () => {
     render(<PageHeader title="Notificações" breadcrumbs={[{ label: "Perfil", href: "/perfil" }]} />);

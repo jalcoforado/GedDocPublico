@@ -96,6 +96,16 @@ function urlDosFiltros(f: ProcessoListFilters, page: number): string {
   return sp.toString();
 }
 
+/**
+ * SI-17 — situação em um clique. Até aqui era um seletor no meio dos filtros,
+ * que só valia depois de "Filtrar": na weekly ninguém achou os rascunhos.
+ */
+const SITUACOES: { valor: ProcessoListFilters["situacao"]; rotulo: string }[] = [
+  { valor: undefined, rotulo: "Protocolados" },
+  { valor: "rascunho", rotulo: "Meus rascunhos" },
+  { valor: "todos", rotulo: "Todos" },
+];
+
 function fmtDate(s: string) {
   const d = new Date(s);
   return (
@@ -180,6 +190,41 @@ export default function ProcessosPage() {
           </Link>
         }
       />
+
+      {/* SI-17 — a situação vale na hora, sem "Filtrar". Fora das caixas:
+          dentro de uma, quem decide o recorte é a caixa. */}
+      {!filters.caixa && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div role="group" aria-label="Situação" className="inline-flex rounded-lg border border-border bg-surface-1 p-0.5">
+            {SITUACOES.map((s) => {
+              const ativo = filters.situacao === s.valor;
+              return (
+                <button
+                  key={s.rotulo}
+                  type="button"
+                  aria-pressed={ativo}
+                  onClick={() => navigate({ ...filters, situacao: s.valor }, 1)}
+                  className={
+                    "rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
+                    (ativo
+                      ? "bg-brand text-primary-foreground shadow-xs"
+                      : "text-foreground-muted hover:bg-muted hover:text-foreground")
+                  }
+                >
+                  {s.rotulo}
+                </button>
+              );
+            })}
+          </div>
+          <span className="text-xs text-foreground-subtle">
+            Encaminhamentos recusados ficam na caixa{" "}
+            <Link href="/m/protocolo/processos?caixa=recusados" className="text-brand hover:underline">
+              Recusados
+            </Link>
+            .
+          </span>
+        </div>
+      )}
 
       <Card>
         <CardContent>
@@ -289,28 +334,6 @@ export default function ProcessosPage() {
                     {ESCOPO_LABEL[e]}
                   </option>
                 ))}
-              </select>
-            </div>
-            <div>
-              <Label htmlFor="situacao">Situação</Label>
-              {/* E3 — ausente = protocolados (comportamento de hoje). Rascunho
-                  é workflow interno: não some da tela, só não entra na conta
-                  padrão de "processos" que o resto do sistema já espera. */}
-              <select
-                id="situacao"
-                value={draft.situacao ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    situacao: (e.target.value || undefined) as
-                      | ProcessoListFilters["situacao"],
-                  })
-                }
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="">Protocolados (padrão)</option>
-                <option value="rascunho">Rascunhos</option>
-                <option value="todos">Todos</option>
               </select>
             </div>
             <div className="flex items-center gap-2">
