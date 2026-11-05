@@ -28,6 +28,7 @@ from ..models import (
     UnidadeTrabalho,
     Usuario,
 )
+from ..schemas.manifestante import telefone_para_exibir
 
 _TOKEN_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}")
 
@@ -116,11 +117,11 @@ async def build_context(
 
     telefone = ""
     if manifestante is not None:
-        telefone = (
+        # Gravado só com dígitos desde 2026-11-04: o documento mostra formatado.
+        telefone = telefone_para_exibir(
             manifestante.telefone_celular
             or manifestante.telefone_residencial
             or manifestante.telefone_comercial
-            or ""
         )
 
     return {

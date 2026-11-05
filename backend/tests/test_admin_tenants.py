@@ -72,9 +72,15 @@ async def test_provisiona_tenant_completo(admin_engine):
         # admin bcrypt-only (sem MD5)
         u = (await s.execute(text("SELECT senha, senha_bcrypt FROM utils.usuario WHERE tenant_id=:t"), {"t": tenant.id})).first()
         assert u.senha == "" and u.senha_bcrypt and u.senha_bcrypt.startswith("$2")
-        for tbl in ("utils.grupo", "utils.usuario_grupo", "utils.unidade_trabalho", "protocolos.tipo_manifestante"):
+        for tbl in ("utils.grupo", "utils.usuario_grupo", "utils.unidade_trabalho"):
             n = (await s.execute(text(f"SELECT count(*) FROM {tbl} WHERE tenant_id=:t"), {"t": tenant.id})).scalar_one()
             assert n == 1, f"{tbl} deveria ter 1 linha"
+        # Pessoa física e jurídica (0136), física primeiro: o portal do cidadão
+        # usa o de menor id quando não acha tipo da natureza do documento.
+        tipos = (await s.execute(text(
+            "SELECT natureza FROM protocolos.tipo_manifestante WHERE tenant_id=:t ORDER BY id"
+        ), {"t": tenant.id})).scalars().all()
+        assert tipos == ["F", "J"]
         audit = (await s.execute(text("SELECT count(*) FROM aprimora_py.audit_log WHERE tenant_id=:t AND acao='tenant.provisionado'"), {"t": tenant.id})).scalar_one()
         assert audit == 1
 

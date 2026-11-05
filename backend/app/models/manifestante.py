@@ -14,6 +14,8 @@ class TipoManifestante(Base):
     )
     tipo_manifestante: Mapped[str | None] = mapped_column(String(150), nullable=True)
     id_categoria: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 'F' pessoa física (CPF), 'J' pessoa jurídica (CNPJ) — migration 0136.
+    natureza: Mapped[str] = mapped_column(String(1), nullable=False, default="F")
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 

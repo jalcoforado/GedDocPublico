@@ -30,7 +30,6 @@ import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { SectionCard } from "@/components/ui/section-card";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
-import { UnidadePicker } from "@/components/UnidadePicker";
 import {
   api,
   organogramaApi,
@@ -42,6 +41,7 @@ import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useAssuntosAll } from "@/lib/assuntos";
 import { useManifestantesBusca } from "@/lib/manifestantes";
+import { telefoneParaExibir } from "@/lib/mascaras";
 
 /** Espelha o regex de `backend/app/services/placeholders.py::resolve()`. */
 const TOKEN_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
@@ -83,64 +83,80 @@ type FormState = {
 
 const DRAFT_KEY = "aprimora.novo-processo.draft.v1";
 
-function ToggleCard({
-  checked,
-  onChange,
-  icon: Icon,
-  title,
-  description,
-  iconBgClass,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
+interface OpcaoConfig<V extends string> {
+  valor: V;
+  rotulo: string;
+  descricao: string;
   icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  description: string;
-  iconBgClass: string;
+}
+
+/**
+ * Escolha entre dois valores com título fixo e as duas opções à vista.
+ *
+ * Substitui o interruptor (ToggleCard), cujo título trocava com o estado:
+ * desligado, ele mostrava "Sigiloso" ou "Origem interna" com a chave
+ * apagada — lido como "não sigiloso", "não interna", o oposto do gravado.
+ * Interruptor é para ligar/desligar; escolher entre dois valores pede as
+ * duas opções nomeadas. Por baixo são `<input type="radio">` nativos: setas,
+ * Tab e leitor de tela funcionam sem código próprio.
+ */
+function EscolhaConfig<V extends string>({
+  nome,
+  titulo,
+  valor,
+  opcoes,
+  onChange,
+}: {
+  nome: string;
+  titulo: string;
+  valor: V;
+  opcoes: [OpcaoConfig<V>, OpcaoConfig<V>];
+  onChange: (v: V) => void;
 }) {
+  const atual = opcoes.find((o) => o.valor === valor) ?? opcoes[0];
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "group flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-all duration-fast",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        checked
-          ? "border-brand/40 bg-brand/5 shadow-xs"
-          : "border-border bg-surface-1 hover:border-border-strong hover:bg-surface-2",
-      )}
-    >
-      <span
-        className={cn(
-          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors",
-          checked ? iconBgClass : "bg-surface-3 text-foreground-muted",
-        )}
-        aria-hidden="true"
-      >
-        <Icon className="h-4 w-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium text-foreground">{title}</span>
-          <span
-            className={cn(
-              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
-              checked ? "bg-brand" : "bg-border",
-            )}
-          >
-            <span
-              className={cn(
-                "inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-                checked ? "translate-x-4" : "translate-x-0.5",
-              )}
-            />
-          </span>
-        </div>
-        <p className="mt-0.5 text-xs text-foreground-muted">{description}</p>
+    <fieldset className="rounded-lg border border-border bg-surface-1 p-3">
+      <legend className="sr-only">{titulo}</legend>
+      <div aria-hidden="true" className="mb-2 text-sm font-medium text-foreground">
+        {titulo}
       </div>
-    </button>
+      <div className="grid grid-cols-2 gap-1 rounded-md bg-surface-2 p-1">
+        {opcoes.map((o) => {
+          const marcada = o.valor === valor;
+          const Icon = o.icon;
+          return (
+            <label
+              key={o.valor}
+              className={cn(
+                // `relative` prende o rádio `sr-only` (absoluto) dentro da
+                // opção. Sem ele o rádio ficava ancorado longe, e o foco do
+                // clique rolava a página até lá.
+                "relative flex cursor-pointer items-center justify-center gap-1.5 rounded px-2 py-1.5 text-sm transition-colors duration-fast",
+                "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
+                marcada
+                  ? "bg-card font-medium text-foreground shadow-xs"
+                  : "text-foreground-muted hover:text-foreground",
+              )}
+            >
+              <input
+                type="radio"
+                name={nome}
+                value={o.valor}
+                checked={marcada}
+                onChange={() => onChange(o.valor)}
+                aria-describedby={marcada ? `${nome}-descricao` : undefined}
+                className="sr-only"
+              />
+              <Icon className={cn("h-4 w-4 shrink-0", marcada && "text-brand")} aria-hidden="true" />
+              {o.rotulo}
+            </label>
+          );
+        })}
+      </div>
+      <p id={`${nome}-descricao`} className="mt-2 text-xs text-foreground-muted">
+        {atual.descricao}
+      </p>
+    </fieldset>
   );
 }
 
@@ -248,11 +264,21 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
     queryKey: ["templates-documento", "ativos"],
     queryFn: () => api.templatesDocumento.list({ apenas_ativos: true }),
   });
-  // Mesma queryKey do UnidadePicker — reaproveita o cache se ele já buscou.
+  // Mesma queryKey do UnidadePicker (balcão, dashboard) — cache compartilhado.
   const organogramaQ = useQuery({
     queryKey: ["organograma"],
     queryFn: () => organogramaApi.tree(),
   });
+
+  // Unidade proprietária na mesma lista com busca dos campos acima. Era o
+  // UnidadePicker (árvore do organograma num modal), que não tinha o X e, por
+  // só buscar as unidades ao abrir, mostrava o placeholder mesmo com a
+  // unidade sugerida já escolhida.
+  const unidadeOptions = useMemo<ComboboxOption[]>(() => {
+    return (organogramaQ.data ?? [])
+      .map((u) => ({ value: u.id, label: u.unidade_trabalho, hint: u.sigla ?? undefined }))
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  }, [organogramaQ.data]);
 
   const tipoOptions = useMemo<ComboboxOption<{ id: number }>[]>(() => {
     return (tiposProcessoQ.data ?? []).map((t) => ({
@@ -316,11 +342,11 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
       "requerente.nome": manifestante?.nome ?? "",
       "requerente.cpf_cnpj": manifestante?.cpf_cnpj ?? "",
       "requerente.email": manifestante?.email ?? "",
-      "requerente.telefone":
+      "requerente.telefone": telefoneParaExibir(
         manifestante?.telefone_celular ||
-        manifestante?.telefone_residencial ||
-        manifestante?.telefone_comercial ||
-        "",
+          manifestante?.telefone_residencial ||
+          manifestante?.telefone_comercial,
+      ),
       "processo.assunto": assunto?.assunto ?? "",
       "processo.observacao": form.observacao,
       "unidade.nome": unidade?.unidade_trabalho ?? "",
@@ -648,17 +674,24 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
           </div>
 
           <div>
-            <Label required>Unidade proprietária</Label>
-            <UnidadePicker
+            <Label htmlFor="unidade" required>
+              Unidade proprietária
+            </Label>
+            <Combobox
+              id="unidade"
+              options={unidadeOptions}
               value={
                 form.id_unidade_proprietaria === ""
                   ? null
                   : form.id_unidade_proprietaria
               }
               onChange={(v) =>
-                setForm({ ...form, id_unidade_proprietaria: v ?? "" })
+                setForm({ ...form, id_unidade_proprietaria: typeof v === "number" ? v : "" })
               }
-              placeholder="Escolher unidade proprietária no organograma"
+              placeholder="Buscar unidade…"
+              searchPlaceholder="Nome ou sigla da unidade…"
+              emptyText="Nenhuma unidade encontrada."
+              loading={organogramaQ.isLoading}
             />
             <p className="mt-1 text-xs text-foreground-subtle">
               Sugerida: sua unidade
@@ -735,7 +768,7 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
           step={3}
           icon={Hash}
           title="Configurações"
-          description="Visibilidade, origem externa e número de protocolo prévio."
+          description="Número de origem, visibilidade, origem e canal de entrada."
         >
           <div>
             <Label htmlFor="origem">
@@ -751,43 +784,71 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <ToggleCard
-              checked={form.publico}
-              onChange={(v) => setForm({ ...form, publico: v })}
-              icon={form.publico ? Globe : Lock}
-              iconBgClass="bg-success-soft text-success"
-              title={form.publico ? "Público" : "Sigiloso"}
-              description={
-                form.publico
-                  ? "Qualquer servidor pode visualizar este processo."
-                  : "Apenas usuários autorizados poderão ver. Audit log marcará acessos."
-              }
+            {/* Rótulos e textos mantidos de propósito (decisão de 2026-11-04):
+                hoje `publico=false` grava o nível `interno`
+                (services/sigilo.py), que todo servidor alcança pela credencial
+                padrão, e nenhum acesso é registrado em auditoria. O
+                comportamento do sigilo será ajustado em tarefa própria; ao
+                mudá-lo, revisar estes textos. */}
+            <EscolhaConfig
+              nome="visibilidade"
+              titulo="Visibilidade"
+              valor={form.publico ? "publico" : "sigiloso"}
+              onChange={(v) => setForm({ ...form, publico: v === "publico" })}
+              opcoes={[
+                {
+                  valor: "publico",
+                  rotulo: "Público",
+                  icon: Globe,
+                  descricao: "Qualquer servidor pode visualizar este processo.",
+                },
+                {
+                  valor: "sigiloso",
+                  rotulo: "Sigiloso",
+                  icon: Lock,
+                  descricao: "Apenas usuários autorizados poderão ver. Audit log marcará acessos.",
+                },
+              ]}
             />
-            <ToggleCard
-              checked={form.externo}
-              onChange={(v) => setForm({ ...form, externo: v })}
-              icon={Users}
-              iconBgClass="bg-info-soft text-info"
-              title={form.externo ? "Origem externa" : "Origem interna"}
-              description={
-                form.externo
-                  ? "Processo iniciado por cidadão ou orgão externo."
-                  : "Processo aberto por servidor interno da prefeitura."
-              }
+            <EscolhaConfig
+              nome="origem-processo"
+              titulo="Origem"
+              valor={form.externo ? "externa" : "interna"}
+              onChange={(v) => setForm({ ...form, externo: v === "externa" })}
+              opcoes={[
+                {
+                  valor: "interna",
+                  rotulo: "Interna",
+                  icon: Building2,
+                  descricao: "Processo aberto por servidor interno da prefeitura.",
+                },
+                {
+                  valor: "externa",
+                  rotulo: "Externa",
+                  icon: Users,
+                  descricao: "Processo iniciado por cidadão ou órgão externo.",
+                },
+              ]}
             />
-            <ToggleCard
-              checked={form.canal_entrada === "email"}
-              onChange={(v) =>
-                setForm({ ...form, canal_entrada: v ? "email" : "interno" })
-              }
-              icon={form.canal_entrada === "email" ? Mail : Building2}
-              iconBgClass="bg-brand/10 text-brand"
-              title={form.canal_entrada === "email" ? "Recebido por e-mail" : "Registrado internamente"}
-              description={
-                form.canal_entrada === "email"
-                  ? "Documento chegou por e-mail e está sendo protocolado agora."
-                  : "Não veio de balcão, portal do cidadão nem e-mail."
-              }
+            <EscolhaConfig
+              nome="canal-entrada"
+              titulo="Canal de entrada"
+              valor={form.canal_entrada}
+              onChange={(v) => setForm({ ...form, canal_entrada: v })}
+              opcoes={[
+                {
+                  valor: "interno",
+                  rotulo: "Registro interno",
+                  icon: Building2,
+                  descricao: "Não veio de balcão, portal do cidadão nem e-mail.",
+                },
+                {
+                  valor: "email",
+                  rotulo: "E-mail",
+                  icon: Mail,
+                  descricao: "Documento chegou por e-mail e está sendo protocolado agora.",
+                },
+              ]}
             />
           </div>
         </SectionCard>
