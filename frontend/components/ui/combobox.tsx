@@ -52,10 +52,15 @@ interface ComboboxProps<T> {
   id?: string;
 }
 
+/** Minúsculas e sem acento: "SAÚDE" casa com "saude". */
+function semAcento(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+
 function defaultFilter<T>(option: ComboboxOption<T>, query: string): boolean {
-  const q = query.toLowerCase();
-  if (option.label.toLowerCase().includes(q)) return true;
-  if (option.hint?.toLowerCase().includes(q)) return true;
+  const q = semAcento(query);
+  if (semAcento(option.label).includes(q)) return true;
+  if (option.hint && semAcento(option.hint).includes(q)) return true;
   return false;
 }
 
@@ -204,10 +209,14 @@ export function Combobox<T>({
           )}
         </span>
         <span
+          data-testid="combobox-seta"
           className={cn(
             "flex items-center gap-1",
-            // reserva o lugar do botão Limpar (irmão absoluto) para o texto não passar por baixo
-            clearable && selected && !disabled && "mr-6",
+            // Reserva o lugar do botão Limpar (irmão absoluto, `right-9`) À
+            // ESQUERDA da seta, para o texto não passar por baixo dele. Era
+            // `mr-6`, que empurrava a própria seta para a esquerda — direto
+            // para baixo do X.
+            clearable && selected && !disabled && "pl-7",
           )}
         >
           <ChevronDown

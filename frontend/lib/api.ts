@@ -199,6 +199,8 @@ export interface TipoManifestante {
   id: number;
   tipo_manifestante: string;
   id_categoria: number;
+  /** "F" pessoa física (CPF), "J" pessoa jurídica (CNPJ) — migration 0136. */
+  natureza: "F" | "J";
   ativo: boolean;
 }
 export interface Manifestante {
