@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -366,7 +368,7 @@ export default function FornecedoresPage() {
             <div className="col-span-2 mt-2 border-t border-border pt-3">
               <p className="mb-2 text-sm font-semibold text-foreground">Histórico de situação</p>
               {historicoQ.isLoading ? (
-                <p className="text-xs text-muted-foreground">Carregando…</p>
+                <Carregando className="text-xs text-muted-foreground" />
               ) : (historicoQ.data ?? []).length === 0 ? (
                 <p className="text-xs text-muted-foreground">Sem registros.</p>
               ) : (

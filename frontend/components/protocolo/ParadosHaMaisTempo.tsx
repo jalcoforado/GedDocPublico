@@ -5,6 +5,7 @@ import { ArrowRight, Hourglass } from "lucide-react";
 import Link from "next/link";
 
 import { nivelDeEspera, textoDoPrazo } from "@/components/TabelaCaixaProcessos";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { hrefDaCaixa } from "@/lib/caixas-processos";
@@ -82,13 +83,8 @@ export function ParadosHaMaisTempo({ intervalo }: { intervalo: number }) {
             </TR>
           </THead>
           <TBody>
-            {q.isLoading && (
-              <TR>
-                <TD colSpan={4} className="text-sm text-foreground-muted">
-                  Carregando…
-                </TD>
-              </TR>
-            )}
+            {q.isLoading &&
+              Array.from({ length: QUANTOS_PARADOS }).map((_, i) => <SkeletonRow key={i} cols={4} />)}
             {q.isError && (
               <TR>
                 <TD colSpan={4} className="text-sm text-danger-soft-foreground">

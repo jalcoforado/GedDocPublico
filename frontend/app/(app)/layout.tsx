@@ -7,6 +7,7 @@ import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
 import { CommandPaletteProvider } from "@/components/CommandPalette";
 import { Header } from "@/components/Header";
 import { LoadingBar } from "@/components/LoadingBar";
+import { ShellCarregando } from "@/components/ShellCarregando";
 import { Sidebar } from "@/components/Sidebar";
 import { TrilhaDoModulo } from "@/components/TrilhaDoModulo";
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -21,13 +22,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const modulo = moduloDoPathname(pathname);
 
-  if (loading) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center text-foreground-muted">
-        Carregando...
-      </div>
-    );
-  }
+  if (loading) return <ShellCarregando comMenuLateral={!!modulo} />;
   if (!user) return null;
   // Publicado para o `PageHeader` montar a trilha sem ler a URL por conta
   // própria (ver `lib/modulo-atual.tsx`).

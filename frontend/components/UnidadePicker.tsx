@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useQuery } from "@tanstack/react-query";
 import {
   Background,
@@ -204,9 +206,7 @@ export function UnidadePicker({
             style={{ height: 420 }}
           >
             {q.isLoading && (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Carregando…
-              </div>
+              <Carregando className="flex h-full items-center justify-center text-sm text-muted-foreground" />
             )}
             {!q.isLoading && (q.data?.length ?? 0) === 0 && (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">

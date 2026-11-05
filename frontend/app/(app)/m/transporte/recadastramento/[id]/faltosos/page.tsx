@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlarmClock, CheckCircle2, Send } from "lucide-react";
 import Link from "next/link";
@@ -121,7 +123,7 @@ export default function FaltososPage({ params }: PageParams) {
       )}
 
       {q.isLoading ? (
-        <div className="py-8 text-center text-muted-foreground">Carregando...</div>
+        <Carregando className="py-8 text-center text-muted-foreground" />
       ) : itens.length === 0 ? (
         <EmptyState
           icon={CheckCircle2}

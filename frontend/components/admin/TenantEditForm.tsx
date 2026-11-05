@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -51,7 +53,7 @@ export function TenantEditForm({ tenantId }: { tenantId: number }) {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (q.isLoading) return <p className="text-sm text-muted-foreground" role="status">Carregando…</p>;
+  if (q.isLoading) return <Carregando className="text-sm text-muted-foreground" />;
   if (!q.data) return <p className="text-sm text-muted-foreground">Tenant não encontrado.</p>;
 
   return (

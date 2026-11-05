@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, FileText, CheckCircle, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
@@ -300,7 +302,7 @@ export default function VeiculoDetailPage() {
     onError: (e: any) => toast.error(e.message || "Erro ao renovar vistoria"),
   });
 
-  if (veiculoQ.isLoading) return <div>Carregando...</div>;
+  if (veiculoQ.isLoading) return <Carregando />;
   if (veiculoQ.isError) return <div>Erro ao carregar veículo</div>;
 
   const veiculo = veiculoQ.data!;
@@ -464,7 +466,7 @@ export default function VeiculoDetailPage() {
           </div>
 
           {docsQ.isLoading ? (
-            <div>Carregando...</div>
+            <Carregando />
           ) : docsQ.data && docsQ.data.items.length > 0 ? (
             <Table>
               <THead>
@@ -615,7 +617,7 @@ export default function VeiculoDetailPage() {
           </div>
 
           {avalsQ.isLoading ? (
-            <div>Carregando...</div>
+            <Carregando />
           ) : avalsQ.data && avalsQ.data.items.length > 0 ? (
             <Table>
               <THead>
@@ -752,7 +754,7 @@ export default function VeiculoDetailPage() {
           </div>
 
           {vistQ.isLoading ? (
-            <div>Carregando...</div>
+            <Carregando />
           ) : vistQ.data && vistQ.data.items.length > 0 ? (
             <Table>
               <THead>

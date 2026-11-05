@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, Pencil, XCircle } from "lucide-react";
 import Link from "next/link";
@@ -23,7 +25,7 @@ export default function WorkflowDetailPage() {
   });
 
   if (q.isLoading) {
-    return <div className="text-muted-foreground">Carregando…</div>;
+    return <Carregando className="text-muted-foreground" />;
   }
   if (q.error || !q.data) {
     return (

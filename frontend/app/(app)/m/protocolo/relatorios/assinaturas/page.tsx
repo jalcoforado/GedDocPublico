@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Clock, Download, FileText, XCircle } from "lucide-react";
 import Link from "next/link";
@@ -215,7 +217,7 @@ export default function RelatorioAssinaturasPage() {
         </CardContent>
       </Card>
 
-      {relQ.isLoading && <p className="text-sm text-muted-foreground">Carregando...</p>}
+      {relQ.isLoading && <Carregando className="text-sm text-muted-foreground" />}
       {relQ.error && (
         <div
           role="alert"

@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
@@ -38,7 +40,7 @@ export function TenantsAdmin() {
         <Button onClick={() => setOpenCriar(true)}>Nova prefeitura</Button>
       </div>
 
-      {listQ.isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
+      {listQ.isLoading && <Carregando className="text-sm text-muted-foreground" />}
 
       <div className="overflow-x-auto rounded-md border border-border">
         <table className="w-full text-sm">

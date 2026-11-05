@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -18,6 +20,7 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { api, notificacoesApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -31,7 +34,7 @@ import { cn } from "@/lib/utils";
  * todos os módulos que a prefeitura contratou e que ela alcança.
  *
  * Até 2026-11-05 a `/home` empurrava quem opera processos para o painel do
- * Protocolo (decisão de 2026-10-21, PR #142). Na prática "Início" virou um
+ * Protocolo (decisão de 2026-10-21, PR 142 do repositório). Na prática "Início" virou um
  * segundo link para "Painel de controle": clicado no painel, recarregava a
  * mesma tela; clicado em Pagamentos, jogava a pessoa no Protocolo. O painel
  * de cada módulo responde "como está a minha unidade NESTE módulo"; o Início
@@ -121,7 +124,11 @@ export default function HomePage() {
             aparecem. As notificações abaixo continuam valendo.
           </p>
         ) : !modulosQ.data ? (
-          <p className="text-sm text-foreground-muted">Carregando…</p>
+          <div role="status" className="grid gap-4 animate-aparece-depois motion-reduce:animate-none lg:grid-cols-2">
+            <span className="sr-only">Carregando…</span>
+            <Skeleton aria-hidden="true" role="presentation" className="h-44 rounded-card" variant="shimmer" />
+            <Skeleton aria-hidden="true" role="presentation" className="h-44 rounded-card" variant="shimmer" />
+          </div>
         ) : !veProtocolo && !vePagamentos && !veFrota && !veTransporte ? (
           <p className="text-sm text-foreground-muted">
             Nenhum módulo com pendências para o seu perfil. Os módulos que você alcança estão em
@@ -414,7 +421,7 @@ function Notificacoes() {
           Não foi possível carregar as notificações.
         </p>
       ) : !notifQ.data ? (
-        <p className="text-sm text-foreground-muted">Carregando…</p>
+        <Carregando className="text-sm text-foreground-muted" />
       ) : itens.length === 0 ? (
         <p className="rounded-card border border-border bg-surface-1 px-4 py-3 text-sm text-foreground-muted">
           Nenhuma notificação nova.
@@ -484,7 +491,7 @@ function Acompanhando() {
           Não foi possível carregar os processos acompanhados.
         </p>
       ) : !q.data ? (
-        <p className="text-sm text-foreground-muted">Carregando…</p>
+        <Carregando className="text-sm text-foreground-muted" />
       ) : itens.length === 0 ? (
         <p className="rounded-card border border-border bg-surface-1 px-4 py-3 text-sm text-foreground-muted">
           <Star className="mr-1.5 inline h-4 w-4 align-[-3px]" aria-hidden="true" />

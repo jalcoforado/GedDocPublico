@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
 import { MarcaDoMunicipio } from "@/components/MarcaDoMunicipio";
+import { ShellCarregando } from "@/components/ShellCarregando";
 import { api } from "@/lib/api";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { Providers } from "@/lib/providers";
@@ -80,13 +81,7 @@ function CabecalhoDoLauncher() {
 function Shell({ children }: { children: React.ReactNode }) {
   const { loading, user } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center text-foreground-muted">
-        Carregando...
-      </div>
-    );
-  }
+  if (loading) return <ShellCarregando />;
   if (!user) return null;
 
   return (
