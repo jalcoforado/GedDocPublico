@@ -176,7 +176,7 @@ function Cartao({
         </h3>
         <Link
           href={href}
-          className="inline-flex items-center gap-1 rounded text-xs font-medium text-foreground-muted hover:text-foreground hover:underline"
+          className="-mx-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground"
         >
           Abrir módulo
           <ArrowRight className="h-3 w-3" aria-hidden="true" />

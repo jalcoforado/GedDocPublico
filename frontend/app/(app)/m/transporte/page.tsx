@@ -19,7 +19,7 @@ export default function TransporteReguladoHubPage() {
           const Icon = c.icon;
           const content = (
             <>
-              <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-md bg-brand/12 text-brand">
+              <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-lg bg-brand/10 text-brand transition-colors duration-fast group-hover:bg-brand group-hover:text-primary-foreground">
                 <Icon className="h-5 w-5" aria-hidden="true" />
               </div>
               <div className="flex items-center gap-2">
@@ -37,7 +37,7 @@ export default function TransporteReguladoHubPage() {
             <Link
               key={c.title}
               href={c.href}
-              className="group rounded-lg border border-border bg-surface-1 p-4 transition-colors hover:border-brand hover:bg-sidebar-accent"
+              className="group rounded-card border border-border bg-surface-1 p-4 shadow-xs transition-[border-color,box-shadow] duration-fast hover:border-brand/40 hover:shadow-md"
             >
               {content}
             </Link>

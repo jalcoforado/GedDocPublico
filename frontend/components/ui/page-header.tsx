@@ -50,8 +50,7 @@ export function PageHeader({
 }: PageHeaderProps) {
   const isHero = variant === "hero";
   const modulo = useModuloAtual();
-  // Dentro de um módulo o SHELL já desenha "Menu principal › Meus módulos ›
-  // Módulo" (`TrilhaDoModulo`). Daqui sai o que repetiria aquilo: a migalha
+  // Dentro de um módulo o SHELL já desenha "Início › Módulo" (`TrilhaDoModulo`). Daqui sai o que repetiria aquilo: a migalha
   // da raiz do módulo ("Frota Pública" → /m/frota) e o atalho de Início. E se
   // o que sobra é só o nome da própria tela, não sobra nada a mostrar — o
   // título logo abaixo já diz isso. Fica a trilha quando há um nível

@@ -138,11 +138,8 @@ export function FilaPorEtapa({
 
   return (
     <div className="space-y-4">
+      {/* Sem migalha "Solicitações": a volta para a lista é a aba "Todas", logo abaixo. */}
       <PageHeader
-        breadcrumbs={[
-          { label: "Pagamentos", href: "/m/pagamentos" },
-          { label: "Solicitações", href: "/m/pagamentos/solicitacoes" },
-        ]}
         title={titulo}
         description={descricao}
         icon={icon}
