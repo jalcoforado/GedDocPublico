@@ -14,7 +14,7 @@ export default function TransporteReguladoHubPage() {
         title="Transporte Regulado"
         description="Gestão de permissionários e do transporte público regulado do município."
       />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {CARDS.map((c) => {
           const Icon = c.icon;
           const content = (
@@ -37,7 +37,7 @@ export default function TransporteReguladoHubPage() {
             <Link
               key={c.title}
               href={c.href}
-              className="group rounded-card border border-border bg-surface-1 p-4 shadow-xs transition-[border-color,box-shadow] duration-fast hover:border-brand/40 hover:shadow-md"
+              className="group rounded-card border border-border bg-surface-1 p-5 shadow-xs transition-[border-color,box-shadow] duration-fast hover:border-brand/40 hover:shadow-md"
             >
               {content}
             </Link>

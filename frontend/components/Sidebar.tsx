@@ -310,31 +310,22 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         className={cn(
           "fixed inset-y-0 left-0 z-modal flex w-72 shrink-0 flex-col overflow-hidden",
           "border-r border-sidebar-border bg-sidebar text-sidebar-foreground pt-safe transition-[transform,width] duration-base ease-out-expo",
-          "md:static md:w-[68px] md:translate-x-0",
-          !colapsada && "lg:w-64",
+          "md:static md:w-[72px] md:translate-x-0",
+          !colapsada && "lg:w-64 min-[1440px]:w-72",
           open ? "translate-x-0 shadow-xl" : "-translate-x-full shadow-none md:translate-x-0",
         )}
       >
-        {/* Marca do município — é AQUI que ela mora quando há menu lateral; o
-            cabeçalho só a mostra onde não há menu ao lado. Num cartão claro,
-            como no cabeçalho: a marca de prefeitura costuma ter texto escuro,
-            e a barra pode ser de qualquer cor. Recolhida, a barra tem 68px e
-            a marca horizontal não cabe: entra a quadrada (o brasão). */}
-        <div className="flex items-center justify-between gap-2 border-b border-sidebar-border px-3 py-3">
+        {/* A marca do município mora no cabeçalho, que passa por cima da
+            barra (2026-11-06). Aqui ela só aparece na GAVETA do celular, que
+            cobre o cabeçalho — num cartão claro, porque a marca de prefeitura
+            tem texto escuro e a barra é verde. */}
+        <div className="flex items-center justify-between gap-2 border-b border-sidebar-border px-4 py-3 md:hidden">
           <Link
             href="/home"
             aria-label="Início"
-            className={cn(
-              "flex h-11 min-w-0 items-center rounded-lg bg-card px-3 shadow-sm transition-shadow duration-fast hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              colapsada && "md:w-11 md:justify-center md:px-1",
-            )}
+            className="flex h-12 min-w-0 items-center rounded-lg bg-marca-fundo px-3 shadow-sm transition-shadow duration-fast hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <span className={cn("flex min-w-0 items-center", colapsada && "md:hidden")}>
-              <MarcaDoMunicipio />
-            </span>
-            <span className={cn("hidden", colapsada && "md:flex")}>
-              <MarcaDoMunicipio quadrada />
-            </span>
+            <MarcaDoMunicipio className="h-9" />
           </Link>
           <button
             type="button"
@@ -350,12 +341,12 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
             grupos, acima deles — não é uma tela para navegar, é o que se veio
             fazer. Sem a permissão de criar, não aparece. */}
         {acao && can(acao.perm, acao.action) && (
-          <div className={cn("px-2 pt-2", colapsada && "md:px-1")}>
+          <div className={cn("px-4 pb-1 pt-5", colapsada && "md:px-2")}>
             <Link
               href={acao.href}
               title={colapsada ? acao.label : undefined}
               className={cn(
-                "flex h-10 items-center justify-center gap-2 rounded-button bg-accent px-3 text-sm font-semibold text-accent-foreground shadow-button transition-colors duration-fast hover:bg-accent-light",
+                "flex h-11 items-center justify-center gap-2 rounded-button bg-accent px-3 text-sm font-semibold text-accent-foreground shadow-button transition-colors duration-fast hover:bg-accent-light",
                 colapsada && "md:px-0",
               )}
             >
@@ -366,7 +357,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         )}
 
         {/* Items */}
-        <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 py-2">
+        <div className={cn("flex flex-1 flex-col gap-5 overflow-y-auto px-4 py-4", colapsada && "md:gap-2 md:px-2")}>
           {NAV.map((group) => {
             const visible = group.items
               .filter((item) => canSeeItem(item, can))
@@ -389,7 +380,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                 className={cn(
                   "rounded-md",
                   // Destaque baixo (Administração): no fim, depois de uma linha.
-                  group.quieto && "mt-auto border-t border-sidebar-border pt-2 opacity-80 hover:opacity-100",
+                  group.quieto && "mt-auto border-t border-sidebar-border pt-4 opacity-80 hover:opacity-100",
                 )}
               >
                 {/* Group header — clicável (exceto em collapsed mode, vira só separador). */}
@@ -405,7 +396,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                     aria-expanded={isOpen}
                     aria-controls={slugId}
                     className={cn(
-                      "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors duration-fast",
+                      "mb-1.5 flex w-full items-center gap-1.5 rounded-md px-3 py-1.5 text-left transition-colors duration-fast",
                       "hover:bg-sidebar-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       groupIsActive && "text-sidebar-foreground",
                     )}
@@ -419,7 +410,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                     />
                     <span
                       className={cn(
-                        "flex-1 text-[10px] font-semibold uppercase tracking-wider",
+                        "flex-1 text-[11px] font-semibold uppercase tracking-wider",
                         groupIsActive ? "text-sidebar-foreground" : "text-sidebar-muted",
                       )}
                     >
@@ -437,7 +428,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                 {/* Items do grupo */}
                 <div
                   id={slugId}
-                  className={cn("flex flex-col gap-0.5", !showItems && "hidden")}
+                  className={cn("flex flex-col gap-1", !showItems && "hidden")}
                 >
                   {visible.map((item) => {
                     const Icon = item.icon;
@@ -505,7 +496,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                         aria-current={linkActive ? "page" : undefined}
                         title={colapsada ? item.label : undefined}
                         className={cn(
-                          "group relative flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-fast",
+                          "group relative flex min-h-10 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
                           colapsada && "md:justify-center md:gap-0 md:px-0",
                           linkActive
                             ? "bg-sidebar-active text-sidebar-foreground"
@@ -561,7 +552,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         {/* Footer com toggles */}
         <div
           className={cn(
-            "flex items-center gap-2 border-t border-sidebar-border bg-sidebar-accent/50 px-3 py-3",
+            "flex items-center gap-2 border-t border-sidebar-border bg-sidebar-accent/50 px-4 py-3",
             colapsada ? "md:flex-col" : "justify-between",
           )}
         >
@@ -683,7 +674,7 @@ function Subitens({ item, pathname }: { item: NavItem; pathname: string }) {
             href={child.href}
             aria-current={childActive ? "page" : undefined}
             className={cn(
-              "group relative flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-fast",
+              "group relative flex min-h-10 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
               childActive
                 ? "bg-sidebar-active text-sidebar-foreground"
                 : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",

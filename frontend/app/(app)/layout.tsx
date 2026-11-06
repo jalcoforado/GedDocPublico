@@ -31,7 +31,9 @@ function Shell({ children }: { children: React.ReactNode }) {
     : null;
   return (
     <ModuloAtualProvider value={moduloAtual}>
-      <div className="flex h-dvh bg-background">
+      {/* Cabeçalho de ponta a ponta no alto (com a marca do município), e
+          a barra lateral + conteúdo embaixo dele (2026-11-06). */}
+      <div className="flex h-dvh flex-col bg-background">
         {/* Skip link (fatia 3.5): primeiro focável — teclado pula sidebar e
             header direto para o conteúdo. Invisível até receber foco. */}
         <a
@@ -45,19 +47,19 @@ function Shell({ children }: { children: React.ReactNode }) {
             todos os módulos contratados — no Início, no perfil e dentro dos
             módulos. Antes ela só existia dentro de um módulo e mostrava só ele;
             a troca de módulo passava pelo launcher. */}
-        <Sidebar modulo={modulo} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <Header onOpenSidebar={() => setSidebarOpen(true)} />
+        <Header onOpenSidebar={() => setSidebarOpen(true)} />
+        <div className="flex min-h-0 flex-1">
+          <Sidebar modulo={modulo} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
           <main
             id="conteudo"
-            className="flex-1 overflow-y-auto p-4 sm:p-[var(--density-space)]"
+            className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-[var(--density-space)]"
           >
             {/* Contrato de largura (spec §12.2): max-w-7xl centrado por padrão;
                 página full-width (dashboard) opta por fora marcando qualquer
                 elemento seu com data-full-width — o :has() solta o teto. */}
             <div
               key={pathname}
-              className="mx-auto w-full max-w-7xl animate-page-in motion-reduce:animate-none has-[[data-full-width]]:max-w-none"
+              className="pagina mx-auto w-full max-w-7xl animate-page-in motion-reduce:animate-none has-[[data-full-width]]:max-w-none"
             >
               {/* No shell, e não no PageHeader: várias telas de módulo
                   desenham o próprio título sem ele, e ficavam sem trilha. */}

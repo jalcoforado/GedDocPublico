@@ -1,8 +1,8 @@
 /**
- * Onde a marca do município aparece: no topo do MENU LATERAL quando há menu,
- * e no cabeçalho só onde não há menu ao lado. As duas juntas, lado a lado,
- * eram redundância — e a primeira correção tirou a do menu, quando a que
- * devia sair era a do cabeçalho.
+ * Onde a marca do município aparece: no CABEÇALHO, que vai de ponta a ponta
+ * por cima da barra lateral (2026-11-06), sobre faixa clara. Na barra só na
+ * gaveta do celular, que cobre o cabeçalho. Antes ficava num cartão branco no
+ * topo da barra verde, e o cabeçalho (na cor da marca) a escondia no desktop.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
@@ -70,27 +70,29 @@ function comProviders(ui: React.ReactNode) {
 }
 
 describe("marca do município", () => {
-  it("o menu lateral traz a marca, num link para o início", () => {
+  it("o cabeçalho traz a marca horizontal, num link para o início — em toda largura", () => {
+    comProviders(<Header onOpenSidebar={() => {}} />);
+    const inicio = screen.getByRole("link", { name: "Início" });
+    expect(inicio.getAttribute("href")).toBe("/home");
+    expect(Array.from(inicio.querySelectorAll("img")).map((i) => i.getAttribute("src"))).toEqual([
+      "/brand/itaitinga-logo.png",
+    ]);
+    // Antes ela sumia do desktop quando havia menu lateral; agora o cabeçalho
+    // passa por cima da barra e é ele quem leva a marca.
+    expect(inicio.className).not.toContain("md:hidden");
+  });
+
+  it("no menu lateral a marca só existe na gaveta do celular (que cobre o cabeçalho)", () => {
     comProviders(<Sidebar modulo="frota" open onClose={() => {}} />);
-    // O menu também tem um ITEM "Início"; a marca é o link que carrega imagem.
-    const inicio = screen
+    const marca = screen
       .getAllByRole("link", { name: "Início" })
       .find((a) => a.querySelector("img"));
-    expect(inicio, "link da marca no topo do menu").toBeTruthy();
-    if (!inicio) return;
-    expect(inicio.getAttribute("href")).toBe("/home");
-    const imagens = Array.from(inicio.querySelectorAll("img")).map((i) => i.getAttribute("src"));
-    // A horizontal para a barra aberta e a quadrada (brasão) para a recolhida.
-    expect(imagens).toEqual(["/brand/itaitinga-logo.png", "/brand/itaitinga-brasao.png"]);
+    expect(marca, "link da marca na gaveta").toBeTruthy();
+    expect(marca?.parentElement?.className).toContain("md:hidden");
   });
 
-  it("com menu lateral, a marca do cabeçalho some do desktop (fica para o celular)", () => {
-    comProviders(<Header onOpenSidebar={() => {}} />);
-    expect(screen.getByRole("link", { name: "Início" }).className).toContain("md:hidden");
-  });
-
-  it("sem menu lateral (início, perfil), o cabeçalho é quem mostra a marca", () => {
+  it("no escuro a marca ganha fundo claro (texto marinho de prefeitura não some)", () => {
     comProviders(<Header />);
-    expect(screen.getByRole("link", { name: "Início" }).className).not.toContain("md:hidden");
+    expect(screen.getByRole("link", { name: "Início" }).className).toContain("bg-marca-fundo");
   });
 });

@@ -20,29 +20,28 @@ export function ShellCarregando({ comMenuLateral = false }: { comMenuLateral?: b
       role="status"
       aria-live="polite"
       aria-label="Carregando o sistema"
-      className="flex h-dvh animate-aparece-depois bg-background motion-reduce:animate-none"
+      className="flex h-dvh animate-aparece-depois flex-col bg-background motion-reduce:animate-none"
     >
-      {comMenuLateral && (
-        <div
-          aria-hidden="true"
-          className="hidden w-64 shrink-0 flex-col gap-3 border-r border-sidebar-border bg-sidebar p-3 md:flex"
-        >
-          <div className="h-12 w-24 rounded-lg bg-sidebar-accent" />
-          <div className="mt-3 h-10 rounded-button bg-sidebar-accent" />
-          {Array.from({ length: 7 }).map((_, i) => (
-            <div key={i} className="h-8 rounded-md bg-sidebar-accent/60" />
-          ))}
-        </div>
-      )}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <div
-          aria-hidden="true"
-          className="flex h-16 shrink-0 items-center gap-4 bg-gradient-to-r from-brand-dark via-brand to-brand-light px-4 shadow-md sm:px-6"
-        >
-          {!comMenuLateral && <div className="h-11 w-24 rounded-lg bg-card/90" />}
-          <div className="mx-auto hidden h-10 w-full max-w-md rounded-full bg-card/80 sm:block" />
-          <div className="ml-auto h-10 w-40 rounded-full bg-card/80" />
-        </div>
+      <div
+        aria-hidden="true"
+        className="flex h-[73px] shrink-0 items-center gap-6 border-b border-border bg-surface-1 px-4 sm:px-6"
+      >
+        <Skeleton className="h-10 w-40" />
+        <Skeleton className="mx-auto hidden h-10 w-full max-w-lg rounded-full sm:block" />
+        <Skeleton className="ml-auto h-10 w-40 rounded-full" />
+      </div>
+      <div className="flex min-h-0 flex-1">
+        {comMenuLateral && (
+          <div
+            aria-hidden="true"
+            className="hidden w-64 shrink-0 flex-col gap-2 min-[1440px]:w-72 border-r border-sidebar-border bg-sidebar px-4 pt-5 md:flex"
+          >
+            <div className="mb-4 h-11 rounded-button bg-sidebar-accent" />
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="h-10 rounded-md bg-sidebar-accent/60" />
+            ))}
+          </div>
+        )}
         <div aria-hidden="true" className="flex-1 overflow-hidden p-4 sm:p-[var(--density-space)]">
           <div className="mx-auto w-full max-w-7xl space-y-6">
             <div className="space-y-2">

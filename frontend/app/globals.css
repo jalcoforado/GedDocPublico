@@ -176,6 +176,10 @@
        nunca para texto. Texto usa `--assinatura-texto`. */
     --assinatura: 18 95% 53%; /* #F95C17, medido no logo */
     --assinatura-texto: 18 90% 38%; /* ~5.2:1 sobre --bg, ~5.6:1 sobre card */
+    /* Fundo da marca do MUNICÍPIO no cabeçalho: logotipo de prefeitura tem
+       texto escuro (o de Itaitinga é marinho). No claro some na faixa; no
+       escuro vira um cartão branco atrás da marca. */
+    --marca-fundo: var(--surface-1);
 
     /* === Surfaces (tonal) === */
     --bg: var(--neutral-25); /* canvas geral — off-white, viés frio/verde */
@@ -322,6 +326,7 @@
     --accent: 32 95% 60%; /* âmbar clareia */
     --accent-light: 38 92% 70%;
     --assinatura-texto: 18 95% 62%; /* clareia: o tom de texto do light some no fundo escuro */
+    --marca-fundo: var(--neutral-0); /* a marca do município não escurece */
     --primary: var(--brand);
     --primary-foreground: 158 20% 10%;
     --ring: var(--brand-light);
@@ -354,20 +359,25 @@
 
   /* Density compact — reduz padding em componentes que usam o utility .density-aware */
   :root[data-density="compact"] {
-    --density-pad-y: 0.375rem; /* vs 0.5 default */
+    --density-pad-y: 0.375rem; /* vs 0.75 default */
     --density-pad-x: 0.625rem; /* vs 0.75 default */
     --density-row-h: 2.25rem; /* 36px vs 44px default */
-    --density-space: 1rem; /* vs 1.5 default */
-    --density-gap: 0.5rem; /* vs 0.75 default */
+    --density-space: 1rem; /* vs 2 default */
+    --density-gap: 0.5rem; /* vs 1 default */
+    --density-secao: 1rem; /* vs 1.75 default */
   }
   :root {
-    --density-pad-y: 0.5rem;
-    --density-pad-x: 0.75rem;
+    --density-pad-y: 0.75rem;
+    --density-pad-x: 0.75rem; /* lateral não cresce: tabela de 8 colunas quebrava em 1280px */
     --density-row-h: 2.75rem;
     /* Fatia 3.9: densidade deixa de ser só de tabela — espaço de seção
        (main, cards, PageHeader) e ritmo vertical também encolhem no compacto. */
-    --density-space: 1.5rem;
-    --density-gap: 0.75rem;
+    --density-space: 2rem;
+    --density-gap: 1rem;
+    /* Distância entre as seções de uma tela (ver `.pagina` abaixo). O
+       confortável é o padrão e foi aberto em 2026-11-06: a tela era densa
+       demais; quem quer tudo junto tem o modo compacto. */
+    --density-secao: 1.75rem;
   }
 
   html,
@@ -437,6 +447,16 @@
 }
 
 @layer components {
+  /* === Ritmo vertical das telas ===
+     A raiz de quase toda tela é um `space-y-3..6` escolhido à mão, tela a
+     tela — e o resultado era um espaçamento diferente em cada uma, quase
+     sempre apertado. O shell marca o contêiner da tela com `.pagina`, e as
+     seções da raiz passam a se afastar pelo mesmo token, que o modo
+     compacto encolhe. Especificidade (0,4,0) > a do `space-y-*` (0,3,0). */
+  .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :not([hidden]) ~ :not([hidden]) {
+    margin-top: var(--density-secao);
+  }
+
   /* === Workflow editor — handles visíveis === */
   .workflow-editor .react-flow__handle {
     width: 12px;

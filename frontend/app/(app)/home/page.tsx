@@ -99,7 +99,7 @@ export default function HomePage() {
         }
       />
 
-      <section aria-labelledby="pendencias-titulo" className="space-y-3">
+      <section aria-labelledby="pendencias-titulo" className="space-y-4">
         <h2 id="pendencias-titulo" className="font-display text-base font-semibold text-foreground">
           O que precisa de você hoje
         </h2>
@@ -125,7 +125,7 @@ export default function HomePage() {
             // ocupava meia tela e deixava a outra metade em branco.
             const faixa = [veProtocolo, vePagamentos, veFrota, veTransporte].filter(Boolean).length === 1;
             return (
-              <div className={cn("grid gap-4", !faixa && "lg:grid-cols-2 2xl:grid-cols-4")}>
+              <div className={cn("grid gap-5", !faixa && "lg:grid-cols-2 2xl:grid-cols-4")}>
                 {veProtocolo && <CartaoProtocolo faixa={faixa} />}
                 {vePagamentos && <CartaoPagamentos faixa={faixa} />}
                 {veFrota && <CartaoFrota faixa={faixa} />}
@@ -136,7 +136,7 @@ export default function HomePage() {
         )}
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-2">
         <Notificacoes />
         {veProtocolo && <Acompanhando />}
       </div>
@@ -169,7 +169,7 @@ function Cartao({
       aria-label={titulo}
       className="flex flex-col rounded-card border border-border bg-surface-1 shadow-card"
     >
-      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-4">
         <h3 className="inline-flex items-center gap-2 font-display text-sm font-semibold text-foreground">
           <Icone className="h-4 w-4 text-primary" aria-hidden="true" />
           {titulo}
@@ -183,13 +183,13 @@ function Cartao({
         </Link>
       </div>
       {erro ? (
-        <p className="px-4 py-3 text-sm text-danger-soft-foreground">
+        <p className="px-5 py-4 text-sm text-danger-soft-foreground">
           Não foi possível carregar os números deste módulo agora.
         </p>
       ) : faixa ? (
         <ul className="grid grid-cols-2 divide-border lg:grid-cols-4 lg:divide-x">
           {linhas.map((l) => (
-            <li key={l.rotulo} className="flex flex-col gap-1 px-4 py-3">
+            <li key={l.rotulo} className="flex flex-col gap-1.5 px-5 py-4">
               <span
                 className={cn(
                   "text-xs uppercase tracking-wide text-foreground-subtle",
@@ -223,16 +223,11 @@ function Cartao({
       ) : (
         <ul className="divide-y divide-border">
           {linhas.map((l) => (
-            <li key={l.rotulo} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
-              <span
-                className={cn(
-                  "text-foreground",
-                  (l.valor ?? 0) > 0 && l.tom === "danger" && "font-medium text-danger-soft-foreground",
-                  (l.valor ?? 0) > 0 && l.tom === "warning" && "font-medium text-warning-soft-foreground",
-                )}
-              >
-                {l.rotulo}
-              </span>
+            <li key={l.rotulo} className="flex items-center justify-between gap-3 px-5 py-3.5 text-sm">
+              {/* O rótulo fica neutro: a cor do alerta vai só na contagem. Rótulo
+                  e número tingidos juntos, em âmbar e vermelho, viravam uma
+                  coluna colorida que brigava com o resto da tela. */}
+              <span className="text-foreground">{l.rotulo}</span>
               {carregando || l.valor === undefined ? (
                 <span className="text-foreground-subtle">…</span>
               ) : l.valor > 0 ? (
@@ -378,7 +373,7 @@ function Notificacoes() {
   });
 
   return (
-    <section aria-label="Notificações não lidas" className="space-y-2">
+    <section aria-label="Notificações não lidas" className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-base font-semibold text-foreground">
           Notificações não lidas
@@ -408,13 +403,13 @@ function Notificacoes() {
       ) : !notifQ.data ? (
         <Carregando className="text-sm text-foreground-muted" />
       ) : itens.length === 0 ? (
-        <p className="rounded-card border border-border bg-surface-1 px-4 py-3 text-sm text-foreground-muted">
+        <p className="rounded-card border border-border bg-surface-1 px-5 py-4 text-sm text-foreground-muted">
           Nenhuma notificação nova.
         </p>
       ) : (
         <ul className="divide-y divide-border rounded-card border border-border bg-surface-1">
           {itens.map((n) => (
-            <li key={n.id} className="px-4 py-3 text-sm">
+            <li key={n.id} className="px-5 py-3.5 text-sm">
               {n.link_url ? (
                 <Link
                   href={n.link_url}
@@ -456,7 +451,7 @@ function Acompanhando() {
   const total = q.data?.total ?? 0;
 
   return (
-    <section aria-labelledby="acompanhando-titulo" className="space-y-2">
+    <section aria-labelledby="acompanhando-titulo" className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="acompanhando-titulo" className="font-display text-base font-semibold text-foreground">
           Processos que você acompanha
@@ -478,7 +473,7 @@ function Acompanhando() {
       ) : !q.data ? (
         <Carregando className="text-sm text-foreground-muted" />
       ) : itens.length === 0 ? (
-        <p className="rounded-card border border-border bg-surface-1 px-4 py-3 text-sm text-foreground-muted">
+        <p className="rounded-card border border-border bg-surface-1 px-5 py-4 text-sm text-foreground-muted">
           <Star className="mr-1.5 inline h-4 w-4 align-[-3px]" aria-hidden="true" />
           Nenhum processo acompanhado. Marque a estrela de um processo — na lista ou no detalhe — para
           ver aqui onde ele está.

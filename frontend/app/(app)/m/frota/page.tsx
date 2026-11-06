@@ -116,14 +116,14 @@ export default function FrotaHubPage() {
         </Link>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {CARDS.map((c) => {
           const Icon = c.icon;
           return (
             <Link
               key={c.href}
               href={c.href}
-              className="group rounded-card border border-border bg-surface-1 p-4 shadow-xs transition-[border-color,box-shadow] duration-fast hover:border-brand/40 hover:shadow-md"
+              className="group rounded-card border border-border bg-surface-1 p-5 shadow-xs transition-[border-color,box-shadow] duration-fast hover:border-brand/40 hover:shadow-md"
             >
               <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-lg bg-brand/10 text-brand transition-colors duration-fast group-hover:bg-brand group-hover:text-primary-foreground">
                 <Icon className="h-5 w-5" aria-hidden="true" />
