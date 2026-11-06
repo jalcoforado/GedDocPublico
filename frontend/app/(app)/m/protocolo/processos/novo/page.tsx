@@ -507,7 +507,7 @@ export default function NovoProcessoPage() {
               onChange={(v) =>
                 setForm({ ...form, id_unidade_proprietaria: v ?? "" })
               }
-              placeholder="Escolher unidade proprietária no organograma"
+              placeholder="Buscar a unidade proprietária"
             />
             <p className="mt-1 text-xs text-foreground-subtle">
               Sugerida: sua unidade

@@ -12,13 +12,20 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    access_token: str
+    """Resposta do login. Com 2FA pendente (`requer_2fa`) NÃO há sessão: vêm
+    só o `desafio` (a apresentar com o código em `/auth/login/2fa`) e o e-mail
+    mascarado para onde o código foi; os campos de sessão ficam vazios."""
+
+    access_token: str | None = None
     token_type: str = "bearer"
-    expires_in: int
-    usuario_id: int
-    usuario_email: str
-    nome: str
+    expires_in: int | None = None
+    usuario_id: int | None = None
+    usuario_email: str | None = None
+    nome: str | None = None
     must_change_password: bool = False
+    requer_2fa: bool = False
+    desafio: str | None = None
+    email_mascarado: str | None = None
 
 
 class PermissaoItem(BaseModel):
@@ -68,3 +75,47 @@ class TrocarLotacaoRequest(BaseModel):
 class AlterarSenhaRequest(BaseModel):
     senha_atual: str = Field(min_length=1, max_length=255)
     nova_senha: str = Field(min_length=SENHA_MINIMA, max_length=255)
+
+
+# ---------------------------------------------------------------- conta (0136)
+
+
+class DoisFatoresRequest(BaseModel):
+    desafio: str = Field(min_length=1, max_length=2000)
+    codigo: str = Field(min_length=6, max_length=12)
+    # "Lembrar este computador por 30 dias".
+    lembrar: bool = False
+
+
+class ReenviarCodigoRequest(BaseModel):
+    desafio: str = Field(min_length=1, max_length=2000)
+
+
+class EsqueciSenhaRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+
+
+class TokenContaRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=200)
+
+
+class DefinirSenhaRequest(BaseModel):
+    """Redefinição pelo link do e-mail ou aceite de convite."""
+
+    token: str = Field(min_length=10, max_length=200)
+    nova_senha: str = Field(min_length=SENHA_MINIMA, max_length=255)
+
+
+class ConviteInfo(BaseModel):
+    nome: str
+    email: str
+
+
+class ContaConfirmada(BaseModel):
+    """Para onde mandar a pessoa depois: login do servidor ou do cidadão."""
+
+    tipo: str  # "servidor" | "cidadao"
+
+
+class AvisoEnviado(BaseModel):
+    detail: str

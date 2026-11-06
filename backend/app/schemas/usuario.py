@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -11,7 +13,10 @@ class UsuarioBase(BaseModel):
 
 
 class UsuarioCreate(UsuarioBase):
-    senha: str = Field(min_length=4, max_length=255)
+    # Sem senha (o padrão da tela desde 0136): a conta nasce com convite por
+    # e-mail e a própria pessoa escolhe a senha. Com senha: comportamento
+    # antigo (senha temporária, troca obrigatória no primeiro acesso).
+    senha: str | None = Field(default=None, min_length=4, max_length=255)
     grupos: list[int] = Field(default_factory=list)
 
 
@@ -31,6 +36,8 @@ class UsuarioOut(UsuarioBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     nivel_acesso_sigilo: str = "interno"
+    # NULL = convite enviado e ainda não aceito ("Convite pendente" na tela).
+    email_verificado_em: datetime | None = None
 
 
 class UsuarioDetail(UsuarioOut):

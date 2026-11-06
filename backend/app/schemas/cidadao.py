@@ -15,6 +15,12 @@ class CadastroCidadaoRequest(BaseModel):
     telefone_whatsapp: bool = False
 
 
+class CpfCnpjRequest(BaseModel):
+    """"Esqueci a senha" e reenvio da confirmação de e-mail do cidadão."""
+
+    cpf_cnpj: str = Field(min_length=11, max_length=18)
+
+
 class LoginCidadaoRequest(BaseModel):
     cpf_cnpj: str
     senha: str

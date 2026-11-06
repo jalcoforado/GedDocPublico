@@ -1,5 +1,7 @@
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import get_current_user, require_tenant_id
@@ -17,6 +19,7 @@ from ..schemas.usuario import (
     UsuarioUpdate,
 )
 from ..services.audit import log as audit_log
+from ..services.conta_email import enviar_convite
 from ..services.permissoes import load_permissions
 from ..services.usuario_senha import resetar_senha_usuario
 
@@ -116,6 +119,7 @@ async def get_usuario(
 @router.post("", response_model=UsuarioDetail, status_code=status.HTTP_201_CREATED)
 async def create_usuario(
     payload: UsuarioCreate,
+    request: Request,
     _: Usuario = Depends(require_permission("usuario", "inserir")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
@@ -137,20 +141,29 @@ async def create_usuario(
     # apenas bcrypt; MD5 legado fica vazio para alinhar com provisionamento e
     # reset administrativo. O usuário será obrigado a trocar a senha no
     # primeiro acesso (guard em get_current_user, Commit 2).
+    #
+    # 0136 — sem `senha` no payload (o que a tela manda agora) a conta nasce
+    # por CONVITE: senha aleatória que ninguém conhece, e-mail não verificado,
+    # e o link do e-mail leva a pessoa a escolher a dela. Login fica recusado
+    # até o convite ser aceito.
+    convite = payload.senha is None
     user = Usuario(
         nome=payload.nome,
         email=payload.email,
         cpf=payload.cpf,
         senha="",  # MD5 legado limpo — só bcrypt
-        senha_bcrypt=hash_password(payload.senha),
+        senha_bcrypt=hash_password(secrets.token_urlsafe(32) if convite else payload.senha),
         id_unidade_trabalho=payload.id_unidade_trabalho,
         cargo=payload.cargo,
         ativo=payload.ativo,
         excluido=False,
         app=get_settings().app_name,
         tenant_id=tenant_id,
-        must_change_password=True,
+        must_change_password=not convite,
     )
+    if convite:
+        # `null()`, não `None` — ver o comentário do campo em `models/usuario.py`.
+        user.email_verificado_em = null()
     db.add(user)
     await db.flush()
 
@@ -167,12 +180,43 @@ async def create_usuario(
         )
     await db.commit()
     await db.refresh(user)
+    if convite:
+        await enviar_convite(db, request, user)
+        await db.refresh(user)
     grupos, unidades = await _load_links(db, user.id, tenant_id)
     return UsuarioDetail(
         **UsuarioOut.model_validate(user).model_dump(),
         grupos=grupos,
         unidades_extras=unidades,
     )
+
+
+@router.post("/{usuario_id}/reenviar-convite", status_code=status.HTTP_204_NO_CONTENT)
+async def reenviar_convite(
+    usuario_id: int,
+    request: Request,
+    _: Usuario = Depends(require_permission("usuario", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Manda o convite de novo (o link anterior deixa de valer)."""
+    user = (
+        await db.execute(
+            select(Usuario).where(
+                Usuario.id == usuario_id,
+                Usuario.tenant_id == tenant_id,
+                Usuario.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+    if user.email_verificado_em is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Este usuário já ativou a conta. Para trocar a senha, use a redefinição.",
+        )
+    await enviar_convite(db, request, user)
 
 
 @router.put("/{usuario_id}", response_model=UsuarioDetail)

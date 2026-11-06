@@ -5,7 +5,7 @@ escopado por tenant (cidadão acessa via `cidadao.{slug}.aprimora.app`).
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,12 +14,15 @@ from ..auth.cidadao_sessao import emitir_sessao_cidadao
 from ..config import get_settings
 from ..database import get_db, tenant_filter
 from ..models import Assunto, Manifestante, Processo, TipoProcesso, UsuarioExterno
+from ..schemas.auth import AvisoEnviado
+from ..services import conta_email, conta_tokens
 from ..schemas.cidadao import (
     AbrirPorServicoRequest,
     AbrirProcessoCidadaoRequest,
     AnexoCidadaoOut,
     CadastroCidadaoRequest,
     CidadaoMeResponse,
+    CpfCnpjRequest,
     EspecieCidadaoOut,
     LoginCidadaoRequest,
     LoginCidadaoResponse,
@@ -29,6 +32,7 @@ from ..schemas.cidadao import (
 from ..services.anexos import AnexoError, upload_anexo
 from ..services.cidadao_auth import (
     CidadaoAuthError,
+    EmailNaoConfirmadoError,
     cadastrar,
     login,
 )
@@ -59,6 +63,7 @@ router = APIRouter(prefix="/cidadao", tags=["cidadao"])
 )
 async def cadastrar_endpoint(
     payload: CadastroCidadaoRequest,
+    request: Request,
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> CidadaoMeResponse:
@@ -68,7 +73,100 @@ async def cadastrar_endpoint(
         )
     except CidadaoAuthError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    # 0136 — o cadastro nasce sem e-mail confirmado; o login espera o link.
+    await _enviar_confirmacao(db, request, cidadao, respeitar_intervalo=False)
     return CidadaoMeResponse.model_validate(cidadao)
+
+
+async def _enviar_confirmacao(
+    db: AsyncSession, request: Request, cidadao: UsuarioExterno, *, respeitar_intervalo: bool = True
+) -> None:
+    _, token = await conta_tokens.emitir(
+        db,
+        conta_tokens.Titular(tenant_id=cidadao.tenant_id, id_usuario_externo=cidadao.id),
+        "verificar_email",
+        respeitar_intervalo=respeitar_intervalo,
+    )
+    await db.commit()
+    assunto, texto = conta_email.texto_verificar_email(
+        nome=cidadao.nome,
+        orgao=await conta_email.nome_do_orgao(db, cidadao.tenant_id),
+        url=conta_email.link(request, "/login/verificar-email", token),
+    )
+    await conta_email.enviar_email(
+        para=cidadao.email, assunto=assunto, texto=texto, tenant_id=cidadao.tenant_id
+    )
+
+
+_AVISO_CIDADAO = (
+    "Se houver um cadastro com esse CPF/CNPJ, enviamos o link para o e-mail "
+    "informado nele. Confira a caixa de entrada e o spam."
+)
+
+
+async def _cidadao_por_documento(
+    db: AsyncSession, tenant_id: int, cpf_cnpj: str
+) -> UsuarioExterno | None:
+    digitos = "".join(ch for ch in cpf_cnpj if ch.isdigit())
+    return (
+        await db.execute(
+            select(UsuarioExterno).where(
+                UsuarioExterno.cpf_cnpj == digitos,
+                UsuarioExterno.tenant_id == tenant_id,
+                UsuarioExterno.excluido.is_(False),
+                UsuarioExterno.ativo.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+
+
+@router.post("/esqueci-senha", response_model=AvisoEnviado, status_code=status.HTTP_202_ACCEPTED)
+async def esqueci_senha_endpoint(
+    payload: CpfCnpjRequest,
+    request: Request,
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AvisoEnviado:
+    """Link de nova senha para o e-mail do cadastro. Resposta igual exista o
+    cadastro ou não; quem entra pelo gov.br não tem senha aqui e não recebe."""
+    cidadao = await _cidadao_por_documento(db, tenant_id, payload.cpf_cnpj)
+    if cidadao is None or cidadao.login_govbr or not cidadao.email:
+        return AvisoEnviado(detail=_AVISO_CIDADAO)
+    try:
+        _, token = await conta_tokens.emitir(
+            db,
+            conta_tokens.Titular(tenant_id=tenant_id, id_usuario_externo=cidadao.id),
+            "redefinir_senha",
+        )
+    except conta_tokens.EnvioRecenteError:
+        return AvisoEnviado(detail=_AVISO_CIDADAO)
+    await db.commit()
+    assunto, texto = conta_email.texto_redefinir_senha(
+        nome=cidadao.nome,
+        orgao=await conta_email.nome_do_orgao(db, tenant_id),
+        url=conta_email.link(request, "/login/redefinir-senha", token),
+    )
+    await conta_email.enviar_email(para=cidadao.email, assunto=assunto, texto=texto, tenant_id=tenant_id)
+    return AvisoEnviado(detail=_AVISO_CIDADAO)
+
+
+@router.post(
+    "/reenviar-confirmacao", response_model=AvisoEnviado, status_code=status.HTTP_202_ACCEPTED
+)
+async def reenviar_confirmacao_endpoint(
+    payload: CpfCnpjRequest,
+    request: Request,
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AvisoEnviado:
+    cidadao = await _cidadao_por_documento(db, tenant_id, payload.cpf_cnpj)
+    if cidadao is None or cidadao.email_verificado_em is not None or not cidadao.email:
+        return AvisoEnviado(detail=_AVISO_CIDADAO)
+    try:
+        await _enviar_confirmacao(db, request, cidadao)
+    except conta_tokens.EnvioRecenteError:
+        pass
+    return AvisoEnviado(detail=_AVISO_CIDADAO)
 
 
 @router.post("/login", response_model=LoginCidadaoResponse)
@@ -81,6 +179,14 @@ async def login_endpoint(
     try:
         cidadao = await login(
             db, tenant_id=tenant_id, cpf_cnpj=payload.cpf_cnpj, senha=payload.senha
+        )
+    except EmailNaoConfirmadoError as e:
+        # 403 e não 401: a senha estava certa; falta só a confirmação. A tela
+        # usa o cabeçalho para oferecer o reenvio do link.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e),
+            headers={"X-Motivo": "email-nao-confirmado"},
         )
     except CidadaoAuthError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))

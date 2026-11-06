@@ -1,4 +1,6 @@
-from sqlalchemy import Boolean, ForeignKey, Integer, String, text
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
@@ -35,4 +37,12 @@ class Usuario(Base):
     # commits do SEC-1).
     must_change_password: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # 0136 — conta confirmada por e-mail. Nasce NOW() (server_default) em todo
+    # caminho que não manda e-mail; só o convite grava NULL. NULL = convite
+    # ainda não aceito: o login recusa (`services/conta_email.py`).
+    # O `None` explícito NÃO grava NULL aqui (o ORM o troca pelo server_default):
+    # quem precisa nascer não verificado atribui `sqlalchemy.null()`.
+    email_verificado_em: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, server_default=func.now()
     )

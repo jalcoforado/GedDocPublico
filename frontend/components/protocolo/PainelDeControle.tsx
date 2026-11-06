@@ -367,6 +367,16 @@ export function PainelDeControle() {
               />
               Atualizar
             </Button>
+            {/* O painel é o ponto de partida do dia: abrir processo daqui,
+                sem ir antes à lista (pedido do Jorge, 2026-11-06). */}
+            {can("processo", "inserir") && (
+              <Button asChild size="sm">
+                <Link href="/m/protocolo/processos/novo">
+                  <FilePlus2 className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                  Abrir processo
+                </Link>
+              </Button>
+            )}
           </div>
         }
       />

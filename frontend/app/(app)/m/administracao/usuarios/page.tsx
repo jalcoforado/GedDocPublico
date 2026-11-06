@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
@@ -66,9 +67,9 @@ export default function UsuariosPage() {
 
   const createM = useMutation({
     mutationFn: (data: UsuarioInput) => api.usuarios.create(data),
-    onSuccess: () => {
+    onSuccess: (criado) => {
       qc.invalidateQueries({ queryKey: ["usuarios"] });
-      toast.success("Usuário criado.");
+      toast.success(`Usuário criado. Enviamos o convite para ${criado.email}.`);
       closeDialog();
     },
     onError: (e: Error) => setErr(e.message),
@@ -90,6 +91,11 @@ export default function UsuariosPage() {
       qc.invalidateQueries({ queryKey: ["usuarios"] });
       toast.success("Usuário excluído.");
     },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const conviteM = useMutation({
+    mutationFn: (u: { id: number; email: string }) => api.usuarios.reenviarConvite(u.id),
+    onSuccess: (_r, u) => toast.success(`Convite reenviado para ${u.email}.`),
     onError: (e: Error) => toast.error(e.message),
   });
   const resetM = useMutation({
@@ -142,7 +148,10 @@ export default function UsuariosPage() {
       if (!isSuper) delete payload.nivel_acesso_sigilo;
       updateM.mutate({ id: editing.id, data: payload });
     } else {
-      createM.mutate(form);
+      // 0136 — sem senha: o backend cria por convite e manda o e-mail; a
+      // própria pessoa escolhe a senha ao ativar a conta.
+      const { senha: _semSenha, ...semSenha } = form;
+      createM.mutate(semSenha);
     }
   }
 
@@ -198,7 +207,17 @@ export default function UsuariosPage() {
               <TD className="font-medium">{u.nome}</TD>
               <TD className="text-muted-foreground">{u.email}</TD>
               <TD className="font-mono text-xs tabular-nums">{u.cpf}</TD>
-              <TD>{u.ativo ? "Sim" : "Não"}</TD>
+              <TD>
+                {u.email_verificado_em === null ? (
+                  <Badge intent="warning" title="O convite foi enviado e ainda não foi aceito.">
+                    Convite pendente
+                  </Badge>
+                ) : u.ativo ? (
+                  "Sim"
+                ) : (
+                  "Não"
+                )}
+              </TD>
               <TD className="text-right">
                 <div className="inline-flex gap-2">
                   {can("usuario", "atualizar") && (
@@ -206,7 +225,17 @@ export default function UsuariosPage() {
                       Editar
                     </Button>
                   )}
-                  {can("usuario", "atualizar") && (
+                  {can("usuario", "atualizar") && u.email_verificado_em === null && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={conviteM.isPending}
+                      onClick={() => conviteM.mutate({ id: u.id, email: u.email })}
+                    >
+                      Reenviar convite
+                    </Button>
+                  )}
+                  {can("usuario", "atualizar") && u.email_verificado_em !== null && (
                     <Button
                       variant="secondary"
                       size="sm"
@@ -375,27 +404,27 @@ export default function UsuariosPage() {
               </p>
             </div>
           )}
+          {!editing ? (
+            <p className="rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-foreground-muted">
+              O usuário recebe um convite no e-mail informado e escolhe a própria senha ao
+              ativar a conta. Até lá, aparece como &quot;Convite pendente&quot;.
+            </p>
+          ) : (
           <div>
-            <Label htmlFor="senha" required={!editing}>
-              {editing
-                ? "Nova senha temporária (vazio = manter senha atual)"
-                : "Senha"}
-            </Label>
+            <Label htmlFor="senha">Nova senha temporária (vazio = manter senha atual)</Label>
             <PasswordInput
               id="senha"
               value={form.senha ?? ""}
               onChange={(e) => setForm({ ...form, senha: e.target.value })}
-              autoComplete={editing ? "new-password" : "new-password"}
-              required={!editing}
-              aria-describedby={editing ? "senha-help" : undefined}
+              autoComplete="new-password"
+              aria-describedby="senha-help"
             />
-            {editing && (
-              <p id="senha-help" className="mt-1 text-xs text-foreground-muted">
-                Se preenchida, o usuário será obrigado a alterá-la no próximo
-                acesso. Não envie por canal inseguro.
-              </p>
-            )}
+            <p id="senha-help" className="mt-1 text-xs text-foreground-muted">
+              Se preenchida, o usuário será obrigado a alterá-la no próximo
+              acesso. Não envie por canal inseguro.
+            </p>
           </div>
+          )}
           <div className="flex items-center gap-2">
             <Checkbox
               id="ativo"

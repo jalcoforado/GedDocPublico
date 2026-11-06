@@ -40,6 +40,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
   return (
     <header
       aria-label="Cabeçalho do sistema"
+      data-topo-fixo
       className="
         sticky top-0 z-sticky
         flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-surface-1

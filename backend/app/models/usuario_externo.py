@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,3 +33,10 @@ class UsuarioExterno(Base):
     app: Mapped[str | None] = mapped_column(String, nullable=True)
     telefone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     telefone_whatsapp: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 0136 — e-mail confirmado. Nasce NOW() (gov.br e cadastros antigos já
+    # valem); o autocadastro grava NULL e o login espera a confirmação.
+    # O `None` explícito NÃO grava NULL aqui (o ORM o troca pelo server_default):
+    # quem precisa nascer não verificado atribui `sqlalchemy.null()`.
+    email_verificado_em: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, server_default=func.now()
+    )
