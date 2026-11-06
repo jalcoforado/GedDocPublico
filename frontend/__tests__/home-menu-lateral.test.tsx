@@ -1,10 +1,8 @@
 /**
- * Menu lateral só dentro de módulo. A tela inicial chegou a mostrar o menu
- * do protocolo para quem opera processos (PR #139), porque o painel de
- * controle morava nela; com o painel em `/m/protocolo/painel`, a exceção
- * perdeu o motivo e saiu. Este teste trava a regra de volta: `/home` sem
- * menu lateral para todo mundo, e o painel com o menu do módulo, como
- * qualquer tela do protocolo.
+ * Menu único (2026-11-05, no modelo do IAnalisys): a barra lateral está em
+ * TODA tela — Início, perfil e dentro dos módulos —, com todos os módulos
+ * contratados. Antes ela só existia dentro de um módulo e mostrava só ele, e
+ * este teste travava o contrário (`/home` sem menu).
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -30,7 +28,7 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/api", () => ({
   api: {
     admin: { me: () => Promise.resolve({ is_platform_admin: false }) },
-    modulos: () => Promise.resolve({ itens: [] }),
+    modulos: () => Promise.resolve({ itens: [{ slug: "protocolo", nome: "Protocolo", icone: "FileText", ordem: 1 }] }),
     branding: () => Promise.resolve(null),
     processos: {
       caixas: () => Promise.resolve({
@@ -64,21 +62,21 @@ function abrir(caminho: string, perms: string[]) {
 
 afterEach(cleanup);
 
-describe("menu lateral só dentro de módulo", () => {
-  it("a tela inicial não tem menu lateral, nem para quem opera processos", () => {
+describe("menu único: a barra lateral está em toda tela", () => {
+  it("o Início tem o menu lateral, com o Protocolo contratado", async () => {
     abrir("/home", ["processo"]);
-    expect(screen.queryByRole("link", { name: /Caixas de trabalho/ })).toBeNull();
-    expect(screen.queryByRole("link", { name: /Painel de controle/ })).toBeNull();
+    expect((await screen.findAllByRole("link", { name: /Caixas de trabalho/ })).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: /Painel de controle/ }).length).toBeGreaterThan(0);
   });
 
-  it("o painel do protocolo mostra o menu do módulo, com o painel e as caixas de trabalho", () => {
+  it("o painel do protocolo mostra o mesmo menu", async () => {
     abrir("/m/protocolo/painel", ["processo"]);
-    expect(screen.getAllByRole("link", { name: /Painel de controle/ }).length).toBeGreaterThan(0);
+    expect((await screen.findAllByRole("link", { name: /Painel de controle/ })).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: /Caixas de trabalho/ }).length).toBeGreaterThan(0);
   });
 
-  it("as outras telas gerais seguem sem menu lateral", () => {
+  it("as outras telas gerais também têm o menu", async () => {
     abrir("/perfil", ["processo"]);
-    expect(screen.queryByRole("link", { name: /Caixas de trabalho/ })).toBeNull();
+    expect((await screen.findAllByRole("link", { name: /Caixas de trabalho/ })).length).toBeGreaterThan(0);
   });
 });

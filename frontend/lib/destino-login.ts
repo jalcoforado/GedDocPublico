@@ -13,8 +13,9 @@
  * coisas ruins a bloquear.
  */
 
-/** Para onde o login vai quando não há `next` utilizável. É o launcher (F2). */
-export const DESTINO_PADRAO = "/modulos";
+/** Para onde o login vai quando não há `next` utilizável: o Início (o launcher
+ * `/modulos`, destino até 2026-11-05, saiu com o menu único). */
+export const DESTINO_PADRAO = "/home";
 
 /** Prefixos que nunca são destino: levariam a laço ou a tela de trânsito. */
 const NUNCA_DESTINO = ["/login", "/alterar-senha-obrigatoria"];

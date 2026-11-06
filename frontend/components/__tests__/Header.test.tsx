@@ -10,9 +10,6 @@ const openSpy = vi.fn();
 vi.mock("@/components/CommandPalette", () => ({
   useCommandPalette: () => ({ open: openSpy }),
 }));
-vi.mock("@/components/ModuloSwitcher", () => ({
-  ModuloSwitcher: () => <div data-testid="switcher" />,
-}));
 vi.mock("@/components/NotificacoesBell", () => ({
   NotificacoesBell: () => <div data-testid="bell" />,
 }));

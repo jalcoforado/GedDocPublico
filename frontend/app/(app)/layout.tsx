@@ -22,7 +22,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const modulo = moduloDoPathname(pathname);
 
-  if (loading) return <ShellCarregando comMenuLateral={!!modulo} />;
+  if (loading) return <ShellCarregando comMenuLateral />;
   if (!user) return null;
   // Publicado para o `PageHeader` montar a trilha sem ler a URL por conta
   // própria (ver `lib/modulo-atual.tsx`).
@@ -41,15 +41,13 @@ function Shell({ children }: { children: React.ReactNode }) {
           Pular para o conteúdo
         </a>
         <LoadingBar />
-        {/* Layout de referência (Figma): as telas transversais — início, perfil,
-            para assinar, dashboard — não têm barra lateral; a navegação delas é
-            o cabeçalho e o próprio "Menu principal". O menu lateral aparece
-            dentro de um módulo, onde há menu de módulo para mostrar. */}
-        {modulo ? (
-          <Sidebar modulo={modulo} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-        ) : null}
+        {/* Menu único (2026-11-05): a barra lateral está em TODA tela, com
+            todos os módulos contratados — no Início, no perfil e dentro dos
+            módulos. Antes ela só existia dentro de um módulo e mostrava só ele;
+            a troca de módulo passava pelo launcher. */}
+        <Sidebar modulo={modulo} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         <div className="flex flex-1 flex-col overflow-hidden">
-          <Header onOpenSidebar={modulo ? () => setSidebarOpen(true) : undefined} />
+          <Header onOpenSidebar={() => setSidebarOpen(true)} />
           <main
             id="conteudo"
             className="flex-1 overflow-y-auto p-4 sm:p-[var(--density-space)]"

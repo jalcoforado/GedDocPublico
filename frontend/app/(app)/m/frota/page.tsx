@@ -12,6 +12,7 @@ import {
   IdCard,
   MapPinned,
   Truck,
+  Workflow,
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
@@ -73,6 +74,14 @@ const CARDS = [
     icon: BarChart3,
     title: "Visão gerencial",
     desc: "Indicadores consolidados: veículos, solicitações, pendências e abastecimentos.",
+  },
+  // Saiu do menu lateral (menu único, 2026-11-05): mora aqui, como as demais
+  // telas do módulo que não são de trabalho diário.
+  {
+    href: "/m/frota/fluxo",
+    icon: Workflow,
+    title: "Fluxo do processo",
+    desc: "O caminho de uma solicitação de veículo, do pedido ao retorno, com as quantidades em cada etapa.",
   },
 ];
 

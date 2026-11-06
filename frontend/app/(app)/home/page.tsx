@@ -8,9 +8,7 @@ import {
   Banknote,
   Bus,
   CheckCheck,
-  FilePlus2,
   FileText,
-  LayoutGrid,
   type LucideIcon,
   PenLine,
   Star,
@@ -68,7 +66,7 @@ export default function HomePage() {
   const data = agora.toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
   const hoje = data.charAt(0).toUpperCase() + data.slice(1);
 
-  // Mesma queryKey do guard de módulo, do launcher e do switcher.
+  // Mesma queryKey do guard de módulo e do menu lateral.
   const modulosQ = useQuery({ queryKey: ["modulos-me"], queryFn: api.modulos });
   const contratado = (slug: string) => !!modulosQ.data?.itens.some((i) => i.slug === slug);
 
@@ -76,7 +74,6 @@ export default function HomePage() {
   const vePagamentos = contratado("pagamentos") && PERMS_LEITURA_PAGAMENTOS.some((p) => can(p));
   const veFrota = contratado("frota") && can("frota");
   const veTransporte = contratado("transporte") && can("transporte_regulado");
-  const podeAbrir = veProtocolo && can("processo", "inserir");
 
   return (
     <div className="space-y-6">
@@ -89,25 +86,13 @@ export default function HomePage() {
           </>
         }
         actions={
+          // "Abrir processo" e a lista de módulos moram no menu lateral, que
+          // desde o menu único também aparece aqui.
           <div className="flex flex-wrap gap-2">
-            {podeAbrir && (
-              <Button asChild>
-                <Link href="/m/protocolo/processos/novo">
-                  <FilePlus2 className="h-4 w-4" aria-hidden="true" />
-                  Abrir processo
-                </Link>
-              </Button>
-            )}
             <Button asChild variant="secondary">
               <Link href="/para-assinar">
                 <PenLine className="h-4 w-4" aria-hidden="true" />
                 Para assinar
-              </Link>
-            </Button>
-            <Button asChild variant="secondary">
-              <Link href="/modulos">
-                <LayoutGrid className="h-4 w-4" aria-hidden="true" />
-                Meus módulos
               </Link>
             </Button>
           </div>
@@ -131,8 +116,8 @@ export default function HomePage() {
           </div>
         ) : !veProtocolo && !vePagamentos && !veFrota && !veTransporte ? (
           <p className="text-sm text-foreground-muted">
-            Nenhum módulo com pendências para o seu perfil. Os módulos que você alcança estão em
-            &ldquo;Meus módulos&rdquo;.
+            Nenhum módulo com pendências para o seu perfil. Os módulos que você alcança estão no
+            menu ao lado.
           </p>
         ) : (
           (() => {

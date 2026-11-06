@@ -15,12 +15,12 @@ import { useQuery } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { canSeeItem, MENUS, menuDoModulo, type NavGroup, type NavItem } from "@/lib/menus";
+import { canSeeItem, MENUS, type NavGroup, type NavItem } from "@/lib/menus";
+import { nomeDoModulo } from "@/lib/modulos";
 import { cn } from "@/lib/utils";
 import { DensityToggle } from "./DensityToggle";
 import { MarcaDoMunicipio } from "./MarcaDoMunicipio";
 import { Popover } from "@/components/ui/popover";
-import { SidebarModuloHeader } from "./SidebarModuloHeader";
 import { ThemeToggle } from "./ThemeToggle";
 
 function isPathActive(href: string, pathname: string): boolean {
@@ -60,26 +60,52 @@ interface SidebarProps {
 }
 
 const COLLAPSED_KEY = "aprimora.sidebar.collapsed";
-const GROUP_STATE_KEY = "aprimora.sidebar.groups.v1";
+// v2: os títulos dos grupos viraram nomes de módulo no menu único — o estado
+// salvo da v1 ("Processos", "Cadastros"…) não se aplica mais.
+const GROUP_STATE_KEY = "aprimora.sidebar.groups.v2";
 const FOCUSABLE =
   'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function Sidebar({ modulo, open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { can } = useAuth();
-  // Transversais (comum) sempre primeiro — é a ordem do NAV original ("Geral"
-  // abria a lista) e continua sendo o caminho de volta para /home e
-  // /dashboard, agora no topo em vez do fim. Depois vêm os grupos do módulo
-  // ativo. "comum" nunca duplica: menuDoModulo(null) devolve null, e o guard
-  // `menu.slug !== "comum"` evita repetir o grupo se algum dia o slug do
-  // pathname vier como "comum" por engano (hoje nenhuma entrada de
-  // ROTA_MODULO mapeia para "comum" — é defesa, não caminho alcançável).
-  const menu = menuDoModulo(modulo);
-  const acao = menu && menu.slug !== "comum" ? menu.acaoPrincipal : undefined;
+  // MENU ÚNICO (2026-11-05, no modelo do IAnalisys): a barra mostra TODOS os
+  // módulos contratados, em toda tela — inclusive no Início —, e não mais só
+  // o módulo da URL. Cada módulo é uma seção aberta com as suas telas de
+  // trabalho (`lugar` "barra"); cadastros e configuração moram na tela-índice
+  // do módulo (`lugar` "hub"), etapas de uma lista viram abas ("aba"). O
+  // launcher `/modulos` e as trocas de módulo saíram: a barra já é a troca.
+  //
+  // Contratação vem de `/modulos/me` (mesma chave do guard de módulo). Se
+  // ela falhar, cai no comportamento antigo — só o módulo da URL —, para uma
+  // falha temporária não esvaziar o menu.
+  const modulosQ = useQuery({ queryKey: ["modulos-me"], queryFn: api.modulos, staleTime: 5 * 60_000 });
+  const contratados = modulosQ.isError
+    ? modulo && MENUS[modulo] ? [modulo] : []
+    : [...(modulosQ.data?.itens ?? [])]
+        .sort((a, b) => a.ordem - b.ordem)
+        .map((m) => m.slug)
+        .filter((s) => s !== "comum" && !!MENUS[s]);
+  const naBarra = (items: NavItem[]) => items.filter((i) => (i.lugar ?? "barra") === "barra");
+  const secao = (slug: string): NavGroup => {
+    const m = MENUS[slug];
+    const quieto = m.grupos.some((g) => g.quieto);
+    return {
+      title: nomeDoModulo(slug),
+      items: naBarra(m.grupos.flatMap((g) => g.items)),
+      defaultOpen: !quieto,
+      quieto,
+    };
+  };
   const NAV: NavGroup[] = [
     ...MENUS.comum.grupos,
-    ...(menu && menu.slug !== "comum" ? menu.grupos : []),
+    // Os de trabalho na ordem do catálogo; os "quietos" (Administração) no fim.
+    ...contratados.filter((s) => !MENUS[s].grupos.some((g) => g.quieto)).map(secao),
+    ...contratados.filter((s) => MENUS[s].grupos.some((g) => g.quieto)).map(secao),
   ];
+  // "Abrir processo" (ação principal do Protocolo) no alto da barra, em
+  // qualquer tela, quando o Protocolo está contratado.
+  const acao = contratados.includes("protocolo") ? MENUS.protocolo.acaoPrincipal : undefined;
   // PR3a — link de plataforma só aparece para admin de plataforma (allowlist).
   const adminMeQ = useQuery({
     queryKey: ["admin-me"],
@@ -146,8 +172,11 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
     if (activeParent && !subOpen[activeParent.label]) {
       setSubOpen((prev) => ({ ...prev, [activeParent.label]: true }));
     }
+    // `modulosQ.data`: no menu único as seções só existem depois que a
+    // contratação chega. Só com `pathname`, quem recarregava dentro da
+    // Administração (seção fechada por padrão) não via o item atual.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+  }, [pathname, modulosQ.data]);
 
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
@@ -189,6 +218,23 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
   // estática e nada disto roda.
   const navRef = useRef<HTMLElement>(null);
   const focoAnterior = useRef<HTMLElement | null>(null);
+
+  // Com todos os módulos na barra, ela passa da altura da tela: o item atual
+  // pode nascer abaixo da dobra (Administração, no fim). Rola só a barra, e só
+  // o necessário (`nearest`), uma vez por página. A rolagem fica PENDENTE até
+  // o item estar visível: a seção dele pode ainda estar fechada no render em
+  // que a página muda (a Administração abre no render seguinte).
+  const rolarPendente = useRef(true);
+  useEffect(() => {
+    rolarPendente.current = true;
+  }, [pathname, modulosQ.data]);
+  useEffect(() => {
+    if (!rolarPendente.current) return;
+    const atual = navRef.current?.querySelector<HTMLElement>('a[aria-current="page"]');
+    if (!atual || atual.getClientRects().length === 0) return; // ainda escondido
+    atual.scrollIntoView?.({ block: "nearest" });
+    rolarPendente.current = false;
+  });
   useEffect(() => {
     if (!open) return;
     const nav = navRef.current;
@@ -300,10 +346,6 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
           </button>
         </div>
 
-        {/* Cabeçalho de módulo — onde o usuário está e o caminho de volta a
-            /modulos. Acima de todos os grupos, de propósito (ver componente). */}
-        <SidebarModuloHeader modulo={modulo} collapsed={colapsada} />
-
         {/* Ação principal do módulo (`MenuModulo.acaoPrincipal`): fora dos
             grupos, acima deles — não é uma tela para navegar, é o que se veio
             fazer. Sem a permissão de criar, não aparece. */}
@@ -342,9 +384,16 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
             const slugId = `nav-group-${group.title.toLowerCase().replace(/\s+/g, "-")}`;
 
             return (
-              <div key={group.title} className="rounded-md">
+              <div
+                key={group.title}
+                className={cn(
+                  "rounded-md",
+                  // Destaque baixo (Administração): no fim, depois de uma linha.
+                  group.quieto && "mt-auto border-t border-sidebar-border pt-2 opacity-80 hover:opacity-100",
+                )}
+              >
                 {/* Group header — clicável (exceto em collapsed mode, vira só separador). */}
-                {colapsada ? (
+                {group.semTitulo ? null : colapsada ? (
                   <div
                     className="my-1 hidden h-px w-full bg-sidebar-border md:block"
                     aria-hidden="true"
@@ -456,7 +505,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                         aria-current={linkActive ? "page" : undefined}
                         title={colapsada ? item.label : undefined}
                         className={cn(
-                          "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
+                          "group relative flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-fast",
                           colapsada && "md:justify-center md:gap-0 md:px-0",
                           linkActive
                             ? "bg-sidebar-active text-sidebar-foreground"

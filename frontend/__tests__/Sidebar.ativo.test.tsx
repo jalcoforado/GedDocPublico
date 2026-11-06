@@ -17,7 +17,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const onde = { pathname: "/m/protocolo/processos", busca: "", podeInserir: true };
+const onde = { pathname: "/m/protocolo/processos", busca: "", podeInserir: true, semProtocolo: false };
 vi.mock("next/navigation", () => ({
   usePathname: () => onde.pathname,
   useSearchParams: () => new URLSearchParams(onde.busca),
@@ -41,7 +41,7 @@ vi.mock("@/lib/api", () => ({
     modulos: () =>
       Promise.resolve({
         itens: [
-          { slug: "protocolo", nome: "Protocolo", icone: "FileText", ordem: 1 },
+          ...(onde.semProtocolo ? [] : [{ slug: "protocolo", nome: "Protocolo", icone: "FileText", ordem: 1 }]),
           { slug: "pagamentos", nome: "Pagamentos", icone: "Wallet", ordem: 2 },
         ],
       }),
@@ -87,7 +87,9 @@ beforeEach(() => {
   onde.pathname = "/m/protocolo/processos";
   onde.busca = "";
   onde.podeInserir = true;
+  onde.semProtocolo = false;
   caixasMock.mockReset();
+  window.localStorage.clear();
 });
 
 describe("ação principal do módulo", () => {
@@ -106,8 +108,15 @@ describe("ação principal do módulo", () => {
     expect(screen.queryByRole("link", { name: "Abrir processo" })).toBeNull();
   });
 
-  it("módulo sem ação declarada não ganha botão", async () => {
+  it("no menu único o botão vale em qualquer tela — inclusive fora do Protocolo", async () => {
     onde.pathname = "/m/pagamentos";
+    renderSidebar({ modulo: "pagamentos", open: true, onClose: () => {} });
+    expect(await screen.findByRole("link", { name: "Abrir processo" })).toBeInTheDocument();
+  });
+
+  it("prefeitura sem o Protocolo contratado não ganha botão", async () => {
+    onde.pathname = "/m/pagamentos";
+    onde.semProtocolo = true;
     renderSidebar({ modulo: "pagamentos", open: true, onClose: () => {} });
     await screen.findByRole("link", { name: "Visão geral" });
     expect(screen.queryByRole("link", { name: "Abrir processo" })).toBeNull();
@@ -155,10 +164,12 @@ describe("irmãos aninhados — vence o mais específico", () => {
     await waitFor(() => expect(atuais()).toEqual(["Dashboard"]));
   });
 
-  it("em /m/pagamentos/solicitacoes/gestor, só 'Aguardando Gestor' (não 'Solicitações')", async () => {
+  it("numa etapa (aba) de Solicitações, a atual na barra é 'Solicitações'", async () => {
+    // "Aguardando Gestor" virou aba de Solicitações (menu único): fora da
+    // barra, quem acende é a tela que contém a aba.
     onde.pathname = "/m/pagamentos/solicitacoes/gestor";
     renderSidebar({ modulo: "pagamentos", open: true, onClose: () => {} });
-    await waitFor(() => expect(atuais()).toEqual(["Aguardando Gestor"]));
+    await waitFor(() => expect(atuais()).toEqual(["Solicitações"]));
   });
 
   it("sem irmão mais específico, o item segue aceso nas próprias subpáginas", async () => {

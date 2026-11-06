@@ -200,17 +200,6 @@ describe("o que precisa de você hoje", () => {
     expect(await screen.findByText(/Nenhum módulo com pendências para o seu perfil/)).toBeInTheDocument();
   });
 
-  it("'Abrir processo' só para quem pode inserir", async () => {
-    estado.perms = ["processo"];
-    await abrir();
-    await screen.findByRole("region", { name: "Protocolo" });
-    expect(screen.queryByRole("link", { name: /Abrir processo/ })).toBeNull();
-    cleanup();
-    estado.perms = ["processo", "processo:inserir"];
-    await abrir();
-    expect(await screen.findByRole("link", { name: /Abrir processo/ })).toHaveAttribute(
-      "href", "/m/protocolo/processos/novo");
-  });
 });
 
 describe("processos que você acompanha", () => {
@@ -278,9 +267,9 @@ describe("notificações", () => {
     expect(screen.queryByRole("button", { name: /Marcar todas/ })).toBeNull();
   });
 
-  it("leva aos módulos e às assinaturas", async () => {
+  it("leva às assinaturas — módulos e 'Abrir processo' estão no menu lateral", async () => {
     await abrir();
-    expect(screen.getByRole("link", { name: /Meus módulos/ })).toHaveAttribute("href", "/modulos");
     expect(screen.getByRole("link", { name: /Para assinar/ })).toHaveAttribute("href", "/para-assinar");
+    expect(screen.queryByRole("link", { name: /Meus módulos/ })).toBeNull();
   });
 });

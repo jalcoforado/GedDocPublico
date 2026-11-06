@@ -38,7 +38,6 @@ vi.mock("@/lib/branding", () => ({
 }));
 // O cabeçalho monta busca, sino e conta; aqui só interessa a marca.
 vi.mock("@/components/BuscaGlobal", () => ({ BuscaGlobal: () => null }));
-vi.mock("@/components/ModuloSwitcher", () => ({ ModuloSwitcher: () => null }));
 vi.mock("@/components/NotificacoesBell", () => ({ NotificacoesBell: () => null }));
 vi.mock("@/components/AvatarDropdown", () => ({ AvatarDropdown: () => null }));
 vi.mock("@/components/UnidadeAtiva", () => ({ UnidadeAtiva: () => null }));

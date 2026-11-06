@@ -142,7 +142,7 @@ export function CommandPalette({ open, onOpenChange }: Props) {
     enabled: open && debouncedQ.length >= 2,
   });
 
-  // Módulos contratados do tenant — MESMA queryKey que ModuloSwitcher e o
+  // Módulos contratados do tenant — MESMA queryKey que o menu lateral e o
   // launcher usam (não inventa chave nova). Herda o cache: a paleta abre por
   // cima de uma página já montada dentro de `(app)`, então o dado costuma já
   // estar quente quando o usuário aperta Ctrl+K.

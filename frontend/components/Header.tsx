@@ -7,7 +7,6 @@ import { AvatarDropdown } from "@/components/AvatarDropdown";
 import { BuscaGlobal } from "@/components/BuscaGlobal";
 import { useCommandPalette } from "@/components/CommandPalette";
 import { MarcaDoMunicipio } from "@/components/MarcaDoMunicipio";
-import { ModuloSwitcher } from "@/components/ModuloSwitcher";
 import { NotificacoesBell } from "@/components/NotificacoesBell";
 import { UnidadeAtiva } from "@/components/UnidadeAtiva";
 import { useAuth } from "@/lib/auth";
@@ -114,7 +113,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
           >
             <Search className="h-5 w-5" aria-hidden="true" />
           </button>
-          <ModuloSwitcher />
+          {/* A troca de módulo saiu: o menu lateral único já lista todos. */}
           <NotificacoesBell />
           <AvatarDropdown />
         </div>

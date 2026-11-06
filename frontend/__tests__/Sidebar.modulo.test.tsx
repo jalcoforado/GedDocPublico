@@ -1,18 +1,24 @@
 /**
- * A Sidebar passa a renderizar SÓ o módulo ativo, mais os transversais.
- * O que este teste protege: estar em /m/frota não pode mostrar menu de
- * pagamentos — era exatamente o que a Sidebar de 637 linhas fazia.
+ * Menu único (2026-11-05, no modelo do IAnalisys): a Sidebar mostra TODOS os
+ * módulos contratados, em toda tela, cada um como uma seção com as telas de
+ * trabalho dele. Substitui o modelo anterior — só o módulo da URL, mais um
+ * cabeçalho para trocar de módulo e o launcher `/modulos`.
+ *
+ * O que este teste protege: módulo não contratado não aparece (mesmo com
+ * permissão); cadastros e etapas (`lugar` "hub"/"aba") ficam fora da barra;
+ * Administração vem por último e fechada; e uma falha de `/modulos/me` não
+ * esvazia o menu.
  */
 import type { ComponentProps } from "react";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const onde = { pathname: "/m/frota/veiculos" };
 vi.mock("next/navigation", () => ({
-  // A barra lateral lê a query da URL (qual caixa de Processos está aberta).
   useSearchParams: () => new URLSearchParams(),
-  usePathname: () => "/m/frota/veiculos",
+  usePathname: () => onde.pathname,
   useRouter: () => ({ push: vi.fn() }),
 }));
 vi.mock("@/lib/auth", () => ({
@@ -25,8 +31,6 @@ vi.mock("@/lib/auth", () => ({
   }),
 }));
 
-// admin.me alimenta o link de plataforma (não testado aqui); modulos alimenta
-// o SidebarModuloHeader — mesma queryKey `modulos-me` do ModuloSwitcher.
 const modulosMock = vi.fn();
 vi.mock("@/lib/api", () => ({
   api: {
@@ -38,40 +42,26 @@ vi.mock("@/lib/api", () => ({
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeProvider } from "@/lib/theme";
 
-const DOIS_MODULOS = {
+const m = (slug: string, nome: string, ordem: number) => ({ slug, nome, icone: null, ordem });
+const TODOS = {
   itens: [
-    { slug: "frota", nome: "Frota", icone: "Truck", ordem: 1 },
-    { slug: "pagamentos", nome: "Pagamentos", icone: "Wallet", ordem: 2 },
+    m("protocolo", "Protocolo", 1),
+    m("pagamentos", "Pagamentos", 2),
+    m("frota", "Frota", 3),
+    m("administracao", "Administração", 0), // ordem baixa de propósito: mesmo assim vai pro fim
+    m("transporte", "Transporte Regulado", 4),
   ],
 };
 
 beforeEach(() => {
+  onde.pathname = "/m/frota/veiculos";
   modulosMock.mockReset();
-  modulosMock.mockResolvedValue(DOIS_MODULOS);
+  modulosMock.mockResolvedValue(TODOS);
+  window.localStorage.clear();
 });
 
-// jsdom não implementa matchMedia; o ThemeProvider consulta a preferência do
-// SO ao montar. Sem isso a montagem quebra antes de qualquer asserção.
-window.matchMedia =
-  window.matchMedia ??
-  (((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })) as unknown as typeof window.matchMedia);
-
-// A Sidebar consulta /admin/me via react-query (link de plataforma) e usa
-// ThemeToggle no rodapé (exige ThemeProvider) — sem os dois a montagem
-// explode antes de qualquer asserção rodar.
 function renderSidebar(props: ComponentProps<typeof Sidebar>) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <ThemeProvider>
@@ -81,95 +71,78 @@ function renderSidebar(props: ComponentProps<typeof Sidebar>) {
   );
 }
 
-describe("Sidebar por módulo", () => {
-  it("mostra o menu do módulo ativo e não o dos outros", () => {
+describe("menu único", () => {
+  it("todos os módulos contratados aparecem, em qualquer tela — não só o da URL", async () => {
     renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
-    expect(screen.getByText("Veículos")).toBeTruthy();
-    expect(screen.queryByText("Contas a pagar")).toBeNull();
-    expect(screen.queryByText("Permissionários")).toBeNull();
+    expect(await screen.findByRole("link", { name: "Caixas de trabalho" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Conciliação" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Veículos" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Alvarás" })).toBeInTheDocument();
   });
 
-  it("em rota transversal mostra os itens comuns e nenhum menu de módulo", () => {
+  it("no Início (sem módulo na URL) o menu é o mesmo", async () => {
+    onde.pathname = "/home";
     renderSidebar({ modulo: null, open: true, onClose: () => {} });
-    expect(screen.getByText("Início")).toBeTruthy();
-    expect(screen.queryByText("Veículos")).toBeNull();
+    expect(await screen.findByRole("link", { name: "Caixas de trabalho" })).toBeInTheDocument();
+    // Dois links "Início": a marca do município e o item do menu.
+    expect(screen.getAllByRole("link", { name: "Início" }).some((a) => a.getAttribute("aria-current") === "page")).toBe(true);
   });
 
-  it("o grupo comum (transversais) vem antes do grupo do módulo ativo", () => {
-    // Guarda viva da ordem: "Geral" era o primeiro grupo no NAV original.
-    // Precisa renderizar a Sidebar de verdade — um teste que só olhasse dados
-    // (MENUS/ORDEM_GRUPOS_ORIGINAL) já passou verde uma vez com a Sidebar
-    // montando a ordem oposta, porque nunca exercitava o componente.
+  it("módulo não contratado não aparece, mesmo com permissão para tudo", async () => {
+    modulosMock.mockResolvedValue({ itens: [m("frota", "Frota", 1)] });
     renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
-    const geral = screen.getByText("Geral");
-    // Botão do GRUPO "Frota" (role button, aria-expanded) — não o texto do
-    // cabeçalho de módulo (role link), que também pode conter "Frota".
-    const frota = screen.getByRole("button", { name: "Frota" });
-    const posicao = geral.compareDocumentPosition(frota);
-    expect(posicao & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await screen.findByRole("link", { name: "Veículos" });
+    expect(screen.queryByRole("link", { name: "Caixas de trabalho" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Conciliação" })).toBeNull();
   });
-});
 
-describe("cabeçalho de módulo (topo da Sidebar) — seletor", () => {
-  it("dentro de um módulo, com mais de um módulo disponível, é um botão fechado com o nome do módulo", async () => {
+  it("cadastros e etapas ficam fora da barra; a tela-índice do módulo entra no lugar", async () => {
     renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
-    const header = await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
-    expect(header.tagName).toBe("BUTTON");
-    expect(header).toHaveAttribute("aria-expanded", "false");
-    expect(header.textContent).toContain("Frota");
-    // fechado: nenhum link de outro módulo ocupando a Sidebar
-    expect(screen.queryByTestId("sidebar-modulo-lista")).toBeNull();
+    await screen.findByRole("link", { name: "Caixas de trabalho" });
+    for (const fora of ["Manifestantes", "Assuntos", "CCD (Classificação)", "Aguardando Gestor", "Fornecedores", "Motoristas", "Empresas"]) {
+      expect(screen.queryByRole("link", { name: fora }), fora).toBeNull();
+    }
+    expect(screen.getByRole("link", { name: "Cadastros e configuração" })).toHaveAttribute("href", "/m/protocolo/cadastros");
+    expect(screen.getByRole("link", { name: "Cadastros e controle" })).toHaveAttribute("href", "/m/pagamentos/cadastros");
   });
 
-  it("clicar abre a lista com os OUTROS módulos (raiz de cada um) e o link para /modulos — clicar de novo fecha", async () => {
+  it("seções na ordem do catálogo, Administração por último e fechada", async () => {
     renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
-    const header = await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
-    fireEvent.click(header);
-    const lista = screen.getByTestId("sidebar-modulo-lista");
-    expect(header).toHaveAttribute("aria-expanded", "true");
-    const pagamentos = within(lista).getByRole("link", { name: /Pagamentos/ });
-    expect(pagamentos).toHaveAttribute("href", "/m/pagamentos");
-    // o módulo ativo não se lista a si mesmo — é o rótulo do botão
-    expect(within(lista).queryByRole("link", { name: /Frota/ })).toBeNull();
-    expect(within(lista).getByRole("link", { name: /todos os módulos/i })).toHaveAttribute(
-      "href",
-      "/modulos",
-    );
-    fireEvent.click(header);
-    expect(screen.queryByTestId("sidebar-modulo-lista")).toBeNull();
+    await screen.findByRole("link", { name: "Caixas de trabalho" });
+    const botoes = screen
+      .getAllByRole("button")
+      .filter((b) => b.hasAttribute("aria-expanded") && /^(Protocolo|Pagamentos|Frota|Transporte Regulado|Administração)$/.test(b.textContent?.trim() ?? ""));
+    expect(botoes.map((b) => b.textContent?.trim())).toEqual([
+      "Protocolo",
+      "Pagamentos",
+      "Frota",
+      "Transporte Regulado",
+      "Administração",
+    ]);
+    const adm = botoes[botoes.length - 1];
+    expect(adm.getAttribute("aria-expanded")).toBe("false");
+    for (const b of botoes.slice(0, -1)) expect(b.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("em rota transversal, mostra rótulo neutro e a lista traz todos os módulos", async () => {
-    renderSidebar({ modulo: null, open: true, onClose: () => {} });
-    const header = await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
-    expect(header.textContent).toContain("Módulos");
-    expect(header.textContent).not.toMatch(/frota|pagamentos/i);
-    fireEvent.click(header);
-    const lista = screen.getByTestId("sidebar-modulo-lista");
-    expect(within(lista).getByRole("link", { name: /Frota/ })).toBeTruthy();
-    expect(within(lista).getByRole("link", { name: /Pagamentos/ })).toBeTruthy();
+  it("dentro da Administração, ela abre sozinha (o item atual nunca fica escondido)", async () => {
+    onde.pathname = "/m/administracao/usuarios";
+    renderSidebar({ modulo: "administracao", open: true, onClose: () => {} });
+    const usuarios = await screen.findByRole("link", { name: "Usuários" });
+    await waitFor(() => expect(usuarios.closest("[id^='nav-group-']")?.className).not.toMatch(/\bhidden\b/));
   });
 
-  it("com um único módulo disponível, mostra só o nome do módulo — sem link, sem seta, sem ação", async () => {
-    // O launcher faz auto-redirect quando há um módulo só: um link aqui
-    // bateria e voltaria na hora. Vale tanto dentro do módulo quanto numa
-    // rota transversal — o que importa é ter um módulo só, não a rota atual.
-    modulosMock.mockResolvedValue({
-      itens: [{ slug: "frota", nome: "Frota", icone: "Truck", ordem: 1 }],
-    });
+  it("o cabeçalho de troca de módulo saiu — a barra já é a troca", async () => {
     renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
-    const header = await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
-    expect(header.tagName).toBe("DIV");
-    expect(header).not.toHaveAttribute("href");
-    expect(header.textContent).toBe("Frota");
+    await screen.findByRole("link", { name: "Veículos" });
+    expect(screen.queryByTestId("sidebar-modulo-header")).toBeNull();
+    expect(screen.queryByRole("link", { name: /Meus módulos/ })).toBeNull();
   });
 
-  it("erro ao carregar módulos fica visível e recuperável — não pode ser confundido com módulo único", async () => {
-    modulosMock.mockReset();
-    modulosMock.mockRejectedValue(new Error("falhou"));
+  it("se /modulos/me falhar, fica ao menos o módulo da URL — o menu não esvazia", async () => {
+    modulosMock.mockRejectedValue(new Error("fora do ar"));
     renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
-    const header = await waitFor(() => screen.getByTestId("sidebar-modulo-header"));
-    expect(header.tagName).toBe("BUTTON");
-    expect(header.textContent).toMatch(/indisponíveis/i);
+    const nav = screen.getByRole("navigation", { name: "Navegação principal" });
+    expect(await within(nav).findByRole("link", { name: "Veículos" })).toBeInTheDocument();
+    expect(within(nav).queryByRole("link", { name: "Caixas de trabalho" })).toBeNull();
   });
 });
