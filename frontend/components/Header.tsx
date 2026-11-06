@@ -63,14 +63,14 @@ export function Header({ onOpenSidebar }: HeaderProps) {
           </button>
         ) : null}
 
-        {/* No escuro a faixa escurece e a marca (texto marinho) sumiria: ela
-            ganha um fundo claro só nesse tema. */}
+        {/* No escuro entra a variante `-escuro` da marca (texto claro), sem
+            cartão — ver `MarcaDoMunicipio`. */}
         <Link
           href="/home"
           aria-label="Início"
           className="
-            flex h-12 shrink-0 items-center rounded-lg bg-marca-fundo px-2
-            transition-colors duration-fast hover:bg-muted dark:hover:bg-marca-fundo/90
+            flex h-12 shrink-0 items-center rounded-lg px-2
+            transition-colors duration-fast hover:bg-muted
             focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
           "
         >

@@ -10,11 +10,11 @@ import {
   Landmark,
   Lock,
   ShieldAlert,
+  ShieldCheck,
   Wallet,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { type ComponentType, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -34,7 +34,6 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { api, type ComposicaoItem } from "@/lib/api";
 import { PAGAMENTO_ROTULO, TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
 import { cn } from "@/lib/utils";
@@ -193,7 +192,6 @@ function ComposicaoChart({ titulo, itens }: { titulo: string; itens: ComposicaoI
 
 export default function PagamentosDashboardPage() {
   const [meses, setMeses] = useState(12);
-  const router = useRouter();
 
   const q = useQuery({
     queryKey: ["pag-dashboard", meses],
@@ -372,151 +370,175 @@ export default function PagamentosDashboardPage() {
         <ComposicaoChart titulo="Despesa por fonte de recursos (top 6)" itens={por_fonte} />
       </div>
 
-      {/* Linha 4 — maiores débitos + alertas */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Maiores débitos em aberto</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {maiores_debitos.length === 0 ? (
-              <div className="p-4">
-                <EmptyState
-                  icon={Landmark}
-                  title="Sem débitos em aberto"
-                  description="Nenhum débito pendente no momento."
-                />
-              </div>
-            ) : (
-              <Table variant="flat">
-                <THead>
-                  <TR>
-                    <TH>Fornecedor</TH>
-                    <TH>Descrição</TH>
-                    <TH className="text-right">Valor</TH>
-                    <TH>Status</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {maiores_debitos.map((deb) => {
-                    // Antes de autorizado, a dimensão que se move é a
-                    // tramitação; depois, a tramitação fica presa em
-                    // AUTORIZADA e quem informa é a execução do pagamento.
-                    const rotulo = deb.situacao_tramitacao === "AUTORIZADA"
-                      ? PAGAMENTO_ROTULO[deb.situacao_pagamento]
-                      : TRAMITACAO_ROTULO[deb.situacao_tramitacao];
-                    const href = `/m/pagamentos/contas-a-pagar/${deb.id}`;
-                    return (
-                      <TR
-                        key={deb.id}
-                        onClickRow={() => router.push(href)}
-                        // Linha clicável precisa do equivalente por teclado; o guard
-                        // de target evita disparo dobrado quando o Enter é no Link interno.
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.target !== e.currentTarget) return;
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            router.push(href);
-                          }
-                        }}
-                        className="cursor-pointer"
-                      >
-                        <TD className="max-w-[170px]">
-                          <Link
-                            href={href}
-                            className="block truncate whitespace-nowrap text-primary hover:underline"
-                            title={deb.nome_fornecedor}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {deb.nome_fornecedor}
-                          </Link>
-                        </TD>
-                        <TD className="max-w-[190px]">
-                          <span className="block truncate whitespace-nowrap" title={deb.descricao}>
-                            {deb.descricao}
-                          </span>
-                        </TD>
-                        <TD className="whitespace-nowrap text-right tabular-nums">{fmtBRL(deb.valor_total)}</TD>
-                        <TD>
-                          <Badge intent={rotulo.intent} icon={rotulo.icon}>{rotulo.label}</Badge>
-                        </TD>
-                      </TR>
-                    );
-                  })}
-                </TBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Alertas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!temAlertas ? (
+      {/* Linha 4 — maiores débitos + alertas. A lista leva 2/3 da largura e
+          cada débito vira linha de duas alturas (fornecedor, descrição), com
+          valor e situação à direita: a tabela de 4 colunas em meia tela
+          cortava os nomes e escondia a coluna de situação. `items-start`:
+          o cartão de alertas, quase sempre curto, não estica até a altura
+          da lista. */}
+      <div className="grid items-start gap-6 lg:grid-cols-3">
+        <section
+          aria-labelledby="maiores-debitos"
+          className="overflow-hidden rounded-card border border-border bg-surface-1 shadow-card lg:col-span-2"
+        >
+          <h2
+            id="maiores-debitos"
+            className="border-b border-border px-5 py-4 font-display text-base font-semibold text-foreground"
+          >
+            Maiores débitos em aberto
+          </h2>
+          {maiores_debitos.length === 0 ? (
+            <div className="p-5">
               <EmptyState
-                icon={ShieldAlert}
-                title="Nenhum alerta"
-                description="Nenhuma parcela vencida, vencendo ou conta abaixo do mínimo."
+                icon={Landmark}
+                title="Sem débitos em aberto"
+                description="Nenhum débito pendente no momento."
               />
-            ) : (
-              <ul className="space-y-2 text-sm">
-                {alertas.parcelas_vencidas.map((p) => (
-                  <li
-                    key={`venc-${p.id}`}
-                    className="flex items-start gap-2 rounded-md bg-danger-soft px-3 py-2 text-danger-soft-foreground"
-                  >
-                    <AlertCircle className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
-                    <span className="flex-1">
-                      <Link
-                        href={`/m/pagamentos/contas-a-pagar/${p.id_debito}`}
-                        className="rounded-sm font-medium underline decoration-1 underline-offset-2 hover:decoration-2"
-                      >
-                        {p.nome_fornecedor}
-                      </Link>{" "}
-                      — parcela vencida há {p.dias_atraso} dia(s), venc. {fmtData(p.vencimento)}
-                    </span>
-                    <span className="shrink-0 tabular-nums font-semibold">{fmtBRL(p.valor)}</span>
+            </div>
+          ) : (
+            <ul className="divide-y divide-border">
+              {maiores_debitos.map((deb) => {
+                // Antes de autorizado, a dimensão que se move é a
+                // tramitação; depois, a tramitação fica presa em
+                // AUTORIZADA e quem informa é a execução do pagamento.
+                const rotulo = deb.situacao_tramitacao === "AUTORIZADA"
+                  ? PAGAMENTO_ROTULO[deb.situacao_pagamento]
+                  : TRAMITACAO_ROTULO[deb.situacao_tramitacao];
+                return (
+                  <li key={deb.id}>
+                    <Link
+                      href={`/m/pagamentos/solicitacoes/${deb.id}`}
+                      className="flex items-center gap-4 px-5 py-3 transition-colors duration-fast hover:bg-surface-2"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-foreground" title={deb.nome_fornecedor}>
+                          {deb.nome_fornecedor}
+                        </span>
+                        <span className="block truncate text-xs text-foreground-muted" title={deb.descricao}>
+                          {deb.descricao}
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 flex-col items-end gap-1">
+                        <span className="text-sm font-semibold tabular-nums text-foreground">
+                          {fmtBRL(deb.valor_total)}
+                        </span>
+                        <Badge intent={rotulo.intent} icon={rotulo.icon}>{rotulo.label}</Badge>
+                      </span>
+                    </Link>
                   </li>
-                ))}
-                {alertas.parcelas_7dias.map((p) => (
-                  <li
-                    key={`7d-${p.id}`}
-                    className="flex items-start gap-2 rounded-md bg-warning-soft px-3 py-2 text-warning-soft-foreground"
-                  >
-                    <Clock className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
-                    <span className="flex-1">
-                      <Link
-                        href={`/m/pagamentos/contas-a-pagar/${p.id_debito}`}
-                        className="rounded-sm font-medium underline decoration-1 underline-offset-2 hover:decoration-2"
-                      >
-                        {p.nome_fornecedor}
-                      </Link>{" "}
-                      — vence em até 7 dias, {fmtData(p.vencimento)}
-                    </span>
-                    <span className="shrink-0 tabular-nums font-semibold">{fmtBRL(p.valor)}</span>
-                  </li>
-                ))}
-                {alertas.contas_abaixo_minimo.map((c) => (
-                  <li
-                    key={`min-${c.id_conta}`}
-                    className="flex items-start gap-2 rounded-md bg-danger-soft px-3 py-2 text-danger-soft-foreground"
-                  >
-                    <ShieldAlert className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
-                    <span className="flex-1">
-                      Conta <span className="font-medium">{c.nome}</span> abaixo do saldo mínimo de
-                      alerta ({fmtBRL(c.saldo_minimo_alerta)})
-                    </span>
-                    <span className="shrink-0 tabular-nums font-semibold">{fmtBRL(c.saldo_atual)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        <section
+          aria-labelledby="alertas"
+          className="overflow-hidden rounded-card border border-border bg-surface-1 shadow-card"
+        >
+          <h2
+            id="alertas"
+            className="border-b border-border px-5 py-4 font-display text-base font-semibold text-foreground"
+          >
+            Alertas
+          </h2>
+          {!temAlertas ? (
+            <div className="flex items-start gap-3 px-5 py-4">
+              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-success-soft text-success-soft-foreground">
+                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <span>
+                <span className="block text-sm font-medium text-foreground">Nenhum alerta</span>
+                <span className="block text-xs text-foreground-muted">
+                  Nenhuma parcela vencida, vencendo ou conta abaixo do mínimo.
+                </span>
+              </span>
+            </div>
+          ) : (
+            <ul className="divide-y divide-border">
+              {alertas.parcelas_vencidas.map((p) => (
+                <Alerta
+                  key={`venc-${p.id}`}
+                  tom="danger"
+                  icone={AlertCircle}
+                  href={`/m/pagamentos/solicitacoes/${p.id_debito}`}
+                  titulo={p.nome_fornecedor}
+                  detalhe={`Parcela vencida há ${p.dias_atraso} dia(s) — ${fmtData(p.vencimento)}`}
+                  valor={fmtBRL(p.valor)}
+                />
+              ))}
+              {alertas.parcelas_7dias.map((p) => (
+                <Alerta
+                  key={`7d-${p.id}`}
+                  tom="warning"
+                  icone={Clock}
+                  href={`/m/pagamentos/solicitacoes/${p.id_debito}`}
+                  titulo={p.nome_fornecedor}
+                  detalhe={`Vence em até 7 dias — ${fmtData(p.vencimento)}`}
+                  valor={fmtBRL(p.valor)}
+                />
+              ))}
+              {alertas.contas_abaixo_minimo.map((c) => (
+                <Alerta
+                  key={`min-${c.id_conta}`}
+                  tom="danger"
+                  icone={ShieldAlert}
+                  titulo={`Conta ${c.nome}`}
+                  detalhe={`Abaixo do saldo mínimo de alerta (${fmtBRL(c.saldo_minimo_alerta)})`}
+                  valor={fmtBRL(c.saldo_atual)}
+                />
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
     </div>
+  );
+}
+
+/** Uma linha de alerta: a cor fica no ícone, o texto segue neutro. */
+function Alerta({
+  tom,
+  icone: Icone,
+  href,
+  titulo,
+  detalhe,
+  valor,
+}: {
+  tom: "danger" | "warning";
+  icone: ComponentType<{ className?: string }>;
+  href?: string;
+  titulo: string;
+  detalhe: string;
+  valor: string;
+}) {
+  const corpo = (
+    <>
+      <span
+        className={cn(
+          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+          tom === "danger" ? "bg-danger-soft text-danger-soft-foreground" : "bg-warning-soft text-warning-soft-foreground",
+        )}
+      >
+        <Icone className="h-4 w-4" aria-hidden="true" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-foreground">{titulo}</span>
+        <span className="block text-xs text-foreground-muted">{detalhe}</span>
+      </span>
+      <span className="shrink-0 text-sm font-semibold tabular-nums text-foreground">{valor}</span>
+    </>
+  );
+  const classe = "flex items-center gap-3 px-5 py-3";
+  return (
+    <li>
+      {href ? (
+        <Link href={href} className={cn(classe, "transition-colors duration-fast hover:bg-surface-2")}>
+          {corpo}
+        </Link>
+      ) : (
+        <div className={classe}>{corpo}</div>
+      )}
+    </li>
   );
 }

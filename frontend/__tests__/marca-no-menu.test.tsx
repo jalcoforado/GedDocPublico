@@ -5,7 +5,7 @@
  * topo da barra verde, e o cabeçalho (na cor da marca) a escondia no desktop.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -44,6 +44,7 @@ vi.mock("@/components/UnidadeAtiva", () => ({ UnidadeAtiva: () => null }));
 vi.mock("@/components/CommandPalette", () => ({ useCommandPalette: () => null }));
 
 import { Header } from "@/components/Header";
+import { varianteEscura } from "@/components/MarcaDoMunicipio";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeProvider } from "@/lib/theme";
 
@@ -74,12 +75,16 @@ describe("marca do município", () => {
     comProviders(<Header onOpenSidebar={() => {}} />);
     const inicio = screen.getByRole("link", { name: "Início" });
     expect(inicio.getAttribute("href")).toBe("/home");
+    // A normal no claro e a variante `-escuro` (texto claro) no escuro.
     expect(Array.from(inicio.querySelectorAll("img")).map((i) => i.getAttribute("src"))).toEqual([
       "/brand/itaitinga-logo.png",
+      "/brand/itaitinga-logo-escuro.png",
     ]);
     // Antes ela sumia do desktop quando havia menu lateral; agora o cabeçalho
     // passa por cima da barra e é ele quem leva a marca.
     expect(inicio.className).not.toContain("md:hidden");
+    // Sem cartão branco atrás: no escuro quem resolve é a variante.
+    expect(inicio.className).not.toContain("bg-marca-fundo");
   });
 
   it("no menu lateral a marca só existe na gaveta do celular (que cobre o cabeçalho)", () => {
@@ -91,8 +96,19 @@ describe("marca do município", () => {
     expect(marca?.parentElement?.className).toContain("md:hidden");
   });
 
-  it("no escuro a marca ganha fundo claro (texto marinho de prefeitura não some)", () => {
+  it("município sem variante escura: a marca normal ganha fundo claro só no escuro", () => {
     comProviders(<Header />);
-    expect(screen.getByRole("link", { name: "Início" }).className).toContain("bg-marca-fundo");
+    const [, escura] = Array.from(
+      screen.getByRole("link", { name: "Início" }).querySelectorAll("img"),
+    );
+    fireEvent.error(escura);
+    const imgs = Array.from(screen.getByRole("link", { name: "Início" }).querySelectorAll("img"));
+    expect(imgs.map((i) => i.getAttribute("src"))).toEqual(["/brand/itaitinga-logo.png"]);
+    expect(imgs[0].className).toContain("dark:bg-marca-fundo");
+  });
+
+  it("a variante escura só vale para arquivo local de /brand/", () => {
+    expect(varianteEscura("/brand/itaitinga-logo.png")).toBe("/brand/itaitinga-logo-escuro.png");
+    expect(varianteEscura("https://exemplo.gov.br/logo.png")).toBeNull();
   });
 });
