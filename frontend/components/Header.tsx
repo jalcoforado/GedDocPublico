@@ -8,6 +8,7 @@ import { BuscaGlobal } from "@/components/BuscaGlobal";
 import { useCommandPalette } from "@/components/CommandPalette";
 import { MarcaDoMunicipio } from "@/components/MarcaDoMunicipio";
 import { NotificacoesBell } from "@/components/NotificacoesBell";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { UnidadeAtiva } from "@/components/UnidadeAtiva";
 import { useAuth } from "@/lib/auth";
 
@@ -109,6 +110,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         >
           <Search className="h-5 w-5" aria-hidden="true" />
         </button>
+        <ThemeToggle />
         <NotificacoesBell />
         <AvatarDropdown />
       </div>

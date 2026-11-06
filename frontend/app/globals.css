@@ -457,6 +457,30 @@
     margin-top: var(--density-secao);
   }
 
+  /* === Entrada da tela ===
+     As seções sobem e aparecem uma depois da outra (40ms de intervalo, até a
+     sexta), em vez de a tela inteira surgir de uma vez. Só opacidade e
+     transform, que o compositor anima; quem pediu menos movimento não vê. */
+  @media (prefers-reduced-motion: no-preference) {
+    .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > * {
+      animation: secao-entra 420ms var(--ease-out-expo) both;
+    }
+    .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(2) { animation-delay: 40ms; }
+    .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(3) { animation-delay: 80ms; }
+    .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(4) { animation-delay: 120ms; }
+    .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(5) { animation-delay: 160ms; }
+    .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(n + 6) { animation-delay: 200ms; }
+  }
+
+  /* === Troca de tema (ThemeToggle) ===
+     O tema novo entra por um círculo animado em JS sobre a captura nova;
+     aqui só se desliga o cross-fade padrão da View Transitions API. */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+  }
+
   /* === Workflow editor — handles visíveis === */
   .workflow-editor .react-flow__handle {
     width: 12px;
@@ -600,4 +624,15 @@
   color: hsl(var(--foreground-subtle));
   pointer-events: none;
   height: 0;
+}
+
+@keyframes secao-entra {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }

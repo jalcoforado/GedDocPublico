@@ -21,7 +21,6 @@ import { cn } from "@/lib/utils";
 import { DensityToggle } from "./DensityToggle";
 import { MarcaDoMunicipio } from "./MarcaDoMunicipio";
 import { Popover } from "@/components/ui/popover";
-import { ThemeToggle } from "./ThemeToggle";
 
 function isPathActive(href: string, pathname: string): boolean {
   // Query no `href` não conta para o CAMINHO.
@@ -428,8 +427,14 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                 {/* Items do grupo */}
                 <div
                   id={slugId}
-                  className={cn("flex flex-col gap-1", !showItems && "hidden")}
+                  className={cn(
+                    // Abre e fecha deslizando (grid 0fr ↔ 1fr), em vez de sumir de
+                    // uma vez. `invisible` fechado: os links saem da ordem de foco.
+                    "grid transition-[grid-template-rows,visibility] duration-base ease-out-expo motion-reduce:transition-none",
+                    showItems ? "grid-rows-[1fr]" : "invisible grid-rows-[0fr]",
+                  )}
                 >
+                  <div className="-m-1 flex min-h-0 flex-col gap-1 overflow-hidden p-1">
                   {visible.map((item) => {
                     const Icon = item.icon;
                     // Mesma regra dos subitens: entre irmãos aninhados,
@@ -506,13 +511,13 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                         <span
                           aria-hidden="true"
                           className={cn(
-                            "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full transition-all duration-fast",
-                            linkActive ? "bg-accent" : "bg-transparent group-hover:bg-sidebar-border",
+                            "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full transition-all duration-base ease-out-expo",
+                            linkActive ? "scale-y-100 bg-accent" : "scale-y-0 bg-transparent group-hover:scale-y-50 group-hover:bg-sidebar-border",
                           )}
                         />
                         <Icon
                           className={cn(
-                            "h-4 w-4 shrink-0 transition-colors",
+                            "h-4 w-4 shrink-0 transition-[color,transform] duration-fast group-hover:translate-x-0.5 motion-reduce:group-hover:translate-x-0",
                             linkActive ? "text-accent" : "",
                           )}
                           aria-hidden="true"
@@ -525,6 +530,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                       </Link>
                     );
                   })}
+                  </div>
                 </div>
               </div>
             );
@@ -549,16 +555,14 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
           )}
         </div>
 
-        {/* Footer com toggles */}
+        {/* Rodapé: densidade e recolher. A chave de tema foi para o cabeçalho,
+            ao lado do sino (2026-11-06). */}
         <div
           className={cn(
             "flex items-center gap-2 border-t border-sidebar-border bg-sidebar-accent/50 px-4 py-3",
-            colapsada ? "md:flex-col" : "justify-between",
+            colapsada ? "md:flex-col" : "justify-end",
           )}
         >
-          <div className={cn(colapsada && "md:hidden")}>
-            <ThemeToggle />
-          </div>
           <div className="flex items-center gap-1.5">
             <DensityToggle />
             <button

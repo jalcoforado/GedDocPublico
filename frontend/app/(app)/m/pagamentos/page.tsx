@@ -73,7 +73,7 @@ function Etapas({ filas }: { filas: Fila[] }) {
             </span>
             <span
               className={cn(
-                "font-display text-3xl font-semibold tabular-nums",
+                "origin-left font-display text-3xl font-semibold tabular-nums transition-transform duration-base ease-out-expo group-hover:scale-110 motion-reduce:group-hover:scale-100",
                 total > 0 ? "text-foreground" : "text-foreground-subtle",
               )}
             >
@@ -89,7 +89,7 @@ function Etapas({ filas }: { filas: Fila[] }) {
             key={e.rotulo}
             href={destino.href}
             aria-label={`${e.rotulo}: ${total} ${e.legenda}`}
-            className={cn(caixa, "transition-colors duration-fast hover:bg-surface-2")}
+            className={cn(caixa, "group transition-colors duration-fast hover:bg-surface-2")}
           >
             {conteudo}
           </Link>

@@ -95,7 +95,7 @@ export function Popover({
       data-popover=""
       style={floatingStyles}
       className={cn(
-        "z-dropdown flex flex-col overflow-hidden rounded-dropdown border border-border bg-card shadow-dropdown animate-fade-in",
+        "z-dropdown flex flex-col overflow-hidden rounded-dropdown border border-border bg-card shadow-dropdown origin-top animate-scale-in",
         className,
       )}
     >

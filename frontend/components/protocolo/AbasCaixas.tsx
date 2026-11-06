@@ -3,9 +3,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { Rows3 } from "lucide-react";
 import Link from "next/link";
+import { useRef } from "react";
 
 import type { CaixaProcesso } from "@/lib/api";
 import { api } from "@/lib/api";
+import { IndicadorDeAba } from "@/components/ui/indicador-aba";
 import { CAIXAS, ROTA_PROCESSOS, hrefDaCaixa } from "@/lib/caixas-processos";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +33,7 @@ export function AbasCaixas({ caixa }: { caixa: CaixaProcesso | undefined }) {
     staleTime: 0,
   });
   const contagem = contagemQ.data;
+  const lista = useRef<HTMLUListElement>(null);
 
   const abas = [
     { chave: "todos", rotulo: "Todos", titulo: "Todos", href: ROTA_PROCESSOS, icone: Rows3, ativo: !caixa, n: undefined },
@@ -47,7 +50,7 @@ export function AbasCaixas({ caixa }: { caixa: CaixaProcesso | undefined }) {
 
   return (
     <nav aria-label="Caixas de trabalho" className="border-b border-border">
-      <ul className="-mb-px flex gap-0.5 overflow-x-auto">
+      <ul ref={lista} className="relative -mb-px flex gap-0.5 overflow-x-auto">
         {abas.map((a) => {
           const Icone = a.icone;
           return (
@@ -57,15 +60,16 @@ export function AbasCaixas({ caixa }: { caixa: CaixaProcesso | undefined }) {
                 title={a.rotulo === a.titulo ? undefined : a.titulo}
                 aria-current={a.ativo ? "page" : undefined}
                 className={cn(
-                  "flex h-10 items-center gap-1 whitespace-nowrap rounded-t-md border-b-2 px-2 text-sm font-medium transition-colors duration-fast min-[1440px]:gap-1.5 min-[1440px]:px-3",
+                  "flex h-10 items-center gap-1 whitespace-nowrap rounded-t-md border-b-2 border-transparent px-2 text-sm font-medium transition-colors duration-fast min-[1700px]:gap-1.5 min-[1700px]:px-3",
                   a.ativo
-                    ? "border-primary text-primary"
-                    : "border-transparent text-foreground-muted hover:border-border-strong hover:bg-muted hover:text-foreground",
+                    ? "text-primary"
+                    : "text-foreground-muted hover:border-border-strong hover:bg-muted hover:text-foreground",
                 )}
               >
-                {/* O ícone só aparece a partir de 1440px: abaixo disso as nove
-                    abas não cabem lado a lado com ele (medido a 1280). */}
-                <Icone className="hidden h-4 w-4 shrink-0 min-[1440px]:block" aria-hidden="true" />
+                {/* O ícone só aparece a partir de 1700px: abaixo disso as nove
+                    abas não cabem lado a lado com ele — o conteúdo perde a barra
+                    lateral (288px) e o respiro do main (medido a 1500). */}
+                <Icone className="hidden h-4 w-4 shrink-0 min-[1700px]:block" aria-hidden="true" />
                 <span>{a.rotulo}</span>
                 {a.rotulo !== a.titulo && <span className="sr-only"> ({a.titulo})</span>}
                 <Contador n={a.n} ativo={a.ativo} />
@@ -73,6 +77,10 @@ export function AbasCaixas({ caixa }: { caixa: CaixaProcesso | undefined }) {
             </li>
           );
         })}
+        {/* O sublinhado da aba ativa desliza de uma caixa para a outra. */}
+        <li aria-hidden="true" className="contents">
+          <IndicadorDeAba lista={lista} seletor='[aria-current="page"]' chave={caixa ?? "todos"} />
+        </li>
       </ul>
     </nav>
   );

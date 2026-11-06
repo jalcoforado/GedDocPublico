@@ -52,7 +52,7 @@ export function HubDoModulo({
                   <Link
                     key={i.href}
                     href={i.href}
-                    className="group flex items-center gap-3 rounded-card border border-border bg-surface-1 px-5 py-4 shadow-xs transition-[border-color,box-shadow] duration-fast hover:border-brand/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="group flex items-center gap-3 rounded-card border border-border bg-surface-1 px-5 py-4 shadow-xs transition-[border-color,box-shadow,transform] duration-base ease-out-expo hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md motion-reduce:hover:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand transition-colors duration-fast group-hover:bg-brand group-hover:text-primary-foreground">
                       <Icone className="h-4 w-4" aria-hidden="true" />

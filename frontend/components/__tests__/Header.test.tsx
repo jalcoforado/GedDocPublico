@@ -19,6 +19,9 @@ vi.mock("@/components/AvatarDropdown", () => ({
 vi.mock("@/components/UnidadeAtiva", () => ({
   UnidadeAtiva: () => <div data-testid="unidade" />,
 }));
+vi.mock("@/components/ThemeToggle", () => ({
+  ThemeToggle: () => <div data-testid="tema" />,
+}));
 vi.mock("@/lib/branding", () => ({ useBranding: () => null }));
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: null }) }));
 

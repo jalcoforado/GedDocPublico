@@ -123,7 +123,7 @@ export default function FrotaHubPage() {
             <Link
               key={c.href}
               href={c.href}
-              className="group rounded-card border border-border bg-surface-1 p-5 shadow-xs transition-[border-color,box-shadow] duration-fast hover:border-brand/40 hover:shadow-md"
+              className="group rounded-card border border-border bg-surface-1 p-5 shadow-xs transition-[border-color,box-shadow,transform] duration-base ease-out-expo hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md motion-reduce:hover:translate-y-0"
             >
               <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-lg bg-brand/10 text-brand transition-colors duration-fast group-hover:bg-brand group-hover:text-primary-foreground">
                 <Icon className="h-5 w-5" aria-hidden="true" />
