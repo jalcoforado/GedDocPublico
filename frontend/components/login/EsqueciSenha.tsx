@@ -91,7 +91,7 @@ export function EsqueciSenha({
       <button
         type="submit"
         disabled={enviando || !email.includes("@")}
-        className={cn(BOTAO_LOGIN, "bg-success text-success-foreground shadow-sm hover:bg-success/90 hover:shadow-md")}
+        className={cn(BOTAO_LOGIN, "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-md")}
       >
         {enviando ? "Enviando..." : "Enviar link"}
       </button>

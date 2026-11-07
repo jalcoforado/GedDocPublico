@@ -300,7 +300,7 @@ export default function LoginPage() {
                   type="submit"
                   disabled={loading}
                   aria-label="Entrar como servidor"
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-success px-4 font-display text-base font-medium text-success-foreground shadow-sm transition-all duration-fast hover:bg-success/90 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-primary px-4 font-display text-base font-medium text-primary-foreground shadow-sm transition-all duration-fast hover:bg-primary/90 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Users className="h-5 w-5" aria-hidden="true" />
                   {loading ? "Entrando..." : "Servidor"}

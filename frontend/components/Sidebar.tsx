@@ -18,7 +18,6 @@ import { useAuth } from "@/lib/auth";
 import { canSeeItem, MENUS, type NavGroup, type NavItem } from "@/lib/menus";
 import { nomeDoModulo } from "@/lib/modulos";
 import { cn } from "@/lib/utils";
-import { DensityToggle } from "./DensityToggle";
 import { MarcaDoMunicipio } from "./MarcaDoMunicipio";
 import { Popover } from "@/components/ui/popover";
 
@@ -555,16 +554,16 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
           )}
         </div>
 
-        {/* Rodapé: densidade e recolher. A chave de tema foi para o cabeçalho,
-            ao lado do sino (2026-11-06). */}
+        {/* Rodapé: só o recolher (que só existe no desktop — então o rodapé
+            também). A chave de tema foi para o cabeçalho e o "modo compacto"
+            saiu (2026-11-06). */}
         <div
           className={cn(
-            "flex items-center gap-2 border-t border-sidebar-border bg-sidebar-accent/50 px-4 py-3",
+            "hidden items-center gap-2 border-t border-sidebar-border bg-sidebar-accent/50 px-4 py-3 lg:flex",
             colapsada ? "md:flex-col" : "justify-end",
           )}
         >
           <div className="flex items-center gap-1.5">
-            <DensityToggle />
             <button
               type="button"
               onClick={toggleCollapsed}

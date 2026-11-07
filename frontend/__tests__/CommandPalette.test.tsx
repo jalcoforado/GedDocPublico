@@ -16,7 +16,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/theme", () => ({
-  useTheme: () => ({ setPreference: vi.fn(), setDensity: vi.fn() }),
+  useTheme: () => ({ setPreference: vi.fn() }),
 }));
 
 const canMock = vi.fn((_perm: string) => true);

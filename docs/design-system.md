@@ -13,7 +13,7 @@ do código, o código (e as guardas) vencem — e este arquivo deve ser corrigid
 
 ## Arquitetura de tokens (3 camadas)
 
-1. **Primitiva** — rampas HSL completas (`--green-*`, `--amber-*`, `--neutral-*`,
+1. **Primitiva** — rampas HSL completas (`--laranja-*`, `--marinho-*`, `--neutral-*`,
    `--red/emerald/yellow/blue-*`) + escalas não-cor (`--radius-*`, `--shadow-*`,
    `--text-*`/`--leading-*`, `--z-*`). **Nunca usar primitivo direto em
    componente** — sempre via token semântico. Degraus de rampa sem consumidor
@@ -31,16 +31,20 @@ Escalas que **não** têm token próprio (o Tailwind é a fonte): espaçamento
 
 ## Paleta (semântica)
 
+Identidade desde 2026-11-06: o laranja do logo Aprimora como marca e o
+marinho do wordmark na lateral, sobre neutros frios. (Antes: verde-petróleo +
+âmbar.)
+
 | Papel | Light | Dark | Classe |
 |---|---|---|---|
-| Marca | verde-petróleo `--green-700` | `--green-400` (clareia p/ AA) | `bg-brand`, `text-brand` |
-| Acento | âmbar `--amber-600` | âmbar clareado | `bg-accent` + `text-accent-foreground` |
+| Marca | laranja queimado `--laranja-600` (#C64410, texto branco 4.96:1) | `--laranja-400` (clareia; texto escuro) | `bg-brand`, `text-brand` |
+| Acento | laranja vivo `--laranja-500` (#F66628) — CTA da lateral, item ativo; texto escuro | `--laranja-400` | `bg-accent` + `text-accent-foreground` |
 | Assinatura do produto | laranja do logo `--assinatura` (só borda/detalhe) + `--assinatura-texto` (texto, AA) | texto clareia | `border-assinatura`, `text-assinatura-texto` — fixa, o tema do município não a sobrescreve; só no rodapé (login, telas internas, portal do cidadão, validação) e no admin de plataforma, via `components/AssinaturaAprimora.tsx` |
 | Títulos de página | `--titulo` (= texto) e `--titulo-destaque` (= marca) | idem | `text-titulo` no `PageHeader`; `text-titulo-destaque` na trilha do módulo (`TrilhaDoModulo`). O município troca os dois por `cor_titulos`, e a fonte deles por `fonte_titulos` (lista fechada em `lib/tema-cores.ts::FONTES`) |
-| Canvas | `--neutral-25` off-white | verde-escuro profundo | `bg-background` |
+| Canvas | `--neutral-25` off-white frio | marinho profundo | `bg-background` |
 | Superfícies | `--surface-1..3` (card → popover) | elevação tonal invertida | `bg-surface-1..3` (tailwind.config, aceita `/alpha`) |
 | Status | `danger` / `success` / `warning` / `info`, cada um com par `-soft` | fundos `-soft` escurecem, texto clareia | `bg-danger-soft text-danger-soft-foreground` |
-| Sidebar | `--green-900` | `--green-950` | tokens `--sidebar-*` |
+| Sidebar | marinho `--marinho-900` (#121C40) | `--marinho-950` | tokens `--sidebar-*` |
 
 **Regra de contraste**: todo par `X`/`X-foreground` ≥ 4.5:1 (AA) nos dois temas
 (primary é large-text, ≥ 3:1). `npm run contrast:check` valida os 26 pares;
@@ -73,15 +77,15 @@ a partir de um degrau de rampa.
   que usa `ring-*` próprio remove o outline (`focus-visible:outline-none`).
 - **Hover**: nunca só cor de texto — sempre mudança de fundo ou borda.
 - **Disabled**: `opacity-50` + `cursor-not-allowed`, sem mudar a cor base.
-- **Density**: `data-density="compact"` no `<html>` reduz `--density-pad-*`
-  e `--density-row-h`; componentes de dados usam esses tokens.
+- **Density**: uma só, a confortável — `--density-*` é a régua de espaço
+  (main, cards, linhas de tabela, inputs). O modo compacto saiu em 2026-11-06.
 
 ## Do / Don't
 
 | ✔ Do | ✘ Don't |
 |---|---|
 | `bg-danger-soft text-danger-soft-foreground` para chip de status | `bg-red-100 text-red-700` (cor literal — ratchet reprova) |
-| Criar token semântico apontando para degrau de rampa | Usar `var(--green-300)` direto num componente |
+| Criar token semântico apontando para degrau de rampa | Usar `var(--laranja-300)` direto num componente |
 | `z-modal`, `z-toast` (classes da escala) | `z-[1400]` em camada global |
 | Declarar token quando o consumidor existe | Declarar token "para o futuro" (guarda de token morto reprova) |
 | Redefinir token semântico no bloco dark | Criar variante `--x-dark` nova |

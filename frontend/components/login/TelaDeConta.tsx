@@ -55,7 +55,7 @@ export function Concluido({
       </p>
       <Link
         href={tipo === "cidadao" ? "/cidadao/login" : "/login"}
-        className={cn(BOTAO_LOGIN, "bg-success text-success-foreground shadow-sm hover:bg-success/90 hover:shadow-md")}
+        className={cn(BOTAO_LOGIN, "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-md")}
       >
         Ir para o login
       </Link>

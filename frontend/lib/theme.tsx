@@ -11,32 +11,22 @@ import {
 
 export type Theme = "light" | "dark";
 export type ThemePreference = Theme | "system";
-export type Density = "comfortable" | "compact";
 
 interface ThemeCtx {
   theme: Theme; // resolvido (light/dark) — segue sistema quando pref="system"
   preference: ThemePreference;
   setPreference: (p: ThemePreference) => void;
-  density: Density;
-  setDensity: (d: Density) => void;
 }
 
 const ThemeContext = createContext<ThemeCtx | null>(null);
 
 const STORAGE_THEME = "aprimora.theme";
-const STORAGE_DENSITY = "aprimora.density";
 
 function readPreference(): ThemePreference {
   if (typeof window === "undefined") return "system";
   const raw = localStorage.getItem(STORAGE_THEME);
   if (raw === "light" || raw === "dark" || raw === "system") return raw;
   return "system";
-}
-
-function readDensity(): Density {
-  if (typeof window === "undefined") return "comfortable";
-  const raw = localStorage.getItem(STORAGE_DENSITY);
-  return raw === "compact" ? "compact" : "comfortable";
 }
 
 function systemPrefersDark(): boolean {
@@ -51,15 +41,12 @@ function resolveTheme(pref: ThemePreference): Theme {
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [preference, setPrefState] = useState<ThemePreference>("system");
-  const [density, setDensityState] = useState<Density>("comfortable");
   const [theme, setThemeState] = useState<Theme>("light");
 
   // Hidrata do localStorage no mount
   useEffect(() => {
     const p = readPreference();
-    const d = readDensity();
     setPrefState(p);
-    setDensityState(d);
     setThemeState(resolveTheme(p));
   }, []);
 
@@ -68,10 +55,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const root = document.documentElement;
     root.classList.toggle("dark", theme === "dark");
     root.dataset.theme = theme;
-    root.dataset.density = density;
     // color-scheme avisa o browser pra inverter scrollbars/inputs nativos
     root.style.colorScheme = theme;
-  }, [theme, density]);
+  }, [theme]);
 
   // Escuta mudança do sistema quando preference=system
   useEffect(() => {
@@ -93,18 +79,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const setDensity = useCallback((d: Density) => {
-    setDensityState(d);
-    try {
-      localStorage.setItem(STORAGE_DENSITY, d);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
   const value = useMemo(
-    () => ({ theme, preference, setPreference, density, setDensity }),
-    [theme, preference, setPreference, density, setDensity],
+    () => ({ theme, preference, setPreference }),
+    [theme, preference, setPreference],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
@@ -125,12 +102,12 @@ export const THEME_INIT_SCRIPT = `
 (function() {
   try {
     var p = localStorage.getItem("${STORAGE_THEME}") || "system";
-    var d = localStorage.getItem("${STORAGE_DENSITY}") || "comfortable";
     var dark = p === "dark" || (p === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
     if (dark) document.documentElement.classList.add("dark");
     document.documentElement.dataset.theme = dark ? "dark" : "light";
-    document.documentElement.dataset.density = d;
     document.documentElement.style.colorScheme = dark ? "dark" : "light";
+    // O "modo compacto" saiu (2026-11-06): limpa a escolha que ficou guardada.
+    localStorage.removeItem("aprimora.density");
     // Sidebar colapsada (UX-03 fatia 3.2): a marca no <html> deixa a Sidebar
     // nascer no estado certo em vez de pintar larga e encolher um frame depois.
     if (localStorage.getItem("aprimora.sidebar.collapsed") === "1") {

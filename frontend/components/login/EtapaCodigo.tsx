@@ -126,7 +126,7 @@ export function EtapaCodigo({
       <button
         type="submit"
         disabled={enviando || codigo.length !== 6}
-        className={cn(BOTAO_LOGIN, "bg-success text-success-foreground shadow-sm hover:bg-success/90 hover:shadow-md")}
+        className={cn(BOTAO_LOGIN, "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-md")}
       >
         {enviando ? "Conferindo..." : "Entrar"}
       </button>

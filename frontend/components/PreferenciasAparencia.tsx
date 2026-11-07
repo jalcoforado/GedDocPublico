@@ -1,14 +1,12 @@
 "use client";
 
 import {
-  Maximize2,
-  Minimize2,
   Monitor,
   Moon,
   Sun,
 } from "lucide-react";
 
-import { useTheme, type Density, type ThemePreference } from "@/lib/theme";
+import { useTheme, type ThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTS: Array<{
@@ -19,15 +17,6 @@ const THEME_OPTS: Array<{
   { value: "system", label: "Sistema", icon: Monitor },
   { value: "light", label: "Claro", icon: Sun },
   { value: "dark", label: "Escuro", icon: Moon },
-];
-
-const DENSITY_OPTS: Array<{
-  value: Density;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-}> = [
-  { value: "comfortable", label: "Confortável", icon: Maximize2 },
-  { value: "compact", label: "Compacto", icon: Minimize2 },
 ];
 
 function Radiogroup<T extends string>({
@@ -80,17 +69,16 @@ function Radiogroup<T extends string>({
 }
 
 /**
- * Tema + densidade como radiogroups de verdade (UX-03 fatia 3.7) — a única
+ * Tema como radiogroup de verdade (UX-03 fatia 3.7) — a única
  * implementação, consumida pelo AvatarDropdown e pela superfície canônica em
  * /perfil. Antes eram `menuitemradio` fora de menu válido, que leitor de
  * tela não anuncia como opção selecionável.
  */
 export function PreferenciasAparencia({ className }: { className?: string }) {
-  const { preference, setPreference, density, setDensity } = useTheme();
+  const { preference, setPreference } = useTheme();
   return (
     <div className={cn("space-y-3", className)}>
       <Radiogroup label="Tema" opts={THEME_OPTS} atual={preference} onChange={setPreference} />
-      <Radiogroup label="Densidade" opts={DENSITY_OPTS} atual={density} onChange={setDensity} />
     </div>
   );
 }
