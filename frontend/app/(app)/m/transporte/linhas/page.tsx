@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Inbox, Plus, Route } from "lucide-react";
 import Link from "next/link";
@@ -310,7 +312,7 @@ export default function LinhasPage() {
       </div>
 
       {q.isLoading ? (
-        <div className="py-8 text-center text-muted-foreground">Carregando...</div>
+        <Carregando className="py-8 text-center text-muted-foreground" />
       ) : itens.length === 0 ? (
         <EmptyState
           icon={Inbox}
@@ -487,7 +489,7 @@ export default function LinhasPage() {
                   />
                   <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
                     {empresasQ.isLoading ? (
-                      <div className="p-2 text-xs text-muted-foreground">Carregando...</div>
+                      <Carregando className="p-2 text-xs text-muted-foreground" />
                     ) : (empresasQ.data?.items ?? []).length === 0 ? (
                       <div className="p-2 text-xs text-muted-foreground">
                         Nenhuma empresa encontrada.
@@ -537,7 +539,7 @@ export default function LinhasPage() {
                   />
                   <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
                     {permsQ.isLoading ? (
-                      <div className="p-2 text-xs text-muted-foreground">Carregando...</div>
+                      <Carregando className="p-2 text-xs text-muted-foreground" />
                     ) : (permsQ.data?.items ?? []).length === 0 ? (
                       <div className="p-2 text-xs text-muted-foreground">
                         Nenhum permissionário encontrado.

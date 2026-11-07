@@ -7,16 +7,28 @@ function baseUrl(): string {
 }
 
 export interface LoginResponse {
-  access_token: string;
+  /** Vazios quando `requer_2fa`: ainda não há sessão, só o desafio. */
+  access_token: string | null;
   token_type: string;
-  expires_in: number;
-  usuario_id: number;
-  usuario_email: string;
-  nome: string;
+  expires_in: number | null;
+  usuario_id: number | null;
+  usuario_email: string | null;
+  nome: string | null;
   /** SEC-1 Commit 4 — true quando o usuário acabou de receber senha temporária
    * (provisionamento, reset administrativo, POST /usuarios). O frontend
    * deve redirecionar para /alterar-senha-obrigatoria. */
   must_change_password: boolean;
+  /** 2FA por e-mail (0136): senha certa, falta o código de 6 dígitos. */
+  requer_2fa?: boolean;
+  /** Apresentado com o código em `/auth/login/2fa`. Vale 10 minutos. */
+  desafio?: string | null;
+  /** Para onde o código foi, mascarado (`ad•••@prefeitura.gov.br`). */
+  email_mascarado?: string | null;
+}
+
+/** Resposta das rotas de link por e-mail: para qual login mandar a pessoa. */
+export interface ContaConfirmada {
+  tipo: "servidor" | "cidadao";
 }
 
 // Fase 15 — branding/white-label do tenant atual (resolvido pelo Host header).
@@ -103,6 +115,8 @@ export interface Usuario {
   ativo: boolean;
   /** Sigilo gradual — credencial de acesso (só super-usuário altera) */
   nivel_acesso_sigilo: NivelSigilo;
+  /** `null` = convite enviado e ainda não aceito (0136). */
+  email_verificado_em?: string | null;
 }
 export interface UsuarioDetail extends Usuario {
   grupos: number[];
@@ -996,10 +1010,11 @@ function _suprimeRedirectSessaoExpirada(pathname: string, path: string): boolean
   // A própria requisição de login: 401 aqui é credencial errada, não sessão
   // expirada. Precisa aparecer na tela (mensagem "e-mail ou senha inválidos"),
   // não virar redirect — senão a tela de login vira um loop.
-  if (path === "/auth/login") return true;
-  // Já na tela de login: redirecionar de /login pra /login é ruído e pode
-  // laçar com o middleware.
-  if (pathname === "/login") return true;
+  if (path === "/auth/login" || path.startsWith("/auth/login/")) return true;
+  // Já na tela de login (ou numa das telas de conta sob ela — código de 2FA,
+  // redefinir senha, convite): redirecionar para /login é ruído e pode laçar
+  // com o middleware.
+  if (pathname === "/login" || pathname.startsWith("/login/")) return true;
   // Portal do cidadão: cookie e login próprios (aprimora_cidadao_token,
   // /cidadao/login). Defensivo — `request()` não é usada pelo cidadão hoje,
   // mas um 401 vindo de uma página `/cidadao/*` não pode mandar pro login
@@ -3260,6 +3275,44 @@ export const api = {
       body: JSON.stringify({ email, senha }),
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
+  // Conta por e-mail (0136): 2FA, "não lembro a senha", convite, confirmação.
+  conta: {
+    login2fa: (desafio: string, codigo: string, lembrar: boolean) =>
+      request<LoginResponse>("/auth/login/2fa", {
+        method: "POST",
+        body: JSON.stringify({ desafio, codigo, lembrar }),
+      }),
+    reenviarCodigo: (desafio: string) =>
+      request<LoginResponse>("/auth/login/2fa/reenviar", {
+        method: "POST",
+        body: JSON.stringify({ desafio }),
+      }),
+    esqueciSenha: (email: string) =>
+      request<{ detail: string }>("/auth/esqueci-senha", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      }),
+    redefinirSenha: (token: string, nova_senha: string) =>
+      request<ContaConfirmada>("/auth/redefinir-senha", {
+        method: "POST",
+        body: JSON.stringify({ token, nova_senha }),
+      }),
+    conviteInfo: (token: string) =>
+      request<{ nome: string; email: string }>("/auth/convite/info", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      }),
+    aceitarConvite: (token: string, nova_senha: string) =>
+      request<ContaConfirmada>("/auth/convite/aceitar", {
+        method: "POST",
+        body: JSON.stringify({ token, nova_senha }),
+      }),
+    verificarEmail: (token: string) =>
+      request<ContaConfirmada>("/auth/verificar-email", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      }),
+  },
   me: (token?: string) => request<MeResponse>("/auth/me", {}, token),
   // E1 (benchmark SUiTE) — "alterar setor": troca a lotação ativa da sessão.
   // O backend já devolve o MeResponse recalculado; não precisa de uma
@@ -3401,6 +3454,9 @@ export const api = {
       request<ResetSenhaResponse>(`/usuarios/${id}/resetar-senha`, {
         method: "POST",
       }),
+    /** Convite pendente: manda o link de novo (o anterior deixa de valer). */
+    reenviarConvite: (id: number) =>
+      request<void>(`/usuarios/${id}/reenviar-convite`, { method: "POST" }),
   },
 
   unidades: {
@@ -5030,6 +5086,18 @@ export const api = {
       requestCidadao<CidadaoLoginResponse>("/cidadao/login", {
         method: "POST",
         body: JSON.stringify({ cpf_cnpj, senha }),
+      }),
+    /** Link de nova senha para o e-mail do cadastro (resposta igual sempre). */
+    esqueciSenha: (cpf_cnpj: string) =>
+      requestCidadao<{ detail: string }>("/cidadao/esqueci-senha", {
+        method: "POST",
+        body: JSON.stringify({ cpf_cnpj }),
+      }),
+    /** Login recusado com 403 = e-mail ainda não confirmado: manda o link de novo. */
+    reenviarConfirmacao: (cpf_cnpj: string) =>
+      requestCidadao<{ detail: string }>("/cidadao/reenviar-confirmacao", {
+        method: "POST",
+        body: JSON.stringify({ cpf_cnpj }),
       }),
     logout: () => requestCidadao<void>("/cidadao/logout", { method: "POST" }),
     me: (token?: string) => requestCidadao<CidadaoMe>("/cidadao/me", {}, token),

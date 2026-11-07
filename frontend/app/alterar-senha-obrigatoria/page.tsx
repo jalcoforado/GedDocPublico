@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 /**
  * SEC-1 Commit 5 — tela de troca obrigatória de senha.
  *
@@ -56,9 +58,7 @@ function Inner() {
 
   if (checking || !me) {
     return (
-      <div className="flex min-h-dvh items-center justify-center text-foreground-muted">
-        Carregando...
-      </div>
+      <Carregando className="flex min-h-dvh items-center justify-center text-foreground-muted" />
     );
   }
 

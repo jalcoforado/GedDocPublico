@@ -42,13 +42,13 @@ describe("destino apos o login", () => {
   it("vai para o launcher", async () => {
     login.mockResolvedValue({ must_change_password: false });
     await submeter();
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/modulos"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/home"));
   });
 
   it("troca de senha obrigatoria tem precedencia sobre o launcher", async () => {
     login.mockResolvedValue({ must_change_password: true });
     await submeter();
     await waitFor(() => expect(push).toHaveBeenCalledWith("/alterar-senha-obrigatoria"));
-    expect(push).not.toHaveBeenCalledWith("/modulos");
+    expect(push).not.toHaveBeenCalledWith("/home");
   });
 });

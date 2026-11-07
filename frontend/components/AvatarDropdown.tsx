@@ -120,7 +120,7 @@ export function AvatarDropdown() {
             </div>
           </div>
 
-          {/* Tema + densidade — radiogroups compartilhados com /perfil (fatia 3.7) */}
+          {/* Tema — radiogroups compartilhados com /perfil (fatia 3.7) */}
           <div className="border-b border-border px-3 py-2">
             <PreferenciasAparencia />
           </div>

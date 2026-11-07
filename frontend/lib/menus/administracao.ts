@@ -13,6 +13,7 @@ export const menuAdministracao: MenuModulo = {
   grupos: [
     {
       title: "Administração",
+      quieto: true,
       defaultOpen: false,
       items: [
         { label: "Usuários", href: "/m/administracao/usuarios", icon: Users, perm: "usuario" },

@@ -32,6 +32,10 @@ const paginaMock = vi.fn((p?: Pedido) => {
 const contagemMock = vi.fn(() => Promise.resolve(contagem));
 const listMock = vi.fn(() => Promise.resolve([]));
 
+// As abas de etapa (`AbasSolicitacoes`, menu único) são podadas por permissão.
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ can: () => true }) }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/m/pagamentos/solicitacoes/gestor" }));
+
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
   return {

@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Inbox, Plus, ScrollText } from "lucide-react";
@@ -542,7 +544,7 @@ export default function AlvarasPage() {
       </div>
 
       {listaQ.isLoading ? (
-        <div className="text-center text-muted-foreground py-8">Carregando...</div>
+        <Carregando className="text-center text-muted-foreground py-8" />
       ) : filteredData.length === 0 ? (
         // Dois estados distintos, mensagem distinta. "Cadastre o primeiro
         // alvará" numa busca sem resultado é informação errada — o tenant pode

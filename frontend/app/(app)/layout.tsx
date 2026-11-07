@@ -8,6 +8,7 @@ import { CommandPaletteProvider } from "@/components/CommandPalette";
 import { Header } from "@/components/Header";
 import { LoadingBar } from "@/components/LoadingBar";
 import { RastreadorDeNavegacao } from "@/components/RastreadorDeNavegacao";
+import { ShellCarregando } from "@/components/ShellCarregando";
 import { Sidebar } from "@/components/Sidebar";
 import { TrilhaDoModulo } from "@/components/TrilhaDoModulo";
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -22,13 +23,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const modulo = moduloDoPathname(pathname);
 
-  if (loading) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center text-foreground-muted">
-        Carregando...
-      </div>
-    );
-  }
+  if (loading) return <ShellCarregando comMenuLateral />;
   if (!user) return null;
   // Publicado para o `PageHeader` montar a trilha sem ler a URL por conta
   // própria (ver `lib/modulo-atual.tsx`).
@@ -37,7 +32,9 @@ function Shell({ children }: { children: React.ReactNode }) {
     : null;
   return (
     <ModuloAtualProvider value={moduloAtual}>
-      <div className="flex h-dvh bg-background">
+      {/* Cabeçalho de ponta a ponta no alto (com a marca do município), e
+          a barra lateral + conteúdo embaixo dele (2026-11-06). */}
+      <div className="flex h-dvh flex-col bg-background">
         {/* Skip link (fatia 3.5): primeiro focável — teclado pula sidebar e
             header direto para o conteúdo. Invisível até receber foco. */}
         <a
@@ -52,25 +49,23 @@ function Shell({ children }: { children: React.ReactNode }) {
         <Suspense fallback={null}>
           <RastreadorDeNavegacao />
         </Suspense>
-        {/* Layout de referência (Figma): as telas transversais — início, perfil,
-            para assinar, dashboard — não têm barra lateral; a navegação delas é
-            o cabeçalho e o próprio "Menu principal". O menu lateral aparece
-            dentro de um módulo, onde há menu de módulo para mostrar. */}
-        {modulo ? (
+        {/* Menu único (2026-11-05): a barra lateral está em TODA tela, com
+            todos os módulos contratados — no Início, no perfil e dentro dos
+            módulos. Antes ela só existia dentro de um módulo e mostrava só ele;
+            a troca de módulo passava pelo launcher. */}
+        <Header onOpenSidebar={() => setSidebarOpen(true)} />
+        <div className="flex min-h-0 flex-1">
           <Sidebar modulo={modulo} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-        ) : null}
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <Header onOpenSidebar={modulo ? () => setSidebarOpen(true) : undefined} />
           <main
             id="conteudo"
-            className="flex-1 overflow-y-auto p-4 sm:p-[var(--density-space)]"
+            className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-[var(--density-space)]"
           >
             {/* Contrato de largura (spec §12.2): max-w-7xl centrado por padrão;
                 página full-width (dashboard) opta por fora marcando qualquer
                 elemento seu com data-full-width — o :has() solta o teto. */}
             <div
               key={pathname}
-              className="mx-auto w-full max-w-7xl animate-page-in motion-reduce:animate-none has-[[data-full-width]]:max-w-none"
+              className="pagina mx-auto w-full max-w-7xl animate-page-in motion-reduce:animate-none has-[[data-full-width]]:max-w-none"
             >
               {/* No shell, e não no PageHeader: várias telas de módulo
                   desenham o próprio título sem ele, e ficavam sem trilha. */}

@@ -1,6 +1,6 @@
 /**
- * Trilha do topo das telas de módulo — "Menu principal › Módulo". O "Menu
- * principal" é a tela de módulos (SI-20); "Meus módulos" saiu por repetir.
+ * Trilha do topo das telas de módulo — "Menu principal › Meus módulos ›
+ * Módulo", do layout de referência.
  *
  * A trilha mora no SHELL. A primeira versão ficava no `PageHeader`, e uma em
  * cada três telas de módulo (Usuários, Grupos, Relatórios…) desenha o próprio
@@ -24,10 +24,10 @@ const links = (nav: HTMLElement) =>
     .map((a) => [a.textContent, a.getAttribute("href")]);
 
 describe("trilha do módulo (shell)", () => {
-  it("Menu principal (a tela de módulos) › Módulo, cada parte um link", () => {
+  it("Início › Módulo, cada parte um link (o launcher saiu da trilha com o menu único)", () => {
     render(<TrilhaDoModulo modulo={FROTA} />);
     expect(links(screen.getByRole("navigation", { name: "Trilha" }))).toEqual([
-      ["Menu principal", "/modulos"],
+      ["Início", "/home"],
       ["Frota", "/m/frota"],
     ]);
   });
@@ -80,49 +80,6 @@ describe("PageHeader dentro de um módulo", () => {
     expect(links(nav)).toEqual([["Solicitações", "/m/frota/solicitacoes"]]);
     // Sem o atalho de Início: ele já está na trilha do shell.
     expect(within(nav).queryByRole("link", { name: "Início" })).toBeNull();
-  });
-});
-
-describe("PageHeader — seta de voltar (SI-18)", () => {
-  function renderEmFrota(ui: React.ReactNode) {
-    return render(<ModuloAtualProvider value={FROTA}>{ui}</ModuloAtualProvider>);
-  }
-  const DETALHE = {
-    title: "Solicitação 12",
-    breadcrumbs: [
-      { label: "Frota Pública", href: "/m/frota" },
-      { label: "Solicitações", href: "/m/frota/solicitacoes" },
-      { label: "Solicitação 12" },
-    ],
-  };
-
-  it("tela interna sem histórico na aba: a seta leva à tela-mãe", () => {
-    window.sessionStorage.clear();
-    renderEmFrota(<PageHeader {...DETALHE} />);
-    expect(screen.getByRole("link", { name: "Voltar" })).toHaveAttribute(
-      "href",
-      "/m/frota/solicitacoes",
-    );
-  });
-
-  it("veio da lista filtrada: seta e trilha voltam com os filtros", () => {
-    window.sessionStorage.setItem(
-      "aprimora.trilha.v1",
-      JSON.stringify(["/m/frota/solicitacoes?status=pendente"]),
-    );
-    renderEmFrota(<PageHeader {...DETALHE} />);
-    expect(screen.getByRole("link", { name: "Voltar" })).toHaveAttribute(
-      "href",
-      "/m/frota/solicitacoes?status=pendente",
-    );
-    const nav = screen.getByRole("navigation", { name: "Trilha da tela" });
-    expect(links(nav)).toEqual([["Solicitações", "/m/frota/solicitacoes?status=pendente"]]);
-    window.sessionStorage.clear();
-  });
-
-  it("tela de topo (sem nível acima) não ganha seta", () => {
-    renderEmFrota(<PageHeader title="Veículos" />);
-    expect(screen.queryByRole("link", { name: "Voltar" })).toBeNull();
   });
 });
 

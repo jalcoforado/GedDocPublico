@@ -1,8 +1,8 @@
 "use client";
 
 import { useMutation } from "@tanstack/react-query";
+import { MailCheck } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,6 @@ import { api } from "@/lib/api";
 import { SENHA_MINIMA } from "@/lib/senha";
 
 export default function CidadaoCadastrarPage() {
-  const router = useRouter();
   const [form, setForm] = useState({
     cpf_cnpj: "",
     nome: "",
@@ -36,16 +35,47 @@ export default function CidadaoCadastrarPage() {
         telefone: form.telefone || undefined,
         telefone_whatsapp: form.telefone_whatsapp,
       }),
-    onSuccess: async () => {
-      try {
-        await api.cidadao.login(form.cpf_cnpj, form.senha);
-        router.push("/cidadao/processos");
-      } catch {
-        router.push("/cidadao/login");
-      }
-    },
+    // 0136 — o cadastro só entra depois de o e-mail ser confirmado: em vez de
+    // logar direto (o backend recusaria), a tela pede para abrir o link.
+    onSuccess: () => setCadastrado(true),
     onError: (e: Error) => setErr(e.message),
   });
+  const [cadastrado, setCadastrado] = useState(false);
+  const [reenvio, setReenvio] = useState<string | null>(null);
+
+  if (cadastrado) {
+    return (
+      <div className="mx-auto max-w-md">
+        <Card>
+          <CardHeader>
+            <CardTitle>Confirme o seu e-mail</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm text-foreground-muted">
+            <div className="flex items-start gap-3 rounded-md border border-border bg-surface-2 px-4 py-3">
+              <MailCheck className="mt-0.5 h-5 w-5 shrink-0 text-brand" aria-hidden="true" />
+              <p>
+                Enviamos um link para <strong className="font-medium text-foreground">{form.email}</strong>.
+                Abra-o para ativar o cadastro — depois disso você já pode entrar.
+              </p>
+            </div>
+            <p>Não chegou? Confira o spam ou peça outro link (um por minuto).</p>
+            {reenvio && <p role="status" className="text-success-soft-foreground">{reenvio}</p>}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                onClick={async () => setReenvio((await api.cidadao.reenviarConfirmacao(form.cpf_cnpj)).detail)}
+              >
+                Reenviar link
+              </Button>
+              <Button asChild>
+                <Link href="/cidadao/login">Ir para o login</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-md">

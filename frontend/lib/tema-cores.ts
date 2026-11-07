@@ -77,9 +77,9 @@ const HEX = /^#[0-9a-f]{6}$/i;
 const CONTRASTE_AA = 4.5;
 const BRANCO: Hsl = { h: 0, s: 0, l: 100 };
 // Fundo do modo escuro (`--bg` em `:root.dark`), contra o qual a marca clareia.
-const FUNDO_ESCURO: Hsl = { h: 158, s: 20, l: 8 };
+const FUNDO_ESCURO: Hsl = { h: 226, s: 30, l: 8 };
 // Canvas do tema claro (`--bg` = `--neutral-25`): é sobre ele que os títulos leem.
-const FUNDO_CLARO: Hsl = { h: 120, s: 6, l: 97 };
+const FUNDO_CLARO: Hsl = { h: 220, s: 22, l: 97 };
 
 export function corValida(cor: string | null | undefined): cor is string {
   return typeof cor === "string" && HEX.test(cor);

@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, KeyRound, Plus, ShieldOff } from "lucide-react";
 import { useState } from "react";
@@ -120,7 +122,7 @@ export default function IntegracoesPage() {
 
       <SectionCard title="Chaves cadastradas">
         {sistemasQ.isLoading ? (
-          <p className="text-sm text-muted">Carregando…</p>
+          <Carregando className="text-sm text-muted" />
         ) : sistemas.length === 0 ? (
           <EmptyState
             icon={KeyRound}

@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
@@ -11,7 +13,7 @@ export function PlataformaGate({ children }: { children: React.ReactNode }) {
   const q = useQuery({ queryKey: ["admin-me"], queryFn: () => api.admin.me() });
 
   if (q.isLoading) {
-    return <p className="text-sm text-muted-foreground" role="status">Carregando…</p>;
+    return <Carregando className="text-sm text-muted-foreground" />;
   }
   if (!q.data?.is_platform_admin) {
     return (

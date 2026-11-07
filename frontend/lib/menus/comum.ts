@@ -19,6 +19,7 @@ export const menuComum: MenuModulo = {
   grupos: [
     {
       title: "Geral",
+      semTitulo: true,
       defaultOpen: true,
       items: [
         { label: "Início", href: "/home", icon: Home },

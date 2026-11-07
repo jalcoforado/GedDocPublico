@@ -1,3 +1,6 @@
+import logging
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from redis.asyncio import Redis
@@ -10,14 +13,30 @@ from ..auth.deps import (
     ler_unidade_contexto,
     require_tenant_id,
 )
+from ..auth.dois_fatores import (
+    COOKIE_LEMBRAR,
+    VALIDADE_LEMBRAR,
+    emitir_desafio,
+    emitir_lembrar,
+    lembrar_vale,
+    ler_desafio,
+)
 from ..auth.jwt import build_payload, encode_token, get_jwt_secret
 from ..auth.password import hash_password, verify_password
 from ..auth.perms import require_permission
 from ..config import get_settings
 from ..database import get_db
-from ..models import GoogleCredencial, Usuario
+from ..models import GoogleCredencial, Usuario, UsuarioExterno
 from ..schemas.auth import (
     AlterarSenhaRequest,
+    AvisoEnviado,
+    ContaConfirmada,
+    ConviteInfo,
+    DefinirSenhaRequest,
+    DoisFatoresRequest,
+    EsqueciSenhaRequest,
+    ReenviarCodigoRequest,
+    TokenContaRequest,
     LoginRequest,
     LoginResponse,
     LotacaoOut,
@@ -25,12 +44,14 @@ from ..schemas.auth import (
     PermissaoItem,
     TrocarLotacaoRequest,
 )
+from ..services import conta_email, conta_tokens
 from ..services.conta import ContaError, alterar_senha
 from ..services.google_oauth_flow import GoogleOAuthFlow
 from ..services.minutas import criar_google_doc_para_minuta
 from ..services.permissoes import listar_lotacoes, load_permissions, resolver_unidade_ativa
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 _settings = get_settings()
 
 
@@ -84,7 +105,45 @@ async def login(
         user.senha = ""
         await db.commit()
 
+    if user.email_verificado_em is None:
+        # Convite ainda não aceito. Na prática quase inalcançável — quem foi
+        # convidado não tem senha até abrir o link —, mas a regra vale aqui e
+        # não só no fato de a senha ser aleatória.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Conta ainda não ativada. Abra o link do convite que enviamos para o seu e-mail.",
+        )
+
     secret = await get_jwt_secret(db)
+    if _dois_fatores_ativo() and not lembrar_vale(
+        secret,
+        request.cookies.get(COOKIE_LEMBRAR),
+        usuario_id=user.id,
+        tenant_id=user.tenant_id,
+        senha_bcrypt=user.senha_bcrypt,
+    ):
+        return await _iniciar_2fa(db, user, secret)
+
+    return _emitir_sessao(response, user, secret, tenant_id=tenant_id)
+
+
+def _dois_fatores_ativo() -> bool:
+    """2FA só vale com SMTP configurado. Sem servidor de e-mail o código nunca
+    chegaria e NINGUÉM entraria — trancar a prefeitura inteira é pior do que
+    o login seguir só com a senha até o SMTP ser configurado. O log de erro
+    é o aviso de que está faltando."""
+    settings = get_settings()
+    if not settings.dois_fatores_email:
+        return False
+    if not settings.smtp_host:
+        logger.error("dois_fatores_sem_smtp", extra={"efeito": "login só com senha até configurar SMTP_HOST"})
+        return False
+    return True
+
+
+def _emitir_sessao(
+    response: Response, user: Usuario, secret: str, *, tenant_id: int | None
+) -> LoginResponse:
     # E1 — a lotação ativa nasce na principal; "alterar setor" troca depois.
     jwt_payload = build_payload(
         user.id, user.email, tenant_id=tenant_id,
@@ -108,6 +167,127 @@ async def login(
         usuario_email=user.email,
         nome=user.nome,
         must_change_password=user.must_change_password,
+    )
+
+
+async def _iniciar_2fa(db: AsyncSession, user: Usuario, secret: str) -> LoginResponse:
+    """Senha certa, computador não lembrado: manda o código e devolve o
+    desafio. Nenhuma sessão é emitida aqui."""
+    linha, codigo = await conta_tokens.emitir(
+        db,
+        conta_tokens.Titular(tenant_id=user.tenant_id, id_usuario=user.id),
+        "codigo_2fa",
+        respeitar_intervalo=False,
+    )
+    await db.commit()
+    assunto, texto = conta_email.texto_codigo_2fa(
+        nome=user.nome, orgao=await conta_email.nome_do_orgao(db, user.tenant_id), codigo=codigo
+    )
+    await conta_email.enviar_email(
+        para=user.email, assunto=assunto, texto=texto, tenant_id=user.tenant_id
+    )
+    return LoginResponse(
+        requer_2fa=True,
+        desafio=emitir_desafio(
+            secret, usuario_id=user.id, tenant_id=user.tenant_id, id_token=linha.id
+        ),
+        email_mascarado=conta_email.mascarar_email(user.email),
+    )
+
+
+async def _usuario_do_desafio(
+    db: AsyncSession, secret: str, desafio: str
+) -> tuple[Usuario, dict]:
+    dados = ler_desafio(secret, desafio)
+    if dados is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="O código expirou. Entre com a sua senha de novo.",
+        )
+    user = (
+        await db.execute(
+            select(Usuario).where(
+                Usuario.id == int(dados["sub"]),
+                Usuario.tenant_id == dados["tid"],
+                Usuario.excluido.is_(False),
+                Usuario.ativo.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciais inválidas")
+    return user, dados
+
+
+@router.post("/login/2fa", response_model=LoginResponse)
+async def login_2fa(
+    payload: DoisFatoresRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> LoginResponse:
+    """Segundo passo do login: o código de 6 dígitos enviado por e-mail."""
+    secret = await get_jwt_secret(db)
+    user, dados = await _usuario_do_desafio(db, secret, payload.desafio)
+    ok = await conta_tokens.conferir_codigo(
+        db, dados["tok"], payload.codigo, tenant_id=user.tenant_id
+    )
+    # Commit também no erro: é ele que grava a tentativa contada.
+    await db.commit()
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Código inválido ou expirado.",
+        )
+    if payload.lembrar:
+        response.set_cookie(
+            key=COOKIE_LEMBRAR,
+            value=emitir_lembrar(
+                secret, usuario_id=user.id, tenant_id=user.tenant_id,
+                senha_bcrypt=user.senha_bcrypt,
+            ),
+            max_age=VALIDADE_LEMBRAR,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+    return _emitir_sessao(
+        response, user, secret, tenant_id=getattr(request.state, "tenant_id", None)
+    )
+
+
+@router.post("/login/2fa/reenviar", response_model=LoginResponse)
+async def login_2fa_reenviar(
+    payload: ReenviarCodigoRequest,
+    db: AsyncSession = Depends(get_db),
+) -> LoginResponse:
+    """Manda um código novo (o anterior deixa de valer). Um por minuto."""
+    secret = await get_jwt_secret(db)
+    user, _ = await _usuario_do_desafio(db, secret, payload.desafio)
+    try:
+        linha, codigo = await conta_tokens.emitir(
+            db,
+            conta_tokens.Titular(tenant_id=user.tenant_id, id_usuario=user.id),
+            "codigo_2fa",
+        )
+    except conta_tokens.EnvioRecenteError:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Aguarde um minuto para pedir outro código.",
+        )
+    await db.commit()
+    assunto, texto = conta_email.texto_codigo_2fa(
+        nome=user.nome, orgao=await conta_email.nome_do_orgao(db, user.tenant_id), codigo=codigo
+    )
+    await conta_email.enviar_email(
+        para=user.email, assunto=assunto, texto=texto, tenant_id=user.tenant_id
+    )
+    return LoginResponse(
+        requer_2fa=True,
+        desafio=emitir_desafio(
+            secret, usuario_id=user.id, tenant_id=user.tenant_id, id_token=linha.id
+        ),
+        email_mascarado=conta_email.mascarar_email(user.email),
     )
 
 
@@ -414,3 +594,146 @@ async def get_google_credential_status(
         "connected": True,
         "connected_at": cred.criado_em.isoformat(),
     }
+
+
+# ------------------------------------------------- conta por e-mail (0137)
+#
+# "Não lembro a senha", convite de servidor e confirmação de e-mail do
+# cidadão. Rotas públicas (sem sessão): o tenant vem do host, como no login.
+# Os pedidos de envio respondem sempre o mesmo texto, exista a conta ou não —
+# senão o formulário viraria um verificador de quais e-mails estão cadastrados.
+
+_AVISO_ESQUECI = (
+    "Se houver uma conta com esse e-mail, enviamos um link para criar uma nova "
+    "senha. Confira a caixa de entrada e o spam."
+)
+
+
+async def _titular_do_token(db: AsyncSession, linha) -> Usuario | UsuarioExterno:  # noqa: ANN001
+    if linha.id_usuario is not None:
+        conta = await db.get(Usuario, linha.id_usuario)
+    else:
+        conta = await db.get(UsuarioExterno, linha.id_usuario_externo)
+    if conta is None or conta.excluido or not conta.ativo:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Link inválido ou expirado.")
+    return conta
+
+
+def _link_invalido() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Este link não vale mais: expirou, já foi usado ou foi substituído por um mais novo.",
+    )
+
+
+@router.post("/esqueci-senha", response_model=AvisoEnviado, status_code=status.HTTP_202_ACCEPTED)
+async def esqueci_senha(
+    payload: EsqueciSenhaRequest,
+    request: Request,
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> AvisoEnviado:
+    user = (
+        await db.execute(
+            select(Usuario).where(
+                Usuario.email == payload.email.strip(),
+                Usuario.tenant_id == tenant_id,
+                Usuario.excluido.is_(False),
+                Usuario.ativo.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        return AvisoEnviado(detail=_AVISO_ESQUECI)
+    # Convite pendente: o "esqueci" vira reenvio do convite — é o link que
+    # essa pessoa precisa, e o de redefinição a deixaria sem e-mail confirmado.
+    finalidade = "convite" if user.email_verificado_em is None else "redefinir_senha"
+    try:
+        _, token = await conta_tokens.emitir(
+            db, conta_tokens.Titular(tenant_id=tenant_id, id_usuario=user.id), finalidade
+        )
+    except conta_tokens.EnvioRecenteError:
+        return AvisoEnviado(detail=_AVISO_ESQUECI)
+    await db.commit()
+    orgao = await conta_email.nome_do_orgao(db, tenant_id)
+    if finalidade == "convite":
+        assunto, texto = conta_email.texto_convite(
+            nome=user.nome, orgao=orgao, url=conta_email.link(request, "/login/convite", token)
+        )
+    else:
+        assunto, texto = conta_email.texto_redefinir_senha(
+            nome=user.nome, orgao=orgao, url=conta_email.link(request, "/login/redefinir-senha", token)
+        )
+    await conta_email.enviar_email(para=user.email, assunto=assunto, texto=texto, tenant_id=tenant_id)
+    return AvisoEnviado(detail=_AVISO_ESQUECI)
+
+
+@router.post("/redefinir-senha", response_model=ContaConfirmada)
+async def redefinir_senha(
+    payload: DefinirSenhaRequest,
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ContaConfirmada:
+    """Nova senha pelo link do e-mail — vale para servidor e para cidadão."""
+    linha = await conta_tokens.consumir(db, payload.token, ("redefinir_senha",), tenant_id=tenant_id)
+    if linha is None:
+        raise _link_invalido()
+    conta = await _titular_do_token(db, linha)
+    conta.senha_bcrypt = hash_password(payload.nova_senha)
+    conta.senha = ""
+    # Quem abriu o link provou que lê aquela caixa de e-mail.
+    conta.email_verificado_em = conta.email_verificado_em or datetime.utcnow()
+    if isinstance(conta, Usuario):
+        conta.must_change_password = False
+    await db.commit()
+    return ContaConfirmada(tipo="servidor" if isinstance(conta, Usuario) else "cidadao")
+
+
+@router.post("/convite/info", response_model=ConviteInfo)
+async def convite_info(
+    payload: TokenContaRequest,
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ConviteInfo:
+    """Nome e e-mail do convite, para a tela de ativação — sem consumi-lo."""
+    linha = await conta_tokens.localizar(db, payload.token, ("convite",), tenant_id=tenant_id)
+    if linha is None:
+        raise _link_invalido()
+    user = await _titular_do_token(db, linha)
+    return ConviteInfo(nome=user.nome, email=user.email)
+
+
+@router.post("/convite/aceitar", response_model=ContaConfirmada)
+async def convite_aceitar(
+    payload: DefinirSenhaRequest,
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ContaConfirmada:
+    """Ativa a conta do servidor convidado: confirma o e-mail e grava a senha
+    que ELE escolheu — o administrador nunca chega a conhecê-la."""
+    linha = await conta_tokens.consumir(db, payload.token, ("convite",), tenant_id=tenant_id)
+    if linha is None:
+        raise _link_invalido()
+    user = await _titular_do_token(db, linha)
+    user.senha_bcrypt = hash_password(payload.nova_senha)
+    user.senha = ""
+    user.email_verificado_em = datetime.utcnow()
+    user.must_change_password = False
+    await db.commit()
+    return ContaConfirmada(tipo="servidor")
+
+
+@router.post("/verificar-email", response_model=ContaConfirmada)
+async def verificar_email(
+    payload: TokenContaRequest,
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ContaConfirmada:
+    """Confirma o e-mail do cidadão que se cadastrou pelo portal."""
+    linha = await conta_tokens.consumir(db, payload.token, ("verificar_email",), tenant_id=tenant_id)
+    if linha is None:
+        raise _link_invalido()
+    conta = await _titular_do_token(db, linha)
+    conta.email_verificado_em = conta.email_verificado_em or datetime.utcnow()
+    await db.commit()
+    return ContaConfirmada(tipo="servidor" if isinstance(conta, Usuario) else "cidadao")

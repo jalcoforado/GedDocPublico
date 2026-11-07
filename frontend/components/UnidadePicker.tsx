@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useQuery } from "@tanstack/react-query";
 import {
   Background,
@@ -11,13 +13,13 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Building2, ChevronDown, X as XIcon } from "lucide-react";
+import { Building2, Network, X as XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Dialog } from "@/components/ui/dialog";
 import { organogramaApi, type OrganogramaNo } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 const NODE_WIDTH = 180;
 const NODE_HEIGHT = 70;
@@ -63,36 +65,134 @@ function layoutTree(nodes: OrganogramaNo[]): Map<number, { x: number; y: number 
 interface Props {
   value: number | null;
   onChange: (v: number | null) => void;
-  /** Label do botão quando sem seleção */
+  /** Texto do campo quando sem seleção */
   placeholder?: string;
   /** Disabled state */
   disabled?: boolean;
+  id?: string;
 }
 
+/** Busca sem acento e sem caixa: "saude" acha "Secretaria de Saúde". */
+function normalizar(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+
+/** Caminho dos ancestrais, da raiz até o pai: "PREF › Secretaria de Saúde". */
+function caminho(no: OrganogramaNo, porId: Map<number, OrganogramaNo>): string {
+  const partes: string[] = [];
+  const vistos = new Set<number>();
+  let pai = no.id_unidade_pai != null ? porId.get(no.id_unidade_pai) : undefined;
+  while (pai && !vistos.has(pai.id)) {
+    vistos.add(pai.id);
+    partes.unshift(pai.sigla || pai.unidade_trabalho);
+    pai = pai.id_unidade_pai != null ? porId.get(pai.id_unidade_pai) : undefined;
+  }
+  return partes.join(" › ");
+}
+
+/**
+ * Escolha de unidade: um campo com busca (parte do nome ou a sigla, sem
+ * acento), e cada opção mostra onde a unidade fica na hierarquia. O
+ * organograma desenhado continua a um clique ("Ver no organograma"), para
+ * quem prefere achar pela árvore.
+ *
+ * Antes o campo era só um botão que abria o diagrama — sem busca e sem
+ * teclado, numa prefeitura com dezenas de unidades (pedido do Jorge,
+ * 2026-11-06).
+ */
 export function UnidadePicker({
   value,
   onChange,
   placeholder = "Escolher unidade",
   disabled,
+  id,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [organograma, setOrganograma] = useState(false);
 
   const q = useQuery({
     queryKey: ["organograma"],
     queryFn: () => organogramaApi.tree(),
-    enabled: open,
+    staleTime: 5 * 60_000,
   });
 
-  const selecionada = q.data?.find((u) => u.id === value);
-  const nomeAtual = selecionada
-    ? selecionada.unidade_trabalho + (selecionada.sigla ? ` (${selecionada.sigla})` : "")
-    : null;
+  const opcoes = useMemo<ComboboxOption<OrganogramaNo>[]>(() => {
+    const dados = q.data ?? [];
+    const porId = new Map(dados.map((n) => [n.id, n]));
+    return dados
+      .map((no) => ({
+        value: no.id,
+        label: no.unidade_trabalho + (no.sigla ? ` (${no.sigla})` : ""),
+        hint: caminho(no, porId) || undefined,
+        data: no,
+      }))
+      .sort(
+        (a, b) =>
+          (a.hint ?? "").localeCompare(b.hint ?? "", "pt-BR") ||
+          a.label.localeCompare(b.label, "pt-BR"),
+      );
+  }, [q.data]);
 
+  return (
+    <>
+      <Combobox
+        id={id}
+        options={opcoes}
+        value={value}
+        onChange={(v) => onChange(v == null ? null : Number(v))}
+        placeholder={placeholder}
+        searchPlaceholder="Buscar pelo nome ou pela sigla…"
+        emptyText="Nenhuma unidade com esse nome."
+        loading={q.isLoading}
+        disabled={disabled}
+        clearable
+        filter={(o, busca) => normalizar(`${o.label} ${o.hint ?? ""}`).includes(normalizar(busca))}
+        footer={
+          <button
+            type="button"
+            onClick={() => setOrganograma(true)}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs font-medium text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground"
+          >
+            <Network className="h-3.5 w-3.5" aria-hidden="true" />
+            Ver no organograma
+          </button>
+        }
+      />
+
+      <OrganogramaDialog
+        aberto={organograma}
+        onFechar={() => setOrganograma(false)}
+        dados={q.data ?? []}
+        carregando={q.isLoading}
+        value={value}
+        onEscolher={(v) => {
+          onChange(v);
+          setOrganograma(false);
+        }}
+      />
+    </>
+  );
+}
+
+/** O organograma desenhado (React Flow): clicar num nó escolhe a unidade. */
+function OrganogramaDialog({
+  aberto,
+  onFechar,
+  dados,
+  carregando,
+  value,
+  onEscolher,
+}: {
+  aberto: boolean;
+  onFechar: () => void;
+  dados: OrganogramaNo[];
+  carregando: boolean;
+  value: number | null;
+  onEscolher: (v: number | null) => void;
+}) {
   const { nodes, edges } = useMemo(() => {
-    const data = q.data ?? [];
-    const pos = layoutTree(data);
-    const ids = new Set(data.map((n) => n.id));
-    const nodes: Node[] = data.map((no) => {
+    const pos = layoutTree(dados);
+    const ids = new Set(dados.map((n) => n.id));
+    const nodes: Node[] = dados.map((no) => {
       const p = pos.get(no.id) ?? { x: 0, y: 0 };
       const isSelected = value === no.id;
       return {
@@ -132,7 +232,7 @@ export function UnidadePicker({
         targetPosition: Position.Top,
       };
     });
-    const edges: Edge[] = data
+    const edges: Edge[] = dados
       .filter((n) => n.id_unidade_pai != null && ids.has(n.id_unidade_pai!))
       .map((n) => ({
         id: `e-${n.id_unidade_pai}-${n.id}`,
@@ -142,94 +242,55 @@ export function UnidadePicker({
         markerEnd: { type: MarkerType.ArrowClosed },
       }));
     return { nodes, edges };
-  }, [q.data, value]);
-
-  function handleNodeClick(_: unknown, node: Node) {
-    const id = Number(node.id);
-    onChange(id);
-    setOpen(false);
-  }
-
-  function handleClear() {
-    onChange(null);
-    setOpen(false);
-  }
+  }, [dados, value]);
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        disabled={disabled}
-        className={cn(
-          "flex h-11 w-full items-center justify-between gap-2 rounded-md border border-input bg-card px-3 text-sm transition-colors",
-          "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          "disabled:cursor-not-allowed disabled:opacity-50",
-        )}
-      >
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate text-left",
-            nomeAtual ? "text-foreground" : "text-muted-foreground",
-          )}
-        >
-          {nomeAtual ?? placeholder}
-        </span>
-        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-      </button>
-
-      <Dialog
-        open={open}
-        onClose={() => setOpen(false)}
-        title="Escolher unidade no organograma"
-        size="lg"
-        footer={
-          <div className="flex w-full justify-between">
-            <Button variant="secondary" onClick={handleClear}>
-              <XIcon className="mr-1 h-4 w-4" aria-hidden="true" />
-              Sem unidade
-            </Button>
-            <Button variant="ghost" onClick={() => setOpen(false)}>
-              Cancelar
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">
-            Clique numa unidade da árvore para selecioná-la.
-          </p>
-          <div
-            className="rounded-md border border-border bg-muted/30"
-            style={{ height: 420 }}
-          >
-            {q.isLoading && (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Carregando…
-              </div>
-            )}
-            {!q.isLoading && (q.data?.length ?? 0) === 0 && (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Nenhuma unidade cadastrada.
-              </div>
-            )}
-            {!q.isLoading && (q.data?.length ?? 0) > 0 && (
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                fitView
-                nodesDraggable={false}
-                nodesConnectable={false}
-                onNodeClick={handleNodeClick}
-                proOptions={{ hideAttribution: true }}
-              >
-                <Background />
-                <Controls showInteractive={false} />
-              </ReactFlow>
-            )}
-          </div>
+    <Dialog
+      open={aberto}
+      onClose={onFechar}
+      title="Escolher unidade no organograma"
+      size="lg"
+      footer={
+        <div className="flex w-full justify-between">
+          <Button variant="secondary" onClick={() => onEscolher(null)}>
+            <XIcon className="mr-1 h-4 w-4" aria-hidden="true" />
+            Sem unidade
+          </Button>
+          <Button variant="ghost" onClick={onFechar}>
+            Cancelar
+          </Button>
         </div>
-      </Dialog>
-    </>
+      }
+    >
+      <div className="space-y-2">
+        <p className="text-xs text-muted-foreground">
+          Clique numa unidade da árvore para selecioná-la.
+        </p>
+        <div className="rounded-md border border-border bg-muted/30" style={{ height: 420 }}>
+          {carregando && (
+            <Carregando className="flex h-full items-center justify-center text-sm text-muted-foreground" />
+          )}
+          {!carregando && dados.length === 0 && (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              Nenhuma unidade cadastrada.
+            </div>
+          )}
+          {!carregando && dados.length > 0 && (
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              fitView
+              nodesDraggable={false}
+              nodesConnectable={false}
+              onNodeClick={(_, node) => onEscolher(Number(node.id))}
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background />
+              <Controls showInteractive={false} />
+            </ReactFlow>
+          )}
+        </div>
+      </div>
+    </Dialog>
   );
 }

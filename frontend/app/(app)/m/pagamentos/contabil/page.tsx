@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, FileSpreadsheet, Plus } from "lucide-react";
 import { useState } from "react";
@@ -81,7 +83,7 @@ export default function ExportContabilPage() {
 
       <SectionCard title="Lotes gerados">
         {lotesQ.isLoading ? (
-          <p className="text-sm text-muted">Carregando…</p>
+          <Carregando className="text-sm text-muted" />
         ) : lotes.length === 0 ? (
           <EmptyState
             icon={FileSpreadsheet}

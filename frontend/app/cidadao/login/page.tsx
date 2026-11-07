@@ -14,7 +14,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { cn } from "@/lib/utils";
-import { api, govbrLoginUrl } from "@/lib/api";
+import { ApiError, api, govbrLoginUrl } from "@/lib/api";
 
 const DESTINO = "/cidadao/processos";
 
@@ -49,11 +49,96 @@ export default function CidadaoLoginPage() {
     staleTime: 5 * 60_000,
   });
 
+  // 403 no login = senha certa, e-mail do cadastro ainda não confirmado
+  // (0136): a tela oferece o reenvio do link em vez de só mostrar o erro.
+  const [naoConfirmado, setNaoConfirmado] = useState(false);
+  const [esqueci, setEsqueci] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("esqueci")) setEsqueci(true);
+  }, []);
+
   const m = useMutation({
     mutationFn: () => api.cidadao.login(cpf, senha),
     onSuccess: () => router.push(DESTINO),
+    onError: (e: Error) => {
+      setNaoConfirmado(e instanceof ApiError && e.status === 403);
+      setErr(e.message);
+    },
+  });
+
+  const pedirLink = useMutation({
+    mutationFn: () => (esqueci ? api.cidadao.esqueciSenha(cpf) : api.cidadao.reenviarConfirmacao(cpf)),
+    onSuccess: (r) => {
+      setErr(null);
+      setAviso(r.detail);
+    },
     onError: (e: Error) => setErr(e.message),
   });
+
+  if (esqueci) {
+    return (
+      <div className="mx-auto w-full max-w-sm pt-4 motion-safe:animate-slide-up">
+        <h1 className="text-center text-2xl font-normal text-foreground-muted">Nova senha</h1>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setAviso(null);
+            pedirLink.mutate();
+          }}
+          className="mt-6 space-y-4"
+          noValidate
+        >
+          <p className="px-2 text-sm text-foreground-muted">
+            Informe o CPF ou CNPJ do cadastro. Enviaremos um link para o e-mail cadastrado.
+          </p>
+          <div>
+            <Label htmlFor="cpf-esqueci" required className="px-2">
+              CPF ou CNPJ
+            </Label>
+            <input
+              id="cpf-esqueci"
+              value={cpf}
+              onChange={(e) => setCpf(e.target.value)}
+              inputMode="numeric"
+              autoComplete="username"
+              autoFocus
+              className={CAMPO_LOGIN}
+            />
+          </div>
+          {aviso && (
+            <p role="status" className="rounded-2xl border border-border bg-surface-1 px-4 py-3 text-sm text-foreground-muted">
+              {aviso} O link vale por 1 hora.
+            </p>
+          )}
+          {err && (
+            <div role="alert" className="rounded-2xl border border-danger/30 bg-danger-soft px-4 py-2 text-sm text-danger-soft-foreground">
+              {err}
+            </div>
+          )}
+          <button
+            type="submit"
+            disabled={pedirLink.isPending || cpf.replace(/\D/g, "").length < 11}
+            className={cn(BOTAO_LOGIN, "bg-primary text-primary-foreground shadow-sm hover:opacity-90 hover:shadow-md")}
+          >
+            {pedirLink.isPending ? "Enviando..." : "Enviar link"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setEsqueci(false);
+              setAviso(null);
+              setErr(null);
+            }}
+            className="rounded px-2 py-1 text-sm text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground"
+          >
+            Voltar ao login
+          </button>
+        </form>
+      </div>
+    );
+  }
 
   // Mesma linguagem do login do servidor (campos e botões em pílula, título
   // leve), sem o cartão. Os rótulos ficam VISÍVEIS aqui, ao contrário de lá:
@@ -101,13 +186,40 @@ export default function CidadaoLoginPage() {
             className={CAMPO_SENHA_LOGIN}
           />
         </div>
+        <div className="flex justify-end px-2">
+          <button
+            type="button"
+            onClick={() => {
+              setErr(null);
+              setEsqueci(true);
+            }}
+            className="-mx-1.5 rounded px-1.5 py-0.5 text-sm text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground"
+          >
+            Esqueci minha senha
+          </button>
+        </div>
         {err && (
           <div
             role="alert"
             className="rounded-2xl border border-danger/30 bg-danger-soft px-4 py-2 text-sm text-danger-soft-foreground"
           >
             {err}
+            {naoConfirmado && (
+              <button
+                type="button"
+                onClick={() => pedirLink.mutate()}
+                disabled={pedirLink.isPending}
+                className="mt-2 block font-medium underline underline-offset-2"
+              >
+                Reenviar o e-mail de confirmação
+              </button>
+            )}
           </div>
+        )}
+        {aviso && !err && (
+          <p role="status" className="rounded-2xl border border-border bg-surface-1 px-4 py-3 text-sm text-foreground-muted">
+            {aviso}
+          </p>
         )}
         <button
           type="submit"

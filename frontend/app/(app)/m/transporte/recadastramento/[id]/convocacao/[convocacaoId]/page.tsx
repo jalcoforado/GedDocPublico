@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -158,7 +160,7 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
   const ficha = fichaQ.data;
 
   if (fichaQ.isLoading) {
-    return <div className="text-center text-muted-foreground py-8">Carregando...</div>;
+    return <Carregando className="text-center text-muted-foreground py-8" />;
   }
   if (fichaQ.isError || !ficha) {
     return (

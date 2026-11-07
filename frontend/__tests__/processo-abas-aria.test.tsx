@@ -25,7 +25,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const replaceMock = vi.fn();
 
@@ -130,8 +130,16 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
+// A página é a maior do sistema: o import a frio (transformar o módulo e a
+// árvore dele) leva ~10 s numa máquina ocupada. Feito dentro do teste, isso
+// estourava os 5 s do primeiro `it` — e o tempo medido era o do bundler, não o
+// da tela. O import vai para cá, com orçamento próprio.
+let Page: React.ComponentType;
+beforeAll(async () => {
+  ({ default: Page } = await import("@/app/(app)/m/protocolo/processos/[id]/page"));
+}, 60_000);
+
 async function renderizarPagina() {
-  const { default: Page } = await import("@/app/(app)/m/protocolo/processos/[id]/page");
   montar(<Page />);
   await waitFor(() => expect(screen.getAllByRole("tab").length).toBe(4));
   return screen.getAllByRole("tab");

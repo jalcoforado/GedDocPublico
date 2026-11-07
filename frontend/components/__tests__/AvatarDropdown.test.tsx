@@ -79,7 +79,7 @@ describe("AvatarDropdown — links (fatia 3.7)", () => {
   });
 });
 
-describe("AvatarDropdown — tema e densidade como radiogroup (fatia 3.7)", () => {
+describe("AvatarDropdown — tema como radiogroup (fatia 3.7)", () => {
   it("tema é um radiogroup com 3 radios e o ativo marcado", () => {
     renderAvatar();
     abrir();
@@ -89,13 +89,10 @@ describe("AvatarDropdown — tema e densidade como radiogroup (fatia 3.7)", () =
     expect(radios.filter((r) => r.getAttribute("aria-checked") === "true").length).toBe(1);
   });
 
-  it("densidade é um radiogroup com 2 radios; escolher marca a opção", () => {
+  it("não oferece mais densidade (o modo compacto saiu em 2026-11-06)", () => {
     renderAvatar();
     abrir();
-    const grupo = screen.getByRole("radiogroup", { name: /densidade/i });
-    const compacto = within(grupo).getByRole("radio", { name: /compacto/i });
-    fireEvent.click(compacto);
-    expect(compacto).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("radiogroup", { name: /densidade/i })).toBeNull();
   });
 });
 

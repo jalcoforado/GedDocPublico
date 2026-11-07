@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
@@ -140,7 +142,7 @@ export default function PreferenciasNotificacoesPage() {
   });
 
   if (prefsQ.isLoading) {
-    return <div className="text-muted-foreground">Carregando…</div>;
+    return <Carregando className="text-muted-foreground" />;
   }
   if (prefsQ.error || !prefsQ.data) {
     return (

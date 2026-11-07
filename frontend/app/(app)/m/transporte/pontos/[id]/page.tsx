@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MapPin, UserPlus } from "lucide-react";
 import { use, useState } from "react";
@@ -150,7 +152,7 @@ export default function PontoDetalhePage({ params }: PageParams) {
       )}
 
       {mapaQ.isLoading ? (
-        <div className="py-8 text-center text-muted-foreground">Carregando...</div>
+        <Carregando className="py-8 text-center text-muted-foreground" />
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {/* O mapa desenha SEMPRE as vagas_total vagas, livres inclusive. */}

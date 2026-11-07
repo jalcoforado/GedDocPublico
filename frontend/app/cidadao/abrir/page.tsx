@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -159,7 +161,7 @@ export default function CidadaoAbrirPage() {
     onError: (e: Error) => setErr(e.message),
   });
 
-  if (loading) return <p className="text-sm text-muted-foreground">Carregando...</p>;
+  if (loading) return <Carregando className="text-sm text-muted-foreground" />;
   if (!cidadao) return null;
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {

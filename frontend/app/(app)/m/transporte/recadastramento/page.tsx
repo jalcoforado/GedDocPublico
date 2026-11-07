@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardList, Inbox, Plus, RefreshCw } from "lucide-react";
 import Link from "next/link";
@@ -243,7 +245,7 @@ export default function RecadastramentoPage() {
       </div>
 
       {listaQ.isLoading ? (
-        <div className="text-center text-muted-foreground py-8">Carregando...</div>
+        <Carregando className="text-center text-muted-foreground py-8" />
       ) : ciclos.length === 0 ? (
         // Dois estados distintos: "não existe ciclo" convida a criar; "a busca
         // não achou" NÃO — o município pode ter vários, e o botão convidaria a

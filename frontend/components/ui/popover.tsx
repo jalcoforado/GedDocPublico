@@ -28,6 +28,16 @@ interface PopoverProps {
 }
 
 /**
+ * Margem da viewport para flip/colisão. Em cima, conta o cabeçalho fixo: ele
+ * fica acima dos dropdowns (z-sticky > z-dropdown), e um painel que abria
+ * para cima "cabendo" na viewport escondia a busca embaixo dele.
+ */
+function margens() {
+  const topo = document.querySelector("[data-topo-fixo]")?.getBoundingClientRect().bottom ?? 0;
+  return { top: Math.max(0, topo) + 8, right: 8, bottom: 8, left: 8 };
+}
+
+/**
  * Popover base (UX-02 fatia 2.6, Floating UI — decisão do §11 da spec):
  * portal para o body (escapa de overflow-hidden), posição fixed com flip e
  * colisão de viewport, altura máxima limitada ao espaço disponível. É o
@@ -53,17 +63,17 @@ export function Popover({
     elements: { reference: anchorRef.current },
     middleware: [
       offset(4),
-      flip({ padding: 8 }),
-      shift({ padding: 8 }),
-      size({
-        padding: 8,
+      flip(() => ({ padding: margens() })),
+      shift(() => ({ padding: margens() })),
+      size(() => ({
+        padding: margens(),
         apply({ availableHeight, rects, elements }) {
           elements.floating.style.maxHeight = `${Math.max(120, availableHeight)}px`;
           if (matchAnchorWidth) {
             elements.floating.style.minWidth = `${rects.reference.width}px`;
           }
         },
-      }),
+      })),
     ],
   });
 
@@ -95,7 +105,7 @@ export function Popover({
       data-popover=""
       style={floatingStyles}
       className={cn(
-        "z-dropdown flex flex-col overflow-hidden rounded-dropdown border border-border bg-card shadow-dropdown animate-fade-in",
+        "z-dropdown flex flex-col overflow-hidden rounded-dropdown border border-border bg-card shadow-dropdown origin-top animate-scale-in",
         className,
       )}
     >

@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -281,7 +283,7 @@ export default function ConciliacaoPage() {
         </div>
 
         {extratosQ.isLoading ? (
-          <p className="text-sm text-muted">Carregando…</p>
+          <Carregando className="text-sm text-muted" />
         ) : extratos.length === 0 ? (
           <EmptyState
             icon={FileUp}
@@ -343,7 +345,7 @@ export default function ConciliacaoPage() {
               </div>
             )}
             {sugestoesQ.isLoading ? (
-              <p className="text-sm text-muted">Carregando…</p>
+              <Carregando className="text-sm text-muted" />
             ) : sugestoes.length === 0 ? (
               <EmptyState
                 icon={ListChecks}
@@ -425,7 +427,7 @@ export default function ConciliacaoPage() {
               </div>
             )}
             {lancamentosQ.isLoading ? (
-              <p className="text-sm text-muted">Carregando…</p>
+              <Carregando className="text-sm text-muted" />
             ) : (
               <Table>
                 <THead>

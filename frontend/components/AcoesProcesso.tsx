@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { DESPACHO_PADRAO } from "@/lib/despacho";
 import {
   api,
   type EncaminharInput,
@@ -522,7 +523,18 @@ function EncaminharDialog({
           />
         </div>
         <div>
-          <Label htmlFor="desp">Despacho (opcional)</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="desp">Despacho (opcional)</Label>
+            {!form.despacho && (
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, despacho: DESPACHO_PADRAO })}
+                className="rounded text-xs font-medium text-primary underline-offset-2 hover:underline"
+              >
+                Usar texto padrão
+              </button>
+            )}
+          </div>
           <Textarea
             id="desp"
             value={form.despacho ?? ""}

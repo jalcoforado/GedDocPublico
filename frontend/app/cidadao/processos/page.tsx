@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Clock } from "lucide-react";
 import Link from "next/link";
@@ -29,7 +31,7 @@ export default function CidadaoProcessosPage() {
     enabled: !!cidadao,
   });
 
-  if (loading) return <p className="text-sm text-muted-foreground">Carregando...</p>;
+  if (loading) return <Carregando className="text-sm text-muted-foreground" />;
   if (!cidadao) return null;
 
   return (
@@ -52,7 +54,7 @@ export default function CidadaoProcessosPage() {
         </CardHeader>
         <CardContent>
           {q.isLoading && (
-            <p className="py-6 text-center text-sm text-muted-foreground">Carregando...</p>
+            <Carregando className="py-6 text-center text-sm text-muted-foreground" />
           )}
           {!q.isLoading && (q.data?.length ?? 0) === 0 && (
             <p className="py-6 text-center text-sm text-muted-foreground">

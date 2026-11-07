@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Route,
   ScrollText,
+  Workflow,
 } from "lucide-react";
 import type React from "react";
 
@@ -100,6 +101,14 @@ export const CARDS: HubCard[] = [
     icon: AlertOctagon,
     title: "Ocorrências",
     desc: "Ocorrências regulatórias e fiscalização: apuração de denúncias e fiscalizações contra permissionários e empresas.",
+    ready: true,
+  },
+  // Saiu do menu lateral (menu único, 2026-11-05): mora aqui.
+  {
+    href: "/m/transporte/fluxo",
+    icon: Workflow,
+    title: "Fluxo do processo",
+    desc: "Os três caminhos do módulo — alvará, recadastramento e ocorrência — com as quantidades em cada etapa.",
     ready: true,
   },
 ];
