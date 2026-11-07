@@ -669,9 +669,10 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
             <Label htmlFor="unidade" required>
               Unidade proprietária
             </Label>
-            {/* Busca do Heitor (#146): nome ou sigla, sem acento, com o
-                caminho na hierarquia e o organograma a um clique. Escolhido
-                pelo PO em 2026-11-06 no lugar da lista simples do #144. */}
+            {/* Busca do Heitor (PR 146): nome ou sigla, sem acento, com o
+                caminho na hierarquia e o organograma a um clique. Escolhida
+                pelo PO em 2026-11-06 no lugar da lista simples do PR 144.
+                Sem cerquilha antes do número: o design:check a lê como cor. */}
             <UnidadePicker
               id="unidade"
               value={
