@@ -109,6 +109,20 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     # é do usuário, não do módulo que a consome depois (minutas).
     ("GET", "/api/v2/auth/google"),
     ("GET", "/api/v2/auth/google/callback"),
+    # Conta por e-mail (0137, SI-6/SI-7/SI-22): todas rodam ANTES de haver
+    # sessão — quem chama ainda não provou quem é, então não há usuário para
+    # permissionar nem módulo a exigir. O controle é o segredo de uso único
+    # (link ou código, guardado só como HMAC, com validade curta), o limite de
+    # 5 erros do código e o intervalo de 60 s entre reenvios
+    # (`services/conta_tokens.py`). "Esqueci a senha" responde igual exista ou
+    # não o e-mail, para não virar oráculo de contas.
+    ("POST", "/api/v2/auth/login/2fa"),
+    ("POST", "/api/v2/auth/login/2fa/reenviar"),
+    ("POST", "/api/v2/auth/esqueci-senha"),
+    ("POST", "/api/v2/auth/redefinir-senha"),
+    ("POST", "/api/v2/auth/verificar-email"),
+    ("POST", "/api/v2/auth/convite/info"),
+    ("POST", "/api/v2/auth/convite/aceitar"),
 
     # -- Infra e identidade visual: sem auth, consumidos na tela de login.
     ("GET", "/api/v2/health"),
@@ -179,6 +193,10 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     ("POST", "/api/v2/cidadao/denuncias"),
     ("POST", "/api/v2/cidadao/cadastrar"),
     ("POST", "/api/v2/cidadao/login"),
+    # Conta do cidadão por e-mail (0137): mesma porta do login acima, antes de
+    # haver sessão. Mesmos controles das rotas de conta do servidor.
+    ("POST", "/api/v2/cidadao/esqueci-senha"),
+    ("POST", "/api/v2/cidadao/reenviar-confirmacao"),
     ("POST", "/api/v2/cidadao/logout"),
     ("POST", "/api/v2/cidadao/processos"),
     ("POST", "/api/v2/cidadao/processos/{processo_id}/anexos"),

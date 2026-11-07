@@ -7,8 +7,6 @@ import {
   FileText,
   KeyboardIcon,
   LogOut,
-  Maximize2,
-  Minimize2,
   Monitor,
   Moon,
   Plus,
@@ -22,6 +20,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api, buscaApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { CAIXAS, hrefDaCaixa } from "@/lib/caixas-processos";
 import { canSeeItem, itensNavegaveis, type NavItem } from "@/lib/menus";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -41,6 +40,14 @@ export const ITENS_EXTRA: ReadonlyArray<{ item: NavItem; moduloSlug: string; gro
     group: "navegar",
     item: { label: "Preferências de notificações", href: "/perfil/notificacoes", icon: Bell },
   },
+  // As caixas de trabalho saíram do menu lateral (viraram abas da tela de
+  // Processos), mas continuam alcançáveis pelo teclado: "entrada" no Ctrl+K
+  // abre a caixa de entrada direto.
+  ...CAIXAS.map(({ caixa, rotulo, icone }) => ({
+    moduloSlug: "protocolo",
+    group: "navegar" as const,
+    item: { label: rotulo, href: hrefDaCaixa(caixa), icon: icone, perm: "processo" },
+  })),
   {
     moduloSlug: "protocolo",
     group: "criar",
@@ -64,6 +71,7 @@ export const KEYWORDS_POR_HREF: Record<string, string[]> = {
   // O painel morou na `/home` até sair para o módulo: quem o procurava por
   // "início" ou "caixas" continua achando.
   "/m/protocolo/painel": ["sei", "quadros", "caixas", "prazos", "início"],
+  "/m/protocolo/processos": ["processos", "todos", "lista", "caixas"],
   "/m/protocolo/workflow": ["bpm", "fluxo"],
   "/m/administracao/organograma": ["unidades", "hierarquia"],
   "/m/administracao/auditoria": ["log", "histórico"],
@@ -102,7 +110,7 @@ interface Props {
 export function CommandPalette({ open, onOpenChange }: Props) {
   const router = useRouter();
   const { logout, can } = useAuth();
-  const { setPreference, setDensity } = useTheme();
+  const { setPreference } = useTheme();
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
@@ -132,7 +140,7 @@ export function CommandPalette({ open, onOpenChange }: Props) {
     enabled: open && debouncedQ.length >= 2,
   });
 
-  // Módulos contratados do tenant — MESMA queryKey que ModuloSwitcher e o
+  // Módulos contratados do tenant — MESMA queryKey que o menu lateral e o
   // launcher usam (não inventa chave nova). Herda o cache: a paleta abre por
   // cima de uma página já montada dentro de `(app)`, então o dado costuma já
   // estar quente quando o usuário aperta Ctrl+K.
@@ -182,17 +190,15 @@ export function CommandPalette({ open, onOpenChange }: Props) {
       ...doMenu,
       ...extras,
 
-      // Preferências (tema + densidade)
+      // Preferências (tema)
       { id: "pref-theme-system", type: "action", title: "Tema: seguir sistema", icon: Monitor, onSelect: () => setPreference("system"), group: "preferencias", keywords: ["theme", "auto", "modo"] },
       { id: "pref-theme-light", type: "action", title: "Tema: claro", icon: Sun, onSelect: () => setPreference("light"), group: "preferencias", keywords: ["theme", "light", "claro"] },
       { id: "pref-theme-dark", type: "action", title: "Tema: escuro", icon: Moon, onSelect: () => setPreference("dark"), group: "preferencias", keywords: ["theme", "dark", "escuro", "noturno"] },
-      { id: "pref-density-comfortable", type: "action", title: "Densidade: confortável", icon: Maximize2, onSelect: () => setDensity("comfortable"), group: "preferencias", keywords: ["density", "espaçoso"] },
-      { id: "pref-density-compact", type: "action", title: "Densidade: compacta", icon: Minimize2, onSelect: () => setDensity("compact"), group: "preferencias", keywords: ["density", "denso", "power-user"] },
 
       // Conta
       { id: "act-logout", type: "action", title: "Sair", icon: LogOut, onSelect: logout, group: "conta", keywords: ["logout", "sign out"] },
     ];
-  }, [can, modulosContratados, logout, setPreference, setDensity]);
+  }, [can, modulosContratados, logout, setPreference]);
 
   /* ---- Resultados de busca como ações ---- */
   const searchResults: CommandAction[] = useMemo(() => {

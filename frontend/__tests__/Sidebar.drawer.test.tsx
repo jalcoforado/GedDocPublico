@@ -96,11 +96,12 @@ describe("Sidebar drawer — padrão de Dialog (UX-03 fatia 3.1)", () => {
     expect(nav.contains(document.activeElement)).toBe(true);
   });
 
-  it("clicar num link da rota ATUAL fecha o drawer (pathname não muda)", () => {
+  it("clicar num link da rota ATUAL fecha o drawer (pathname não muda)", async () => {
     const onClose = vi.fn();
     renderSidebar({ modulo: "frota", open: true, onClose });
-    // "Veículos" aponta para a rota atual /m/frota/veiculos
-    fireEvent.click(screen.getByText("Veículos"));
+    // "Veículos" aponta para a rota atual /m/frota/veiculos (a seção da Frota
+    // entra quando a contratação chega — menu único).
+    fireEvent.click(await screen.findByText("Veículos"));
     expect(onClose).toHaveBeenCalled();
   });
 

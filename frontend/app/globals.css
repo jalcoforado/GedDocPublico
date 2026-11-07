@@ -6,13 +6,13 @@
  * ============================================================
  * Aprimora Design System v3 — Institucional Refinado
  *
- * Estilo: verde-petróleo formalizado como marca (era navy no v2),
- *   âmbar mantido como acento-assinatura (par quente/frio),
- *   acabamento denso/sereno (Linear/Vercel), Inter + numerais
- *   tabulares. Três camadas: primitivo → semântico → componente.
+ * Estilo: laranja do logo Aprimora como marca, marinho do wordmark
+ *   na lateral, neutros frios (par quente/frio). O verde-petróleo do
+ *   v3 saiu em 2026-11-06. Inter + numerais tabulares.
+ *   Três camadas: primitivo → semântico → componente.
  *
- * Camada primitiva (novo nesta versão): ramps HSL completos
- *   (green/amber/neutral/status) + escalas não-cor (radius, shadow,
+ * Camada primitiva: ramps HSL
+ *   (laranja/marinho/neutral/status) + escalas não-cor (radius, shadow,
  *   text, z-index). Espaço/pesos/tracking usam as escalas do próprio
  *   Tailwind. NUNCA usar primitivos direto em componente — sempre
  *   via token semântico.
@@ -23,8 +23,6 @@
  *
  * Dark mode: tokens dessaturados (não invertidos), surface
  *   elevation tonal (Material 3 style).
- *
- * Density: data-density="compact" no <html> reduz padding/gap.
  * ============================================================ */
 
 @layer base {
@@ -33,46 +31,31 @@
      * CAMADA PRIMITIVA
      * ============================================================ */
 
-    /* --- Ramp verde-petróleo (marca) --- */
-    --green-50: 166 40% 96%;
-    --green-100: 166 38% 90%;
-    --green-200: 166 36% 80%;
-    --green-300: 166 38% 67%;
-    --green-400: 166 40% 52%;
-    --green-500: 166 42% 40%;
-    --green-600: 166 44% 33%;
-    --green-700: 166 45% 28%; /* âncora de marca — AA 6.6:1 c/ texto branco */
-    --green-800: 165 48% 22%;
-    --green-900: 164 56% 16%; /* = sidebar base (light), valor v2 preservado */
-    --green-950: 164 56% 11%; /* = sidebar base (dark), valor v2 preservado */
+    /* --- Ramp laranja (marca) — do laranja do logo Aprimora (#F95C17) --- */
+    --laranja-300: 19 92% 73%;
+    --laranja-400: 18 92% 62%;
+    --laranja-500: 18 92% 56%; /* vivo #F66628 — destaque; texto escuro 5.8:1 */
+    --laranja-600: 17 85% 42%; /* âncora de marca #C64410 — texto branco 4.96:1 */
+    --laranja-700: 16 82% 36%;
 
-    /* --- Ramp âmbar (acento-assinatura) — valores v2 preservados --- */
-    --amber-50: 33 95% 97%;
-    --amber-100: 34 92% 92%;
-    --amber-200: 35 90% 84%;
-    --amber-300: 36 90% 70%;
-    --amber-400: 38 92% 56%; /* = accent-light v2 */
-    --amber-500: 35 94% 50%;
-    --amber-600: 32 95% 44%; /* = accent v2 (#d97706) */
-    --amber-700: 30 90% 39%;
-    --amber-800: 28 86% 35%; /* = accent-dark v2 */
-    --amber-900: 26 80% 26%;
-    --amber-950: 24 75% 16%;
+    /* --- Ramp marinho (lateral) — o #14204A do wordmark --- */
+    --marinho-900: 227 57% 16%; /* lateral (claro) #121C40 */
+    --marinho-950: 228 55% 10%; /* lateral (escuro) */
 
-    /* --- Ramp neutra — viés frio-esverdeado sutil (substitui os slates) --- */
+    /* --- Ramp neutra — viés frio-azulado, par do marinho --- */
     --neutral-0: 0 0% 100%;
-    --neutral-25: 120 6% 97%; /* canvas off-white — valor v2 preservado */
-    --neutral-50: 150 8% 99%;
-    --neutral-100: 150 8% 96%;
-    --neutral-200: 150 8% 90%;
-    --neutral-300: 150 8% 82%;
-    --neutral-400: 150 7% 70%;
-    --neutral-500: 150 7% 55%;
-    --neutral-600: 150 8% 52%;
-    --neutral-700: 150 9% 38%;
-    --neutral-800: 152 10% 25%;
-    --neutral-900: 152 14% 16%;
-    --neutral-950: 155 16% 9%;
+    --neutral-25: 220 22% 97%; /* canvas off-white */
+    --neutral-50: 220 25% 99%;
+    --neutral-100: 220 20% 95.5%;
+    --neutral-200: 220 16% 89%;
+    --neutral-300: 220 14% 81%;
+    --neutral-400: 220 12% 68%;
+    --neutral-500: 220 10% 53%;
+    --neutral-600: 220 11% 46%; /* 4.57:1 sobre o canvas */
+    --neutral-700: 222 14% 35%;
+    --neutral-800: 222 20% 24%;
+    --neutral-900: 224 28% 15%;
+    --neutral-950: 226 35% 9%;
 
     /* --- Ramps de status (5 degraus cada: soft-bg / soft-fg / base / dark-soft-bg / dark-soft-fg) --- */
     --red-100: 0 86% 97%;
@@ -106,11 +89,11 @@
     --radius-full: 9999px;
 
     /* --- Sombras (primitivo — tom frio neutro, substitui o navy rgba do v2) --- */
-    --shadow-xs: 0 1px 2px 0 rgba(20, 30, 27, 0.04);
-    --shadow-sm: 0 1px 3px 0 rgba(20, 30, 27, 0.07), 0 1px 2px -1px rgba(20, 30, 27, 0.05);
-    --shadow-md: 0 4px 6px -1px rgba(20, 30, 27, 0.09), 0 2px 4px -2px rgba(20, 30, 27, 0.05);
-    --shadow-lg: 0 10px 15px -3px rgba(20, 30, 27, 0.09), 0 4px 6px -4px rgba(20, 30, 27, 0.05);
-    --shadow-xl: 0 20px 25px -5px rgba(20, 30, 27, 0.11), 0 8px 10px -6px rgba(20, 30, 27, 0.06);
+    --shadow-xs: 0 1px 2px 0 rgba(16, 24, 48, 0.04);
+    --shadow-sm: 0 1px 3px 0 rgba(16, 24, 48, 0.07), 0 1px 2px -1px rgba(16, 24, 48, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(16, 24, 48, 0.09), 0 2px 4px -2px rgba(16, 24, 48, 0.05);
+    --shadow-lg: 0 10px 15px -3px rgba(16, 24, 48, 0.09), 0 4px 6px -4px rgba(16, 24, 48, 0.05);
+    --shadow-xl: 0 20px 25px -5px rgba(16, 24, 48, 0.11), 0 8px 10px -6px rgba(16, 24, 48, 0.06);
 
     /* --- Tipografia primitiva: pares tamanho/altura-de-linha --- */
     --text-xs: 0.75rem; /* 12px */
@@ -149,15 +132,17 @@
      * ============================================================ */
 
     /* === Brand === */
-    --brand: var(--green-700); /* verde-petróleo — era navy no v2 */
-    --brand-light: var(--green-600);
-    --brand-dark: var(--green-800);
-    --accent: var(--amber-600); /* âmbar #d97706 — inalterado */
-    --accent-light: var(--amber-400);
-    --accent-dark: var(--amber-800);
-    /* Âmbar da marca é claro demais para texto branco (era 3.15:1). Escurecer
-       o TEXTO mantém a cor da marca intacta; escurecer o fundo a mudaria. */
-    --accent-foreground: 24 75% 12%; /* 5.10:1 sobre --accent */
+    /* Dois laranjas com papéis distintos: a marca (queimado, onde vai texto
+       branco — botões, títulos) e o destaque (vivo, onde o laranja aparece
+       como cor — CTA da lateral, indicador de item ativo). O vivo com texto
+       branco dava 3.07:1; o texto sobre ele é escuro. */
+    --brand: var(--laranja-600);
+    --brand-light: var(--laranja-500);
+    --brand-dark: var(--laranja-700);
+    --accent: var(--laranja-500);
+    --accent-light: var(--laranja-400);
+    --accent-dark: var(--laranja-600);
+    --accent-foreground: 14 70% 10%; /* 5.78:1 sobre --accent */
 
     /* === Títulos de página ===
        Dois papéis, dois padrões: o título de tela é texto; o do "Menu
@@ -176,22 +161,26 @@
        nunca para texto. Texto usa `--assinatura-texto`. */
     --assinatura: 18 95% 53%; /* #F95C17, medido no logo */
     --assinatura-texto: 18 90% 38%; /* ~5.2:1 sobre --bg, ~5.6:1 sobre card */
+    /* Fundo da marca do MUNICÍPIO no cabeçalho: logotipo de prefeitura tem
+       texto escuro (o de Itaitinga é marinho). No claro some na faixa; no
+       escuro vira um cartão branco atrás da marca. */
+    --marca-fundo: var(--surface-1);
 
     /* === Surfaces (tonal) === */
-    --bg: var(--neutral-25); /* canvas geral — off-white, viés frio/verde */
+    --bg: var(--neutral-25); /* canvas geral — off-white, viés frio */
     --surface-1: var(--neutral-0); /* cards */
     --surface-2: var(--neutral-50); /* nested cards / hover */
     --surface-3: var(--neutral-100); /* popovers / dropdowns */
-    /* Sidebar: verde-petróleo escuro (identidade própria do módulo),
-       agora referenciando o ramp green-900/950 — look v2 preservado. */
-    --sidebar: var(--green-900); /* base ~#123f33 */
-    --sidebar-foreground: 154 18% 92%; /* ~#e8efec — itens/ícones */
-    --sidebar-muted-foreground: 158 16% 67%; /* ~#9db8af — títulos de grupo/muted */
-    --sidebar-border: 164 40% 22%;
-    --sidebar-accent: 164 52% 19%; /* hover ~#17493c */
-    --sidebar-active: 165 50% 21%; /* item ativo ~#1b5244 */
+    /* Sidebar: marinho do wordmark Aprimora; o laranja vivo do destaque lê
+       sobre ela a 5.4:1. */
+    --sidebar: var(--marinho-900);
+    --sidebar-foreground: 222 30% 92%; /* 13.6:1 — itens/ícones */
+    --sidebar-muted-foreground: 223 22% 70%; /* 7.3:1 — títulos de grupo */
+    --sidebar-border: 226 38% 24%;
+    --sidebar-accent: 226 42% 22%; /* hover */
+    --sidebar-active: 225 42% 26%; /* item ativo */
     --background: var(--bg);
-    --foreground: 155 16% 10%; /* texto principal — viés frio-esverdeado */
+    --foreground: 224 30% 12%; /* texto principal — marinho quase preto */
     --foreground-muted: var(--neutral-700);
     --foreground-subtle: var(--neutral-600);
     --card: var(--surface-1);
@@ -288,42 +277,44 @@
     --dropdown-shadow: var(--shadow-sm);
   }
 
-  /* === Dark mode: tokens dessaturados, surface tonal, viés verde === */
+  /* === Dark mode: tokens dessaturados, surface tonal, viés marinho === */
   :root.dark,
   :root[data-theme="dark"] {
-    --bg: 158 20% 8%;
-    --surface-1: 158 18% 11%; /* cards */
-    --surface-2: 158 16% 14%; /* nested */
-    --surface-3: 156 14% 17%; /* popovers */
-    /* Sidebar no dark: mesmo verde-petróleo, mais profundo — mantém a
-       identidade do módulo e a sensação de "elevação invertida" típica de
-       sidebars dark mode. */
-    --sidebar: var(--green-950); /* base ~#0c2b23 */
-    --sidebar-foreground: 154 18% 92%;
-    --sidebar-muted-foreground: 158 16% 67%;
-    --sidebar-border: 164 40% 17%;
-    --sidebar-accent: 164 45% 15%; /* hover */
-    --sidebar-active: 165 45% 18%; /* item ativo */
+    --bg: 226 30% 8%;
+    --surface-1: 226 26% 11%; /* cards */
+    --surface-2: 226 22% 14%; /* nested */
+    --surface-3: 225 20% 17%; /* popovers */
+    /* Sidebar no dark: o mesmo marinho, mais profundo — "elevação
+       invertida" típica de sidebars dark mode. */
+    --sidebar: var(--marinho-950);
+    --sidebar-foreground: 222 30% 92%;
+    --sidebar-muted-foreground: 223 20% 68%;
+    --sidebar-border: 226 35% 18%;
+    --sidebar-accent: 226 38% 16%; /* hover */
+    --sidebar-active: 225 38% 20%; /* item ativo */
     --background: var(--bg);
-    --foreground: 150 10% 96%;
-    --foreground-muted: 150 6% 70%;
-    --foreground-subtle: 150 6% 55%;
+    --foreground: 220 20% 96%;
+    --foreground-muted: 220 12% 70%;
+    --foreground-subtle: 220 10% 56%;
     --card: var(--surface-1);
     --card-foreground: var(--foreground);
-    --muted: 156 14% 17%;
+    --muted: 225 20% 17%;
     --muted-foreground: var(--foreground-muted);
-    --border: 156 12% 22%;
-    --border-strong: 156 12% 30%;
-    --input: 156 12% 22%;
+    --border: 225 18% 22%;
+    --border-strong: 225 16% 30%;
+    --input: 225 18% 22%;
 
-    --brand: var(--green-400); /* clareia pra atingir contraste no dark */
-    --brand-light: var(--green-300);
-    --brand-dark: var(--green-600);
-    --accent: 32 95% 60%; /* âmbar clareia */
-    --accent-light: 38 92% 70%;
+    /* No escuro a marca clareia (6.7:1 sobre o fundo) e o texto sobre ela
+       passa a escuro. */
+    --brand: var(--laranja-400);
+    --brand-light: var(--laranja-300);
+    --brand-dark: var(--laranja-500);
+    --accent: var(--laranja-400);
+    --accent-light: var(--laranja-300);
     --assinatura-texto: 18 95% 62%; /* clareia: o tom de texto do light some no fundo escuro */
+    --marca-fundo: var(--neutral-0); /* a marca do município não escurece */
     --primary: var(--brand);
-    --primary-foreground: 158 20% 10%;
+    --primary-foreground: 14 65% 10%;
     --ring: var(--brand-light);
 
     /* Branco sobre este vermelho dava 3.82:1. Aqui o fundo escurece em vez
@@ -352,22 +343,16 @@
     --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.55), 0 8px 10px -6px rgba(0, 0, 0, 0.35);
   }
 
-  /* Density compact — reduz padding em componentes que usam o utility .density-aware */
-  :root[data-density="compact"] {
-    --density-pad-y: 0.375rem; /* vs 0.5 default */
-    --density-pad-x: 0.625rem; /* vs 0.75 default */
-    --density-row-h: 2.25rem; /* 36px vs 44px default */
-    --density-space: 1rem; /* vs 1.5 default */
-    --density-gap: 0.5rem; /* vs 0.75 default */
-  }
+  /* Espaçamento do sistema. Houve um "modo compacto" que encolhia estes
+     valores; saiu em 2026-11-06 — uma densidade só, a confortável. */
   :root {
-    --density-pad-y: 0.5rem;
-    --density-pad-x: 0.75rem;
+    --density-pad-y: 0.75rem;
+    --density-pad-x: 0.75rem; /* lateral não cresce: tabela de 8 colunas quebrava em 1280px */
     --density-row-h: 2.75rem;
-    /* Fatia 3.9: densidade deixa de ser só de tabela — espaço de seção
-       (main, cards, PageHeader) e ritmo vertical também encolhem no compacto. */
-    --density-space: 1.5rem;
-    --density-gap: 0.75rem;
+    --density-space: 2rem; /* main, cards, PageHeader */
+    --density-gap: 1rem;
+    /* Distância entre as seções de uma tela (ver `.pagina` abaixo). */
+    --density-secao: 1.75rem;
   }
 
   html,
@@ -437,6 +422,40 @@
 }
 
 @layer components {
+  /* === Ritmo vertical das telas ===
+     A raiz de quase toda tela é um `space-y-3..6` escolhido à mão, tela a
+     tela — e o resultado era um espaçamento diferente em cada uma, quase
+     sempre apertado. O shell marca o contêiner da tela com `.pagina`, e as
+     seções da raiz passam a se afastar pelo mesmo token, que o modo
+     compacto encolhe. Especificidade (0,4,0) > a do `space-y-*` (0,3,0). */
+  .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :not([hidden]) ~ :not([hidden]) {
+    margin-top: var(--density-secao);
+  }
+
+  /* === Entrada da tela ===
+     As seções sobem e aparecem uma depois da outra (40ms de intervalo, até a
+     sexta), em vez de a tela inteira surgir de uma vez. Só opacidade e
+     transform, que o compositor anima; quem pediu menos movimento não vê. */
+  @media (prefers-reduced-motion: no-preference) {
+    .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > * {
+      animation: secao-entra 420ms var(--ease-out-expo) both;
+    }
+    .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(2) { animation-delay: 40ms; }
+    .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(3) { animation-delay: 80ms; }
+    .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(4) { animation-delay: 120ms; }
+    .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(5) { animation-delay: 160ms; }
+    .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(n + 6) { animation-delay: 200ms; }
+  }
+
+  /* === Troca de tema (ThemeToggle) ===
+     O tema novo entra por um círculo animado em JS sobre a captura nova;
+     aqui só se desliga o cross-fade padrão da View Transitions API. */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+  }
+
   /* === Workflow editor — handles visíveis === */
   .workflow-editor .react-flow__handle {
     width: 12px;
@@ -580,4 +599,15 @@
   color: hsl(var(--foreground-subtle));
   pointer-events: none;
   height: 0;
+}
+
+@keyframes secao-entra {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }

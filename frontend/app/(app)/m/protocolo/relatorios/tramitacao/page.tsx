@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ChevronDown, ChevronUp, Download, FileText } from "lucide-react";
 import Link from "next/link";
@@ -214,7 +216,7 @@ export default function RelatorioTramitacaoPage() {
         </CardContent>
       </Card>
 
-      {relQ.isLoading && <p className="text-sm text-muted-foreground">Carregando...</p>}
+      {relQ.isLoading && <Carregando className="text-sm text-muted-foreground" />}
       {relQ.error && (
         <div
           role="alert"

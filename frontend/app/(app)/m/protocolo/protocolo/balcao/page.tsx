@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   CheckCircle2,
@@ -314,7 +316,7 @@ export default function ProtocoloBalcaoPage() {
               </header>
               <div className="flex flex-wrap gap-2">
                 {especiesQ.isLoading && (
-                  <p className="text-sm text-foreground-muted">Carregando…</p>
+                  <Carregando className="text-sm text-foreground-muted" />
                 )}
                 {especies.map((esp) => {
                   const isSelected = form.id_especie_documental === esp.id;

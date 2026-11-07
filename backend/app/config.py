@@ -176,6 +176,14 @@ class Settings(BaseSettings):
     smtp_from: str = "noreply@aprimora.app"
     smtp_use_tls: bool = True  # STARTTLS
 
+    # 2FA por e-mail no login do servidor (0137). Ligado por padrão: todo
+    # servidor recebe um código de 6 dígitos a cada login, salvo no computador
+    # lembrado por 30 dias. Só vale com `SMTP_HOST` configurado (sem ele o
+    # código não chegaria — ver `routers/auth._dois_fatores_ativo`). Desligar
+    # (`DOIS_FATORES_EMAIL=false`) só em teste
+    # automatizado e e2e — a suíte não tem caixa de e-mail para ler o código.
+    dois_fatores_email: bool = True
+
     # WhatsApp — Fase 16. provider="zenvia"|"stub" (default stub mantém dev limpo).
     # zenvia_api_url default aponta pro endpoint v2 da Zenvia.
     whatsapp_provider: str = "stub"

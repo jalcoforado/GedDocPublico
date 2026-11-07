@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { use, useEffect, useState } from "react";
@@ -298,7 +300,7 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
       />
 
       {q.isLoading ? (
-        <div className="py-8 text-center text-muted-foreground">Carregando...</div>
+        <Carregando className="py-8 text-center text-muted-foreground" />
       ) : !ocorrencia ? (
         <div className="py-8 text-center text-muted-foreground">Ocorrência não encontrada.</div>
       ) : (
@@ -490,7 +492,7 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
                 />
                 <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
                   {empresasQ.isLoading ? (
-                    <div className="p-2 text-xs text-muted-foreground">Carregando...</div>
+                    <Carregando className="p-2 text-xs text-muted-foreground" />
                   ) : (empresasQ.data?.items ?? []).length === 0 ? (
                     <div className="p-2 text-xs text-muted-foreground">
                       Nenhuma empresa encontrada.
@@ -540,7 +542,7 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
                 />
                 <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
                   {permsQ.isLoading ? (
-                    <div className="p-2 text-xs text-muted-foreground">Carregando...</div>
+                    <Carregando className="p-2 text-xs text-muted-foreground" />
                   ) : (permsQ.data?.items ?? []).length === 0 ? (
                     <div className="p-2 text-xs text-muted-foreground">
                       Nenhum permissionário encontrado.
@@ -590,7 +592,7 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
                 />
                 <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
                   {veiculosQ.isLoading ? (
-                    <div className="p-2 text-xs text-muted-foreground">Carregando...</div>
+                    <Carregando className="p-2 text-xs text-muted-foreground" />
                   ) : (veiculosQ.data?.items ?? []).length === 0 ? (
                     <div className="p-2 text-xs text-muted-foreground">
                       Nenhum veículo encontrado.

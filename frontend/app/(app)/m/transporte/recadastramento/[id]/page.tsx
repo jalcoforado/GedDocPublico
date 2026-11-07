@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlarmClock, Building2, IdCard, Inbox, Play, RefreshCw } from "lucide-react";
 import Link from "next/link";
@@ -156,7 +158,7 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
   const encerrado = ciclo?.situacao === "encerrado";
 
   if (cicloQ.isLoading) {
-    return <div className="text-center text-muted-foreground py-8">Carregando...</div>;
+    return <Carregando className="text-center text-muted-foreground py-8" />;
   }
   if (cicloQ.isError || !ciclo) {
     return (
@@ -244,7 +246,7 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
       </div>
 
       {convocacoesQ.isLoading ? (
-        <div className="text-center text-muted-foreground py-8">Carregando...</div>
+        <Carregando className="text-center text-muted-foreground py-8" />
       ) : convocacoes.length === 0 ? (
         // "A busca não achou" NÃO oferece gerar: o ciclo pode ter centenas de
         // convocados e o botão sugeriria que a lista está vazia.

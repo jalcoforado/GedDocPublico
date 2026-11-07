@@ -25,6 +25,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog } from "@/components/ui/dialog";
+import { ParadosHaMaisTempo } from "@/components/protocolo/ParadosHaMaisTempo";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -42,7 +43,9 @@ import { cn } from "@/lib/utils";
  *
  * Mora no módulo (`/m/protocolo/painel`), e não na tela inicial, por decisão
  * do produto: é o painel de quem opera processos, como no SEI é a porta do
- * sistema de processos. A `/home` leva quem opera processos até aqui.
+ * sistema de processos. A `/home` deixou de redirecionar para cá em
+ * 2026-11-05: virou o Início que atravessa os módulos, e um dos cartões dela
+ * resume este painel.
  *
  * Os números vêm de `GET /processos/painel`, no mesmo recorte das caixas de
  * trabalho (unidade ATIVA, sigilo de quem consulta): o quadro diz 12 e a
@@ -364,6 +367,16 @@ export function PainelDeControle() {
               />
               Atualizar
             </Button>
+            {/* O painel é o ponto de partida do dia: abrir processo daqui,
+                sem ir antes à lista (pedido do Jorge, 2026-11-06). */}
+            {can("processo", "inserir") && (
+              <Button asChild size="sm">
+                <Link href="/m/protocolo/processos/novo">
+                  <FilePlus2 className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                  Abrir processo
+                </Link>
+              </Button>
+            )}
           </div>
         }
       />
@@ -391,6 +404,10 @@ export function PainelDeControle() {
       {operaProcessos && unidadeVazia && <PrimeiroUso podeAbrir={can("processo", "inserir")} />}
 
       {operaProcessos && painel && <Tabelas painel={painel} />}
+
+      {operaProcessos && painel && !unidadeVazia && (
+        <ParadosHaMaisTempo intervalo={INTERVALO_ATUALIZACAO} />
+      )}
 
       {configurando && (
         <ConfigurarQuadros

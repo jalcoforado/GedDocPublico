@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardList, Inbox, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -204,7 +206,7 @@ export default function ItensRecadastramentoPage() {
       </div>
 
       {listaQ.isLoading ? (
-        <div className="text-center text-muted-foreground py-8">Carregando...</div>
+        <Carregando className="text-center text-muted-foreground py-8" />
       ) : itens.length === 0 ? (
         <EmptyState
           icon={Inbox}

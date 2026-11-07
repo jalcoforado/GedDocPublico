@@ -7,8 +7,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
 import { AtalhosPublicos, CAMPO_LOGIN, CAMPO_SENHA_LOGIN } from "@/components/login/comum";
+import { EsqueciSenha } from "@/components/login/EsqueciSenha";
+import { EtapaCodigo } from "@/components/login/EtapaCodigo";
 import { PasswordInput } from "@/components/ui/password-input";
-import { api } from "@/lib/api";
+import { type LoginResponse, api } from "@/lib/api";
 import { useBranding } from "@/lib/branding";
 import { destinoDaQuery } from "@/lib/destino-login";
 
@@ -41,7 +43,10 @@ export default function LoginPage() {
   const [email, setEmail] = useState(DEV ? "admin@local.test" : "");
   const [senha, setSenha] = useState(DEV ? "admin123" : "");
   const [lembrar, setLembrar] = useState(false);
-  const [ajudaSenha, setAjudaSenha] = useState(false);
+  // Passos da tela: senha → (2FA) código; "Não lembro a senha" troca o
+  // formulário pelo pedido de link.
+  const [etapa, setEtapa] = useState<"senha" | "codigo" | "esqueci">("senha");
+  const [desafio, setDesafio] = useState<{ token: string; email: string | null } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // A foto entra com fade quando termina de carregar. Sem isso, em conexão
@@ -76,6 +81,22 @@ export default function LoginPage() {
       // launcher de módulos (F2 Task 5) — não mais o dashboard fixo /home.
       const r = await api.login(email, senha);
       gravarEmailLembrado(lembrar ? email : null);
+      if (r.requer_2fa && r.desafio) {
+        // 2FA por e-mail (0136): a senha passou, mas a sessão só sai com o
+        // código. Este computador não está entre os lembrados.
+        setDesafio({ token: r.desafio, email: r.email_mascarado ?? null });
+        setEtapa("codigo");
+        return;
+      }
+      entrou(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao autenticar");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function entrou(r: LoginResponse) {
       // `must_change_password` tem PRECEDÊNCIA sobre o `next` (SEC-1). O
       // destino guardado na URL é conveniência de navegação; a troca de senha
       // obrigatória é decisão do backend, e deixá-la ser pulada por um
@@ -89,11 +110,12 @@ export default function LoginPage() {
           ? "/alterar-senha-obrigatoria"
           : destinoDaQuery(window.location.search),
       );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao autenticar");
-    } finally {
-      setLoading(false);
-    }
+  }
+
+  function voltarAoLogin() {
+    setEtapa("senha");
+    setDesafio(null);
+    setError(null);
   }
 
   const nome = branding?.nome ?? "Aprimora";
@@ -190,9 +212,22 @@ export default function LoginPage() {
                   </div>
                 </div>
               )}
-              <h1 className="mt-8 text-2xl font-normal text-foreground-muted">Login</h1>
+              <h1 className="mt-8 text-2xl font-normal text-foreground-muted">
+                {etapa === "codigo" ? "Confirme que é você" : etapa === "esqueci" ? "Nova senha" : "Login"}
+              </h1>
             </div>
 
+            {etapa === "codigo" && desafio && (
+              <EtapaCodigo
+                desafio={desafio.token}
+                emailMascarado={desafio.email}
+                onEntrou={entrou}
+                onVoltar={voltarAoLogin}
+              />
+            )}
+            {etapa === "esqueci" && <EsqueciSenha emailInicial={email} onVoltar={voltarAoLogin} />}
+
+            {etapa === "senha" && (
             <form onSubmit={handleSubmit} className="mt-5 space-y-3.5" noValidate>
               <div>
                 <label htmlFor="email" className="sr-only">
@@ -241,21 +276,15 @@ export default function LoginPage() {
                 </label>
                 <button
                   type="button"
-                  onClick={() => setAjudaSenha((v) => !v)}
-                  aria-expanded={ajudaSenha}
-                  className="rounded text-foreground-muted underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => {
+                    setError(null);
+                    setEtapa("esqueci");
+                  }}
+                  className="-mx-1.5 rounded px-1.5 py-0.5 text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   Não lembro a senha
                 </button>
               </div>
-
-              {ajudaSenha && (
-                <p className="rounded-2xl border border-border bg-surface-1 px-4 py-3 text-sm text-foreground-muted">
-                  <strong className="font-medium text-foreground">Servidor:</strong>{" "}
-                  peça a redefinição da senha ao administrador do sistema na sua
-                  secretaria.
-                </p>
-              )}
 
               {error && (
                 <div
@@ -271,7 +300,7 @@ export default function LoginPage() {
                   type="submit"
                   disabled={loading}
                   aria-label="Entrar como servidor"
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-success px-4 font-display text-base font-medium text-success-foreground shadow-sm transition-all duration-fast hover:bg-success/90 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-primary px-4 font-display text-base font-medium text-primary-foreground shadow-sm transition-all duration-fast hover:bg-primary/90 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Users className="h-5 w-5" aria-hidden="true" />
                   {loading ? "Entrando..." : "Servidor"}
@@ -292,6 +321,7 @@ export default function LoginPage() {
                 </p>
               )}
             </form>
+            )}
 
             <p className="mt-8 px-2 text-sm text-foreground-muted">
               Ainda não tem acesso?{" "}

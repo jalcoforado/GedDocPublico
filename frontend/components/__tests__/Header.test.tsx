@@ -10,9 +10,6 @@ const openSpy = vi.fn();
 vi.mock("@/components/CommandPalette", () => ({
   useCommandPalette: () => ({ open: openSpy }),
 }));
-vi.mock("@/components/ModuloSwitcher", () => ({
-  ModuloSwitcher: () => <div data-testid="switcher" />,
-}));
 vi.mock("@/components/NotificacoesBell", () => ({
   NotificacoesBell: () => <div data-testid="bell" />,
 }));
@@ -21,6 +18,9 @@ vi.mock("@/components/AvatarDropdown", () => ({
 }));
 vi.mock("@/components/UnidadeAtiva", () => ({
   UnidadeAtiva: () => <div data-testid="unidade" />,
+}));
+vi.mock("@/components/ThemeToggle", () => ({
+  ThemeToggle: () => <div data-testid="tema" />,
 }));
 vi.mock("@/lib/branding", () => ({ useBranding: () => null }));
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: null }) }));

@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -157,7 +159,7 @@ export default function TemplatesDocumentoPage() {
       </div>
 
       {listQ.isLoading ? (
-        <p className="text-sm text-muted-foreground">Carregando…</p>
+        <Carregando className="text-sm text-muted-foreground" />
       ) : templates.length === 0 ? (
         <p className="text-sm text-gray-500">
           Nenhum template cadastrado. Crie o primeiro modelo.

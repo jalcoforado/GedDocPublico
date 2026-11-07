@@ -1,7 +1,7 @@
 /**
- * UX-03 fatia 3.9 — densidade de verdade (P1-13): o "Modo compacto" só
- * mudava tabelas. Agora `--density-*` é consumido pelo <main>, cards,
- * PageHeader e controles de formulário — o toggle muda a tela inteira.
+ * UX-03 fatia 3.9 — `--density-*` é a régua de espaço do sistema: consumida
+ * pelo <main>, cards, PageHeader e controles de formulário. Houve um "modo
+ * compacto" que encolhia esses tokens; saiu em 2026-11-06 (uma densidade só).
  */
 import { render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
@@ -43,13 +43,9 @@ import { ThemeProvider } from "@/lib/theme";
 const globals = readFileSync(join(__dirname, "..", "app", "globals.css"), "utf8");
 
 describe("densidade de verdade (UX-03 fatia 3.9)", () => {
-  it("o modo compacto redefine os tokens de espaço de seção e ritmo vertical", () => {
-    const compacto = globals.match(
-      /:root\[data-density="compact"\]\s*\{[^}]*\}/,
-    )?.[0];
-    expect(compacto, "bloco compact existe").toBeTruthy();
-    expect(compacto).toContain("--density-space:");
-    expect(compacto).toContain("--density-gap:");
+  it("não há mais modo compacto: os tokens de espaço têm um valor só", () => {
+    expect(globals).not.toContain('data-density="compact"');
+    expect(globals.match(/--density-space:/g)).toHaveLength(1);
   });
 
   it("o <main> respira com --density-space (não p-6 fixo)", () => {

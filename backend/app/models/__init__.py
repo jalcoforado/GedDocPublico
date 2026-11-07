@@ -96,6 +96,7 @@ from .nivel import Nivel
 from .servico import Servico
 from .sistema import Sistema
 from .tenant import Tenant
+from .token_conta import TokenConta
 from .transporte_regulado import (
     Empresa,
     Linha,
@@ -247,6 +248,7 @@ __all__ = [
     "VeiculoVistoria",
     "VeiculoDocumentoRegulado",
     "VeiculoAvaliacao",
+    "TokenConta",
     "Usuario",
     "UsuarioExterno",
     "UsuarioGrupo",

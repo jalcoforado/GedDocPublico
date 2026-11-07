@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useQuery } from "@tanstack/react-query";
 import { AlertOctagon } from "lucide-react";
 import Link from "next/link";
@@ -43,7 +45,7 @@ export default function CidadaoDenunciasPage() {
     enabled: !!cidadao,
   });
 
-  if (loading) return <p className="text-sm text-muted-foreground">Carregando...</p>;
+  if (loading) return <Carregando className="text-sm text-muted-foreground" />;
   if (!cidadao) return null;
 
   const itens = q.data ?? [];
@@ -63,7 +65,7 @@ export default function CidadaoDenunciasPage() {
         </CardHeader>
         <CardContent>
           {q.isLoading && (
-            <p className="py-6 text-center text-sm text-muted-foreground">Carregando...</p>
+            <Carregando className="py-6 text-center text-sm text-muted-foreground" />
           )}
           {!q.isLoading && itens.length === 0 && (
             <EmptyState

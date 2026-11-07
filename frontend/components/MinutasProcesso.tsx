@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -103,7 +105,7 @@ export function MinutasProcesso({ processo }: { processo: ProcessoDetail }) {
       </div>
 
       {minutasQ.isLoading ? (
-        <p className="text-sm text-muted-foreground">Carregando…</p>
+        <Carregando className="text-sm text-muted-foreground" />
       ) : minutas.length === 0 ? (
         <p className="text-sm text-gray-500">
           Nenhum documento redigido. Use "Redigir documento" para criar a partir de um

@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Inbox, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
@@ -151,7 +153,7 @@ export function AlvaraVeiculosModal({
         <div className="space-y-3">
           <h3 className="font-semibold">Veículos Vinculados</h3>
           {veiculosLoading ? (
-            <div className="text-center text-gray-600">Carregando...</div>
+            <Carregando className="text-center text-gray-600" />
           ) : !veiculosAlvara || veiculosAlvara.items.length === 0 ? (
             <EmptyState
               icon={Inbox}

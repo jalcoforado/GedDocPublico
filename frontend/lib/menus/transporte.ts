@@ -24,13 +24,15 @@ export const menuTransporte: MenuModulo = {
       title: "Transporte Regulado",
       defaultOpen: false,
       items: [
-        { label: "Transporte Regulado", href: "/m/transporte", icon: Bus, perm: "transporte_regulado" },
+        // Índice do módulo (`lib/transporte-hub.ts`): os cartões dela levam ao que não está na barra.
+        { label: "Visão geral", href: "/m/transporte", icon: Bus, perm: "transporte_regulado" },
         // Mapa dos três caminhos do módulo: alvará, recadastramento e ocorrência.
         {
           label: "Fluxo do processo",
           href: "/m/transporte/fluxo",
           icon: Workflow,
           perm: "transporte_regulado",
+          lugar: "hub",
         },
         {
           label: "Permissionários",
@@ -43,12 +45,14 @@ export const menuTransporte: MenuModulo = {
           href: "/m/transporte/empresas",
           icon: Building2,
           perm: "transporte_regulado",
+          lugar: "hub",
         },
         {
           label: "Veículos",
           href: "/m/transporte/veiculos",
           icon: Car,
           perm: "transporte_regulado",
+          lugar: "hub",
         },
         {
           label: "Alvarás",
@@ -61,18 +65,21 @@ export const menuTransporte: MenuModulo = {
           href: "/m/transporte/pontos",
           icon: MapPin,
           perm: "transporte_regulado",
+          lugar: "hub",
         },
         {
           label: "Mapa dos pontos",
           href: "/m/transporte/mapa",
           icon: MapPinned,
           perm: "transporte_regulado",
+          lugar: "hub",
         },
         {
           label: "Linhas e Itinerários",
           href: "/m/transporte/linhas",
           icon: Route,
           perm: "transporte_regulado",
+          lugar: "hub",
         },
         {
           label: "Ocorrências",
@@ -91,6 +98,7 @@ export const menuTransporte: MenuModulo = {
           href: "/m/transporte/relatorio",
           icon: BarChart3,
           perm: "transporte_regulado",
+          lugar: "hub",
         },
       ],
     },

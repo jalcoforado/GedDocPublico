@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { KpiCard } from "@/components/ui/kpi-card";
+import { AbasSolicitacoes } from "@/components/pagamentos/AbasSolicitacoes";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { SkeletonRow } from "@/components/ui/skeleton";
@@ -134,6 +135,8 @@ export default function SolicitacoesPage() {
           </div>
         }
       />
+
+      <AbasSolicitacoes />
 
       {/* Sumário clicável por etapa */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">

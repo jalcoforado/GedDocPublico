@@ -16,7 +16,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/theme", () => ({
-  useTheme: () => ({ setPreference: vi.fn(), setDensity: vi.fn() }),
+  useTheme: () => ({ setPreference: vi.fn() }),
 }));
 
 const canMock = vi.fn((_perm: string) => true);
@@ -58,7 +58,7 @@ describe("CommandPalette — módulo e permissão", () => {
     modulosMock.mockResolvedValue({ itens: [{ slug: "protocolo", nome: "Protocolo", icone: null, ordem: 1 }] });
     renderPalette();
 
-    await waitFor(() => expect(screen.getByText("Todos os processos")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Caixas de trabalho")).toBeTruthy());
     // Frota e administração não estão contratados — seus itens não podem
     // aparecer, mesmo que o usuário tenha permissão para tudo.
     expect(screen.queryByText("Frota Pública")).toBeNull();
@@ -77,7 +77,7 @@ describe("CommandPalette — módulo e permissão", () => {
     await waitFor(() => expect(screen.getByText("Workflows")).toBeTruthy());
     // "Processos" exige perm "processo", negada — some, embora o módulo
     // protocolo esteja contratado.
-    expect(screen.queryByText("Todos os processos")).toBeNull();
+    expect(screen.queryByText("Caixas de trabalho")).toBeNull();
     // O atalho "Novo processo" (não vem de lib/menus, é item extra) usa a
     // MESMA regra de permissão — também some.
     expect(screen.queryByText("Novo processo")).toBeNull();
@@ -93,7 +93,7 @@ describe("CommandPalette — módulo e permissão", () => {
     expect(screen.getByText("Preferências de notificações")).toBeTruthy();
     expect(screen.getByText("Início")).toBeTruthy();
     // Itens de módulo (nenhum contratado) somem.
-    expect(screen.queryByText("Todos os processos")).toBeNull();
+    expect(screen.queryByText("Caixas de trabalho")).toBeNull();
     expect(screen.queryByText("Novo processo")).toBeNull();
     // Ações que não são navegação por módulo (preferências, conta) continuam.
     expect(screen.getByText("Sair")).toBeTruthy();

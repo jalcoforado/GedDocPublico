@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Inbox, Plus, Tags } from "lucide-react";
 import { useState } from "react";
@@ -150,7 +152,7 @@ export default function OcorrenciasTiposPage() {
       />
 
       {q.isLoading ? (
-        <div className="py-8 text-center text-muted-foreground">Carregando...</div>
+        <Carregando className="py-8 text-center text-muted-foreground" />
       ) : itens.length === 0 ? (
         <EmptyState
           icon={Inbox}

@@ -32,22 +32,16 @@ const TODOS = Object.values(MENUS).flatMap((m) => hrefs(m.grupos.flatMap((g) => 
 const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> = {
   "/home": {},
   "/m/protocolo/painel": { perm: "processo" },
+  // "Caixas de trabalho": UM item. As caixas são abas da tela, não itens do
+  // menu (`components/protocolo/AbasCaixas.tsx`).
   "/m/protocolo/processos": { perm: "processo" },
-  // Caixas de trabalho — subitens de Processos. Literais de propósito: esta
-  // tabela é a fonte INDEPENDENTE, e montá-la a partir de `CAIXAS` faria o
-  // teste concordar com qualquer coisa que o menu dissesse.
-  "/m/protocolo/processos?caixa=entrada&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=saida&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=recusados&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=analise&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=externos&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=aguardando_assinatura&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=enviado_para_assinatura&ativos=0": { perm: "processo" },
-  "/m/protocolo/processos?caixa=arquivados&ativos=0": { perm: "processo" },
   "/m/protocolo/fluxo": { perm: "processo" },
   "/m/protocolo/workflow": {},
   "/m/protocolo/relatorios": { perm: "processo" },
   "/m/protocolo/protocolo/balcao": { perm: "processo" },
+  // Tela-índice do menu único: sem poda própria — cada cartão dela é podado
+  // pela permissão do item que leva.
+  "/m/protocolo/cadastros": {},
   "/m/protocolo/protocolo/vencendo-prazo": { perm: "processo" },
   "/m/protocolo/protocolo/ccd": { perm: "catalogo" },
   "/m/protocolo/protocolo/ttd": { perm: "catalogo" },
@@ -86,6 +80,12 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   },
   "/m/pagamentos/solicitacoes": {
     anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar"],
+  },
+  // Tela-índice do menu único ("Cadastros e controle"): qualquer leitura do módulo.
+  "/m/pagamentos/cadastros": {
+    anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar",
+            "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
+            "pagamento_cadastro"],
   },
   "/m/pagamentos/solicitacoes/gestor": { perm: "pagamento_gerir" },
   "/m/pagamentos/solicitacoes/validacao": { perm: "pagamento_validar" },
@@ -201,10 +201,12 @@ describe("split dos menus", () => {
   it("a ordem dos grupos dentro de cada módulo é a do NAV original", () => {
     const ORDEM_ESPERADA: Record<string, string[]> = {
       comum: ["Geral"],
-      protocolo: ["Processos", "Protocolo", "Cadastros"],
+      // Menu único (2026-11-05): o 1º grupo tem as telas da barra; os demais
+      // são as seções da tela-índice do módulo (`lugar: "hub"`).
+      protocolo: ["Processos", "Fluxo e prazos", "Gestão documental", "Cadastros"],
       frota: ["Frota"],
       transporte: ["Transporte Regulado"],
-      pagamentos: ["Pagamentos"],
+      pagamentos: ["Pagamentos", "Controle", "Cadastros"],
       administracao: ["Administração"],
     };
     for (const [slug, menu] of Object.entries(MENUS)) {

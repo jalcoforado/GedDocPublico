@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Clock, XCircle } from "lucide-react";
 import { useState } from "react";
@@ -66,7 +68,7 @@ export function AssinaturasProcesso({ processo }: { processo: ProcessoDetail }) 
         </Button>
       </div>
 
-      {listQ.isLoading && <p className="text-sm text-gray-500">Carregando...</p>}
+      {listQ.isLoading && <Carregando className="text-sm text-gray-500" />}
 
       {(listQ.data ?? []).map((s) => (
         <SolicitacaoCard

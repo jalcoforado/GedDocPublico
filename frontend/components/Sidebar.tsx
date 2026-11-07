@@ -9,43 +9,39 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { api, type CaixasContagem } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { canSeeItem, MENUS, menuDoModulo, type NavGroup, type NavItem } from "@/lib/menus";
+import { canSeeItem, MENUS, type NavGroup, type NavItem } from "@/lib/menus";
+import { nomeDoModulo } from "@/lib/modulos";
 import { cn } from "@/lib/utils";
-import { DensityToggle } from "./DensityToggle";
 import { MarcaDoMunicipio } from "./MarcaDoMunicipio";
 import { Popover } from "@/components/ui/popover";
-import { SidebarModuloHeader } from "./SidebarModuloHeader";
-import { ThemeToggle } from "./ThemeToggle";
 
 function isPathActive(href: string, pathname: string): boolean {
-  // O `href` pode carregar query (as caixas de Processos); para o CAMINHO
-  // ela não conta.
+  // Query no `href` não conta para o CAMINHO.
   const caminho = href.split("?")[0];
   return pathname === caminho || pathname.startsWith(caminho + "/");
 }
 
 /**
- * Qual subitem está aberto, quando vários compartilham o caminho e só a query
- * os distingue. Item com `filtro` é ativo quando a URL tem aquele parâmetro
- * com aquele valor; item sem `filtro` é "o resto" — ativo quando o caminho
- * casa e nenhum irmão com filtro casa.
+ * Qual item do grupo está aberto. O caminho de um item casa também com as
+ * subpáginas dele, então irmãos aninhados casam juntos: em
+ * `/m/pagamentos/dashboard`, "Visão geral" (`/m/pagamentos`) e "Dashboard"
+ * casavam os dois, e o menu marcava duas páginas atuais. Vence o irmão de
+ * caminho MAIS LONGO — o mais específico. Sem irmão mais específico casando,
+ * o item continua aceso nas próprias subpáginas (o detalhe de um processo
+ * acende "Caixas de trabalho").
  */
-function filhoAtivo(
-  filho: NavItem,
-  irmaos: NavItem[],
-  pathname: string,
-  busca: URLSearchParams,
-): boolean {
+function filhoAtivo(filho: NavItem, irmaos: NavItem[], pathname: string): boolean {
   if (!isPathActive(filho.href, pathname)) return false;
-  const casa = (i: NavItem) => !!i.filtro && busca.get(i.filtro.chave) === i.filtro.valor;
-  if (filho.filtro) return casa(filho);
-  return !irmaos.some((i) => i !== filho && isPathActive(i.href, pathname) && casa(i));
+  const tamanho = (i: NavItem) => i.href.split("?")[0].length;
+  return !irmaos.some(
+    (i) => i !== filho && isPathActive(i.href, pathname) && tamanho(i) > tamanho(filho),
+  );
 }
 
 /** True se o item OU algum descendente corresponde ao pathname atual. */
@@ -62,52 +58,52 @@ interface SidebarProps {
 }
 
 const COLLAPSED_KEY = "aprimora.sidebar.collapsed";
-const GROUP_STATE_KEY = "aprimora.sidebar.groups.v1";
+// v2: os títulos dos grupos viraram nomes de módulo no menu único — o estado
+// salvo da v1 ("Processos", "Cadastros"…) não se aplica mais.
+const GROUP_STATE_KEY = "aprimora.sidebar.groups.v2";
 const FOCUSABLE =
   'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function Sidebar({ modulo, open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { can } = useAuth();
-  // Transversais (comum) sempre primeiro — é a ordem do NAV original ("Geral"
-  // abria a lista) e continua sendo o caminho de volta para /home e
-  // /dashboard, agora no topo em vez do fim. Depois vêm os grupos do módulo
-  // ativo. "comum" nunca duplica: menuDoModulo(null) devolve null, e o guard
-  // `menu.slug !== "comum"` evita repetir o grupo se algum dia o slug do
-  // pathname vier como "comum" por engano (hoje nenhuma entrada de
-  // ROTA_MODULO mapeia para "comum" — é defesa, não caminho alcançável).
-  const menu = menuDoModulo(modulo);
+  // MENU ÚNICO (2026-11-05, no modelo do IAnalisys): a barra mostra TODOS os
+  // módulos contratados, em toda tela — inclusive no Início —, e não mais só
+  // o módulo da URL. Cada módulo é uma seção aberta com as suas telas de
+  // trabalho (`lugar` "barra"); cadastros e configuração moram na tela-índice
+  // do módulo (`lugar` "hub"), etapas de uma lista viram abas ("aba"). O
+  // launcher `/modulos` e as trocas de módulo saíram: a barra já é a troca.
+  //
+  // Contratação vem de `/modulos/me` (mesma chave do guard de módulo). Se
+  // ela falhar, cai no comportamento antigo — só o módulo da URL —, para uma
+  // falha temporária não esvaziar o menu.
+  const modulosQ = useQuery({ queryKey: ["modulos-me"], queryFn: api.modulos, staleTime: 5 * 60_000 });
+  const contratados = modulosQ.isError
+    ? modulo && MENUS[modulo] ? [modulo] : []
+    : [...(modulosQ.data?.itens ?? [])]
+        .sort((a, b) => a.ordem - b.ordem)
+        .map((m) => m.slug)
+        .filter((s) => s !== "comum" && !!MENUS[s]);
+  const naBarra = (items: NavItem[]) => items.filter((i) => (i.lugar ?? "barra") === "barra");
+  const secao = (slug: string): NavGroup => {
+    const m = MENUS[slug];
+    const quieto = m.grupos.some((g) => g.quieto);
+    return {
+      title: nomeDoModulo(slug),
+      items: naBarra(m.grupos.flatMap((g) => g.items)),
+      defaultOpen: !quieto,
+      quieto,
+    };
+  };
   const NAV: NavGroup[] = [
     ...MENUS.comum.grupos,
-    ...(menu && menu.slug !== "comum" ? menu.grupos : []),
+    // Os de trabalho na ordem do catálogo; os "quietos" (Administração) no fim.
+    ...contratados.filter((s) => !MENUS[s].grupos.some((g) => g.quieto)).map(secao),
+    ...contratados.filter((s) => MENUS[s].grupos.some((g) => g.quieto)).map(secao),
   ];
-  // A QUERY da URL, que é o que distingue as caixas de Processos entre si
-  // (todas têm o mesmo caminho). Quem a lê é `LeitorDaBusca`, lá embaixo,
-  // dentro de Suspense — `useSearchParams` chamado direto aqui obrigaria toda
-  // página do shell a abrir mão da pré-renderização.
-  const [buscaStr, setBuscaStr] = useState("");
-  const busca = useMemo(() => new URLSearchParams(buscaStr), [buscaStr]);
-
-  // Contadores das caixas, para os itens do menu que declaram `contador`.
-  // Falha aqui não derruba o menu: os itens continuam navegáveis, sem número.
-  const temContador = NAV.some((g) =>
-    g.items.some((i) => i.contador || i.children?.some((c) => c.contador)),
-  );
-  const caixasQ = useQuery({
-    queryKey: ["processos-caixas"],
-    queryFn: () => api.processos.caixas(),
-    enabled: temContador,
-    staleTime: 0,
-  });
-  // A barra não desmonta entre telas, então o `staleTime` sozinho não refaz
-  // nada. Encaminhar e receber acontecem no detalhe do processo: refaz a
-  // contagem a cada navegação, que é quando o número pode ter mudado.
-  const { refetch: recontarCaixas } = caixasQ;
-  useEffect(() => {
-    if (temContador) void recontarCaixas();
-  }, [pathname, buscaStr, temContador, recontarCaixas]);
-  const contagem = caixasQ.data;
-
+  // "Abrir processo" (ação principal do Protocolo) no alto da barra, em
+  // qualquer tela, quando o Protocolo está contratado.
+  const acao = contratados.includes("protocolo") ? MENUS.protocolo.acaoPrincipal : undefined;
   // PR3a — link de plataforma só aparece para admin de plataforma (allowlist).
   const adminMeQ = useQuery({
     queryKey: ["admin-me"],
@@ -174,8 +170,11 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
     if (activeParent && !subOpen[activeParent.label]) {
       setSubOpen((prev) => ({ ...prev, [activeParent.label]: true }));
     }
+    // `modulosQ.data`: no menu único as seções só existem depois que a
+    // contratação chega. Só com `pathname`, quem recarregava dentro da
+    // Administração (seção fechada por padrão) não via o item atual.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+  }, [pathname, modulosQ.data]);
 
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
@@ -217,6 +216,23 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
   // estática e nada disto roda.
   const navRef = useRef<HTMLElement>(null);
   const focoAnterior = useRef<HTMLElement | null>(null);
+
+  // Com todos os módulos na barra, ela passa da altura da tela: o item atual
+  // pode nascer abaixo da dobra (Administração, no fim). Rola só a barra, e só
+  // o necessário (`nearest`), uma vez por página. A rolagem fica PENDENTE até
+  // o item estar visível: a seção dele pode ainda estar fechada no render em
+  // que a página muda (a Administração abre no render seguinte).
+  const rolarPendente = useRef(true);
+  useEffect(() => {
+    rolarPendente.current = true;
+  }, [pathname, modulosQ.data]);
+  useEffect(() => {
+    if (!rolarPendente.current) return;
+    const atual = navRef.current?.querySelector<HTMLElement>('a[aria-current="page"]');
+    if (!atual || atual.getClientRects().length === 0) return; // ainda escondido
+    atual.scrollIntoView?.({ block: "nearest" });
+    rolarPendente.current = false;
+  });
   useEffect(() => {
     if (!open) return;
     const nav = navRef.current;
@@ -292,31 +308,22 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         className={cn(
           "fixed inset-y-0 left-0 z-modal flex w-72 shrink-0 flex-col overflow-hidden",
           "border-r border-sidebar-border bg-sidebar text-sidebar-foreground pt-safe transition-[transform,width] duration-base ease-out-expo",
-          "md:static md:w-[68px] md:translate-x-0",
-          !colapsada && "lg:w-64",
+          "md:static md:w-[72px] md:translate-x-0",
+          !colapsada && "lg:w-64 min-[1440px]:w-72",
           open ? "translate-x-0 shadow-xl" : "-translate-x-full shadow-none md:translate-x-0",
         )}
       >
-        {/* Marca do município — é AQUI que ela mora quando há menu lateral; o
-            cabeçalho só a mostra onde não há menu ao lado. Num cartão claro,
-            como no cabeçalho: a marca de prefeitura costuma ter texto escuro,
-            e a barra pode ser de qualquer cor. Recolhida, a barra tem 68px e
-            a marca horizontal não cabe: entra a quadrada (o brasão). */}
-        <div className="flex items-center justify-between gap-2 border-b border-sidebar-border px-3 py-3">
+        {/* A marca do município mora no cabeçalho, que passa por cima da
+            barra (2026-11-06). Aqui ela só aparece na GAVETA do celular, que
+            cobre o cabeçalho — num cartão claro, porque a marca de prefeitura
+            tem texto escuro e a barra é verde. */}
+        <div className="flex items-center justify-between gap-2 border-b border-sidebar-border px-4 py-3 md:hidden">
           <Link
             href="/home"
             aria-label="Início"
-            className={cn(
-              "flex h-11 min-w-0 items-center rounded-lg bg-card px-3 shadow-sm transition-shadow duration-fast hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              colapsada && "md:w-11 md:justify-center md:px-1",
-            )}
+            className="flex h-12 min-w-0 items-center rounded-lg bg-marca-fundo px-3 shadow-sm transition-shadow duration-fast hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <span className={cn("flex min-w-0 items-center", colapsada && "md:hidden")}>
-              <MarcaDoMunicipio />
-            </span>
-            <span className={cn("hidden", colapsada && "md:flex")}>
-              <MarcaDoMunicipio quadrada />
-            </span>
+            <MarcaDoMunicipio className="h-9" />
           </Link>
           <button
             type="button"
@@ -328,16 +335,27 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
           </button>
         </div>
 
-        <Suspense fallback={null}>
-          <LeitorDaBusca aoMudar={setBuscaStr} />
-        </Suspense>
-
-        {/* Cabeçalho de módulo — onde o usuário está e o caminho de volta a
-            /modulos. Acima de todos os grupos, de propósito (ver componente). */}
-        <SidebarModuloHeader modulo={modulo} collapsed={colapsada} />
+        {/* Ação principal do módulo (`MenuModulo.acaoPrincipal`): fora dos
+            grupos, acima deles — não é uma tela para navegar, é o que se veio
+            fazer. Sem a permissão de criar, não aparece. */}
+        {acao && can(acao.perm, acao.action) && (
+          <div className={cn("px-4 pb-1 pt-5", colapsada && "md:px-2")}>
+            <Link
+              href={acao.href}
+              title={colapsada ? acao.label : undefined}
+              className={cn(
+                "flex h-11 items-center justify-center gap-2 rounded-button bg-accent px-3 text-sm font-semibold text-accent-foreground shadow-button transition-colors duration-fast hover:bg-accent-light",
+                colapsada && "md:px-0",
+              )}
+            >
+              <acao.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className={cn(colapsada && "md:sr-only")}>{acao.label}</span>
+            </Link>
+          </div>
+        )}
 
         {/* Items */}
-        <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 py-2">
+        <div className={cn("flex flex-1 flex-col gap-5 overflow-y-auto px-4 py-4", colapsada && "md:gap-2 md:px-2")}>
           {NAV.map((group) => {
             const visible = group.items
               .filter((item) => canSeeItem(item, can))
@@ -355,9 +373,16 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
             const slugId = `nav-group-${group.title.toLowerCase().replace(/\s+/g, "-")}`;
 
             return (
-              <div key={group.title} className="rounded-md">
+              <div
+                key={group.title}
+                className={cn(
+                  "rounded-md",
+                  // Destaque baixo (Administração): no fim, depois de uma linha.
+                  group.quieto && "mt-auto border-t border-sidebar-border pt-4 opacity-80 hover:opacity-100",
+                )}
+              >
                 {/* Group header — clicável (exceto em collapsed mode, vira só separador). */}
-                {colapsada ? (
+                {group.semTitulo ? null : colapsada ? (
                   <div
                     className="my-1 hidden h-px w-full bg-sidebar-border md:block"
                     aria-hidden="true"
@@ -369,7 +394,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                     aria-expanded={isOpen}
                     aria-controls={slugId}
                     className={cn(
-                      "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors duration-fast",
+                      "mb-1.5 flex w-full items-center gap-1.5 rounded-md px-3 py-1.5 text-left transition-colors duration-fast",
                       "hover:bg-sidebar-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       groupIsActive && "text-sidebar-foreground",
                     )}
@@ -383,7 +408,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                     />
                     <span
                       className={cn(
-                        "flex-1 text-[10px] font-semibold uppercase tracking-wider",
+                        "flex-1 text-[11px] font-semibold uppercase tracking-wider",
                         groupIsActive ? "text-sidebar-foreground" : "text-sidebar-muted",
                       )}
                     >
@@ -401,13 +426,19 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                 {/* Items do grupo */}
                 <div
                   id={slugId}
-                  className={cn("flex flex-col gap-0.5", !showItems && "hidden")}
+                  className={cn(
+                    // Abre e fecha deslizando (grid 0fr ↔ 1fr), em vez de sumir de
+                    // uma vez. `invisible` fechado: os links saem da ordem de foco.
+                    "grid transition-[grid-template-rows,visibility] duration-base ease-out-expo motion-reduce:transition-none",
+                    showItems ? "grid-rows-[1fr]" : "invisible grid-rows-[0fr]",
+                  )}
                 >
+                  <div className="-m-1 flex min-h-0 flex-col gap-1 overflow-hidden p-1">
                   {visible.map((item) => {
                     const Icon = item.icon;
-                    // Mesma regra dos subitens: itens que compartilham o
-                    // caminho (as caixas) são distinguidos pela query.
-                    const active = filhoAtivo(item, visible, pathname, busca);
+                    // Mesma regra dos subitens: entre irmãos aninhados,
+                    // vence o mais específico.
+                    const active = filhoAtivo(item, visible, pathname);
 
                     if (item.children && item.children.length > 0 && !colapsada) {
                       const subIsOpen = subOpen[item.label] ?? false;
@@ -441,12 +472,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                             id={subSlugId}
                             className={cn("ml-3 flex flex-col gap-0.5 border-l border-sidebar-border pl-2", !subIsOpen && "hidden")}
                           >
-                            <Subitens
-                              item={item}
-                              pathname={pathname}
-                              busca={busca}
-                              contagem={contagem}
-                            />
+                            <Subitens item={item} pathname={pathname} />
                           </div>
                         </div>
                       );
@@ -474,7 +500,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                         aria-current={linkActive ? "page" : undefined}
                         title={colapsada ? item.label : undefined}
                         className={cn(
-                          "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
+                          "group relative flex min-h-10 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
                           colapsada && "md:justify-center md:gap-0 md:px-0",
                           linkActive
                             ? "bg-sidebar-active text-sidebar-foreground"
@@ -484,13 +510,13 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                         <span
                           aria-hidden="true"
                           className={cn(
-                            "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full transition-all duration-fast",
-                            linkActive ? "bg-accent" : "bg-transparent group-hover:bg-sidebar-border",
+                            "absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full transition-all duration-base ease-out-expo",
+                            linkActive ? "scale-y-100 bg-accent" : "scale-y-0 bg-transparent group-hover:scale-y-50 group-hover:bg-sidebar-border",
                           )}
                         />
                         <Icon
                           className={cn(
-                            "h-4 w-4 shrink-0 transition-colors",
+                            "h-4 w-4 shrink-0 transition-[color,transform] duration-fast group-hover:translate-x-0.5 motion-reduce:group-hover:translate-x-0",
                             linkActive ? "text-accent" : "",
                           )}
                           aria-hidden="true"
@@ -500,13 +526,10 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
                         <span className={cn("flex-1", colapsada && "md:sr-only")}>
                           {item.label}
                         </span>
-                        <Contador
-                          n={item.contador ? contagem?.[item.contador] : undefined}
-                          className={cn(colapsada && "md:sr-only")}
-                        />
                       </Link>
                     );
                   })}
+                  </div>
                 </div>
               </div>
             );
@@ -531,18 +554,16 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
           )}
         </div>
 
-        {/* Footer com toggles */}
+        {/* Rodapé: só o recolher (que só existe no desktop — então o rodapé
+            também). A chave de tema foi para o cabeçalho e o "modo compacto"
+            saiu (2026-11-06). */}
         <div
           className={cn(
-            "flex items-center gap-2 border-t border-sidebar-border bg-sidebar-accent/50 px-3 py-3",
-            colapsada ? "md:flex-col" : "justify-between",
+            "hidden items-center gap-2 border-t border-sidebar-border bg-sidebar-accent/50 px-4 py-3 lg:flex",
+            colapsada ? "md:flex-col" : "justify-end",
           )}
         >
-          <div className={cn(colapsada && "md:hidden")}>
-            <ThemeToggle />
-          </div>
           <div className="flex items-center gap-1.5">
-            <DensityToggle />
             <button
               type="button"
               onClick={toggleCollapsed}
@@ -579,11 +600,6 @@ function ItemColapsadoComFilhos({
   const gatilhoRef = useRef<HTMLButtonElement>(null);
   const ativo = item.children!.some((c) => isPathActive(c.href, pathname));
   const Icon = item.icon;
-  // O flyout só existe depois de um clique, então ler a URL na hora basta —
-  // dispensa `useSearchParams` (e a fronteira de Suspense) aqui.
-  const busca = new URLSearchParams(
-    typeof window === "undefined" ? "" : window.location.search,
-  );
 
   const fechar = () => {
     setAberto(false);
@@ -622,7 +638,7 @@ function ItemColapsadoComFilhos({
         <nav aria-label={item.label}>
           {item.children!.map((child) => {
             const ChildIcon = child.icon;
-            const childActive = filhoAtivo(child, item.children!, pathname, busca);
+            const childActive = filhoAtivo(child, item.children!, pathname);
             return (
               <Link
                 key={child.href}
@@ -647,63 +663,21 @@ function ItemColapsadoComFilhos({
   );
 }
 
-/**
- * Único ponto da barra que lê a QUERY da URL. Não desenha nada: só publica a
- * busca para o componente pai. Fica dentro de Suspense, que é o que
- * `useSearchParams` exige para a página poder ser pré-renderizada.
- */
-function LeitorDaBusca({ aoMudar }: { aoMudar: (busca: string) => void }) {
-  const busca = useSearchParams().toString();
-  useEffect(() => {
-    aoMudar(busca);
-  }, [busca, aoMudar]);
-  return null;
-}
-
-/** Quantidade ao lado do rótulo de um item (as caixas de Processos). */
-function Contador({ n, className }: { n: number | undefined; className?: string }) {
-  if (n === undefined) return null;
-  return (
-    // Zero não pede atenção: fica apagado, e o que tem processo salta sem
-    // precisar de cor de alerta.
-    <span
-      className={cn(
-        "text-xs tabular-nums",
-        n === 0 ? "text-sidebar-muted" : "font-semibold text-sidebar-foreground",
-        className,
-      )}
-    >
-      {n}
-      <span className="sr-only"> {n === 1 ? "processo" : "processos"}</span>
-    </span>
-  );
-}
-
 /** Filhos de um subgrupo do menu (item com `children`). */
-function Subitens({
-  item,
-  pathname,
-  busca,
-  contagem,
-}: {
-  item: NavItem;
-  pathname: string;
-  busca: URLSearchParams;
-  contagem: CaixasContagem | undefined;
-}) {
+function Subitens({ item, pathname }: { item: NavItem; pathname: string }) {
   const filhos = item.children ?? [];
   return (
     <>
       {filhos.map((child) => {
         const ChildIcon = child.icon;
-        const childActive = filhoAtivo(child, filhos, pathname, busca);
+        const childActive = filhoAtivo(child, filhos, pathname);
         return (
           <Link
             key={child.href}
             href={child.href}
             aria-current={childActive ? "page" : undefined}
             className={cn(
-              "group relative flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-fast",
+              "group relative flex min-h-10 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
               childActive
                 ? "bg-sidebar-active text-sidebar-foreground"
                 : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground",
@@ -721,7 +695,6 @@ function Subitens({
               aria-hidden="true"
             />
             <span className="flex-1">{child.label}</span>
-            <Contador n={child.contador ? contagem?.[child.contador] : undefined} />
           </Link>
         );
       })}

@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Inbox, MapPin, Plus } from "lucide-react";
 import Link from "next/link";
@@ -266,7 +268,7 @@ export default function PontosPage() {
       </div>
 
       {q.isLoading ? (
-        <div className="py-8 text-center text-muted-foreground">Carregando...</div>
+        <Carregando className="py-8 text-center text-muted-foreground" />
       ) : itens.length === 0 ? (
         <EmptyState
           icon={Inbox}

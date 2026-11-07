@@ -12,6 +12,7 @@ import {
   IdCard,
   MapPinned,
   Truck,
+  Workflow,
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
@@ -74,6 +75,14 @@ const CARDS = [
     title: "Visão gerencial",
     desc: "Indicadores consolidados: veículos, solicitações, pendências e abastecimentos.",
   },
+  // Saiu do menu lateral (menu único, 2026-11-05): mora aqui, como as demais
+  // telas do módulo que não são de trabalho diário.
+  {
+    href: "/m/frota/fluxo",
+    icon: Workflow,
+    title: "Fluxo do processo",
+    desc: "O caminho de uma solicitação de veículo, do pedido ao retorno, com as quantidades em cada etapa.",
+  },
 ];
 
 export default function FrotaHubPage() {
@@ -107,16 +116,16 @@ export default function FrotaHubPage() {
         </Link>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {CARDS.map((c) => {
           const Icon = c.icon;
           return (
             <Link
               key={c.href}
               href={c.href}
-              className="group rounded-lg border border-border bg-surface-1 p-4 transition-colors hover:border-brand hover:bg-sidebar-accent"
+              className="group rounded-card border border-border bg-surface-1 p-5 shadow-xs transition-[border-color,box-shadow,transform] duration-base ease-out-expo hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md motion-reduce:hover:translate-y-0"
             >
-              <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-md bg-brand/12 text-brand">
+              <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-lg bg-brand/10 text-brand transition-colors duration-fast group-hover:bg-brand group-hover:text-primary-foreground">
                 <Icon className="h-5 w-5" aria-hidden="true" />
               </div>
               <h2 className="font-semibold text-foreground">{c.title}</h2>

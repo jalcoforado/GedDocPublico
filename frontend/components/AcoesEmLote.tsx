@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { DESPACHO_PADRAO } from "@/lib/despacho";
 import {
   api,
   type CaixaProcesso,
@@ -273,7 +274,18 @@ function EncaminharEmLote({
           <Input id="lote-prazo" type="date" value={prazo} onChange={(e) => setPrazo(e.target.value)} />
         </div>
         <div>
-          <Label htmlFor="lote-despacho">Despacho (opcional)</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="lote-despacho">Despacho (opcional)</Label>
+            {!despacho && (
+              <button
+                type="button"
+                onClick={() => setDespacho(DESPACHO_PADRAO)}
+                className="rounded text-xs font-medium text-primary underline-offset-2 hover:underline"
+              >
+                Usar texto padrão
+              </button>
+            )}
+          </div>
           <Textarea id="lote-despacho" rows={3} value={despacho} onChange={(e) => setDespacho(e.target.value)} />
         </div>
       </div>

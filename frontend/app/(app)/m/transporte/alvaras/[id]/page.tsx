@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, History, Inbox, Truck } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -98,7 +100,7 @@ export default function AlvaraDetailPage({ params }: PageParams) {
   // Resolve params
   if (!resolvedParams) {
     params.then((p) => setResolvedParams(p));
-    return <div>Carregando...</div>;
+    return <Carregando />;
   }
 
   const alvaraId = parseInt(resolvedParams.id, 10);

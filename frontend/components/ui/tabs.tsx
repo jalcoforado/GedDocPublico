@@ -2,6 +2,7 @@
 
 import * as React from "react";
 
+import { IndicadorDeAba } from "@/components/ui/indicador-aba";
 import { cn } from "@/lib/utils";
 
 interface TabsContextValue {
@@ -102,14 +103,15 @@ interface TabListProps {
 }
 
 const CLASSES_BARRA: Record<TabVariant, string> = {
-  sublinhado: "flex gap-1 border-b border-border",
+  sublinhado: "relative flex gap-1 border-b border-border",
   pill: "flex gap-1 py-2",
 };
 
 const CLASSES_BOTAO: Record<TabVariant, { base: string; ativa: string; inativa: string }> = {
   sublinhado: {
     base: "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-    ativa: "border-brand text-brand",
+    // A cor da borda da ativa vem do `IndicadorDeAba`, que desliza.
+    ativa: "border-transparent text-brand",
     inativa:
       "border-transparent text-foreground-muted hover:border-border-strong hover:text-foreground",
   },
@@ -123,6 +125,7 @@ const CLASSES_BOTAO: Record<TabVariant, { base: string; ativa: string; inativa: 
 export function TabList({ tabs, className, variant = "sublinhado", ...aria }: TabListProps) {
   const { value, onChange, idBase, montados } = useTabs("TabList");
   const refs = React.useRef(new Map<string, HTMLButtonElement>());
+  const barra = React.useRef<HTMLDivElement>(null);
 
   const habilitadas = tabs.filter((t) => !t.disabled);
 
@@ -146,6 +149,7 @@ export function TabList({ tabs, className, variant = "sublinhado", ...aria }: Ta
 
   return (
     <div
+      ref={barra}
       role="tablist"
       {...aria}
       onKeyDown={onKeyDown}
@@ -181,6 +185,9 @@ export function TabList({ tabs, className, variant = "sublinhado", ...aria }: Ta
           </button>
         );
       })}
+      {variant === "sublinhado" && (
+        <IndicadorDeAba lista={barra} seletor={'[aria-selected="true"]'} chave={value} className="bg-brand" />
+      )}
     </div>
   );
 }
