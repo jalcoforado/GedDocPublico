@@ -274,16 +274,19 @@ export default function LoginPage() {
                   />
                   Lembrar meu usuário
                 </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setError(null);
-                    setEtapa("esqueci");
-                  }}
-                  className="-mx-1.5 rounded px-1.5 py-0.5 text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  Não lembro a senha
-                </button>
+                {/* Só com a conta por e-mail ligada: sem ela o link não chegaria. */}
+                {branding?.conta_por_email && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError(null);
+                      setEtapa("esqueci");
+                    }}
+                    className="-mx-1.5 rounded px-1.5 py-0.5 text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    Não lembro a senha
+                  </button>
+                )}
               </div>
 
               {error && (

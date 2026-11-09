@@ -35,6 +35,9 @@ export interface ContaConfirmada {
 export interface BrandingResponse {
   slug: string;
   nome: string;
+  /** Conta por e-mail ligada (convite, confirmação, "Não lembro a senha",
+   * 2FA)? Desligada por padrão desde 2026-11-09: a tela esconde essas partes. */
+  conta_por_email?: boolean;
   cor_primaria: string | null;
   /** Tema do município: com `cor_primaria`, `lib/tema-cores.ts` deriva a paleta. */
   cor_destaque: string | null;
@@ -864,6 +867,8 @@ export interface CidadaoMe {
   telefone: string | null;
   telefone_whatsapp: boolean;
   ativo: boolean;
+  /** `null` = cadastro esperando a confirmação por e-mail. */
+  email_verificado_em?: string | null;
 }
 
 export interface CidadaoLoginResponse {

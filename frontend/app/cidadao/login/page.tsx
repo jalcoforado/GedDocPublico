@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { cn } from "@/lib/utils";
 import { ApiError, api, govbrLoginUrl } from "@/lib/api";
+import { useBranding } from "@/lib/branding";
 
 const DESTINO = "/cidadao/processos";
 
@@ -55,9 +56,10 @@ export default function CidadaoLoginPage() {
   const [esqueci, setEsqueci] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
 
+  const contaPorEmail = useBranding()?.conta_por_email ?? false;
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("esqueci")) setEsqueci(true);
-  }, []);
+    if (contaPorEmail && new URLSearchParams(window.location.search).get("esqueci")) setEsqueci(true);
+  }, [contaPorEmail]);
 
   const m = useMutation({
     mutationFn: () => api.cidadao.login(cpf, senha),
@@ -186,18 +188,21 @@ export default function CidadaoLoginPage() {
             className={CAMPO_SENHA_LOGIN}
           />
         </div>
-        <div className="flex justify-end px-2">
-          <button
-            type="button"
-            onClick={() => {
-              setErr(null);
-              setEsqueci(true);
-            }}
-            className="-mx-1.5 rounded px-1.5 py-0.5 text-sm text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground"
-          >
-            Esqueci minha senha
-          </button>
-        </div>
+        {/* Só com a conta por e-mail ligada: sem ela o link não chegaria. */}
+        {contaPorEmail && (
+          <div className="flex justify-end px-2">
+            <button
+              type="button"
+              onClick={() => {
+                setErr(null);
+                setEsqueci(true);
+              }}
+              className="-mx-1.5 rounded px-1.5 py-0.5 text-sm text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground"
+            >
+              Esqueci minha senha
+            </button>
+          </div>
+        )}
         {err && (
           <div
             role="alert"

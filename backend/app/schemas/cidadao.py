@@ -35,6 +35,9 @@ class CidadaoMeResponse(BaseModel):
     telefone: str | None
     telefone_whatsapp: bool
     ativo: bool
+    # 0137 — `None` = cadastro esperando a confirmação por e-mail. A tela de
+    # cadastro decide por aqui se pede o link ou entra direto.
+    email_verificado_em: datetime | None = None
 
 
 class LoginCidadaoResponse(BaseModel):

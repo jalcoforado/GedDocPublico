@@ -31,6 +31,7 @@ const NIVEIS_SIGILO: NivelSigilo[] = [
   "ultrassecreto",
 ];
 import { useAuth } from "@/lib/auth";
+import { useBranding } from "@/lib/branding";
 
 const EMPTY_FORM: UsuarioInput = {
   nome: "",
@@ -45,6 +46,7 @@ const EMPTY_FORM: UsuarioInput = {
 
 export default function UsuariosPage() {
   const { can, perms } = useAuth();
+  const contaPorEmail = useBranding()?.conta_por_email ?? false;
   const isSuper = perms?.is_super_usuario ?? false;
   const qc = useQueryClient();
   const toast = useToast();
@@ -69,7 +71,9 @@ export default function UsuariosPage() {
     mutationFn: (data: UsuarioInput) => api.usuarios.create(data),
     onSuccess: (criado) => {
       qc.invalidateQueries({ queryKey: ["usuarios"] });
-      toast.success(`Usuário criado. Enviamos o convite para ${criado.email}.`);
+      toast.success(
+        contaPorEmail ? `Usuário criado. Enviamos o convite para ${criado.email}.` : "Usuário criado.",
+      );
       closeDialog();
     },
     onError: (e: Error) => setErr(e.message),
@@ -147,11 +151,14 @@ export default function UsuariosPage() {
       // Só super-usuário altera credencial de sigilo (backend bloqueia com 403).
       if (!isSuper) delete payload.nivel_acesso_sigilo;
       updateM.mutate({ id: editing.id, data: payload });
-    } else {
-      // 0136 — sem senha: o backend cria por convite e manda o e-mail; a
+    } else if (contaPorEmail) {
+      // 0137 — sem senha: o backend cria por convite e manda o e-mail; a
       // própria pessoa escolhe a senha ao ativar a conta.
       const { senha: _semSenha, ...semSenha } = form;
       createM.mutate(semSenha);
+    } else {
+      // Conta por e-mail desligada: o admin define a senha temporária.
+      createM.mutate(form);
     }
   }
 
@@ -225,7 +232,7 @@ export default function UsuariosPage() {
                       Editar
                     </Button>
                   )}
-                  {can("usuario", "atualizar") && u.email_verificado_em === null && (
+                  {can("usuario", "atualizar") && contaPorEmail && u.email_verificado_em === null && (
                     <Button
                       variant="secondary"
                       size="sm"
@@ -235,7 +242,9 @@ export default function UsuariosPage() {
                       Reenviar convite
                     </Button>
                   )}
-                  {can("usuario", "atualizar") && u.email_verificado_em !== null && (
+                  {/* Sem e-mail, o "Resetar senha" é a saída de quem ficou com
+                      convite pendente: o reset também ativa a conta. */}
+                  {can("usuario", "atualizar") && (u.email_verificado_em !== null || !contaPorEmail) && (
                     <Button
                       variant="secondary"
                       size="sm"
@@ -404,20 +413,25 @@ export default function UsuariosPage() {
               </p>
             </div>
           )}
-          {!editing ? (
+          {!editing && contaPorEmail ? (
             <p className="rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-foreground-muted">
               O usuário recebe um convite no e-mail informado e escolhe a própria senha ao
               ativar a conta. Até lá, aparece como &quot;Convite pendente&quot;.
             </p>
           ) : (
           <div>
-            <Label htmlFor="senha">Nova senha temporária (vazio = manter senha atual)</Label>
+            {/* Conta por e-mail desligada: no cadastro o admin define a senha
+                temporária, como antes do convite por e-mail. */}
+            <Label htmlFor="senha" required={!editing}>
+              {editing ? "Nova senha temporária (vazio = manter senha atual)" : "Senha temporária"}
+            </Label>
             <PasswordInput
               id="senha"
               value={form.senha ?? ""}
               onChange={(e) => setForm({ ...form, senha: e.target.value })}
               autoComplete="new-password"
               aria-describedby="senha-help"
+              required={!editing}
             />
             <p id="senha-help" className="mt-1 text-xs text-foreground-muted">
               Se preenchida, o usuário será obrigado a alterá-la no próximo

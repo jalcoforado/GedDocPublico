@@ -46,6 +46,17 @@ def caixa(monkeypatch):
     return enviados
 
 
+@pytest.fixture(autouse=True)
+def conta_por_email_ligada(monkeypatch):
+    """Este arquivo testa a conta por e-mail LIGADA. Ela nasce desligada
+    (decisão de 2026-11-09); o comportamento desligado está em
+    `test_conta_email_desligada.py`. O host SMTP nunca é contatado: os
+    e-mails são capturados por `caixa`."""
+    s = get_settings()
+    monkeypatch.setattr(s, "conta_por_email", True)
+    monkeypatch.setattr(s, "smtp_host", "smtp.teste.invalid")
+
+
 @pytest.fixture
 def com_2fa(monkeypatch):
     s = get_settings()

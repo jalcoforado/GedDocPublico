@@ -133,7 +133,7 @@ def _dois_fatores_ativo() -> bool:
     o login seguir só com a senha até o SMTP ser configurado. O log de erro
     é o aviso de que está faltando."""
     settings = get_settings()
-    if not settings.dois_fatores_email:
+    if not settings.dois_fatores_email or not settings.conta_por_email:
         return False
     if not settings.smtp_host:
         logger.error("dois_fatores_sem_smtp", extra={"efeito": "login só com senha até configurar SMTP_HOST"})

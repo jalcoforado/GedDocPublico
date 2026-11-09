@@ -1,4 +1,5 @@
 import secrets
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import delete, func, null, or_, select
@@ -19,7 +20,7 @@ from ..schemas.usuario import (
     UsuarioUpdate,
 )
 from ..services.audit import log as audit_log
-from ..services.conta_email import enviar_convite
+from ..services.conta_email import conta_por_email_ativa, enviar_convite
 from ..services.permissoes import load_permissions
 from ..services.usuario_senha import resetar_senha_usuario
 
@@ -147,6 +148,13 @@ async def create_usuario(
     # e o link do e-mail leva a pessoa a escolher a dela. Login fica recusado
     # até o convite ser aceito.
     convite = payload.senha is None
+    if convite and not conta_por_email_ativa():
+        # Conta por e-mail desligada: não há convite, então vale o rito de
+        # antes — o admin define a senha temporária.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Informe a senha temporária do usuário.",
+        )
     user = Usuario(
         nome=payload.nome,
         email=payload.email,
@@ -243,6 +251,10 @@ async def update_usuario(
         data["senha_bcrypt"] = hash_password(plain)
         data["must_change_password"] = True
         senha_alterada = True
+        # Senha definida pelo admin ativa convite pendente: quem entrega a
+        # senha responde pela conta (mesma regra do "Resetar senha").
+        if user.email_verificado_em is None:
+            data["email_verificado_em"] = datetime.utcnow()
     elif "senha" in data:
         data.pop("senha")
 

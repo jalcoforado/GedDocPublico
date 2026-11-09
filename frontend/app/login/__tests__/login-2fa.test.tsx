@@ -31,8 +31,10 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+// A conta por e-mail nasce desligada (2026-11-09); cada teste diz se a quer.
+const branding = { nome: "Aprimora Test", cor_primaria: null, logo_url: null, conta_por_email: true };
 vi.mock("@/lib/branding", () => ({
-  useBranding: () => ({ nome: "Aprimora Test", cor_primaria: null, logo_url: null }),
+  useBranding: () => branding,
 }));
 
 const SESSAO = {
@@ -50,6 +52,7 @@ beforeEach(() => {
   apiLogin.mockReset();
   login2fa.mockReset();
   esqueciSenha.mockReset();
+  branding.conta_por_email = true;
 });
 
 describe("login com código por e-mail", () => {
@@ -120,5 +123,11 @@ describe("não lembro a senha", () => {
     await waitFor(() => expect(esqueciSenha).toHaveBeenCalledWith("maria@prefeitura.gov.br"));
     expect(await screen.findByRole("status")).toHaveTextContent("Se houver uma conta");
     expect(apiLogin).not.toHaveBeenCalled();
+  });
+
+  it("com a conta por e-mail desligada, o link não aparece", () => {
+    branding.conta_por_email = false;
+    render(<LoginPage />);
+    expect(screen.queryByRole("button", { name: "Não lembro a senha" })).toBeNull();
   });
 });

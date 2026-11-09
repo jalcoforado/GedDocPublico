@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
 from ..models import Tenant
 from ..schemas.branding import BrandingResponse
+from ..services.conta_email import conta_por_email_ativa
 
 router = APIRouter(prefix="/branding", tags=["branding"])
 
@@ -31,4 +32,6 @@ async def branding_me(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Tenant não encontrado"
         )
-    return BrandingResponse.model_validate(tenant, from_attributes=True)
+    resposta = BrandingResponse.model_validate(tenant, from_attributes=True)
+    resposta.conta_por_email = conta_por_email_ativa()
+    return resposta

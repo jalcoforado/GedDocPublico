@@ -29,6 +29,16 @@ from . import conta_tokens
 logger = logging.getLogger(__name__)
 
 
+def conta_por_email_ativa() -> bool:
+    """A conta por e-mail vale? Exige a chave `CONTA_POR_EMAIL` E um servidor
+    de e-mail (`SMTP_HOST`). Desligada, o sistema age como se o e-mail não
+    existisse: sem 2FA, o admin define a senha do servidor novo, o cidadão
+    entra sem confirmar e a tela esconde "Não lembro a senha". O código fica
+    pronto para ser ligado no futuro."""
+    s = get_settings()
+    return s.conta_por_email and bool(s.smtp_host)
+
+
 async def enviar_email(*, para: str, assunto: str, texto: str, tenant_id: int | None = None) -> None:
     """Envia texto puro por SMTP; sem `SMTP_HOST`, só registra no log."""
     settings = get_settings()

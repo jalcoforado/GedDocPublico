@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.password import hash_password, verify_password
 from ..models import UsuarioExterno
 from ..schemas.cidadao import CadastroCidadaoRequest
+from .conta_email import conta_por_email_ativa
 
 
 class CidadaoAuthError(Exception):
@@ -82,7 +83,8 @@ async def cadastrar(
         # 0137 — o cadastro só vale depois de o cidadão confirmar o e-mail
         # (link enviado pelo router). `null()` e não `None`: com `None` o ORM
         # usaria o server_default NOW() e o cadastro nasceria confirmado.
-        email_verificado_em=null(),
+        # Com a conta por e-mail desligada, nasce confirmado (não há link).
+        email_verificado_em=null() if conta_por_email_ativa() else datetime.utcnow(),
     )
     db.add(cidadao)
     await db.commit()
@@ -113,7 +115,9 @@ async def login(
         raise CidadaoAuthError("CPF/CNPJ ou senha inválidos")
     # Só depois da senha certa: dizer "e-mail não confirmado" a quem errou a
     # senha contaria que aquele CPF/CNPJ tem cadastro.
-    if cidadao.email_verificado_em is None:
+    # Com a conta por e-mail desligada a confirmação não existe: nem quem se
+    # cadastrou enquanto ela estava ligada fica preso esperando um link.
+    if cidadao.email_verificado_em is None and conta_por_email_ativa():
         raise EmailNaoConfirmadoError(
             "Confirme o seu e-mail para entrar: abra o link que enviamos quando "
             "você se cadastrou."

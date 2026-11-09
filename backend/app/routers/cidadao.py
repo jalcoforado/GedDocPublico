@@ -74,7 +74,9 @@ async def cadastrar_endpoint(
     except CidadaoAuthError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     # 0137 — o cadastro nasce sem e-mail confirmado; o login espera o link.
-    await _enviar_confirmacao(db, request, cidadao, respeitar_intervalo=False)
+    # Com a conta por e-mail desligada ele já nasce confirmado: nada a mandar.
+    if cidadao.email_verificado_em is None:
+        await _enviar_confirmacao(db, request, cidadao, respeitar_intervalo=False)
     return CidadaoMeResponse.model_validate(cidadao)
 
 

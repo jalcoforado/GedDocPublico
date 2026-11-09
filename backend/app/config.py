@@ -176,6 +176,14 @@ class Settings(BaseSettings):
     smtp_from: str = "noreply@aprimora.app"
     smtp_use_tls: bool = True  # STARTTLS
 
+    # Conta por e-mail (0137): convite de servidor, confirmação de e-mail do
+    # cidadão, "Não lembro a senha" e 2FA. DESLIGADA por padrão — decisão do
+    # PO em 2026-11-09: enquanto o Aprimora é POC, o sistema funciona como se
+    # o e-mail não existisse (admin define a senha, cidadão entra sem
+    # confirmar, login só com senha). Ligar exige também `SMTP_HOST`; ver
+    # `services/conta_email.conta_por_email_ativa`.
+    conta_por_email: bool = False
+
     # 2FA por e-mail no login do servidor (0137). Ligado por padrão: todo
     # servidor recebe um código de 6 dígitos a cada login, salvo no computador
     # lembrado por 30 dias. Só vale com `SMTP_HOST` configurado (sem ele o

@@ -3,6 +3,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { MailCheck } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import { api } from "@/lib/api";
 import { SENHA_MINIMA } from "@/lib/senha";
 
 export default function CidadaoCadastrarPage() {
+  const router = useRouter();
   const [form, setForm] = useState({
     cpf_cnpj: "",
     nome: "",
@@ -35,9 +37,21 @@ export default function CidadaoCadastrarPage() {
         telefone: form.telefone || undefined,
         telefone_whatsapp: form.telefone_whatsapp,
       }),
-    // 0136 — o cadastro só entra depois de o e-mail ser confirmado: em vez de
-    // logar direto (o backend recusaria), a tela pede para abrir o link.
-    onSuccess: () => setCadastrado(true),
+    // 0137 — com a conta por e-mail ligada, o cadastro só entra depois de o
+    // e-mail ser confirmado: a tela pede para abrir o link. Desligada, ele já
+    // nasce confirmado e entra direto, como antes.
+    onSuccess: async (me) => {
+      if (!me.email_verificado_em) {
+        setCadastrado(true);
+        return;
+      }
+      try {
+        await api.cidadao.login(form.cpf_cnpj, form.senha);
+        router.push("/cidadao/processos");
+      } catch {
+        router.push("/cidadao/login");
+      }
+    },
     onError: (e: Error) => setErr(e.message),
   });
   const [cadastrado, setCadastrado] = useState(false);
