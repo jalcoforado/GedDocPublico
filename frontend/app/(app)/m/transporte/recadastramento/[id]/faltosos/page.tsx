@@ -3,13 +3,16 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlarmClock, CheckCircle2, Send } from "lucide-react";
-import Link from "next/link";
+import { AlarmClock, Ban, CheckCircle2, ClipboardCheck, Send, Users } from "lucide-react";
 import { use, useState } from "react";
 
+import { fmtData } from "@/components/pagamentos/format";
+import { documentoParaExibir } from "@/components/transporte/rotulos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
@@ -20,11 +23,9 @@ interface PageParams {
   params: Promise<{ id: string }>;
 }
 
-function formataData(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("pt-BR");
-}
+// `new Date("2026-11-10")` é meia-noite UTC: em UTC-3 o prazo aparecia um
+// dia antes. `fmtData` lê data sem hora como data local.
+const formataData = fmtData;
 
 export default function FaltososPage({ params }: PageParams) {
   const { id } = use(params);
@@ -107,18 +108,16 @@ export default function FaltososPage({ params }: PageParams) {
       />
 
       {kpis && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {[
-            { rotulo: "Convocados", valor: kpis.convocados },
-            { rotulo: "Atendidos", valor: kpis.atendidos },
-            { rotulo: "Em atraso", valor: kpis.em_atraso },
-            { rotulo: "Suspensos", valor: kpis.suspensos },
-          ].map((k) => (
-            <div key={k.rotulo} className="rounded-lg border p-3">
-              <div className="text-xs text-muted-foreground">{k.rotulo}</div>
-              <div className="text-2xl font-semibold">{k.valor}</div>
-            </div>
-          ))}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <KpiCard label="Convocados" value={kpis.convocados} icon={Users} />
+          <KpiCard
+            label="Atendidos"
+            value={kpis.atendidos}
+            icon={CheckCircle2}
+            intent="success"
+          />
+          <KpiCard label="Em atraso" value={kpis.em_atraso} icon={AlarmClock} intent="danger" />
+          <KpiCard label="Suspensos" value={kpis.suspensos} icon={Ban} intent="warning" />
         </div>
       )}
 
@@ -164,22 +163,28 @@ export default function FaltososPage({ params }: PageParams) {
                   />
                 </TD>
                 <TD className="font-medium">{f.nome_regulado}</TD>
-                <TD className="text-sm text-muted-foreground">{f.documento}</TD>
-                <TD className="text-sm">{formataData(f.prazo)}</TD>
-                <TD>
-                  <Badge intent="danger">{f.dias_atraso} dia(s)</Badge>
+                <TD className="whitespace-nowrap font-mono text-sm text-muted-foreground">
+                  {documentoParaExibir(f.documento)}
                 </TD>
-                <TD className="text-sm text-muted-foreground">
+                <TD className="text-sm tabular-nums">{formataData(f.prazo)}</TD>
+                <TD>
+                  <Badge intent="danger">
+                    {f.dias_atraso} {f.dias_atraso === 1 ? "dia" : "dias"}
+                  </Badge>
+                </TD>
+                <TD className="text-sm tabular-nums text-muted-foreground">
                   {formataData(f.ultima_notificacao)}
                 </TD>
                 <TD className="text-right">
-                  <Link
-                    href={`/m/transporte/recadastramento/${cicloId}/convocacao/${f.id}`}
-                  >
-                    <Button variant="secondary" size="sm">
-                      Atender
-                    </Button>
-                  </Link>
+                  <AcoesDaLinha
+                    acoes={[
+                      {
+                        label: "Atender",
+                        icon: ClipboardCheck,
+                        href: `/m/transporte/recadastramento/${cicloId}/convocacao/${f.id}`,
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}

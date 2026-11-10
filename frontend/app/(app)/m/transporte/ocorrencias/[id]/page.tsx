@@ -3,19 +3,22 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, SearchX } from "lucide-react";
 import { use, useEffect, useState } from "react";
 
+import { fmtData } from "@/components/pagamentos/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
+import { dataHoraParaExibir } from "@/components/transporte/rotulos";
 import { WorkflowTimeline } from "@/components/transporte/WorkflowTimeline";
 import {
   api,
@@ -66,11 +69,8 @@ const RESULTADOS: { value: OcorrenciaDecidirInput["resultado"]; label: string }[
   { value: "arquivada", label: "Arquivada" },
 ];
 
-function formatarData(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("pt-BR");
-}
+// Data e hora sem os segundos do `toLocaleString` puro.
+const formatarData = dataHoraParaExibir;
 
 export default function OcorrenciaDetalhePage({ params }: PageParams) {
   const { id } = use(params);
@@ -302,7 +302,11 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
       {q.isLoading ? (
         <Carregando className="py-8 text-center text-muted-foreground" />
       ) : !ocorrencia ? (
-        <div className="py-8 text-center text-muted-foreground">Ocorrência não encontrada.</div>
+        <EmptyState
+          icon={SearchX}
+          title="Ocorrência não encontrada"
+          description="Ela pode ter sido excluída. Volte para a lista de ocorrências."
+        />
       ) : (
         <>
           <Card>
@@ -323,7 +327,7 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Data do fato</div>
-                <div>{ocorrencia.data_fato}</div>
+                <div className="tabular-nums">{fmtData(ocorrencia.data_fato)}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Alvo</div>

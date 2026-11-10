@@ -3,13 +3,15 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MapPin, UserPlus } from "lucide-react";
+import { History, MapPin, UserPlus } from "lucide-react";
 import { use, useState } from "react";
 
+import { documentoParaExibir } from "@/components/transporte/rotulos";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -145,7 +147,10 @@ export default function PontoDetalhePage({ params }: PageParams) {
       />
 
       {mapa && mapa.situacao === "inativo" && (
-        <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
+        <div
+          role="status"
+          className="rounded-md border border-warning/40 bg-warning-soft p-3 text-sm text-warning-soft-foreground"
+        >
           Ponto <strong>inativo</strong>: não recebe novas ocupações. Quem já está
           na vaga permanece até ser liberado.
         </div>
@@ -216,11 +221,13 @@ export default function PontoDetalhePage({ params }: PageParams) {
       )}
 
       <div>
-        <h2 className="mb-2 mt-6 font-semibold">Histórico de ocupação</h2>
+        <h2 className="mb-2 mt-6 font-semibold text-foreground">Histórico de ocupação</h2>
         {historico.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Nenhuma ocupação registrada neste ponto.
-          </p>
+          <EmptyState
+            icon={History}
+            title="Nenhuma ocupação registrada"
+            description="Quem ocupou e liberou cada vaga deste ponto aparece aqui."
+          />
         ) : (
           <Table>
             <THead>
@@ -239,7 +246,7 @@ export default function PontoDetalhePage({ params }: PageParams) {
                   <TD className="font-medium">{o.nome_permissionario}</TD>
                   <TD className="text-sm">{formataData(o.desde)}</TD>
                   <TD className="text-sm">
-                    {o.ate ? formataData(o.ate) : <Badge intent="success">vigente</Badge>}
+                    {o.ate ? formataData(o.ate) : <Badge intent="success">Vigente</Badge>}
                   </TD>
                   <TD className="text-sm text-muted-foreground">
                     {o.motivo_liberacao ? MOTIVO_LABEL[o.motivo_liberacao] ?? o.motivo_liberacao : "—"}
@@ -280,7 +287,7 @@ export default function PontoDetalhePage({ params }: PageParams) {
             <option value="">Selecione...</option>
             {perms.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.nome} — {p.cpf}
+                {p.nome} — {documentoParaExibir(p.cpf)}
               </option>
             ))}
           </Select>

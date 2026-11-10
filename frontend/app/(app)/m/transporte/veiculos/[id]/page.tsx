@@ -3,11 +3,22 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, FileText, CheckCircle, Plus, Trash2 } from "lucide-react";
-import Link from "next/link";
+import {
+  AlertTriangle,
+  Car,
+  CheckCircle,
+  FileText,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
+import { fmtData } from "@/components/pagamentos/format";
+import { rotuloTipoServico } from "@/components/transporte/rotulos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
@@ -19,6 +30,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { SectionCard } from "@/components/ui/section-card";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -72,7 +84,8 @@ const TIPO_LABEL: Record<string, string> = Object.fromEntries(
 const STATUS_INTENT: Record<string, "success" | "warning" | "danger" | "info" | "neutral"> = {
   valido: "success",
   pendente: "warning",
-  vencido: "info",
+  // Vencido é `danger` como no alvará: a mesma situação, a mesma cor.
+  vencido: "danger",
   rejeitado: "danger",
 };
 const RESULTADO_INTENT: Record<string, "success" | "warning" | "danger" | "info" | "neutral"> = {
@@ -80,6 +93,23 @@ const RESULTADO_INTENT: Record<string, "success" | "warning" | "danger" | "info"
   pendente: "warning",
   reprovado: "danger",
   condicional: "info",
+};
+const STATUS_LABEL: Record<string, string> = Object.fromEntries(
+  STATUS_DOCUMENTO.map((s) => [s.value, s.label]),
+);
+const RESULTADO_LABEL: Record<string, string> = Object.fromEntries(
+  RESULTADOS_AVALIACAO.map((r) => [r.value, r.label]),
+);
+// Mesmos rótulos e cores da lista de veículos regulados.
+const SITUACAO_VEICULO: Record<
+  string,
+  { label: string; intent: "success" | "warning" | "info" | "danger" | "neutral" }
+> = {
+  ativo: { label: "Ativo", intent: "success" },
+  pendente: { label: "Pendente", intent: "warning" },
+  suspenso: { label: "Suspenso", intent: "info" },
+  cassado: { label: "Cassado", intent: "danger" },
+  inativo: { label: "Inativo", intent: "neutral" },
 };
 
 interface DocumentoForm {
@@ -303,7 +333,14 @@ export default function VeiculoDetailPage() {
   });
 
   if (veiculoQ.isLoading) return <Carregando />;
-  if (veiculoQ.isError) return <div>Erro ao carregar veículo</div>;
+  if (veiculoQ.isError)
+    return (
+      <EmptyState
+        icon={AlertTriangle}
+        title="Não foi possível carregar o veículo"
+        description="Confira o endereço ou volte para a lista de veículos regulados."
+      />
+    );
 
   const veiculo = veiculoQ.data!;
 
@@ -378,78 +415,72 @@ export default function VeiculoDetailPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/m/transporte/veiculos">
-          <Button variant="ghost" size="sm">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Voltar
-          </Button>
-        </Link>
-        <PageHeader title={veiculo.placa} description={`${veiculo.marca} ${veiculo.modelo}`} />
-      </div>
+    // A seta de voltar vem do PageHeader (trilha com a lista de veículos); o
+    // botão "Voltar" solto e as abas com azul/cinza fixos saíram.
+    <Tabs value={tab} onChange={(v) => setTab(v as typeof tab)} className="space-y-6">
+      <PageHeader
+        icon={Car}
+        title={veiculo.placa}
+        description={`${veiculo.marca} ${veiculo.modelo} — ${rotuloTipoServico(veiculo.tipo_servico)}`}
+        breadcrumbs={[
+          { label: "Transporte Regulado", href: "/m/transporte" },
+          { label: "Veículos regulados", href: "/m/transporte/veiculos" },
+          { label: veiculo.placa },
+        ]}
+        tabs={
+          <TabList
+            aria-label="Seção do veículo"
+            tabs={[
+              { value: "info", label: "Informações" },
+              { value: "documentos", label: "Documentos" },
+              { value: "avaliacoes", label: "Avaliações" },
+              { value: "vistorias", label: "Vistorias" },
+            ]}
+          />
+        }
+      />
 
-      {/* Abas */}
-      <div className="flex gap-2 border-b">
-        {(["info", "documentos", "avaliacoes", "vistorias"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 border-b-2 transition ${
-              tab === t
-                ? "border-blue-500 text-blue-600 font-semibold"
-                : "border-transparent text-gray-600 hover:text-gray-900"
-            }`}
-          >
-            {t === "info" && "Informações"}
-            {t === "documentos" && "Documentos"}
-            {t === "avaliacoes" && "Avaliações"}
-            {t === "vistorias" && "Vistorias"}
-          </button>
-        ))}
-      </div>
-
-      {/* Info Tab */}
-      {tab === "info" && (
-        <SectionCard title="Informações do Veículo">
-          <div className="grid grid-cols-2 gap-4">
+      <TabPanel value="info">
+        <SectionCard title="Informações do veículo" icon={Car}>
+          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <Label>Placa</Label>
-              <p className="font-semibold">{veiculo.placa}</p>
+              <dt className="text-xs text-foreground-muted">Placa</dt>
+              <dd className="font-mono font-semibold text-foreground">{veiculo.placa}</dd>
             </div>
             <div>
-              <Label>Marca/Modelo</Label>
-              <p className="font-semibold">
+              <dt className="text-xs text-foreground-muted">Marca / modelo</dt>
+              <dd className="font-semibold text-foreground">
                 {veiculo.marca} {veiculo.modelo}
-              </p>
+              </dd>
             </div>
             <div>
-              <Label>RENAVAM</Label>
-              <p>{veiculo.renavam || "-"}</p>
+              <dt className="text-xs text-foreground-muted">RENAVAM</dt>
+              <dd className="text-foreground">{veiculo.renavam || "—"}</dd>
             </div>
             <div>
-              <Label>Chassi</Label>
-              <p>{veiculo.chassi || "-"}</p>
+              <dt className="text-xs text-foreground-muted">Chassi</dt>
+              <dd className="text-foreground">{veiculo.chassi || "—"}</dd>
             </div>
             <div>
-              <Label>Situação</Label>
-              <Badge intent={veiculo.situacao === "ativo" ? "success" : "warning"}>
-                {veiculo.situacao}
-              </Badge>
+              <dt className="text-xs text-foreground-muted">Situação</dt>
+              <dd>
+                <Badge intent={SITUACAO_VEICULO[veiculo.situacao]?.intent ?? "neutral"}>
+                  {SITUACAO_VEICULO[veiculo.situacao]?.label ?? veiculo.situacao}
+                </Badge>
+              </dd>
             </div>
             <div>
-              <Label>Tipo de Serviço</Label>
-              <p>{veiculo.tipo_servico}</p>
+              <dt className="text-xs text-foreground-muted">Tipo de serviço</dt>
+              <dd className="text-foreground">{rotuloTipoServico(veiculo.tipo_servico)}</dd>
             </div>
-          </div>
+          </dl>
         </SectionCard>
-      )}
+      </TabPanel>
 
-      {/* Documentos Tab */}
-      {tab === "documentos" && (
+      <TabPanel value="documentos">
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold">Documentos do Veículo</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-foreground">Documentos do veículo</h2>
             {can("transporte_regulado", "inserir") && (
               <Button
                 size="sm"
@@ -459,8 +490,8 @@ export default function VeiculoDetailPage() {
                   setDocDialogOpen(true);
                 }}
               >
-                <Plus className="h-4 w-4 mr-2" />
-                Novo Documento
+                <Plus className="mr-1 h-4 w-4" />
+                Novo documento
               </Button>
             )}
           </div>
@@ -475,65 +506,76 @@ export default function VeiculoDetailPage() {
                   <TH>Número</TH>
                   <TH>Emissão</TH>
                   <TH>Validade</TH>
-                  <TH>Status</TH>
-                  <TH>Ações</TH>
+                  <TH>Situação</TH>
+                  <TH className="text-right">Ações</TH>
                 </TR>
               </THead>
               <TBody>
                 {docsQ.data.items.map((doc) => (
                   <TR key={doc.id}>
-                    <TD>{TIPO_LABEL[doc.tipo_documento]}</TD>
+                    <TD>{TIPO_LABEL[doc.tipo_documento] ?? doc.tipo_documento}</TD>
                     <TD>{doc.numero_documento}</TD>
-                    <TD>{doc.data_emissao || "-"}</TD>
-                    <TD>{doc.data_validade || "-"}</TD>
+                    <TD className="tabular-nums">{fmtData(doc.data_emissao)}</TD>
+                    <TD className="tabular-nums">{fmtData(doc.data_validade)}</TD>
                     <TD>
                       <Badge intent={STATUS_INTENT[doc.situacao] || "neutral"}>
-                        {doc.situacao}
+                        {STATUS_LABEL[doc.situacao] ?? doc.situacao}
                       </Badge>
                     </TD>
-                    <TD className="flex gap-2">
-                      {can("transporte_regulado", "atualizar") && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            setEditingDoc(doc);
-                            setDocForm({
-                              tipo_documento: doc.tipo_documento,
-                              numero_documento: doc.numero_documento,
-                              data_emissao: doc.data_emissao || "",
-                              data_validade: doc.data_validade || "",
-                              observacoes: doc.observacoes || "",
-                            });
-                            setDocDialogOpen(true);
-                          }}
-                        >
-                          Editar
-                        </Button>
-                      )}
-                      {can("transporte_regulado", "excluir") && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => removerDocM.mutate(doc.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
+                    <TD className="text-right">
+                      <AcoesDaLinha
+                        acoes={[
+                          {
+                            label: "Editar",
+                            icon: Pencil,
+                            oculta: !can("transporte_regulado", "atualizar"),
+                            onClick: () => {
+                              setEditingDoc(doc);
+                              setDocForm({
+                                tipo_documento: doc.tipo_documento,
+                                numero_documento: doc.numero_documento,
+                                data_emissao: doc.data_emissao || "",
+                                data_validade: doc.data_validade || "",
+                                observacoes: doc.observacoes || "",
+                              });
+                              setDocDialogOpen(true);
+                            },
+                          },
+                          {
+                            label: "Excluir",
+                            icon: Trash2,
+                            perigo: true,
+                            oculta: !can("transporte_regulado", "excluir"),
+                            onClick: async () => {
+                              const ok = await confirm({
+                                title: "Excluir documento",
+                                message: `Excluir o documento "${doc.numero_documento}"? Esta ação não pode ser desfeita.`,
+                                confirmLabel: "Excluir",
+                                intent: "danger",
+                              });
+                              if (ok) removerDocM.mutate(doc.id);
+                            },
+                          },
+                        ]}
+                      />
                     </TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
           ) : (
-            <EmptyState icon={FileText} title="Sem documentos" description="Nenhum documento registrado" />
+            <EmptyState
+              icon={FileText}
+              title="Nenhum documento"
+              description="CRLV, seguro, inspeção e demais documentos do veículo aparecem aqui."
+            />
           )}
 
           {/* Documento Dialog */}
           <Dialog
             open={docDialogOpen}
             onClose={() => setDocDialogOpen(false)}
-            title={editingDoc ? "Editar Documento" : "Novo Documento"}
+            title={editingDoc ? "Editar documento" : "Novo documento"}
           >
             <div className="space-y-4">
               <div>
@@ -594,13 +636,12 @@ export default function VeiculoDetailPage() {
             </div>
           </Dialog>
         </div>
-      )}
+      </TabPanel>
 
-      {/* Avaliacoes Tab */}
-      {tab === "avaliacoes" && (
+      <TabPanel value="avaliacoes">
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold">Avaliações do Veículo</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-foreground">Avaliações do veículo</h2>
             {can("transporte_regulado", "inserir") && (
               <Button
                 size="sm"
@@ -610,8 +651,8 @@ export default function VeiculoDetailPage() {
                   setAvalDialogOpen(true);
                 }}
               >
-                <Plus className="h-4 w-4 mr-2" />
-                Nova Avaliação
+                <Plus className="mr-1 h-4 w-4" />
+                Nova avaliação
               </Button>
             )}
           </div>
@@ -625,7 +666,7 @@ export default function VeiculoDetailPage() {
                   <TH>Resultado</TH>
                   <TH>Data</TH>
                   <TH>Parecer</TH>
-                  <TH>Ações</TH>
+                  <TH className="text-right">Ações</TH>
                 </TR>
               </THead>
               <TBody>
@@ -633,53 +674,64 @@ export default function VeiculoDetailPage() {
                   <TR key={aval.id}>
                     <TD>
                       <Badge intent={RESULTADO_INTENT[aval.resultado] || "neutral"}>
-                        {aval.resultado}
+                        {RESULTADO_LABEL[aval.resultado] ?? aval.resultado}
                       </Badge>
                     </TD>
-                    <TD>{new Date(aval.data_avaliacao).toLocaleDateString()}</TD>
+                    <TD className="tabular-nums">{fmtData(aval.data_avaliacao)}</TD>
                     <TD className="max-w-sm truncate">{aval.parecer}</TD>
-                    <TD className="flex gap-2">
-                      {can("transporte_regulado", "atualizar") && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            setEditingAval(aval);
-                            setAvalForm({
-                              resultado: aval.resultado,
-                              parecer: aval.parecer,
-                              observacoes: aval.observacoes || "",
-                              data_avaliacao: aval.data_avaliacao.split("T")[0],
-                            });
-                            setAvalDialogOpen(true);
-                          }}
-                        >
-                          Editar
-                        </Button>
-                      )}
-                      {can("transporte_regulado", "excluir") && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => removerAvalM.mutate(aval.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
+                    <TD className="text-right">
+                      <AcoesDaLinha
+                        acoes={[
+                          {
+                            label: "Editar",
+                            icon: Pencil,
+                            oculta: !can("transporte_regulado", "atualizar"),
+                            onClick: () => {
+                              setEditingAval(aval);
+                              setAvalForm({
+                                resultado: aval.resultado,
+                                parecer: aval.parecer,
+                                observacoes: aval.observacoes || "",
+                                data_avaliacao: aval.data_avaliacao.split("T")[0],
+                              });
+                              setAvalDialogOpen(true);
+                            },
+                          },
+                          {
+                            label: "Excluir",
+                            icon: Trash2,
+                            perigo: true,
+                            oculta: !can("transporte_regulado", "excluir"),
+                            onClick: async () => {
+                              const ok = await confirm({
+                                title: "Excluir avaliação",
+                                message: "Excluir esta avaliação? Esta ação não pode ser desfeita.",
+                                confirmLabel: "Excluir",
+                                intent: "danger",
+                              });
+                              if (ok) removerAvalM.mutate(aval.id);
+                            },
+                          },
+                        ]}
+                      />
                     </TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
           ) : (
-            <EmptyState icon={CheckCircle} title="Sem avaliações" description="Nenhuma avaliação registrada" />
+            <EmptyState
+              icon={CheckCircle}
+              title="Nenhuma avaliação"
+              description="As avaliações técnicas do veículo aparecem aqui, com o resultado e o parecer."
+            />
           )}
 
           {/* Avaliacao Dialog */}
           <Dialog
             open={avalDialogOpen}
             onClose={() => setAvalDialogOpen(false)}
-            title={editingAval ? "Editar Avaliação" : "Nova Avaliação"}
+            title={editingAval ? "Editar avaliação" : "Nova avaliação"}
           >
             <div className="space-y-4">
               <div>
@@ -731,13 +783,12 @@ export default function VeiculoDetailPage() {
             </div>
           </Dialog>
         </div>
-      )}
+      </TabPanel>
 
-      {/* Vistorias Tab */}
-      {tab === "vistorias" && (
+      <TabPanel value="vistorias">
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold">Vistorias do Veículo</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-foreground">Vistorias do veículo</h2>
             {can("transporte_regulado", "inserir") && (
               <Button
                 size="sm"
@@ -747,8 +798,8 @@ export default function VeiculoDetailPage() {
                   setVistDialogOpen(true);
                 }}
               >
-                <Plus className="h-4 w-4 mr-2" />
-                Nova Vistoria
+                <Plus className="mr-1 h-4 w-4" />
+                Nova vistoria
               </Button>
             )}
           </div>
@@ -762,7 +813,7 @@ export default function VeiculoDetailPage() {
                   <TH>Resultado</TH>
                   <TH>Data</TH>
                   <TH>Parecer</TH>
-                  <TH>Ações</TH>
+                  <TH className="text-right">Ações</TH>
                 </TR>
               </THead>
               <TBody>
@@ -771,9 +822,9 @@ export default function VeiculoDetailPage() {
                   return (
                     <TR key={vist.id}>
                       <TD>
-                        <div className="flex flex-col gap-1">
+                        <div className="flex flex-col items-start gap-1">
                           <Badge intent={RESULTADO_INTENT[vist.resultado] || "neutral"}>
-                            {vist.resultado}
+                            {RESULTADO_LABEL[vist.resultado] ?? vist.resultado}
                           </Badge>
                           {isVencida && (
                             <Badge intent="danger">Vencida</Badge>
@@ -781,58 +832,64 @@ export default function VeiculoDetailPage() {
                         </div>
                       </TD>
                       <TD>
-                        <div className="flex flex-col gap-1">
-                          <span>{new Date(vist.data_vistoria).toLocaleDateString()}</span>
+                        <div className="flex flex-col gap-1 tabular-nums">
+                          <span>{fmtData(vist.data_vistoria)}</span>
                           {vist.data_validade && (
                             <span className="text-xs text-muted-foreground">
-                              Válida até: {new Date(vist.data_validade).toLocaleDateString()}
+                              Válida até {fmtData(vist.data_validade)}
                             </span>
                           )}
                         </div>
                       </TD>
                       <TD className="max-w-sm truncate">{vist.parecer}</TD>
-                      <TD className="flex gap-2">
-                        {isVencida && can("transporte_regulado", "inserir") && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setSelectedVistToRenew(vist);
-                              setRenovarForm(EMPTY_RENOV);
-                              setRenovarDialogOpen(true);
-                            }}
-                          >
-                            Renovar
-                          </Button>
-                        )}
-                        {can("transporte_regulado", "atualizar") && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setEditingVist(vist);
-                              setVistForm({
-                                resultado: vist.resultado,
-                                parecer: vist.parecer,
-                                observacoes: vist.observacoes || "",
-                                data_vistoria: vist.data_vistoria.split("T")[0],
-                                data_validade: vist.data_validade ? vist.data_validade.split("T")[0] : "",
-                              });
-                              setVistDialogOpen(true);
-                            }}
-                          >
-                            Editar
-                          </Button>
-                        )}
-                        {can("transporte_regulado", "excluir") && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => removerVistM.mutate(vist.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
+                      <TD className="text-right">
+                        <AcoesDaLinha
+                          acoes={[
+                            {
+                              label: "Renovar",
+                              icon: RefreshCw,
+                              oculta: !(isVencida && can("transporte_regulado", "inserir")),
+                              onClick: () => {
+                                setSelectedVistToRenew(vist);
+                                setRenovarForm(EMPTY_RENOV);
+                                setRenovarDialogOpen(true);
+                              },
+                            },
+                            {
+                              label: "Editar",
+                              icon: Pencil,
+                              oculta: !can("transporte_regulado", "atualizar"),
+                              onClick: () => {
+                                setEditingVist(vist);
+                                setVistForm({
+                                  resultado: vist.resultado,
+                                  parecer: vist.parecer,
+                                  observacoes: vist.observacoes || "",
+                                  data_vistoria: vist.data_vistoria.split("T")[0],
+                                  data_validade: vist.data_validade
+                                    ? vist.data_validade.split("T")[0]
+                                    : "",
+                                });
+                                setVistDialogOpen(true);
+                              },
+                            },
+                            {
+                              label: "Excluir",
+                              icon: Trash2,
+                              perigo: true,
+                              oculta: !can("transporte_regulado", "excluir"),
+                              onClick: async () => {
+                                const ok = await confirm({
+                                  title: "Excluir vistoria",
+                                  message: "Excluir esta vistoria? Esta ação não pode ser desfeita.",
+                                  confirmLabel: "Excluir",
+                                  intent: "danger",
+                                });
+                                if (ok) removerVistM.mutate(vist.id);
+                              },
+                            },
+                          ]}
+                        />
                       </TD>
                     </TR>
                   );
@@ -840,14 +897,18 @@ export default function VeiculoDetailPage() {
               </TBody>
             </Table>
           ) : (
-            <EmptyState icon={CheckCircle} title="Sem vistorias" description="Nenhuma vistoria registrada" />
+            <EmptyState
+              icon={CheckCircle}
+              title="Nenhuma vistoria"
+              description="As vistorias do veículo aparecem aqui, com a validade de cada uma."
+            />
           )}
 
           {/* Vistoria Dialog */}
           <Dialog
             open={vistDialogOpen}
             onClose={() => setVistDialogOpen(false)}
-            title={editingVist ? "Editar Vistoria" : "Nova Vistoria"}
+            title={editingVist ? "Editar vistoria" : "Nova vistoria"}
           >
             <div className="space-y-4">
               <div>
@@ -911,13 +972,20 @@ export default function VeiculoDetailPage() {
           <Dialog
             open={renovarDialogOpen}
             onClose={() => setRenovarDialogOpen(false)}
-            title="Renovar Vistoria"
+            title="Renovar vistoria"
           >
             <div className="space-y-4">
               {selectedVistToRenew && (
                 <div className="p-3 bg-muted rounded-md">
-                  <p className="text-sm font-medium">Renovando vistoria de {new Date(selectedVistToRenew.data_vistoria).toLocaleDateString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Válida até: {selectedVistToRenew.data_validade ? new Date(selectedVistToRenew.data_validade).toLocaleDateString() : "Sem validade"}</p>
+                  <p className="text-sm font-medium">
+                    Renovando vistoria de {fmtData(selectedVistToRenew.data_vistoria)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Válida até{" "}
+                    {selectedVistToRenew.data_validade
+                      ? fmtData(selectedVistToRenew.data_validade)
+                      : "— sem validade"}
+                  </p>
                 </div>
               )}
               <div>
@@ -963,13 +1031,13 @@ export default function VeiculoDetailPage() {
                   Cancelar
                 </Button>
                 <Button onClick={handleSaveRenov} disabled={renovarVistM.isPending}>
-                  Renovar Vistoria
+                  Renovar vistoria
                 </Button>
               </div>
             </div>
           </Dialog>
         </div>
-      )}
-    </div>
+      </TabPanel>
+    </Tabs>
   );
 }

@@ -9,6 +9,7 @@ import {
   CarFront,
   CheckCircle2,
   ClipboardCheck,
+  History,
   Inbox,
   RotateCcw,
   XCircle,
@@ -29,6 +30,7 @@ import { useToast } from "@/components/ui/toast";
 import { api, type RecadastramentoChecklistItem } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { WorkflowTimeline } from "@/components/transporte/WorkflowTimeline";
+import { dataHoraParaExibir, SITUACAO_CONVOCACAO } from "@/components/transporte/rotulos";
 
 interface PageParams {
   params: Promise<{ id: string; convocacaoId: string }>;
@@ -44,18 +46,21 @@ const ATO_TITULO: Record<Ato, string> = {
   reativar: "Reativar recadastramento",
 };
 
-const SITUACAO_INTENT: Record<string, "neutral" | "success" | "danger" | "info"> = {
-  convocado: "neutral",
-  em_analise: "info",
-  deferido: "success",
-  indeferido: "danger",
-  suspenso: "danger",
-};
-
-const DECISAO_INTENT: Record<string, "success" | "danger" | "warning"> = {
+const DECISAO_INTENT: Record<string, "success" | "danger" | "warning" | "info"> = {
   deferimento: "success",
   indeferimento: "danger",
   reabertura: "warning",
+  suspensao: "danger",
+  reativacao: "info",
+};
+
+// O histórico mostrava o tipo cru ("indeferimento", "suspensao").
+const DECISAO_LABEL: Record<string, string> = {
+  deferimento: "Deferimento",
+  indeferimento: "Indeferimento",
+  reabertura: "Reabertura",
+  suspensao: "Suspensão",
+  reativacao: "Reativação",
 };
 
 export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
@@ -198,7 +203,7 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
         ]}
         actions={
           canEdit ? (
-            <div className="flex flex-wrap gap-2">
+            <>
               {/* Suspensa tem UMA saída, e não duas: reativar. Oferecer
                   "Reabrir" aqui deixaria a trilha ambígua — uma suspensão
                   desfeita por reabertura não se distingue de um indeferimento
@@ -228,8 +233,10 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
                     Deferir
                   </Button>
                   {/* Indeferir NUNCA desabilita: indeferir por falta de
-                      documento é justamente o caso real do balcão. */}
-                  <Button variant="danger" onClick={() => abrirAto("indeferir")}>
+                      documento é justamente o caso real do balcão.
+                      Contorno vermelho, não cheio: o vermelho cheio fica no
+                      "Confirmar" do diálogo, que é onde o ato acontece. */}
+                  <Button variant="danger-outline" onClick={() => abrirAto("indeferir")}>
                     <XCircle className="mr-1 h-4 w-4" />
                     Indeferir
                   </Button>
@@ -238,7 +245,7 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
                       receber erro é armadilha. */}
                   {vencida && (
                     <Button
-                      variant="danger"
+                      variant="danger-outline"
                       onClick={() => abrirAto("suspender")}
                     >
                       <Ban className="mr-1 h-4 w-4" />
@@ -247,14 +254,14 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
                   )}
                 </>
               )}
-            </div>
+            </>
           ) : undefined
         }
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <Badge intent={SITUACAO_INTENT[ficha.situacao] ?? "neutral"}>
-          {ficha.situacao.replace("_", " ")}
+        <Badge intent={SITUACAO_CONVOCACAO[ficha.situacao]?.intent ?? "neutral"}>
+          {SITUACAO_CONVOCACAO[ficha.situacao]?.label ?? ficha.situacao}
         </Badge>
         {!decidida && !ficha.pode_deferir && (
           <span className="text-sm text-muted-foreground">
@@ -301,18 +308,18 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
                   <TD className="font-medium">
                     <div className="flex flex-wrap items-center gap-2">
                       {i.descricao}
-                      {i.obrigatorio && <Badge intent="warning">obrigatório</Badge>}
+                      {i.obrigatorio && <Badge intent="warning">Obrigatório</Badge>}
                     </div>
                   </TD>
                   <TD>
                     {/* Três estados, não dois: `null` é "ninguém olhou", que
                         não é a mesma coisa que "olhou e não está em ordem". */}
                     {i.marcado === null ? (
-                      <Badge intent="neutral">não conferido</Badge>
+                      <Badge intent="neutral">Não conferido</Badge>
                     ) : i.marcado ? (
-                      <Badge intent="success">em ordem</Badge>
+                      <Badge intent="success">Em ordem</Badge>
                     ) : (
-                      <Badge intent="danger">não apresentado</Badge>
+                      <Badge intent="danger">Não apresentado</Badge>
                     )}
                   </TD>
                   <TD className="text-sm text-muted-foreground">
@@ -320,7 +327,7 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
                   </TD>
                   <TD className="text-right">
                     {canEdit && !decidida && (
-                      <div className="inline-flex flex-wrap justify-end items-center gap-2">
+                      <div className="inline-flex flex-nowrap items-center justify-end gap-2">
                         <Input
                           className="w-44"
                           placeholder="Observação"
@@ -423,15 +430,22 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
           Histórico de decisões
         </h2>
         {(decisoesQ.data?.length ?? 0) === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhuma decisão registrada.</p>
+          <EmptyState
+            icon={History}
+            title="Nenhuma decisão registrada"
+            description="Deferimentos, indeferimentos e reaberturas desta convocação aparecem aqui."
+            className="p-6"
+          />
         ) : (
           <ul className="space-y-2">
             {decisoesQ.data?.map((d) => (
-              <li key={d.id} className="rounded-md border p-3 text-sm">
+              <li key={d.id} className="rounded-md border border-border p-3 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge intent={DECISAO_INTENT[d.tipo] ?? "neutral"}>{d.tipo}</Badge>
+                  <Badge intent={DECISAO_INTENT[d.tipo] ?? "neutral"}>
+                    {DECISAO_LABEL[d.tipo] ?? d.tipo}
+                  </Badge>
                   <span className="text-muted-foreground">
-                    {new Date(d.criado_em).toLocaleString("pt-BR")}
+                    {dataHoraParaExibir(d.criado_em)}
                   </span>
                 </div>
                 <p className="mt-1 whitespace-pre-wrap">{d.parecer}</p>
@@ -453,7 +467,7 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
             <Button
               onClick={submeterAto}
               disabled={atoM.isPending}
-              variant={ato === "indeferir" ? "danger" : "primary"}
+              variant={ato === "indeferir" || ato === "suspender" ? "danger" : "primary"}
             >
               {atoM.isPending ? "Registrando..." : "Confirmar"}
             </Button>

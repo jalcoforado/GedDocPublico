@@ -3,14 +3,26 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Plus, Route, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  MapPin,
+  Pencil,
+  Plus,
+  Route,
+  SearchX,
+  Trash2,
+  X,
+} from "lucide-react";
 import { use, useEffect, useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -363,7 +375,11 @@ export default function LinhaDetalhePage({ params }: PageParams) {
       {q.isLoading ? (
         <Carregando className="py-8 text-center text-muted-foreground" />
       ) : !linha ? (
-        <div className="py-8 text-center text-muted-foreground">Linha não encontrada.</div>
+        <EmptyState
+          icon={SearchX}
+          title="Linha não encontrada"
+          description="Ela pode ter sido excluída. Volte para a lista de linhas."
+        />
       ) : (
         <>
           <Card>
@@ -421,9 +437,12 @@ export default function LinhaDetalhePage({ params }: PageParams) {
             </CardHeader>
             <CardContent>
               {paradas.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Nenhuma parada cadastrada nesta linha.
-                </p>
+                <EmptyState
+                  icon={MapPin}
+                  title="Nenhuma parada"
+                  description="As paradas da linha aparecem aqui, na ordem do itinerário."
+                  className="p-6"
+                />
               ) : (
                 <ol className="space-y-2">
                   {paradas.map((p, idx) => (
@@ -459,12 +478,21 @@ export default function LinhaDetalhePage({ params }: PageParams) {
                           >
                             <ArrowDown className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => abrirEdicaoParada(p)}>
-                            Editar
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => pedirRemocaoParada(p)}>
-                            Remover
-                          </Button>
+                          <AcoesDaLinha
+                            acoes={[
+                              {
+                                label: "Editar",
+                                icon: Pencil,
+                                onClick: () => abrirEdicaoParada(p),
+                              },
+                              {
+                                label: "Remover",
+                                icon: Trash2,
+                                perigo: true,
+                                onClick: () => pedirRemocaoParada(p),
+                              },
+                            ]}
+                          />
                         </div>
                       )}
                     </li>

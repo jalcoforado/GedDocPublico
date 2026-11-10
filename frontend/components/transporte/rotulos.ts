@@ -38,3 +38,32 @@ export function documentoParaExibir(v: string | null | undefined): string {
   if (/^[0-9A-Z]{12}\d{2}$/.test(v)) return aplicarMascara("cnpj", v).valor;
   return v;
 }
+
+/**
+ * Data e hora de evento (trilha, auditoria): `10/11/2026 14:32`, sem os
+ * segundos que o `toLocaleString` puro traz.
+ */
+export function dataHoraParaExibir(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const data = d.toLocaleDateString("pt-BR");
+  const hora = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return `${data} ${hora}`;
+}
+
+/**
+ * Situação da convocação de recadastramento. A lista do ciclo mostrava o
+ * enum cru (`em_analise`) e o atendimento fazia `replace("_", " ")`; os dois
+ * leem daqui agora, com a mesma cor.
+ */
+export const SITUACAO_CONVOCACAO: Record<
+  string,
+  { label: string; intent: "neutral" | "success" | "danger" | "info" }
+> = {
+  convocado: { label: "Convocado", intent: "neutral" },
+  em_analise: { label: "Em análise", intent: "info" },
+  deferido: { label: "Deferido", intent: "success" },
+  indeferido: { label: "Indeferido", intent: "danger" },
+  suspenso: { label: "Suspenso", intent: "danger" },
+};

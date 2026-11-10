@@ -11,8 +11,10 @@
  */
 import { useQuery } from "@tanstack/react-query";
 
+import { dataHoraParaExibir } from "@/components/transporte/rotulos";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Carregando } from "@/components/ui/carregando";
 import { api, type WorkflowTransicaoOut } from "@/lib/api";
 
 export interface WorkflowTimelineProps {
@@ -28,11 +30,8 @@ function humanizarSlug(slug: string): string {
     .join(" ");
 }
 
-function formatarData(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("pt-BR");
-}
+// Sem os segundos do `toLocaleString` puro.
+const formatarData = dataHoraParaExibir;
 
 export function WorkflowTimeline({ entidadeTipo, entidadeId }: WorkflowTimelineProps) {
   const q = useQuery({
@@ -47,7 +46,7 @@ export function WorkflowTimeline({ entidadeTipo, entidadeId }: WorkflowTimelineP
       </CardHeader>
       <CardContent>
         {q.isLoading ? (
-          <p className="text-sm text-muted-foreground">Carregando fluxo de trabalho...</p>
+          <Carregando className="text-sm text-muted-foreground" linhas={2} />
         ) : q.isError ? (
           <p className="text-sm text-muted-foreground">
             Não foi possível carregar o fluxo de trabalho no momento.

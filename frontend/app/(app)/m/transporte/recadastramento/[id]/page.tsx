@@ -3,14 +3,28 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlarmClock, Building2, IdCard, Inbox, Play, RefreshCw } from "lucide-react";
+import {
+  AlarmClock,
+  Building2,
+  CalendarClock,
+  ClipboardCheck,
+  IdCard,
+  Inbox,
+  Play,
+  RefreshCw,
+  SearchX,
+} from "lucide-react";
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 
+import { fmtData } from "@/components/pagamentos/format";
+import { SITUACAO_CONVOCACAO } from "@/components/transporte/rotulos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -157,6 +171,11 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
   const buscando = buscaAplicada.length > 0 || tipoFiltro !== "";
   const encerrado = ciclo?.situacao === "encerrado";
 
+  function limparFiltros() {
+    setTipoFiltro("");
+    setBusca("");
+  }
+
   if (cicloQ.isLoading) {
     return <Carregando className="text-center text-muted-foreground py-8" />;
   }
@@ -175,7 +194,7 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
       <PageHeader
         icon={RefreshCw}
         title={ciclo.nome}
-        description={`Janela de ${ciclo.data_inicio} a ${ciclo.data_fim}. ${
+        description={`Janela de ${fmtData(ciclo.data_inicio)} a ${fmtData(ciclo.data_fim)}. ${
           ciclo.criterio_escalonamento === "final_documento"
             ? "Prazos escalonados pelo final do CPF/CNPJ."
             : "Todos os convocados no fim da janela."
@@ -186,24 +205,24 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
           { label: ciclo.nome },
         ]}
         actions={
-          <div className="flex flex-wrap gap-2">
+          <>
             {/* Sem este link a tela de faltosos existiria e ninguem chegaria
                 nela. `__tests__/rotas-modulo.test.ts` reprova pagina orfa —
                 e so passou a reprovar DE VERDADE na P5.3, ver o docstring de
                 lá. */}
-            <Link href={`/m/transporte/recadastramento/${cicloId}/faltosos`}>
-              <Button variant="secondary">
+            <Button variant="secondary" asChild>
+              <Link href={`/m/transporte/recadastramento/${cicloId}/faltosos`}>
                 <AlarmClock className="mr-1 h-4 w-4" />
                 Faltosos
-              </Button>
-            </Link>
+              </Link>
+            </Button>
             {canCreate && !encerrado && (
               <Button onClick={() => gerarM.mutate()} disabled={gerarM.isPending}>
                 <Play className="mr-1 h-4 w-4" />
                 {gerarM.isPending ? "Gerando..." : "Gerar convocações"}
               </Button>
             )}
-          </div>
+          </>
         }
       />
 
@@ -221,11 +240,11 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
         )}
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <div>
-          <Label htmlFor="f_tipo">Tipo de regulado</Label>
+      <FilterBar ariaLabel="Filtros dos convocados">
+        <FilterBar.Group label="Tipo de regulado" className="w-full sm:w-48">
           <Select
             id="f_tipo"
+            aria-label="Tipo de regulado"
             value={tipoFiltro}
             onChange={(e) => setTipoFiltro(e.target.value)}
           >
@@ -233,17 +252,24 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
             <option value="permissionario">Permissionários</option>
             <option value="empresa">Empresas</option>
           </Select>
-        </div>
-        <div className="flex-1 min-w-[200px]">
-          <Label htmlFor="f_q">Busca por nome</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Busca por nome" className="min-w-[200px] flex-1">
           <Input
             id="f_q"
+            aria-label="Busca por nome"
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             placeholder="Nome do permissionário ou razão social..."
           />
-        </div>
-      </div>
+        </FilterBar.Group>
+        {buscando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {convocacoesQ.isLoading ? (
         <Carregando className="text-center text-muted-foreground py-8" />
@@ -251,7 +277,7 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
         // "A busca não achou" NÃO oferece gerar: o ciclo pode ter centenas de
         // convocados e o botão sugeriria que a lista está vazia.
         <EmptyState
-          icon={Inbox}
+          icon={buscando ? SearchX : Inbox}
           title={buscando ? "Nenhum convocado encontrado" : "Nenhuma convocação"}
           description={
             buscando
@@ -259,7 +285,11 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
               : "Gere as convocações para chamar os permissionários e empresas ativos."
           }
           action={
-            !buscando && canCreate && !encerrado ? (
+            buscando ? (
+              <Button variant="secondary" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            ) : canCreate && !encerrado ? (
               <Button onClick={() => gerarM.mutate()} disabled={gerarM.isPending}>
                 <Play className="mr-1 h-4 w-4" />
                 Gerar convocações
@@ -294,36 +324,41 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
                 </TD>
                 <TD>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span>{c.prazo}</span>
+                    <span className="tabular-nums">{fmtData(c.prazo)}</span>
                     {c.ajustado && (
                       // O prazo original fica visível: sem ele o ajuste não é
                       // auditável na tela, só no banco.
                       <Badge intent="warning" title={c.ajuste_justificativa ?? undefined}>
-                        ajustado (era {c.prazo_original})
+                        Ajustado (era {fmtData(c.prazo_original)})
                       </Badge>
                     )}
-                    {emAtraso(c) && <Badge intent="danger">em atraso</Badge>}
+                    {emAtraso(c) && <Badge intent="danger">Em atraso</Badge>}
                   </div>
                 </TD>
-                <TD className="text-sm text-muted-foreground">{c.situacao}</TD>
+                <TD>
+                  <Badge intent={SITUACAO_CONVOCACAO[c.situacao]?.intent ?? "neutral"}>
+                    {SITUACAO_CONVOCACAO[c.situacao]?.label ?? c.situacao}
+                  </Badge>
+                </TD>
                 <TD className="text-right">
-                  <div className="inline-flex flex-wrap justify-end gap-2">
-                    {/* Sem este link a tela de atendimento existiria e ninguem
-                        chegaria nela — foi o defeito que a costura de
-                        2026-08-01 achou em Alvaras e Relatorios. */}
-                    <Button variant="secondary" size="sm" asChild>
-                      <Link
-                        href={`/m/transporte/recadastramento/${cicloId}/convocacao/${c.id}`}
-                      >
-                        Atender
-                      </Link>
-                    </Button>
-                    {canEdit && !encerrado && (
-                      <Button variant="secondary" size="sm" onClick={() => abrirAjuste(c)}>
-                        Ajustar prazo
-                      </Button>
-                    )}
-                  </div>
+                  {/* Sem o "Atender" a tela de atendimento existiria e ninguem
+                      chegaria nela — foi o defeito que a costura de
+                      2026-08-01 achou em Alvaras e Relatorios. */}
+                  <AcoesDaLinha
+                    acoes={[
+                      {
+                        label: "Atender",
+                        icon: ClipboardCheck,
+                        href: `/m/transporte/recadastramento/${cicloId}/convocacao/${c.id}`,
+                      },
+                      {
+                        label: "Ajustar prazo",
+                        icon: CalendarClock,
+                        onClick: () => abrirAjuste(c),
+                        oculta: !(canEdit && !encerrado),
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}
@@ -349,8 +384,8 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
         <div className="space-y-3">
           {ajusteErr && <div className="text-sm text-danger">{ajusteErr}</div>}
           <p className="text-sm text-muted-foreground">
-            O prazo tem de ficar dentro da janela do ciclo ({ciclo.data_inicio} a{" "}
-            {ciclo.data_fim}). Data no passado é permitida — regularizar alguém
+            O prazo tem de ficar dentro da janela do ciclo ({fmtData(ciclo.data_inicio)} a{" "}
+            {fmtData(ciclo.data_fim)}). Data no passado é permitida — regularizar alguém
             retroativamente é caso de balcão.
           </p>
           <div>
@@ -365,7 +400,7 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
             />
             {alvo && (
               <p className="mt-1 text-xs text-muted-foreground">
-                Prazo calculado pela regra: {alvo.prazo_original}
+                Prazo calculado pela regra: {fmtData(alvo.prazo_original)}
               </p>
             )}
           </div>

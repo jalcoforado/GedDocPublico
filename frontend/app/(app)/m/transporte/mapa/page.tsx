@@ -109,7 +109,7 @@ export default function MapaPontosPage() {
             <p className="text-sm text-foreground-muted">
               Nenhum ponto ativo tem latitude e longitude. Informe as
               coordenadas em{" "}
-              <Link href="/m/transporte/pontos" className="underline">
+              <Link href="/m/transporte/pontos" className="text-primary hover:underline">
                 Pontos e Vagas
               </Link>
               .
@@ -159,7 +159,7 @@ export default function MapaPontosPage() {
                         )}
                         <Link
                           href={`/m/transporte/pontos/${p.id}`}
-                          className="inline-block pt-1 underline"
+                          className="inline-block pt-1 text-primary hover:underline"
                         >
                           Abrir o ponto
                         </Link>
