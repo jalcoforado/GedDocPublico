@@ -1,15 +1,21 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Building2, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
+import { AtivoBadge } from "@/components/pagamentos/Rotulos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, type ContaBancaria } from "@/lib/api";
@@ -175,10 +181,17 @@ export default function ContasPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-aprimora">Contas bancárias</h1>
-        <Button onClick={openNew}>Novo</Button>
-      </div>
+      <PageHeader
+        icon={Building2}
+        title="Contas bancárias"
+        description="Contas da prefeitura por fonte de recursos, com o saldo mínimo que dispara alerta."
+        actions={
+          <Button onClick={openNew}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Nova conta bancária
+          </Button>
+        }
+      />
 
       <Table>
         <THead>
@@ -187,15 +200,28 @@ export default function ContasPage() {
             <TH>Banco / Agência / Conta</TH>
             <TH>Fonte</TH>
             <TH>Grupo</TH>
-            <TH>Ativa</TH>
+            <TH>Situação</TH>
             <TH className="text-right">Ações</TH>
           </TR>
         </THead>
         <TBody>
+          {listQ.isLoading &&
+            Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={6} />)}
           {!listQ.isLoading && contas.length === 0 && (
             <TR>
-              <TD colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
-                Nenhuma conta cadastrada.
+              <TD colSpan={6} className="p-0">
+                <EmptyState
+                  icon={Building2}
+                  title="Nenhuma conta bancária cadastrada"
+                  description="Cadastre as contas de onde saem os pagamentos."
+                  action={
+                    <Button onClick={openNew}>
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                      Nova conta bancária
+                    </Button>
+                  }
+                  className="rounded-none border-0 bg-transparent"
+                />
               </TD>
             </TR>
           )}
@@ -207,16 +233,16 @@ export default function ContasPage() {
               </TD>
               <TD>{fonteNome(c.id_fonte_recursos)}</TD>
               <TD>{GRUPO_LABELS[c.grupo_despesa] ?? c.grupo_despesa}</TD>
-              <TD>{c.ativa ? "Sim" : "Não"}</TD>
+              <TD>
+                <AtivoBadge ativo={c.ativa} feminino />
+              </TD>
               <TD className="text-right">
-                <div className="inline-flex gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => openEdit(c)}>
-                    Editar
-                  </Button>
-                  <Button variant="danger" size="sm" onClick={() => excluir(c)}>
-                    Excluir
-                  </Button>
-                </div>
+                <AcoesDaLinha
+                  acoes={[
+                    { label: "Editar", icon: Pencil, onClick: () => openEdit(c) },
+                    { label: "Excluir", icon: Trash2, perigo: true, onClick: () => excluir(c) },
+                  ]}
+                />
               </TD>
             </TR>
           ))}

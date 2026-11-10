@@ -1,15 +1,20 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { BookOpen, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, type FonteRecursos } from "@/lib/api";
@@ -144,10 +149,17 @@ export default function FontesPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-aprimora">Fontes de recursos</h1>
-        <Button onClick={openNew}>Novo</Button>
-      </div>
+      <PageHeader
+        icon={BookOpen}
+        title="Fontes de recursos"
+        description="De onde vem o dinheiro de cada despesa e em quais grupos ele pode ser gasto."
+        actions={
+          <Button onClick={openNew}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Nova fonte de recursos
+          </Button>
+        }
+      />
 
       <Table>
         <THead>
@@ -159,10 +171,23 @@ export default function FontesPage() {
           </TR>
         </THead>
         <TBody>
+          {listQ.isLoading &&
+            Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={4} />)}
           {!listQ.isLoading && fontes.length === 0 && (
             <TR>
-              <TD colSpan={4} className="py-6 text-center text-sm text-muted-foreground">
-                Nenhuma fonte cadastrada.
+              <TD colSpan={4} className="p-0">
+                <EmptyState
+                  icon={BookOpen}
+                  title="Nenhuma fonte de recursos cadastrada"
+                  description="Cadastre as fontes antes das contas bancárias: toda conta pertence a uma."
+                  action={
+                    <Button onClick={openNew}>
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                      Nova fonte de recursos
+                    </Button>
+                  }
+                  className="rounded-none border-0 bg-transparent"
+                />
               </TD>
             </TR>
           )}
@@ -174,14 +199,12 @@ export default function FontesPage() {
                 {f.grupos_despesa_permitidos.map((g) => GRUPO_LABELS[g] ?? g).join(", ") || "—"}
               </TD>
               <TD className="text-right">
-                <div className="inline-flex gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => openEdit(f)}>
-                    Editar
-                  </Button>
-                  <Button variant="danger" size="sm" onClick={() => excluir(f)}>
-                    Excluir
-                  </Button>
-                </div>
+                <AcoesDaLinha
+                  acoes={[
+                    { label: "Editar", icon: Pencil, onClick: () => openEdit(f) },
+                    { label: "Excluir", icon: Trash2, perigo: true, onClick: () => excluir(f) },
+                  ]}
+                />
               </TD>
             </TR>
           ))}

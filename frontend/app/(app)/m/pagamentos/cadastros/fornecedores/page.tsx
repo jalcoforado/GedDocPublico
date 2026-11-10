@@ -3,14 +3,20 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Eye, Pencil, Plus, Trash2, UserCircle } from "lucide-react";
 import { useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, type Fornecedor, type DadosBancarios } from "@/lib/api";
@@ -46,16 +52,12 @@ const SITUACAO_LABEL: Record<Fornecedor["situacao_cadastral"], string> = {
 };
 
 function SituacaoBadge({ situacao }: { situacao: Fornecedor["situacao_cadastral"] }) {
-  const cls =
-    situacao === "REGULAR"
-      ? "bg-success-soft text-success-soft-foreground"
-      : situacao === "PENDENTE"
-        ? "bg-warning-soft text-warning-soft-foreground"
-        : "bg-danger-soft text-danger-soft-foreground";
+  const intent =
+    situacao === "REGULAR" ? "success" : situacao === "PENDENTE" ? "warning" : "danger";
   return (
-    <span className={`inline-block whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium ${cls}`}>
+    <Badge intent={intent} className="whitespace-nowrap">
       {SITUACAO_LABEL[situacao]}
-    </span>
+    </Badge>
   );
 }
 
@@ -177,10 +179,17 @@ export default function FornecedoresPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-aprimora">Fornecedores</h1>
-        <Button onClick={openNew}>Novo</Button>
-      </div>
+      <PageHeader
+        icon={UserCircle}
+        title="Fornecedores"
+        description="Quem recebe os pagamentos: documento, situação cadastral e dados bancários."
+        actions={
+          <Button onClick={openNew}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Novo fornecedor
+          </Button>
+        }
+      />
 
       <Table>
         <THead>
@@ -194,10 +203,23 @@ export default function FornecedoresPage() {
           </TR>
         </THead>
         <TBody>
+          {listQ.isLoading &&
+            Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={6} />)}
           {!listQ.isLoading && fornecedores.length === 0 && (
             <TR>
-              <TD colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
-                Nenhum fornecedor cadastrado.
+              <TD colSpan={6} className="p-0">
+                <EmptyState
+                  icon={UserCircle}
+                  title="Nenhum fornecedor cadastrado"
+                  description="Cadastre quem vai receber os pagamentos da prefeitura."
+                  action={
+                    <Button onClick={openNew}>
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                      Novo fornecedor
+                    </Button>
+                  }
+                  className="rounded-none border-0 bg-transparent"
+                />
               </TD>
             </TR>
           )}
@@ -211,24 +233,19 @@ export default function FornecedoresPage() {
               </TD>
               <TD>{c.tem_dados_bancarios ? "Sim" : "Não"}</TD>
               <TD className="text-right">
-                <div className="inline-flex gap-2">
-                  {c.tem_dados_bancarios && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => revelar(c)}
-                      disabled={revealLoading === c.id}
-                    >
-                      {revealLoading === c.id ? "Revelando..." : "Revelar dados bancários"}
-                    </Button>
-                  )}
-                  <Button variant="secondary" size="sm" onClick={() => openEdit(c)}>
-                    Editar
-                  </Button>
-                  <Button variant="danger" size="sm" onClick={() => excluir(c)}>
-                    Excluir
-                  </Button>
-                </div>
+                <AcoesDaLinha
+                  acoes={[
+                    { label: "Editar", icon: Pencil, onClick: () => openEdit(c) },
+                    {
+                      label: revealLoading === c.id ? "Revelando…" : "Revelar dados bancários",
+                      icon: Eye,
+                      onClick: () => revelar(c),
+                      disabled: revealLoading === c.id,
+                      oculta: !c.tem_dados_bancarios,
+                    },
+                    { label: "Excluir", icon: Trash2, perigo: true, onClick: () => excluir(c) },
+                  ]}
+                />
               </TD>
             </TR>
           ))}
@@ -368,9 +385,9 @@ export default function FornecedoresPage() {
             <div className="col-span-2 mt-2 border-t border-border pt-3">
               <p className="mb-2 text-sm font-semibold text-foreground">Histórico de situação</p>
               {historicoQ.isLoading ? (
-                <Carregando className="text-xs text-muted-foreground" />
+                <Carregando className="text-xs text-foreground-muted" />
               ) : (historicoQ.data ?? []).length === 0 ? (
-                <p className="text-xs text-muted-foreground">Sem registros.</p>
+                <p className="text-xs text-foreground-muted">Sem registros.</p>
               ) : (
                 <ul className="space-y-2">
                   {(historicoQ.data ?? []).map((h) => (

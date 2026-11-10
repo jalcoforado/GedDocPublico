@@ -1,15 +1,21 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Lock, Plus, ReceiptText, Trash2, Wallet } from "lucide-react";
 import { useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BotaoExportarCsv, BotoesExportar } from "@/components/pagamentos/BotoesExportar";
+import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
@@ -20,11 +26,14 @@ import {
   type TipoMovimentacao,
 } from "@/lib/api";
 
-function fmtMoeda(v: string): string {
-  const n = Number(v);
-  if (Number.isNaN(n)) return v;
-  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
+/** Origem do lançamento por rótulo — o extrato mostrava o código ("APORTE"). */
+const ORIGEM_LABEL: Record<OrigemMovimentacao, string> = {
+  APORTE: "Aporte",
+  RECEITA: "Receita",
+  AJUSTE: "Ajuste",
+  PAGAMENTO: "Pagamento",
+  ESTORNO: "Estorno",
+};
 
 function hojeISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -171,22 +180,24 @@ export default function CaixaPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-aprimora">Caixa</h1>
-          <p className="text-sm text-muted-foreground">
-            Painel de saldo por conta e lançamentos de entrada/saída.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <BotoesExportar
-            csvUrl={api.pagamentos.caixa.painelCsvUrl()}
-            pdfUrl={api.pagamentos.caixa.painelPdfUrl()}
-            rotulo="painel de caixa"
-          />
-          <Button onClick={abrirLancar}>Lançar entrada/saída</Button>
-        </div>
-      </div>
+      <PageHeader
+        icon={Wallet}
+        title="Caixa"
+        description="Saldo de cada conta, o extrato e os bloqueios; clique numa conta para ver o detalhe."
+        actions={
+          <>
+            <BotoesExportar
+              csvUrl={api.pagamentos.caixa.painelCsvUrl()}
+              pdfUrl={api.pagamentos.caixa.painelPdfUrl()}
+              rotulo="painel de caixa"
+            />
+            <Button onClick={abrirLancar}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Lançar entrada/saída
+            </Button>
+          </>
+        }
+      />
 
       <Table>
         <THead>
@@ -204,10 +215,17 @@ export default function CaixaPage() {
           </TR>
         </THead>
         <TBody>
+          {painelQ.isLoading &&
+            Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={10} />)}
           {!painelQ.isLoading && painel.length === 0 && (
             <TR>
-              <TD colSpan={10} className="py-6 text-center text-sm text-muted-foreground">
-                Nenhuma conta cadastrada.
+              <TD colSpan={10} className="p-0">
+                <EmptyState
+                  icon={Wallet}
+                  title="Nenhuma conta bancária cadastrada"
+                  description="O painel de caixa mostra o saldo das contas cadastradas em Contas bancárias."
+                  className="rounded-none border-0 bg-transparent"
+                />
               </TD>
             </TR>
           )}
@@ -257,9 +275,11 @@ export default function CaixaPage() {
           )}
         </div>
         {selecionada === null ? (
-          <p className="text-sm text-muted-foreground">
-            Selecione uma conta no painel acima para ver o extrato.
-          </p>
+          <EmptyState
+            icon={ReceiptText}
+            title="Escolha uma conta"
+            description="Clique numa conta do painel acima para ver o extrato e os bloqueios dela."
+          />
         ) : (
           <Table>
             <THead>
@@ -272,22 +292,29 @@ export default function CaixaPage() {
               </TR>
             </THead>
             <TBody>
+              {extratoQ.isLoading &&
+                Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={5} />)}
               {!extratoQ.isLoading && extrato.length === 0 && (
                 <TR>
-                  <TD colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
-                    Nenhuma movimentação nesta conta.
+                  <TD colSpan={5} className="p-0">
+                    <EmptyState
+                      icon={ReceiptText}
+                      title="Nenhuma movimentação nesta conta"
+                      description="Entradas, saídas e pagamentos da conta aparecem aqui."
+                      className="rounded-none border-0 bg-transparent"
+                    />
                   </TD>
                 </TR>
               )}
               {extrato.map((m) => (
                 <TR key={m.id}>
-                  <TD>{m.data}</TD>
+                  <TD className="whitespace-nowrap tabular-nums">{fmtData(m.data)}</TD>
                   <TD>
                     <Badge intent={m.tipo === "ENTRADA" ? "success" : "danger"}>
                       {m.tipo === "ENTRADA" ? "Entrada" : "Saída"}
                     </Badge>
                   </TD>
-                  <TD>{m.origem}</TD>
+                  <TD>{ORIGEM_LABEL[m.origem] ?? m.origem}</TD>
                   <TD
                     className={
                       "text-right tabular-nums " +
@@ -320,6 +347,7 @@ export default function CaixaPage() {
                 setBloqOpen(true);
               }}
             >
+              <Plus className="h-4 w-4" aria-hidden="true" />
               Novo bloqueio
             </Button>
           </div>
@@ -330,15 +358,20 @@ export default function CaixaPage() {
                 <TH>Motivo</TH>
                 <TH>Início</TH>
                 <TH>Fim</TH>
-                <TH></TH>
-                <TH></TH>
+                <TH>Situação</TH>
+                <TH className="text-right">Ações</TH>
               </TR>
             </THead>
             <TBody>
               {!bloqueiosQ.isLoading && bloqueios.length === 0 && (
                 <TR>
-                  <TD colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
-                    Nenhum bloqueio nesta conta.
+                  <TD colSpan={6} className="p-0">
+                    <EmptyState
+                      icon={Lock}
+                      title="Nenhum bloqueio nesta conta"
+                      description="Bloqueie parte do saldo para reservá-lo a um fim específico."
+                      className="rounded-none border-0 bg-transparent"
+                    />
                   </TD>
                 </TR>
               )}
@@ -346,20 +379,26 @@ export default function CaixaPage() {
                 <TR key={b.id}>
                   <TD className="text-right tabular-nums">{fmtMoeda(b.valor)}</TD>
                   <TD>{b.motivo}</TD>
-                  <TD>{b.periodo_inicio}</TD>
-                  <TD>{b.periodo_fim ?? "—"}</TD>
+                  <TD className="whitespace-nowrap tabular-nums">{fmtData(b.periodo_inicio)}</TD>
+                  <TD className="whitespace-nowrap tabular-nums">{fmtData(b.periodo_fim)}</TD>
                   <TD>
                     <Badge intent={b.ativo ? "warning" : "neutral"}>
                       {b.ativo ? "Ativo" : "Inativo"}
                     </Badge>
                   </TD>
                   <TD className="text-right">
-                    {b.ativo && (
-                      <Button variant="ghost" size="sm" onClick={() => removerBloqueio(b.id)}
-                        disabled={removerBloqM.isPending}>
-                        Remover
-                      </Button>
-                    )}
+                    <AcoesDaLinha
+                      acoes={[
+                        {
+                          label: "Remover",
+                          icon: Trash2,
+                          perigo: true,
+                          onClick: () => removerBloqueio(b.id),
+                          disabled: removerBloqM.isPending,
+                          oculta: !b.ativo,
+                        },
+                      ]}
+                    />
                   </TD>
                 </TR>
               ))}

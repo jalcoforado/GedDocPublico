@@ -1,9 +1,10 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, FileText } from "lucide-react";
 
 import { CrudPage } from "@/components/CrudPage";
+import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
 import { CATEGORIA_CONTRATO_LABEL, api, type Contrato } from "@/lib/api";
 
 const OPCOES_CATEGORIA = Object.entries(CATEGORIA_CONTRATO_LABEL).map(([value, label]) => ({
@@ -27,6 +28,9 @@ export default function ContratosPage() {
   return (
     <CrudPage<Contrato>
       title="Contratos"
+      icon={FileText}
+      description="Contratos com fornecedores: vigência, valor e a categoria da fila cronológica."
+      novoLabel="Novo contrato"
       queryKey={["pag-contratos"]}
       fetchList={() => api.pagamentos.cadastros.contratos.list()}
       createFn={api.pagamentos.cadastros.contratos.create}
@@ -63,9 +67,14 @@ export default function ContratosPage() {
         { header: "Objeto", render: (r) => r.objeto },
         {
           header: "Vigência",
-          render: (r) => `${r.vigencia_inicio} a ${r.vigencia_fim}`,
+          render: (r) => `${fmtData(r.vigencia_inicio)} a ${fmtData(r.vigencia_fim)}`,
+          className: "whitespace-nowrap tabular-nums",
         },
-        { header: "Valor total", render: (r) => r.valor_total },
+        {
+          header: "Valor total",
+          render: (r) => fmtMoeda(r.valor_total),
+          className: "whitespace-nowrap text-right tabular-nums",
+        },
         {
           header: "Categoria",
           render: (r) => (r.categoria ? CATEGORIA_CONTRATO_LABEL[r.categoria] : "—"),

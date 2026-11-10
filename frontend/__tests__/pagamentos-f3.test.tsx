@@ -380,7 +380,7 @@ describe("Contratos — categoria da fila cronológica obrigatória (F3)", () =>
     );
     renderComQueryClient(<ContratosPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Novo" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Novo contrato" }));
 
     const selectCategoria = (await screen.findByLabelText(
       /^categoria \(fila cronológica\)/i,
