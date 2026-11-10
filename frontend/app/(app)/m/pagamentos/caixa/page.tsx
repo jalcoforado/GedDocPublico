@@ -7,12 +7,15 @@ import { useState } from "react";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
 import { BotaoExportarCsv, BotoesExportar } from "@/components/pagamentos/BotoesExportar";
 import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
+import { useValidacaoCampos } from "@/components/pagamentos/useValidacaoCampos";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { SkeletonRow } from "@/components/ui/skeleton";
@@ -36,7 +39,10 @@ const ORIGEM_LABEL: Record<OrigemMovimentacao, string> = {
 };
 
 function hojeISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Data LOCAL: o toISOString() é UTC, e depois das 21h (horário de Brasília)
+  // o lançamento nascia com a data de amanhã.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 interface FormState {
@@ -95,7 +101,11 @@ export default function CaixaPage() {
   });
 
   function abrirLancar() {
-    setForm(emptyForm(selecionada?.id_conta ?? contasQ.data?.[0]?.id ?? null));
+    // Conta já escolhida no painel vem preenchida; sem escolha, só a conta
+    // única entra sozinha (a primeira da lista era palpite).
+    const contas = contasQ.data ?? [];
+    setForm(emptyForm(selecionada?.id_conta ?? (contas.length === 1 ? contas[0].id : null)));
+    vl.reiniciar();
     setErr(null);
     setOpen(true);
   }
@@ -176,7 +186,35 @@ export default function CaixaPage() {
   const painel = painelQ.data ?? [];
   const extrato = extratoQ.data ?? [];
   const bloqueios = bloqueiosQ.data ?? [];
-  const podeSalvar = form.id_conta !== null && Number(form.valor) > 0 && form.data.length > 0;
+  const contaDoLancamento = painel.find((c) => c.id_conta === form.id_conta);
+
+  const vl = useValidacaoCampos(
+    {
+      id_conta: form.id_conta === null && "Escolha a conta do lançamento.",
+      valor: !(Number(form.valor) > 0) && "Informe um valor maior que zero, ex.: 1500,00.",
+      data: !form.data && "Informe a data do lançamento.",
+    },
+    { id_conta: "cx-conta", valor: "cx-valor", data: "cx-data" },
+  );
+  const vb = useValidacaoCampos(
+    {
+      valor: !(Number(bloqForm.valor) > 0) && "Informe um valor maior que zero.",
+      motivo: !bloqForm.motivo.trim() && "Diga por que o saldo fica bloqueado.",
+      periodo_inicio: !bloqForm.periodo_inicio && "Informe desde quando o bloqueio vale.",
+      periodo_fim:
+        !!bloqForm.periodo_fim &&
+        bloqForm.periodo_fim < bloqForm.periodo_inicio &&
+        "O fim tem de ser depois do início.",
+    },
+    { valor: "bloq-valor", motivo: "bloq-motivo", periodo_inicio: "bloq-inicio", periodo_fim: "bloq-fim" },
+  );
+
+  function salvarLancamento() {
+    if (vl.conferir()) lancarM.mutate();
+  }
+  function salvarBloqueio() {
+    if (vb.conferir()) criarBloqM.mutate();
+  }
 
   return (
     <div className="space-y-4">
@@ -344,6 +382,7 @@ export default function CaixaPage() {
               variant="secondary"
               onClick={() => {
                 setBloqForm({ valor: "", motivo: "", periodo_inicio: hojeISO(), periodo_fim: "" });
+                vb.reiniciar();
                 setBloqOpen(true);
               }}
             >
@@ -411,168 +450,209 @@ export default function CaixaPage() {
         open={bloqOpen}
         onClose={() => setBloqOpen(false)}
         title="Novo bloqueio de saldo"
-        size="lg"
+        description={
+          selecionada
+            ? `Conta ${selecionada.nome}. O valor bloqueado sai do disponível enquanto o bloqueio valer.`
+            : undefined
+        }
+        size="md"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setBloqOpen(false)}>
+            <Button variant="ghost" onClick={() => setBloqOpen(false)}>
               Cancelar
             </Button>
-            <Button
-              onClick={() => criarBloqM.mutate()}
-              disabled={
-                Number(bloqForm.valor) <= 0 ||
-                bloqForm.motivo.trim().length === 0 ||
-                criarBloqM.isPending
-              }
-            >
-              {criarBloqM.isPending ? "Salvando..." : "Bloquear"}
+            <Button onClick={salvarBloqueio} loading={criarBloqM.isPending}>
+              Bloquear saldo
             </Button>
           </>
         }
       >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label>Valor</Label>
-            <Input
+        <div className="space-y-4">
+          <FormField
+            label="Valor"
+            required
+            error={vb.erro("valor")}
+            hint={
+              selecionada
+                ? `Disponível hoje nesta conta: ${fmtMoeda(selecionada.disponivel)}.`
+                : undefined
+            }
+          >
+            <CampoComUnidade
+              id="bloq-valor"
+              prefixo="R$"
               type="number"
+              inputMode="decimal"
               step="0.01"
+              min="0"
               value={bloqForm.valor}
               onChange={(e) => setBloqForm((f) => ({ ...f, valor: e.target.value }))}
+              onBlur={vb.tocar("valor")}
+              placeholder="0,00"
             />
-          </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label>Motivo</Label>
+          </FormField>
+          <FormField
+            label="Motivo"
+            required
+            error={vb.erro("motivo")}
+            hint="Aparece na lista de bloqueios da conta."
+          >
             <Input
+              id="bloq-motivo"
               value={bloqForm.motivo}
               onChange={(e) => setBloqForm((f) => ({ ...f, motivo: e.target.value }))}
+              onBlur={vb.tocar("motivo")}
+              maxLength={255}
+              placeholder="Ex.: Contrapartida do convênio 123/2026"
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Início da vigência</Label>
-            <Input
-              type="date"
-              value={bloqForm.periodo_inicio}
-              onChange={(e) => setBloqForm((f) => ({ ...f, periodo_inicio: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Fim da vigência (opcional)</Label>
-            <Input
-              type="date"
-              value={bloqForm.periodo_fim}
-              onChange={(e) => setBloqForm((f) => ({ ...f, periodo_fim: e.target.value }))}
-            />
-          </div>
+          </FormField>
+          <GradeCampos>
+            <FormField label="Início da vigência" required error={vb.erro("periodo_inicio")} hint="Hoje, por padrão.">
+              <Input
+                id="bloq-inicio"
+                type="date"
+                value={bloqForm.periodo_inicio}
+                onChange={(e) => setBloqForm((f) => ({ ...f, periodo_inicio: e.target.value }))}
+                onBlur={vb.tocar("periodo_inicio")}
+              />
+            </FormField>
+            <FormField
+              label="Fim da vigência"
+              opcional
+              error={vb.erro("periodo_fim")}
+              hint="Em branco, o bloqueio vale até ser removido."
+            >
+              <Input
+                id="bloq-fim"
+                type="date"
+                value={bloqForm.periodo_fim}
+                min={bloqForm.periodo_inicio || undefined}
+                onChange={(e) => setBloqForm((f) => ({ ...f, periodo_fim: e.target.value }))}
+                onBlur={vb.tocar("periodo_fim")}
+              />
+            </FormField>
+          </GradeCampos>
         </div>
       </Dialog>
 
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title="Lançar entrada/saída"
-        size="lg"
+        title="Lançar entrada ou saída"
+        description="Movimentação manual no caixa. Pagamentos e estornos entram sozinhos pelo fluxo."
+        size="md"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setOpen(false)}>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => lancarM.mutate()} disabled={!podeSalvar || lancarM.isPending}>
-              {lancarM.isPending ? "Salvando..." : "Salvar"}
+            <Button onClick={salvarLancamento} loading={lancarM.isPending}>
+              {form.tipo === "ENTRADA" ? "Lançar entrada" : "Lançar saída"}
             </Button>
           </>
         }
       >
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <Label htmlFor="cx-conta" required>
-              Conta
-            </Label>
+        <div className="space-y-4">
+          <FormField
+            label="Conta"
+            required
+            error={vl.erro("id_conta")}
+            hint={
+              contaDoLancamento
+                ? `Saldo atual: ${fmtMoeda(contaDoLancamento.saldo_atual)}.`
+                : undefined
+            }
+          >
             <Select
               id="cx-conta"
               value={form.id_conta ?? ""}
-              onChange={(e) => setForm({ ...form, id_conta: Number(e.target.value) })}
-              required
+              onChange={(e) => {
+                setForm({ ...form, id_conta: e.target.value === "" ? null : Number(e.target.value) });
+                vl.tocar("id_conta")();
+              }}
             >
-              <option value="" disabled>
-                Selecione...
-              </option>
+              <option value="">Escolha a conta</option>
               {(contasQ.data ?? []).map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.nome} ({c.banco})
                 </option>
               ))}
             </Select>
-          </div>
-          <div>
-            <Label htmlFor="cx-tipo" required>
-              Tipo
-            </Label>
-            <Select
-              id="cx-tipo"
-              value={form.tipo}
-              onChange={(e) => setForm({ ...form, tipo: e.target.value as TipoMovimentacao })}
+          </FormField>
+          <EscolhaSegmentada
+            nome="cx-tipo"
+            titulo="Tipo"
+            valor={form.tipo}
+            onChange={(t) => setForm({ ...form, tipo: t })}
+            opcoes={[
+              { valor: "ENTRADA", rotulo: "Entrada", descricao: "Soma ao saldo da conta." },
+              { valor: "SAIDA", rotulo: "Saída", descricao: "Subtrai do saldo da conta." },
+            ]}
+            moldura={false}
+          />
+          <EscolhaSegmentada
+            nome="cx-origem"
+            titulo="Origem"
+            valor={form.origem as "APORTE" | "RECEITA" | "AJUSTE"}
+            onChange={(o) => setForm({ ...form, origem: o })}
+            opcoes={[
+              { valor: "APORTE", rotulo: "Aporte", descricao: "Dinheiro transferido para a conta." },
+              { valor: "RECEITA", rotulo: "Receita", descricao: "Arrecadação que caiu na conta." },
+              { valor: "AJUSTE", rotulo: "Ajuste", descricao: "Correção de saldo — explique na descrição." },
+            ]}
+            moldura={false}
+          />
+          <GradeCampos>
+            <FormField
+              label="Valor"
               required
-            >
-              <option value="ENTRADA">Entrada</option>
-              <option value="SAIDA">Saída</option>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="cx-origem" required>
-              Origem
-            </Label>
-            <Select
-              id="cx-origem"
-              value={form.origem}
-              onChange={(e) =>
-                setForm({ ...form, origem: e.target.value as OrigemMovimentacao })
+              error={vl.erro("valor")}
+              hint={
+                contaDoLancamento && Number(form.valor) > 0
+                  ? `Saldo depois: ${fmtMoeda(
+                      Number(contaDoLancamento.saldo_atual) +
+                        (form.tipo === "ENTRADA" ? 1 : -1) * Number(form.valor),
+                    )}.`
+                  : undefined
               }
-              required
             >
-              <option value="APORTE">Aporte</option>
-              <option value="RECEITA">Receita</option>
-              <option value="AJUSTE">Ajuste</option>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="cx-valor" required>
-              Valor
-            </Label>
-            <Input
-              id="cx-valor"
-              type="number"
-              min="0.01"
-              step="0.01"
-              value={form.valor}
-              onChange={(e) => setForm({ ...form, valor: e.target.value })}
-              required
-            />
-          </div>
-          <div>
-            <Label htmlFor="cx-data" required>
-              Data
-            </Label>
-            <Input
-              id="cx-data"
-              type="date"
-              value={form.data}
-              onChange={(e) => setForm({ ...form, data: e.target.value })}
-              required
-            />
-          </div>
-          <div className="col-span-2">
-            <Label htmlFor="cx-descricao">Descrição</Label>
+              <CampoComUnidade
+                id="cx-valor"
+                prefixo="R$"
+                type="number"
+                inputMode="decimal"
+                min="0.01"
+                step="0.01"
+                value={form.valor}
+                onChange={(e) => setForm({ ...form, valor: e.target.value })}
+                onBlur={vl.tocar("valor")}
+                placeholder="0,00"
+              />
+            </FormField>
+            <FormField label="Data" required error={vl.erro("data")} hint="Hoje, por padrão.">
+              <Input
+                id="cx-data"
+                type="date"
+                value={form.data}
+                onChange={(e) => setForm({ ...form, data: e.target.value })}
+                onBlur={vl.tocar("data")}
+              />
+            </FormField>
+          </GradeCampos>
+          <FormField label="Descrição" opcional hint="Aparece no extrato da conta.">
             <Input
               id="cx-descricao"
               value={form.descricao}
               onChange={(e) => setForm({ ...form, descricao: e.target.value })}
+              maxLength={255}
+              placeholder="Ex.: Repasse do FPM — 1º decêndio"
             />
-          </div>
+          </FormField>
 
           {err && (
             <div
               role="alert"
-              className="col-span-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+              className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
             >
               {err}
             </div>
