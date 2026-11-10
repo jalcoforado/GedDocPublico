@@ -9,6 +9,7 @@ import {
   Bus,
   CheckCheck,
   FileText,
+  Home,
   type LucideIcon,
   PenLine,
   Star,
@@ -16,7 +17,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -78,6 +81,7 @@ export default function HomePage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        icon={Home}
         title="Início"
         description={
           <>
@@ -115,10 +119,11 @@ export default function HomePage() {
             <Skeleton aria-hidden="true" role="presentation" className="h-44 rounded-card" variant="shimmer" />
           </div>
         ) : !veProtocolo && !vePagamentos && !veFrota && !veTransporte ? (
-          <p className="text-sm text-foreground-muted">
-            Nenhum módulo com pendências para o seu perfil. Os módulos que você alcança estão no
-            menu ao lado.
-          </p>
+          <EmptyState
+            icon={CheckCheck}
+            title="Nenhum módulo com pendências para o seu perfil"
+            description="Os módulos que você alcança estão no menu ao lado."
+          />
         ) : (
           (() => {
             // Um módulo só vira faixa de largura inteira: um cartão sozinho
@@ -378,9 +383,9 @@ function Notificacoes() {
         <h2 className="font-display text-base font-semibold text-foreground">
           Notificações não lidas
           {naoLidas > 0 && (
-            <span className="ml-2 rounded-full bg-danger-soft px-2 text-xs font-semibold tabular-nums text-danger-soft-foreground">
+            <Badge intent="danger" className="ml-2 tabular-nums">
               {naoLidas}
-            </span>
+            </Badge>
           )}
         </h2>
         {itens.length > 0 && (
@@ -479,38 +484,37 @@ function Acompanhando() {
           ver aqui onde ele está.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-card border border-border bg-surface-1 shadow-card">
-          <Table>
-            <THead>
-              <TR>
-                <TH>Processo</TH>
-                <TH>Assunto</TH>
-                <TH>Onde está agora</TH>
+        // A Table já é um cartão (borda, fundo, sombra): sem casca em volta.
+        <Table>
+          <THead>
+            <TR>
+              <TH>Processo</TH>
+              <TH>Assunto</TH>
+              <TH>Onde está agora</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {itens.map((p) => (
+              <TR key={p.id}>
+                <TD className="font-mono text-xs tabular-nums">
+                  <Link
+                    href={`/m/protocolo/processos/${p.id}`}
+                    className="font-medium text-primary underline-offset-2 hover:underline"
+                  >
+                    {p.nup ?? p.numero_processo}
+                  </Link>
+                </TD>
+                <TD>
+                  <div className="line-clamp-1 text-sm">{p.assunto ?? "—"}</div>
+                </TD>
+                <TD className="text-sm">
+                  {p.local_atual ?? <span className="text-foreground-muted">sem unidade registrada</span>}
+                  {!p.ativo && <span className="ml-1 text-xs text-foreground-muted">(inativo)</span>}
+                </TD>
               </TR>
-            </THead>
-            <TBody>
-              {itens.map((p) => (
-                <TR key={p.id}>
-                  <TD className="font-mono text-xs tabular-nums">
-                    <Link
-                      href={`/m/protocolo/processos/${p.id}`}
-                      className="font-medium text-foreground underline underline-offset-2 hover:no-underline"
-                    >
-                      {p.nup ?? p.numero_processo}
-                    </Link>
-                  </TD>
-                  <TD>
-                    <div className="line-clamp-1 text-sm">{p.assunto ?? "—"}</div>
-                  </TD>
-                  <TD className="text-sm">
-                    {p.local_atual ?? <span className="text-foreground-muted">sem unidade registrada</span>}
-                    {!p.ativo && <span className="ml-1 text-xs text-foreground-muted">(inativo)</span>}
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        </div>
+            ))}
+          </TBody>
+        </Table>
       )}
     </section>
   );
