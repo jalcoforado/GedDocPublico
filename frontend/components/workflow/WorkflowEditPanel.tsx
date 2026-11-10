@@ -95,7 +95,7 @@ function EstadoEditor({
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Estado</h3>
         {dsl.estado_inicial === slug ? (
-          <span className="text-xs font-medium text-blue-700">● inicial</span>
+          <span className="text-xs font-medium text-info-soft-foreground">● inicial</span>
         ) : (
           <Button size="sm" variant="ghost" onClick={definirComoInicial}>
             Definir como inicial

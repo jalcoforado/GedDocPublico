@@ -1,12 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Save, X } from "lucide-react";
+import { GitBranch, Save, X } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { WorkflowEditor, type WorkflowEditorSelection } from "./WorkflowEditor";
@@ -36,6 +37,8 @@ interface Props {
 interface ValidationIssue {
   level: "error" | "warning";
   msg: string;
+  /** Erro de um campo do cabeçalho: aparece embaixo dele, não na lista. */
+  campo?: "slug" | "nome";
 }
 
 function validateDsl(
@@ -52,10 +55,11 @@ function validateDsl(
       issues.push({
         level: "error",
         msg: "Slug do workflow deve começar com letra e usar só [a-z0-9_-].",
+        campo: "slug",
       });
     }
   }
-  if (!nome.trim()) issues.push({ level: "error", msg: "Nome é obrigatório." });
+  if (!nome.trim()) issues.push({ level: "error", msg: "Nome é obrigatório.", campo: "nome" });
 
   // Estados
   if (dsl.estados.length === 0) {
@@ -170,9 +174,21 @@ export function WorkflowEditPage({
     [dsl, slug, nome, mode],
   );
   const errors = issues.filter((i) => i.level === "error");
+  // Erro de campo só depois que a pessoa mexeu nele ou tentou salvar: a tela
+  // abria com "Slug… deve começar com letra" e "Nome é obrigatório" em
+  // vermelho antes de qualquer digitação. Por isso o Criar não fica mais
+  // desabilitado com erro — clicar é o que revela o que falta.
+  const [tocados, setTocados] = useState<{ slug?: boolean; nome?: boolean }>({});
+  const [tentouSalvar, setTentouSalvar] = useState(false);
+  const erroDoCampo = (campo: "slug" | "nome") =>
+    tentouSalvar || tocados[campo]
+      ? errors.find((i) => i.campo === campo)?.msg
+      : undefined;
+  const errosDoFluxo = errors.filter((i) => !i.campo);
   const warnings = issues.filter((i) => i.level === "warning");
 
   const handleSave = useCallback(async () => {
+    setTentouSalvar(true);
     if (errors.length > 0) {
       toast.error(`Corrija ${errors.length} erro(s) antes de salvar.`);
       return;
@@ -199,28 +215,37 @@ export function WorkflowEditPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-primary">
-          {mode === "novo" ? "Novo workflow" : `Editar workflow${versao ? ` · v${versao}` : ""}`}
-        </h1>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={handleCancel} disabled={saving}>
-            <X className="mr-1 h-4 w-4" aria-hidden="true" />
-            Cancelar
-          </Button>
-          <Button onClick={handleSave} disabled={saving || errors.length > 0}>
-            <Save className="mr-1 h-4 w-4" aria-hidden="true" />
-            {saving
-              ? "Salvando…"
-              : mode === "novo"
-                ? "Criar"
-                : "Salvar nova versão"}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        icon={GitBranch}
+        breadcrumbs={[
+          { label: "Workflows", href: "/m/protocolo/workflow" },
+          ...(mode === "editar" && workflowId
+            ? [{ label: initialNome || "Workflow", href: `/m/protocolo/workflow/${workflowId}` }]
+            : []),
+          { label: mode === "novo" ? "Novo workflow" : "Editar" },
+        ]}
+        title={mode === "novo" ? "Novo workflow" : `Editar workflow${versao ? ` · v${versao}` : ""}`}
+        description="Desenhe os estados e as transições no diagrama; clique num item para editar os detalhes ao lado."
+        actions={
+          <>
+            <Button variant="secondary" onClick={handleCancel} disabled={saving}>
+              <X className="h-4 w-4" aria-hidden="true" />
+              Cancelar
+            </Button>
+            <Button onClick={handleSave} disabled={saving}>
+              <Save className="h-4 w-4" aria-hidden="true" />
+              {saving
+                ? "Salvando…"
+                : mode === "novo"
+                  ? "Criar"
+                  : "Salvar nova versão"}
+            </Button>
+          </>
+        }
+      />
 
       {mode === "editar" && (
-        <p className="rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-900">
+        <p className="rounded border border-info/30 bg-info-soft p-2 text-xs text-info-soft-foreground">
           Editar gera <strong>nova versão</strong> deste workflow (instances ativas
           continuam na versão antiga).
         </p>
@@ -233,9 +258,17 @@ export function WorkflowEditPage({
             id="wf-slug"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
+            onBlur={() => setTocados((t) => ({ ...t, slug: true }))}
             disabled={mode === "editar"}
             placeholder="ex: fluxo_recurso"
+            aria-invalid={erroDoCampo("slug") ? true : undefined}
+            aria-describedby={erroDoCampo("slug") ? "wf-slug-erro" : undefined}
           />
+          {erroDoCampo("slug") && (
+            <p id="wf-slug-erro" className="text-sm text-danger">
+              {erroDoCampo("slug")}
+            </p>
+          )}
         </div>
         <div className="space-y-1">
           <Label htmlFor="wf-nome">Nome</Label>
@@ -243,8 +276,16 @@ export function WorkflowEditPage({
             id="wf-nome"
             value={nome}
             onChange={(e) => setNome(e.target.value)}
+            onBlur={() => setTocados((t) => ({ ...t, nome: true }))}
             placeholder="Nome humano"
+            aria-invalid={erroDoCampo("nome") ? true : undefined}
+            aria-describedby={erroDoCampo("nome") ? "wf-nome-erro" : undefined}
           />
+          {erroDoCampo("nome") && (
+            <p id="wf-nome-erro" className="text-sm text-danger">
+              {erroDoCampo("nome")}
+            </p>
+          )}
         </div>
         <div className="space-y-1">
           <Label htmlFor="wf-desc">Descrição</Label>
@@ -257,9 +298,9 @@ export function WorkflowEditPage({
         </div>
       </div>
 
-      {(errors.length > 0 || warnings.length > 0) && (
+      {(errosDoFluxo.length > 0 || warnings.length > 0) && (
         <div className="space-y-1">
-          {errors.map((i, idx) => (
+          {errosDoFluxo.map((i, idx) => (
             <p
               key={`e-${idx}`}
               className="rounded border border-danger/40 bg-danger/10 px-2 py-1 text-xs text-danger-soft-foreground"

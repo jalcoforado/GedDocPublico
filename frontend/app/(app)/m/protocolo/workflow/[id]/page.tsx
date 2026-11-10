@@ -1,14 +1,16 @@
 "use client";
 
-import { Carregando } from "@/components/ui/carregando";
-
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Pencil, XCircle } from "lucide-react";
+import { GitBranch, Pencil } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { BadgeAtivo } from "@/components/protocolo/BadgeAtivo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Carregando } from "@/components/ui/carregando";
+import { PageHeader } from "@/components/ui/page-header";
+import { COR_WF } from "@/components/workflow/cores";
 import { WorkflowDiagram } from "@/components/workflow/WorkflowDiagram";
 import { WorkflowMapeamentoTipos } from "@/components/workflow/WorkflowMapeamentoTipos";
 import { WorkflowVersoes } from "@/components/workflow/WorkflowVersoes";
@@ -40,36 +42,29 @@ export default function WorkflowDetailPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Link
-          href="/m/protocolo/workflow"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          aria-label="Voltar"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        </Link>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold text-primary">{wf.nome}</h1>
-          <p className="text-sm text-muted-foreground">
+      {/* A seta de voltar vem do PageHeader, pela trilha até a lista. */}
+      <PageHeader
+        icon={GitBranch}
+        breadcrumbs={[
+          { label: "Workflows", href: "/m/protocolo/workflow" },
+          { label: wf.nome },
+        ]}
+        title={wf.nome}
+        description={
+          <span className="inline-flex flex-wrap items-center gap-1.5">
             <span className="font-mono">{wf.slug}</span> · v{wf.versao} ·
-            {wf.ativo ? (
-              <Badge intent="success" icon={CheckCircle2}>
-                Ativo
-              </Badge>
-            ) : (
-              <Badge intent="neutral" icon={XCircle}>
-                Inativo
-              </Badge>
-            )}
-          </p>
-        </div>
-        <Link href={`/m/protocolo/workflow/${wf.id}/editar`}>
-          <Button size="sm" variant="secondary">
-            <Pencil className="mr-1 h-4 w-4" aria-hidden="true" />
-            Editar (nova versão)
+            <BadgeAtivo ativo={wf.ativo} />
+          </span>
+        }
+        actions={
+          <Button asChild variant="secondary">
+            <Link href={`/m/protocolo/workflow/${wf.id}/editar`}>
+              <Pencil className="h-4 w-4" aria-hidden="true" />
+              Editar (nova versão)
+            </Link>
           </Button>
-        </Link>
-      </div>
+        }
+      />
 
       {wf.descricao && (
         <p className="text-sm text-foreground">{wf.descricao}</p>
@@ -85,24 +80,41 @@ export default function WorkflowDetailPage() {
         </h2>
         <WorkflowDiagram dsl={dsl} height={520} />
         <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+          {/* Legenda com as mesmas cores do diagrama (`components/workflow/cores`). */}
           <span>
-            <span className="inline-block h-2 w-4 align-middle border-2 border-dashed border-[#2563eb]" />{" "}
+            <span
+              className="inline-block h-2 w-4 align-middle border-2 border-dashed"
+              style={{ borderColor: COR_WF.inicial }}
+            />{" "}
             inicial
           </span>
           <span>
-            <span className="inline-block h-2 w-4 align-middle border-2 border-[#16a34a] bg-[#dcfce7]" />{" "}
+            <span
+              className="inline-block h-2 w-4 align-middle border-2"
+              style={{ borderColor: COR_WF.final, background: COR_WF.finalFundo }}
+            />{" "}
             final
           </span>
           <span>
-            <span className="inline-block h-px w-4 align-middle bg-[#64748b]" /> transição
-            manual
+            <span
+              className="inline-block h-px w-4 align-middle"
+              style={{ background: COR_WF.transicao }}
+            />{" "}
+            transição manual
           </span>
           <span>
-            <span className="inline-block h-px w-4 align-middle bg-[#64748b] border-dashed border-t" />{" "}
+            <span
+              className="inline-block w-4 align-middle border-t border-dashed"
+              style={{ borderColor: COR_WF.transicao }}
+            />{" "}
             transição auto (evento)
           </span>
           <span>
-            <span className="inline-block h-px w-4 align-middle bg-[#9333ea]" /> com condição
+            <span
+              className="inline-block h-px w-4 align-middle"
+              style={{ background: COR_WF.condicao }}
+            />{" "}
+            com condição
           </span>
         </div>
       </section>
