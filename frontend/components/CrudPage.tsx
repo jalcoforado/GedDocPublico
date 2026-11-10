@@ -435,10 +435,13 @@ export function CrudPage<T extends { id: number }>({
         </TBody>
       </Table>
 
-      {meta && (
+      {/* Lista vazia já diz isso no EmptyState; "0 registros — página 1"
+          com Anterior/Próxima desabilitados embaixo era ruído. */}
+      {meta && meta.total > 0 && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>
-            {meta.total} registros — página {page}
+            {meta.total} {meta.total === 1 ? "registro" : "registros"}
+            {` — página ${page} de ${lastPage}`}
           </span>
           <div className="flex gap-2">
             <Button
