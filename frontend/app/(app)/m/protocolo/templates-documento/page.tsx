@@ -1,17 +1,22 @@
 "use client";
 
-import { Carregando } from "@/components/ui/carregando";
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Copy, FileText, Pause, Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Carregando } from "@/components/ui/carregando";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { api, protocoloApi, type TemplateDocumento } from "@/lib/api";
 
@@ -145,25 +150,37 @@ export default function TemplatesDocumentoPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">
-            Templates de documento
-          </h1>
-          <p className="text-sm text-muted-foreground">
+      <PageHeader
+        icon={FileText}
+        title="Templates de documento"
+        description={
+          <>
             Modelos com campos automáticos ({"{{"}placeholders{"}}"}) usados ao redigir
             documentos nos processos.
-          </p>
-        </div>
-        <Button onClick={abrirNovo}>Novo template</Button>
-      </div>
+          </>
+        }
+        actions={
+          <Button onClick={abrirNovo}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Novo template
+          </Button>
+        }
+      />
 
       {listQ.isLoading ? (
         <Carregando className="text-sm text-muted-foreground" />
       ) : templates.length === 0 ? (
-        <p className="text-sm text-gray-500">
-          Nenhum template cadastrado. Crie o primeiro modelo.
-        </p>
+        <EmptyState
+          icon={FileText}
+          title="Nenhum template cadastrado"
+          description="Crie o primeiro modelo para usar ao redigir documentos nos processos."
+          action={
+            <Button onClick={abrirNovo}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Novo template
+            </Button>
+          }
+        />
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border bg-card">
           {templates.map((t: TemplateDocumento) => (
@@ -175,9 +192,9 @@ export default function TemplatesDocumentoPage() {
                 <div className="truncate text-sm font-medium text-foreground">
                   {t.nome}
                   {!t.ativo && (
-                    <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
-                      inativo
-                    </span>
+                    <Badge intent="neutral" icon={Pause} className="ml-2">
+                      Inativo
+                    </Badge>
                   )}
                 </div>
                 <div className="text-xs text-muted-foreground">
@@ -191,27 +208,24 @@ export default function TemplatesDocumentoPage() {
                     : ""}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button variant="secondary" size="sm" onClick={() => abrirEdicao(t.id)}>
-                  Editar
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => clonarM.mutate(t.id)}
-                  disabled={clonarM.isPending}
-                >
-                  Clonar
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => excluir(t.id)}
-                  disabled={removeM.isPending}
-                >
-                  Excluir
-                </Button>
-              </div>
+              <AcoesDaLinha
+                acoes={[
+                  { label: "Editar", icon: Pencil, onClick: () => abrirEdicao(t.id) },
+                  {
+                    label: "Clonar",
+                    icon: Copy,
+                    onClick: () => clonarM.mutate(t.id),
+                    disabled: clonarM.isPending,
+                  },
+                  {
+                    label: "Excluir",
+                    icon: Trash2,
+                    perigo: true,
+                    onClick: () => excluir(t.id),
+                    disabled: removeM.isPending,
+                  },
+                ]}
+              />
             </li>
           ))}
         </ul>
@@ -246,7 +260,7 @@ export default function TemplatesDocumentoPage() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="tpl-especie">Espécie documental</Label>
-              <select
+              <Select
                 id="tpl-especie"
                 value={form.id_especie_documental ?? ""}
                 onChange={(e) =>
@@ -255,7 +269,6 @@ export default function TemplatesDocumentoPage() {
                     id_especie_documental: e.target.value ? Number(e.target.value) : null,
                   })
                 }
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">Sem espécie</option>
                 {(especiesQ.data ?? []).map((e) => (
@@ -263,12 +276,12 @@ export default function TemplatesDocumentoPage() {
                     {e.nome}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="tpl-unidade">Setor administrador</Label>
-            <select
+            <Select
               id="tpl-unidade"
               value={form.id_unidade_trabalho ?? ""}
               onChange={(e) =>
@@ -277,7 +290,6 @@ export default function TemplatesDocumentoPage() {
                   id_unidade_trabalho: e.target.value ? Number(e.target.value) : null,
                 })
               }
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="">Todo o tenant (sem setor específico)</option>
               {(unidadesQ.data?.items ?? []).map((u) => (
@@ -285,7 +297,7 @@ export default function TemplatesDocumentoPage() {
                   {u.unidade_trabalho}
                 </option>
               ))}
-            </select>
+            </Select>
             <p className="text-xs text-muted-foreground">
               Só define quem administra o modelo — todos no tenant continuam podendo usá-lo.
             </p>
@@ -309,7 +321,7 @@ export default function TemplatesDocumentoPage() {
                   type="button"
                   onClick={() => inserirPlaceholder(p.chave)}
                   title={p.descricao}
-                  className="rounded border border-border bg-muted px-2 py-0.5 text-xs text-foreground hover:bg-accent"
+                  className="rounded border border-border bg-muted px-2 py-0.5 text-xs text-foreground transition-colors hover:border-primary/40 hover:bg-primary/10"
                 >
                   {`{{${p.chave}}}`}
                 </button>
