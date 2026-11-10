@@ -168,7 +168,7 @@ describe("CrudPage — paginação", () => {
     const chamadasAntes = fetchList.mock.calls.length;
 
     fireEvent.click(screen.getByRole("button", { name: "Novo" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Salvar" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Cadastrar/ }));
 
     // A queryKey ganhou o segmento de página; a invalidação por prefixo das
     // mutations precisa continuar alcançando-a.
