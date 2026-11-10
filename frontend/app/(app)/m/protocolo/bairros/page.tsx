@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Map as MapIcon } from "lucide-react";
 
 import { CrudPage } from "@/components/CrudPage";
+import { BadgeAtivo } from "@/components/protocolo/BadgeAtivo";
 import { api, type Bairro } from "@/lib/api";
 
 export default function BairrosPage() {
@@ -16,6 +18,9 @@ export default function BairrosPage() {
   return (
     <CrudPage<Bairro>
       title="Bairros"
+      icon={MapIcon}
+      description="Bairros usados no endereço dos manifestantes."
+      novoLabel="Novo bairro"
       queryKey={["bairros", q]}
       fetchList={({ page }) => api.bairros.list({ q: q || undefined, page, page_size: 50 })}
       createFn={api.bairros.create}
@@ -31,7 +36,7 @@ export default function BairrosPage() {
           render: (r) =>
             cidadesQ.data?.items.find((c) => c.id === r.id_cidade)?.cidade ?? "—",
         },
-        { header: "Ativo", render: (r) => (r.ativo ? "Sim" : "Não"), className: "w-20" },
+        { header: "Situação", render: (r) => <BadgeAtivo ativo={r.ativo} />, className: "w-24" },
       ]}
       fields={[
         { name: "bairro", label: "Nome", type: "text", required: true, colSpan: 2 },

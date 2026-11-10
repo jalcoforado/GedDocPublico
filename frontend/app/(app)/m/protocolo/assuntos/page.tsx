@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { BookOpen } from "lucide-react";
 
 import { CrudPage } from "@/components/CrudPage";
+import { BadgeAtivo } from "@/components/protocolo/BadgeAtivo";
 import { api, type Assunto } from "@/lib/api";
 import { useAssuntosAll } from "@/lib/assuntos";
 
@@ -23,6 +25,9 @@ export default function AssuntosPage() {
   return (
     <CrudPage<Assunto>
       title="Assuntos"
+      icon={BookOpen}
+      description="Assuntos que classificam os processos, em árvore e por tipo de processo."
+      novoLabel="Novo assunto"
       queryKey={["assuntos", q]}
       fetchList={({ page }) => api.assuntos.list({ q: q || undefined, page, page_size: 50 })}
       createFn={api.assuntos.create}
@@ -52,7 +57,7 @@ export default function AssuntosPage() {
           render: (r) =>
             tiposQ.data?.find((t) => t.id === r.id_tipo_processo)?.tipo_processo ?? "—",
         },
-        { header: "Ativo", render: (r) => (r.ativo ? "Sim" : "Não"), className: "w-20" },
+        { header: "Situação", render: (r) => <BadgeAtivo ativo={r.ativo} />, className: "w-24" },
       ]}
       fields={[
         { name: "assunto", label: "Assunto", type: "textarea", required: true, colSpan: 2 },

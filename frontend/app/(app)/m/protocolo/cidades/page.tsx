@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { MapPin } from "lucide-react";
 
 import { CrudPage } from "@/components/CrudPage";
 import { api, type Cidade } from "@/lib/api";
@@ -13,6 +14,9 @@ export default function CidadesPage() {
   return (
     <CrudPage<Cidade>
       title="Cidades"
+      icon={MapPin}
+      description="Cidades usadas no endereço dos manifestantes."
+      novoLabel="Nova cidade"
       queryKey={["cidades", q]}
       fetchList={({ page }) => api.cidades.list({ q: q || undefined, page, page_size: 50 })}
       createFn={api.cidades.create}
