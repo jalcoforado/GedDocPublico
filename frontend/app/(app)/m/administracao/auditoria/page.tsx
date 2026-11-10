@@ -92,7 +92,7 @@ export default function AuditoriaPage() {
               setDraft({ ...draft, acao: e.target.value || undefined })
             }
             onKeyDown={aoTeclar}
-            placeholder="ex: processo."
+            placeholder="Ex.: processo."
           />
         </FilterBar.Group>
         <FilterBar.Group label="Entidade" className="w-full sm:w-44">
@@ -103,7 +103,7 @@ export default function AuditoriaPage() {
               setDraft({ ...draft, entidade: e.target.value || undefined })
             }
             onKeyDown={aoTeclar}
-            placeholder="ex: processo"
+            placeholder="Ex.: processo"
           />
         </FilterBar.Group>
         <FilterBar.Group label="ID da entidade" className="w-full sm:w-32">
@@ -119,6 +119,7 @@ export default function AuditoriaPage() {
               })
             }
             onKeyDown={aoTeclar}
+            placeholder="Ex.: 1234"
           />
         </FilterBar.Group>
         <FilterBar.Group label="Desde" className="w-full sm:w-52">
