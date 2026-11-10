@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
@@ -125,29 +126,28 @@ export default function CcdPage() {
         icon={FolderTree}
         title="CCD — Classificação Documental"
         description="Taxonomia hierárquica de classes documentais. Cada protocolo recebe uma classe que determina o prazo de guarda via tabela de temporalidade (TTD)."
+        actions={
+          canInsert && (
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setCreatingParent(null);
+              }}
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Nova classe raiz
+            </Button>
+          )
+        }
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-2">
-          <Button size="sm" variant="secondary" onClick={expandAll}>
-            Expandir tudo
-          </Button>
-          <Button size="sm" variant="secondary" onClick={collapseAll}>
-            Recolher
-          </Button>
-        </div>
-        {canInsert && (
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditing(null);
-              setCreatingParent(null);
-            }}
-          >
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" />
-            Nova classe raiz
-          </Button>
-        )}
+      <div className="flex gap-2">
+        <Button size="sm" variant="secondary" onClick={expandAll}>
+          Expandir tudo
+        </Button>
+        <Button size="sm" variant="secondary" onClick={collapseAll}>
+          Recolher
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
@@ -162,7 +162,7 @@ export default function CcdPage() {
             <EmptyState
               icon={FolderTree}
               title="Nenhuma classe cadastrada"
-              description="Clique em Nova classe para criar a primeira da árvore."
+              description="Use “Nova classe raiz” para criar a primeira da árvore."
               className="border-0 bg-transparent"
             />
           )}
@@ -213,8 +213,8 @@ export default function CcdPage() {
           )}
           {!editing && creatingParent === undefined && (
             <div className="rounded-xl border border-dashed border-border bg-surface-1 p-4 text-xs text-foreground-muted">
-              Clique numa classe pra editar, ou em &ldquo;Nova classe raiz&rdquo;
-              pra criar. Use o + ao lado da linha pra criar subclasse.
+              Use Editar na linha para alterar uma classe, &ldquo;Subclasse&rdquo; para criar
+              uma abaixo dela ou &ldquo;Nova classe raiz&rdquo; no topo.
             </div>
           )}
         </aside>
@@ -285,38 +285,32 @@ function TreeRow({
             kw: {node.palavras_chave}
           </span>
         )}
-        <div className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
-          {onAddChild && (
-            <button
-              type="button"
-              onClick={() => onAddChild(node.id)}
-              className="rounded p-1 text-foreground-muted hover:bg-surface-3 hover:text-foreground"
-              title="Adicionar subclasse"
-            >
-              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          )}
-          {onEdit && (
-            <button
-              type="button"
-              onClick={() => onEdit(classeForCallback)}
-              className="rounded p-1 text-foreground-muted hover:bg-surface-3 hover:text-foreground"
-              title="Editar"
-            >
-              <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          )}
-          {onDelete && (
-            <button
-              type="button"
-              onClick={() => onDelete(classeForCallback)}
-              className="rounded p-1 text-foreground-muted hover:bg-danger/10 hover:text-danger"
-              title="Excluir"
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          )}
-        </div>
+        {/* Eram ícones que só apareciam no hover: invisíveis no toque e no
+            teclado. */}
+        <AcoesDaLinha
+          className="shrink-0"
+          acoes={[
+            {
+              label: "Subclasse",
+              icon: Plus,
+              oculta: !onAddChild,
+              onClick: () => onAddChild?.(node.id),
+            },
+            {
+              label: "Editar",
+              icon: Pencil,
+              oculta: !onEdit,
+              onClick: () => onEdit?.(classeForCallback),
+            },
+            {
+              label: "Excluir",
+              icon: Trash2,
+              perigo: true,
+              oculta: !onDelete,
+              onClick: () => onDelete?.(classeForCallback),
+            },
+          ]}
+        />
       </div>
       {hasChildren && isOpen && (
         <ul className="divide-y divide-border">

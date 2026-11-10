@@ -12,10 +12,12 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -118,33 +120,38 @@ export default function TtdPage() {
         icon={CalendarClock}
         title="TTD — Tabela de Temporalidade Documental"
         description="Para cada classe CCD (opcionalmente combinada com espécie), define anos na fase corrente, intermediária e destino final (eliminação ou guarda permanente)."
+        actions={
+          canInsert && (
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setCreating(true);
+              }}
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Nova regra
+            </Button>
+          )
+        }
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex w-full max-w-md flex-1 items-center gap-2">
-          <Label className="shrink-0 text-xs text-foreground-muted">
-            Filtrar classe:
-          </Label>
+      <FilterBar>
+        <FilterBar.Group label="Classe" className="w-full max-w-md">
           <Combobox
             options={classeOptions}
             value={filtroClasse}
             onChange={(v) => setFiltroClasse(typeof v === "number" ? v : null)}
             placeholder="Todas as classes"
           />
-        </div>
-        {canInsert && (
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditing(null);
-              setCreating(true);
-            }}
-          >
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" />
-            Nova regra
-          </Button>
+        </FilterBar.Group>
+        {filtroClasse !== null && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={() => setFiltroClasse(null)}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
         )}
-      </div>
+      </FilterBar>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
         <section className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
@@ -170,7 +177,9 @@ export default function TtdPage() {
                   <th className="px-3 py-2 text-center">Corrente</th>
                   <th className="px-3 py-2 text-center">Intermed.</th>
                   <th className="px-3 py-2">Destino</th>
-                  <th className="px-3 py-2 w-20"></th>
+                  <th className="px-3 py-2 text-right">
+                    <span className="sr-only">Ações</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -205,30 +214,29 @@ export default function TtdPage() {
                         </p>
                       )}
                     </td>
-                    <td className="px-3 py-2">
-                      <div className="flex opacity-0 transition-opacity group-hover:opacity-100">
-                        {canUpdate && (
-                          <button
-                            onClick={() => {
+                    <td className="px-3 py-2 text-right">
+                      {/* Eram ícones que só apareciam no hover: invisíveis no
+                          toque e no teclado. */}
+                      <AcoesDaLinha
+                        acoes={[
+                          {
+                            label: "Editar",
+                            icon: Pencil,
+                            oculta: !canUpdate,
+                            onClick: () => {
                               setCreating(false);
                               setEditing(r);
-                            }}
-                            className="rounded p-1 text-foreground-muted hover:bg-surface-3 hover:text-foreground"
-                            title="Editar"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        {canDelete && (
-                          <button
-                            onClick={() => onDelete(r)}
-                            className="rounded p-1 text-foreground-muted hover:bg-danger/10 hover:text-danger"
-                            title="Excluir"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </div>
+                            },
+                          },
+                          {
+                            label: "Excluir",
+                            icon: Trash2,
+                            perigo: true,
+                            oculta: !canDelete,
+                            onClick: () => onDelete(r),
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -255,8 +263,8 @@ export default function TtdPage() {
           )}
           {!editing && !creating && (
             <div className="rounded-xl border border-dashed border-border bg-surface-1 p-4 text-xs text-foreground-muted">
-              Hover numa linha pra editar/excluir, ou clique em &ldquo;Nova
-              regra&rdquo; pra criar.
+              Use Editar ou Excluir na linha, ou &ldquo;Nova regra&rdquo; no
+              topo para criar.
             </div>
           )}
         </aside>
