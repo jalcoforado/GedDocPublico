@@ -50,6 +50,15 @@ interface ComboboxProps<T> {
   selectedOption?: ComboboxOption<T> | null;
   className?: string;
   id?: string;
+  /**
+   * Repassados ao gatilho. É o que o `FormField` injeta no controle: sem isso
+   * a borda de erro, a dica/erro lidos pelo leitor de tela e o
+   * `focarPrimeiroInvalido` não alcançavam os campos de busca.
+   */
+  "aria-invalid"?: boolean | "true" | "false";
+  "aria-describedby"?: string;
+  /** Aceito para casar com o `FormField`; a obrigatoriedade é validada pela tela. */
+  required?: boolean;
 }
 
 /** Minúsculas e sem acento: "SAÚDE" casa com "saude". */
@@ -80,6 +89,9 @@ export function Combobox<T>({
   selectedOption,
   className,
   id,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
+  required,
 }: ComboboxProps<T>) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -180,11 +192,15 @@ export function Combobox<T>({
         aria-expanded={open}
         aria-controls={listboxId}
         aria-haspopup="listbox"
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedBy}
+        aria-required={required || undefined}
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         className={cn(
           "flex h-11 w-full items-center justify-between gap-2 rounded-input border border-input bg-card px-3 text-sm shadow-input transition-colors duration-fast",
           "hover:border-border-strong hover:bg-muted/50",
+          "aria-[invalid=true]:border-danger aria-[invalid=true]:focus-visible:ring-danger",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
           "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-input disabled:hover:bg-card",
         )}
