@@ -53,6 +53,8 @@ export interface CrudField<T = any> {
   textoAoLado?: string;
   /** Dica permanente sob o campo: formato, exemplo, para que serve. */
   dica?: string;
+  /** Marca "opcional" ao lado do rótulo (campo livre num grupo de obrigatórios). */
+  opcional?: boolean;
   /** Unidade grudada no campo (só `text`/`number`): "R$" antes, "km" depois. */
   prefixo?: string;
   sufixo?: string;
@@ -538,6 +540,9 @@ export function CrudPage<T extends { id: number }>({
             >
               <Label htmlFor={f.name} required={f.required && f.type !== "checkbox"}>
                 {resolver(f.label, form)}
+                {f.opcional && !f.required && (
+                  <span className="ml-1.5 text-xs font-normal text-foreground-subtle">opcional</span>
+                )}
               </Label>
               {f.type === "select" ? (
                 <Select
