@@ -458,14 +458,15 @@ export default function SolicitacoesPage() {
         <Table>
           <THead>
             <TR>
-              <TH>Finalidade</TH>
-              <TH>Destino</TH>
-              <TH>Saída prevista</TH>
-              <TH>Retorno previsto</TH>
+              {/* Dez colunas não cabiam em 1440px: Status e Ações ficavam
+                  fora da tela, atrás da rolagem lateral. Agora são pares que
+                  se leem juntos (o quê + para onde; saída + retorno; veículo +
+                  motorista + o que aconteceu) numa célula de duas linhas. */}
+              <TH>Solicitação</TH>
+              <TH>Previsto</TH>
               <TH className="text-right">Passag.</TH>
               <TH>Unidade</TH>
-              <TH>Designado</TH>
-              <TH>Saída / Retorno</TH>
+              <TH>Execução</TH>
               <TH>Status</TH>
               <TH className="text-right">Ações</TH>
             </TR>
@@ -473,7 +474,7 @@ export default function SolicitacoesPage() {
           <TBody>
             {listQ.isLoading && (
               <TR>
-                <TD colSpan={10} className="text-center text-muted-foreground">
+                <TD colSpan={8} className="text-center text-muted-foreground">
                   Carregando solicitações...
                 </TD>
               </TR>
@@ -487,54 +488,52 @@ export default function SolicitacoesPage() {
                   {/* Finalidade e destino são texto livre: cortados numa linha,
                       com o texto inteiro no title. Quebrando, cada linha virava
                       um bloco de cinco linhas. */}
-                  <TD className="max-w-[16rem] truncate font-medium" title={s.finalidade}>
-                    {s.finalidade}
+                  <TD className="max-w-[18rem]">
+                    <div className="truncate font-medium" title={s.finalidade}>
+                      {s.finalidade}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground" title={s.destino}>
+                      {s.destino}
+                    </div>
                   </TD>
-                  <TD className="max-w-[12rem] truncate text-muted-foreground" title={s.destino}>
-                    {s.destino}
+                  <TD className="whitespace-nowrap tabular-nums">
+                    <div>{fmtDataHora(s.data_saida_prevista)}</div>
+                    <div className="text-xs text-muted-foreground">
+                      até {fmtDataHora(s.data_retorno_prevista)}
+                    </div>
                   </TD>
-                  <TD className="whitespace-nowrap tabular-nums">{fmtDataHora(s.data_saida_prevista)}</TD>
-                  <TD className="whitespace-nowrap tabular-nums">{fmtDataHora(s.data_retorno_prevista)}</TD>
                   <TD className="text-right tabular-nums">{s.quantidade_passageiros}</TD>
                   <TD className="text-muted-foreground">{unidadeNome(s.id_unidade_solicitante)}</TD>
-                  <TD>
+                  <TD className="max-w-[16rem]">
                     {s.id_veiculo_designado ? (
-                      <div className="text-xs">
-                        <div className="font-medium">
+                      <>
+                        <div className="truncate font-medium">
                           {veiculoLabel(s.id_veiculo_designado) ?? `#${s.id_veiculo_designado}`}
                         </div>
-                        {s.id_motorista_designado && (
-                          <div className="text-muted-foreground">
-                            {motoristaNome(s.id_motorista_designado) ?? `#${s.id_motorista_designado}`}
+                        <div className="truncate text-xs text-muted-foreground">
+                          {s.id_motorista_designado
+                            ? (motoristaNome(s.id_motorista_designado) ?? `#${s.id_motorista_designado}`)
+                            : "Sem motorista"}
+                        </div>
+                        {/* O último fato da viagem numa linha; os dois no title. */}
+                        {(s.data_saida_real || s.data_retorno_real) && (
+                          <div
+                            className="truncate text-xs tabular-nums text-muted-foreground"
+                            title={[
+                              s.data_saida_real &&
+                                `Saída: ${fmtDataHora(s.data_saida_real)}${s.km_saida != null ? ` · ${s.km_saida} km` : ""}`,
+                              s.data_retorno_real &&
+                                `Retorno: ${fmtDataHora(s.data_retorno_real)}${s.km_retorno != null ? ` · ${s.km_retorno} km` : ""}`,
+                            ]
+                              .filter(Boolean)
+                              .join("\n")}
+                          >
+                            {s.data_retorno_real
+                              ? `Voltou ${fmtDataHora(s.data_retorno_real)}${s.km_retorno != null ? ` · ${s.km_retorno} km` : ""}`
+                              : `Saiu ${fmtDataHora(s.data_saida_real!)}${s.km_saida != null ? ` · ${s.km_saida} km` : ""}`}
                           </div>
                         )}
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TD>
-                  <TD>
-                    {s.data_saida_real || s.data_retorno_real ? (
-                      <div className="text-xs">
-                        {s.data_saida_real && (
-                          <div>
-                            <span className="text-muted-foreground">Saída: </span>
-                            {fmtDataHora(s.data_saida_real)}
-                            {s.km_saida != null && (
-                              <span className="text-muted-foreground"> · {s.km_saida} km</span>
-                            )}
-                          </div>
-                        )}
-                        {s.data_retorno_real && (
-                          <div>
-                            <span className="text-muted-foreground">Retorno: </span>
-                            {fmtDataHora(s.data_retorno_real)}
-                            {s.km_retorno != null && (
-                              <span className="text-muted-foreground"> · {s.km_retorno} km</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                      </>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
