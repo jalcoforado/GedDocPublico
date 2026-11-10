@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 
 import { fmtData, fmtDataHora, fmtMoeda } from "@/components/pagamentos/format";
 import { RitoPagamento } from "@/components/pagamentos/RitoPagamento";
+import { useValidacaoCampos } from "@/components/pagamentos/useValidacaoCampos";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,13 @@ const SITUACAO_LOTE_ROTULO: Record<SituacaoLote, string> = {
   ENVIADO: "Enviado ao banco",
   PROCESSADO: "Processado",
   CANCELADO: "Cancelado",
+};
+
+/** Situação da parcela dentro do lote, por rótulo (a tabela mostrava o código). */
+const SITUACAO_PARCELA_LOTE: Record<string, string> = {
+  PENDENTE: "Pendente",
+  PAGA: "Paga",
+  FALHOU: "Falhou",
 };
 
 export default function TesourariaPage() {
@@ -147,7 +155,11 @@ function TabSelecionar({ onLoteCriado }: { onLoteCriado: () => void }) {
   return (
     <div className="space-y-4 pb-24">
       <div className="max-w-sm">
-        <FormField label="Conta pagadora" required>
+        <FormField
+          label="Conta pagadora"
+          required
+          hint="Só contas ativas. As parcelas liberadas para ela aparecem abaixo."
+        >
           <Select
             value={contaId === "" ? "" : String(contaId)}
             onChange={(e) => {
@@ -155,7 +167,7 @@ function TabSelecionar({ onLoteCriado }: { onLoteCriado: () => void }) {
               setSelecionadas([]);
             }}
           >
-            <option value="">Selecione…</option>
+            <option value="">Escolha a conta</option>
             {contas.map((c: ContaBancaria) => (
               <option key={c.id} value={c.id}>
                 {c.nome} — {c.banco}/{c.agencia}
@@ -218,8 +230,8 @@ function TabSelecionar({ onLoteCriado }: { onLoteCriado: () => void }) {
             <span className="font-semibold">{selecionadas.length}</span> selecionada(s) — Σ{" "}
             <span className="font-semibold tabular-nums">{fmtMoeda(String(somaSelecionadas))}</span>
           </p>
-          <Button onClick={() => criarLoteM.mutate()} disabled={criarLoteM.isPending}>
-            {criarLoteM.isPending ? "Criando…" : "Criar lote"}
+          <Button onClick={() => criarLoteM.mutate()} loading={criarLoteM.isPending}>
+            Criar lote com {selecionadas.length === 1 ? "1 parcela" : `${selecionadas.length} parcelas`}
           </Button>
         </div>
       )}
@@ -289,6 +301,10 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
   const [comprovanteArquivo, setComprovanteArquivo] = useState<File | null>(null);
   // Um lote sai do banco por um meio só. Era gravado "TED" para todo retorno.
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamentoLote>("TED");
+  const vProgramar = useValidacaoCampos(
+    { data: !dataProgramada && "Escolha o dia em que o banco deve pagar o lote." },
+    { data: `lote-${loteId}-data` },
+  );
 
   const loteQ = useQuery({
     queryKey: ["pag-lote", loteId],
@@ -376,7 +392,7 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
                   <Badge
                     intent={p.situacao === "PAGA" ? "success" : p.situacao === "FALHOU" ? "danger" : "neutral"}
                   >
-                    {p.situacao}
+                    {SITUACAO_PARCELA_LOTE[p.situacao] ?? p.situacao}
                   </Badge>
                   {p.motivo_falha && <p className="text-xs text-foreground-muted">{p.motivo_falha}</p>}
                 </TD>
@@ -385,6 +401,7 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
                     {p.situacao === "PENDENTE" ? (
                       <div className="flex items-center gap-2">
                         <Select
+                          aria-label={`Resultado da parcela #${p.id_parcela}`}
                           value={retornos[p.id_parcela]?.resultado ?? "PAGA"}
                           onChange={(e) =>
                             setRetornos((cur) => ({
@@ -401,7 +418,8 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
                         </Select>
                         {retornos[p.id_parcela]?.resultado === "FALHOU" && (
                           <Input
-                            placeholder="Motivo da falha"
+                            aria-label={`Motivo da falha da parcela #${p.id_parcela}`}
+                            placeholder="Ex.: Conta do favorecido encerrada"
                             value={retornos[p.id_parcela]?.motivo ?? ""}
                             onChange={(e) =>
                               setRetornos((cur) => ({
@@ -440,11 +458,21 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
 
       {lote.situacao === "RASCUNHO" && (
         <div className="flex flex-wrap items-end gap-3">
-          <FormField label="Data programada" required>
-            <Input type="date" value={dataProgramada} onChange={(e) => setDataProgramada(e.target.value)} />
+          <FormField label="Data programada" required error={vProgramar.erro("data")} hint="Dia em que o banco deve pagar.">
+            <Input
+              id={`lote-${loteId}-data`}
+              type="date"
+              value={dataProgramada}
+              onChange={(e) => setDataProgramada(e.target.value)}
+            />
           </FormField>
-          <Button onClick={() => programarM.mutate()} disabled={!dataProgramada || programarM.isPending}>
-            Programar
+          <Button
+            onClick={() => {
+              if (vProgramar.conferir()) programarM.mutate();
+            }}
+            loading={programarM.isPending}
+          >
+            Programar lote
           </Button>
           <Button variant="danger-outline" onClick={() => cancelarM.mutate()} disabled={cancelarM.isPending}>
             <XCircle className="mr-1 h-4 w-4" aria-hidden="true" />
@@ -469,7 +497,7 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
       {lote.situacao === "ENVIADO" && (
         <div className="space-y-3 border-t border-border pt-3">
           <div className="flex flex-wrap items-end gap-2">
-            <FormField label="Forma de pagamento" hint="Como o banco pagou as parcelas deste lote">
+            <FormField label="Forma de pagamento" hint="Como o banco pagou as parcelas deste lote.">
               <Select
                 value={formaPagamento}
                 onChange={(e) => setFormaPagamento(e.target.value as FormaPagamentoLote)}
@@ -480,12 +508,12 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
                 <option value="OUTRO">Outro</option>
               </Select>
             </FormField>
-            <Button onClick={() => retornoM.mutate()} disabled={retornoM.isPending}>
-              {retornoM.isPending ? "Registrando…" : "Registrar retorno"}
+            <Button onClick={() => retornoM.mutate()} loading={retornoM.isPending}>
+              Registrar retorno
             </Button>
           </div>
           <div className="flex flex-wrap items-end gap-2">
-            <FormField label="Comprovante da remessa" hint="PDF do protocolo bancário, opcional">
+            <FormField label="Comprovante da remessa" opcional hint="PDF do protocolo bancário.">
               <input
                 type="file"
                 onChange={(e) => setComprovanteArquivo(e.target.files?.[0] ?? null)}

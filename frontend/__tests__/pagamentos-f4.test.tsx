@@ -4,7 +4,7 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import type {
   ContaBancaria, LoteDetalhe, LotePagamento, ParcelaElegivel, RetencoesDebito,
@@ -160,6 +160,13 @@ function renderComQueryClient(children: React.ReactNode) {
 // Central da tesouraria
 // ---------------------------------------------------------------------------
 
+// A primeira importação das telas (muitos módulos) passava dos 5 s do teste
+// em máquina carregada; aquecer aqui tira o custo de dentro dos testes.
+beforeAll(async () => {
+  await import("@/components/pagamentos/DetalheDebitoContent");
+  await import("@/app/(app)/m/pagamentos/tesouraria/page");
+}, 60_000);
+
 describe("Central da tesouraria — selecionar e criar lote", () => {
   it("lista contas, mostra elegíveis ao escolher uma e cria o lote com a seleção", async () => {
     const { default: TesourariaPage } = await import(
@@ -207,10 +214,10 @@ describe("Central da tesouraria — selecionar e criar lote", () => {
 
     // Dois seletores no passo de retorno: o resultado da parcela (na linha
     // dela) e a forma de pagamento do lote.
-    const selectResultado = screen.getAllByRole("combobox")[0];
+    const selectResultado = screen.getByLabelText("Resultado da parcela #55");
     fireEvent.change(selectResultado, { target: { value: "FALHOU" } });
 
-    const inputMotivo = await screen.findByPlaceholderText(/motivo da falha/i);
+    const inputMotivo = await screen.findByLabelText(/motivo da falha/i);
     fireEvent.change(inputMotivo, { target: { value: "conta encerrada" } });
 
     fireEvent.click(botaoRegistrar);

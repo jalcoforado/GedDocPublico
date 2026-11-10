@@ -341,14 +341,15 @@ function TabDespesa() {
         size="md"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
+            <Button variant="ghost" onClick={() => setConfirmOpen(false)}>
               Cancelar
             </Button>
             <Button
               onClick={() => autorizarM.mutate()}
-              disabled={gruposSelecionados.length === 0 || faltaConta || autorizarM.isPending}
+              disabled={gruposSelecionados.length === 0 || faltaConta}
+              loading={autorizarM.isPending}
             >
-              {autorizarM.isPending ? "Autorizando..." : "Confirmar e gerar OP"}
+              Autorizar e gerar OP
             </Button>
           </>
         }
@@ -556,8 +557,10 @@ function TabPagamento() {
             <span className="font-semibold tabular-nums">{fmtMoeda(somaSelecionados)}</span>
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            <Label htmlFor="lib-data-prevista" className="sr-only">
-              Data prevista (opcional)
+            {/* Rótulo visível: só o campo de data, solto na barra, não dizia
+                para que servia. */}
+            <Label htmlFor="lib-data-prevista" className="mb-0 text-xs font-normal text-foreground-muted">
+              Previsão de pagamento (opcional)
             </Label>
             <Input
               id="lib-data-prevista"
@@ -565,7 +568,6 @@ function TabPagamento() {
               value={dataPrevista}
               onChange={(e) => setDataPrevista(e.target.value)}
               className="h-9 w-40"
-              aria-label="Data prevista (opcional)"
             />
             <Button onClick={() => setConfirmOpen(true)}>Liberar pagamentos</Button>
           </div>
@@ -579,11 +581,11 @@ function TabPagamento() {
         size="md"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
+            <Button variant="ghost" onClick={() => setConfirmOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => liberarM.mutate()} disabled={liberarM.isPending}>
-              {liberarM.isPending ? "Liberando..." : "Confirmar liberação"}
+            <Button onClick={() => liberarM.mutate()} loading={liberarM.isPending}>
+              Liberar {selecionados.length === 1 ? "parcela" : `${selecionados.length} parcelas`}
             </Button>
           </>
         }
