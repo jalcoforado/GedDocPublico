@@ -26,9 +26,27 @@ export default function ChecklistItensPage() {
         { header: "Situação", render: (r) => <AtivoBadge ativo={r.ativo} /> },
       ]}
       fields={[
-        { name: "descricao", label: "Descrição", type: "textarea", required: true, colSpan: 2 },
-        { name: "obrigatorio", label: "Obrigatório para validar", type: "checkbox" },
-        { name: "ativo", label: "Ativo", type: "checkbox" },
+        {
+          name: "descricao",
+          label: "Documento a conferir",
+          type: "textarea",
+          required: true,
+          colSpan: 2,
+          placeholder: "Ex.: Certidão negativa de débitos federais válida",
+          dica: "Escreva como o validador vai ler na lista de conferência.",
+        },
+        {
+          name: "obrigatorio",
+          label: "Obrigatório",
+          type: "checkbox",
+          textoAoLado: "A validação só conclui com este item marcado",
+        },
+        {
+          name: "ativo",
+          label: "Situação",
+          type: "checkbox",
+          textoAoLado: "Ativo — entra no checklist das solicitações",
+        },
       ]}
     />
   );
