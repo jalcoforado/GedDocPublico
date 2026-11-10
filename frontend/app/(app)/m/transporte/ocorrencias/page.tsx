@@ -3,15 +3,18 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Inbox, Plus, Tags } from "lucide-react";
+import { AlertTriangle, Eye, Inbox, Plus, SearchX, Tags, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { fmtData } from "@/components/pagamentos/format";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -280,6 +283,16 @@ export default function OcorrenciasPage() {
       ? `Veículo #${form.id_veiculo}`
       : null;
 
+  const filtrando =
+    buscaAplicada !== "" || situacaoFiltro !== "" || origemFiltro !== "" || tipoFiltro !== "";
+
+  function limparFiltros() {
+    setBusca("");
+    setSituacaoFiltro("");
+    setOrigemFiltro("");
+    setTipoFiltro("");
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -291,80 +304,107 @@ export default function OcorrenciasPage() {
           { label: "Ocorrências" },
         ]}
         actions={
-          <div className="flex gap-2">
-            <Link href="/m/transporte/ocorrencias/tipos">
-              <Button variant="secondary">
+          <>
+            <Button asChild variant="secondary">
+              <Link href="/m/transporte/ocorrencias/tipos">
                 <Tags className="mr-1 h-4 w-4" />
                 Tipos de ocorrência
-              </Button>
-            </Link>
+              </Link>
+            </Button>
             {canCreate && (
               <Button onClick={abrirNovo}>
                 <Plus className="mr-1 h-4 w-4" />
                 Registrar ocorrência
               </Button>
             )}
-          </div>
+          </>
         }
       />
 
-      <div className="flex flex-wrap gap-2">
-        <Input
-          placeholder="Buscar por descrição ou alvo..."
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-          className="max-w-xs"
-        />
-        <Select
-          value={situacaoFiltro}
-          onChange={(e) => setSituacaoFiltro(e.target.value)}
-          className="max-w-[180px]"
-        >
-          <option value="">Todas as situações</option>
-          {(Object.keys(SITUACAO_LABEL) as OcorrenciaSituacao[]).map((s) => (
-            <option key={s} value={s}>
-              {SITUACAO_LABEL[s]}
-            </option>
-          ))}
-        </Select>
-        <Select
-          value={origemFiltro}
-          onChange={(e) => setOrigemFiltro(e.target.value)}
-          className="max-w-[160px]"
-        >
-          <option value="">Todas as origens</option>
-          {(Object.keys(ORIGEM_LABEL) as OcorrenciaOrigem[]).map((o) => (
-            <option key={o} value={o}>
-              {ORIGEM_LABEL[o]}
-            </option>
-          ))}
-        </Select>
-        <Select
-          value={tipoFiltro}
-          onChange={(e) => setTipoFiltro(e.target.value)}
-          className="max-w-[200px]"
-        >
-          <option value="">Todos os tipos</option>
-          {tipos.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.nome}
-            </option>
-          ))}
-        </Select>
-      </div>
+      <FilterBar ariaLabel="Filtros das ocorrências">
+        <FilterBar.Group label="Busca" className="w-full sm:w-72">
+          <Input
+            aria-label="Buscar por descrição ou alvo"
+            placeholder="Buscar por descrição ou alvo..."
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
+        </FilterBar.Group>
+        <FilterBar.Group label="Situação" className="w-full sm:w-48">
+          <Select
+            aria-label="Situação"
+            value={situacaoFiltro}
+            onChange={(e) => setSituacaoFiltro(e.target.value)}
+          >
+            <option value="">Todas as situações</option>
+            {(Object.keys(SITUACAO_LABEL) as OcorrenciaSituacao[]).map((s) => (
+              <option key={s} value={s}>
+                {SITUACAO_LABEL[s]}
+              </option>
+            ))}
+          </Select>
+        </FilterBar.Group>
+        <FilterBar.Group label="Origem" className="w-full sm:w-44">
+          <Select
+            aria-label="Origem"
+            value={origemFiltro}
+            onChange={(e) => setOrigemFiltro(e.target.value)}
+          >
+            <option value="">Todas as origens</option>
+            {(Object.keys(ORIGEM_LABEL) as OcorrenciaOrigem[]).map((o) => (
+              <option key={o} value={o}>
+                {ORIGEM_LABEL[o]}
+              </option>
+            ))}
+          </Select>
+        </FilterBar.Group>
+        <FilterBar.Group label="Tipo" className="w-full sm:w-52">
+          <Select
+            aria-label="Tipo de ocorrência"
+            value={tipoFiltro}
+            onChange={(e) => setTipoFiltro(e.target.value)}
+          >
+            <option value="">Todos os tipos</option>
+            {tipos.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.nome}
+              </option>
+            ))}
+          </Select>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {q.isLoading ? (
         <Carregando className="py-8 text-center text-muted-foreground" />
       ) : itens.length === 0 ? (
         <EmptyState
-          icon={Inbox}
-          title={buscaAplicada ? "Nenhuma ocorrência encontrada" : "Nenhuma ocorrência registrada"}
+          icon={filtrando ? SearchX : Inbox}
+          title={filtrando ? "Nenhuma ocorrência encontrada" : "Nenhuma ocorrência registrada"}
           // Com busca ativa, NÃO oferecer "registrar": convidaria a duplicar
           // uma ocorrência que existe e a busca não achou.
           description={
-            buscaAplicada
-              ? "Nenhuma ocorrência corresponde à busca. Revise o termo."
+            filtrando
+              ? "Nenhuma ocorrência corresponde à busca ou aos filtros. Revise o termo."
               : "Registre fiscalizações e denúncias contra operadores do transporte regulado."
+          }
+          action={
+            filtrando ? (
+              <Button variant="secondary" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            ) : canCreate ? (
+              <Button onClick={abrirNovo}>
+                <Plus className="mr-1 h-4 w-4" />
+                Registrar ocorrência
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -384,7 +424,10 @@ export default function OcorrenciasPage() {
             {itens.map((o) => (
               <TR key={o.id}>
                 <TD className="font-medium">
-                  <Link href={`/m/transporte/ocorrencias/${o.id}`} className="hover:underline">
+                  <Link
+                    href={`/m/transporte/ocorrencias/${o.id}`}
+                    className="text-primary hover:underline"
+                  >
                     #{o.id}
                   </Link>
                 </TD>
@@ -393,23 +436,26 @@ export default function OcorrenciasPage() {
                   {o.alvo_resumo ?? o.referencia_alvo ?? "—"}
                 </TD>
                 <TD className="text-sm">{ORIGEM_LABEL[o.origem]}</TD>
-                <TD className="text-sm">{o.data_fato}</TD>
+                <TD className="text-sm tabular-nums">{fmtData(o.data_fato)}</TD>
                 <TD>
                   <Badge intent={SITUACAO_INTENT[o.situacao]}>
                     {SITUACAO_LABEL[o.situacao]}
                   </Badge>
                 </TD>
-                <TD className="space-x-2 text-right">
-                  <Link href={`/m/transporte/ocorrencias/${o.id}`}>
-                    <Button variant="ghost" size="sm">
-                      Ver
-                    </Button>
-                  </Link>
-                  {canDelete && o.situacao === "registrada" && (
-                    <Button variant="ghost" size="sm" onClick={() => pedirExclusao(o)}>
-                      Excluir
-                    </Button>
-                  )}
+                <TD className="text-right">
+                  <AcoesDaLinha
+                    acoes={[
+                      { label: "Ver", icon: Eye, href: `/m/transporte/ocorrencias/${o.id}` },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        onClick: () => pedirExclusao(o),
+                        // Só a recém-registrada sai: depois disso há apuração.
+                        oculta: !(canDelete && o.situacao === "registrada"),
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}

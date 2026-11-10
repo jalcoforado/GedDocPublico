@@ -1,14 +1,28 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, Inbox, Plus } from "lucide-react";
+import {
+  Ban,
+  Building2,
+  Inbox,
+  PauseCircle,
+  Pencil,
+  Plus,
+  RotateCcw,
+  SearchX,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 
+import { documentoParaExibir } from "@/components/transporte/rotulos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -136,6 +150,14 @@ export default function EmpresasPage() {
       }),
   });
   const totalPages = Math.max(1, Math.ceil((listaQ.data?.total ?? 0) / PAGE_SIZE));
+  const filtrando = situacaoFiltro !== "" || tipoFiltro !== "" || busca.trim() !== "";
+
+  function limparFiltros() {
+    setSituacaoFiltro("");
+    setTipoFiltro("");
+    setBusca("");
+    setPage(1);
+  }
 
   // Permissionários para o select de representante (opcional).
   const permsQ = useQuery({
@@ -283,11 +305,11 @@ export default function EmpresasPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-3">
-        <div>
-          <Label htmlFor="f_sit">Situação</Label>
+      <FilterBar ariaLabel="Filtros das empresas">
+        <FilterBar.Group label="Situação" className="w-full sm:w-48">
           <Select
             id="f_sit"
+            aria-label="Situação"
             value={situacaoFiltro}
             onChange={(e) => {
               setSituacaoFiltro(e.target.value);
@@ -301,11 +323,11 @@ export default function EmpresasPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div>
-          <Label htmlFor="f_tipo">Tipo de serviço</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Tipo de serviço" className="w-full sm:w-56">
           <Select
             id="f_tipo"
+            aria-label="Tipo de serviço"
             value={tipoFiltro}
             onChange={(e) => {
               setTipoFiltro(e.target.value);
@@ -319,11 +341,11 @@ export default function EmpresasPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div className="flex-1 min-w-[200px]">
-          <Label htmlFor="f_q">Busca</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Busca" className="min-w-[200px] flex-1">
           <Input
             id="f_q"
+            aria-label="Busca"
             value={busca}
             onChange={(e) => {
               setBusca(e.target.value);
@@ -331,16 +353,31 @@ export default function EmpresasPage() {
             }}
             placeholder="Razão social, nome fantasia ou CNPJ"
           />
-        </div>
-      </div>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {!listaQ.isLoading && (listaQ.data?.items.length ?? 0) === 0 ? (
         <EmptyState
-          icon={Inbox}
-          title="Nenhuma empresa"
-          description="Cadastre a primeira empresa do transporte regulado."
+          icon={filtrando ? SearchX : Inbox}
+          title={filtrando ? "Nenhuma empresa encontrada" : "Nenhuma empresa"}
+          description={
+            filtrando
+              ? "Nenhuma empresa corresponde à busca ou aos filtros aplicados."
+              : "Cadastre a primeira empresa do transporte regulado."
+          }
           action={
-            canCreate ? (
+            filtrando ? (
+              <Button variant="secondary" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            ) : canCreate ? (
               <Button onClick={openNew}>
                 <Plus className="mr-1 h-4 w-4" />
                 Cadastrar empresa
@@ -361,13 +398,8 @@ export default function EmpresasPage() {
             </TR>
           </THead>
           <TBody>
-            {listaQ.isLoading && (
-              <TR>
-                <TD colSpan={6} className="text-center text-muted-foreground">
-                  Carregando...
-                </TD>
-              </TR>
-            )}
+            {listaQ.isLoading &&
+              Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={6} />)}
             {listaQ.data?.items.map((e) => (
               <TR key={e.id}>
                 <TD>
@@ -376,7 +408,7 @@ export default function EmpresasPage() {
                     <div className="text-xs text-muted-foreground">{e.nome_fantasia}</div>
                   )}
                 </TD>
-                <TD className="font-mono">{e.cnpj}</TD>
+                <TD className="whitespace-nowrap font-mono">{documentoParaExibir(e.cnpj)}</TD>
                 <TD>{TIPO_LABEL[e.tipo_servico] ?? e.tipo_servico}</TD>
                 <TD className="text-muted-foreground">{e.numero_autorizacao ?? "—"}</TD>
                 <TD>
@@ -385,45 +417,37 @@ export default function EmpresasPage() {
                   </Badge>
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex flex-wrap justify-end gap-2">
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(e)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canEdit && e.situacao !== "ativa" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: e.id, acao: "reativar" })}
-                      >
-                        Reativar
-                      </Button>
-                    )}
-                    {canEdit && e.situacao !== "suspensa" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: e.id, acao: "suspender" })}
-                      >
-                        Suspender
-                      </Button>
-                    )}
-                    {canEdit && e.situacao !== "inativa" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: e.id, acao: "inativar" })}
-                      >
-                        Inativar
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={deleteM.isPending}
-                        onClick={async () => {
+                  {/* Mesmo arranjo de permissionários e veículos: o que muda
+                      com a situação à vista; Inativar e Excluir no ⋯. */}
+                  <AcoesDaLinha
+                    acoes={[
+                      { label: "Editar", icon: Pencil, onClick: () => openEdit(e), oculta: !canEdit },
+                      {
+                        label: "Reativar",
+                        icon: RotateCcw,
+                        onClick: () => actionM.mutate({ id: e.id, acao: "reativar" }),
+                        oculta: !canEdit || e.situacao === "ativa",
+                      },
+                      {
+                        label: "Suspender",
+                        icon: PauseCircle,
+                        onClick: () => actionM.mutate({ id: e.id, acao: "suspender" }),
+                        oculta: !canEdit || e.situacao === "suspensa",
+                      },
+                      {
+                        label: "Inativar",
+                        icon: Ban,
+                        perigo: true,
+                        onClick: () => actionM.mutate({ id: e.id, acao: "inativar" }),
+                        oculta: !canEdit || e.situacao === "inativa",
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        disabled: deleteM.isPending,
+                        oculta: !canDelete,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir empresa",
                             message: `Excluir a empresa "${e.razao_social}"? Esta ação não pode ser desfeita.`,
@@ -431,12 +455,10 @@ export default function EmpresasPage() {
                             intent: "danger",
                           });
                           if (ok) deleteM.mutate(e.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}

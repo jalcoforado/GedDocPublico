@@ -3,15 +3,27 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, Inbox, Plus, RefreshCw } from "lucide-react";
+import {
+  ClipboardList,
+  Inbox,
+  Pencil,
+  Plus,
+  RefreshCw,
+  SearchX,
+  Trash2,
+  Users,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { fmtData } from "@/components/pagamentos/format";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -188,6 +200,12 @@ export default function RecadastramentoPage() {
 
   const ciclos = listaQ.data?.items ?? [];
   const buscando = buscaAplicada.length > 0;
+  const filtrando = buscando || situacaoFiltro !== "";
+
+  function limparFiltros() {
+    setSituacaoFiltro("");
+    setBusca("");
+  }
 
   return (
     <div className="space-y-4">
@@ -200,7 +218,7 @@ export default function RecadastramentoPage() {
           { label: "Recadastramento" },
         ]}
         actions={
-          <div className="flex flex-wrap gap-2">
+          <>
             <Button variant="secondary" asChild>
               <Link href="/m/transporte/recadastramento/itens">
                 <ClipboardList className="mr-1 h-4 w-4" />
@@ -213,15 +231,15 @@ export default function RecadastramentoPage() {
                 Novo ciclo
               </Button>
             )}
-          </div>
+          </>
         }
       />
 
-      <div className="flex flex-wrap gap-3">
-        <div>
-          <Label htmlFor="f_sit">Situação</Label>
+      <FilterBar ariaLabel="Filtros dos ciclos">
+        <FilterBar.Group label="Situação" className="w-full sm:w-44">
           <Select
             id="f_sit"
+            aria-label="Situação"
             value={situacaoFiltro}
             onChange={(e) => setSituacaoFiltro(e.target.value)}
           >
@@ -232,17 +250,24 @@ export default function RecadastramentoPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div className="flex-1 min-w-[200px]">
-          <Label htmlFor="f_q">Busca por nome</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Busca por nome" className="min-w-[200px] flex-1">
           <Input
             id="f_q"
+            aria-label="Busca por nome"
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             placeholder="Recadastramento 2026..."
           />
-        </div>
-      </div>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {listaQ.isLoading ? (
         <Carregando className="text-center text-muted-foreground py-8" />
@@ -251,15 +276,21 @@ export default function RecadastramentoPage() {
         // não achou" NÃO — o município pode ter vários, e o botão convidaria a
         // duplicar um que já existe.
         <EmptyState
-          icon={Inbox}
-          title={buscando ? "Nenhum ciclo encontrado" : "Nenhum ciclo de recadastramento"}
+          icon={filtrando ? SearchX : Inbox}
+          title={filtrando ? "Nenhum ciclo encontrado" : "Nenhum ciclo de recadastramento"}
           description={
             buscando
               ? `Nada corresponde a "${buscaAplicada}". A busca cobre todos os ciclos do município, não só os desta página.`
-              : "Crie o primeiro ciclo para convocar os regulados ativos."
+              : filtrando
+                ? "Nenhum ciclo nesta situação."
+                : "Crie o primeiro ciclo para convocar os regulados ativos."
           }
           action={
-            !buscando && canCreate ? (
+            filtrando ? (
+              <Button variant="secondary" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            ) : canCreate ? (
               <Button onClick={openNew}>
                 <Plus className="mr-1 h-4 w-4" />
                 Criar ciclo
@@ -289,8 +320,8 @@ export default function RecadastramentoPage() {
                     {c.nome}
                   </Link>
                 </TD>
-                <TD className="text-sm">
-                  {c.data_inicio} — {c.data_fim}
+                <TD className="whitespace-nowrap text-sm tabular-nums">
+                  {fmtData(c.data_inicio)} a {fmtData(c.data_fim)}
                 </TD>
                 <TD className="text-sm text-muted-foreground">
                   {CRITERIO_LABEL[c.criterio_escalonamento] ?? c.criterio_escalonamento}
@@ -301,31 +332,29 @@ export default function RecadastramentoPage() {
                   </Badge>
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex flex-wrap justify-end gap-2">
-                    <Button variant="secondary" size="sm" asChild>
-                      <Link href={`/m/transporte/recadastramento/${c.id}`}>Convocados</Link>
-                    </Button>
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(c)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={async () => {
+                  <AcoesDaLinha
+                    acoes={[
+                      {
+                        label: "Convocados",
+                        icon: Users,
+                        href: `/m/transporte/recadastramento/${c.id}`,
+                      },
+                      { label: "Editar", icon: Pencil, onClick: () => openEdit(c), oculta: !canEdit },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        oculta: !canDelete,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir ciclo",
                             message: `Excluir o ciclo "${c.nome}"? As convocações permanecem registradas.`,
                           });
                           if (ok) deleteM.mutate(c.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}

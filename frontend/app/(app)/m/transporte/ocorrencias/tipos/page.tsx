@@ -3,9 +3,10 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Plus, Tags } from "lucide-react";
+import { Inbox, Pencil, Plus, Tags, Trash2 } from "lucide-react";
 import { useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -134,7 +135,7 @@ export default function OcorrenciasTiposPage() {
     <div className="space-y-4">
       <PageHeader
         icon={Tags}
-        title="Tipos de Ocorrência"
+        title="Tipos de ocorrência"
         description="Catálogo dos tipos usados para registrar fiscalizações e denúncias."
         breadcrumbs={[
           { label: "Transporte Regulado", href: "/m/transporte" },
@@ -145,7 +146,7 @@ export default function OcorrenciasTiposPage() {
           canCreate ? (
             <Button onClick={abrirNovo}>
               <Plus className="mr-1 h-4 w-4" />
-              Novo tipo
+              Novo tipo de ocorrência
             </Button>
           ) : undefined
         }
@@ -158,6 +159,14 @@ export default function OcorrenciasTiposPage() {
           icon={Inbox}
           title="Nenhum tipo cadastrado"
           description="Cadastre os tipos de ocorrência do transporte regulado."
+          action={
+            canCreate ? (
+              <Button onClick={abrirNovo}>
+                <Plus className="mr-1 h-4 w-4" />
+                Cadastrar tipo
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
         <Table>
@@ -179,17 +188,24 @@ export default function OcorrenciasTiposPage() {
                     {t.ativo ? "Ativo" : "Inativo"}
                   </Badge>
                 </TD>
-                <TD className="space-x-2 text-right">
-                  {canEdit && (
-                    <Button variant="ghost" size="sm" onClick={() => abrirEdicao(t)}>
-                      Editar
-                    </Button>
-                  )}
-                  {canDelete && (
-                    <Button variant="ghost" size="sm" onClick={() => pedirExclusao(t)}>
-                      Excluir
-                    </Button>
-                  )}
+                <TD className="text-right">
+                  <AcoesDaLinha
+                    acoes={[
+                      {
+                        label: "Editar",
+                        icon: Pencil,
+                        onClick: () => abrirEdicao(t),
+                        oculta: !canEdit,
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        onClick: () => pedirExclusao(t),
+                        oculta: !canDelete,
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}

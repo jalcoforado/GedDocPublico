@@ -3,15 +3,17 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Plus, Route } from "lucide-react";
+import { Inbox, Pencil, Plus, Route, SearchX, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -261,6 +263,14 @@ export default function LinhasPage() {
       ? `Permissionário #${form.id_permissionario}`
       : null;
 
+  const filtrando = buscaAplicada !== "" || tipoFiltro !== "" || situacaoFiltro !== "";
+
+  function limparFiltros() {
+    setBusca("");
+    setTipoFiltro("");
+    setSituacaoFiltro("");
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -281,48 +291,73 @@ export default function LinhasPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-2">
-        <Input
-          placeholder="Buscar por nome ou código..."
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-          className="max-w-xs"
-        />
-        <Select
-          value={tipoFiltro}
-          onChange={(e) => setTipoFiltro(e.target.value)}
-          className="max-w-[200px]"
-        >
-          <option value="">Todos os tipos</option>
-          {TIPOS.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </Select>
-        <Select
-          value={situacaoFiltro}
-          onChange={(e) => setSituacaoFiltro(e.target.value)}
-          className="max-w-[160px]"
-        >
-          <option value="">Todas</option>
-          <option value="ativa">Ativas</option>
-          <option value="inativa">Inativas</option>
-        </Select>
-      </div>
+      <FilterBar ariaLabel="Filtros das linhas">
+        <FilterBar.Group label="Busca" className="w-full sm:w-72">
+          <Input
+            aria-label="Buscar por nome ou código"
+            placeholder="Buscar por nome ou código..."
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
+        </FilterBar.Group>
+        <FilterBar.Group label="Tipo de serviço" className="w-full sm:w-56">
+          <Select
+            aria-label="Tipo de serviço"
+            value={tipoFiltro}
+            onChange={(e) => setTipoFiltro(e.target.value)}
+          >
+            <option value="">Todos os tipos</option>
+            {TIPOS.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </Select>
+        </FilterBar.Group>
+        <FilterBar.Group label="Situação" className="w-full sm:w-40">
+          <Select
+            aria-label="Situação"
+            value={situacaoFiltro}
+            onChange={(e) => setSituacaoFiltro(e.target.value)}
+          >
+            <option value="">Todas</option>
+            <option value="ativa">Ativas</option>
+            <option value="inativa">Inativas</option>
+          </Select>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {q.isLoading ? (
         <Carregando className="py-8 text-center text-muted-foreground" />
       ) : itens.length === 0 ? (
         <EmptyState
-          icon={Inbox}
-          title={buscaAplicada ? "Nenhuma linha encontrada" : "Nenhuma linha cadastrada"}
+          icon={filtrando ? SearchX : Inbox}
+          title={filtrando ? "Nenhuma linha encontrada" : "Nenhuma linha cadastrada"}
           // Com busca ativa, NÃO oferecer "cadastrar": convidaria a duplicar
           // uma linha que existe e a busca não achou.
           description={
-            buscaAplicada
-              ? "Nenhuma linha corresponde à busca. Revise o termo."
+            filtrando
+              ? "Nenhuma linha corresponde à busca ou aos filtros. Revise o termo."
               : "Cadastre as linhas de transporte regulado do município."
+          }
+          action={
+            filtrando ? (
+              <Button variant="secondary" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            ) : canCreate ? (
+              <Button onClick={abrirNovo}>
+                <Plus className="mr-1 h-4 w-4" />
+                Cadastrar linha
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -344,7 +379,7 @@ export default function LinhasPage() {
                 <TD className="font-medium">
                   <Link
                     href={`/m/transporte/linhas/${l.id}`}
-                    className="hover:underline"
+                    className="text-primary hover:underline"
                   >
                     {l.nome}
                   </Link>
@@ -367,17 +402,24 @@ export default function LinhasPage() {
                     {l.situacao === "ativa" ? "Ativa" : "Inativa"}
                   </Badge>
                 </TD>
-                <TD className="space-x-2 text-right">
-                  {canEdit && (
-                    <Button variant="ghost" size="sm" onClick={() => abrirEdicao(l)}>
-                      Editar
-                    </Button>
-                  )}
-                  {canDelete && (
-                    <Button variant="ghost" size="sm" onClick={() => pedirExclusao(l)}>
-                      Excluir
-                    </Button>
-                  )}
+                <TD className="text-right">
+                  <AcoesDaLinha
+                    acoes={[
+                      {
+                        label: "Editar",
+                        icon: Pencil,
+                        onClick: () => abrirEdicao(l),
+                        oculta: !canEdit,
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        onClick: () => pedirExclusao(l),
+                        oculta: !canDelete,
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}

@@ -3,14 +3,16 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, Inbox, Plus } from "lucide-react";
+import { ClipboardList, Inbox, Pencil, Plus, SearchX, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -157,6 +159,11 @@ export default function ItensRecadastramentoPage() {
   const itens = listaQ.data?.items ?? [];
   const buscando = buscaAplicada.length > 0 || aplicaFiltro !== "";
 
+  function limparFiltros() {
+    setAplicaFiltro("");
+    setBusca("");
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -172,17 +179,17 @@ export default function ItensRecadastramentoPage() {
           canCreate ? (
             <Button onClick={openNew}>
               <Plus className="mr-1 h-4 w-4" />
-              Novo item
+              Novo item exigido
             </Button>
           ) : undefined
         }
       />
 
-      <div className="flex flex-wrap gap-3">
-        <div>
-          <Label htmlFor="f_aplica">Aplica-se a</Label>
+      <FilterBar ariaLabel="Filtros dos itens">
+        <FilterBar.Group label="Aplica-se a" className="w-full sm:w-60">
           <Select
             id="f_aplica"
+            aria-label="Aplica-se a"
             value={aplicaFiltro}
             onChange={(e) => setAplicaFiltro(e.target.value)}
           >
@@ -193,23 +200,30 @@ export default function ItensRecadastramentoPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div className="flex-1 min-w-[200px]">
-          <Label htmlFor="f_q">Busca por descrição</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Busca por descrição" className="min-w-[200px] flex-1">
           <Input
             id="f_q"
+            aria-label="Busca por descrição"
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             placeholder="CNH, contrato social..."
           />
-        </div>
-      </div>
+        </FilterBar.Group>
+        {buscando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {listaQ.isLoading ? (
         <Carregando className="text-center text-muted-foreground py-8" />
       ) : itens.length === 0 ? (
         <EmptyState
-          icon={Inbox}
+          icon={buscando ? SearchX : Inbox}
           title={buscando ? "Nenhum item encontrado" : "Nenhum item cadastrado"}
           description={
             buscando
@@ -217,7 +231,11 @@ export default function ItensRecadastramentoPage() {
               : "Sem itens, o atendimento não tem o que conferir e toda convocação pode ser deferida direto."
           }
           action={
-            !buscando && canCreate ? (
+            buscando ? (
+              <Button variant="secondary" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            ) : canCreate ? (
               <Button onClick={openNew}>
                 <Plus className="mr-1 h-4 w-4" />
                 Criar item
@@ -243,7 +261,7 @@ export default function ItensRecadastramentoPage() {
                 <TD className="font-medium">
                   <div className="flex flex-wrap items-center gap-2">
                     {i.descricao}
-                    {!i.ativo && <Badge intent="neutral">inativo</Badge>}
+                    {!i.ativo && <Badge intent="neutral">Inativo</Badge>}
                   </div>
                 </TD>
                 <TD className="text-sm text-muted-foreground">
@@ -251,34 +269,30 @@ export default function ItensRecadastramentoPage() {
                 </TD>
                 <TD>
                   {i.obrigatorio ? (
-                    <Badge intent="warning">obrigatório</Badge>
+                    <Badge intent="warning">Obrigatório</Badge>
                   ) : (
-                    <Badge intent="neutral">opcional</Badge>
+                    <Badge intent="neutral">Opcional</Badge>
                   )}
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex flex-wrap justify-end gap-2">
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(i)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={async () => {
+                  <AcoesDaLinha
+                    acoes={[
+                      { label: "Editar", icon: Pencil, onClick: () => openEdit(i), oculta: !canEdit },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        oculta: !canDelete,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir item",
                             message: `Excluir "${i.descricao}"? As marcações já feitas continuam registradas nos atendimentos.`,
                           });
                           if (ok) deleteM.mutate(i.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}
