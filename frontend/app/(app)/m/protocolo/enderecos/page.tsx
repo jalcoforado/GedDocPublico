@@ -57,9 +57,9 @@ export default function EnderecosPage() {
         },
       ]}
       fields={[
-        { name: "rua", label: "Rua", type: "text", colSpan: 2 },
-        { name: "numero", label: "Número", type: "text" },
-        { name: "complemento", label: "Complemento", type: "text" },
+        { name: "rua", label: "Rua", type: "text", colSpan: 2, placeholder: "Ex.: Rua das Flores" },
+        { name: "numero", label: "Número", type: "text", placeholder: "Ex.: 120 ou S/N" },
+        { name: "complemento", label: "Complemento", type: "text", placeholder: "Ex.: Sala 2" },
         {
           name: "id_estado",
           label: "Estado",

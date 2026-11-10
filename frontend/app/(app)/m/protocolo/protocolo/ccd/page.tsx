@@ -17,7 +17,7 @@ import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
@@ -372,10 +372,16 @@ function ClasseForm({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Erro sob o campo só depois de tentar salvar (antes era um toast genérico).
+  const [tentou, setTentou] = useState(false);
+  const faltaCodigo = !codigo.trim();
+  const faltaNome = !nome.trim();
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!codigo.trim() || !nome.trim()) {
-      toast.error("Código e nome são obrigatórios.");
+    setTentou(true);
+    if (faltaCodigo || faltaNome) {
+      document.getElementById(faltaCodigo ? "ccd-codigo" : "ccd-nome")?.focus();
       return;
     }
     if (isEditing) {
@@ -404,10 +410,11 @@ function ClasseForm({
   return (
     <form
       onSubmit={submit}
-      className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-xs"
+      noValidate
+      className="space-y-4 rounded-card border border-border bg-card p-4 shadow-card"
     >
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">
+        <h2 className="text-sm font-semibold text-foreground">
           {isEditing ? "Editar classe" : "Nova classe"}
         </h2>
         <button
@@ -422,41 +429,43 @@ function ClasseForm({
 
       {!isEditing && (
         <p className="text-xs text-foreground-muted">
-          Pai:{" "}
-          <span className="font-mono">
-            {parentLabel ? `${parentLabel.codigo} ${parentLabel.nome}` : "(raiz)"}
+          Dentro de:{" "}
+          <span className="font-mono text-foreground">
+            {parentLabel ? `${parentLabel.codigo} ${parentLabel.nome}` : "raiz do plano"}
           </span>
         </p>
       )}
 
-      <div>
-        <Label htmlFor="ccd-codigo">
-          Código <span className="text-danger">*</span>
-        </Label>
+      <FormField
+        label="Código"
+        required
+        error={tentou && faltaCodigo ? "Informe o código da classe, ex.: 025." : undefined}
+      >
         <Input
           id="ccd-codigo"
           value={codigo}
           onChange={(e) => setCodigo(e.target.value)}
-          placeholder="Ex: 025"
+          placeholder="Ex.: 025"
           maxLength={20}
+          className="font-mono"
         />
-      </div>
+      </FormField>
 
-      <div>
-        <Label htmlFor="ccd-nome">
-          Nome <span className="text-danger">*</span>
-        </Label>
+      <FormField
+        label="Nome"
+        required
+        error={tentou && faltaNome ? "Dê um nome à classe." : undefined}
+      >
         <Input
           id="ccd-nome"
           value={nome}
           onChange={(e) => setNome(e.target.value)}
-          placeholder="Ex: Concursos e seleções"
+          placeholder="Ex.: Concursos e seleções"
           maxLength={200}
         />
-      </div>
+      </FormField>
 
-      <div>
-        <Label htmlFor="ccd-desc">Descrição (opcional)</Label>
+      <FormField label="Descrição" opcional>
         <Textarea
           id="ccd-desc"
           value={descricao}
@@ -464,31 +473,28 @@ function ClasseForm({
           rows={2}
           maxLength={1000}
         />
-      </div>
+      </FormField>
 
-      <div>
-        <Label htmlFor="ccd-kw">
-          Palavras-chave{" "}
-          <span className="text-xs text-foreground-muted">
-            (CSV — ajuda a sugestão automática)
-          </span>
-        </Label>
+      <FormField
+        label="Palavras-chave"
+        opcional
+        hint="Separadas por vírgula. Ajudam a sugerir esta classe no balcão."
+      >
         <Input
           id="ccd-kw"
           value={palavrasChave}
           onChange={(e) => setPalavrasChave(e.target.value)}
-          placeholder="Ex: edital, concurso, vaga"
+          placeholder="Ex.: edital, concurso, vaga"
           maxLength={500}
         />
-      </div>
+      </FormField>
 
       <div className="flex justify-end gap-2 pt-1">
-        <Button type="button" variant="secondary" onClick={onClose}>
+        <Button type="button" variant="ghost" onClick={onClose}>
           Cancelar
         </Button>
-        <Button type="submit" disabled={pending}>
-          {pending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-          {isEditing ? "Salvar" : "Criar"}
+        <Button type="submit" loading={pending}>
+          {isEditing ? "Salvar alterações" : "Criar classe"}
         </Button>
       </div>
     </form>

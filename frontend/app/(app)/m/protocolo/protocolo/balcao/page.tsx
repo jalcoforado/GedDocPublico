@@ -115,7 +115,7 @@ function fmtHora(s: string | null) {
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
-/** Espelha `kbd` usado no app: tecla de atalho visível. */
+/** Tecla de atalho à vista (os atalhos são o que faz o balcão andar rápido). */
 function Tecla({ children }: { children: React.ReactNode }) {
   return (
     <kbd className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-foreground">

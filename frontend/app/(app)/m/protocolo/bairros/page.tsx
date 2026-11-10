@@ -39,7 +39,7 @@ export default function BairrosPage() {
         { header: "Situação", render: (r) => <BadgeAtivo ativo={r.ativo} />, className: "w-24" },
       ]}
       fields={[
-        { name: "bairro", label: "Nome", type: "text", required: true, colSpan: 2 },
+        { name: "bairro", label: "Nome", type: "text", required: true, colSpan: 2, placeholder: "Ex.: Centro" },
         {
           name: "id_cidade",
           label: "Cidade",

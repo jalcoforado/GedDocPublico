@@ -13,7 +13,7 @@ import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Select } from "@/components/ui/select";
@@ -69,7 +69,26 @@ export default function TemplatesDocumentoPage() {
     (unidadesQ.data?.items ?? []).map((u) => [u.id, u.unidade_trabalho]),
   );
 
+  // Erro sob o campo só depois de tentar salvar; o botão não fica cinza.
+  const [tentou, setTentou] = useState(false);
+  const faltaNome = form.nome.trim().length === 0;
+  const faltaCorpo = form.corpo_html.trim().length === 0;
+
+  function salvar() {
+    setTentou(true);
+    if (faltaNome) {
+      document.getElementById("tpl-nome")?.focus();
+      return;
+    }
+    if (faltaCorpo) {
+      document.querySelector<HTMLElement>('[aria-label="Conteúdo do template"]')?.focus();
+      return;
+    }
+    saveM.mutate();
+  }
+
   function abrirNovo() {
+    setTentou(false);
     setEditId(null);
     setForm(EMPTY);
     setOpen(true);
@@ -77,6 +96,7 @@ export default function TemplatesDocumentoPage() {
 
   async function abrirEdicao(id: number) {
     const t = await api.templatesDocumento.get(id);
+    setTentou(false);
     setEditId(id);
     setForm({
       nome: t.nome,
@@ -146,7 +166,6 @@ export default function TemplatesDocumentoPage() {
   }
 
   const templates = listQ.data ?? [];
-  const podeSalvar = form.nome.trim().length > 0 && form.corpo_html.trim().length > 0;
 
   return (
     <div className="space-y-6">
@@ -234,32 +253,38 @@ export default function TemplatesDocumentoPage() {
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title={editId === null ? "Novo template" : "Editar template"}
+        title={editId === null ? "Novo modelo de documento" : "Editar modelo de documento"}
         size="xl"
         footer={
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setOpen(false)}>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => saveM.mutate()} disabled={!podeSalvar || saveM.isPending}>
-              {saveM.isPending ? "Salvando…" : "Salvar"}
+            <Button onClick={salvar} loading={saveM.isPending}>
+              {saveM.isPending
+                ? "Salvando…"
+                : editId === null
+                  ? "Criar modelo"
+                  : "Salvar alterações"}
             </Button>
           </div>
         }
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="tpl-nome">Nome</Label>
+          <GradeCampos>
+            <FormField
+              label="Nome"
+              required
+              error={tentou && faltaNome ? "Dê um nome ao modelo, ex.: Despacho de encaminhamento." : undefined}
+            >
               <Input
                 id="tpl-nome"
                 value={form.nome}
                 onChange={(e) => setForm({ ...form, nome: e.target.value })}
                 placeholder="Ex.: Despacho de encaminhamento"
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="tpl-especie">Espécie documental</Label>
+            </FormField>
+            <FormField label="Espécie documental" opcional>
               <Select
                 id="tpl-especie"
                 value={form.id_especie_documental ?? ""}
@@ -277,10 +302,13 @@ export default function TemplatesDocumentoPage() {
                   </option>
                 ))}
               </Select>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="tpl-unidade">Setor administrador</Label>
+            </FormField>
+          </GradeCampos>
+          <FormField
+            label="Setor administrador"
+            opcional
+            hint="Só define quem administra o modelo; todos continuam podendo usá-lo."
+          >
             <Select
               id="tpl-unidade"
               value={form.id_unidade_trabalho ?? ""}
@@ -291,29 +319,32 @@ export default function TemplatesDocumentoPage() {
                 })
               }
             >
-              <option value="">Todo o tenant (sem setor específico)</option>
+              <option value="">Nenhum setor específico</option>
               {(unidadesQ.data?.items ?? []).map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.unidade_trabalho}
                 </option>
               ))}
             </Select>
-            <p className="text-xs text-muted-foreground">
-              Só define quem administra o modelo — todos no tenant continuam podendo usá-lo.
-            </p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="tpl-desc">Descrição</Label>
+          </FormField>
+          <FormField
+            label="Descrição"
+            opcional
+            hint="Aparece ao escolher o modelo, para ajudar a achar o certo."
+          >
             <Input
               id="tpl-desc"
               value={form.descricao}
               onChange={(e) => setForm({ ...form, descricao: e.target.value })}
-              placeholder="Breve descrição do uso do modelo"
+              placeholder="Ex.: Para encaminhar processos entre secretarias."
             />
-          </div>
+          </FormField>
 
           <div className="space-y-1.5">
-            <Label>Campos automáticos (clique para inserir)</Label>
+            <p className="text-sm font-medium text-foreground">Campos automáticos</p>
+            <p className="text-xs text-foreground-muted">
+              Clique para inserir no texto. Ao usar o modelo, cada campo vira o dado do processo.
+            </p>
             <div className="flex flex-wrap gap-1.5">
               {(placeholdersQ.data ?? []).map((p) => (
                 <button
@@ -321,7 +352,7 @@ export default function TemplatesDocumentoPage() {
                   type="button"
                   onClick={() => inserirPlaceholder(p.chave)}
                   title={p.descricao}
-                  className="rounded border border-border bg-muted px-2 py-0.5 text-xs text-foreground transition-colors hover:border-primary/40 hover:bg-primary/10"
+                  className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground transition-colors duration-fast hover:border-primary/40 hover:bg-primary/10"
                 >
                   {`{{${p.chave}}}`}
                 </button>
@@ -329,26 +360,39 @@ export default function TemplatesDocumentoPage() {
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label>Conteúdo do modelo</Label>
-            <RichTextEditor
-              value={form.corpo_html}
-              onChange={(html) => setForm({ ...form, corpo_html: html })}
-              minHeight={280}
-              ariaLabel="Conteúdo do template"
-              onUploadImage={async (file) => {
-                const { url } = await api.editorImagens.upload(file);
-                return url;
-              }}
-            />
-          </div>
+          <FormField
+            label="Conteúdo do modelo"
+            required
+            error={tentou && faltaCorpo ? "Escreva o texto do modelo." : undefined}
+          >
+            {/* O editor não aceita id: o rótulo aponta para o invólucro e o
+                nome acessível vem do ariaLabel. */}
+            <div>
+              <RichTextEditor
+                value={form.corpo_html}
+                onChange={(html) => setForm({ ...form, corpo_html: html })}
+                minHeight={280}
+                ariaLabel="Conteúdo do template"
+                onUploadImage={async (file) => {
+                  const { url } = await api.editorImagens.upload(file);
+                  return url;
+                }}
+              />
+            </div>
+          </FormField>
 
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border bg-surface-1 px-3 py-2.5 transition-colors duration-fast hover:bg-surface-2">
             <Checkbox
               checked={form.ativo}
               onChange={(e) => setForm({ ...form, ativo: e.target.checked })}
+              className="mt-0.5 h-4 w-4"
             />
-            Ativo (disponível para seleção ao redigir)
+            <span className="text-sm">
+              <span className="block font-medium text-foreground">Ativo</span>
+              <span className="block text-xs text-foreground-muted">
+                Aparece na lista de modelos ao redigir um documento.
+              </span>
+            </span>
           </label>
         </div>
       </Dialog>

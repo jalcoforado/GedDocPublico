@@ -29,8 +29,13 @@ export default function TiposProcessoPage() {
         { header: "Situação", render: (r) => <BadgeAtivo ativo={r.ativo} />, className: "w-24" },
       ]}
       fields={[
-        { name: "tipo_processo", label: "Nome", type: "text", required: true, colSpan: 2 },
-        { name: "exige_processo_pai", label: "Exige processo pai", type: "checkbox" },
+        { name: "tipo_processo", label: "Nome", type: "text", required: true, colSpan: 2, placeholder: "Ex.: Requerimento" },
+        {
+          name: "exige_processo_pai",
+          label: "Exige processo pai",
+          type: "checkbox",
+          dica: "Só pode ser aberto vinculado a outro processo.",
+        },
         { name: "ativo", label: "Ativo", type: "checkbox" },
       ]}
     />

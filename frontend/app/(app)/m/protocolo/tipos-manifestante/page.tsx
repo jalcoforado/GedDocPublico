@@ -28,7 +28,7 @@ export default function TiposManifestantePage() {
         { header: "Situação", render: (r) => <BadgeAtivo ativo={r.ativo} />, className: "w-24" },
       ]}
       fields={[
-        { name: "tipo_manifestante", label: "Nome", type: "text", required: true, colSpan: 2 },
+        { name: "tipo_manifestante", label: "Nome", type: "text", required: true, colSpan: 2, placeholder: "Ex.: Pessoa física" },
         {
           // Decide a máscara do documento no cadastro de manifestante.
           name: "natureza",
@@ -36,6 +36,7 @@ export default function TiposManifestantePage() {
           type: "select",
           required: true,
           colSpan: 2,
+          dica: "Define se o cadastro pede CPF ou CNPJ.",
           options: Object.entries(NATUREZA).map(([value, label]) => ({ value, label })),
         },
         { name: "id_categoria", label: "ID Categoria", type: "number", required: true },

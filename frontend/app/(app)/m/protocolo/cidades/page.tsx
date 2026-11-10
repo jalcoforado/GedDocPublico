@@ -35,7 +35,7 @@ export default function CidadesPage() {
         },
       ]}
       fields={[
-        { name: "cidade", label: "Nome", type: "text", required: true, colSpan: 2 },
+        { name: "cidade", label: "Nome", type: "text", required: true, colSpan: 2, placeholder: "Ex.: Itaitinga" },
         {
           name: "id_estado",
           label: "Estado",

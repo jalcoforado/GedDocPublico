@@ -9,7 +9,7 @@ import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
 import { PasswordInput } from "@/components/ui/password-input";
 import { SkeletonRow } from "@/components/ui/skeleton";
@@ -40,6 +40,38 @@ export default function ParaAssinarPage() {
   const [err, setErr] = useState<string | null>(null);
   const [recusando, setRecusando] = useState<PendenciaAssinatura | null>(null);
   const [motivo, setMotivo] = useState("");
+  // Erro sob o campo só depois de tentar confirmar; os botões não ficam
+  // cinza esperando a senha ou o motivo.
+  const [tentouAssinar, setTentouAssinar] = useState(false);
+  const [tentouRecusar, setTentouRecusar] = useState(false);
+
+  function fecharAssinatura() {
+    setAssinando(null);
+    setSenha("");
+    setErr(null);
+    setTentouAssinar(false);
+  }
+  function fecharRecusa() {
+    setRecusando(null);
+    setMotivo("");
+    setTentouRecusar(false);
+  }
+  function assinar() {
+    setTentouAssinar(true);
+    if (!senha) {
+      document.getElementById("senha-assinar")?.focus();
+      return;
+    }
+    m.mutate();
+  }
+  function recusar() {
+    setTentouRecusar(true);
+    if (motivo.trim().length < 3) {
+      document.getElementById("motivo-recusa")?.focus();
+      return;
+    }
+    recusaM.mutate();
+  }
 
   const q = useQuery({
     queryKey: ["minhas-pendencias-assinatura"],
@@ -169,106 +201,92 @@ export default function ParaAssinarPage() {
 
       <Dialog
         open={!!assinando}
-        onClose={() => {
-          setAssinando(null);
-          setSenha("");
-          setErr(null);
-        }}
+        onClose={fecharAssinatura}
         title={assinando ? `Assinar — ${assinando.anexo_descricao}` : ""}
         footer={
           <>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setAssinando(null);
-                setSenha("");
-                setErr(null);
-              }}
-            >
+            <Button variant="ghost" onClick={fecharAssinatura}>
               Cancelar
             </Button>
-            <Button onClick={() => m.mutate()} disabled={m.isPending || !senha}>
-              {m.isPending ? "Assinando..." : "Confirmar assinatura"}
+            <Button onClick={assinar} loading={m.isPending}>
+              {m.isPending ? "Assinando…" : "Confirmar assinatura"}
             </Button>
           </>
         }
       >
-        <p className="text-sm">
-          Confirme sua senha para registrar a assinatura do anexo{" "}
-          <b>{assinando?.anexo_descricao}</b> no processo{" "}
-          <b className="font-mono">{assinando?.numero_processo ?? "Rascunho"}</b>.
-        </p>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            m.mutate();
-          }}
-          className="mt-3"
-        >
-          <Label htmlFor="senha-assinar" required>
-            Senha
-          </Label>
-          <PasswordInput
-            id="senha-assinar"
-            autoComplete="current-password"
-            value={senha}
-            onChange={(e) => setSenha(e.target.value)}
-            autoFocus
-            required
-          />
-        </form>
-        {err && (
-          <div
-            role="alert"
-            className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+        <div className="space-y-4">
+          <p className="text-sm">
+            Confirme sua senha para registrar a assinatura do anexo{" "}
+            <b>{assinando?.anexo_descricao}</b> no processo{" "}
+            <b className="font-mono">{assinando?.numero_processo ?? "Rascunho"}</b>.
+          </p>
+          <form
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              assinar();
+            }}
           >
-            {err}
-          </div>
-        )}
+            <FormField
+              label="Senha"
+              required
+              hint="A mesma do login. Ela confirma que é você quem assina."
+              error={tentouAssinar && !senha ? "Digite sua senha para assinar." : undefined}
+            >
+              <PasswordInput
+                id="senha-assinar"
+                autoComplete="current-password"
+                value={senha}
+                onChange={(e) => setSenha(e.target.value)}
+                autoFocus
+              />
+            </FormField>
+          </form>
+          {err && (
+            <div
+              role="alert"
+              className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+            >
+              {err}
+            </div>
+          )}
+        </div>
       </Dialog>
 
       <Dialog
         open={!!recusando}
-        onClose={() => {
-          setRecusando(null);
-          setMotivo("");
-        }}
+        onClose={fecharRecusa}
         title={recusando ? `Recusar — ${recusando.anexo_descricao ?? "anexo"}` : ""}
         footer={
           <>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setRecusando(null);
-                setMotivo("");
-              }}
-            >
+            <Button variant="ghost" onClick={fecharRecusa}>
               Cancelar
             </Button>
-            <Button
-              variant="danger"
-              onClick={() => recusaM.mutate()}
-              disabled={recusaM.isPending || motivo.trim().length < 3}
-            >
-              {recusaM.isPending ? "Recusando..." : "Confirmar recusa"}
+            <Button variant="danger" onClick={recusar} loading={recusaM.isPending}>
+              {recusaM.isPending ? "Recusando…" : "Confirmar recusa"}
             </Button>
           </>
         }
       >
-        <p className="text-sm">
-          Informe o motivo da recusa. Ele fica registrado na trilha de auditoria.
-        </p>
-        <Label htmlFor="motivo-recusa" required>
-          Motivo
-        </Label>
-        <Textarea
-          id="motivo-recusa"
-          value={motivo}
-          onChange={(e) => setMotivo(e.target.value)}
-          rows={3}
-          autoFocus
-          className="mt-1"
-        />
+        <FormField
+          label="Motivo"
+          required
+          hint="Fica registrado na trilha de auditoria."
+          error={
+            tentouRecusar && motivo.trim().length < 3
+              ? "Escreva o motivo da recusa, com pelo menos 3 letras."
+              : undefined
+          }
+        >
+          <Textarea
+            id="motivo-recusa"
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            rows={3}
+            autoFocus
+            placeholder="Ex.: O documento está com o valor errado na cláusula 2."
+          />
+        </FormField>
       </Dialog>
     </div>
   );

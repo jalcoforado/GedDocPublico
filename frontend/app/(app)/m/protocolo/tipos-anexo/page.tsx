@@ -20,7 +20,7 @@ export default function TiposAnexoPage() {
       emptyForm={{ tipo_anexo: "" }}
       columns={[{ header: "Nome", render: (r) => r.tipo_anexo }]}
       fields={[
-        { name: "tipo_anexo", label: "Nome", type: "text", required: true, colSpan: 2 },
+        { name: "tipo_anexo", label: "Nome", type: "text", required: true, colSpan: 2, placeholder: "Ex.: Documento de identidade" },
       ]}
     />
   );

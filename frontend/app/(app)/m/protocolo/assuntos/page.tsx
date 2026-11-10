@@ -60,18 +60,26 @@ export default function AssuntosPage() {
         { header: "Situação", render: (r) => <BadgeAtivo ativo={r.ativo} />, className: "w-24" },
       ]}
       fields={[
-        { name: "assunto", label: "Assunto", type: "textarea", required: true, colSpan: 2 },
+        {
+          name: "assunto",
+          label: "Assunto",
+          type: "textarea",
+          required: true,
+          colSpan: 2,
+          placeholder: "Ex.: Poda de árvore",
+        },
         {
           name: "id_assunto_pai",
-          label: "Assunto pai (opcional — vazio = raiz)",
+          label: "Assunto pai",
           type: "select",
           colSpan: 2,
+          dica: "Em branco, o assunto fica na raiz da lista.",
           options: (assuntosQ.data ?? []).map((a) => ({
             value: a.id,
             label: `${"—".repeat(a.nivel - 1)} ${a.assunto}`.trim(),
           })),
         },
-        { name: "codigo", label: "Código (opcional)", type: "text" },
+        { name: "codigo", label: "Código", type: "text", placeholder: "Ex.: 1.02", dica: "Opcional. Código interno do assunto, se houver." },
         {
           name: "id_tipo_processo",
           label: "Tipo de Processo",
@@ -79,7 +87,12 @@ export default function AssuntosPage() {
           required: true,
           options: tiposQ.data?.map((t) => ({ value: t.id, label: t.tipo_processo })),
         },
-        { name: "exige_processo_pai", label: "Exige processo pai", type: "checkbox" },
+        {
+          name: "exige_processo_pai",
+          label: "Exige processo pai",
+          type: "checkbox",
+          dica: "Só pode ser aberto vinculado a outro processo.",
+        },
         { name: "ativo", label: "Ativo", type: "checkbox" },
       ]}
     />

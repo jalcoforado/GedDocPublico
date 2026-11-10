@@ -18,10 +18,10 @@ import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterBar } from "@/components/ui/filter-bar";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
-import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useConfirm } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
@@ -319,10 +319,14 @@ function TtdForm({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Erro sob o campo só depois de tentar salvar (antes era um toast).
+  const [tentou, setTentou] = useState(false);
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
+    setTentou(true);
     if (idClasse == null) {
-      toast.error("Escolha uma classe CCD.");
+      document.getElementById("ttd-classe")?.focus();
       return;
     }
     if (isEditing) {
@@ -350,10 +354,11 @@ function TtdForm({
   return (
     <form
       onSubmit={submit}
-      className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-xs"
+      noValidate
+      className="space-y-4 rounded-card border border-border bg-card p-4 shadow-card"
     >
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">
+        <h2 className="text-sm font-semibold text-foreground">
           {isEditing ? "Editar regra TTD" : "Nova regra TTD"}
         </h2>
         <button
@@ -366,97 +371,106 @@ function TtdForm({
         </button>
       </div>
 
-      <div>
-        <Label>
-          Classe CCD <span className="text-danger">*</span>
-        </Label>
+      <FormField
+        label="Classe CCD"
+        required
+        hint={
+          isEditing
+            ? "A classe não muda depois de criada. Para trocar, exclua a regra e crie outra."
+            : "Busque pelo código ou pelo nome."
+        }
+        error={tentou && idClasse == null ? "Escolha a classe do plano de classificação." : undefined}
+      >
         <Combobox
+          id="ttd-classe"
           options={classeOptions}
           value={idClasse}
           onChange={(v) => setIdClasse(typeof v === "number" ? v : null)}
-          placeholder="Selecione…"
+          placeholder="Buscar classe…"
+          searchPlaceholder="Código ou nome…"
           disabled={isEditing}
         />
-        {isEditing && (
-          <p className="mt-1 text-xs text-foreground-muted">
-            A classe não muda após criação — exclua e crie nova se precisar.
-          </p>
-        )}
-      </div>
+      </FormField>
 
-      <div>
-        <Label>
-          Espécie documental{" "}
-          <span className="text-xs text-foreground-muted">
-            (vazio = aplica a todas)
-          </span>
-        </Label>
+      <FormField
+        label="Espécie documental"
+        opcional
+        hint="Em branco, a regra vale para todas as espécies da classe."
+      >
         <Combobox
+          id="ttd-especie"
           options={especieOptions}
           value={idEspecie}
           onChange={(v) => setIdEspecie(typeof v === "number" ? v : null)}
           placeholder="Todas as espécies"
         />
-      </div>
+      </FormField>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label htmlFor="ttd-corrente">Anos na fase corrente</Label>
-          <Input
+      {/* As duas fases andam juntas: o tempo total de guarda é a soma. */}
+      <GradeCampos>
+        <FormField label="Fase corrente" hint="Na unidade que produziu.">
+          <CampoComUnidade
             id="ttd-corrente"
             type="number"
             min={0}
             max={999}
+            sufixo="anos"
             value={anosCorrente}
             onChange={(e) => setAnosCorrente(Number(e.target.value) || 0)}
           />
-        </div>
-        <div>
-          <Label htmlFor="ttd-inter">Anos na fase intermediária</Label>
-          <Input
+        </FormField>
+        <FormField label="Fase intermediária" hint="No arquivo, aguardando o destino.">
+          <CampoComUnidade
             id="ttd-inter"
             type="number"
             min={0}
             max={999}
+            sufixo="anos"
             value={anosInter}
             onChange={(e) => setAnosInter(Number(e.target.value) || 0)}
           />
-        </div>
-      </div>
+        </FormField>
+      </GradeCampos>
 
-      <div>
-        <Label htmlFor="ttd-destino">
-          Destino final <span className="text-danger">*</span>
-        </Label>
-        <Select
-          id="ttd-destino"
-          value={destino}
-          onChange={(e) => setDestino(e.target.value as DestinoFinal)}
-        >
-          <option value="ELIMINACAO">Eliminação</option>
-          <option value="GUARDA_PERMANENTE">Guarda permanente</option>
-        </Select>
-      </div>
+      <EscolhaSegmentada
+        nome="ttd-destino"
+        titulo="Destino final"
+        moldura={false}
+        valor={destino}
+        onChange={(v) => setDestino(v)}
+        opcoes={[
+          {
+            valor: "ELIMINACAO",
+            rotulo: "Eliminação",
+            icon: Trash2,
+            descricao: "Ao fim dos prazos, o documento pode ser eliminado.",
+          },
+          {
+            valor: "GUARDA_PERMANENTE",
+            rotulo: "Guarda permanente",
+            icon: Archive,
+            descricao: "Ao fim dos prazos, o documento fica guardado para sempre.",
+          },
+        ]}
+      />
 
-      <div>
-        <Label htmlFor="ttd-obs">Observação (opcional)</Label>
+      <FormField label="Observação" opcional>
         <Textarea
           id="ttd-obs"
           value={observacao}
           onChange={(e) => setObservacao(e.target.value)}
           rows={2}
           maxLength={1000}
-          placeholder="Ex: 100 anos previdência social"
+          placeholder="Ex.: 100 anos — previdência social"
         />
-      </div>
+      </FormField>
 
       <div className="flex justify-end gap-2 pt-1">
-        <Button type="button" variant="secondary" onClick={onClose}>
+        <Button type="button" variant="ghost" onClick={onClose}>
           Cancelar
         </Button>
-        <Button type="submit" disabled={pending}>
-          {pending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-          {isEditing ? "Salvar" : "Criar"}
+        <Button type="submit" loading={pending}>
+          {isEditing ? "Salvar alterações" : "Criar regra"}
         </Button>
       </div>
     </form>
