@@ -8,15 +8,19 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { fmtData } from "@/components/pagamentos/format";
+import { CamposAlvo } from "@/components/transporte/campos-alvo";
+import { GrupoCampos, hojeISO, useValidacao } from "@/components/transporte/formulario";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
 import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -142,61 +146,6 @@ export default function OcorrenciasPage() {
   const tipos = tiposQ.data ?? [];
   const tiposAtivos = tipos.filter((t) => t.ativo);
 
-  // Seletores de alvo — busca NO SERVIDOR com debounce, mesmo padrão do
-  // seletor de operador de linhas/page.tsx.
-  const [buscaEmpresa, setBuscaEmpresa] = useState("");
-  const [buscaEmpresaAplicada, setBuscaEmpresaAplicada] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setBuscaEmpresaAplicada(buscaEmpresa.trim()), 300);
-    return () => clearTimeout(t);
-  }, [buscaEmpresa]);
-
-  const [buscaPerm, setBuscaPerm] = useState("");
-  const [buscaPermAplicada, setBuscaPermAplicada] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setBuscaPermAplicada(buscaPerm.trim()), 300);
-    return () => clearTimeout(t);
-  }, [buscaPerm]);
-
-  const [buscaVeiculo, setBuscaVeiculo] = useState("");
-  const [buscaVeiculoAplicada, setBuscaVeiculoAplicada] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setBuscaVeiculoAplicada(buscaVeiculo.trim()), 300);
-    return () => clearTimeout(t);
-  }, [buscaVeiculo]);
-
-  const empresasQ = useQuery({
-    queryKey: ["tr-empresas-busca", buscaEmpresaAplicada],
-    queryFn: () => api.empresas.list({ q: buscaEmpresaAplicada || undefined }),
-    enabled: dialogOpen,
-  });
-  const permsQ = useQuery({
-    queryKey: ["tr-perms-busca", buscaPermAplicada],
-    queryFn: () => api.permissionarios.list({ q: buscaPermAplicada || undefined }),
-    enabled: dialogOpen,
-  });
-  const veiculosQ = useQuery({
-    queryKey: ["tr-veiculos-busca", buscaVeiculoAplicada],
-    queryFn: () => api.veiculosRegulados.list({ q: buscaVeiculoAplicada || undefined }),
-    enabled: dialogOpen,
-  });
-
-  const empresaSelecionadaQ = useQuery({
-    queryKey: ["tr-empresa-selecionada", form.id_empresa],
-    queryFn: () => api.empresas.get(form.id_empresa as number),
-    enabled: form.id_empresa !== null,
-  });
-  const permSelecionadoQ = useQuery({
-    queryKey: ["tr-perm-selecionado", form.id_permissionario],
-    queryFn: () => api.permissionarios.get(form.id_permissionario as number),
-    enabled: form.id_permissionario !== null,
-  });
-  const veiculoSelecionadoQ = useQuery({
-    queryKey: ["tr-veiculo-selecionado", form.id_veiculo],
-    queryFn: () => api.veiculosRegulados.get(form.id_veiculo as number),
-    enabled: form.id_veiculo !== null,
-  });
-
   function invalidar() {
     qc.invalidateQueries({ queryKey: ["tr-ocorrencias"] });
   }
@@ -223,14 +172,10 @@ export default function OcorrenciasPage() {
   });
 
   function abrirNovo() {
-    setForm(EMPTY);
+    // O fato costuma ser de hoje (a dica do campo diz isso).
+    setForm({ ...EMPTY, data_fato: hojeISO() });
     setErr(null);
-    setBuscaEmpresa("");
-    setBuscaEmpresaAplicada("");
-    setBuscaPerm("");
-    setBuscaPermAplicada("");
-    setBuscaVeiculo("");
-    setBuscaVeiculoAplicada("");
+    val.reiniciar();
     setDialogOpen(true);
   }
 
@@ -250,38 +195,30 @@ export default function OcorrenciasPage() {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
-  function submeter(e: React.FormEvent) {
-    e.preventDefault();
+  const tipoEscolhido = tiposAtivos.find((t) => t.id === form.id_tipo);
+  // Ao menos um alvo FORMAL: `exigir_alvo` no backend não aceita
+  // `referencia_alvo` sozinha — ela é só complemento textual. Validar igual
+  // ao servidor evita o round-trip que terminaria em 422.
+  const val = useValidacao<"alvo" | "id_tipo" | "data_fato" | "descricao">({
+    alvo:
+      form.id_permissionario === null && form.id_empresa === null && form.id_veiculo === null
+        ? "Escolha ao menos um alvo: permissionário, empresa ou veículo."
+        : undefined,
+    id_tipo: form.id_tipo === null ? "Escolha o tipo da ocorrência." : undefined,
+    data_fato:
+      form.data_fato === ""
+        ? "Informe a data do fato."
+        : form.data_fato > hojeISO()
+          ? "A data do fato não pode ser futura."
+          : undefined,
+    descricao: form.descricao.trim() === "" ? "Descreva o que aconteceu." : undefined,
+  });
+
+  function submeter() {
     setErr(null);
-    if (form.id_tipo === null) {
-      setErr("Selecione o tipo da ocorrência.");
-      return;
-    }
-    // Ao menos um alvo FORMAL: `exigir_alvo` no backend não aceita
-    // `referencia_alvo` sozinha — ela é só complemento textual. Validar
-    // igual ao servidor evita o round-trip que terminaria em 422.
-    if (form.id_permissionario === null && form.id_empresa === null && form.id_veiculo === null) {
-      setErr("Informe ao menos um alvo: permissionário, empresa ou veículo.");
-      return;
-    }
+    if (!val.conferir()) return;
     registrarM.mutate();
   }
-
-  const empresaSelecionadaNome = empresaSelecionadaQ.data
-    ? empresaSelecionadaQ.data.nome_fantasia ?? empresaSelecionadaQ.data.razao_social
-    : form.id_empresa !== null
-      ? `Empresa #${form.id_empresa}`
-      : null;
-  const permSelecionadoNome = permSelecionadoQ.data
-    ? permSelecionadoQ.data.nome
-    : form.id_permissionario !== null
-      ? `Permissionário #${form.id_permissionario}`
-      : null;
-  const veiculoSelecionadoNome = veiculoSelecionadoQ.data
-    ? `${veiculoSelecionadoQ.data.placa} — ${veiculoSelecionadoQ.data.marca} ${veiculoSelecionadoQ.data.modelo}`
-    : form.id_veiculo !== null
-      ? `Veículo #${form.id_veiculo}`
-      : null;
 
   const filtrando =
     buscaAplicada !== "" || situacaoFiltro !== "" || origemFiltro !== "" || tipoFiltro !== "";
@@ -463,251 +400,129 @@ export default function OcorrenciasPage() {
         </Table>
       )}
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} title="Registrar ocorrência">
-        <form className="space-y-3" onSubmit={submeter}>
-          {err && (
-            <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
-              {err}
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="tipo">Tipo</Label>
-              <Select
-                id="tipo"
-                required
-                value={form.id_tipo ?? ""}
-                onChange={(e) => set("id_tipo", e.target.value ? Number(e.target.value) : null)}
-              >
-                <option value="">Selecione...</option>
-                {tiposAtivos.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.nome}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="origem">Origem</Label>
-              <Select
-                id="origem"
-                value={form.origem}
-                onChange={(e) => set("origem", e.target.value as OcorrenciaOrigem)}
-              >
-                {(Object.keys(ORIGEM_LABEL) as OcorrenciaOrigem[]).map((o) => (
-                  <option key={o} value={o}>
-                    {ORIGEM_LABEL[o]}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
-          <div>
-            <Label htmlFor="data_fato">Data do fato</Label>
-            <Input
-              id="data_fato"
-              type="date"
-              required
-              value={form.data_fato}
-              onChange={(e) => set("data_fato", e.target.value)}
-            />
-          </div>
-          <div>
-            <Label htmlFor="descricao">Descrição</Label>
-            <Textarea
-              id="descricao"
-              required
-              rows={3}
-              value={form.descricao}
-              onChange={(e) => set("descricao", e.target.value)}
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label htmlFor="buscaEmpresa">Empresa alvo</Label>
-              {form.id_empresa !== null ? (
-                <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
-                  <span className="truncate">{empresaSelecionadaNome}</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      set("id_empresa", null);
-                      setBuscaEmpresa("");
-                      setBuscaEmpresaAplicada("");
-                    }}
-                  >
-                    Limpar
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <Input
-                    id="buscaEmpresa"
-                    placeholder="Buscar por razão social/CNPJ..."
-                    value={buscaEmpresa}
-                    onChange={(e) => setBuscaEmpresa(e.target.value)}
-                  />
-                  <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
-                    {empresasQ.isLoading ? (
-                      <Carregando className="p-2 text-xs text-muted-foreground" />
-                    ) : (empresasQ.data?.items ?? []).length === 0 ? (
-                      <div className="p-2 text-xs text-muted-foreground">
-                        Nenhuma empresa encontrada.
-                      </div>
-                    ) : (
-                      (empresasQ.data?.items ?? []).map((emp) => (
-                        <button
-                          key={emp.id}
-                          type="button"
-                          className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
-                          onClick={() => set("id_empresa", emp.id)}
-                        >
-                          {emp.nome_fantasia ?? emp.razao_social}
-                          <span className="ml-2 text-xs text-muted-foreground">{emp.cnpj}</span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="buscaPerm">Permissionário alvo</Label>
-              {form.id_permissionario !== null ? (
-                <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
-                  <span className="truncate">{permSelecionadoNome}</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      set("id_permissionario", null);
-                      setBuscaPerm("");
-                      setBuscaPermAplicada("");
-                    }}
-                  >
-                    Limpar
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <Input
-                    id="buscaPerm"
-                    placeholder="Buscar por nome/CPF..."
-                    value={buscaPerm}
-                    onChange={(e) => setBuscaPerm(e.target.value)}
-                  />
-                  <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
-                    {permsQ.isLoading ? (
-                      <Carregando className="p-2 text-xs text-muted-foreground" />
-                    ) : (permsQ.data?.items ?? []).length === 0 ? (
-                      <div className="p-2 text-xs text-muted-foreground">
-                        Nenhum permissionário encontrado.
-                      </div>
-                    ) : (
-                      (permsQ.data?.items ?? []).map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
-                          onClick={() => set("id_permissionario", p.id)}
-                        >
-                          {p.nome}
-                          <span className="ml-2 text-xs text-muted-foreground">{p.cpf}</span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="buscaVeiculo">Veículo alvo</Label>
-              {form.id_veiculo !== null ? (
-                <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
-                  <span className="truncate">{veiculoSelecionadoNome}</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      set("id_veiculo", null);
-                      setBuscaVeiculo("");
-                      setBuscaVeiculoAplicada("");
-                    }}
-                  >
-                    Limpar
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <Input
-                    id="buscaVeiculo"
-                    placeholder="Buscar por placa/marca/modelo..."
-                    value={buscaVeiculo}
-                    onChange={(e) => setBuscaVeiculo(e.target.value)}
-                  />
-                  <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
-                    {veiculosQ.isLoading ? (
-                      <Carregando className="p-2 text-xs text-muted-foreground" />
-                    ) : (veiculosQ.data?.items ?? []).length === 0 ? (
-                      <div className="p-2 text-xs text-muted-foreground">
-                        Nenhum veículo encontrado.
-                      </div>
-                    ) : (
-                      (veiculosQ.data?.items ?? []).map((v) => (
-                        <button
-                          key={v.id}
-                          type="button"
-                          className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
-                          onClick={() => set("id_veiculo", v.id)}
-                        >
-                          {v.placa}
-                          <span className="ml-2 text-xs text-muted-foreground">
-                            {v.marca} {v.modelo}
-                          </span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-          <div>
-            <Label htmlFor="referencia">Referência do alvo (opcional)</Label>
-            <Input
-              id="referencia"
-              placeholder="Ex.: placa do veículo"
-              value={form.referencia_alvo}
-              onChange={(e) => set("referencia_alvo", e.target.value)}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Complemento textual (ex.: placa); não substitui o vínculo formal.
-            </p>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Informe ao menos um alvo: permissionário, empresa ou veículo.
-          </p>
-          <div>
-            <Label htmlFor="obs">Observações</Label>
-            <Input
-              id="obs"
-              value={form.observacoes}
-              onChange={(e) => set("observacoes", e.target.value)}
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setDialogOpen(false)}>
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        title="Registrar ocorrência"
+        description="Contra quem, o que aconteceu e quando. A apuração começa depois, na tela da ocorrência."
+        size="lg"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={registrarM.isPending}>
-              {registrarM.isPending ? "Registrando..." : "Registrar"}
+            <Button onClick={submeter} loading={registrarM.isPending}>
+              Registrar ocorrência
             </Button>
+          </>
+        }
+      >
+        <div ref={val.ref} className="space-y-5">
+          <GrupoCampos titulo="Contra quem">
+            <CamposAlvo
+              ativo={dialogOpen}
+              idPermissionario={form.id_permissionario}
+              idEmpresa={form.id_empresa}
+              idVeiculo={form.id_veiculo}
+              onPermissionario={(id) => set("id_permissionario", id)}
+              onEmpresa={(id) => set("id_empresa", id)}
+              onVeiculo={(id) => set("id_veiculo", id)}
+              erro={val.erro("alvo")}
+            />
+            <FormField
+              label="Referência complementar"
+              opcional
+              hint="Texto livre que ajuda a achar o alvo; não substitui a escolha acima."
+            >
+              <Input
+                id="referencia"
+                placeholder="Ex.: placa ABC1D23, se o veículo não tem cadastro"
+                value={form.referencia_alvo}
+                onChange={(e) => set("referencia_alvo", e.target.value)}
+              />
+            </FormField>
+          </GrupoCampos>
+
+          <GrupoCampos titulo="O que aconteceu">
+            <GradeCampos>
+              <FormField
+                label="Tipo"
+                required
+                error={val.erro("id_tipo")}
+                hint={tipoEscolhido?.descricao ?? undefined}
+              >
+                <Select
+                  id="tipo"
+                  value={form.id_tipo ?? ""}
+                  onChange={(e) => set("id_tipo", e.target.value ? Number(e.target.value) : null)}
+                  onBlur={val.sair("id_tipo")}
+                >
+                  <option value="">Selecione…</option>
+                  {tiposAtivos.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nome}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField
+                label="Data do fato"
+                required
+                error={val.erro("data_fato")}
+                hint="Hoje, por padrão. Não pode ser data futura."
+              >
+                <Input
+                  id="data_fato"
+                  type="date"
+                  max={hojeISO()}
+                  value={form.data_fato}
+                  onChange={(e) => set("data_fato", e.target.value)}
+                  onBlur={val.sair("data_fato")}
+                />
+              </FormField>
+            </GradeCampos>
+            <EscolhaSegmentada<OcorrenciaOrigem>
+              nome="origem"
+              titulo="Origem"
+              moldura={false}
+              valor={form.origem}
+              onChange={(o) => set("origem", o)}
+              opcoes={[
+                { valor: "fiscalizacao", rotulo: ORIGEM_LABEL.fiscalizacao, descricao: "Constatada por agente durante a fiscalização." },
+                { valor: "denuncia", rotulo: ORIGEM_LABEL.denuncia, descricao: "Relatada por cidadão ou outro órgão." },
+                { valor: "outro", rotulo: ORIGEM_LABEL.outro, descricao: "Outra origem — conte na descrição como chegou." },
+              ]}
+            />
+            <FormField
+              label="Descrição"
+              required
+              error={val.erro("descricao")}
+              hint="O que aconteceu, onde e como foi constatado."
+            >
+              <Textarea
+                id="descricao"
+                rows={4}
+                value={form.descricao}
+                onChange={(e) => set("descricao", e.target.value)}
+                onBlur={val.sair("descricao")}
+                placeholder="Ex.: veículo operando com alvará vencido na Av. Central, às 14h."
+              />
+            </FormField>
+          </GrupoCampos>
+
+          <div className="border-t border-border pt-5">
+            <FormField label="Observações" opcional>
+              <Input
+                id="obs"
+                value={form.observacoes}
+                onChange={(e) => set("observacoes", e.target.value)}
+                placeholder="Ex.: auto de infração nº 1234"
+              />
+            </FormField>
           </div>
-        </form>
+
+          {err && <Alert intent="danger">{err}</Alert>}
+        </div>
       </Dialog>
     </div>
   );

@@ -4,18 +4,20 @@ import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, SearchX } from "lucide-react";
-import { use, useEffect, useState } from "react";
+import { use, useState } from "react";
 
 import { fmtData } from "@/components/pagamentos/format";
+import { CamposAlvo } from "@/components/transporte/campos-alvo";
+import { useValidacao } from "@/components/transporte/formulario";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FormField } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
-import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { dataHoraParaExibir } from "@/components/transporte/rotulos";
@@ -63,10 +65,11 @@ const ATO_LABEL: Record<string, string> = {
   decisao: "Decisão",
 };
 
-const RESULTADOS: { value: OcorrenciaDecidirInput["resultado"]; label: string }[] = [
-  { value: "procedente", label: "Procedente" },
-  { value: "improcedente", label: "Improcedente" },
-  { value: "arquivada", label: "Arquivada" },
+// A descrição é a consequência da escolha, dita sob o grupo ao decidir.
+const RESULTADOS: { value: OcorrenciaDecidirInput["resultado"]; label: string; descricao: string }[] = [
+  { value: "procedente", label: "Procedente", descricao: "A infração fica confirmada contra o alvo." },
+  { value: "improcedente", label: "Improcedente", descricao: "Encerra a ocorrência: não houve infração." },
+  { value: "arquivada", label: "Arquivada", descricao: "Encerra a ocorrência sem julgar o mérito." },
 ];
 
 // Data e hora sem os segundos do `toLocaleString` puro.
@@ -105,6 +108,9 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
   const [anotarOpen, setAnotarOpen] = useState(false);
   const [parecerAnotacao, setParecerAnotacao] = useState("");
   const [erroAnotar, setErroAnotar] = useState<string | null>(null);
+  const valAnotar = useValidacao<"parecer">({
+    parecer: parecerAnotacao.trim() === "" ? "Escreva a anotação." : undefined,
+  });
 
   const anotarM = useMutation({
     mutationFn: (parecer: string) => api.ocorrenciasTransporte.anotar(ocorrenciaId, { parecer }),
@@ -120,74 +126,28 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
   function abrirAnotar() {
     setParecerAnotacao("");
     setErroAnotar(null);
+    valAnotar.reiniciar();
     setAnotarOpen(true);
   }
 
-  function submeterAnotar(e: React.FormEvent) {
-    e.preventDefault();
+  function submeterAnotar() {
     setErroAnotar(null);
+    if (!valAnotar.conferir()) return;
     anotarM.mutate(parecerAnotacao.trim());
   }
 
   // --- Vincular alvo ------------------------------------------------------
-  // Busca NO SERVIDOR com debounce, mesmo padrão do seletor de operador em
-  // linhas/page.tsx.
+  // A busca (no servidor, com debounce) mora em `CamposAlvo`.
   const [vincularOpen, setVincularOpen] = useState(false);
   const [vIdEmpresa, setVIdEmpresa] = useState<number | null>(null);
   const [vIdPermissionario, setVIdPermissionario] = useState<number | null>(null);
   const [vIdVeiculo, setVIdVeiculo] = useState<number | null>(null);
   const [erroVincular, setErroVincular] = useState<string | null>(null);
-
-  const [buscaEmpresa, setBuscaEmpresa] = useState("");
-  const [buscaEmpresaAplicada, setBuscaEmpresaAplicada] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setBuscaEmpresaAplicada(buscaEmpresa.trim()), 300);
-    return () => clearTimeout(t);
-  }, [buscaEmpresa]);
-
-  const [buscaPerm, setBuscaPerm] = useState("");
-  const [buscaPermAplicada, setBuscaPermAplicada] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setBuscaPermAplicada(buscaPerm.trim()), 300);
-    return () => clearTimeout(t);
-  }, [buscaPerm]);
-
-  const [buscaVeiculo, setBuscaVeiculo] = useState("");
-  const [buscaVeiculoAplicada, setBuscaVeiculoAplicada] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setBuscaVeiculoAplicada(buscaVeiculo.trim()), 300);
-    return () => clearTimeout(t);
-  }, [buscaVeiculo]);
-
-  const empresasQ = useQuery({
-    queryKey: ["tr-empresas-busca", buscaEmpresaAplicada],
-    queryFn: () => api.empresas.list({ q: buscaEmpresaAplicada || undefined }),
-    enabled: vincularOpen,
-  });
-  const permsQ = useQuery({
-    queryKey: ["tr-perms-busca", buscaPermAplicada],
-    queryFn: () => api.permissionarios.list({ q: buscaPermAplicada || undefined }),
-    enabled: vincularOpen,
-  });
-  const veiculosQ = useQuery({
-    queryKey: ["tr-veiculos-busca", buscaVeiculoAplicada],
-    queryFn: () => api.veiculosRegulados.list({ q: buscaVeiculoAplicada || undefined }),
-    enabled: vincularOpen,
-  });
-  const empresaSelecionadaQ = useQuery({
-    queryKey: ["tr-empresa-selecionada", vIdEmpresa],
-    queryFn: () => api.empresas.get(vIdEmpresa as number),
-    enabled: vIdEmpresa !== null,
-  });
-  const permSelecionadoQ = useQuery({
-    queryKey: ["tr-perm-selecionado", vIdPermissionario],
-    queryFn: () => api.permissionarios.get(vIdPermissionario as number),
-    enabled: vIdPermissionario !== null,
-  });
-  const veiculoSelecionadoQ = useQuery({
-    queryKey: ["tr-veiculo-selecionado", vIdVeiculo],
-    queryFn: () => api.veiculosRegulados.get(vIdVeiculo as number),
-    enabled: vIdVeiculo !== null,
+  const valVincular = useValidacao<"alvo">({
+    alvo:
+      vIdEmpresa === null && vIdPermissionario === null && vIdVeiculo === null
+        ? "Escolha ao menos um alvo: permissionário, empresa ou veículo."
+        : undefined,
   });
 
   const vincularM = useMutation({
@@ -209,23 +169,14 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
     setVIdEmpresa(ocorrencia?.id_empresa ?? null);
     setVIdPermissionario(ocorrencia?.id_permissionario ?? null);
     setVIdVeiculo(ocorrencia?.id_veiculo ?? null);
-    setBuscaEmpresa("");
-    setBuscaEmpresaAplicada("");
-    setBuscaPerm("");
-    setBuscaPermAplicada("");
-    setBuscaVeiculo("");
-    setBuscaVeiculoAplicada("");
     setErroVincular(null);
+    valVincular.reiniciar();
     setVincularOpen(true);
   }
 
-  function submeterVincular(e: React.FormEvent) {
-    e.preventDefault();
+  function submeterVincular() {
     setErroVincular(null);
-    if (vIdEmpresa === null && vIdPermissionario === null && vIdVeiculo === null) {
-      setErroVincular("Selecione ao menos um alvo: empresa, permissionário ou veículo.");
-      return;
-    }
+    if (!valVincular.conferir()) return;
     vincularM.mutate();
   }
 
@@ -234,6 +185,10 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
   const [resultado, setResultado] = useState<OcorrenciaDecidirInput["resultado"]>("procedente");
   const [parecerDecisao, setParecerDecisao] = useState("");
   const [erroDecidir, setErroDecidir] = useState<string | null>(null);
+  const valDecidir = useValidacao<"parecer">({
+    parecer:
+      parecerDecisao.trim() === "" ? "Escreva o parecer: ele fundamenta a decisão." : undefined,
+  });
 
   const decidirM = useMutation({
     mutationFn: (data: OcorrenciaDecidirInput) => api.ocorrenciasTransporte.decidir(ocorrenciaId, data),
@@ -249,42 +204,21 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
     setResultado("procedente");
     setParecerDecisao("");
     setErroDecidir(null);
+    valDecidir.reiniciar();
     setDecidirOpen(true);
   }
 
-  function submeterDecidir(e: React.FormEvent) {
-    e.preventDefault();
+  function submeterDecidir() {
     setErroDecidir(null);
-    const parecer = parecerDecisao.trim();
-    if (!parecer) {
-      setErroDecidir("O parecer é obrigatório para decidir a ocorrência.");
-      return;
-    }
-    decidirM.mutate({ resultado, parecer });
+    if (!valDecidir.conferir()) return;
+    decidirM.mutate({ resultado, parecer: parecerDecisao.trim() });
   }
-
   const ocorrencia = q.data;
   const andamentos = [...(ocorrencia?.andamentos ?? [])].sort(
     (a, b) =>
       new Date(a.criado_em).getTime() - new Date(b.criado_em).getTime() ||
       a.id - b.id,
   );
-
-  const empresaSelecionadaNome = empresaSelecionadaQ.data
-    ? empresaSelecionadaQ.data.nome_fantasia ?? empresaSelecionadaQ.data.razao_social
-    : vIdEmpresa !== null
-      ? `Empresa #${vIdEmpresa}`
-      : null;
-  const permSelecionadoNome = permSelecionadoQ.data
-    ? permSelecionadoQ.data.nome
-    : vIdPermissionario !== null
-      ? `Permissionário #${vIdPermissionario}`
-      : null;
-  const veiculoSelecionadoNome = veiculoSelecionadoQ.data
-    ? `${veiculoSelecionadoQ.data.placa} — ${veiculoSelecionadoQ.data.marca} ${veiculoSelecionadoQ.data.modelo}`
-    : vIdVeiculo !== null
-      ? `Veículo #${vIdVeiculo}`
-      : null;
 
   return (
     <div className="space-y-4">
@@ -430,247 +364,109 @@ export default function OcorrenciaDetalhePage({ params }: PageParams) {
         </>
       )}
 
-      <Dialog open={anotarOpen} onClose={() => setAnotarOpen(false)} title="Anotar">
-        <form className="space-y-3" onSubmit={submeterAnotar}>
-          {erroAnotar && (
-            <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
-              {erroAnotar}
-            </div>
-          )}
-          <div>
-            <Label htmlFor="parecerAnotacao">Parecer</Label>
+      <Dialog
+        open={anotarOpen}
+        onClose={() => setAnotarOpen(false)}
+        title="Anotar na ocorrência"
+        description="A anotação entra na trilha da ocorrência, com seu nome e a data."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAnotarOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={submeterAnotar} loading={anotarM.isPending}>
+              Registrar anotação
+            </Button>
+          </>
+        }
+      >
+        <div ref={valAnotar.ref} className="space-y-4">
+          <FormField label="Anotação" required error={valAnotar.erro("parecer")}>
             <Textarea
               id="parecerAnotacao"
-              required
-              rows={3}
+              rows={4}
               value={parecerAnotacao}
               onChange={(e) => setParecerAnotacao(e.target.value)}
+              onBlur={valAnotar.sair("parecer")}
+              placeholder="Ex.: permissionário notificado por telefone; prazo de 5 dias para defesa."
             />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setAnotarOpen(false)}>
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={anotarM.isPending}>
-              {anotarM.isPending ? "Salvando..." : "Salvar"}
-            </Button>
-          </div>
-        </form>
+          </FormField>
+          {erroAnotar && <Alert intent="danger">{erroAnotar}</Alert>}
+        </div>
       </Dialog>
 
-      <Dialog open={vincularOpen} onClose={() => setVincularOpen(false)} title="Vincular alvo">
-        <form className="space-y-3" onSubmit={submeterVincular}>
-          <p className="text-xs text-muted-foreground">
-            Vincular substitui/acrescenta; não remove vínculo existente.
-          </p>
-          {erroVincular && (
-            <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
-              {erroVincular}
-            </div>
-          )}
-          <div>
-            <Label htmlFor="vBuscaEmpresa">Empresa</Label>
-            {vIdEmpresa !== null ? (
-              <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
-                <span className="truncate">{empresaSelecionadaNome}</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setVIdEmpresa(null);
-                    setBuscaEmpresa("");
-                    setBuscaEmpresaAplicada("");
-                  }}
-                >
-                  Limpar
-                </Button>
-              </div>
-            ) : (
-              <>
-                <Input
-                  id="vBuscaEmpresa"
-                  placeholder="Buscar por razão social/CNPJ..."
-                  value={buscaEmpresa}
-                  onChange={(e) => setBuscaEmpresa(e.target.value)}
-                />
-                <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
-                  {empresasQ.isLoading ? (
-                    <Carregando className="p-2 text-xs text-muted-foreground" />
-                  ) : (empresasQ.data?.items ?? []).length === 0 ? (
-                    <div className="p-2 text-xs text-muted-foreground">
-                      Nenhuma empresa encontrada.
-                    </div>
-                  ) : (
-                    (empresasQ.data?.items ?? []).map((emp) => (
-                      <button
-                        key={emp.id}
-                        type="button"
-                        className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
-                        onClick={() => setVIdEmpresa(emp.id)}
-                      >
-                        {emp.nome_fantasia ?? emp.razao_social}
-                        <span className="ml-2 text-xs text-muted-foreground">{emp.cnpj}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-          <div>
-            <Label htmlFor="vBuscaPerm">Permissionário</Label>
-            {vIdPermissionario !== null ? (
-              <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
-                <span className="truncate">{permSelecionadoNome}</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setVIdPermissionario(null);
-                    setBuscaPerm("");
-                    setBuscaPermAplicada("");
-                  }}
-                >
-                  Limpar
-                </Button>
-              </div>
-            ) : (
-              <>
-                <Input
-                  id="vBuscaPerm"
-                  placeholder="Buscar por nome/CPF..."
-                  value={buscaPerm}
-                  onChange={(e) => setBuscaPerm(e.target.value)}
-                />
-                <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
-                  {permsQ.isLoading ? (
-                    <Carregando className="p-2 text-xs text-muted-foreground" />
-                  ) : (permsQ.data?.items ?? []).length === 0 ? (
-                    <div className="p-2 text-xs text-muted-foreground">
-                      Nenhum permissionário encontrado.
-                    </div>
-                  ) : (
-                    (permsQ.data?.items ?? []).map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
-                        onClick={() => setVIdPermissionario(p.id)}
-                      >
-                        {p.nome}
-                        <span className="ml-2 text-xs text-muted-foreground">{p.cpf}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-          <div>
-            <Label htmlFor="vBuscaVeiculo">Veículo</Label>
-            {vIdVeiculo !== null ? (
-              <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
-                <span className="truncate">{veiculoSelecionadoNome}</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setVIdVeiculo(null);
-                    setBuscaVeiculo("");
-                    setBuscaVeiculoAplicada("");
-                  }}
-                >
-                  Limpar
-                </Button>
-              </div>
-            ) : (
-              <>
-                <Input
-                  id="vBuscaVeiculo"
-                  placeholder="Buscar por placa/marca/modelo..."
-                  value={buscaVeiculo}
-                  onChange={(e) => setBuscaVeiculo(e.target.value)}
-                />
-                <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
-                  {veiculosQ.isLoading ? (
-                    <Carregando className="p-2 text-xs text-muted-foreground" />
-                  ) : (veiculosQ.data?.items ?? []).length === 0 ? (
-                    <div className="p-2 text-xs text-muted-foreground">
-                      Nenhum veículo encontrado.
-                    </div>
-                  ) : (
-                    (veiculosQ.data?.items ?? []).map((v) => (
-                      <button
-                        key={v.id}
-                        type="button"
-                        className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
-                        onClick={() => setVIdVeiculo(v.id)}
-                      >
-                        {v.placa}
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          {v.marca} {v.modelo}
-                        </span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setVincularOpen(false)}>
+      <Dialog
+        open={vincularOpen}
+        onClose={() => setVincularOpen(false)}
+        title="Vincular alvo"
+        description="Acrescenta ou troca o alvo. Deixar um campo vazio não remove o vínculo que já existe."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setVincularOpen(false)}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={vincularM.isPending}>
-              {vincularM.isPending ? "Vinculando..." : "Vincular"}
+            <Button onClick={submeterVincular} loading={vincularM.isPending}>
+              Vincular alvo
             </Button>
-          </div>
-        </form>
+          </>
+        }
+      >
+        <div ref={valVincular.ref} className="space-y-4">
+          <CamposAlvo
+            ativo={vincularOpen}
+            idPermissionario={vIdPermissionario}
+            idEmpresa={vIdEmpresa}
+            idVeiculo={vIdVeiculo}
+            onPermissionario={setVIdPermissionario}
+            onEmpresa={setVIdEmpresa}
+            onVeiculo={setVIdVeiculo}
+            erro={valVincular.erro("alvo")}
+          />
+          {erroVincular && <Alert intent="danger">{erroVincular}</Alert>}
+        </div>
       </Dialog>
 
-      <Dialog open={decidirOpen} onClose={() => setDecidirOpen(false)} title="Decidir ocorrência">
-        <form className="space-y-3" onSubmit={submeterDecidir}>
-          {erroDecidir && (
-            <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
-              {erroDecidir}
-            </div>
-          )}
-          <div>
-            <Label htmlFor="resultado">Resultado</Label>
-            <Select
-              id="resultado"
-              value={resultado}
-              onChange={(e) => setResultado(e.target.value as OcorrenciaDecidirInput["resultado"])}
-            >
-              {RESULTADOS.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="parecerDecisao">Parecer</Label>
+      <Dialog
+        open={decidirOpen}
+        onClose={() => setDecidirOpen(false)}
+        title="Decidir ocorrência"
+        description="A decisão encerra a apuração."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDecidirOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={submeterDecidir} loading={decidirM.isPending}>
+              Registrar decisão
+            </Button>
+          </>
+        }
+      >
+        <div ref={valDecidir.ref} className="space-y-4">
+          <EscolhaSegmentada<OcorrenciaDecidirInput["resultado"]>
+            nome="resultado"
+            titulo="Resultado"
+            valor={resultado}
+            onChange={setResultado}
+            opcoes={RESULTADOS.map((r) => ({ valor: r.value, rotulo: r.label, descricao: r.descricao }))}
+          />
+          <FormField
+            label="Parecer"
+            required
+            error={valDecidir.erro("parecer")}
+            hint="Os fatos e o fundamento da decisão."
+          >
             <Textarea
               id="parecerDecisao"
-              required
-              rows={3}
+              rows={4}
               value={parecerDecisao}
               onChange={(e) => setParecerDecisao(e.target.value)}
+              onBlur={valDecidir.sair("parecer")}
+              placeholder="Ex.: constatado o transporte sem alvará válido, conforme auto de infração nº 1234."
             />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setDecidirOpen(false)}>
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={decidirM.isPending}>
-              {decidirM.isPending ? "Salvando..." : "Decidir"}
-            </Button>
-          </div>
-        </form>
+          </FormField>
+          {erroDecidir && <Alert intent="danger">{erroDecidir}</Alert>}
+        </div>
       </Dialog>
     </div>
   );
