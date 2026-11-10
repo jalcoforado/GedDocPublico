@@ -1,17 +1,22 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { KeyRound, Mail, Pencil, Plus, Search, Trash2, Users } from "lucide-react";
 import { useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Select } from "@/components/ui/select";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -32,6 +37,7 @@ const NIVEIS_SIGILO: NivelSigilo[] = [
 ];
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
+import { aplicarMascara } from "@/lib/mascaras";
 
 const EMPTY_FORM: UsuarioInput = {
   nome: "",
@@ -174,20 +180,33 @@ export default function UsuariosPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-primary">Usuários</h1>
-        {can("usuario", "inserir") && <Button onClick={openNew}>Novo usuário</Button>}
-      </div>
+      <PageHeader
+        icon={Users}
+        title="Usuários"
+        description="Quem acessa o sistema, em que unidade trabalha e de quais grupos faz parte."
+        actions={
+          can("usuario", "inserir") && (
+            <Button onClick={openNew}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Novo usuário
+            </Button>
+          )
+        }
+      />
 
-      <div className="flex gap-2">
+      <div className="relative w-full max-w-sm">
+        <Search
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground-subtle"
+          aria-hidden="true"
+        />
         <Input
-          placeholder="Buscar por nome ou e-mail..."
+          placeholder="Buscar por nome ou e-mail…"
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
             setPage(1);
           }}
-          className="max-w-sm"
+          className="pl-9"
         />
       </div>
 
@@ -197,75 +216,93 @@ export default function UsuariosPage() {
             <TH>Nome</TH>
             <TH>E-mail</TH>
             <TH>CPF</TH>
-            <TH>Ativo</TH>
+            <TH>Situação</TH>
             <TH className="text-right">Ações</TH>
           </TR>
         </THead>
         <TBody>
-          {usuariosQ.isLoading && (
+          {usuariosQ.isLoading &&
+            Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={5} />)}
+          {!usuariosQ.isLoading && usuariosQ.data?.items.length === 0 && (
             <TR>
-              <TD colSpan={5} className="text-center text-muted-foreground">
-                Carregando...
+              <TD colSpan={5} className="p-0">
+                <EmptyState
+                  icon={Users}
+                  title={q ? "Nenhum usuário encontrado" : "Nenhum usuário cadastrado"}
+                  description={
+                    q
+                      ? "Confira o nome ou o e-mail digitado na busca."
+                      : "Use “Novo usuário” para dar acesso ao primeiro servidor."
+                  }
+                  className="border-0 bg-transparent"
+                />
               </TD>
             </TR>
           )}
           {usuariosQ.data?.items.map((u) => (
             <TR key={u.id}>
               <TD className="font-medium">{u.nome}</TD>
-              <TD className="text-muted-foreground">{u.email}</TD>
-              <TD className="font-mono text-xs tabular-nums">{u.cpf}</TD>
+              <TD className="text-foreground-muted">{u.email}</TD>
+              {/* Gravado só com dígitos; a máscara é só da tela. */}
+              <TD className="whitespace-nowrap tabular-nums">
+                {u.cpf ? aplicarMascara("cpf", u.cpf).valor : "—"}
+              </TD>
               <TD>
                 {u.email_verificado_em === null ? (
                   <Badge intent="warning" title="O convite foi enviado e ainda não foi aceito.">
                     Convite pendente
                   </Badge>
                 ) : u.ativo ? (
-                  "Sim"
+                  <Badge intent="success">Ativo</Badge>
                 ) : (
-                  "Não"
+                  <Badge intent="neutral">Inativo</Badge>
                 )}
               </TD>
               <TD className="text-right">
-                <div className="inline-flex gap-2">
-                  {can("usuario", "atualizar") && (
-                    <Button variant="secondary" size="sm" onClick={() => openEdit(u.id)}>
-                      Editar
-                    </Button>
-                  )}
-                  {can("usuario", "atualizar") && contaPorEmail && u.email_verificado_em === null && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      disabled={conviteM.isPending}
-                      onClick={() => conviteM.mutate({ id: u.id, email: u.email })}
-                    >
-                      Reenviar convite
-                    </Button>
-                  )}
-                  {/* Sem e-mail, o "Resetar senha" é a saída de quem ficou com
-                      convite pendente: o reset também ativa a conta. */}
-                  {can("usuario", "atualizar") && (u.email_verificado_em !== null || !contaPorEmail) && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      disabled={resetM.isPending}
-                      onClick={async () => {
+                <AcoesDaLinha
+                  acoes={[
+                    {
+                      label: "Editar",
+                      icon: Pencil,
+                      oculta: !can("usuario", "atualizar"),
+                      onClick: () => openEdit(u.id),
+                    },
+                    {
+                      label: "Reenviar convite",
+                      icon: Mail,
+                      oculta: !(
+                        can("usuario", "atualizar") &&
+                        contaPorEmail &&
+                        u.email_verificado_em === null
+                      ),
+                      disabled: conviteM.isPending,
+                      onClick: () => conviteM.mutate({ id: u.id, email: u.email }),
+                    },
+                    // Sem e-mail, o "Resetar senha" é a saída de quem ficou com
+                    // convite pendente: o reset também ativa a conta.
+                    {
+                      label: "Resetar senha",
+                      icon: KeyRound,
+                      oculta: !(
+                        can("usuario", "atualizar") &&
+                        (u.email_verificado_em !== null || !contaPorEmail)
+                      ),
+                      disabled: resetM.isPending,
+                      onClick: async () => {
                         const ok = await confirm({
                           title: "Resetar senha",
                           message: `Gerar uma senha temporária para ${u.nome}? A senha atual deixará de funcionar e a nova será exibida uma única vez.`,
                           confirmLabel: "Gerar senha",
                         });
                         if (ok) resetM.mutate(u.id);
-                      }}
-                    >
-                      Resetar senha
-                    </Button>
-                  )}
-                  {can("usuario", "excluir") && (
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={async () => {
+                      },
+                    },
+                    {
+                      label: "Excluir",
+                      icon: Trash2,
+                      perigo: true,
+                      oculta: !can("usuario", "excluir"),
+                      onClick: async () => {
                         const ok = await confirm({
                           title: "Excluir usuário",
                           message: `Excluir ${u.nome}? Esta ação não pode ser desfeita.`,
@@ -273,12 +310,10 @@ export default function UsuariosPage() {
                           intent: "danger",
                         });
                         if (ok) deleteM.mutate(u.id);
-                      }}
-                    >
-                      Excluir
-                    </Button>
-                  )}
-                </div>
+                      },
+                    },
+                  ]}
+                />
               </TD>
             </TR>
           ))}
@@ -286,7 +321,7 @@ export default function UsuariosPage() {
       </Table>
 
       {usuariosQ.data && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <div className="flex items-center justify-between text-sm text-foreground-muted">
           <span>
             {usuariosQ.data.total} usuários — página {page}
           </span>

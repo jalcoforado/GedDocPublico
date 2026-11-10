@@ -91,7 +91,7 @@ export default function ConfiguracoesPage() {
     <div className="space-y-6">
       <PageHeader
         icon={Settings}
-        title="Configurações do tenant"
+        title="Configurações"
         description="Identidade institucional, configuração inicial e ajustes administrativos da prefeitura."
       />
 
@@ -110,7 +110,7 @@ export default function ConfiguracoesPage() {
             <Building2 className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold tracking-tight">Tenant atual</h2>
+            <h2 className="text-sm font-semibold tracking-tight">Identificação na plataforma</h2>
             <p className="mt-0.5 text-xs text-foreground-muted">
               Identificadores de plataforma (somente leitura — alteração via Admin SaaS).
             </p>
@@ -155,7 +155,7 @@ function OnboardingCard() {
             )}
           </div>
           <p className="mt-0.5 text-xs text-foreground-muted">
-            Passos sugeridos para deixar o tenant pronto para uso. Calculado a
+            Passos sugeridos para deixar o sistema pronto para uso. Calculado a
             partir do estado atual.
           </p>
         </div>

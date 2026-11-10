@@ -1,14 +1,19 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { KeyRound, Plus, Shield } from "lucide-react";
 import { useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, type Grupo, type GrupoTransacao } from "@/lib/api";
@@ -104,10 +109,17 @@ export default function GruposPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-primary">Grupos & Permissões</h1>
-        <Button onClick={() => setCreating(true)}>Novo grupo</Button>
-      </div>
+      <PageHeader
+        icon={Shield}
+        title="Grupos & Permissões"
+        description="Perfis de acesso: o que cada grupo pode inserir, atualizar e excluir em cada transação."
+        actions={
+          <Button onClick={() => setCreating(true)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Novo grupo
+          </Button>
+        }
+      />
 
       <Table>
         <THead>
@@ -119,10 +131,17 @@ export default function GruposPage() {
           </TR>
         </THead>
         <TBody>
-          {gruposQ.isLoading && (
+          {gruposQ.isLoading &&
+            Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={4} />)}
+          {!gruposQ.isLoading && gruposQ.data?.length === 0 && (
             <TR>
-              <TD colSpan={4} className="text-center text-muted-foreground">
-                Carregando...
+              <TD colSpan={4} className="p-0">
+                <EmptyState
+                  icon={Shield}
+                  title="Nenhum grupo cadastrado"
+                  description="Use “Novo grupo” para criar o primeiro perfil de acesso."
+                  className="border-0 bg-transparent"
+                />
               </TD>
             </TR>
           )}
@@ -132,9 +151,9 @@ export default function GruposPage() {
               <TD>{niveisQ.data?.find((n) => n.id === g.id_nivel)?.nivel ?? g.id_nivel}</TD>
               <TD>{sistemasQ.data?.find((s) => s.id === g.id_sistema)?.sistema ?? g.id_sistema}</TD>
               <TD className="text-right">
-                <Button variant="secondary" size="sm" onClick={() => openEdit(g)}>
-                  Permissões
-                </Button>
+                <AcoesDaLinha
+                  acoes={[{ label: "Permissões", icon: KeyRound, onClick: () => openEdit(g) }]}
+                />
               </TD>
             </TR>
           ))}
@@ -223,7 +242,7 @@ export default function GruposPage() {
         }
       >
         {groupPermsQ.isLoading ? (
-          <p className="text-sm text-muted-foreground">Carregando permissões...</p>
+          <p className="text-sm text-foreground-muted">Carregando permissões...</p>
         ) : (
           <Table>
             <THead>
@@ -241,7 +260,7 @@ export default function GruposPage() {
                   <TR key={t.id}>
                     <TD>
                       <div className="font-medium">{t.transacao}</div>
-                      <div className="font-mono text-xs text-muted-foreground">{t.codigo}</div>
+                      <div className="font-mono text-xs text-foreground-muted">{t.codigo}</div>
                     </TD>
                     {(["inserir", "atualizar", "excluir"] as const).map((field) => (
                       <TD key={field}>
