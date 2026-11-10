@@ -156,7 +156,7 @@ export function UnidadeEditDrawer({
             Excluir <strong>{mode.unidade.unidade_trabalho}</strong>?
           </p>
           {hasChildren && (
-            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+            <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-warning-soft-foreground">
               <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span className="text-xs">
                 Esta unidade tem subordinadas. Excluí-la pode deixar filhas órfãs
@@ -209,10 +209,9 @@ export function UnidadeEditDrawer({
           {isEdit && canDelete ? (
             <Button
               type="button"
-              variant="ghost"
+              variant="danger-outline"
               onClick={handleDelete}
               disabled={deleteM.isPending}
-              className="text-danger hover:bg-danger-soft hover:text-danger-soft-foreground"
             >
               <Trash2 className="h-4 w-4" aria-hidden="true" />
               {deleteM.isPending ? "Excluindo…" : "Excluir"}
@@ -221,7 +220,7 @@ export function UnidadeEditDrawer({
             <span />
           )}
           <div className="flex gap-2">
-            <Button type="button" variant="ghost" onClick={onClose}>
+            <Button type="button" variant="secondary" onClick={onClose}>
               Cancelar
             </Button>
             <Button
