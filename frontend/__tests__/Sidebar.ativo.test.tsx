@@ -92,33 +92,13 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
-describe("ação principal do módulo", () => {
-  it("o protocolo tem 'Abrir processo' no alto do menu, levando ao formulário", async () => {
-    renderSidebar({ modulo: "protocolo", open: true, onClose: () => {} });
-    const abrir = await screen.findByRole("link", { name: "Abrir processo" });
-    expect(abrir.getAttribute("href")).toBe("/m/protocolo/processos/novo");
-    // Não é uma tela para navegar: não disputa a marca de página atual.
-    expect(abrir.getAttribute("aria-current")).toBeNull();
-  });
-
-  it("quem só consulta (sem 'inserir') não vê o botão", async () => {
-    onde.podeInserir = false;
+describe("sem botão de ação no menu", () => {
+  // Houve um "Abrir processo" no alto da barra (2026-11-05); saiu em
+  // 2026-11-10 a pedido do Heitor. Abrir processo segue no Painel, nas Caixas
+  // de trabalho e no Ctrl+K — o menu fica só com telas.
+  it("o menu lateral não tem mais o botão 'Abrir processo'", async () => {
     renderSidebar({ modulo: "protocolo", open: true, onClose: () => {} });
     await screen.findByRole("link", { name: "Caixas de trabalho" });
-    expect(screen.queryByRole("link", { name: "Abrir processo" })).toBeNull();
-  });
-
-  it("no menu único o botão vale em qualquer tela — inclusive fora do Protocolo", async () => {
-    onde.pathname = "/m/pagamentos";
-    renderSidebar({ modulo: "pagamentos", open: true, onClose: () => {} });
-    expect(await screen.findByRole("link", { name: "Abrir processo" })).toBeInTheDocument();
-  });
-
-  it("prefeitura sem o Protocolo contratado não ganha botão", async () => {
-    onde.pathname = "/m/pagamentos";
-    onde.semProtocolo = true;
-    renderSidebar({ modulo: "pagamentos", open: true, onClose: () => {} });
-    await screen.findByRole("link", { name: "Visão geral" });
     expect(screen.queryByRole("link", { name: "Abrir processo" })).toBeNull();
   });
 });
