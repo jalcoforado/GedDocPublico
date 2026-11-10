@@ -7,6 +7,7 @@ import { Copy, KeyRound, Plus, ShieldOff } from "lucide-react";
 import { useState } from "react";
 
 import { fmtDataHora } from "@/components/pagamentos/format";
+import { useValidacaoCampos } from "@/components/pagamentos/useValidacaoCampos";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -36,6 +38,10 @@ export default function IntegracoesPage() {
   const [criarOpen, setCriarOpen] = useState(false);
   const [form, setForm] = useState<SistemaIntegradoInput>(FORM_INICIAL);
   const [chaveCriada, setChaveCriada] = useState<string | null>(null);
+  const vCriar = useValidacaoCampos(
+    { nome: !form.nome.trim() && "Dê um nome para reconhecer a chave na lista." },
+    { nome: "integracao-nome" },
+  );
 
   const sistemasQ = useQuery({
     queryKey: ["pag-sistemas-integrados"],
@@ -72,6 +78,7 @@ export default function IntegracoesPage() {
 
   function abrirCriar() {
     setForm(FORM_INICIAL);
+    vCriar.reiniciar();
     setCriarOpen(true);
   }
 
@@ -202,27 +209,35 @@ export default function IntegracoesPage() {
             <Button variant="ghost" onClick={() => setCriarOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => criar.mutate()} disabled={criar.isPending || !form.nome.trim()}>
-              Criar
+            <Button
+              onClick={() => {
+                if (vCriar.conferir()) criar.mutate();
+              }}
+              loading={criar.isPending}
+            >
+              Criar chave
             </Button>
           </>
         }
       >
         <div className="space-y-4">
-          <div>
-            <Label htmlFor="integracao-nome" required>
-              Nome
-            </Label>
+          <FormField
+            label="Nome do sistema"
+            required
+            error={vCriar.erro("nome")}
+            hint="Para reconhecer a chave na lista. Ex.: o nome do ERP que vai usá-la."
+          >
             <Input
               id="integracao-nome"
               value={form.nome}
               onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
+              onBlur={vCriar.tocar("nome")}
               placeholder="Ex.: ERP Financeiro"
               autoFocus
             />
-          </div>
-          <div className="space-y-2">
-            <Label>Escopos</Label>
+          </FormField>
+          <fieldset className="space-y-2">
+            <legend className="mb-1 text-sm font-medium text-foreground">O que a chave pode fazer</legend>
             <div className="flex items-center gap-2">
               <Checkbox
                 id="integracao-leitura"
@@ -235,6 +250,9 @@ export default function IntegracoesPage() {
                 Leitura
               </Label>
             </div>
+            <p className="pl-7 text-xs text-foreground-muted">
+              Consultar solicitações, ordens de pagamento e baixas.
+            </p>
             <div className="flex items-center gap-2">
               <Checkbox
                 id="integracao-escrita"
@@ -247,7 +265,10 @@ export default function IntegracoesPage() {
                 Escrita
               </Label>
             </div>
-          </div>
+            <p className="pl-7 text-xs text-foreground-muted">
+              Criar solicitações e registrar liquidação pela API.
+            </p>
+          </fieldset>
         </div>
       </Dialog>
 
