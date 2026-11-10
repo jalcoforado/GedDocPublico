@@ -50,6 +50,7 @@ import { ProximaAcao } from "@/components/pagamentos/ProximaAcao";
 import { SituacoesDebito } from "@/components/pagamentos/SituacoesDebito";
 import {
   FILA_ROTULO,
+  PARCELA_ROTULO,
   PEDIDO_AJUSTE_ROTULO,
   TRAMITACAO_ROTULO,
   TRANSACAO_PAGAMENTOS,
@@ -662,7 +663,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                 <div className="text-foreground">{debito.nome_fornecedor}</div>
               </div>
               <div>
-                <div className="text-xs font-medium text-foreground-muted">Valor Total</div>
+                <div className="text-xs font-medium text-foreground-muted">Valor total</div>
                 <div className="tabular-nums text-foreground">{fmtMoeda(debito.valor_total)}</div>
               </div>
               <div className="sm:col-span-2">
@@ -702,7 +703,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                       <TH>Número</TH>
                       <TH className="text-right">Valor</TH>
                       <TH>Vencimento</TH>
-                      <TH>Status</TH>
+                      <TH>Situação</TH>
                       <TH className="text-right">Ações</TH>
                     </TR>
                   </THead>
@@ -713,7 +714,12 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                         <TD className="text-right tabular-nums">{fmtMoeda(p.valor)}</TD>
                         <TD>{fmtData(p.vencimento)}</TD>
                         <TD>
-                          <Badge intent="neutral">{p.status}</Badge>
+                          <Badge
+                            intent={PARCELA_ROTULO[p.status]?.intent ?? "neutral"}
+                            icon={PARCELA_ROTULO[p.status]?.icon}
+                          >
+                            {PARCELA_ROTULO[p.status]?.label ?? p.status}
+                          </Badge>
                         </TD>
                         <TD className="text-right">
                           {p.status === "PAGA" && can("pagamento_pagar") && (
@@ -804,9 +810,9 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                           <TD className="text-right tabular-nums">{fmtMoeda(r.valor)}</TD>
                           <TD>
                             {r.recolhido ? (
-                              <Badge intent="success">recolhida em {fmtData(r.data_recolhimento)}</Badge>
+                              <Badge intent="success">Recolhida em {fmtData(r.data_recolhimento)}</Badge>
                             ) : (
-                              <Badge intent="neutral">pendente</Badge>
+                              <Badge intent="neutral">Pendente</Badge>
                             )}
                           </TD>
                           <TD className="text-right">

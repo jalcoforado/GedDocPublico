@@ -300,7 +300,7 @@ export default function PagamentosDashboardPage() {
         <KpiCard
           label="Vencidas"
           value={fmtBRL(kpis.vencidas_valor)}
-          hint={`${kpis.vencidas_qtd} parcela(s)`}
+          hint={kpis.vencidas_qtd === 1 ? "1 parcela" : `${kpis.vencidas_qtd} parcelas`}
           icon={AlertCircle}
           intent={kpis.vencidas_qtd > 0 ? "danger" : "default"}
         />
@@ -465,7 +465,7 @@ export default function PagamentosDashboardPage() {
                   icone={AlertCircle}
                   href={`/m/pagamentos/solicitacoes/${p.id_debito}`}
                   titulo={p.nome_fornecedor}
-                  detalhe={`Parcela vencida há ${p.dias_atraso} dia(s) — ${fmtData(p.vencimento)}`}
+                  detalhe={`Parcela vencida há ${p.dias_atraso} ${p.dias_atraso === 1 ? "dia" : "dias"} — ${fmtData(p.vencimento)}`}
                   valor={fmtBRL(p.valor)}
                 />
               ))}

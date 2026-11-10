@@ -286,3 +286,11 @@ export const CRITICIDADE_ROTULO: Record<string, Rotulo> = {
   MEDIA: { label: "Média", intent: "info", icon: Flag },
   BAIXA: { label: "Baixa", intent: "neutral", icon: Minus },
 };
+
+/** Situação da parcela — o detalhe mostrava o código ("A_PAGAR") num selo cinza. */
+export const PARCELA_ROTULO: Record<string, Rotulo> = {
+  A_PAGAR: { label: "A pagar", intent: "neutral", icon: Clock },
+  LIBERADA: { label: "Liberada", intent: "info", icon: Send },
+  PAGA: { label: "Paga", intent: "success", icon: Check },
+  CANCELADA: { label: "Cancelada", intent: "neutral", icon: Ban },
+};
