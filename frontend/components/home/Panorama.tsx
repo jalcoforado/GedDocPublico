@@ -124,7 +124,7 @@ export function Panorama({ acesso }: { acesso: AcessoPanorama }) {
           <QuadroGrafico
             pergunta="Para onde vai o dinheiro?"
             resposta="Despesas por natureza nos últimos 12 meses."
-            acao={{ href: "/m/pagamentos/dashboard", label: "Dashboard financeiro" }}
+            acao={{ href: "/m/pagamentos/dashboard", label: "Financeiro" }}
           >
             {pagQ.isLoading ? (
               <Esqueleto altura="h-56" />
@@ -291,13 +291,16 @@ function FaixaDeTendencias({
             />
           ) : undefined
         }
+        // O percentual do backend conta "vencendo" como em dia (ainda não
+        // venceu). A dica diz isso com os números, para bater com o anel
+        // logo abaixo, que separa as duas fatias.
         dica={
           p
-            ? p.atrasado > 0
-              ? `${p.atrasado} ${p.atrasado === 1 ? "atrasado" : "atrasados"}, ${p.vencendo} vencendo`
-              : comPrazo > 0
-                ? "nenhum atrasado"
-                : "nenhum processo com prazo"
+            ? comPrazo > 0
+              ? `${p.dentro_do_prazo + p.vencendo} de ${comPrazo} com prazo em dia${
+                  p.atrasado > 0 ? ` · ${p.atrasado} ${p.atrasado === 1 ? "atrasado" : "atrasados"}` : ""
+                }`
+              : "nenhum processo com prazo"
             : undefined
         }
       />,
@@ -590,7 +593,8 @@ function PrazosAgora({ q }: { q: { data?: DashboardKpis; isLoading: boolean; isE
             {fatias.map((f, i) => (
               <li
                 key={f.rotulo}
-                onMouseEnter={() => setAtivo(i)}
+                // Fatia vazia não tem o que destacar no anel.
+                onMouseEnter={() => f.valor > 0 && setAtivo(i)}
                 onMouseLeave={() => setAtivo(null)}
                 className={cn(
                   "-mx-1.5 flex items-center justify-between gap-2 rounded px-1.5 py-1 text-sm transition-[background-color,opacity] duration-fast",
@@ -788,7 +792,11 @@ function AlvarasAgora() {
   return (
     <QuadroGrafico
       pergunta="Os alvarás estão em dia?"
-      resposta={k ? `${k.total_alvaras} ${k.total_alvaras === 1 ? "alvará" : "alvarás"} no transporte regulado.` : undefined}
+      resposta={
+        k
+          ? `${k.total_alvaras} ${k.total_alvaras === 1 ? "alvará" : "alvarás"}; "a renovar" vence em até 30 dias.`
+          : undefined
+      }
       acao={{ href: "/m/transporte/relatorio", label: "Relatório" }}
     >
       {q.isLoading ? (
@@ -800,7 +808,7 @@ function AlvarasAgora() {
           unidade={["alvará", "alvarás"]}
           segmentos={[
             { rotulo: "Em dia", valor: k.ativos, cor: COR.sucesso, href: "/m/transporte/relatorio" },
-            { rotulo: "A renovar (30 dias)", valor: k.a_renovar_30d, cor: COR.alerta, href: "/m/transporte/relatorio" },
+            { rotulo: "A renovar", valor: k.a_renovar_30d, cor: COR.alerta, href: "/m/transporte/relatorio" },
             { rotulo: "Vencidos", valor: k.vencidos, cor: COR.perigo, href: "/m/transporte/relatorio" },
             { rotulo: "Sem validade", valor: k.indefinidos, cor: COR.neutro, href: "/m/transporte/relatorio" },
           ]}
