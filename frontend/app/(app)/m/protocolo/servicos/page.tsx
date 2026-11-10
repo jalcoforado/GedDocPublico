@@ -6,18 +6,24 @@ import {
   FileText,
   Inbox,
   MessageSquareText,
+  Pause,
+  Pencil,
+  Play,
   Plus,
   Settings2,
   Trash2,
 } from "lucide-react";
 import { useState } from "react";
 
+import { BadgeAtivo } from "@/components/protocolo/BadgeAtivo";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -228,28 +234,25 @@ export default function ServicosPage() {
         icon={ClipboardList}
         title="Catálogo de Serviços"
         description="Carta de Serviços do município. Cadastre os serviços que aparecem no portal do cidadão."
+        actions={
+          canCreate && (
+            <Button onClick={openNew}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Novo serviço
+            </Button>
+          )
+        }
       />
 
-      <div
-        role="region"
-        aria-label="Filtros do catálogo"
-        data-testid="servicos-toolbar"
-        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface-1 p-3"
-      >
-        <label className="flex items-center gap-2 text-sm text-foreground-muted">
+      <FilterBar ariaLabel="Filtros do catálogo">
+        <label className="flex h-11 items-center gap-2 text-sm text-foreground-muted">
           <Checkbox
             checked={incluirInativos}
             onChange={(e) => setIncluirInativos(e.target.checked)}
           />
           Mostrar inativos
         </label>
-        {canCreate && (
-          <Button onClick={openNew}>
-            <Plus className="mr-1 h-4 w-4" />
-            Novo serviço
-          </Button>
-        )}
-      </div>
+      </FilterBar>
 
       {!servicosQ.isLoading && servicosQ.data && servicosQ.data.length === 0 ? (
         <EmptyState
@@ -299,23 +302,19 @@ export default function ServicosPage() {
                 <TD className="text-muted-foreground">{s.categoria ?? "—"}</TD>
                 <TD className="tabular-nums">{s.ordem_exibicao}</TD>
                 <TD>
-                  <Badge intent={s.ativo ? "success" : "neutral"}>
-                    {s.ativo ? "Ativo" : "Inativo"}
-                  </Badge>
+                  <BadgeAtivo ativo={s.ativo} />
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex gap-2">
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(s)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canEdit && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={toggleM.isPending}
-                        onClick={async () => {
+                  <AcoesDaLinha
+                    acoes={[
+                      { label: "Editar", icon: Pencil, oculta: !canEdit, onClick: () => openEdit(s) },
+                      {
+                        label: s.ativo ? "Desativar" : "Ativar",
+                        icon: s.ativo ? Pause : Play,
+                        perigo: s.ativo,
+                        oculta: !canEdit,
+                        disabled: toggleM.isPending,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: s.ativo ? "Desativar serviço" : "Ativar serviço",
                             message: s.ativo
@@ -324,12 +323,10 @@ export default function ServicosPage() {
                             confirmLabel: s.ativo ? "Desativar" : "Ativar",
                           });
                           if (ok) toggleM.mutate({ id: s.id, ativo: !s.ativo });
-                        }}
-                      >
-                        {s.ativo ? "Desativar" : "Ativar"}
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}
