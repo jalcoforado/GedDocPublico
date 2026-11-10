@@ -17,6 +17,13 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 
 import { fmtData } from "@/components/pagamentos/format";
+import {
+  AtalhosPrazo,
+  dicaVigencia,
+  hojeISO,
+  somarMeses,
+  useValidacao,
+} from "@/components/transporte/formulario";
 import { rotuloTipoServico } from "@/components/transporte/rotulos";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
@@ -24,8 +31,9 @@ import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada, type OpcaoEscolha } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { SectionCard } from "@/components/ui/section-card";
@@ -65,13 +73,6 @@ const STATUS_DOCUMENTO: { value: StatusDocumento; label: string }[] = [
 ];
 
 const RESULTADOS_AVALIACAO: { value: ResultadoAvaliacao; label: string }[] = [
-  { value: "pendente", label: "Pendente" },
-  { value: "aprovado", label: "Aprovado" },
-  { value: "reprovado", label: "Reprovado" },
-  { value: "condicional", label: "Condicional" },
-];
-
-const RESULTADOS_VISTORIA: { value: ResultadoAvaliacao; label: string }[] = [
   { value: "pendente", label: "Pendente" },
   { value: "aprovado", label: "Aprovado" },
   { value: "reprovado", label: "Reprovado" },
@@ -142,6 +143,31 @@ interface RenovarForm {
   data_validade: string;
 }
 
+// Resultado de avaliação e vistoria: quatro opções, todas à vista, com o que
+// cada uma diz sobre o veículo.
+const OPCOES_RESULTADO: OpcaoEscolha<ResultadoAvaliacao>[] = [
+  { valor: "pendente", rotulo: "Pendente", descricao: "Ainda em análise: o veículo não foi liberado nem barrado." },
+  { valor: "aprovado", rotulo: "Aprovado", descricao: "O veículo está apto para o serviço." },
+  { valor: "reprovado", rotulo: "Reprovado", descricao: "O veículo não está apto: diga no parecer o que reprovou." },
+  { valor: "condicional", rotulo: "Condicional", descricao: "Apto com ressalvas: diga no parecer quais e o prazo." },
+];
+
+// O backend exige parecer com 10 caracteres ou mais (`min_length=10`).
+const PARECER_MIN = 10;
+function erroParecer(p: string): string | undefined {
+  if (p.trim() === "") return "Escreva o parecer.";
+  const n = p.length;
+  return n < PARECER_MIN ? `O parecer precisa de pelo menos ${PARECER_MIN} caracteres (faltam ${PARECER_MIN - n}).` : undefined;
+}
+function dicaParecer(p: string): string {
+  const n = p.trim() === "" ? 0 : p.length;
+  return n === 0 || n >= PARECER_MIN ? "O que foi conferido e a conclusão." : `Faltam ${PARECER_MIN - n} caracteres.`;
+}
+function erroDataPassada(d: string, rotulo: string): string | undefined {
+  if (!d) return `Informe a data ${rotulo}.`;
+  return d > hojeISO() ? `A data ${rotulo} não pode ser futura.` : undefined;
+}
+
 const EMPTY_DOC: DocumentoForm = {
   tipo_documento: "crlv" as TipoDocumentoTR,
   numero_documento: "",
@@ -154,14 +180,15 @@ const EMPTY_AVAL: AvaliacaoForm = {
   resultado: "pendente",
   parecer: "",
   observacoes: "",
-  data_avaliacao: new Date().toISOString().split("T")[0],
+  // `toISOString` dava o dia de amanhã depois das 21h em UTC-3.
+  data_avaliacao: hojeISO(),
 };
 
 const EMPTY_VIST: VistoriaForm = {
   resultado: "pendente",
   parecer: "",
   observacoes: "",
-  data_vistoria: new Date().toISOString().split("T")[0],
+  data_vistoria: hojeISO(),
   data_validade: "",
 };
 
@@ -169,7 +196,7 @@ const EMPTY_RENOV: RenovarForm = {
   resultado: "pendente",
   parecer: "",
   observacoes: "",
-  data_validade: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+  data_validade: somarMeses(hojeISO(), 12),
 };
 
 export default function VeiculoDetailPage() {
@@ -257,7 +284,7 @@ export default function VeiculoDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tr-avaliacoes"] });
       setAvalDialogOpen(false);
-      setAvalForm(EMPTY_AVAL);
+      setAvalForm({ ...EMPTY_AVAL, data_avaliacao: hojeISO() });
       toast.success("Avaliação criada");
     },
     onError: (e: any) => toast.error(e.message || "Erro ao criar avaliação"),
@@ -270,7 +297,7 @@ export default function VeiculoDetailPage() {
       qc.invalidateQueries({ queryKey: ["tr-avaliacoes"] });
       setAvalDialogOpen(false);
       setEditingAval(null);
-      setAvalForm(EMPTY_AVAL);
+      setAvalForm({ ...EMPTY_AVAL, data_avaliacao: hojeISO() });
       toast.success("Avaliação atualizada");
     },
     onError: (e: any) => toast.error(e.message || "Erro ao atualizar avaliação"),
@@ -290,7 +317,7 @@ export default function VeiculoDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tr-vistorias"] });
       setVistDialogOpen(false);
-      setVistForm(EMPTY_VIST);
+      setVistForm({ ...EMPTY_VIST, data_vistoria: hojeISO() });
       toast.success("Vistoria criada");
     },
     onError: (e: any) => toast.error(e.message || "Erro ao criar vistoria"),
@@ -303,7 +330,7 @@ export default function VeiculoDetailPage() {
       qc.invalidateQueries({ queryKey: ["tr-vistorias"] });
       setVistDialogOpen(false);
       setEditingVist(null);
-      setVistForm(EMPTY_VIST);
+      setVistForm({ ...EMPTY_VIST, data_vistoria: hojeISO() });
       toast.success("Vistoria atualizada");
     },
     onError: (e: any) => toast.error(e.message || "Erro ao atualizar vistoria"),
@@ -326,11 +353,27 @@ export default function VeiculoDetailPage() {
       qc.invalidateQueries({ queryKey: ["tr-vistorias-vencidas"] });
       setRenovarDialogOpen(false);
       setSelectedVistToRenew(null);
-      setRenovarForm(EMPTY_RENOV);
+      setRenovarForm({ ...EMPTY_RENOV, data_validade: somarMeses(hojeISO(), 12) });
       toast.success("Vistoria renovada");
     },
     onError: (e: any) => toast.error(e.message || "Erro ao renovar vistoria"),
   });
+
+  // Regras do backend (parecer ≥ 10 caracteres, data não futura) ditas no
+  // campo — antes eram um toast que sumia e não dizia onde. Antes do `return`
+  // antecipado: são hooks.
+  const valDoc = useValidacao<"numero_documento">({
+    numero_documento: docForm.numero_documento.trim() === "" ? "Informe o número do documento." : undefined,
+  });
+  const valAval = useValidacao<"parecer" | "data_avaliacao">({
+    parecer: erroParecer(avalForm.parecer),
+    data_avaliacao: erroDataPassada(avalForm.data_avaliacao, "da avaliação"),
+  });
+  const valVist = useValidacao<"parecer" | "data_vistoria">({
+    parecer: erroParecer(vistForm.parecer),
+    data_vistoria: erroDataPassada(vistForm.data_vistoria, "da vistoria"),
+  });
+  const valRenov = useValidacao<"parecer">({ parecer: erroParecer(renovarForm.parecer) });
 
   if (veiculoQ.isLoading) return <Carregando />;
   if (veiculoQ.isError)
@@ -345,10 +388,7 @@ export default function VeiculoDetailPage() {
   const veiculo = veiculoQ.data!;
 
   const handleSaveDoc = async () => {
-    if (!docForm.numero_documento.trim()) {
-      toast.error("Número do documento é obrigatório");
-      return;
-    }
+    if (!valDoc.conferir()) return;
     const payload = {
       tipo_documento: docForm.tipo_documento,
       numero_documento: docForm.numero_documento,
@@ -364,10 +404,7 @@ export default function VeiculoDetailPage() {
   };
 
   const handleSaveAval = async () => {
-    if (!avalForm.parecer.trim() || avalForm.parecer.length < 10) {
-      toast.error("Parecer deve ter no mínimo 10 caracteres");
-      return;
-    }
+    if (!valAval.conferir()) return;
     const payload = {
       resultado: avalForm.resultado,
       parecer: avalForm.parecer,
@@ -382,10 +419,7 @@ export default function VeiculoDetailPage() {
   };
 
   const handleSaveVist = async () => {
-    if (!vistForm.parecer.trim() || vistForm.parecer.length < 10) {
-      toast.error("Parecer deve ter no mínimo 10 caracteres");
-      return;
-    }
+    if (!valVist.conferir()) return;
     const payload = {
       resultado: vistForm.resultado,
       parecer: vistForm.parecer,
@@ -401,10 +435,7 @@ export default function VeiculoDetailPage() {
   };
 
   const handleSaveRenov = async () => {
-    if (!renovarForm.parecer.trim() || renovarForm.parecer.length < 10) {
-      toast.error("Parecer deve ter no mínimo 10 caracteres");
-      return;
-    }
+    if (!valRenov.conferir()) return;
     const payload: VeiculoVistoriaRenovarInput = {
       resultado: renovarForm.resultado,
       parecer: renovarForm.parecer,
@@ -487,6 +518,7 @@ export default function VeiculoDetailPage() {
                 onClick={() => {
                   setEditingDoc(null);
                   setDocForm(EMPTY_DOC);
+                  valDoc.reiniciar();
                   setDocDialogOpen(true);
                 }}
               >
@@ -538,6 +570,7 @@ export default function VeiculoDetailPage() {
                                 data_validade: doc.data_validade || "",
                                 observacoes: doc.observacoes || "",
                               });
+                              valDoc.reiniciar();
                               setDocDialogOpen(true);
                             },
                           },
@@ -576,63 +609,73 @@ export default function VeiculoDetailPage() {
             open={docDialogOpen}
             onClose={() => setDocDialogOpen(false)}
             title={editingDoc ? "Editar documento" : "Novo documento"}
-          >
-            <div className="space-y-4">
-              <div>
-                <Label>Tipo de Documento</Label>
-                <Select
-                  value={docForm.tipo_documento}
-                  onChange={(e) =>
-                    setDocForm({ ...docForm, tipo_documento: e.target.value as TipoDocumentoTR })
-                  }
-                >
-                  {TIPOS_DOCUMENTO.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label>Número do Documento *</Label>
-                <Input
-                  value={docForm.numero_documento}
-                  onChange={(e) =>
-                    setDocForm({ ...docForm, numero_documento: e.target.value })
-                  }
-                  placeholder="Ex: ABC123456"
-                />
-              </div>
-              <div>
-                <Label>Data de Emissão</Label>
-                <Input
-                  type="date"
-                  value={docForm.data_emissao}
-                  onChange={(e) => setDocForm({ ...docForm, data_emissao: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label>Data de Validade</Label>
-                <Input
-                  type="date"
-                  value={docForm.data_validade}
-                  onChange={(e) => setDocForm({ ...docForm, data_validade: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label>Observações</Label>
-                <Textarea
-                  value={docForm.observacoes}
-                  onChange={(e) => setDocForm({ ...docForm, observacoes: e.target.value })}
-                  placeholder="Observações adicionais..."
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button variant="secondary" onClick={() => setDocDialogOpen(false)}>
+            description={`Documento do veículo ${veiculo.placa}.`}
+            footer={
+              <>
+                <Button variant="ghost" onClick={() => setDocDialogOpen(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={handleSaveDoc} disabled={criarDocM.isPending || atualizarDocM.isPending}>
-                  Salvar
+                <Button onClick={handleSaveDoc} loading={criarDocM.isPending || atualizarDocM.isPending}>
+                  {editingDoc ? "Salvar alterações" : "Adicionar documento"}
                 </Button>
-              </div>
+              </>
+            }
+          >
+            <div ref={valDoc.ref} className="space-y-4">
+              <GradeCampos>
+                <FormField label="Tipo de documento" required>
+                  <Select
+                    id="doc_tipo"
+                    value={docForm.tipo_documento}
+                    onChange={(e) =>
+                      setDocForm({ ...docForm, tipo_documento: e.target.value as TipoDocumentoTR })
+                    }
+                  >
+                    {TIPOS_DOCUMENTO.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Número do documento" required error={valDoc.erro("numero_documento")}>
+                  <Input
+                    id="doc_numero"
+                    value={docForm.numero_documento}
+                    onChange={(e) => setDocForm({ ...docForm, numero_documento: e.target.value })}
+                    onBlur={valDoc.sair("numero_documento")}
+                    placeholder="Ex.: ABC123456"
+                  />
+                </FormField>
+              </GradeCampos>
+              <GradeCampos>
+                <FormField label="Emissão" opcional>
+                  <Input
+                    id="doc_emissao"
+                    type="date"
+                    value={docForm.data_emissao}
+                    onChange={(e) => setDocForm({ ...docForm, data_emissao: e.target.value })}
+                  />
+                </FormField>
+                <FormField
+                  label="Validade"
+                  opcional
+                  hint={dicaVigencia(docForm.data_emissao, docForm.data_validade, "Deixe vazio se o documento não tem validade.")}
+                >
+                  <Input
+                    id="doc_validade"
+                    type="date"
+                    value={docForm.data_validade}
+                    onChange={(e) => setDocForm({ ...docForm, data_validade: e.target.value })}
+                  />
+                </FormField>
+              </GradeCampos>
+              <FormField label="Observações" opcional>
+                <Textarea
+                  id="doc_obs"
+                  value={docForm.observacoes}
+                  onChange={(e) => setDocForm({ ...docForm, observacoes: e.target.value })}
+                  placeholder="Ex.: apólice renovada pela seguradora em outubro"
+                />
+              </FormField>
             </div>
           </Dialog>
         </div>
@@ -647,7 +690,8 @@ export default function VeiculoDetailPage() {
                 size="sm"
                 onClick={() => {
                   setEditingAval(null);
-                  setAvalForm(EMPTY_AVAL);
+                  setAvalForm({ ...EMPTY_AVAL, data_avaliacao: hojeISO() });
+                  valAval.reiniciar();
                   setAvalDialogOpen(true);
                 }}
               >
@@ -694,6 +738,7 @@ export default function VeiculoDetailPage() {
                                 observacoes: aval.observacoes || "",
                                 data_avaliacao: aval.data_avaliacao.split("T")[0],
                               });
+                              valAval.reiniciar();
                               setAvalDialogOpen(true);
                             },
                           },
@@ -732,54 +777,63 @@ export default function VeiculoDetailPage() {
             open={avalDialogOpen}
             onClose={() => setAvalDialogOpen(false)}
             title={editingAval ? "Editar avaliação" : "Nova avaliação"}
+            description={`Avaliação técnica do veículo ${veiculo.placa}.`}
+            footer={
+              <>
+                <Button variant="ghost" onClick={() => setAvalDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleSaveAval} loading={criarAvalM.isPending || atualizarAvalM.isPending}>
+                  {editingAval ? "Salvar alterações" : "Registrar avaliação"}
+                </Button>
+              </>
+            }
           >
-            <div className="space-y-4">
-              <div>
-                <Label>Resultado *</Label>
-                <Select
-                  value={avalForm.resultado}
-                  onChange={(e) =>
-                    setAvalForm({ ...avalForm, resultado: e.target.value as ResultadoAvaliacao })
-                  }
-                >
-                  {RESULTADOS_AVALIACAO.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label>Data da Avaliação</Label>
+            <div ref={valAval.ref} className="space-y-4">
+              <EscolhaSegmentada<ResultadoAvaliacao>
+                nome="aval-resultado"
+                titulo="Resultado"
+                valor={avalForm.resultado}
+                onChange={(r) => setAvalForm({ ...avalForm, resultado: r })}
+                opcoes={OPCOES_RESULTADO}
+              />
+              <FormField
+                label="Data da avaliação"
+                required
+                error={valAval.erro("data_avaliacao")}
+                hint={editingAval ? "Não pode ser data futura." : "Hoje, por padrão. Não pode ser data futura."}
+              >
                 <Input
+                  id="aval_data"
                   type="date"
+                  max={hojeISO()}
+                  onBlur={valAval.sair("data_avaliacao")}
                   value={avalForm.data_avaliacao}
                   onChange={(e) => setAvalForm({ ...avalForm, data_avaliacao: e.target.value })}
                 />
-              </div>
-              <div>
-                <Label>Parecer *</Label>
+              </FormField>
+              <FormField
+                label="Parecer"
+                required
+                error={valAval.erro("parecer")}
+                hint={dicaParecer(avalForm.parecer)}
+              >
                 <Textarea
+                  id="aval_parecer"
                   value={avalForm.parecer}
                   onChange={(e) => setAvalForm({ ...avalForm, parecer: e.target.value })}
-                  placeholder="Descreva o parecer técnico (mínimo 10 caracteres)..."
+                  onBlur={valAval.sair("parecer")}
+                  placeholder="Ex.: freios, pneus e iluminação em ordem; cinto traseiro com desgaste."
                   rows={5}
                 />
-              </div>
-              <div>
-                <Label>Observações</Label>
+              </FormField>
+              <FormField label="Observações" opcional>
                 <Textarea
+                  id="aval_obs"
                   value={avalForm.observacoes}
                   onChange={(e) => setAvalForm({ ...avalForm, observacoes: e.target.value })}
-                  placeholder="Observações adicionais..."
                 />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button variant="secondary" onClick={() => setAvalDialogOpen(false)}>
-                  Cancelar
-                </Button>
-                <Button onClick={handleSaveAval} disabled={criarAvalM.isPending || atualizarAvalM.isPending}>
-                  Salvar
-                </Button>
-              </div>
+              </FormField>
             </div>
           </Dialog>
         </div>
@@ -794,7 +848,8 @@ export default function VeiculoDetailPage() {
                 size="sm"
                 onClick={() => {
                   setEditingVist(null);
-                  setVistForm(EMPTY_VIST);
+                  setVistForm({ ...EMPTY_VIST, data_vistoria: hojeISO() });
+                  valVist.reiniciar();
                   setVistDialogOpen(true);
                 }}
               >
@@ -851,7 +906,8 @@ export default function VeiculoDetailPage() {
                               oculta: !(isVencida && can("transporte_regulado", "inserir")),
                               onClick: () => {
                                 setSelectedVistToRenew(vist);
-                                setRenovarForm(EMPTY_RENOV);
+                                setRenovarForm({ ...EMPTY_RENOV, data_validade: somarMeses(hojeISO(), 12) });
+                                valRenov.reiniciar();
                                 setRenovarDialogOpen(true);
                               },
                             },
@@ -870,6 +926,7 @@ export default function VeiculoDetailPage() {
                                     ? vist.data_validade.split("T")[0]
                                     : "",
                                 });
+                                valVist.reiniciar();
                                 setVistDialogOpen(true);
                               },
                             },
@@ -909,62 +966,84 @@ export default function VeiculoDetailPage() {
             open={vistDialogOpen}
             onClose={() => setVistDialogOpen(false)}
             title={editingVist ? "Editar vistoria" : "Nova vistoria"}
-          >
-            <div className="space-y-4">
-              <div>
-                <Label>Resultado *</Label>
-                <Select
-                  value={vistForm.resultado}
-                  onChange={(e) =>
-                    setVistForm({ ...vistForm, resultado: e.target.value as ResultadoAvaliacao })
-                  }
-                >
-                  {RESULTADOS_VISTORIA.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label>Data da Vistoria</Label>
-                <Input
-                  type="date"
-                  value={vistForm.data_vistoria}
-                  onChange={(e) => setVistForm({ ...vistForm, data_vistoria: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label>Data de Validade</Label>
-                <Input
-                  type="date"
-                  value={vistForm.data_validade}
-                  onChange={(e) => setVistForm({ ...vistForm, data_validade: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label>Parecer *</Label>
-                <Textarea
-                  value={vistForm.parecer}
-                  onChange={(e) => setVistForm({ ...vistForm, parecer: e.target.value })}
-                  placeholder="Descreva o parecer da vistoria (mínimo 10 caracteres)..."
-                  rows={5}
-                />
-              </div>
-              <div>
-                <Label>Observações</Label>
-                <Textarea
-                  value={vistForm.observacoes}
-                  onChange={(e) => setVistForm({ ...vistForm, observacoes: e.target.value })}
-                  placeholder="Observações adicionais..."
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button variant="secondary" onClick={() => setVistDialogOpen(false)}>
+            description={`Vistoria do veículo ${veiculo.placa}.`}
+            footer={
+              <>
+                <Button variant="ghost" onClick={() => setVistDialogOpen(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={handleSaveVist} disabled={criarVistM.isPending || atualizarVistM.isPending}>
-                  Salvar
+                <Button onClick={handleSaveVist} loading={criarVistM.isPending || atualizarVistM.isPending}>
+                  {editingVist ? "Salvar alterações" : "Registrar vistoria"}
                 </Button>
-              </div>
+              </>
+            }
+          >
+            <div ref={valVist.ref} className="space-y-4">
+              <EscolhaSegmentada<ResultadoAvaliacao>
+                nome="vist-resultado"
+                titulo="Resultado"
+                valor={vistForm.resultado}
+                onChange={(r) => setVistForm({ ...vistForm, resultado: r })}
+                opcoes={OPCOES_RESULTADO}
+              />
+              <GradeCampos>
+                <FormField
+                  label="Data da vistoria"
+                  required
+                  error={valVist.erro("data_vistoria")}
+                  hint={editingVist ? "Não pode ser data futura." : "Hoje, por padrão. Não pode ser data futura."}
+                >
+                  <Input
+                    id="vist_data"
+                    type="date"
+                    max={hojeISO()}
+                    onBlur={valVist.sair("data_vistoria")}
+                    value={vistForm.data_vistoria}
+                    onChange={(e) => setVistForm({ ...vistForm, data_vistoria: e.target.value })}
+                  />
+                </FormField>
+                <FormField
+                  label="Validade"
+                  opcional
+                  acao={
+                    <AtalhosPrazo
+                      inicio={vistForm.data_vistoria}
+                      meses={[6, 12]}
+                      onEscolher={(d) => setVistForm({ ...vistForm, data_validade: d })}
+                    />
+                  }
+                  hint={dicaVigencia(vistForm.data_vistoria, vistForm.data_validade, "Até quando a vistoria vale.")}
+                >
+                  <Input
+                    id="vist_validade"
+                    type="date"
+                    value={vistForm.data_validade}
+                    onChange={(e) => setVistForm({ ...vistForm, data_validade: e.target.value })}
+                  />
+                </FormField>
+              </GradeCampos>
+              <FormField
+                label="Parecer"
+                required
+                error={valVist.erro("parecer")}
+                hint={dicaParecer(vistForm.parecer)}
+              >
+                <Textarea
+                  id="vist_parecer"
+                  value={vistForm.parecer}
+                  onChange={(e) => setVistForm({ ...vistForm, parecer: e.target.value })}
+                  onBlur={valVist.sair("parecer")}
+                  placeholder="Ex.: itens de segurança conferidos; extintor dentro da validade."
+                  rows={5}
+                />
+              </FormField>
+              <FormField label="Observações" opcional>
+                <Textarea
+                  id="vist_obs"
+                  value={vistForm.observacoes}
+                  onChange={(e) => setVistForm({ ...vistForm, observacoes: e.target.value })}
+                />
+              </FormField>
             </div>
           </Dialog>
 
@@ -973,67 +1052,82 @@ export default function VeiculoDetailPage() {
             open={renovarDialogOpen}
             onClose={() => setRenovarDialogOpen(false)}
             title="Renovar vistoria"
+            description="A renovação registra uma vistoria nova, ligada à vencida."
+            footer={
+              <>
+                <Button variant="ghost" onClick={() => setRenovarDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleSaveRenov} loading={renovarVistM.isPending}>
+                  Renovar vistoria
+                </Button>
+              </>
+            }
           >
-            <div className="space-y-4">
+            <div ref={valRenov.ref} className="space-y-4">
               {selectedVistToRenew && (
-                <div className="p-3 bg-muted rounded-md">
-                  <p className="text-sm font-medium">
-                    Renovando vistoria de {fmtData(selectedVistToRenew.data_vistoria)}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Válida até{" "}
-                    {selectedVistToRenew.data_validade
-                      ? fmtData(selectedVistToRenew.data_validade)
-                      : "— sem validade"}
-                  </p>
-                </div>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-border bg-surface-1 p-4 text-sm">
+                  <div>
+                    <dt className="text-xs text-foreground-muted">Vistoria atual</dt>
+                    <dd className="tabular-nums text-foreground">{fmtData(selectedVistToRenew.data_vistoria)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-foreground-muted">Validade atual</dt>
+                    <dd className="flex items-center gap-2 tabular-nums text-foreground">
+                      {selectedVistToRenew.data_validade ? fmtData(selectedVistToRenew.data_validade) : "Sem validade"}
+                      <Badge intent="danger">Vencida</Badge>
+                    </dd>
+                  </div>
+                </dl>
               )}
-              <div>
-                <Label>Resultado *</Label>
-                <Select
-                  value={renovarForm.resultado}
-                  onChange={(e) =>
-                    setRenovarForm({ ...renovarForm, resultado: e.target.value as ResultadoAvaliacao })
-                  }
-                >
-                  {RESULTADOS_VISTORIA.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label>Data de Validade</Label>
+              <EscolhaSegmentada<ResultadoAvaliacao>
+                nome="renov-resultado"
+                titulo="Resultado"
+                valor={renovarForm.resultado}
+                onChange={(r) => setRenovarForm({ ...renovarForm, resultado: r })}
+                opcoes={OPCOES_RESULTADO}
+              />
+              <FormField
+                label="Nova validade"
+                opcional
+                acao={
+                  <AtalhosPrazo
+                    inicio=""
+                    meses={[6, 12]}
+                    onEscolher={(d) => setRenovarForm({ ...renovarForm, data_validade: d })}
+                  />
+                }
+                hint={dicaVigencia(hojeISO(), renovarForm.data_validade, "Até quando a vistoria renovada vale.")}
+              >
                 <Input
+                  id="renov_validade"
                   type="date"
                   value={renovarForm.data_validade}
                   onChange={(e) => setRenovarForm({ ...renovarForm, data_validade: e.target.value })}
                 />
-              </div>
-              <div>
-                <Label>Parecer *</Label>
+              </FormField>
+              <FormField
+                label="Parecer"
+                required
+                error={valRenov.erro("parecer")}
+                hint={dicaParecer(renovarForm.parecer)}
+              >
                 <Textarea
+                  id="renov_parecer"
                   value={renovarForm.parecer}
                   onChange={(e) => setRenovarForm({ ...renovarForm, parecer: e.target.value })}
-                  placeholder="Descreva o parecer da renovação (mínimo 10 caracteres)..."
+                  onBlur={valRenov.sair("parecer")}
+                  placeholder="Ex.: nova vistoria aprovada sem ressalvas."
                   rows={5}
                 />
-              </div>
-              <div>
-                <Label>Observações</Label>
+              </FormField>
+              <FormField label="Observações" opcional>
                 <Textarea
+                  id="renov_obs"
                   value={renovarForm.observacoes}
                   onChange={(e) => setRenovarForm({ ...renovarForm, observacoes: e.target.value })}
-                  placeholder="Observações adicionais..."
                 />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button variant="secondary" onClick={() => setRenovarDialogOpen(false)}>
-                  Cancelar
-                </Button>
-                <Button onClick={handleSaveRenov} disabled={renovarVistM.isPending}>
-                  Renovar vistoria
-                </Button>
-              </div>
+              </FormField>
             </div>
           </Dialog>
         </div>

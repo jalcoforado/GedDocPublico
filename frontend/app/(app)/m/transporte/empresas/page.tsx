@@ -14,17 +14,28 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import {
+  dicaVigencia,
+  erroEmail,
+  erroValidade,
+  GrupoCampos,
+  InputMascarado,
+  mascaraCompleta,
+  useValidacao,
+} from "@/components/transporte/formulario";
 import { documentoParaExibir } from "@/components/transporte/rotulos";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -201,6 +212,20 @@ export default function EmpresasPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Regras do backend (`EmpresaCreate`) ditas no campo, com o conserto.
+  const val = useValidacao<"razao_social" | "cnpj" | "email" | "uf" | "data_validade_autorizacao">({
+    razao_social: form.razao_social.trim() === "" ? "Informe a razão social." : undefined,
+    cnpj:
+      form.cnpj.trim() === ""
+        ? "Informe o CNPJ."
+        : !mascaraCompleta("cnpj", form.cnpj)
+          ? "CNPJ incompleto: use o formato 00.000.000/0000-00."
+          : undefined,
+    email: erroEmail(form.email),
+    uf: form.uf.trim() !== "" && form.uf.trim().length !== 2 ? "Use a sigla de 2 letras (ex.: CE)." : undefined,
+    data_validade_autorizacao: erroValidade(form.data_inicio_autorizacao, form.data_validade_autorizacao),
+  });
+
   function set<K extends keyof EmpresaForm>(key: K, value: EmpresaForm[K]) {
     setForm((f) => ({ ...f, [key]: value }));
   }
@@ -208,6 +233,7 @@ export default function EmpresasPage() {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+    val.reiniciar();
     setDialogOpen(true);
   }
   function openEdit(e: Empresa) {
@@ -239,6 +265,7 @@ export default function EmpresasPage() {
       observacoes: e.observacoes ?? "",
     });
     setErr(null);
+    val.reiniciar();
     setDialogOpen(true);
   }
   function closeDialog() {
@@ -248,14 +275,7 @@ export default function EmpresasPage() {
   }
   function salvar() {
     setErr(null);
-    if (form.razao_social.trim() === "") {
-      setErr("Razão social é obrigatória.");
-      return;
-    }
-    if (form.cnpj.trim() === "") {
-      setErr("CNPJ é obrigatório.");
-      return;
-    }
+    if (!val.conferir()) return;
     const payload = {
       razao_social: form.razao_social.trim(),
       nome_fantasia: nullify(form.nome_fantasia),
@@ -495,138 +515,238 @@ export default function EmpresasPage() {
       <Dialog
         open={dialogOpen}
         onClose={closeDialog}
-        title={editing ? `Editar — ${editing.razao_social}` : "Nova empresa"}
+        title={editing ? `Editar empresa — ${editing.razao_social}` : "Nova empresa"}
+        description={
+          editing ? undefined : "Quem é a empresa, onde fica e com que autorização opera. Só razão social e CNPJ são obrigatórios."
+        }
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button onClick={salvar} loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Cadastrar empresa"}
             </Button>
           </>
         }
       >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2">
-            <Label htmlFor="razao" required>
-              Razão social
-            </Label>
-            <Input id="razao" value={form.razao_social} onChange={(e) => set("razao_social", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="fantasia">Nome fantasia</Label>
-            <Input id="fantasia" value={form.nome_fantasia} onChange={(e) => set("nome_fantasia", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="cnpj" required>
-              CNPJ
-            </Label>
-            <Input id="cnpj" value={form.cnpj} onChange={(e) => set("cnpj", e.target.value)} placeholder="00.000.000/0000-00" />
-          </div>
-          <div>
-            <Label htmlFor="im">Inscrição municipal</Label>
-            <Input id="im" value={form.inscricao_municipal} onChange={(e) => set("inscricao_municipal", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="ie">Inscrição estadual</Label>
-            <Input id="ie" value={form.inscricao_estadual} onChange={(e) => set("inscricao_estadual", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="tel">Telefone</Label>
-            <Input id="tel" value={form.telefone} onChange={(e) => set("telefone", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="email">E-mail</Label>
-            <Input id="email" value={form.email} onChange={(e) => set("email", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="tipo" required>
-              Tipo de serviço
-            </Label>
-            <Select id="tipo" value={form.tipo_servico} onChange={(e) => set("tipo_servico", e.target.value as TipoServico)}>
-              {TIPOS.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="sit">Situação</Label>
-            <Select id="sit" value={form.situacao} onChange={(e) => set("situacao", e.target.value as EmpresaSituacao)}>
-              {SITUACOES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="cep">CEP</Label>
-            <Input id="cep" value={form.cep} onChange={(e) => set("cep", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="logr">Logradouro</Label>
-            <Input id="logr" value={form.logradouro} onChange={(e) => set("logradouro", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="num">Número</Label>
-            <Input id="num" value={form.numero} onChange={(e) => set("numero", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="compl">Complemento</Label>
-            <Input id="compl" value={form.complemento} onChange={(e) => set("complemento", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="bairro">Bairro</Label>
-            <Input id="bairro" value={form.bairro} onChange={(e) => set("bairro", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="mun">Município</Label>
-            <Input id="mun" value={form.municipio} onChange={(e) => set("municipio", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="uf">UF</Label>
-            <Input id="uf" value={form.uf} maxLength={2} onChange={(e) => set("uf", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="numaut">Número da autorização</Label>
-            <Input id="numaut" value={form.numero_autorizacao} onChange={(e) => set("numero_autorizacao", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="ini">Início da autorização</Label>
-            <Input id="ini" type="date" value={form.data_inicio_autorizacao} onChange={(e) => set("data_inicio_autorizacao", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="val">Validade da autorização</Label>
-            <Input id="val" type="date" value={form.data_validade_autorizacao} onChange={(e) => set("data_validade_autorizacao", e.target.value)} />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="rep">Representante (permissionário)</Label>
-            <Select
-              id="rep"
-              value={form.id_representante_permissionario}
-              onChange={(e) => set("id_representante_permissionario", e.target.value)}
-            >
-              <option value="">— Nenhum —</option>
-              {permsQ.data?.items.map((p) => (
-                <option key={p.id} value={String(p.id)}>
-                  {p.nome} ({p.cpf})
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="obs">Observações</Label>
-            <Textarea id="obs" rows={2} value={form.observacoes} onChange={(e) => set("observacoes", e.target.value)} />
-          </div>
-          {err && (
-            <div role="alert" className="sm:col-span-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
-              {err}
+        <div ref={val.ref} className="space-y-5">
+          <GrupoCampos titulo="Empresa">
+            <FormField label="Razão social" required error={val.erro("razao_social")}>
+              <Input
+                id="razao"
+                value={form.razao_social}
+                onChange={(e) => set("razao_social", e.target.value)}
+                onBlur={val.sair("razao_social")}
+                placeholder="Ex.: Transportes Boa Viagem Ltda."
+              />
+            </FormField>
+            <GradeCampos>
+              <FormField label="CNPJ" required error={val.erro("cnpj")}>
+                <InputMascarado
+                  id="cnpj"
+                  mascara="cnpj"
+                  value={form.cnpj}
+                  onValueChange={(x) => set("cnpj", x)}
+                  onBlur={val.sair("cnpj")}
+                  placeholder="00.000.000/0000-00"
+                />
+              </FormField>
+              <FormField label="Nome fantasia" opcional>
+                <Input
+                  id="fantasia"
+                  value={form.nome_fantasia}
+                  onChange={(e) => set("nome_fantasia", e.target.value)}
+                  placeholder="Ex.: Boa Viagem Táxi"
+                />
+              </FormField>
+            </GradeCampos>
+            <GradeCampos>
+              <FormField label="Inscrição municipal" opcional>
+                <Input id="im" value={form.inscricao_municipal} onChange={(e) => set("inscricao_municipal", e.target.value)} />
+              </FormField>
+              <FormField label="Inscrição estadual" opcional>
+                <Input id="ie" value={form.inscricao_estadual} onChange={(e) => set("inscricao_estadual", e.target.value)} />
+              </FormField>
+            </GradeCampos>
+            <GradeCampos>
+              <FormField label="Telefone" opcional>
+                <Input
+                  id="tel"
+                  type="tel"
+                  value={form.telefone}
+                  onChange={(e) => set("telefone", e.target.value)}
+                  placeholder="Ex.: (88) 3611-0000"
+                />
+              </FormField>
+              <FormField label="E-mail" opcional error={val.erro("email")}>
+                <Input
+                  id="email"
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => set("email", e.target.value)}
+                  onBlur={val.sair("email")}
+                  placeholder="Ex.: contato@empresa.com.br"
+                />
+              </FormField>
+            </GradeCampos>
+          </GrupoCampos>
+
+          <GrupoCampos titulo="Endereço" descricao="Opcional, mas ajuda a fiscalização a localizar a sede.">
+            <GradeCampos>
+              <FormField label="CEP">
+                <Input
+                  id="cep"
+                  inputMode="numeric"
+                  maxLength={9}
+                  value={form.cep}
+                  onChange={(e) => set("cep", e.target.value)}
+                  placeholder="Ex.: 62010-000"
+                />
+              </FormField>
+              <FormField label="Bairro">
+                <Input id="bairro" value={form.bairro} onChange={(e) => set("bairro", e.target.value)} />
+              </FormField>
+            </GradeCampos>
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]">
+              <FormField label="Logradouro">
+                <Input
+                  id="logr"
+                  value={form.logradouro}
+                  onChange={(e) => set("logradouro", e.target.value)}
+                  placeholder="Ex.: Rua Coronel Ernesto Deocleciano"
+                />
+              </FormField>
+              <FormField label="Número">
+                <Input id="num" value={form.numero} onChange={(e) => set("numero", e.target.value)} placeholder="Ex.: 120" />
+              </FormField>
             </div>
-          )}
+            <FormField label="Complemento">
+              <Input
+                id="compl"
+                value={form.complemento}
+                onChange={(e) => set("complemento", e.target.value)}
+                placeholder="Ex.: Sala 3"
+              />
+            </FormField>
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]">
+              <FormField label="Município">
+                <Input id="mun" value={form.municipio} onChange={(e) => set("municipio", e.target.value)} />
+              </FormField>
+              <FormField label="UF" error={val.erro("uf")}>
+                <Input
+                  id="uf"
+                  value={form.uf}
+                  maxLength={2}
+                  className="uppercase"
+                  onChange={(e) => set("uf", e.target.value.toUpperCase())}
+                  onBlur={val.sair("uf")}
+                  placeholder="CE"
+                />
+              </FormField>
+            </div>
+          </GrupoCampos>
+
+          <GrupoCampos titulo="Serviço e autorização">
+            <GradeCampos>
+              <FormField label="Tipo de serviço" required>
+                <Select
+                  id="tipo"
+                  value={form.tipo_servico}
+                  onChange={(e) => set("tipo_servico", e.target.value as TipoServico)}
+                >
+                  {TIPOS.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Número da autorização" opcional>
+                <Input
+                  id="numaut"
+                  value={form.numero_autorizacao}
+                  onChange={(e) => set("numero_autorizacao", e.target.value)}
+                  placeholder="Ex.: AUT-0012/2026"
+                />
+              </FormField>
+            </GradeCampos>
+            <GradeCampos>
+              <FormField label="Início da autorização" opcional>
+                <Input
+                  id="ini"
+                  type="date"
+                  value={form.data_inicio_autorizacao}
+                  onChange={(e) => set("data_inicio_autorizacao", e.target.value)}
+                />
+              </FormField>
+              <FormField
+                label="Validade da autorização"
+                opcional
+                error={val.erro("data_validade_autorizacao")}
+                hint={dicaVigencia(
+                  form.data_inicio_autorizacao,
+                  form.data_validade_autorizacao,
+                  "Último dia em que a autorização vale.",
+                )}
+              >
+                <Input
+                  id="val"
+                  type="date"
+                  value={form.data_validade_autorizacao}
+                  onChange={(e) => set("data_validade_autorizacao", e.target.value)}
+                  onBlur={val.sair("data_validade_autorizacao")}
+                />
+              </FormField>
+            </GradeCampos>
+            <FormField label="Representante" opcional hint="Permissionário que representa a empresa. Busque pelo nome ou CPF.">
+              <Combobox
+                id="rep"
+                options={(permsQ.data?.items ?? []).map((p) => ({
+                  value: p.id,
+                  label: p.nome,
+                  hint: documentoParaExibir(p.cpf),
+                }))}
+                value={form.id_representante_permissionario ? Number(form.id_representante_permissionario) : null}
+                onChange={(id) => set("id_representante_permissionario", id == null ? "" : String(id))}
+                placeholder="Nenhum"
+                searchPlaceholder="Nome ou CPF…"
+                emptyText="Nenhum permissionário com esse nome."
+                loading={permsQ.isLoading}
+              />
+            </FormField>
+            <FormField
+              label="Situação"
+              hint={
+                editing
+                  ? "Suspender e reativar também ficam nas ações da linha."
+                  : "Cadastro novo entra como Pendente, salvo se mudar aqui."
+              }
+            >
+              <Select id="sit" value={form.situacao} onChange={(e) => set("situacao", e.target.value as EmpresaSituacao)}>
+                {SITUACOES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </GrupoCampos>
+
+          <div className="border-t border-border pt-5">
+            <FormField label="Observações" opcional>
+              <Textarea
+                id="obs"
+                rows={2}
+                value={form.observacoes}
+                onChange={(e) => set("observacoes", e.target.value)}
+                placeholder="Ex.: frota em renovação até março"
+              />
+            </FormField>
+          </div>
+
+          {err && <Alert intent="danger">{err}</Alert>}
         </div>
       </Dialog>
     </div>
