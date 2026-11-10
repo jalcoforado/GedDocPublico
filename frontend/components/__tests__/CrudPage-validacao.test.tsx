@@ -68,7 +68,7 @@ function renderizar() {
 
 // Rótulo de obrigatório termina em "*" (o asterisco é aria-hidden, mas entra no texto).
 const rotulo = (nome: string) => new RegExp(`^${nome}\\*?$`);
-const salvar = () => fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+const salvar = () => fireEvent.click(screen.getByRole("button", { name: /^(Cadastrar|Salvar alterações)/ }));
 const digitar = (label: string | RegExp, value: string) =>
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
