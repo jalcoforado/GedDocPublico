@@ -51,6 +51,7 @@ const SOLICITACOES = [
   sol(4, "Na rua", "em_uso", 10),
 ];
 const aprovarMock = vi.fn((_id: number) => Promise.resolve({}));
+const rejeitarMock = vi.fn((_id: number, _motivo: string) => Promise.resolve({}));
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -62,6 +63,7 @@ vi.mock("@/lib/api", async () => {
         ...actual.api.solicitacoes,
         listAll: () => Promise.resolve(SOLICITACOES),
         aprovar: (id: number) => aprovarMock(id),
+        rejeitar: (id: number, motivo: string) => rejeitarMock(id, motivo),
       },
       unidades: { ...actual.api.unidades, list: () => Promise.resolve({ items: [] }) },
       frota: { ...actual.api.frota, listAll: () => Promise.resolve([]) },
@@ -97,7 +99,10 @@ function botoesAVista(l: { getAllByRole: (papel: "button") => HTMLElement[] }) {
 
 vi.setConfig({ testTimeout: 20_000 });
 
-beforeEach(() => aprovarMock.mockClear());
+beforeEach(() => {
+  aprovarMock.mockClear();
+  rejeitarMock.mockClear();
+});
 afterEach(cleanup);
 
 describe("solicitações de veículo — ações da linha", () => {
@@ -137,5 +142,47 @@ describe("solicitações de veículo — ações da linha", () => {
     const l = await linha("Pedido novo");
     expect(l.getByText("11/11/2026 14:55")).toBeInTheDocument();
     expect(l.queryByText(/14:55:43/)).toBeNull();
+  });
+});
+
+describe("solicitações de veículo — rejeitar com motivo", () => {
+  async function abrirRejeicao() {
+    await abrir();
+    const l = await linha("Pedido novo");
+    fireEvent.click(l.getByRole("button", { name: "Mais ações" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rejeitar" }));
+    return screen.findByRole("dialog", { name: "Rejeitar solicitação" });
+  }
+
+  it("abre um diálogo com o campo de motivo, sem erro antes de tentar", async () => {
+    const dialogo = within(await abrirRejeicao());
+    const campo = dialogo.getByLabelText(/Motivo da rejeição/);
+    expect(campo).not.toHaveAttribute("aria-invalid", "true");
+    expect(dialogo.queryByText("Escreva o motivo da rejeição.")).toBeNull();
+  });
+
+  it("sem motivo, o erro aparece sob o campo, o foco vai para ele e nada é enviado", async () => {
+    const dialogo = within(await abrirRejeicao());
+    fireEvent.click(dialogo.getByRole("button", { name: "Rejeitar solicitação" }));
+    const campo = dialogo.getByLabelText(/Motivo da rejeição/);
+    expect(await dialogo.findByText("Escreva o motivo da rejeição.")).toBeInTheDocument();
+    expect(campo).toHaveAttribute("aria-invalid", "true");
+    expect(campo).toHaveFocus();
+    expect(rejeitarMock).not.toHaveBeenCalled();
+  });
+
+  it("o erro também aparece ao sair do campo vazio", async () => {
+    const dialogo = within(await abrirRejeicao());
+    fireEvent.blur(dialogo.getByLabelText(/Motivo da rejeição/));
+    expect(await dialogo.findByText("Escreva o motivo da rejeição.")).toBeInTheDocument();
+  });
+
+  it("com motivo, chama a mesma API de antes, com o texto aparado", async () => {
+    const dialogo = within(await abrirRejeicao());
+    fireEvent.change(dialogo.getByLabelText(/Motivo da rejeição/), {
+      target: { value: "  Sem veículo na data  " },
+    });
+    fireEvent.click(dialogo.getByRole("button", { name: "Rejeitar solicitação" }));
+    await waitFor(() => expect(rejeitarMock).toHaveBeenCalledWith(1, "Sem veículo na data"));
   });
 });
