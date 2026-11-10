@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Pencil, Plus, Search, Trash2, type LucideIcon } from "lucide-react";
+import { AlertCircle, Inbox, Pencil, Plus, Search, Trash2, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -25,6 +26,7 @@ import {
   exemploDaMascara,
   type Mascara,
 } from "@/lib/mascaras";
+import { cn } from "@/lib/utils";
 
 export type FieldType = "text" | "email" | "number" | "select" | "checkbox" | "textarea";
 
@@ -49,6 +51,11 @@ export interface CrudField<T = any> {
   mascara?: Mascara | ((form: any) => Mascara);
   /** Checkbox: texto ao lado da caixa (o `label` fica como título acima). */
   textoAoLado?: string;
+  /** Dica permanente sob o campo: formato, exemplo, para que serve. */
+  dica?: string;
+  /** Unidade grudada no campo (só `text`/`number`): "R$" antes, "km" depois. */
+  prefixo?: string;
+  sufixo?: string;
 }
 
 function resolver<V>(v: V | ((form: any) => V), form: any): V {
@@ -467,7 +474,14 @@ export function CrudPage<T extends { id: number }>({
       <Dialog
         open={open}
         onClose={close}
-        title={editing ? "Editar" : novoLabel}
+        // "Nova cidade" → "Editar cidade": o diálogo diz o que se edita.
+        title={
+          editing
+            ? novoLabel === "Novo"
+              ? "Editar"
+              : `Editar ${novoLabel.replace(/^Nov[oa]\s+/i, "")}`
+            : novoLabel
+        }
         size={dialogSize}
         footer={
           <>
@@ -480,18 +494,47 @@ export function CrudPage<T extends { id: number }>({
           </>
         }
       >
-        <form onSubmit={submit} noValidate className="grid grid-cols-2 gap-3">
+        <form onSubmit={submit} noValidate className="grid grid-cols-2 gap-x-4 gap-y-4">
+          {/* Resumo dos erros no topo: num diálogo que rola, o primeiro campo
+              inválido recebe o foco, mas quem errou três precisa saber que
+              são três. Cada item leva ao campo. */}
+          {Object.keys(erros).length > 1 && (
+            <div
+              role="alert"
+              className="col-span-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+            >
+              <p className="font-medium">Revise {Object.keys(erros).length} campos antes de salvar:</p>
+              <ul className="mt-1 list-inside list-disc">
+                {fields
+                  .filter((f) => erros[f.name])
+                  .map((f) => (
+                    <li key={f.name}>
+                      <button
+                        type="button"
+                        onClick={() => document.getElementById(f.name)?.focus()}
+                        className="underline underline-offset-2 hover:no-underline"
+                      >
+                        {resolver(f.label, form)}
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
           {fields.map((f) => {
             const erro = erros[f.name];
             const mascara = f.mascara && f.type === "text" ? resolver(f.mascara, form) : undefined;
             const aria = {
               "aria-invalid": erro ? true : undefined,
-              "aria-describedby": erro ? `${f.name}-erro` : undefined,
+              "aria-describedby":
+                [erro ? `${f.name}-erro` : null, f.dica ? `${f.name}-dica` : null].filter(Boolean).join(" ") ||
+                undefined,
             };
+            const comUnidade = (f.prefixo || f.sufixo) && (f.type === "text" || f.type === "number") && !mascara;
             return (
             <div
               key={f.name}
-              className={f.colSpan === 2 ? "col-span-2" : "col-span-1"}
+              className={f.colSpan === 2 ? "col-span-2" : "col-span-2 sm:col-span-1"}
             >
               <Label htmlFor={f.name} required={f.required && f.type !== "checkbox"}>
                 {resolver(f.label, form)}
@@ -549,6 +592,28 @@ export function CrudPage<T extends { id: number }>({
                   required={f.required}
                   {...aria}
                 />
+              ) : comUnidade ? (
+                <CampoComUnidade
+                  id={f.name}
+                  type={f.type}
+                  inputMode={f.type === "number" ? "decimal" : undefined}
+                  prefixo={f.prefixo}
+                  sufixo={f.sufixo}
+                  value={form[f.name] ?? ""}
+                  onChange={(e) =>
+                    mudar(
+                      f.name,
+                      f.type === "number"
+                        ? e.target.value === ""
+                          ? null
+                          : Number(e.target.value)
+                        : e.target.value,
+                    )
+                  }
+                  required={f.required}
+                  placeholder={f.placeholder}
+                  {...aria}
+                />
               ) : (
                 <Input
                   id={f.name}
@@ -569,8 +634,14 @@ export function CrudPage<T extends { id: number }>({
                   {...aria}
                 />
               )}
+              {f.dica && (
+                <p id={`${f.name}-dica`} className={cn("mt-1 text-xs text-foreground-muted", erro && "sr-only")}>
+                  {f.dica}
+                </p>
+              )}
               {erro && (
-                <p id={`${f.name}-erro`} className="mt-1 text-sm text-danger">
+                <p id={`${f.name}-erro`} className="mt-1 flex items-start gap-1 text-xs font-medium text-danger-soft-foreground">
+                  <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   {erro}
                 </p>
               )}
