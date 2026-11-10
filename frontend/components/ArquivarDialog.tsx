@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Textarea } from "@/components/ui/textarea";
 import { api, type ProcessoDetail } from "@/lib/api";
 
@@ -75,116 +75,144 @@ export function ArquivarDialog({
   // O mesmo piso do schema (`min_length=3`), para que o erro apareça antes da
   // viagem. O servidor continua sendo a autoridade — isto é conveniência.
   const motivoValido = motivo.trim().length >= 3;
+  // Erro só depois de tentar arquivar: o botão não fica cinza sem explicação.
+  const [tentou, setTentou] = useState(false);
+
+  function fechar() {
+    setTentou(false);
+    setErr(null);
+    onClose();
+  }
+
+  function arquivar() {
+    setErr(null);
+    setTentou(true);
+    if (!motivoValido) {
+      document.getElementById("arq-motivo")?.focus();
+      return;
+    }
+    arquivarM.mutate();
+  }
 
   return (
     <Dialog
       open={open}
-      onClose={onClose}
-      title="Arquivar processo"
+      onClose={fechar}
+      title={processo.numero_processo ? `Arquivar processo ${processo.numero_processo}` : "Arquivar processo"}
       description="Encerra o processo. Esta ação não pode ser desfeita pelo sistema."
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="ghost" onClick={fechar}>
             Cancelar
           </Button>
-          <Button
-            onClick={() => {
-              setErr(null);
-              arquivarM.mutate();
-            }}
-            disabled={!motivoValido || arquivarM.isPending}
-          >
-            {arquivarM.isPending ? "Arquivando..." : "Arquivar"}
+          <Button onClick={arquivar} loading={arquivarM.isPending}>
+            {arquivarM.isPending ? "Arquivando…" : "Arquivar processo"}
           </Button>
         </>
       }
     >
-      <p className="text-sm">
-        Arquivar o processo{" "}
-        <b className="font-mono">{processo.numero_processo}</b>?
-      </p>
-
-      <div className="mt-4 space-y-4">
-        <div>
-          <Label htmlFor="arq-motivo">
-            Motivo <span className="text-danger">*</span>
-          </Label>
+      <div className="space-y-4">
+        <FormField
+          label="Motivo"
+          required
+          hint="Fica no histórico do processo."
+          error={
+            tentou && !motivoValido
+              ? "Escreva o motivo do arquivamento, com pelo menos 3 letras."
+              : undefined
+          }
+        >
           <Input
             id="arq-motivo"
             value={motivo}
             maxLength={255}
             onChange={(e) => setMotivo(e.target.value)}
-            placeholder="Por que este processo está sendo encerrado?"
+            placeholder="Ex.: Pedido atendido"
           />
-          <p className="mt-1 text-xs text-muted-foreground">
-            Fica no histórico do processo. Mínimo de 3 caracteres.
-          </p>
-        </div>
+        </FormField>
 
-        <div>
-          <Label htmlFor="arq-obs">Observação</Label>
+        <FormField
+          label="Observação"
+          opcional
+          hint="Aparece como despacho na linha do tempo."
+        >
           <Textarea
             id="arq-obs"
             rows={3}
             value={observacao}
             onChange={(e) => setObservacao(e.target.value)}
-            placeholder="Texto livre — aparece como despacho na linha do tempo."
+            placeholder="Ex.: Serviço executado em 05/11; cidadão avisado por telefone."
           />
-        </div>
+        </FormField>
 
-        <div className="flex items-center gap-2">
+        <label
+          htmlFor="arq-permanente"
+          className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border bg-surface-1 px-3 py-2.5 transition-colors duration-fast hover:bg-surface-2"
+        >
           <Checkbox
             id="arq-permanente"
             checked={permanente}
             onChange={(e) => setPermanente(e.target.checked)}
+            className="mt-0.5 h-4 w-4"
           />
-          <Label htmlFor="arq-permanente" className="!mb-0">
-            Guarda permanente
-          </Label>
-        </div>
+          <span className="text-sm">
+            <span className="block font-medium text-foreground">Guarda permanente</span>
+            <span className="block text-xs text-foreground-muted">
+              Guardado para sempre, sem prazo de eliminação.
+            </span>
+          </span>
+        </label>
 
         <details className="rounded-md border border-border p-3">
-          <summary className="cursor-pointer text-sm font-medium">
+          <summary className="cursor-pointer text-sm font-medium text-foreground">
             Endereçamento físico
+            <span className="ml-1.5 text-xs font-normal text-foreground-subtle">
+              só para processo de papel
+            </span>
           </summary>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Só para processo de papel. Deixe em branco em processo virtual.
+          <p className="mt-1 text-xs text-foreground-muted">
+            Onde o papel fica guardado. Em processo virtual, deixe em branco.
           </p>
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="arq-local">Local</Label>
-              <Input id="arq-local" value={local} maxLength={255}
-                onChange={(e) => setLocal(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="arq-estante">Estante</Label>
-              <Input id="arq-estante" value={estante} maxLength={255}
-                onChange={(e) => setEstante(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="arq-prateleira">Prateleira</Label>
-              <Input id="arq-prateleira" value={prateleira} maxLength={255}
-                onChange={(e) => setPrateleira(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="arq-caixa">Caixa</Label>
-              <Input id="arq-caixa" value={caixa} maxLength={255}
-                onChange={(e) => setCaixa(e.target.value)} />
-            </div>
-            <div className="col-span-2">
-              <Label htmlFor="arq-pasta">Pasta</Label>
-              <Input id="arq-pasta" value={pasta} maxLength={255}
-                onChange={(e) => setPasta(e.target.value)} />
-            </div>
+          <div className="mt-3 space-y-3">
+            <FormField label="Local">
+              <Input
+                id="arq-local"
+                value={local}
+                maxLength={255}
+                onChange={(e) => setLocal(e.target.value)}
+                placeholder="Ex.: Arquivo central"
+              />
+            </FormField>
+            <GradeCampos>
+              <FormField label="Estante">
+                <Input id="arq-estante" value={estante} maxLength={255}
+                  onChange={(e) => setEstante(e.target.value)} placeholder="Ex.: B" />
+              </FormField>
+              <FormField label="Prateleira">
+                <Input id="arq-prateleira" value={prateleira} maxLength={255}
+                  onChange={(e) => setPrateleira(e.target.value)} placeholder="Ex.: 3" />
+              </FormField>
+              <FormField label="Caixa">
+                <Input id="arq-caixa" value={caixa} maxLength={255}
+                  onChange={(e) => setCaixa(e.target.value)} placeholder="Ex.: 12" />
+              </FormField>
+              <FormField label="Pasta">
+                <Input id="arq-pasta" value={pasta} maxLength={255}
+                  onChange={(e) => setPasta(e.target.value)} placeholder="Ex.: 2026-A" />
+              </FormField>
+            </GradeCampos>
           </div>
         </details>
-      </div>
 
-      {err && (
-        <p role="alert" className="mt-3 text-sm text-danger">
-          {err}
-        </p>
-      )}
+        {err && (
+          <p
+            role="alert"
+            className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+          >
+            {err}
+          </p>
+        )}
+      </div>
     </Dialog>
   );
 }
