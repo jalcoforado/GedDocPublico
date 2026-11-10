@@ -1,14 +1,28 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { IdCard, Inbox, Plus } from "lucide-react";
+import {
+  Ban,
+  IdCard,
+  Inbox,
+  PauseCircle,
+  Pencil,
+  Plus,
+  RotateCcw,
+  SearchX,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 
+import { documentoParaExibir } from "@/components/transporte/rotulos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -124,6 +138,13 @@ export default function PermissionariosPage() {
       }),
   });
   const totalPages = Math.max(1, Math.ceil((listaQ.data?.total ?? 0) / PAGE_SIZE));
+  const filtrando = situacaoFiltro !== "" || tipoFiltro !== "";
+
+  function limparFiltros() {
+    setSituacaoFiltro("");
+    setTipoFiltro("");
+    setPage(1);
+  }
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["tr-permissionarios"] });
 
@@ -246,11 +267,11 @@ export default function PermissionariosPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-3">
-        <div>
-          <Label htmlFor="f_sit">Situação</Label>
+      <FilterBar ariaLabel="Filtros dos permissionários">
+        <FilterBar.Group label="Situação" className="w-full sm:w-48">
           <Select
             id="f_sit"
+            aria-label="Situação"
             value={situacaoFiltro}
             onChange={(e) => {
               setSituacaoFiltro(e.target.value);
@@ -264,11 +285,11 @@ export default function PermissionariosPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div>
-          <Label htmlFor="f_tipo">Tipo de serviço</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Tipo de serviço" className="w-full sm:w-56">
           <Select
             id="f_tipo"
+            aria-label="Tipo de serviço"
             value={tipoFiltro}
             onChange={(e) => {
               setTipoFiltro(e.target.value);
@@ -282,16 +303,33 @@ export default function PermissionariosPage() {
               </option>
             ))}
           </Select>
-        </div>
-      </div>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {!listaQ.isLoading && (listaQ.data?.items.length ?? 0) === 0 ? (
+        // Filtro sem resultado não é cadastro vazio: o botão de cadastrar
+        // convidaria a duplicar quem já existe sob outra situação.
         <EmptyState
-          icon={Inbox}
-          title="Nenhum permissionário"
-          description="Cadastre o primeiro permissionário do transporte regulado."
+          icon={filtrando ? SearchX : Inbox}
+          title={filtrando ? "Nenhum permissionário encontrado" : "Nenhum permissionário"}
+          description={
+            filtrando
+              ? "Nenhum permissionário corresponde aos filtros aplicados."
+              : "Cadastre o primeiro permissionário do transporte regulado."
+          }
           action={
-            canCreate ? (
+            filtrando ? (
+              <Button variant="secondary" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            ) : canCreate ? (
               <Button onClick={openNew}>
                 <Plus className="mr-1 h-4 w-4" />
                 Cadastrar permissionário
@@ -312,64 +350,54 @@ export default function PermissionariosPage() {
             </TR>
           </THead>
           <TBody>
-            {listaQ.isLoading && (
-              <TR>
-                <TD colSpan={6} className="text-center text-muted-foreground">
-                  Carregando...
-                </TD>
-              </TR>
-            )}
+            {listaQ.isLoading &&
+              Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={6} />)}
             {listaQ.data?.items.map((p) => (
               <TR key={p.id}>
                 <TD>{p.nome}</TD>
-                <TD className="font-mono">{p.cpf}</TD>
+                <TD className="whitespace-nowrap font-mono">{documentoParaExibir(p.cpf)}</TD>
                 <TD>{TIPO_LABEL[p.tipo_servico] ?? p.tipo_servico}</TD>
-                <TD className="text-muted-foreground">{p.numero_permissao ?? "—"}</TD>
+                <TD className="whitespace-nowrap text-muted-foreground">
+                  {p.numero_permissao ?? "—"}
+                </TD>
                 <TD>
                   <Badge intent={SIT_INTENT[p.situacao] ?? "neutral"}>
                     {SIT_LABEL[p.situacao] ?? p.situacao}
                   </Badge>
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex flex-wrap justify-end gap-2">
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(p)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canEdit && p.situacao !== "ativo" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: p.id, acao: "reativar" })}
-                      >
-                        Reativar
-                      </Button>
-                    )}
-                    {canEdit && p.situacao !== "suspenso" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: p.id, acao: "suspender" })}
-                      >
-                        Suspender
-                      </Button>
-                    )}
-                    {canEdit && p.situacao !== "inativo" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: p.id, acao: "inativar" })}
-                      >
-                        Inativar
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={deleteM.isPending}
-                        onClick={async () => {
+                  {/* Reativar/Suspender vêm antes: são o que muda na linha
+                      conforme a situação. Inativar e Excluir, destrutivas,
+                      ficam no ⋯. */}
+                  <AcoesDaLinha
+                    acoes={[
+                      { label: "Editar", icon: Pencil, onClick: () => openEdit(p), oculta: !canEdit },
+                      {
+                        label: "Reativar",
+                        icon: RotateCcw,
+                        onClick: () => actionM.mutate({ id: p.id, acao: "reativar" }),
+                        oculta: !canEdit || p.situacao === "ativo",
+                      },
+                      {
+                        label: "Suspender",
+                        icon: PauseCircle,
+                        onClick: () => actionM.mutate({ id: p.id, acao: "suspender" }),
+                        oculta: !canEdit || p.situacao === "suspenso",
+                      },
+                      {
+                        label: "Inativar",
+                        icon: Ban,
+                        perigo: true,
+                        onClick: () => actionM.mutate({ id: p.id, acao: "inativar" }),
+                        oculta: !canEdit || p.situacao === "inativo",
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        disabled: deleteM.isPending,
+                        oculta: !canDelete,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir permissionário",
                             message: `Excluir o permissionário "${p.nome}"? Esta ação não pode ser desfeita.`,
@@ -377,12 +405,10 @@ export default function PermissionariosPage() {
                             intent: "danger",
                           });
                           if (ok) deleteM.mutate(p.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}

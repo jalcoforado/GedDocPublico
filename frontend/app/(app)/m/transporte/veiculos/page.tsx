@@ -1,15 +1,31 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Car, Inbox, Plus } from "lucide-react";
+import {
+  Ban,
+  Building2,
+  Car,
+  Eye,
+  Inbox,
+  PauseCircle,
+  Pencil,
+  Plus,
+  RotateCcw,
+  SearchX,
+  Trash2,
+  User,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -160,6 +176,14 @@ export default function VeiculosReguladosPage() {
       }),
   });
   const totalPages = Math.max(1, Math.ceil((listaQ.data?.total ?? 0) / PAGE_SIZE));
+  const filtrando = situacaoFiltro !== "" || tipoFiltro !== "" || busca.trim() !== "";
+
+  function limparFiltros() {
+    setSituacaoFiltro("");
+    setTipoFiltro("");
+    setBusca("");
+    setPage(1);
+  }
 
   // Vínculos para os selects (permissionário / empresa).
   const permsQ = useQuery({
@@ -321,11 +345,11 @@ export default function VeiculosReguladosPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3">
-        <div>
-          <Label htmlFor="f_sit">Situação</Label>
+      <FilterBar ariaLabel="Filtros dos veículos">
+        <FilterBar.Group label="Situação" className="w-full sm:w-48">
           <Select
             id="f_sit"
+            aria-label="Situação"
             value={situacaoFiltro}
             onChange={(e) => {
               setSituacaoFiltro(e.target.value);
@@ -339,11 +363,11 @@ export default function VeiculosReguladosPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div>
-          <Label htmlFor="f_tipo">Tipo de serviço</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Tipo de serviço" className="w-full sm:w-56">
           <Select
             id="f_tipo"
+            aria-label="Tipo de serviço"
             value={tipoFiltro}
             onChange={(e) => {
               setTipoFiltro(e.target.value);
@@ -357,11 +381,11 @@ export default function VeiculosReguladosPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div className="flex-1 min-w-[200px]">
-          <Label htmlFor="f_q">Busca</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Busca" className="min-w-[200px] flex-1">
           <Input
             id="f_q"
+            aria-label="Busca"
             value={busca}
             onChange={(e) => {
               setBusca(e.target.value);
@@ -369,16 +393,31 @@ export default function VeiculosReguladosPage() {
             }}
             placeholder="Placa, marca, modelo, RENAVAM ou chassi"
           />
-        </div>
-      </div>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {!listaQ.isLoading && (listaQ.data?.items.length ?? 0) === 0 ? (
         <EmptyState
-          icon={Inbox}
-          title="Nenhum veículo regulado"
-          description="Cadastre o primeiro veículo vinculado a um permissionário ou empresa."
+          icon={filtrando ? SearchX : Inbox}
+          title={filtrando ? "Nenhum veículo encontrado" : "Nenhum veículo regulado"}
+          description={
+            filtrando
+              ? "Nenhum veículo corresponde à busca ou aos filtros aplicados."
+              : "Cadastre o primeiro veículo vinculado a um permissionário ou empresa."
+          }
           action={
-            canCreate && !semVinculos ? (
+            filtrando ? (
+              <Button variant="secondary" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            ) : canCreate && !semVinculos ? (
               <Button onClick={openNew}>
                 <Plus className="mr-1 h-4 w-4" />
                 Cadastrar veículo
@@ -400,17 +439,15 @@ export default function VeiculosReguladosPage() {
             </TR>
           </THead>
           <TBody>
-            {listaQ.isLoading && (
-              <TR>
-                <TD colSpan={7} className="text-center text-muted-foreground">
-                  Carregando...
-                </TD>
-              </TR>
-            )}
+            {listaQ.isLoading &&
+              Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={7} />)}
             {listaQ.data?.items.map((v) => (
               <TR key={v.id}>
-                <TD className="font-mono">
-                  <Link href={`/m/transporte/veiculos/${v.id}`} className="text-blue-600 hover:underline">
+                <TD className="whitespace-nowrap font-mono font-medium">
+                  <Link
+                    href={`/m/transporte/veiculos/${v.id}`}
+                    className="text-primary hover:underline"
+                  >
                     {v.placa}
                   </Link>
                 </TD>
@@ -418,9 +455,21 @@ export default function VeiculosReguladosPage() {
                   <div className="font-medium">{v.marca}</div>
                   <div className="text-xs text-muted-foreground">{v.modelo}</div>
                 </TD>
+                {/* Era 👤/🏢 em emoji, que em parte das fontes do sistema
+                    virava um "▌" antes do nome. Ícone da própria UI no lugar. */}
                 <TD className="text-sm text-muted-foreground">
-                  {permLabel(v.id_permissionario) && <div>👤 {permLabel(v.id_permissionario)}</div>}
-                  {empLabel(v.id_empresa) && <div>🏢 {empLabel(v.id_empresa)}</div>}
+                  {permLabel(v.id_permissionario) && (
+                    <div className="flex items-center gap-1.5">
+                      <User className="h-3.5 w-3.5 shrink-0" aria-label="Permissionário" />
+                      {permLabel(v.id_permissionario)}
+                    </div>
+                  )}
+                  {empLabel(v.id_empresa) && (
+                    <div className="flex items-center gap-1.5">
+                      <Building2 className="h-3.5 w-3.5 shrink-0" aria-label="Empresa" />
+                      {empLabel(v.id_empresa)}
+                    </div>
+                  )}
                   {v.id_permissionario == null && v.id_empresa == null && "—"}
                 </TD>
                 <TD>{TIPO_LABEL[v.tipo_servico] ?? v.tipo_servico}</TD>
@@ -431,50 +480,38 @@ export default function VeiculosReguladosPage() {
                   </Badge>
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex flex-wrap justify-end gap-2">
-                    <Link href={`/m/transporte/veiculos/${v.id}`}>
-                      <Button variant="secondary" size="sm">
-                        Detalhes
-                      </Button>
-                    </Link>
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(v)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canEdit && v.situacao !== "ativo" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: v.id, acao: "reativar" })}
-                      >
-                        Reativar
-                      </Button>
-                    )}
-                    {canEdit && v.situacao !== "suspenso" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: v.id, acao: "suspender" })}
-                      >
-                        Suspender
-                      </Button>
-                    )}
-                    {canEdit && v.situacao !== "inativo" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: v.id, acao: "inativar" })}
-                      >
-                        Inativar
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={deleteM.isPending}
-                        onClick={async () => {
+                  {/* Mesma ordem dos permissionários: o que muda com a
+                      situação vem à vista; Inativar e Excluir ficam no ⋯. */}
+                  <AcoesDaLinha
+                    acoes={[
+                      { label: "Detalhes", icon: Eye, href: `/m/transporte/veiculos/${v.id}` },
+                      { label: "Editar", icon: Pencil, onClick: () => openEdit(v), oculta: !canEdit },
+                      {
+                        label: "Reativar",
+                        icon: RotateCcw,
+                        onClick: () => actionM.mutate({ id: v.id, acao: "reativar" }),
+                        oculta: !canEdit || v.situacao === "ativo",
+                      },
+                      {
+                        label: "Suspender",
+                        icon: PauseCircle,
+                        onClick: () => actionM.mutate({ id: v.id, acao: "suspender" }),
+                        oculta: !canEdit || v.situacao === "suspenso",
+                      },
+                      {
+                        label: "Inativar",
+                        icon: Ban,
+                        perigo: true,
+                        onClick: () => actionM.mutate({ id: v.id, acao: "inativar" }),
+                        oculta: !canEdit || v.situacao === "inativo",
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        disabled: deleteM.isPending,
+                        oculta: !canDelete,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir veículo",
                             message: `Excluir o veículo de placa "${v.placa}"? Esta ação não pode ser desfeita.`,
@@ -482,12 +519,10 @@ export default function VeiculosReguladosPage() {
                             intent: "danger",
                           });
                           if (ok) deleteM.mutate(v.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}

@@ -4,14 +4,27 @@ import { Carregando } from "@/components/ui/carregando";
 
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Plus, ScrollText } from "lucide-react";
+import {
+  Eye,
+  FileText,
+  Inbox,
+  Pencil,
+  Plus,
+  RefreshCw,
+  ScrollText,
+  SearchX,
+  Trash2,
+  Users,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -474,6 +487,14 @@ export default function AlvarasPage() {
   // Sem filtro no cliente: o que chega já veio filtrado pelo servidor.
   const filteredData = listaQ.data?.items ?? [];
   const buscando = buscaAplicada.length > 0;
+  const filtrando = buscando || empresaFiltro !== "" || permFiltro !== "";
+
+  function limparFiltros() {
+    setEmpresaFiltro("");
+    setPermFiltro("");
+    setBusca("");
+    setPage(1);
+  }
 
   return (
     <div className="space-y-4">
@@ -495,11 +516,11 @@ export default function AlvarasPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-3">
-        <div>
-          <Label htmlFor="f_emp">Empresa</Label>
+      <FilterBar ariaLabel="Filtros dos alvarás">
+        <FilterBar.Group label="Empresa" className="w-full sm:w-56">
           <Select
             id="f_emp"
+            aria-label="Empresa"
             value={empresaFiltro}
             onChange={(e) => {
               setEmpresaFiltro(e.target.value);
@@ -513,11 +534,11 @@ export default function AlvarasPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div>
-          <Label htmlFor="f_perm">Permissionário</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Permissionário" className="w-full sm:w-56">
           <Select
             id="f_perm"
+            aria-label="Permissionário"
             value={permFiltro}
             onChange={(e) => {
               setPermFiltro(e.target.value);
@@ -531,17 +552,24 @@ export default function AlvarasPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div className="flex-1 min-w-[200px]">
-          <Label htmlFor="f_q">Busca por número</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Busca por número" className="min-w-[200px] flex-1">
           <Input
             id="f_q"
+            aria-label="Busca por número"
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             placeholder="ALV-001, ALV-002..."
           />
-        </div>
-      </div>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {listaQ.isLoading ? (
         <Carregando className="text-center text-muted-foreground py-8" />
@@ -550,15 +578,21 @@ export default function AlvarasPage() {
         // alvará" numa busca sem resultado é informação errada — o tenant pode
         // ter centenas, e o botão convidaria a duplicar um que já existe.
         <EmptyState
-          icon={Inbox}
-          title={buscando ? "Nenhum alvará encontrado" : "Nenhum alvará"}
+          icon={filtrando ? SearchX : Inbox}
+          title={filtrando ? "Nenhum alvará encontrado" : "Nenhum alvará"}
           description={
             buscando
               ? `Nada corresponde a "${buscaAplicada}". A busca cobre todos os alvarás do município, não só os desta página.`
-              : "Cadastre o primeiro alvará do transporte regulado."
+              : filtrando
+                ? "Nenhum alvará corresponde aos filtros aplicados."
+                : "Cadastre o primeiro alvará do transporte regulado."
           }
           action={
-            !buscando && canCreate ? (
+            filtrando ? (
+              <Button variant="secondary" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            ) : canCreate ? (
               <Button onClick={openNew}>
                 <Plus className="mr-1 h-4 w-4" />
                 Cadastrar alvará
@@ -580,7 +614,14 @@ export default function AlvarasPage() {
           <TBody>
             {filteredData.map((a) => (
               <TR key={a.id}>
-                <TD className="font-mono font-medium">{a.numero_alvara}</TD>
+                <TD className="whitespace-nowrap font-mono font-medium">
+                  <Link
+                    href={`/m/transporte/alvaras/${a.id}`}
+                    className="text-primary hover:underline"
+                  >
+                    {a.numero_alvara}
+                  </Link>
+                </TD>
                 <TD>{TIPO_LABEL[a.tipo_servico] ?? a.tipo_servico}</TD>
                 <TD className="text-sm text-muted-foreground">
                   {a.id_empresa && a.id_permissionario
@@ -604,53 +645,50 @@ export default function AlvarasPage() {
                   )}
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex flex-wrap justify-end gap-2">
-                    {/* A tela de detalhe (auditoria + veículos) existia desde a
-                        P3 e NÃO tinha link nenhum: só se chegava digitando a
-                        URL. Achado em 2026-08-05, ao consertar a guarda de
-                        página órfã, que até então truncava a rota no primeiro
-                        segmento dinâmico e por isso nunca a examinou. */}
-                    <Link href={`/m/transporte/alvaras/${a.id}`}>
-                      <Button variant="secondary" size="sm">
-                        Detalhes
-                      </Button>
-                    </Link>
-                    {canCreate && (
-                      <>
-                        <Button variant="secondary" size="sm" onClick={() => openDocs(a)}>
-                          Documentos
-                        </Button>
-                        <Button variant="secondary" size="sm" onClick={() => openResp(a)}>
-                          Responsáveis
-                        </Button>
-                      </>
-                    )}
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(a)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canCreate && isExpired(a.data_validade) && (
-                      <Button variant="secondary" size="sm" onClick={() => openRenovar(a)}>
-                        Renovar
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={async () => {
+                  {/* A tela de detalhe (auditoria + veículos) existia desde a
+                      P3 e NÃO tinha link nenhum: só se chegava digitando a
+                      URL. Achado em 2026-08-05, ao consertar a guarda de
+                      página órfã, que até então truncava a rota no primeiro
+                      segmento dinâmico e por isso nunca a examinou.
+                      Alvará vencido mostra "Renovar" à vista, que é o que se
+                      faz com ele; os demais mostram "Editar". */}
+                  <AcoesDaLinha
+                    acoes={[
+                      { label: "Detalhes", icon: Eye, href: `/m/transporte/alvaras/${a.id}` },
+                      {
+                        label: "Renovar",
+                        icon: RefreshCw,
+                        onClick: () => openRenovar(a),
+                        oculta: !(canCreate && isExpired(a.data_validade)),
+                      },
+                      { label: "Editar", icon: Pencil, onClick: () => openEdit(a), oculta: !canEdit },
+                      {
+                        label: "Documentos",
+                        icon: FileText,
+                        onClick: () => openDocs(a),
+                        oculta: !canCreate,
+                      },
+                      {
+                        label: "Responsáveis",
+                        icon: Users,
+                        onClick: () => openResp(a),
+                        oculta: !canCreate,
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        oculta: !canDelete,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir alvará",
                             message: `Excluir o alvará "${a.numero_alvara}"? Esta ação não pode ser desfeita.`,
                           });
                           if (ok) deleteM.mutate(a.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}
@@ -957,7 +995,7 @@ export default function AlvarasPage() {
                       )}
                       {canDelete && (
                         <Button
-                          variant="danger"
+                          variant="danger-outline"
                           size="sm"
                           onClick={async () => {
                             const ok = await confirm({
@@ -1050,7 +1088,7 @@ export default function AlvarasPage() {
                     </div>
                     {canDelete && (
                       <Button
-                        variant="danger"
+                        variant="danger-outline"
                         size="sm"
                         onClick={async () => {
                           const ok = await confirm({
