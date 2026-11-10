@@ -537,9 +537,12 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
+    // O cabeçalho ocupa a largura da tela, como nas outras; só o formulário
+    // fica na coluna estreita, que é o que ajuda a ler campo a campo. Antes o
+    // PageHeader "hero" ia dentro da coluna: uma faixa com degradê, mais
+    // estreita e recuada em relação a todas as outras telas.
+    <div className="space-y-4">
       <PageHeader
-        variant="hero"
         icon={FilePlus2}
         breadcrumbs={
           editando
@@ -574,329 +577,331 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
         }
       />
 
-      {err && (
-        <div
-          role="alert"
-          className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger-soft-foreground"
-        >
-          <Info className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span>{err}</span>
-        </div>
-      )}
-
-      <form onSubmit={submit} className="space-y-4" noValidate>
-        {/* === Passo 1: Identificação === */}
-        <SectionCard
-          step={1}
-          icon={Users}
-          title="Identificação"
-          description="Quem está abrindo o processo e onde ele vai tramitar."
-        >
-          <div>
-            <Label htmlFor="manif" required>
-              Manifestante
-            </Label>
-            <Combobox
-              id="manif"
-              options={manifestanteBusca.options}
-              selectedOption={manifestanteBusca.selectedOption}
-              onQueryChange={manifestanteBusca.onQueryChange}
-              value={form.id_manifestante === "" ? null : form.id_manifestante}
-              onChange={(v) =>
-                setForm({ ...form, id_manifestante: typeof v === "number" ? v : "" })
-              }
-              placeholder="Buscar por nome ou CPF/CNPJ…"
-              searchPlaceholder="Nome, CPF ou CNPJ…"
-              loading={manifestanteBusca.loading}
-              footer={
-                <Link
-                  href="/m/protocolo/manifestantes"
-                  className="inline-flex items-center gap-1 text-brand hover:underline"
-                >
-                  <span aria-hidden="true">+</span> Cadastrar novo manifestante
-                </Link>
-              }
-            />
+      <div className="max-w-3xl space-y-4">
+        {err && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger-soft-foreground"
+          >
+            <Info className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{err}</span>
           </div>
+        )}
 
-          <p className="flex items-start gap-1.5 text-xs text-foreground-subtle">
-            <Lock className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-            Manifestante e assunto não podem ser alterados depois que o processo for aberto.
-          </p>
-
-          <div className="grid gap-4 sm:grid-cols-2">
+        <form onSubmit={submit} className="space-y-4" noValidate>
+          {/* === Passo 1: Identificação === */}
+          <SectionCard
+            step={1}
+            icon={Users}
+            title="Identificação"
+            description="Quem está abrindo o processo e onde ele vai tramitar."
+          >
             <div>
-              <Label htmlFor="tipo">Tipo de processo</Label>
+              <Label htmlFor="manif" required>
+                Manifestante
+              </Label>
               <Combobox
-                id="tipo"
-                options={tipoOptions}
-                value={form.id_tipo_processo === "" ? null : form.id_tipo_processo}
-                onChange={handleTipoChange}
-                placeholder="(todos)"
-                searchPlaceholder="Buscar tipo…"
-                emptyText="Nenhum tipo de processo."
-                loading={tiposProcessoQ.isLoading}
+                id="manif"
+                options={manifestanteBusca.options}
+                selectedOption={manifestanteBusca.selectedOption}
+                onQueryChange={manifestanteBusca.onQueryChange}
+                value={form.id_manifestante === "" ? null : form.id_manifestante}
+                onChange={(v) =>
+                  setForm({ ...form, id_manifestante: typeof v === "number" ? v : "" })
+                }
+                placeholder="Buscar por nome ou CPF/CNPJ…"
+                searchPlaceholder="Nome, CPF ou CNPJ…"
+                loading={manifestanteBusca.loading}
+                footer={
+                  <Link
+                    href="/m/protocolo/manifestantes"
+                    className="inline-flex items-center gap-1 text-brand hover:underline"
+                  >
+                    <span aria-hidden="true">+</span> Cadastrar novo manifestante
+                  </Link>
+                }
+              />
+            </div>
+
+            <p className="flex items-start gap-1.5 text-xs text-foreground-subtle">
+              <Lock className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+              Manifestante e assunto não podem ser alterados depois que o processo for aberto.
+            </p>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="tipo">Tipo de processo</Label>
+                <Combobox
+                  id="tipo"
+                  options={tipoOptions}
+                  value={form.id_tipo_processo === "" ? null : form.id_tipo_processo}
+                  onChange={handleTipoChange}
+                  placeholder="(todos)"
+                  searchPlaceholder="Buscar tipo…"
+                  emptyText="Nenhum tipo de processo."
+                  loading={tiposProcessoQ.isLoading}
+                />
+                <p className="mt-1 text-xs text-foreground-subtle">
+                  Opcional. Filtra a lista de assuntos abaixo.
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="assunto" required>
+                  Assunto
+                </Label>
+                <Combobox
+                  id="assunto"
+                  options={assuntoOptions}
+                  value={form.id_assunto === "" ? null : form.id_assunto}
+                  onChange={(v) =>
+                    setForm({ ...form, id_assunto: typeof v === "number" ? v : "" })
+                  }
+                  placeholder="Buscar assunto…"
+                  searchPlaceholder="Buscar assunto…"
+                  emptyText={
+                    form.id_tipo_processo
+                      ? "Nenhum assunto neste tipo."
+                      : "Nenhum assunto cadastrado."
+                  }
+                  loading={assuntosQ.isLoading}
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="unidade" required>
+                Unidade proprietária
+              </Label>
+              {/* Busca do Heitor (PR 146): nome ou sigla, sem acento, com o
+                  caminho na hierarquia e o organograma a um clique. Escolhida
+                  pelo PO em 2026-11-06 no lugar da lista simples do PR 144.
+                  Sem cerquilha antes do número: o design:check a lê como cor. */}
+              <UnidadePicker
+                id="unidade"
+                value={
+                  form.id_unidade_proprietaria === ""
+                    ? null
+                    : form.id_unidade_proprietaria
+                }
+                onChange={(v) => setForm({ ...form, id_unidade_proprietaria: v ?? "" })}
+                placeholder="Buscar a unidade proprietária"
               />
               <p className="mt-1 text-xs text-foreground-subtle">
-                Opcional. Filtra a lista de assuntos abaixo.
+                Sugerida: sua unidade
+                {user?.id_unidade_trabalho ? ` (#${user.id_unidade_trabalho})` : ""}.
+              </p>
+            </div>
+          </SectionCard>
+
+          {/* === Passo 2: Conteúdo === */}
+          <SectionCard
+            step={2}
+            icon={Tag}
+            title="Conteúdo"
+            description="Descrição breve e corpo completo do processo."
+          >
+            <div>
+              <Label htmlFor="obs">Observação</Label>
+              <Textarea
+                id="obs"
+                value={form.observacao}
+                onChange={(e) => setForm({ ...form, observacao: e.target.value })}
+                rows={2}
+                placeholder="Resumo curto que aparece nas listagens (uma linha basta)."
+              />
+              <p className="mt-1 text-xs text-foreground-subtle">
+                Texto simples. Usado em buscas e listagens.
               </p>
             </div>
 
             <div>
-              <Label htmlFor="assunto" required>
-                Assunto
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label htmlFor="corpo">Corpo do processo</Label>
+                {templateOptions.length > 0 && (
+                  <div className="flex w-64 items-center gap-1.5">
+                    <LayoutTemplate
+                      className="h-4 w-4 shrink-0 text-foreground-subtle"
+                      aria-hidden="true"
+                    />
+                    <Combobox
+                      options={templateOptions}
+                      value={templateSelecionado === "" ? null : templateSelecionado}
+                      onChange={(v) => {
+                        if (typeof v === "number") {
+                          setTemplateSelecionado(v);
+                          void aplicarTemplate(v);
+                        }
+                      }}
+                      placeholder="Carregar de um modelo…"
+                      searchPlaceholder="Buscar modelo…"
+                      loading={templatesQ.isLoading}
+                    />
+                  </div>
+                )}
+              </div>
+              <RichTextEditor
+                ariaLabel="Corpo do processo"
+                value={form.corpo}
+                onChange={(html) => setForm({ ...form, corpo: html })}
+                placeholder="Descreva o pedido com detalhes. Use Ctrl+B / Ctrl+I, listas, títulos…"
+                minHeight={200}
+                onUploadImage={async (file) => {
+                  const { url } = await api.editorImagens.upload(file);
+                  return url;
+                }}
+              />
+              <p className="mt-1 text-xs text-foreground-subtle">
+                Texto formatado. Aparece no PDF e na ficha do processo.
+              </p>
+            </div>
+          </SectionCard>
+
+          {/* === Passo 3: Configurações === */}
+          <SectionCard
+            step={3}
+            icon={Hash}
+            title="Configurações"
+            description="Número de origem, visibilidade, origem e canal de entrada."
+          >
+            <div>
+              <Label htmlFor="origem">
+                Número de origem
+                <span className="ml-1 font-normal text-foreground-subtle">(opcional)</span>
               </Label>
-              <Combobox
-                id="assunto"
-                options={assuntoOptions}
-                value={form.id_assunto === "" ? null : form.id_assunto}
-                onChange={(v) =>
-                  setForm({ ...form, id_assunto: typeof v === "number" ? v : "" })
-                }
-                placeholder="Buscar assunto…"
-                searchPlaceholder="Buscar assunto…"
-                emptyText={
-                  form.id_tipo_processo
-                    ? "Nenhum assunto neste tipo."
-                    : "Nenhum assunto cadastrado."
-                }
-                loading={assuntosQ.isLoading}
+              <Input
+                id="origem"
+                value={form.numero_origem}
+                onChange={(e) => setForm({ ...form, numero_origem: e.target.value })}
+                placeholder="Ex: protocolo externo, ofício, número de outro sistema"
               />
             </div>
-          </div>
 
-          <div>
-            <Label htmlFor="unidade" required>
-              Unidade proprietária
-            </Label>
-            {/* Busca do Heitor (PR 146): nome ou sigla, sem acento, com o
-                caminho na hierarquia e o organograma a um clique. Escolhida
-                pelo PO em 2026-11-06 no lugar da lista simples do PR 144.
-                Sem cerquilha antes do número: o design:check a lê como cor. */}
-            <UnidadePicker
-              id="unidade"
-              value={
-                form.id_unidade_proprietaria === ""
-                  ? null
-                  : form.id_unidade_proprietaria
-              }
-              onChange={(v) => setForm({ ...form, id_unidade_proprietaria: v ?? "" })}
-              placeholder="Buscar a unidade proprietária"
-            />
-            <p className="mt-1 text-xs text-foreground-subtle">
-              Sugerida: sua unidade
-              {user?.id_unidade_trabalho ? ` (#${user.id_unidade_trabalho})` : ""}.
-            </p>
-          </div>
-        </SectionCard>
-
-        {/* === Passo 2: Conteúdo === */}
-        <SectionCard
-          step={2}
-          icon={Tag}
-          title="Conteúdo"
-          description="Descrição breve e corpo completo do processo."
-        >
-          <div>
-            <Label htmlFor="obs">Observação</Label>
-            <Textarea
-              id="obs"
-              value={form.observacao}
-              onChange={(e) => setForm({ ...form, observacao: e.target.value })}
-              rows={2}
-              placeholder="Resumo curto que aparece nas listagens (uma linha basta)."
-            />
-            <p className="mt-1 text-xs text-foreground-subtle">
-              Texto simples. Usado em buscas e listagens.
-            </p>
-          </div>
-
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label htmlFor="corpo">Corpo do processo</Label>
-              {templateOptions.length > 0 && (
-                <div className="flex w-64 items-center gap-1.5">
-                  <LayoutTemplate
-                    className="h-4 w-4 shrink-0 text-foreground-subtle"
-                    aria-hidden="true"
-                  />
-                  <Combobox
-                    options={templateOptions}
-                    value={templateSelecionado === "" ? null : templateSelecionado}
-                    onChange={(v) => {
-                      if (typeof v === "number") {
-                        setTemplateSelecionado(v);
-                        void aplicarTemplate(v);
-                      }
-                    }}
-                    placeholder="Carregar de um modelo…"
-                    searchPlaceholder="Buscar modelo…"
-                    loading={templatesQ.isLoading}
-                  />
-                </div>
-              )}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {/* Rótulos e textos mantidos de propósito (decisão de 2026-11-04):
+                  hoje `publico=false` grava o nível `interno`
+                  (services/sigilo.py), que todo servidor alcança pela credencial
+                  padrão, e nenhum acesso é registrado em auditoria. O
+                  comportamento do sigilo será ajustado em tarefa própria; ao
+                  mudá-lo, revisar estes textos. */}
+              <EscolhaConfig
+                nome="visibilidade"
+                titulo="Visibilidade"
+                valor={form.publico ? "publico" : "sigiloso"}
+                onChange={(v) => setForm({ ...form, publico: v === "publico" })}
+                opcoes={[
+                  {
+                    valor: "publico",
+                    rotulo: "Público",
+                    icon: Globe,
+                    descricao: "Qualquer servidor pode visualizar este processo.",
+                  },
+                  {
+                    valor: "sigiloso",
+                    rotulo: "Sigiloso",
+                    icon: Lock,
+                    descricao: "Apenas usuários autorizados poderão ver. Audit log marcará acessos.",
+                  },
+                ]}
+              />
+              <EscolhaConfig
+                nome="origem-processo"
+                titulo="Origem"
+                valor={form.externo ? "externa" : "interna"}
+                onChange={(v) => setForm({ ...form, externo: v === "externa" })}
+                opcoes={[
+                  {
+                    valor: "interna",
+                    rotulo: "Interna",
+                    icon: Building2,
+                    descricao: "Processo aberto por servidor interno da prefeitura.",
+                  },
+                  {
+                    valor: "externa",
+                    rotulo: "Externa",
+                    icon: Users,
+                    descricao: "Processo iniciado por cidadão ou órgão externo.",
+                  },
+                ]}
+              />
+              <EscolhaConfig
+                nome="canal-entrada"
+                titulo="Canal de entrada"
+                valor={form.canal_entrada}
+                onChange={(v) => setForm({ ...form, canal_entrada: v })}
+                opcoes={[
+                  {
+                    valor: "interno",
+                    rotulo: "Registro interno",
+                    icon: Building2,
+                    descricao: "Não veio de balcão, portal do cidadão nem e-mail.",
+                  },
+                  {
+                    valor: "email",
+                    rotulo: "E-mail",
+                    icon: Mail,
+                    descricao: "Documento chegou por e-mail e está sendo protocolado agora.",
+                  },
+                ]}
+              />
             </div>
-            <RichTextEditor
-              ariaLabel="Corpo do processo"
-              value={form.corpo}
-              onChange={(html) => setForm({ ...form, corpo: html })}
-              placeholder="Descreva o pedido com detalhes. Use Ctrl+B / Ctrl+I, listas, títulos…"
-              minHeight={200}
-              onUploadImage={async (file) => {
-                const { url } = await api.editorImagens.upload(file);
-                return url;
-              }}
-            />
-            <p className="mt-1 text-xs text-foreground-subtle">
-              Texto formatado. Aparece no PDF e na ficha do processo.
-            </p>
-          </div>
-        </SectionCard>
+          </SectionCard>
 
-        {/* === Passo 3: Configurações === */}
-        <SectionCard
-          step={3}
-          icon={Hash}
-          title="Configurações"
-          description="Número de origem, visibilidade, origem e canal de entrada."
-        >
-          <div>
-            <Label htmlFor="origem">
-              Número de origem
-              <span className="ml-1 font-normal text-foreground-subtle">(opcional)</span>
-            </Label>
-            <Input
-              id="origem"
-              value={form.numero_origem}
-              onChange={(e) => setForm({ ...form, numero_origem: e.target.value })}
-              placeholder="Ex: protocolo externo, ofício, número de outro sistema"
-            />
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {/* Rótulos e textos mantidos de propósito (decisão de 2026-11-04):
-                hoje `publico=false` grava o nível `interno`
-                (services/sigilo.py), que todo servidor alcança pela credencial
-                padrão, e nenhum acesso é registrado em auditoria. O
-                comportamento do sigilo será ajustado em tarefa própria; ao
-                mudá-lo, revisar estes textos. */}
-            <EscolhaConfig
-              nome="visibilidade"
-              titulo="Visibilidade"
-              valor={form.publico ? "publico" : "sigiloso"}
-              onChange={(v) => setForm({ ...form, publico: v === "publico" })}
-              opcoes={[
-                {
-                  valor: "publico",
-                  rotulo: "Público",
-                  icon: Globe,
-                  descricao: "Qualquer servidor pode visualizar este processo.",
-                },
-                {
-                  valor: "sigiloso",
-                  rotulo: "Sigiloso",
-                  icon: Lock,
-                  descricao: "Apenas usuários autorizados poderão ver. Audit log marcará acessos.",
-                },
-              ]}
-            />
-            <EscolhaConfig
-              nome="origem-processo"
-              titulo="Origem"
-              valor={form.externo ? "externa" : "interna"}
-              onChange={(v) => setForm({ ...form, externo: v === "externa" })}
-              opcoes={[
-                {
-                  valor: "interna",
-                  rotulo: "Interna",
-                  icon: Building2,
-                  descricao: "Processo aberto por servidor interno da prefeitura.",
-                },
-                {
-                  valor: "externa",
-                  rotulo: "Externa",
-                  icon: Users,
-                  descricao: "Processo iniciado por cidadão ou órgão externo.",
-                },
-              ]}
-            />
-            <EscolhaConfig
-              nome="canal-entrada"
-              titulo="Canal de entrada"
-              valor={form.canal_entrada}
-              onChange={(v) => setForm({ ...form, canal_entrada: v })}
-              opcoes={[
-                {
-                  valor: "interno",
-                  rotulo: "Registro interno",
-                  icon: Building2,
-                  descricao: "Não veio de balcão, portal do cidadão nem e-mail.",
-                },
-                {
-                  valor: "email",
-                  rotulo: "E-mail",
-                  icon: Mail,
-                  descricao: "Documento chegou por e-mail e está sendo protocolado agora.",
-                },
-              ]}
-            />
-          </div>
-        </SectionCard>
-
-        {/* === Sticky footer com ações === */}
-        <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-1/95 px-4 py-3 backdrop-blur-md sm:mx-0 sm:rounded-xl sm:border">
-          <span className="text-xs text-foreground-subtle">
-            {editando ? (
-              "Abrir o processo gera o número. Depois disso, ele não volta a ser rascunho."
-            ) : hasDraft ? (
-              <span className="inline-flex items-center gap-1">
-                <CheckCircle2 className="h-3 w-3 text-success" aria-hidden="true" />
-                Rascunho salvo automaticamente.
-              </span>
-            ) : (
-              "Preencha os campos obrigatórios para abrir o processo."
-            )}
-          </span>
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href={
-                editando ? `/m/protocolo/processos/${rascunhoId}` : "/m/protocolo/processos"
-              }
-            >
-              <Button variant="ghost" type="button">
-                Cancelar
-              </Button>
-            </Link>
-            <Button
-              type="button"
-              variant="secondary"
-              size="md"
-              disabled={salvando}
-              onClick={salvarComoRascunho}
-              title={
-                editando
-                  ? "Grava as alterações. O processo continua sem número."
-                  : "Cria o processo sem número. Você pode editá-lo depois e abri-lo quando estiver pronto."
-              }
-            >
-              {editando ? "Salvar rascunho" : "Salvar como rascunho"}
-            </Button>
-            <Button type="submit" disabled={salvando} size="md">
-              {salvando ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  Salvando…
-                </>
+          {/* === Sticky footer com ações === */}
+          <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-1/95 px-4 py-3 backdrop-blur-md sm:mx-0 sm:rounded-xl sm:border">
+            <span className="text-xs text-foreground-subtle">
+              {editando ? (
+                "Abrir o processo gera o número. Depois disso, ele não volta a ser rascunho."
+              ) : hasDraft ? (
+                <span className="inline-flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3 text-success" aria-hidden="true" />
+                  Rascunho salvo automaticamente.
+                </span>
               ) : (
-                <>
-                  {editando ? "Salvar e abrir processo" : "Abrir processo"}
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </>
+                "Preencha os campos obrigatórios para abrir o processo."
               )}
-            </Button>
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant="ghost">
+                <Link
+                  href={
+                    editando ? `/m/protocolo/processos/${rascunhoId}` : "/m/protocolo/processos"
+                  }
+                >
+                  Cancelar
+                </Link>
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                disabled={salvando}
+                onClick={salvarComoRascunho}
+                title={
+                  editando
+                    ? "Grava as alterações. O processo continua sem número."
+                    : "Cria o processo sem número. Você pode editá-lo depois e abri-lo quando estiver pronto."
+                }
+              >
+                {editando ? "Salvar rascunho" : "Salvar como rascunho"}
+              </Button>
+              <Button type="submit" disabled={salvando} size="md">
+                {salvando ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    Salvando…
+                  </>
+                ) : (
+                  <>
+                    {editando ? "Salvar e abrir processo" : "Abrir processo"}
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
-        </div>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }
