@@ -60,7 +60,7 @@ export function TrocarSenhaCard({
         <CardTitle>Segurança</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="mb-3 text-sm text-muted-foreground">
+        <p className="mb-3 text-sm text-foreground-muted">
           Atualize sua senha para o padrão atual de segurança. É necessário para
           assinar documentos.
         </p>
