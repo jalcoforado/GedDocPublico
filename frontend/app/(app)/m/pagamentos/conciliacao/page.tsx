@@ -11,12 +11,14 @@ import {
   Landmark,
   Link2,
   ListChecks,
+  Undo2,
   X,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { BotaoExportarCsv } from "@/components/pagamentos/BotoesExportar";
 import { fmtData, fmtDataHora, fmtMoeda } from "@/components/pagamentos/format";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
@@ -380,7 +382,7 @@ export default function ConciliacaoPage() {
                     <TH className="text-right">Valor</TH>
                     <TH>Pagamento correspondente</TH>
                     <TH>Correspondência</TH>
-                    <TH />
+                    <TH className="text-right">Ações</TH>
                   </TR>
                 </THead>
                 <TBody>
@@ -404,20 +406,20 @@ export default function ConciliacaoPage() {
                         </Badge>
                       </TD>
                       <TD className="text-right">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={conciliar.isPending}
-                          onClick={() =>
-                            conciliar.mutate({
-                              id_lancamento: s.id_lancamento,
-                              id_movimentacao: s.id_movimentacao,
-                            })
-                          }
-                        >
-                          <Link2 className="mr-1 h-3.5 w-3.5" />
-                          Conciliar
-                        </Button>
+                        <AcoesDaLinha
+                          acoes={[
+                            {
+                              label: "Conciliar",
+                              icon: Link2,
+                              disabled: conciliar.isPending,
+                              onClick: () =>
+                                conciliar.mutate({
+                                  id_lancamento: s.id_lancamento,
+                                  id_movimentacao: s.id_movimentacao,
+                                }),
+                            },
+                          ]}
+                        />
                       </TD>
                     </TR>
                   ))}
@@ -455,7 +457,7 @@ export default function ConciliacaoPage() {
                     <TH className="text-right">Valor</TH>
                     <TH>Tipo</TH>
                     <TH>Situação</TH>
-                    <TH />
+                    <TH className="text-right">Ações</TH>
                   </TR>
                 </THead>
                 <TBody>
@@ -473,31 +475,30 @@ export default function ConciliacaoPage() {
                         </Badge>
                       </TD>
                       <TD className="text-right">
-                        {!l.conciliado && l.tipo === "DEBITO" && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setManual(l);
-                              setMovEscolhida(null);
-                            }}
-                          >
-                            Conciliar manualmente
-                          </Button>
-                        )}
-                        {l.conciliado && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            aria-label={`Desfazer conciliação de ${l.historico}`}
-                            onClick={() => {
-                              setADesfazer(l);
-                              setMotivoDesfazer("");
-                            }}
-                          >
-                            Desfazer
-                          </Button>
-                        )}
+                        <AcoesDaLinha
+                          acoes={[
+                            {
+                              label: "Conciliar manualmente",
+                              icon: Link2,
+                              oculta: l.conciliado || l.tipo !== "DEBITO",
+                              onClick: () => {
+                                setManual(l);
+                                setMovEscolhida(null);
+                              },
+                            },
+                            {
+                              label: "Desfazer",
+                              icon: Undo2,
+                              perigo: true,
+                              ariaLabel: `Desfazer conciliação de ${l.historico}`,
+                              oculta: !l.conciliado,
+                              onClick: () => {
+                                setADesfazer(l);
+                                setMotivoDesfazer("");
+                              },
+                            },
+                          ]}
+                        />
                       </TD>
                     </TR>
                   ))}

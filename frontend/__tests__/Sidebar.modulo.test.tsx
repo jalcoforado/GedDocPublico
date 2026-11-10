@@ -99,7 +99,7 @@ describe("menu único", () => {
   it("cadastros e etapas ficam fora da barra; a tela-índice do módulo entra no lugar", async () => {
     renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
     await screen.findByRole("link", { name: "Caixas de trabalho" });
-    for (const fora of ["Manifestantes", "Assuntos", "CCD (Classificação)", "Aguardando Gestor", "Fornecedores", "Motoristas", "Empresas"]) {
+    for (const fora of ["Manifestantes", "Assuntos", "CCD (Classificação)", "Aguardando gestor", "Fornecedores", "Motoristas", "Empresas"]) {
       expect(screen.queryByRole("link", { name: fora }), fora).toBeNull();
     }
     expect(screen.getByRole("link", { name: "Cadastros e configuração" })).toHaveAttribute("href", "/m/protocolo/cadastros");

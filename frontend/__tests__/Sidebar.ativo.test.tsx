@@ -165,7 +165,7 @@ describe("irmãos aninhados — vence o mais específico", () => {
   });
 
   it("numa etapa (aba) de Solicitações, a atual na barra é 'Solicitações'", async () => {
-    // "Aguardando Gestor" virou aba de Solicitações (menu único): fora da
+    // "Aguardando gestor" virou aba de Solicitações (menu único): fora da
     // barra, quem acende é a tela que contém a aba.
     onde.pathname = "/m/pagamentos/solicitacoes/gestor";
     renderSidebar({ modulo: "pagamentos", open: true, onClose: () => {} });

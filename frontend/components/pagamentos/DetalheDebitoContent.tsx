@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Banknote,
   ClipboardList,
   Download,
   FileEdit,
@@ -14,10 +15,12 @@ import {
   Percent,
   Receipt,
   Trash2,
+  Undo2,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -722,36 +725,36 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                           </Badge>
                         </TD>
                         <TD className="text-right">
-                          {p.status === "PAGA" && can("pagamento_pagar") && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              aria-label={`Estornar pagamento da parcela ${p.numero}`}
-                              onClick={() => setAcaoParcela({ acao: "estornar", parcela: p })}
-                            >
-                              Estornar
-                            </Button>
-                          )}
-                          {p.status === "LIBERADA" && can("pagamento_pagar") && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              aria-label={`Registrar pagamento da parcela ${p.numero}`}
-                              onClick={() => setParcelaAPagar(p)}
-                            >
-                              Pagar
-                            </Button>
-                          )}
-                          {p.status === "LIBERADA" && can("pagamento_autorizar") && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              aria-label={`Revogar liberação da parcela ${p.numero}`}
-                              onClick={() => setAcaoParcela({ acao: "revogar", parcela: p })}
-                            >
-                              Revogar liberação
-                            </Button>
-                          )}
+                          {/* Estornar só vale para PAGA; Pagar e Revogar, para
+                              LIBERADA — no máximo duas por linha, todas à vista
+                              (os testes e o leitor de tela as acham pelo nome). */}
+                          <AcoesDaLinha
+                            acoes={[
+                              {
+                                label: "Pagar",
+                                icon: Banknote,
+                                ariaLabel: `Registrar pagamento da parcela ${p.numero}`,
+                                oculta: !(p.status === "LIBERADA" && can("pagamento_pagar")),
+                                onClick: () => setParcelaAPagar(p),
+                              },
+                              {
+                                label: "Revogar liberação",
+                                icon: Undo2,
+                                perigo: true,
+                                ariaLabel: `Revogar liberação da parcela ${p.numero}`,
+                                oculta: !(p.status === "LIBERADA" && can("pagamento_autorizar")),
+                                onClick: () => setAcaoParcela({ acao: "revogar", parcela: p }),
+                              },
+                              {
+                                label: "Estornar",
+                                icon: Undo2,
+                                perigo: true,
+                                ariaLabel: `Estornar pagamento da parcela ${p.numero}`,
+                                oculta: !(p.status === "PAGA" && can("pagamento_pagar")),
+                                onClick: () => setAcaoParcela({ acao: "estornar", parcela: p }),
+                              },
+                            ]}
+                          />
                         </TD>
                       </TR>
                     ))}
@@ -816,27 +819,25 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                             )}
                           </TD>
                           <TD className="text-right">
-                            {can("pagamento_pagar") && !r.recolhido && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                aria-label={`Registrar recolhimento da retenção ${r.tipo}`}
-                                onClick={() => setRetencaoARecolher(r)}
-                              >
-                                Recolher
-                              </Button>
-                            )}
-                            {can("pagamento_pagar") && !r.recolhido && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                aria-label={`Remover retenção ${r.tipo}`}
-                                onClick={() => excluirRetencaoM.mutate(r.id)}
-                                disabled={excluirRetencaoM.isPending}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
+                            <AcoesDaLinha
+                              acoes={[
+                                {
+                                  label: "Recolher",
+                                  ariaLabel: `Registrar recolhimento da retenção ${r.tipo}`,
+                                  oculta: !(can("pagamento_pagar") && !r.recolhido),
+                                  onClick: () => setRetencaoARecolher(r),
+                                },
+                                {
+                                  label: "Remover",
+                                  icon: Trash2,
+                                  perigo: true,
+                                  ariaLabel: `Remover retenção ${r.tipo}`,
+                                  oculta: !(can("pagamento_pagar") && !r.recolhido),
+                                  disabled: excluirRetencaoM.isPending,
+                                  onClick: () => excluirRetencaoM.mutate(r.id),
+                                },
+                              ]}
+                            />
                           </TD>
                         </TR>
                       ))}
