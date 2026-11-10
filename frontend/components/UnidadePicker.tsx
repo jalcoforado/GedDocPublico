@@ -71,6 +71,10 @@ interface Props {
   /** Disabled state */
   disabled?: boolean;
   id?: string;
+  /** Repassados ao Combobox — é o que o `FormField` injeta (erro, dica). */
+  "aria-invalid"?: boolean | "true" | "false";
+  "aria-describedby"?: string;
+  required?: boolean;
 }
 
 /** Busca sem acento e sem caixa: "saude" acha "Secretaria de Saúde". */
@@ -107,6 +111,9 @@ export function UnidadePicker({
   placeholder = "Escolher unidade",
   disabled,
   id,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
+  required,
 }: Props) {
   const [organograma, setOrganograma] = useState(false);
 
@@ -137,6 +144,9 @@ export function UnidadePicker({
     <>
       <Combobox
         id={id}
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedBy}
+        required={required}
         options={opcoes}
         value={value}
         onChange={(v) => onChange(v == null ? null : Number(v))}
