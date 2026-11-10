@@ -487,11 +487,17 @@ export function CrudPage<T extends { id: number }>({
         size={dialogSize}
         footer={
           <>
-            <Button variant="secondary" onClick={close}>
+            <Button variant="ghost" onClick={close}>
               Cancelar
             </Button>
-            <Button onClick={submit} disabled={createM.isPending || updateM.isPending}>
-              {createM.isPending || updateM.isPending ? "Salvando..." : "Salvar"}
+            {/* O verbo do formulário (padrão de formulário, regra 8): quem
+                cria cadastra a coisa; quem edita salva alterações. */}
+            <Button onClick={submit} loading={createM.isPending || updateM.isPending}>
+              {editing
+                ? "Salvar alterações"
+                : novoLabel === "Novo"
+                  ? "Cadastrar"
+                  : `Cadastrar ${novoLabel.replace(/^Nov[oa]\s+/i, "")}`}
             </Button>
           </>
         }
