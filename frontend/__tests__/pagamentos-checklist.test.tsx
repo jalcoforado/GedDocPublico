@@ -142,7 +142,7 @@ describe("conferência de documentos no detalhe do débito", () => {
     const alerta = await screen.findByRole("alert");
     expect(alerta).toHaveTextContent("Nota fiscal atestada");
     expect(alerta).not.toHaveTextContent("Certidão municipal");
-    const confirmar = screen.getByRole("button", { name: "Confirmar" });
+    const confirmar = screen.getByRole("button", { name: "Confirmar validação" });
     expect(confirmar).toBeDisabled();
     fireEvent.click(confirmar);
     expect(validarMock).not.toHaveBeenCalled();
@@ -153,7 +153,7 @@ describe("conferência de documentos no detalhe do débito", () => {
     const secao = await abrir();
     await secao.findByLabelText("Nota fiscal atestada");
     fireEvent.click(await screen.findByRole("button", { name: /validar/i }));
-    const confirmar = await screen.findByRole("button", { name: "Confirmar" });
+    const confirmar = await screen.findByRole("button", { name: "Confirmar validação" });
     expect(screen.queryByRole("alert")).toBeNull();
     fireEvent.click(confirmar);
     await waitFor(() => expect(validarMock).toHaveBeenCalledWith(20, { lock_version: 3 }));

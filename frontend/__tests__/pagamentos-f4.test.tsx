@@ -275,12 +275,34 @@ describe("Detalhe da solicitação — seção Retenções (F4)", () => {
     fireEvent.change(screen.getByLabelText(/^base de cálculo/i), { target: { value: "1000.00" } });
     fireEvent.change(screen.getByLabelText(/^valor/i), { target: { value: "15.00" } });
 
-    fireEvent.click(screen.getByRole("button", { name: /^lançar$/i }));
+    // O botão do diálogo diz o verbo inteiro — e tem o mesmo nome do que o
+    // abriu, por isso a busca fica dentro do diálogo.
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Lançar retenção" }),
+    );
 
     await waitFor(() =>
       expect(retencoesCriarMock).toHaveBeenCalledWith(20, expect.objectContaining({
         tipo: "IRRF", base_calculo: "1000.00", valor: "15.00",
       })),
     );
+  });
+
+  it("calcula o valor retido de base × alíquota, e não lança sem valor", async () => {
+    const { DetalheDebitoContent } = await import(
+      "@/components/pagamentos/DetalheDebitoContent"
+    );
+    renderComQueryClient(<DetalheDebitoContent id={20} />);
+    fireEvent.click(await screen.findByRole("button", { name: /lançar retenção/i }));
+    const dialogo = within(await screen.findByRole("dialog"));
+
+    retencoesCriarMock.mockClear();
+    fireEvent.click(dialogo.getByRole("button", { name: "Lançar retenção" }));
+    expect(await dialogo.findByText(/Informe a base de cálculo/)).toBeInTheDocument();
+    expect(retencoesCriarMock).not.toHaveBeenCalled();
+
+    fireEvent.change(dialogo.getByLabelText(/^base de cálculo/i), { target: { value: "1000" } });
+    fireEvent.change(dialogo.getByLabelText(/^alíquota/i), { target: { value: "1.5" } });
+    expect(dialogo.getByLabelText(/^valor retido/i)).toHaveValue(15);
   });
 });
