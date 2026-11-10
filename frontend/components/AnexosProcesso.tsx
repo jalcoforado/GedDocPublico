@@ -5,6 +5,7 @@ import { Download, Eye, Paperclip, Stamp, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -123,49 +124,10 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
                   {a.pagina_processo != null ? ` · fls. ${a.pagina_processo}` : ""}
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-1 sm:shrink-0 sm:justify-end">
-                {isPdf(a) && (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        setViewer({
-                          title: a.descricao ?? `Anexo #${a.id}`,
-                          src: anexoInlineUrl(a.id),
-                          downloadUrl: anexoDownloadUrl(a.id),
-                        })
-                      }
-                    >
-                      <Eye className="h-4 w-4" aria-hidden="true" />
-                      Visualizar
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        setViewer({
-                          title: `Carimbado — ${a.descricao ?? `Anexo #${a.id}`}`,
-                          src: anexoCarimbadoUrl(a.id),
-                          downloadUrl: anexoCarimbadoUrl(a.id, false),
-                        })
-                      }
-                    >
-                      <Stamp className="h-4 w-4" aria-hidden="true" />
-                      Carimbar
-                    </Button>
-                  </>
-                )}
-                <Button variant="ghost" size="sm" asChild>
-                  <a
-                    href={anexoDownloadUrl(a.id)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <Download className="h-4 w-4" aria-hidden="true" />
-                    Baixar
-                  </a>
-                </Button>
+              {/* Eram até cinco botões, que quebravam em duas linhas: à vista os
+                  dois primeiros, o resto no ⋯ e Excluir por último. Desentranhar
+                  tem diálogo próprio e só aparece com permissão. */}
+              <div className="flex flex-nowrap items-center gap-1 sm:shrink-0 sm:justify-end">
                 {a.id_anexo_processo != null && (
                   <AnexoDesentranhar
                     processoId={processo.id}
@@ -173,23 +135,52 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
                     descricaoAnexo={a.descricao}
                   />
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-danger hover:bg-danger-soft hover:text-danger-soft-foreground focus-visible:ring-danger"
-                  onClick={async () => {
-                    const ok = await confirm({
-                      title: "Excluir anexo",
-                      message: `Excluir "${a.descricao ?? `Anexo #${a.id}`}"? Esta ação não pode ser desfeita.`,
-                      confirmLabel: "Excluir",
-                      intent: "danger",
-                    });
-                    if (ok) deleteM.mutate(a.id);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  Excluir
-                </Button>
+                <AcoesDaLinha
+                  acoes={[
+                    {
+                      label: "Visualizar",
+                      icon: Eye,
+                      oculta: !isPdf(a),
+                      onClick: () =>
+                        setViewer({
+                          title: a.descricao ?? `Anexo #${a.id}`,
+                          src: anexoInlineUrl(a.id),
+                          downloadUrl: anexoDownloadUrl(a.id),
+                        }),
+                    },
+                    {
+                      label: "Carimbar",
+                      icon: Stamp,
+                      oculta: !isPdf(a),
+                      onClick: () =>
+                        setViewer({
+                          title: `Carimbado — ${a.descricao ?? `Anexo #${a.id}`}`,
+                          src: anexoCarimbadoUrl(a.id),
+                          downloadUrl: anexoCarimbadoUrl(a.id, false),
+                        }),
+                    },
+                    {
+                      label: "Baixar",
+                      icon: Download,
+                      onClick: () =>
+                        window.open(anexoDownloadUrl(a.id), "_blank", "noopener,noreferrer"),
+                    },
+                    {
+                      label: "Excluir",
+                      icon: Trash2,
+                      perigo: true,
+                      onClick: async () => {
+                        const ok = await confirm({
+                          title: "Excluir anexo",
+                          message: `Excluir "${a.descricao ?? `Anexo #${a.id}`}"? Esta ação não pode ser desfeita.`,
+                          confirmLabel: "Excluir",
+                          intent: "danger",
+                        });
+                        if (ok) deleteM.mutate(a.id);
+                      },
+                    },
+                  ]}
+                />
               </div>
             </li>
           ))}
