@@ -7,15 +7,19 @@ import { Inbox, MapPin, ParkingSquare, Pencil, Plus, SearchX, Trash2 } from "luc
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { GrupoCampos, useValidacao } from "@/components/transporte/formulario";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
 import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -188,10 +192,27 @@ export default function PontosPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Antes só o `required` nativo do formulário conferia; agora o erro vem
+  // no campo, depois de sair dele ou de tentar salvar.
+  const val = useValidacao<"nome" | "vagas_total">({
+    nome: form.nome.trim() === "" ? "Informe o nome do ponto." : undefined,
+    vagas_total:
+      !/^\d+$/.test(form.vagas_total.trim()) || Number(form.vagas_total) < 1
+        ? "Informe quantas vagas o ponto tem (1 ou mais)."
+        : undefined,
+  });
+
+  function submeter() {
+    setErr(null);
+    if (!val.conferir()) return;
+    salvarM.mutate();
+  }
+
   function abrirNovo() {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+    val.reiniciar();
     setDialogOpen(true);
   }
 
@@ -199,6 +220,7 @@ export default function PontosPage() {
     setEditing(p);
     setForm(paraForm(p));
     setErr(null);
+    val.reiniciar();
     setDialogOpen(true);
   }
 
@@ -388,170 +410,150 @@ export default function PontosPage() {
       <Dialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        title={editing ? "Editar ponto" : "Novo ponto"}
-      >
-        <form
-          className="space-y-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setErr(null);
-            salvarM.mutate();
-          }}
-        >
-          {err && (
-            <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
-              {err}
-            </div>
-          )}
-          <div>
-            <Label htmlFor="nome">Nome</Label>
-            <Input
-              id="nome"
-              required
-              value={form.nome}
-              onChange={(e) => set("nome", e.target.value)}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="codigo">Código</Label>
-              <Input
-                id="codigo"
-                value={form.codigo}
-                onChange={(e) => set("codigo", e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="tipo">Tipo de serviço</Label>
-              <Select
-                id="tipo"
-                value={form.tipo_servico}
-                onChange={(e) => set("tipo_servico", e.target.value as TipoServico)}
-              >
-                {TIPOS.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2">
-              <Label htmlFor="logradouro">Logradouro</Label>
-              <Input
-                id="logradouro"
-                value={form.logradouro}
-                onChange={(e) => set("logradouro", e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="numero">Número</Label>
-              <Input
-                id="numero"
-                value={form.numero}
-                onChange={(e) => set("numero", e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="bairro">Bairro</Label>
-              <Input
-                id="bairro"
-                value={form.bairro}
-                onChange={(e) => set("bairro", e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="cep">CEP</Label>
-              <Input
-                id="cep"
-                value={form.cep}
-                onChange={(e) => set("cep", e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="latitude">Latitude</Label>
-              <Input
-                id="latitude"
-                inputMode="decimal"
-                placeholder="-3.9694"
-                value={form.latitude}
-                onChange={(e) => set("latitude", e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="longitude">Longitude</Label>
-              <Input
-                id="longitude"
-                inputMode="decimal"
-                placeholder="-38.5280"
-                value={form.longitude}
-                onChange={(e) => set("longitude", e.target.value)}
-              />
-            </div>
-            <p className="col-span-2 -mt-2 text-xs text-muted-foreground">
-              Opcionais. Com as duas preenchidas, o ponto aparece no mapa.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="vagas">Total de vagas</Label>
-              <Input
-                id="vagas"
-                type="number"
-                min={1}
-                required
-                value={form.vagas_total}
-                onChange={(e) => set("vagas_total", e.target.value)}
-              />
-              {editing && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Não é possível reduzir abaixo da maior vaga ocupada.
-                </p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="situacao">Situação</Label>
-              <Select
-                id="situacao"
-                value={form.situacao}
-                onChange={(e) => set("situacao", e.target.value as PontoSituacao)}
-              >
-                <option value="ativo">Ativo</option>
-                <option value="inativo">Inativo</option>
-              </Select>
-              {form.situacao === "inativo" && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Ponto inativo não recebe novas ocupações; quem já está fica.
-                </p>
-              )}
-            </div>
-          </div>
-          <div>
-            <Label htmlFor="obs">Observações</Label>
-            <Input
-              id="obs"
-              value={form.observacoes}
-              onChange={(e) => set("observacoes", e.target.value)}
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setDialogOpen(false)}
-            >
+        title={editing ? `Editar ponto — ${editing.nome}` : "Novo ponto"}
+        description={editing ? undefined : "O ponto, quantas vagas tem e onde fica. As vagas se ocupam depois, na tela do ponto."}
+        size="lg"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={salvarM.isPending}>
-              {salvarM.isPending ? "Salvando..." : "Salvar"}
+            <Button onClick={submeter} loading={salvarM.isPending}>
+              {editing ? "Salvar alterações" : "Criar ponto"}
             </Button>
+          </>
+        }
+      >
+        <div ref={val.ref} className="space-y-5">
+          <GrupoCampos titulo="Ponto">
+            <FormField label="Nome" required error={val.erro("nome")}>
+              <Input
+                id="nome"
+                value={form.nome}
+                onChange={(e) => set("nome", e.target.value)}
+                onBlur={val.sair("nome")}
+                placeholder="Ex.: Ponto da Rodoviária"
+              />
+            </FormField>
+            <GradeCampos>
+              <FormField label="Código" opcional>
+                <Input
+                  id="codigo"
+                  value={form.codigo}
+                  onChange={(e) => set("codigo", e.target.value)}
+                  placeholder="Ex.: PT-12"
+                />
+              </FormField>
+              <FormField label="Tipo de serviço" required>
+                <Select
+                  id="tipo"
+                  value={form.tipo_servico}
+                  onChange={(e) => set("tipo_servico", e.target.value as TipoServico)}
+                >
+                  {TIPOS.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            </GradeCampos>
+            <GradeCampos>
+              <FormField
+                label="Total de vagas"
+                required
+                error={val.erro("vagas_total")}
+                hint={editing ? "Não dá para reduzir abaixo da maior vaga ocupada." : "As vagas são numeradas de 1 até este total."}
+              >
+                <CampoComUnidade
+                  id="vagas"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  sufixo="vagas"
+                  value={form.vagas_total}
+                  onChange={(e) => set("vagas_total", e.target.value)}
+                  onBlur={val.sair("vagas_total")}
+                />
+              </FormField>
+              <div aria-hidden="true" className="hidden sm:block" />
+            </GradeCampos>
+            <EscolhaSegmentada<PontoSituacao>
+              nome="ponto-situacao"
+              titulo="Situação"
+              moldura={false}
+              valor={form.situacao}
+              onChange={(s) => set("situacao", s)}
+              opcoes={[
+                { valor: "ativo", rotulo: "Ativo", descricao: "O ponto recebe ocupações nas vagas livres." },
+                { valor: "inativo", rotulo: "Inativo", descricao: "Não recebe novas ocupações; quem já está fica." },
+              ]}
+            />
+          </GrupoCampos>
+
+          <GrupoCampos titulo="Localização" descricao="Opcional. Com latitude e longitude, o ponto aparece no mapa.">
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]">
+              <FormField label="Logradouro">
+                <Input
+                  id="logradouro"
+                  value={form.logradouro}
+                  onChange={(e) => set("logradouro", e.target.value)}
+                  placeholder="Ex.: Av. Dom José"
+                />
+              </FormField>
+              <FormField label="Número">
+                <Input id="numero" value={form.numero} onChange={(e) => set("numero", e.target.value)} placeholder="Ex.: s/n" />
+              </FormField>
+            </div>
+            <GradeCampos>
+              <FormField label="Bairro">
+                <Input id="bairro" value={form.bairro} onChange={(e) => set("bairro", e.target.value)} />
+              </FormField>
+              <FormField label="CEP">
+                <Input
+                  id="cep"
+                  inputMode="numeric"
+                  value={form.cep}
+                  onChange={(e) => set("cep", e.target.value)}
+                  placeholder="Ex.: 62010-000"
+                />
+              </FormField>
+            </GradeCampos>
+            <GradeCampos>
+              <FormField label="Latitude" hint="Aceita vírgula ou ponto.">
+                <Input
+                  id="latitude"
+                  inputMode="decimal"
+                  placeholder="Ex.: -3,9694"
+                  value={form.latitude}
+                  onChange={(e) => set("latitude", e.target.value)}
+                />
+              </FormField>
+              <FormField label="Longitude" hint="Copie do mapa junto com a latitude.">
+                <Input
+                  id="longitude"
+                  inputMode="decimal"
+                  placeholder="Ex.: -38,5280"
+                  value={form.longitude}
+                  onChange={(e) => set("longitude", e.target.value)}
+                />
+              </FormField>
+            </GradeCampos>
+          </GrupoCampos>
+
+          <div className="border-t border-border pt-5">
+            <FormField label="Observações" opcional>
+              <Input
+                id="obs"
+                value={form.observacoes}
+                onChange={(e) => set("observacoes", e.target.value)}
+                placeholder="Ex.: funciona das 6h às 22h"
+              />
+            </FormField>
           </div>
-        </form>
+
+          {err && <Alert intent="danger">{err}</Alert>}
+        </div>
       </Dialog>
     </div>
   );

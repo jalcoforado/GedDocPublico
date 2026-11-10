@@ -2,6 +2,7 @@
 
 import { Building2, User, Users } from "lucide-react";
 
+import { ComboRegulado } from "@/components/transporte/campos-alvo";
 import { documentoParaExibir } from "@/components/transporte/rotulos";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
@@ -138,6 +139,70 @@ export function CampoVinculo({
             emptyText="Nenhuma empresa com esse nome ou CNPJ."
             loading={carregando}
             filter={buscaNomeOuDocumento}
+          />
+        </FormField>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Mesma escolha "em nome de", com busca no servidor (`ComboRegulado`) e ids
+ * numéricos — para as telas que já buscavam no servidor (operador da linha).
+ */
+export function CampoVinculoBusca({
+  nome,
+  titulo,
+  modo,
+  onModo,
+  descricoes,
+  idPermissionario,
+  idEmpresa,
+  onPermissionario,
+  onEmpresa,
+  ativo,
+  erroPermissionario,
+  erroEmpresa,
+}: {
+  nome: string;
+  titulo: string;
+  modo: ModoVinculo;
+  onModo: (m: ModoVinculo) => void;
+  descricoes: Record<ModoVinculo, string>;
+  idPermissionario: number | null;
+  idEmpresa: number | null;
+  onPermissionario: (id: number | null) => void;
+  onEmpresa: (id: number | null) => void;
+  ativo: boolean;
+  erroPermissionario?: string;
+  erroEmpresa?: string;
+}) {
+  return (
+    <div className="space-y-4">
+      <EscolhaSegmentada<ModoVinculo>
+        nome={nome}
+        titulo={titulo}
+        valor={modo}
+        onChange={onModo}
+        opcoes={[
+          { valor: "empresa", rotulo: "Empresa", icon: Building2, descricao: descricoes.empresa },
+          { valor: "permissionario", rotulo: "Permissionário", icon: User, descricao: descricoes.permissionario },
+          { valor: "ambos", rotulo: "Os dois", icon: Users, descricao: descricoes.ambos },
+        ]}
+      />
+      {modo !== "permissionario" && (
+        <FormField label="Empresa" required error={erroEmpresa}>
+          <ComboRegulado tipo="empresa" id={`${nome}-empresa`} ativo={ativo} value={idEmpresa} onChange={onEmpresa} />
+        </FormField>
+      )}
+      {modo !== "empresa" && (
+        <FormField label="Permissionário" required error={erroPermissionario}>
+          <ComboRegulado
+            tipo="permissionario"
+            id={`${nome}-permissionario`}
+            ativo={ativo}
+            value={idPermissionario}
+            onChange={onPermissionario}
           />
         </FormField>
       )}

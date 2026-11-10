@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
   ArrowUp,
+  Clock,
   MapPin,
   Pencil,
   Plus,
@@ -14,18 +15,22 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { use, useEffect, useState } from "react";
+import { use, useState } from "react";
 
+import { modoDoVinculo, type ModoVinculo } from "@/components/transporte/campo-vinculo";
+import { CamposLinha, comOperador, errosDaLinha, type CampoLinha } from "@/components/transporte/campos-linha";
+import { useValidacao } from "@/components/transporte/formulario";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -127,56 +132,16 @@ export default function LinhaDetalhePage({ params }: PageParams) {
   }
 
   // --- Dados / edição -------------------------------------------------
+  // O seletor de operador (busca no servidor, com debounce) mora em
+  // `CamposLinha` → `ComboRegulado`.
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<LinhaForm | null>(null);
+  const [modoOperador, setModoOperador] = useState<ModoVinculo>("empresa");
   const [err, setErr] = useState<string | null>(null);
-
-  // Seletor de operador — busca NO SERVIDOR com debounce, mesmo padrão do
-  // seletor de ocupante da P6 (pontos/[id]/page.tsx): filtrar no cliente
-  // sobre a primeira página repete o bug "só enxerga os 50 primeiros".
-  const [buscaEmpresa, setBuscaEmpresa] = useState("");
-  const [buscaEmpresaAplicada, setBuscaEmpresaAplicada] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setBuscaEmpresaAplicada(buscaEmpresa.trim()), 300);
-    return () => clearTimeout(t);
-  }, [buscaEmpresa]);
-
-  const [buscaPerm, setBuscaPerm] = useState("");
-  const [buscaPermAplicada, setBuscaPermAplicada] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setBuscaPermAplicada(buscaPerm.trim()), 300);
-    return () => clearTimeout(t);
-  }, [buscaPerm]);
-
-  const empresasQ = useQuery({
-    queryKey: ["tr-empresas-busca", buscaEmpresaAplicada],
-    queryFn: () => api.empresas.list({ q: buscaEmpresaAplicada || undefined }),
-    enabled: dialogOpen,
-  });
-  const permsQ = useQuery({
-    queryKey: ["tr-perms-busca", buscaPermAplicada],
-    queryFn: () => api.permissionarios.list({ q: buscaPermAplicada || undefined }),
-    enabled: dialogOpen,
-  });
-
-  // Nome do operador já selecionado — busca dedicada por id, independente
-  // do texto de busca atual (o selecionado pode não estar entre os
-  // resultados da busca corrente).
-  const idEmpresaForm = form?.id_empresa ?? null;
-  const idPermissionarioForm = form?.id_permissionario ?? null;
-  const empresaSelecionadaQ = useQuery({
-    queryKey: ["tr-empresa-selecionada", idEmpresaForm],
-    queryFn: () => api.empresas.get(idEmpresaForm as number),
-    enabled: idEmpresaForm !== null,
-  });
-  const permSelecionadoQ = useQuery({
-    queryKey: ["tr-perm-selecionado", idPermissionarioForm],
-    queryFn: () => api.permissionarios.get(idPermissionarioForm as number),
-    enabled: idPermissionarioForm !== null,
-  });
+  const val = useValidacao<CampoLinha>(form ? errosDaLinha(form, modoOperador) : {});
 
   const salvarM = useMutation({
-    mutationFn: (f: LinhaForm) => api.linhasTransporte.update(linhaId, paraPayload(f)),
+    mutationFn: (f: LinhaForm) => api.linhasTransporte.update(linhaId, paraPayload(comOperador(f, modoOperador))),
     onSuccess: () => {
       toast.success("Linha atualizada.");
       setDialogOpen(false);
@@ -188,11 +153,11 @@ export default function LinhaDetalhePage({ params }: PageParams) {
   function abrirEdicao() {
     if (!q.data) return;
     setForm(paraForm(q.data));
+    setModoOperador(
+      modoDoVinculo(String(q.data.id_permissionario ?? ""), String(q.data.id_empresa ?? "")),
+    );
     setErr(null);
-    setBuscaEmpresa("");
-    setBuscaEmpresaAplicada("");
-    setBuscaPerm("");
-    setBuscaPermAplicada("");
+    val.reiniciar();
     setDialogOpen(true);
   }
 
@@ -200,14 +165,10 @@ export default function LinhaDetalhePage({ params }: PageParams) {
     setForm((f) => (f ? { ...f, [k]: v } : f));
   }
 
-  function submeterEdicao(e: React.FormEvent) {
-    e.preventDefault();
+  function submeterEdicao() {
     if (!form) return;
     setErr(null);
-    if (form.id_empresa === null && form.id_permissionario === null) {
-      setErr("Informe ao menos um operador: empresa ou permissionário.");
-      return;
-    }
+    if (!val.conferir()) return;
     salvarM.mutate(form);
   }
 
@@ -217,6 +178,9 @@ export default function LinhaDetalhePage({ params }: PageParams) {
   const [paradaDescricao, setParadaDescricao] = useState("");
   const [paradaObs, setParadaObs] = useState("");
   const [erroParada, setErroParada] = useState<string | null>(null);
+  const valParada = useValidacao<"descricao">({
+    descricao: paradaDescricao.trim() === "" ? "Diga onde fica a parada." : undefined,
+  });
 
   const paradas = [...(q.data?.paradas ?? [])].sort((a, b) => a.ordem - b.ordem);
 
@@ -270,6 +234,7 @@ export default function LinhaDetalhePage({ params }: PageParams) {
     setParadaDescricao("");
     setParadaObs("");
     setErroParada(null);
+    valParada.reiniciar();
     setParadaDialogOpen(true);
   }
 
@@ -278,6 +243,7 @@ export default function LinhaDetalhePage({ params }: PageParams) {
     setParadaDescricao(p.descricao);
     setParadaObs(p.observacoes ?? "");
     setErroParada(null);
+    valParada.reiniciar();
     setParadaDialogOpen(true);
   }
 
@@ -286,9 +252,9 @@ export default function LinhaDetalhePage({ params }: PageParams) {
     setParadaEditando(null);
   }
 
-  function submeterParada(e: React.FormEvent) {
-    e.preventDefault();
+  function submeterParada() {
     setErroParada(null);
+    if (!valParada.conferir()) return;
     const v = { descricao: paradaDescricao.trim(), observacoes: limpo(paradaObs) };
     if (paradaEditando) {
       updateParadaM.mutate({ id: paradaEditando.id, ...v });
@@ -318,6 +284,11 @@ export default function LinhaDetalhePage({ params }: PageParams) {
   // --- Grade de horários ------------------------------------------------
   const [diaNovo, setDiaNovo] = useState("0");
   const [horaNova, setHoraNova] = useState("");
+  // O botão não fica mais desabilitado sem horário: clicar é o que diz o
+  // que falta (padrão de formulário, regra 9).
+  const valHorario = useValidacao<"hora">({
+    hora: horaNova === "" ? "Escolha o horário de partida." : undefined,
+  });
 
   const horarios = q.data?.horarios ?? [];
 
@@ -327,6 +298,7 @@ export default function LinhaDetalhePage({ params }: PageParams) {
     onSuccess: () => {
       toast.success("Horário adicionado.");
       setHoraNova("");
+      valHorario.reiniciar();
       invalidar();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -342,20 +314,9 @@ export default function LinhaDetalhePage({ params }: PageParams) {
   });
 
   function adicionarHorario() {
-    if (!horaNova) return;
+    if (!valHorario.conferir()) return;
     addHorarioM.mutate({ dia_semana: Number(diaNovo), partida: `${horaNova}:00` });
   }
-
-  const empresaSelecionadaNome = empresaSelecionadaQ.data
-    ? empresaSelecionadaQ.data.nome_fantasia ?? empresaSelecionadaQ.data.razao_social
-    : idEmpresaForm !== null
-      ? `Empresa #${idEmpresaForm}`
-      : null;
-  const permSelecionadoNome = permSelecionadoQ.data
-    ? permSelecionadoQ.data.nome
-    : idPermissionarioForm !== null
-      ? `Permissionário #${idPermissionarioForm}`
-      : null;
 
   const linha = q.data;
 
@@ -382,404 +343,234 @@ export default function LinhaDetalhePage({ params }: PageParams) {
         />
       ) : (
         <>
-          <Card>
-            <CardHeader className="flex-row items-center justify-between">
-              <CardTitle>Dados</CardTitle>
-              {canEdit && (
+          <SectionCard
+            title="Dados"
+            icon={Route}
+            actions={
+              canEdit ? (
                 <Button variant="secondary" size="sm" onClick={abrirEdicao}>
-                  Editar
+                  <Pencil className="mr-1 h-4 w-4" />
+                  Editar linha
                 </Button>
-              )}
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+              ) : undefined
+            }
+          >
+            <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
               <div>
-                <div className="text-xs text-muted-foreground">Código</div>
-                <div>{linha.codigo ?? "—"}</div>
+                <dt className="text-xs text-muted-foreground">Código</dt>
+                <dd>{linha.codigo ?? "—"}</dd>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground">Tipo</div>
-                <div>{TIPO_LABEL[linha.tipo_servico] ?? linha.tipo_servico}</div>
+                <dt className="text-xs text-muted-foreground">Tipo</dt>
+                <dd>{TIPO_LABEL[linha.tipo_servico] ?? linha.tipo_servico}</dd>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground">Operador</div>
-                <div>{linha.operador_nome ?? "—"}</div>
+                <dt className="text-xs text-muted-foreground">Operador</dt>
+                <dd>{linha.operador_nome ?? "—"}</dd>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground">Trajeto</div>
-                <div>
+                <dt className="text-xs text-muted-foreground">Trajeto</dt>
+                <dd>
                   {linha.origem} → {linha.destino}
-                </div>
+                </dd>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground">Situação</div>
-                <Badge intent={linha.situacao === "ativa" ? "success" : "neutral"}>
-                  {linha.situacao === "ativa" ? "Ativa" : "Inativa"}
-                </Badge>
+                <dt className="text-xs text-muted-foreground">Situação</dt>
+                <dd>
+                  <Badge intent={linha.situacao === "ativa" ? "success" : "neutral"}>
+                    {linha.situacao === "ativa" ? "Ativa" : "Inativa"}
+                  </Badge>
+                </dd>
               </div>
               {linha.observacoes && (
                 <div className="col-span-2 sm:col-span-3">
-                  <div className="text-xs text-muted-foreground">Observações</div>
-                  <div>{linha.observacoes}</div>
+                  <dt className="text-xs text-muted-foreground">Observações</dt>
+                  <dd>{linha.observacoes}</dd>
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </dl>
+          </SectionCard>
 
-          <Card>
-            <CardHeader className="flex-row items-center justify-between">
-              <CardTitle>Itinerário</CardTitle>
-              {canEdit && (
+          <SectionCard
+            title="Itinerário"
+            icon={MapPin}
+            description="As paradas na ordem em que a linha passa. Use as setas para reordenar."
+            actions={
+              canEdit ? (
                 <Button variant="secondary" size="sm" onClick={abrirNovaParada}>
                   <Plus className="mr-1 h-4 w-4" />
                   Adicionar parada
                 </Button>
-              )}
-            </CardHeader>
-            <CardContent>
-              {paradas.length === 0 ? (
-                <EmptyState
-                  icon={MapPin}
-                  title="Nenhuma parada"
-                  description="As paradas da linha aparecem aqui, na ordem do itinerário."
-                  className="p-6"
-                />
-              ) : (
-                <ol className="space-y-2">
-                  {paradas.map((p, idx) => (
-                    <li
-                      key={p.id}
-                      className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-1 px-3 py-2"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium">
-                          {idx + 1}. {p.descricao}
-                        </div>
-                        {p.observacoes && (
-                          <div className="text-xs text-muted-foreground">{p.observacoes}</div>
-                        )}
-                      </div>
-                      {canEdit && (
-                        <div className="flex shrink-0 items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label={`Mover "${p.descricao}" para cima`}
-                            disabled={idx === 0 || reordenarM.isPending}
-                            onClick={() => mover(idx, -1)}
-                          >
-                            <ArrowUp className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label={`Mover "${p.descricao}" para baixo`}
-                            disabled={idx === paradas.length - 1 || reordenarM.isPending}
-                            onClick={() => mover(idx, 1)}
-                          >
-                            <ArrowDown className="h-4 w-4" />
-                          </Button>
-                          <AcoesDaLinha
-                            acoes={[
-                              {
-                                label: "Editar",
-                                icon: Pencil,
-                                onClick: () => abrirEdicaoParada(p),
-                              },
-                              {
-                                label: "Remover",
-                                icon: Trash2,
-                                perigo: true,
-                                onClick: () => pedirRemocaoParada(p),
-                              },
-                            ]}
-                          />
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Grade de horários</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-7">
-                {DIAS.map((dia, diaIdx) => {
-                  const doDia = horarios
-                    .filter((h) => h.dia_semana === diaIdx)
-                    .sort((a, b) => a.partida.localeCompare(b.partida));
-                  return (
-                    <div key={dia} className="rounded-md border border-border p-2">
-                      <div className="mb-2 text-xs font-semibold text-muted-foreground">
-                        {dia}
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {doDia.length === 0 && (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
-                        {doDia.map((h) => (
-                          <Badge key={h.id} intent="neutral" className="gap-1">
-                            {h.partida.slice(0, 5)}
-                            {canEdit && (
-                              <button
-                                type="button"
-                                aria-label={`Remover horário ${h.partida.slice(0, 5)} de ${dia}`}
-                                onClick={() => removeHorarioM.mutate(h.id)}
-                                className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full hover:bg-muted"
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            )}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {canEdit && (
-                <div className="flex flex-wrap items-end gap-2">
-                  <div>
-                    <Label htmlFor="diaNovo">Dia</Label>
-                    <Select
-                      id="diaNovo"
-                      value={diaNovo}
-                      onChange={(e) => setDiaNovo(e.target.value)}
-                      className="max-w-[160px]"
-                    >
-                      {DIAS.map((dia, idx) => (
-                        <option key={dia} value={idx}>
-                          {dia}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor="horaNova">Horário</Label>
-                    <Input
-                      id="horaNova"
-                      type="time"
-                      value={horaNova}
-                      onChange={(e) => setHoraNova(e.target.value)}
-                      className="max-w-[140px]"
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    onClick={adicionarHorario}
-                    disabled={!horaNova || addHorarioM.isPending}
+              ) : undefined
+            }
+          >
+            {paradas.length === 0 ? (
+              <EmptyState
+                icon={MapPin}
+                title="Nenhuma parada"
+                description="As paradas da linha aparecem aqui, na ordem do itinerário."
+                className="p-6"
+              />
+            ) : (
+              <ol className="space-y-2">
+                {paradas.map((p, idx) => (
+                  <li
+                    key={p.id}
+                    className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-1 px-3 py-2"
                   >
-                    <Plus className="mr-1 h-4 w-4" />
-                    Adicionar horário
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium">
+                        {idx + 1}. {p.descricao}
+                      </div>
+                      {p.observacoes && (
+                        <div className="text-xs text-muted-foreground">{p.observacoes}</div>
+                      )}
+                    </div>
+                    {canEdit && (
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Mover "${p.descricao}" para cima`}
+                          disabled={idx === 0 || reordenarM.isPending}
+                          onClick={() => mover(idx, -1)}
+                        >
+                          <ArrowUp className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Mover "${p.descricao}" para baixo`}
+                          disabled={idx === paradas.length - 1 || reordenarM.isPending}
+                          onClick={() => mover(idx, 1)}
+                        >
+                          <ArrowDown className="h-4 w-4" />
+                        </Button>
+                        <AcoesDaLinha
+                          acoes={[
+                            {
+                              label: "Editar",
+                              icon: Pencil,
+                              onClick: () => abrirEdicaoParada(p),
+                            },
+                            {
+                              label: "Remover",
+                              icon: Trash2,
+                              perigo: true,
+                              onClick: () => pedirRemocaoParada(p),
+                            },
+                          ]}
+                        />
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Grade de horários"
+            icon={Clock}
+            description="Horários de partida por dia da semana."
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-7">
+              {DIAS.map((dia, diaIdx) => {
+                const doDia = horarios
+                  .filter((h) => h.dia_semana === diaIdx)
+                  .sort((a, b) => a.partida.localeCompare(b.partida));
+                return (
+                  <div key={dia} className="rounded-md border border-border p-2">
+                    <div className="mb-2 text-xs font-semibold text-muted-foreground">
+                      {dia}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {doDia.length === 0 && (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                      {doDia.map((h) => (
+                        <Badge key={h.id} intent="neutral" className="gap-1">
+                          {h.partida.slice(0, 5)}
+                          {canEdit && (
+                            <button
+                              type="button"
+                              aria-label={`Remover horário ${h.partida.slice(0, 5)} de ${dia}`}
+                              onClick={() => removeHorarioM.mutate(h.id)}
+                              className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full hover:bg-muted"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {canEdit && (
+              <div
+                ref={valHorario.ref}
+                className="flex flex-wrap items-start gap-3 border-t border-border pt-4"
+              >
+                <FormField label="Dia" className="w-40">
+                  <Select id="diaNovo" value={diaNovo} onChange={(e) => setDiaNovo(e.target.value)}>
+                    {DIAS.map((dia, idx) => (
+                      <option key={dia} value={idx}>
+                        {dia}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Partida" error={valHorario.erro("hora")} className="w-40">
+                  <Input
+                    id="horaNova"
+                    type="time"
+                    value={horaNova}
+                    onChange={(e) => setHoraNova(e.target.value)}
+                  />
+                </FormField>
+                <Button type="button" onClick={adicionarHorario} loading={addHorarioM.isPending} className="mt-6">
+                  <Plus className="mr-1 h-4 w-4" />
+                  Adicionar horário
+                </Button>
+              </div>
+            )}
+          </SectionCard>
         </>
       )}
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} title="Editar linha">
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        title={linha ? `Editar linha — ${linha.nome}` : "Editar linha"}
+        size="lg"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={submeterEdicao} loading={salvarM.isPending}>
+              Salvar alterações
+            </Button>
+          </>
+        }
+      >
         {form && (
-          <form className="space-y-3" onSubmit={submeterEdicao}>
-            {err && (
-              <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
-                {err}
-              </div>
-            )}
-            <div>
-              <Label htmlFor="nome">Nome</Label>
-              <Input
-                id="nome"
-                required
-                value={form.nome}
-                onChange={(e) => set("nome", e.target.value)}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="codigo">Código</Label>
-                <Input
-                  id="codigo"
-                  value={form.codigo}
-                  onChange={(e) => set("codigo", e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="tipo">Tipo de serviço</Label>
-                <Select
-                  id="tipo"
-                  value={form.tipo_servico}
-                  onChange={(e) => set("tipo_servico", e.target.value as TipoServico)}
-                >
-                  {TIPOS.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="origem">Origem</Label>
-                <Input
-                  id="origem"
-                  required
-                  value={form.origem}
-                  onChange={(e) => set("origem", e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="destino">Destino</Label>
-                <Input
-                  id="destino"
-                  required
-                  value={form.destino}
-                  onChange={(e) => set("destino", e.target.value)}
-                />
-              </div>
-            </div>
-            <div>
-              <Label htmlFor="situacao">Situação</Label>
-              <Select
-                id="situacao"
-                value={form.situacao}
-                onChange={(e) => set("situacao", e.target.value as LinhaSituacao)}
-              >
-                <option value="ativa">Ativa</option>
-                <option value="inativa">Inativa</option>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="buscaEmpresa">Empresa operadora</Label>
-                {form.id_empresa !== null ? (
-                  <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
-                    <span className="truncate">{empresaSelecionadaNome}</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        set("id_empresa", null);
-                        setBuscaEmpresa("");
-                        setBuscaEmpresaAplicada("");
-                      }}
-                    >
-                      Limpar
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <Input
-                      id="buscaEmpresa"
-                      placeholder="Buscar por razão social/CNPJ..."
-                      value={buscaEmpresa}
-                      onChange={(e) => setBuscaEmpresa(e.target.value)}
-                    />
-                    <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
-                      {empresasQ.isLoading ? (
-                        <Carregando className="p-2 text-xs text-muted-foreground" />
-                      ) : (empresasQ.data?.items ?? []).length === 0 ? (
-                        <div className="p-2 text-xs text-muted-foreground">
-                          Nenhuma empresa encontrada.
-                        </div>
-                      ) : (
-                        (empresasQ.data?.items ?? []).map((emp) => (
-                          <button
-                            key={emp.id}
-                            type="button"
-                            className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
-                            onClick={() => set("id_empresa", emp.id)}
-                          >
-                            {emp.nome_fantasia ?? emp.razao_social}
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              {emp.cnpj}
-                            </span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="buscaPerm">Permissionário operador</Label>
-                {form.id_permissionario !== null ? (
-                  <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
-                    <span className="truncate">{permSelecionadoNome}</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        set("id_permissionario", null);
-                        setBuscaPerm("");
-                        setBuscaPermAplicada("");
-                      }}
-                    >
-                      Limpar
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <Input
-                      id="buscaPerm"
-                      placeholder="Buscar por nome/CPF..."
-                      value={buscaPerm}
-                      onChange={(e) => setBuscaPerm(e.target.value)}
-                    />
-                    <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
-                      {permsQ.isLoading ? (
-                        <Carregando className="p-2 text-xs text-muted-foreground" />
-                      ) : (permsQ.data?.items ?? []).length === 0 ? (
-                        <div className="p-2 text-xs text-muted-foreground">
-                          Nenhum permissionário encontrado.
-                        </div>
-                      ) : (
-                        (permsQ.data?.items ?? []).map((p) => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
-                            onClick={() => set("id_permissionario", p.id)}
-                          >
-                            {p.nome}
-                            <span className="ml-2 text-xs text-muted-foreground">{p.cpf}</span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Informe ao menos um operador: empresa, permissionário, ou os dois.
-            </p>
-            <div>
-              <Label htmlFor="obs">Observações</Label>
-              <Input
-                id="obs"
-                value={form.observacoes}
-                onChange={(e) => set("observacoes", e.target.value)}
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="secondary" onClick={() => setDialogOpen(false)}>
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={salvarM.isPending}>
-                {salvarM.isPending ? "Salvando..." : "Salvar"}
-              </Button>
-            </div>
-          </form>
+          <div ref={val.ref} className="space-y-5">
+            <CamposLinha
+              form={form}
+              set={set}
+              tipos={TIPOS}
+              modoOperador={modoOperador}
+              onModoOperador={setModoOperador}
+              ativo={dialogOpen}
+              erro={val.erro}
+              sair={val.sair}
+            />
+            {err && <Alert intent="danger">{err}</Alert>}
+          </div>
         )}
       </Dialog>
 
@@ -787,42 +578,45 @@ export default function LinhaDetalhePage({ params }: PageParams) {
         open={paradaDialogOpen}
         onClose={fecharDialogParada}
         title={paradaEditando ? "Editar parada" : "Nova parada"}
+        description={
+          paradaEditando ? undefined : `Entra no fim do itinerário, como a parada ${paradas.length + 1}. Dá para reordenar depois.`
+        }
+        footer={
+          <>
+            <Button variant="ghost" onClick={fecharDialogParada}>
+              Cancelar
+            </Button>
+            <Button onClick={submeterParada} loading={addParadaM.isPending || updateParadaM.isPending}>
+              {paradaEditando ? "Salvar alterações" : "Adicionar parada"}
+            </Button>
+          </>
+        }
       >
-        <form className="space-y-3" onSubmit={submeterParada}>
-          {erroParada && (
-            <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
-              {erroParada}
-            </div>
-          )}
-          <div>
-            <Label htmlFor="paradaDescricao">Descrição</Label>
+        <div ref={valParada.ref} className="space-y-4">
+          <FormField
+            label="Local da parada"
+            required
+            error={valParada.erro("descricao")}
+            hint="Um ponto de referência que o passageiro reconhece."
+          >
             <Input
               id="paradaDescricao"
-              required
               value={paradaDescricao}
               onChange={(e) => setParadaDescricao(e.target.value)}
+              onBlur={valParada.sair("descricao")}
+              placeholder="Ex.: Escola Municipal Rui Barbosa"
             />
-          </div>
-          <div>
-            <Label htmlFor="paradaObs">Observações</Label>
+          </FormField>
+          <FormField label="Observações" opcional>
             <Input
               id="paradaObs"
               value={paradaObs}
               onChange={(e) => setParadaObs(e.target.value)}
+              placeholder="Ex.: só em dias letivos"
             />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={fecharDialogParada}>
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              disabled={addParadaM.isPending || updateParadaM.isPending}
-            >
-              {addParadaM.isPending || updateParadaM.isPending ? "Salvando..." : "Salvar"}
-            </Button>
-          </div>
-        </form>
+          </FormField>
+          {erroParada && <Alert intent="danger">{erroParada}</Alert>}
+        </div>
       </Dialog>
     </div>
   );
