@@ -28,7 +28,7 @@ import {
 } from "@/lib/mascaras";
 import { cn } from "@/lib/utils";
 
-export type FieldType = "text" | "email" | "number" | "select" | "checkbox" | "textarea";
+export type FieldType = "text" | "email" | "number" | "date" | "select" | "checkbox" | "textarea";
 
 export interface SelectOption {
   value: string | number;

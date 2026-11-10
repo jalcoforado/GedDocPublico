@@ -7,6 +7,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
+import { Combobox } from "@/components/ui/combobox";
+import { Dialog } from "@/components/ui/dialog";
 import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
@@ -82,6 +84,46 @@ describe("CampoComUnidade", () => {
     );
     expect(screen.getByText("R$")).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByRole("textbox", { name: "Valor total" })).toBeInTheDocument();
+  });
+});
+
+describe("Combobox dentro de diálogo", () => {
+  function Montado({ onClose }: { onClose: () => void }) {
+    return (
+      <Dialog open onClose={onClose} title="Encaminhar">
+        <FormField label="Destino">
+          <Combobox options={[{ value: 1, label: "Protocolo Geral" }]} value={null} onChange={() => {}} />
+        </FormField>
+      </Dialog>
+    );
+  }
+
+  it("a lista abre acima do diálogo, não atrás", () => {
+    render(<Montado onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("combobox", { name: "Destino" }));
+    const painel = document.querySelector("[data-popover]")!;
+    expect(painel.className).toContain("z-popover");
+    expect(painel.className).not.toContain("z-dropdown");
+  });
+
+  it("Escape fecha a lista e deixa o diálogo (e o que foi preenchido) aberto", () => {
+    const fechar = vi.fn();
+    render(<Montado onClose={fechar} />);
+    fireEvent.click(screen.getByRole("combobox", { name: "Destino" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.querySelector("[data-popover]")).toBeNull();
+    expect(fechar).not.toHaveBeenCalled();
+  });
+
+  it("o FormField marca o campo de busca com o erro", () => {
+    render(
+      <FormField label="Destino" error="Escolha a unidade de destino.">
+        <Combobox options={[]} value={null} onChange={() => {}} />
+      </FormField>,
+    );
+    const campo = screen.getByRole("combobox", { name: "Destino" });
+    expect(campo).toHaveAttribute("aria-invalid", "true");
+    expect(campo).toHaveAccessibleDescription(/Escolha a unidade de destino/);
   });
 });
 
