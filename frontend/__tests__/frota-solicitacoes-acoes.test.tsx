@@ -50,7 +50,7 @@ const SOLICITACOES = [
   sol(3, "Aprovada com veículo", "aprovada", 10),
   sol(4, "Na rua", "em_uso", 10),
 ];
-const aprovarMock = vi.fn(() => Promise.resolve({}));
+const aprovarMock = vi.fn((_id: number) => Promise.resolve({}));
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -91,8 +91,8 @@ async function linha(finalidade: string) {
 }
 
 /** Rótulos dos botões à vista na coluna Ações da linha. */
-function botoesAVista(l: ReturnType<typeof within>) {
-  return l.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent);
+function botoesAVista(l: { getAllByRole: (papel: "button") => HTMLElement[] }) {
+  return l.getAllByRole("button").map((b: HTMLElement) => b.getAttribute("aria-label") ?? b.textContent);
 }
 
 vi.setConfig({ testTimeout: 20_000 });
