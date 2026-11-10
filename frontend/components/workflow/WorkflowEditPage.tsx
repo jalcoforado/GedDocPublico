@@ -1,12 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { GitBranch, Save, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, GitBranch, Save } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
@@ -54,12 +54,12 @@ function validateDsl(
     if (!/^[a-z][a-z0-9_-]*$/.test(slug)) {
       issues.push({
         level: "error",
-        msg: "Slug do workflow deve começar com letra e usar só [a-z0-9_-].",
+        msg: "O identificador deve começar com letra e usar só minúsculas, números, _ e -.",
         campo: "slug",
       });
     }
   }
-  if (!nome.trim()) issues.push({ level: "error", msg: "Nome é obrigatório.", campo: "nome" });
+  if (!nome.trim()) issues.push({ level: "error", msg: "Dê um nome ao workflow.", campo: "nome" });
 
   // Estados
   if (dsl.estados.length === 0) {
@@ -228,16 +228,15 @@ export function WorkflowEditPage({
         description="Desenhe os estados e as transições no diagrama; clique num item para editar os detalhes ao lado."
         actions={
           <>
-            <Button variant="secondary" onClick={handleCancel} disabled={saving}>
-              <X className="h-4 w-4" aria-hidden="true" />
+            <Button variant="ghost" onClick={handleCancel} disabled={saving}>
               Cancelar
             </Button>
-            <Button onClick={handleSave} disabled={saving}>
-              <Save className="h-4 w-4" aria-hidden="true" />
+            <Button onClick={handleSave} loading={saving}>
+              {!saving && <Save className="h-4 w-4" aria-hidden="true" />}
               {saving
                 ? "Salvando…"
                 : mode === "novo"
-                  ? "Criar"
+                  ? "Criar workflow"
                   : "Salvar nova versão"}
             </Button>
           </>
@@ -246,56 +245,55 @@ export function WorkflowEditPage({
 
       {mode === "editar" && (
         <p className="rounded border border-info/30 bg-info-soft p-2 text-xs text-info-soft-foreground">
-          Editar gera <strong>nova versão</strong> deste workflow (instances ativas
+          Editar gera <strong>nova versão</strong> deste workflow (instâncias ativas
           continuam na versão antiga).
         </p>
       )}
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <div className="space-y-1">
-          <Label htmlFor="wf-slug">Slug</Label>
+      <div className="grid gap-4 md:grid-cols-3">
+        <FormField
+          label="Nome"
+          required
+          hint="Como o fluxo aparece nas listas."
+          error={erroDoCampo("nome")}
+        >
+          <Input
+            id="wf-nome"
+            value={nome}
+            onChange={(e) => setNome(e.target.value)}
+            onBlur={() => setTocados((t) => ({ ...t, nome: true }))}
+            placeholder="Ex.: Recurso administrativo"
+          />
+        </FormField>
+        <FormField
+          label="Identificador"
+          required={mode === "novo"}
+          hint={
+            mode === "novo"
+              ? "Minúsculas, números, _ e -. Não muda depois de criado."
+              : "Não muda depois de criado."
+          }
+          error={erroDoCampo("slug")}
+        >
           <Input
             id="wf-slug"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             onBlur={() => setTocados((t) => ({ ...t, slug: true }))}
             disabled={mode === "editar"}
-            placeholder="ex: fluxo_recurso"
-            aria-invalid={erroDoCampo("slug") ? true : undefined}
-            aria-describedby={erroDoCampo("slug") ? "wf-slug-erro" : undefined}
+            placeholder="Ex.: recurso_administrativo"
+            className="font-mono"
           />
-          {erroDoCampo("slug") && (
-            <p id="wf-slug-erro" className="text-sm text-danger">
-              {erroDoCampo("slug")}
-            </p>
-          )}
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="wf-nome">Nome</Label>
-          <Input
-            id="wf-nome"
-            value={nome}
-            onChange={(e) => setNome(e.target.value)}
-            onBlur={() => setTocados((t) => ({ ...t, nome: true }))}
-            placeholder="Nome humano"
-            aria-invalid={erroDoCampo("nome") ? true : undefined}
-            aria-describedby={erroDoCampo("nome") ? "wf-nome-erro" : undefined}
-          />
-          {erroDoCampo("nome") && (
-            <p id="wf-nome-erro" className="text-sm text-danger">
-              {erroDoCampo("nome")}
-            </p>
-          )}
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="wf-desc">Descrição</Label>
+        </FormField>
+        <FormField label="Descrição" opcional>
           <Textarea
             id="wf-desc"
             rows={1}
             value={descricao ?? ""}
             onChange={(e) => setDescricao(e.target.value || null)}
+            placeholder="Ex.: Recursos contra decisões da Secretaria."
           />
-        </div>
+        </FormField>
       </div>
 
       {(errosDoFluxo.length > 0 || warnings.length > 0) && (
@@ -303,17 +301,19 @@ export function WorkflowEditPage({
           {errosDoFluxo.map((i, idx) => (
             <p
               key={`e-${idx}`}
-              className="rounded border border-danger/40 bg-danger/10 px-2 py-1 text-xs text-danger-soft-foreground"
+              className="flex items-start gap-1.5 rounded border border-danger/40 bg-danger-soft px-2 py-1 text-xs text-danger-soft-foreground"
             >
-              ❌ {i.msg}
+              <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              {i.msg}
             </p>
           ))}
           {warnings.map((i, idx) => (
             <p
               key={`w-${idx}`}
-              className="rounded border border-warning/40 bg-warning/10 px-2 py-1 text-xs text-warning-soft-foreground"
+              className="flex items-start gap-1.5 rounded border border-warning/40 bg-warning-soft px-2 py-1 text-xs text-warning-soft-foreground"
             >
-              ⚠ {i.msg}
+              <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              {i.msg}
             </p>
           ))}
         </div>
