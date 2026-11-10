@@ -1,9 +1,11 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Plus } from "lucide-react";
+import { Inbox, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
+import { fmtData } from "@/components/pagamentos/format";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
@@ -65,11 +67,6 @@ const EMPTY: DocForm = {
 function nullify(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
-}
-
-function fmtData(d: string | null): string {
-  if (!d) return "—";
-  return new Date(`${d}T00:00:00`).toLocaleDateString("pt-BR");
 }
 
 /** Badge de vencimento calculado a partir de data_vencimento (cliente). */
@@ -269,18 +266,21 @@ export function DocumentosDialog({ veiculo, open, onClose }: Props) {
                         <Badge intent={b.intent}>{b.label}</Badge>
                       </TD>
                       <TD className="text-right">
-                        <div className="inline-flex gap-2">
-                          {canEdit && (
-                            <Button variant="secondary" size="sm" onClick={() => openEdit(d)}>
-                              Editar
-                            </Button>
-                          )}
-                          {canDelete && (
-                            <Button
-                              variant="danger"
-                              size="sm"
-                              disabled={deleteM.isPending}
-                              onClick={async () => {
+                        <AcoesDaLinha
+                          acoes={[
+                            {
+                              label: "Editar",
+                              icon: Pencil,
+                              oculta: !canEdit,
+                              onClick: () => openEdit(d),
+                            },
+                            {
+                              label: "Excluir",
+                              icon: Trash2,
+                              perigo: true,
+                              oculta: !canDelete,
+                              disabled: deleteM.isPending,
+                              onClick: async () => {
                                 const ok = await confirm({
                                   title: "Excluir documento",
                                   message: `Excluir o documento ${
@@ -290,12 +290,10 @@ export function DocumentosDialog({ veiculo, open, onClose }: Props) {
                                   intent: "danger",
                                 });
                                 if (ok) deleteM.mutate(d.id);
-                              }}
-                            >
-                              Excluir
-                            </Button>
-                          )}
-                        </div>
+                              },
+                            },
+                          ]}
+                        />
                       </TD>
                     </TR>
                   );

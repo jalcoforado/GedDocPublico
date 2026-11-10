@@ -1,9 +1,21 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { IdCard, FileText, Inbox, Plus, Settings2 } from "lucide-react";
+import {
+  FileText,
+  IdCard,
+  Inbox,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Settings2,
+  Trash2,
+  UserX,
+} from "lucide-react";
 import { useState } from "react";
 
+import { fmtData } from "@/components/pagamentos/format";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
@@ -24,16 +36,19 @@ import {
   type MotoristaSituacao,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { aplicarMascara } from "@/lib/mascaras";
 
-const SITUACOES: { value: MotoristaSituacao; label: string }[] = [
-  { value: "ativo", label: "Ativo" },
-  { value: "afastado", label: "Afastado" },
-  { value: "inativo", label: "Inativo" },
+const SITUACOES: {
+  value: MotoristaSituacao;
+  label: string;
+  intent: "success" | "warning" | "neutral";
+}[] = [
+  { value: "ativo", label: "Ativo", intent: "success" },
+  { value: "afastado", label: "Afastado", intent: "warning" },
+  { value: "inativo", label: "Inativo", intent: "neutral" },
 ];
 const CATEGORIAS: CnhCategoria[] = ["A", "B", "AB", "C", "D", "E", "AC", "AD", "AE"];
-const SITUACAO_LABEL: Record<string, string> = Object.fromEntries(
-  SITUACOES.map((s) => [s.value, s.label]),
-);
+const SITUACAO_POR_VALOR = Object.fromEntries(SITUACOES.map((s) => [s.value, s]));
 
 interface MotoristaForm {
   nome: string;
@@ -68,6 +83,11 @@ const EMPTY: MotoristaForm = {
 function nullify(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
+}
+
+/** CPF gravado só com dígitos → 000.000.000-00; o que veio digitado de outro jeito fica como está. */
+function cpfParaExibir(cpf: string): string {
+  return /^\d{11}$/.test(cpf) ? aplicarMascara("cpf", cpf).valor : cpf;
 }
 
 function cnhVencida(validade: string): boolean {
@@ -214,7 +234,7 @@ export default function MotoristasPage() {
             canCreate ? (
               <Button onClick={openNew}>
                 <Plus className="mr-1 h-4 w-4" />
-                Cadastrar motorista
+                Novo motorista
               </Button>
             ) : undefined
           }
@@ -243,7 +263,7 @@ export default function MotoristasPage() {
             {motoristasQ.data?.map((m) => (
               <TR key={m.id}>
                 <TD className="font-medium">{m.nome}</TD>
-                <TD className="font-mono text-xs">{m.cpf}</TD>
+                <TD className="whitespace-nowrap font-mono text-xs">{cpfParaExibir(m.cpf)}</TD>
                 <TD>
                   <span className="font-mono text-xs">{m.cnh_numero}</span>
                   <Badge intent="neutral" className="ml-2">
@@ -251,31 +271,40 @@ export default function MotoristasPage() {
                   </Badge>
                 </TD>
                 <TD>
-                  {cnhVencida(m.cnh_validade) ? (
-                    <Badge intent="danger">Vencida</Badge>
-                  ) : (
-                    <span className="tabular-nums">{m.cnh_validade}</span>
+                  {/* A data fica à vista mesmo vencida: o selo diz que venceu,
+                      a data diz desde quando. */}
+                  <span className="whitespace-nowrap tabular-nums">{fmtData(m.cnh_validade)}</span>
+                  {cnhVencida(m.cnh_validade) && (
+                    <Badge intent="danger" className="ml-2">
+                      Vencida
+                    </Badge>
                   )}
                 </TD>
                 <TD className="text-muted-foreground">{unidadeNome(m.id_unidade)}</TD>
                 <TD>
-                  <Badge intent={m.situacao === "ativo" ? "success" : "neutral"}>
-                    {SITUACAO_LABEL[m.situacao] ?? m.situacao}
+                  <Badge intent={SITUACAO_POR_VALOR[m.situacao]?.intent ?? "neutral"}>
+                    {SITUACAO_POR_VALOR[m.situacao]?.label ?? m.situacao}
                   </Badge>
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex gap-2">
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(m)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canEdit && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={situacaoM.isPending}
-                        onClick={async () => {
+                  <AcoesDaLinha
+                    visiveis={1}
+                    acoes={[
+                      {
+                        label: "Editar",
+                        icon: Pencil,
+                        oculta: !canEdit,
+                        onClick: () => openEdit(m),
+                      },
+                      {
+                        // Reativar não é destrutivo; inativar é (o condutor some
+                        // das designações), por isso só ele vai em vermelho.
+                        label: m.situacao !== "inativo" ? "Inativar" : "Reativar",
+                        icon: m.situacao !== "inativo" ? UserX : RotateCcw,
+                        perigo: m.situacao !== "inativo",
+                        oculta: !canEdit,
+                        disabled: situacaoM.isPending,
+                        onClick: async () => {
                           const inativar = m.situacao !== "inativo";
                           const ok = await confirm({
                             title: inativar ? "Inativar motorista" : "Reativar motorista",
@@ -285,17 +314,15 @@ export default function MotoristasPage() {
                             confirmLabel: inativar ? "Inativar" : "Reativar",
                           });
                           if (ok) situacaoM.mutate({ id: m.id, inativar });
-                        }}
-                      >
-                        {m.situacao !== "inativo" ? "Inativar" : "Reativar"}
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={deleteM.isPending}
-                        onClick={async () => {
+                        },
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        oculta: !canDelete,
+                        disabled: deleteM.isPending,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir motorista",
                             message: `Excluir "${m.nome}"? Esta ação não pode ser desfeita.`,
@@ -303,12 +330,10 @@ export default function MotoristasPage() {
                             intent: "danger",
                           });
                           if (ok) deleteM.mutate(m.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}

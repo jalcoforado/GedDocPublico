@@ -1,14 +1,17 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Car, FileText, Inbox, Plus, SearchX, Settings2 } from "lucide-react";
+import { Car, FileText, Inbox, Pencil, Plus, SearchX, Settings2, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { COMBUSTIVEIS, SITUACOES_VEICULO } from "@/components/frota/rotulos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -27,24 +30,14 @@ import { useAuth } from "@/lib/auth";
 
 import { DocumentosDialog } from "./documentos-dialog";
 
-const SITUACOES: { value: VeiculoSituacao; label: string }[] = [
-  { value: "disponivel", label: "Disponível" },
-  { value: "em_uso", label: "Em uso" },
-  { value: "manutencao", label: "Manutenção" },
-  { value: "inativo", label: "Inativo" },
-  { value: "baixado", label: "Baixado" },
-];
+const SITUACOES = SITUACOES_VEICULO;
 const FORMA_POSSE: { value: VeiculoFormaPosse; label: string }[] = [
   { value: "proprio", label: "Próprio" },
   { value: "locado", label: "Locado" },
   { value: "cedido", label: "Cedido" },
   { value: "convenio", label: "Convênio" },
 ];
-const COMBUSTIVEIS = ["gasolina", "etanol", "flex", "diesel", "gnv", "eletrico", "hibrido"];
-
-const SITUACAO_LABEL: Record<string, string> = Object.fromEntries(
-  SITUACOES.map((s) => [s.value, s.label]),
-);
+const SITUACAO_POR_VALOR = Object.fromEntries(SITUACOES.map((s) => [s.value, s]));
 
 interface VeiculoForm {
   placa: string;
@@ -128,6 +121,10 @@ export default function VeiculosPage() {
     });
   }, [veiculos, busca, situacaoFiltro]);
   const temFiltroAtivo = busca.trim() !== "" || situacaoFiltro !== "";
+  function limparFiltros() {
+    setBusca("");
+    setSituacaoFiltro("");
+  }
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["frota-veiculos"] });
 
@@ -235,11 +232,10 @@ export default function VeiculosPage() {
       />
 
       {(veiculosQ.isLoading || veiculos.length > 0) && (
-        <div className="flex flex-wrap gap-3">
-          <div>
-            <Label htmlFor="f_situacao">Situação</Label>
+        <FilterBar>
+          <FilterBar.Group label="Situação">
             <Select
-              id="f_situacao"
+              aria-label="Situação"
               value={situacaoFiltro}
               onChange={(e) => setSituacaoFiltro(e.target.value)}
             >
@@ -250,17 +246,23 @@ export default function VeiculosPage() {
                 </option>
               ))}
             </Select>
-          </div>
-          <div className="min-w-[200px] flex-1">
-            <Label htmlFor="f_busca">Busca</Label>
+          </FilterBar.Group>
+          <FilterBar.Group label="Busca" className="min-w-[200px] flex-1">
             <Input
-              id="f_busca"
+              aria-label="Busca"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
               placeholder="Placa, tombo, marca, modelo, RENAVAM ou chassi"
             />
-          </div>
-        </div>
+          </FilterBar.Group>
+          {temFiltroAtivo && (
+            <FilterBar.Actions>
+              <Button variant="ghost" onClick={limparFiltros}>
+                Limpar
+              </Button>
+            </FilterBar.Actions>
+          )}
+        </FilterBar>
       )}
 
       {!veiculosQ.isLoading && veiculos.length === 0 ? (
@@ -272,7 +274,7 @@ export default function VeiculosPage() {
             canCreate ? (
               <Button onClick={openNew}>
                 <Plus className="mr-1 h-4 w-4" />
-                Cadastrar veículo
+                Novo veículo
               </Button>
             ) : undefined
           }
@@ -283,13 +285,7 @@ export default function VeiculosPage() {
           title="Nenhum veículo encontrado"
           description="Nenhum veículo corresponde à busca ou ao filtro aplicado."
           action={
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setBusca("");
-                setSituacaoFiltro("");
-              }}
-            >
+            <Button variant="secondary" onClick={limparFiltros}>
               Limpar filtros
             </Button>
           }
@@ -321,8 +317,8 @@ export default function VeiculosPage() {
                 <TD className="tabular-nums text-muted-foreground">{v.numero_tombo ?? "—"}</TD>
                 <TD>{[v.marca, v.modelo].filter(Boolean).join(" ") || "—"}</TD>
                 <TD>
-                  <Badge intent={v.situacao === "disponivel" ? "success" : "neutral"}>
-                    {SITUACAO_LABEL[v.situacao] ?? v.situacao}
+                  <Badge intent={SITUACAO_POR_VALOR[v.situacao]?.intent ?? "neutral"}>
+                    {SITUACAO_POR_VALOR[v.situacao]?.label ?? v.situacao}
                   </Badge>
                 </TD>
                 <TD className="text-muted-foreground">{unidadeNome(v.id_unidade_responsavel)}</TD>
@@ -330,22 +326,22 @@ export default function VeiculosPage() {
                   {v.quilometragem_atual.toLocaleString("pt-BR")}
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex gap-2">
-                    <Button variant="secondary" size="sm" onClick={() => setDocsVeiculo(v)}>
-                      <FileText className="mr-1 h-4 w-4" />
-                      Documentos
-                    </Button>
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(v)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={deleteM.isPending}
-                        onClick={async () => {
+                  <AcoesDaLinha
+                    acoes={[
+                      { label: "Documentos", icon: FileText, onClick: () => setDocsVeiculo(v) },
+                      {
+                        label: "Editar",
+                        icon: Pencil,
+                        oculta: !canEdit,
+                        onClick: () => openEdit(v),
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        oculta: !canDelete,
+                        disabled: deleteM.isPending,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir veículo",
                             message: `Excluir o veículo de placa "${v.placa}"? Esta ação não pode ser desfeita.`,
@@ -353,12 +349,10 @@ export default function VeiculosPage() {
                             intent: "danger",
                           });
                           if (ok) deleteM.mutate(v.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}
@@ -467,8 +461,8 @@ export default function VeiculosPage() {
                 >
                   <option value="">—</option>
                   {COMBUSTIVEIS.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
+                    <option key={c.value} value={c.value}>
+                      {c.label}
                     </option>
                   ))}
                 </Select>

@@ -1,14 +1,18 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fuel, Gauge, Inbox, Plus } from "lucide-react";
+import { Calculator, Droplets, Fuel, Inbox, Pencil, Plus, Trash2, Wallet } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { COMBUSTIVEIS, fmtLitros } from "@/components/frota/rotulos";
+import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
+import { KpiCard } from "@/components/ui/kpi-card";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
@@ -17,8 +21,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { api, type VeiculoAbastecimento } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-
-const COMBUSTIVEIS = ["gasolina", "etanol", "flex", "diesel", "gnv", "eletrico", "hibrido"];
 
 interface AbastForm {
   id_veiculo: number | null;
@@ -47,23 +49,6 @@ const EMPTY: AbastForm = {
 function nullify(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
-}
-function fmtData(d: string | null): string {
-  if (!d) return "—";
-  return new Date(`${d}T00:00:00`).toLocaleDateString("pt-BR");
-}
-function fmtMoeda(v: number | null): string {
-  if (v == null) return "—";
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-surface-1 p-4">
-      <p className="text-sm text-foreground-muted">{label}</p>
-      <p className="mt-1 text-xl font-semibold tabular-nums text-foreground">{value}</p>
-    </div>
-  );
 }
 
 export default function AbastecimentosPage() {
@@ -194,20 +179,20 @@ export default function AbastecimentosPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Abastecimentos" value={String(r?.total_abastecimentos ?? 0)} />
-        <StatCard label="Litros (total)" value={(r?.total_litros ?? 0).toLocaleString("pt-BR")} />
-        <StatCard label="Custo total" value={fmtMoeda(r?.total_valor ?? 0)} />
-        <StatCard
-          label="Média R$/litro"
+        <KpiCard
+          label="Abastecimentos"
+          value={r?.total_abastecimentos ?? 0}
+          icon={Fuel}
+          hint={r?.ultimo_abastecimento ? `Último em ${fmtData(r.ultimo_abastecimento)}` : undefined}
+        />
+        <KpiCard label="Litros (total)" value={fmtLitros(r?.total_litros ?? 0)} icon={Droplets} />
+        <KpiCard label="Custo total" value={fmtMoeda(r?.total_valor ?? 0)} icon={Wallet} />
+        <KpiCard
+          label="Média por litro"
           value={r?.media_valor_litro != null ? fmtMoeda(r.media_valor_litro) : "—"}
+          icon={Calculator}
         />
       </div>
-      {r?.ultimo_abastecimento && (
-        <p className="text-sm text-foreground-muted">
-          <Gauge className="mr-1 inline h-4 w-4" />
-          Último abastecimento: {fmtData(r.ultimo_abastecimento)}
-        </p>
-      )}
 
       {!abastQ.isLoading && (abastQ.data?.length ?? 0) === 0 ? (
         <EmptyState
@@ -249,22 +234,25 @@ export default function AbastecimentosPage() {
                 <TD className="tabular-nums">{fmtData(a.data_abastecimento)}</TD>
                 <TD className="font-mono">{placaDe.get(a.id_veiculo) ?? `#${a.id_veiculo}`}</TD>
                 <TD className="text-right tabular-nums">{a.km_atual.toLocaleString("pt-BR")}</TD>
-                <TD className="text-right tabular-nums">{a.litros.toLocaleString("pt-BR")}</TD>
+                <TD className="text-right tabular-nums">{fmtLitros(a.litros)}</TD>
                 <TD className="text-right tabular-nums">{fmtMoeda(a.valor_total)}</TD>
                 <TD className="text-muted-foreground">{a.posto ?? "—"}</TD>
                 <TD className="text-right">
-                  <div className="inline-flex gap-2">
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(a)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={deleteM.isPending}
-                        onClick={async () => {
+                  <AcoesDaLinha
+                    acoes={[
+                      {
+                        label: "Editar",
+                        icon: Pencil,
+                        oculta: !canEdit,
+                        onClick: () => openEdit(a),
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        oculta: !canDelete,
+                        disabled: deleteM.isPending,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir abastecimento",
                             message: "Excluir este abastecimento? Esta ação não pode ser desfeita.",
@@ -272,12 +260,10 @@ export default function AbastecimentosPage() {
                             intent: "danger",
                           });
                           if (ok) deleteM.mutate(a.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}
@@ -366,8 +352,8 @@ export default function AbastecimentosPage() {
             >
               <option value="">—</option>
               {COMBUSTIVEIS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
+                <option key={c.value} value={c.value}>
+                  {c.label}
                 </option>
               ))}
             </Select>

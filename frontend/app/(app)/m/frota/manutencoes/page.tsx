@@ -1,14 +1,17 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Plus, Wrench } from "lucide-react";
+import { Ban, CheckCircle2, Inbox, Pencil, Play, Plus, SearchX, Trash2, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -35,12 +38,14 @@ const STATUS: { value: ManutencaoStatus; label: string }[] = [
   { value: "cancelada", label: "Cancelada" },
 ];
 const STATUS_LABEL: Record<string, string> = Object.fromEntries(STATUS.map((s) => [s.value, s.label]));
-const STATUS_INTENT: Record<string, "neutral" | "info" | "success" | "danger"> = {
-  aberta: "info",
-  em_andamento: "neutral",
+// Mesma régua de cor das demais telas da Frota (ver components/frota/rotulos.ts).
+const STATUS_INTENT: Record<string, "neutral" | "info" | "success" | "warning"> = {
+  aberta: "warning",
+  em_andamento: "info",
   concluida: "success",
-  cancelada: "danger",
+  cancelada: "neutral",
 };
+const TIPO_LABEL: Record<string, string> = Object.fromEntries(TIPOS.map((t) => [t.value, t.label]));
 
 interface ManutForm {
   id_veiculo: number | null;
@@ -67,14 +72,6 @@ const EMPTY: ManutForm = {
 function nullify(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
-}
-function fmtData(d: string | null): string {
-  if (!d) return "—";
-  return new Date(`${d}T00:00:00`).toLocaleDateString("pt-BR");
-}
-function fmtMoeda(v: number | null): string {
-  if (v == null) return "—";
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
 export default function ManutencoesPage() {
@@ -110,6 +107,11 @@ export default function ManutencoesPage() {
     () => (manutQ.data ?? []).filter((m) => (tipoFiltro ? m.tipo === tipoFiltro : true)),
     [manutQ.data, tipoFiltro],
   );
+  const temFiltroAtivo = statusFiltro !== "" || tipoFiltro !== "";
+  function limparFiltros() {
+    setStatusFiltro("");
+    setTipoFiltro("");
+  }
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["frota-manutencoes"] });
@@ -234,10 +236,9 @@ export default function ManutencoesPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-3">
-        <div>
-          <Label htmlFor="f_status">Status</Label>
-          <Select id="f_status" value={statusFiltro} onChange={(e) => setStatusFiltro(e.target.value)}>
+      <FilterBar>
+        <FilterBar.Group label="Status">
+          <Select aria-label="Status" value={statusFiltro} onChange={(e) => setStatusFiltro(e.target.value)}>
             <option value="">Todos</option>
             {STATUS.map((s) => (
               <option key={s.value} value={s.value}>
@@ -245,10 +246,9 @@ export default function ManutencoesPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div>
-          <Label htmlFor="f_tipo">Tipo</Label>
-          <Select id="f_tipo" value={tipoFiltro} onChange={(e) => setTipoFiltro(e.target.value)}>
+        </FilterBar.Group>
+        <FilterBar.Group label="Tipo">
+          <Select aria-label="Tipo" value={tipoFiltro} onChange={(e) => setTipoFiltro(e.target.value)}>
             <option value="">Todos</option>
             {TIPOS.map((t) => (
               <option key={t.value} value={t.value}>
@@ -256,10 +256,28 @@ export default function ManutencoesPage() {
               </option>
             ))}
           </Select>
-        </div>
-      </div>
+        </FilterBar.Group>
+        {temFiltroAtivo && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
-      {!manutQ.isLoading && linhas.length === 0 ? (
+      {!manutQ.isLoading && linhas.length === 0 && temFiltroAtivo ? (
+        <EmptyState
+          icon={SearchX}
+          title="Nenhuma manutenção encontrada"
+          description="Nenhuma manutenção corresponde aos filtros aplicados."
+          action={
+            <Button variant="secondary" onClick={limparFiltros}>
+              Limpar filtros
+            </Button>
+          }
+        />
+      ) : !manutQ.isLoading && linhas.length === 0 ? (
         <EmptyState
           icon={Inbox}
           title="Nenhuma manutenção"
@@ -300,64 +318,66 @@ export default function ManutencoesPage() {
               return (
                 <TR key={m.id}>
                   <TD className="font-mono">{placaDe.get(m.id_veiculo) ?? `#${m.id_veiculo}`}</TD>
-                  <TD>{m.tipo === "preventiva" ? "Preventiva" : "Corretiva"}</TD>
-                  <TD className="max-w-[20rem] truncate">{m.descricao}</TD>
+                  <TD>{TIPO_LABEL[m.tipo] ?? m.tipo}</TD>
+                  <TD className="max-w-[20rem] truncate" title={m.descricao}>
+                    {m.descricao}
+                  </TD>
                   <TD className="tabular-nums">{fmtData(m.data_abertura)}</TD>
                   <TD>
                     <Badge intent={STATUS_INTENT[m.status] ?? "neutral"}>
                       {STATUS_LABEL[m.status] ?? m.status}
                     </Badge>
                   </TD>
-                  <TD className="text-right tabular-nums">{fmtMoeda(m.custo_final)}</TD>
+                  <TD className="text-right tabular-nums">
+                    {m.custo_final != null ? fmtMoeda(m.custo_final) : "—"}
+                  </TD>
                   <TD className="text-right">
-                    <div className="inline-flex flex-wrap justify-end gap-2">
-                      {canEdit && aberta && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => actionM.mutate({ id: m.id, acao: "iniciar" })}
-                        >
-                          Iniciar
-                        </Button>
-                      )}
-                      {canEdit && encerravel && (
-                        <Button
-                          size="sm"
-                          onClick={() => {
+                    {/* O próximo passo fica à vista (Iniciar, depois Concluir); o
+                        resto vai para o ⋯. */}
+                    <AcoesDaLinha
+                      acoes={[
+                        {
+                          label: "Iniciar",
+                          icon: Play,
+                          oculta: !(canEdit && aberta),
+                          onClick: () => actionM.mutate({ id: m.id, acao: "iniciar" }),
+                        },
+                        {
+                          label: "Concluir",
+                          icon: CheckCircle2,
+                          oculta: !(canEdit && encerravel),
+                          onClick: () => {
                             setConcluindo(m);
                             setConcForm({ data_conclusao: "", custo_final: "", km_atual: "" });
-                          }}
-                        >
-                          Concluir
-                        </Button>
-                      )}
-                      {canEdit && encerravel && (
-                        <Button variant="secondary" size="sm" onClick={() => openEdit(m)}>
-                          Editar
-                        </Button>
-                      )}
-                      {canEdit && encerravel && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={async () => {
+                          },
+                        },
+                        {
+                          label: "Editar",
+                          icon: Pencil,
+                          oculta: !(canEdit && encerravel),
+                          onClick: () => openEdit(m),
+                        },
+                        {
+                          label: "Cancelar",
+                          icon: Ban,
+                          perigo: true,
+                          oculta: !(canEdit && encerravel),
+                          onClick: async () => {
                             const ok = await confirm({
                               title: "Cancelar manutenção",
                               message: "Cancelar esta manutenção?",
                               confirmLabel: "Cancelar manutenção",
                             });
                             if (ok) actionM.mutate({ id: m.id, acao: "cancelar" });
-                          }}
-                        >
-                          Cancelar
-                        </Button>
-                      )}
-                      {canDelete && (
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          disabled={deleteM.isPending}
-                          onClick={async () => {
+                          },
+                        },
+                        {
+                          label: "Excluir",
+                          icon: Trash2,
+                          perigo: true,
+                          oculta: !canDelete,
+                          disabled: deleteM.isPending,
+                          onClick: async () => {
                             const ok = await confirm({
                               title: "Excluir manutenção",
                               message: "Excluir este registro de manutenção? Esta ação não pode ser desfeita.",
@@ -365,12 +385,10 @@ export default function ManutencoesPage() {
                               intent: "danger",
                             });
                             if (ok) deleteM.mutate(m.id);
-                          }}
-                        >
-                          Excluir
-                        </Button>
-                      )}
-                    </div>
+                          },
+                        },
+                      ]}
+                    />
                   </TD>
                 </TR>
               );

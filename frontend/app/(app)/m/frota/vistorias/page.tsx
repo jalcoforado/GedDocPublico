@@ -1,14 +1,18 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardCheck, Inbox, Plus } from "lucide-react";
+import { ClipboardCheck, Inbox, Pencil, Plus, SearchX, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { fmtData } from "@/components/pagamentos/format";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -82,10 +86,6 @@ const EMPTY: VistForm = {
 function nullify(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
-}
-function fmtData(d: string | null): string {
-  if (!d) return "—";
-  return new Date(`${d}T00:00:00`).toLocaleDateString("pt-BR");
 }
 
 export default function VistoriasPage() {
@@ -207,19 +207,42 @@ export default function VistoriasPage() {
         }
       />
 
-      <div>
-        <Label htmlFor="f_res">Resultado</Label>
-        <Select id="f_res" value={resultadoFiltro} onChange={(e) => setResultadoFiltro(e.target.value)}>
-          <option value="">Todos</option>
-          {RESULTADOS.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
-            </option>
-          ))}
-        </Select>
-      </div>
+      <FilterBar>
+        <FilterBar.Group label="Resultado">
+          <Select
+            aria-label="Resultado"
+            value={resultadoFiltro}
+            onChange={(e) => setResultadoFiltro(e.target.value)}
+          >
+            <option value="">Todos</option>
+            {RESULTADOS.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </Select>
+        </FilterBar.Group>
+        {resultadoFiltro !== "" && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={() => setResultadoFiltro("")}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
-      {!vistQ.isLoading && (vistQ.data?.length ?? 0) === 0 ? (
+      {!vistQ.isLoading && (vistQ.data?.length ?? 0) === 0 && resultadoFiltro !== "" ? (
+        <EmptyState
+          icon={SearchX}
+          title="Nenhuma vistoria encontrada"
+          description="Nenhuma vistoria tem o resultado escolhido."
+          action={
+            <Button variant="secondary" onClick={() => setResultadoFiltro("")}>
+              Limpar filtros
+            </Button>
+          }
+        />
+      ) : !vistQ.isLoading && (vistQ.data?.length ?? 0) === 0 ? (
         <EmptyState
           icon={Inbox}
           title="Nenhuma vistoria"
@@ -269,18 +292,21 @@ export default function VistoriasPage() {
                     {okCount}/{ITENS.length}
                   </TD>
                   <TD className="text-right">
-                    <div className="inline-flex gap-2">
-                      {canEdit && (
-                        <Button variant="secondary" size="sm" onClick={() => openEdit(v)}>
-                          Editar
-                        </Button>
-                      )}
-                      {canDelete && (
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          disabled={deleteM.isPending}
-                          onClick={async () => {
+                    <AcoesDaLinha
+                      acoes={[
+                        {
+                          label: "Editar",
+                          icon: Pencil,
+                          oculta: !canEdit,
+                          onClick: () => openEdit(v),
+                        },
+                        {
+                          label: "Excluir",
+                          icon: Trash2,
+                          perigo: true,
+                          oculta: !canDelete,
+                          disabled: deleteM.isPending,
+                          onClick: async () => {
                             const ok = await confirm({
                               title: "Excluir vistoria",
                               message: "Excluir esta vistoria? Esta ação não pode ser desfeita.",
@@ -288,12 +314,10 @@ export default function VistoriasPage() {
                               intent: "danger",
                             });
                             if (ok) deleteM.mutate(v.id);
-                          }}
-                        >
-                          Excluir
-                        </Button>
-                      )}
-                    </div>
+                          },
+                        },
+                      ]}
+                    />
                   </TD>
                 </TR>
               );
@@ -383,8 +407,8 @@ export default function VistoriasPage() {
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {ITENS.map((i) => (
                 <label key={i.key} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
+                  <Checkbox
+                    className="h-4 w-4"
                     checked={form[i.key as keyof VistForm] as boolean}
                     onChange={(e) => set(i.key as keyof VistForm, e.target.checked as never)}
                   />
