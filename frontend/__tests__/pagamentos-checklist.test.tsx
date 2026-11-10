@@ -8,7 +8,7 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChecklistItemDebito } from "@/lib/api";
 
@@ -114,6 +114,12 @@ beforeEach(() => {
   marcarMock.mockClear();
   validarMock.mockClear();
 });
+
+// A primeira importação do detalhe (muitos módulos) passava dos 5 s do
+// teste em máquina carregada; aquecer aqui tira o custo de dentro dos testes.
+beforeAll(async () => {
+  await import("@/components/pagamentos/DetalheDebitoContent");
+}, 60_000);
 
 describe("conferência de documentos no detalhe do débito", () => {
   it("lista os itens e diz quantos obrigatórios faltam", async () => {

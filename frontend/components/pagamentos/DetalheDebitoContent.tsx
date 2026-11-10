@@ -198,6 +198,8 @@ export function DetalheDebitoContent({ id }: { id: number }) {
 
   // Resposta a um pedido de ajuste específico
   const [respostaPorPedido, setRespostaPorPedido] = useState<Record<number, string>>({});
+  // Pedido em que se clicou "Responder" com a resposta vazia: só então o erro aparece.
+  const [respostaVaziaTentada, setRespostaVaziaTentada] = useState<Record<number, boolean>>({});
 
   // Documentos do débito (F2, Task 8)
   const [anexoArquivo, setAnexoArquivo] = useState<File | null>(null);
@@ -1126,25 +1128,40 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                       )}
                       {podeResponder && (
                         <div className="mt-3 space-y-2">
-                          <Textarea
-                            value={respostaPorPedido[p.id] ?? ""}
-                            onChange={(e) =>
-                              setRespostaPorPedido((r) => ({ ...r, [p.id]: e.target.value }))
+                          <FormField
+                            label="Sua resposta"
+                            required
+                            error={
+                              respostaVaziaTentada[p.id] && !(respostaPorPedido[p.id] ?? "").trim()
+                                ? "Escreva o que foi corrigido antes de responder."
+                                : undefined
                             }
-                            placeholder="Escreva a resposta ao pedido de ajuste..."
-                            className="min-h-20"
-                          />
+                            hint="Diga o que foi corrigido. Documentos novos vão na seção Documentos."
+                          >
+                            <Textarea
+                              id={`resposta-pedido-${p.id}`}
+                              value={respostaPorPedido[p.id] ?? ""}
+                              onChange={(e) =>
+                                setRespostaPorPedido((r) => ({ ...r, [p.id]: e.target.value }))
+                              }
+                              placeholder="Ex.: Valor corrigido para R$ 1.200,00, conforme a NF 4587."
+                              className="min-h-20"
+                            />
+                          </FormField>
                           <Button
                             size="sm"
-                            onClick={() =>
+                            onClick={() => {
+                              if (!(respostaPorPedido[p.id] ?? "").trim()) {
+                                setRespostaVaziaTentada((t) => ({ ...t, [p.id]: true }));
+                                document.getElementById(`resposta-pedido-${p.id}`)?.focus();
+                                return;
+                              }
                               responderPedidoM.mutate({
                                 pedidoId: p.id,
                                 resposta: respostaPorPedido[p.id] ?? "",
-                              })
-                            }
-                            disabled={
-                              !(respostaPorPedido[p.id] ?? "").trim() || responderPedidoM.isPending
-                            }
+                              });
+                            }}
+                            loading={responderPedidoM.isPending}
                           >
                             Responder pedido
                           </Button>
