@@ -85,6 +85,8 @@ interface RichTextEditorProps {
   minHeight?: number;
   className?: string;
   ariaLabel?: string;
+  /** Id da área editável — âncora para rolar/focar o editor (roteiro, erro). */
+  id?: string;
   /** Sem isso, "inserir imagem" pede uma URL em vez de fazer upload. */
   onUploadImage?: (file: File) => Promise<string>;
 }
@@ -96,6 +98,7 @@ export function RichTextEditor({
   minHeight = 180,
   className,
   ariaLabel,
+  id,
   onUploadImage,
 }: RichTextEditorProps) {
   const [uploading, setUploading] = useState(false);
@@ -132,6 +135,10 @@ export function RichTextEditor({
         ),
         role: "textbox",
         "aria-multiline": "true",
+        // `<label for>` não nomeia div editável (não é controle "rotulável"):
+        // o nome segue no aria-label; o id serve de âncora para o roteiro do
+        // formulário rolar e focar o editor.
+        ...(id ? { id } : {}),
         "aria-label": ariaLabel ?? "Editor de texto",
         style: `min-height:${minHeight}px`,
       },
