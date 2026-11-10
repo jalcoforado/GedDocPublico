@@ -167,7 +167,7 @@ export function TabelaCaixaProcessos({ itens, carregando, selecao, colunaOrdenav
                   <FavoritoStar processo={p} size="sm" />
                   <Link
                     href={href}
-                    className="rounded text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="rounded text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {p.nup ?? p.numero_processo ?? "Rascunho"}
                   </Link>

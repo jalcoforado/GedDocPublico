@@ -112,7 +112,7 @@ export function ParadosHaMaisTempo({ intervalo }: { intervalo: number }) {
                   <TD className="font-mono text-xs tabular-nums">
                     <Link
                       href={`/m/protocolo/processos/${p.id}`}
-                      className="font-medium text-foreground underline underline-offset-2 hover:no-underline"
+                      className="font-medium text-primary underline-offset-2 hover:underline"
                     >
                       {p.nup ?? p.numero_processo}
                     </Link>
