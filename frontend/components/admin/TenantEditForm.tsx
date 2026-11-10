@@ -5,13 +5,13 @@ import { Carregando } from "@/components/ui/carregando";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { PLANO_LABEL, PLANOS } from "@/components/admin/TenantsAdmin";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
-
-const PLANOS = ["basico", "profissional", "enterprise"];
 
 export function TenantEditForm({ tenantId }: { tenantId: number }) {
   const qc = useQueryClient();
@@ -48,21 +48,19 @@ export function TenantEditForm({ tenantId }: { tenantId: number }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-tenant", tenantId] });
       qc.invalidateQueries({ queryKey: ["admin-tenants"] });
-      toast.success("Tenant atualizado.");
+      toast.success("Prefeitura atualizada.");
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (q.isLoading) return <Carregando className="text-sm text-muted-foreground" />;
-  if (!q.data) return <p className="text-sm text-muted-foreground">Tenant não encontrado.</p>;
+  if (q.isLoading) return <Carregando className="text-sm text-foreground-muted" />;
+  if (!q.data) return <p className="text-sm text-foreground-muted">Prefeitura não encontrada.</p>;
 
   return (
     <form
       onSubmit={(e) => { e.preventDefault(); m.mutate(); }}
       className="max-w-2xl space-y-4"
     >
-      <h1 className="text-xl font-bold text-foreground">Editar prefeitura</h1>
-
       <div>
         <Label>Slug (subdomínio — imutável)</Label>
         {/* Slug NÃO é editável: identifica o subdomínio / URLs públicas. */}
@@ -74,16 +72,16 @@ export function TenantEditForm({ tenantId }: { tenantId: number }) {
         <div><Label>CNPJ</Label><Input value={form.cnpj} onChange={set("cnpj")} /></div>
         <div>
           <Label>Plano</Label>
-          <select value={form.plano} onChange={set("plano")} className="h-11 w-full rounded-md border border-input bg-card px-3 text-sm">
-            {PLANOS.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
+          <Select value={form.plano} onChange={set("plano")}>
+            {PLANOS.map((p) => <option key={p} value={p}>{PLANO_LABEL[p] ?? p}</option>)}
+          </Select>
         </div>
-        <div><Label>Cor primária</Label><Input value={form.cor_primaria} onChange={set("cor_primaria")} placeholder="#0055aa" /></div>
+        <div><Label>Cor primária</Label><Input value={form.cor_primaria} onChange={set("cor_primaria")} placeholder="Código hexadecimal, com #" /></div>
         <div><Label>Limite de usuários</Label><Input value={form.limite_usuarios} onChange={set("limite_usuarios")} type="number" /></div>
         <div><Label>Limite de armazenamento (MB)</Label><Input value={form.limite_armazenamento_mb} onChange={set("limite_armazenamento_mb")} type="number" /></div>
       </div>
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-foreground-muted">
         Módulos do plano: {q.data.modulos.join(", ") || "—"}
       </p>
 
