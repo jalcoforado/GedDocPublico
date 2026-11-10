@@ -49,6 +49,7 @@ import {
   type ApiError,
   type DashboardKpis,
 } from "@/lib/api";
+import { GRAFICO, SERIES } from "@/lib/chart-theme";
 import { cn } from "@/lib/utils";
 
 const PERIODOS = [
@@ -58,7 +59,7 @@ const PERIODOS = [
   { value: 365, label: "1 ano" },
 ];
 
-const PIE_COLORS = ["#2563eb", "#16a34a", "#f59e0b", "#a855f7", "#ef4444"];
+const PIE_COLORS = SERIES;
 
 function fmtNum(n: number | null | undefined, decimals = 0): string {
   if (n === null || n === undefined) return "—";
@@ -527,14 +528,14 @@ export default function DashboardPage() {
                   }))}
                   margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRAFICO.grade} />
                   <XAxis dataKey="dia" tick={{ fontSize: 11 }} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                   <Tooltip />
                   <Line
                     type="monotone"
                     dataKey="count"
-                    stroke="hsl(213 53% 25%)"
+                    stroke={GRAFICO.principal}
                     strokeWidth={2}
                     dot={{ r: 3 }}
                   />
@@ -604,7 +605,7 @@ export default function DashboardPage() {
                     layout="vertical"
                     margin={{ top: 5, right: 20, left: 80, bottom: 5 }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRAFICO.grade} />
                     <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
                     <YAxis
                       dataKey="label"
@@ -613,7 +614,7 @@ export default function DashboardPage() {
                       tick={{ fontSize: 11 }}
                     />
                     <Tooltip />
-                    <Bar dataKey="count" fill="hsl(213 53% 25%)" />
+                    <Bar dataKey="count" fill={GRAFICO.principal} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -641,7 +642,7 @@ export default function DashboardPage() {
                   layout="vertical"
                   margin={{ top: 5, right: 20, left: 80, bottom: 5 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRAFICO.grade} />
                   <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
                   <YAxis
                     dataKey="label"
@@ -650,7 +651,7 @@ export default function DashboardPage() {
                     tick={{ fontSize: 11 }}
                   />
                   <Tooltip />
-                  <Bar dataKey="count" fill="#16a34a" />
+                  <Bar dataKey="count" fill={GRAFICO.secundaria} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

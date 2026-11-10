@@ -138,7 +138,7 @@ describe("CrudPage — paginação", () => {
     fireEvent.click(btnProxima());
     await screen.findByText("Charlie");
 
-    fireEvent.change(screen.getByPlaceholderText("Buscar..."), {
+    fireEvent.change(screen.getByPlaceholderText(/^Buscar em /), {
       target: { value: "alf" },
     });
 
@@ -279,7 +279,7 @@ function renderComBusca(fetchList: ReturnType<typeof fetchComBusca>) {
  * tecla, termos intermediários nunca buscados) e de tempo mínimo decorrido.
  */
 describe("CrudPage — debounce da busca", () => {
-  const input = () => screen.getByPlaceholderText("Buscar...");
+  const input = () => screen.getByPlaceholderText(/^Buscar em /);
 
   it("teclas rápidas coalescem em UM fetch com o termo final, só após o atraso", async () => {
     const fetchList = fetchComBusca();

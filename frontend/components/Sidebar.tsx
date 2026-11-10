@@ -316,7 +316,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         {/* A marca do município mora no cabeçalho, que passa por cima da
             barra (2026-11-06). Aqui ela só aparece na GAVETA do celular, que
             cobre o cabeçalho — num cartão claro, porque a marca de prefeitura
-            tem texto escuro e a barra é verde. */}
+            tem texto escuro e a barra é marinho. */}
         <div className="flex items-center justify-between gap-2 border-b border-sidebar-border px-4 py-3 md:hidden">
           <Link
             href="/home"
@@ -354,8 +354,16 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
           </div>
         )}
 
-        {/* Items */}
-        <div className={cn("flex flex-1 flex-col gap-5 overflow-y-auto px-4 py-4", colapsada && "md:gap-2 md:px-2")}>
+        {/* Items. A máscara esmaece 12px nas pontas: rolada, a lista some aos
+            poucos sob a ação principal em vez de ser cortada a meio rótulo. Em
+            repouso não toca em nada — o py-4 (16px) é maior que o esmaecimento. */}
+        <div
+          className={cn(
+            "flex flex-1 flex-col gap-5 overflow-y-auto px-4 py-4",
+            "[mask-image:linear-gradient(to_bottom,transparent,black_12px,black_calc(100%-12px),transparent)]",
+            colapsada && "md:gap-2 md:px-2",
+          )}
+        >
           {NAV.map((group) => {
             const visible = group.items
               .filter((item) => canSeeItem(item, can))

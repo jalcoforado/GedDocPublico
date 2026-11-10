@@ -36,14 +36,14 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { api, type ComposicaoItem } from "@/lib/api";
 import { PAGAMENTO_ROTULO, TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
+import { GRAFICO } from "@/lib/chart-theme";
 import { cn } from "@/lib/utils";
 
-// Dataviz: entradas/saídas seguem o mesmo semântico usado no caixa
-// (verde/vermelho); a hue única das barras horizontais é o azul
-// institucional (#2563eb) — validado via validate_palette.js (ver report).
-const COR_ENTRADAS = "#16a34a";
-const COR_SAIDAS = "#dc2626";
-const COR_BRAND = "#2563eb";
+// Dataviz: cores vêm de `lib/chart-theme` (tokens; trocam no tema escuro).
+// Entradas/saídas seguem o semântico do caixa (positivo/negativo).
+const COR_ENTRADAS = GRAFICO.positivo;
+const COR_SAIDAS = GRAFICO.negativo;
+const COR_BRAND = GRAFICO.principal;
 
 const PERIODOS = [
   { value: 6, label: "6 meses" },

@@ -80,6 +80,36 @@ a partir de um degrau de rampa.
 - **Density**: uma só, a confortável — `--density-*` é a régua de espaço
   (main, cards, linhas de tabela, inputs). O modo compacto saiu em 2026-11-06.
 
+## Padrão de tela (desde 2026-11-10)
+
+Toda tela interna segue o mesmo esqueleto. Quem abre uma tela nova copia
+daqui; quem acha uma tela fora dele, conserta.
+
+1. **Cabeçalho = `PageHeader`**, sempre com `icon` (o mesmo do menu/hub),
+   `title` em português de gente e `description` de uma frase. Nada de `<h1>`
+   solto, nem título laranja: o título é `text-titulo` (o laranja fica na
+   trilha e nas ações). Botões da tela vão em `actions`.
+2. **Ação de criar** = `Button` primário com `<Plus />` e o nome da coisa, no
+   gênero certo: "Nova cidade", "Novo fornecedor" — nunca "Novo" seco.
+   Cadastro feito com `CrudPage` passa `icon`, `description` e `novoLabel`.
+3. **Ações da linha = `AcoesDaLinha`** (`components/ui/acoes-da-linha.tsx`):
+   até 2 botões discretos à vista, o resto no ⋯ "Mais ações", a destrutiva
+   (`perigo`) sempre por último e em `danger-outline` — vermelho cheio só no
+   botão que CONFIRMA, dentro do diálogo. A coluna nunca quebra em duas linhas.
+4. **Números = `KpiCard`** (rótulo, valor, ícone, `intent`). Sem caixa crua
+   com número, sem número centralizado colorido, sem enfeite de bolinha.
+5. **Filtros = `FilterBar`** acima da tabela, com "Limpar" quando há filtro.
+6. **Vazio = `EmptyState`** com ícone, uma frase do que é e, se couber, a
+   ação de criar. Texto solto ("Nenhum registro") não.
+7. **Valores formatados**: dinheiro `R$ 1.234,56`, data `dd/mm/aaaa`,
+   enum por rótulo ("Transporte escolar", não `transporte_escolar`).
+8. **Status = `Badge`** com `intent` semântico (success/warning/danger/info/
+   neutral). A mesma situação tem a mesma cor em todas as telas.
+9. **Links dentro de tabela** (número do processo, placa) em `text-primary`
+   com sublinhado no hover — não azul, não vermelho.
+10. **Gráfico** pega cor de `lib/chart-theme.ts` (`SERIES`, `GRAFICO`), nunca
+    hex. O tema escuro vem de graça.
+
 ## Do / Don't
 
 | ✔ Do | ✘ Don't |

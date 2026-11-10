@@ -1,15 +1,17 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox } from "lucide-react";
+import { Inbox, Pencil, Plus, Search, Trash2, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -148,6 +150,15 @@ export interface CrudColumn<T> {
 
 interface CrudPageProps<T extends { id: number }> {
   title: string;
+  /** Uma frase sobre o que é o cadastro — o PageHeader de toda tela tem. */
+  description?: React.ReactNode;
+  /** Ícone do cadastro (o mesmo do menu/hub, para a tela ser reconhecível). */
+  icon?: LucideIcon;
+  /**
+   * Rótulo do botão de criar, com o nome da coisa e o gênero certo
+   * ("Nova cidade", "Novo fornecedor"). Também titula o diálogo. Padrão: "Novo".
+   */
+  novoLabel?: string;
   queryKey: any[];
   /**
    * Função que retorna `{items, total, page, page_size}` ou `T[]` direto.
@@ -175,6 +186,9 @@ interface CrudPageProps<T extends { id: number }> {
 
 export function CrudPage<T extends { id: number }>({
   title,
+  description,
+  icon,
+  novoLabel = "Novo",
   queryKey,
   fetchList,
   createFn,
@@ -327,22 +341,37 @@ export function CrudPage<T extends { id: number }>({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-aprimora">{title}</h1>
-        <Button onClick={openNew}>Novo</Button>
-      </div>
+      <PageHeader
+        title={title}
+        description={description}
+        icon={icon}
+        actions={
+          <Button onClick={openNew}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            {novoLabel}
+          </Button>
+        }
+      />
 
-      <div className="flex flex-wrap items-center gap-2">
-        {searchable && (
-          <Input
-            placeholder="Buscar..."
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            className="max-w-sm"
-          />
-        )}
-        {toolbar}
-      </div>
+      {(searchable || toolbar) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {searchable && (
+            <div className="relative w-full max-w-sm">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground-subtle"
+                aria-hidden="true"
+              />
+              <Input
+                placeholder={`Buscar em ${title.toLowerCase()}…`}
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          )}
+          {toolbar}
+        </div>
+      )}
 
       <Table>
         <THead>
@@ -366,7 +395,7 @@ export function CrudPage<T extends { id: number }>({
                 <EmptyState
                   icon={Inbox}
                   title={`Nenhum registro em ${title.toLowerCase()}`}
-                  description="Clique em Novo para criar o primeiro."
+                  description={`Use “${novoLabel}” para cadastrar o primeiro.`}
                   className="border-0 bg-transparent"
                 />
               </TD>
@@ -380,31 +409,26 @@ export function CrudPage<T extends { id: number }>({
                 </TD>
               ))}
               <TD className="text-right">
-                <div className="inline-flex gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => openEdit(row)}
-                  >
-                    Editar
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={async () => {
-                      const ok = await confirm({
-                        title: "Excluir registro",
-                        message:
-                          "Esta ação não pode ser desfeita. Deseja realmente excluir este registro?",
-                        confirmLabel: "Excluir",
-                        intent: "danger",
-                      });
-                      if (ok) deleteM.mutate(row.id);
-                    }}
-                  >
-                    Excluir
-                  </Button>
-                </div>
+                <AcoesDaLinha
+                  acoes={[
+                    { label: "Editar", icon: Pencil, onClick: () => openEdit(row) },
+                    {
+                      label: "Excluir",
+                      icon: Trash2,
+                      perigo: true,
+                      onClick: async () => {
+                        const ok = await confirm({
+                          title: "Excluir registro",
+                          message:
+                            "Esta ação não pode ser desfeita. Deseja realmente excluir este registro?",
+                          confirmLabel: "Excluir",
+                          intent: "danger",
+                        });
+                        if (ok) deleteM.mutate(row.id);
+                      },
+                    },
+                  ]}
+                />
               </TD>
             </TR>
           ))}
@@ -440,7 +464,7 @@ export function CrudPage<T extends { id: number }>({
       <Dialog
         open={open}
         onClose={close}
-        title={editing ? "Editar" : "Novo"}
+        title={editing ? "Editar" : novoLabel}
         size={dialogSize}
         footer={
           <>
@@ -496,7 +520,7 @@ export function CrudPage<T extends { id: number }>({
                     type="checkbox"
                     checked={!!form[f.name]}
                     onChange={(e) => mudar(f.name, e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300"
+                    className="h-4 w-4 rounded border-border-strong accent-[hsl(var(--brand))]"
                   />
                   {f.textoAoLado && (
                     <label htmlFor={f.name} className="text-sm text-foreground">
