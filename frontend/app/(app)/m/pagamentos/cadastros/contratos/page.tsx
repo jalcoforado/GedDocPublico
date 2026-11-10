@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, FileText } from "lucide-react";
 
-import { CrudPage, type FieldType } from "@/components/CrudPage";
+import { CrudPage } from "@/components/CrudPage";
 import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
 import { CATEGORIA_CONTRATO_LABEL, api, type Contrato } from "@/lib/api";
 
@@ -11,12 +11,6 @@ const OPCOES_CATEGORIA = Object.entries(CATEGORIA_CONTRATO_LABEL).map(([value, l
   value,
   label,
 }));
-
-// O CrudPage ainda não tem o tipo "date" em `FieldType`, mas repassa o
-// `type` direto ao `<input>`: o seletor de data do navegador entra e o valor
-// continua "aaaa-mm-dd", o mesmo que o texto livre de antes mandava. Quando o
-// tipo existir no CrudPage, tirar esta conversão.
-const CAMPO_DATA = "date" as FieldType;
 
 export default function ContratosPage() {
   const fornecedoresQ = useQuery({
@@ -130,8 +124,8 @@ export default function ContratosPage() {
           colSpan: 2,
           placeholder: "Ex.: Fornecimento de gêneros alimentícios para a merenda escolar",
         },
-        { name: "vigencia_inicio", label: "Início da vigência", type: CAMPO_DATA, required: true },
-        { name: "vigencia_fim", label: "Fim da vigência", type: CAMPO_DATA, required: true },
+        { name: "vigencia_inicio", label: "Início da vigência", type: "date", required: true },
+        { name: "vigencia_fim", label: "Fim da vigência", type: "date", required: true },
         {
           name: "valor_total",
           label: "Valor total",
