@@ -1,11 +1,30 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Car, ClipboardList, FileText, Gauge, Inbox, MapPin, Plus } from "lucide-react";
+import {
+  Ban,
+  Car,
+  ClipboardList,
+  Eraser,
+  FileText,
+  Gauge,
+  Inbox,
+  LogIn,
+  LogOut,
+  MapPin,
+  Pencil,
+  Plus,
+  ThumbsDown,
+  ThumbsUp,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 
+import { fmtDataHora } from "@/components/frota/rotulos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -35,12 +54,14 @@ const STATUS_LABEL: Record<SolicitacaoStatus, string> = {
   em_uso: "Em uso",
   concluida: "Concluída",
 };
-const STATUS_INTENT: Record<SolicitacaoStatus, "neutral" | "success" | "danger" | "warning"> = {
+// Mesma régua de cor das demais telas da Frota (ver components/frota/rotulos.ts):
+// aguardando decisão = warning; aprovada e em uso estão andando = info.
+const STATUS_INTENT: Record<SolicitacaoStatus, "neutral" | "success" | "danger" | "warning" | "info"> = {
   solicitada: "warning",
-  aprovada: "success",
+  aprovada: "info",
   rejeitada: "danger",
   cancelada: "neutral",
-  em_uso: "warning",
+  em_uso: "info",
   concluida: "success",
 };
 
@@ -93,12 +114,6 @@ const RETORNO_EMPTY: RetornoForm = { km_retorno: "", observacoes_retorno: "" };
 function nullify(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
-}
-
-function fmt(dt: string): string {
-  if (!dt) return "—";
-  const d = new Date(dt);
-  return isNaN(d.getTime()) ? dt : d.toLocaleString("pt-BR");
 }
 
 export default function SolicitacoesPage() {
@@ -412,7 +427,7 @@ export default function SolicitacoesPage() {
     <div className="space-y-4">
       <PageHeader
         icon={ClipboardList}
-        title="Solicitações de Veículo"
+        title="Solicitações de veículo"
         description="Pedidos de uso de veículo da frota, com finalidade, destino e datas previstas."
         breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Solicitações" }]}
         actions={
@@ -469,10 +484,17 @@ export default function SolicitacoesPage() {
               const isEmUso = s.status === "em_uso";
               return (
                 <TR key={s.id}>
-                  <TD className="font-medium">{s.finalidade}</TD>
-                  <TD className="text-muted-foreground">{s.destino}</TD>
-                  <TD className="tabular-nums">{fmt(s.data_saida_prevista)}</TD>
-                  <TD className="tabular-nums">{fmt(s.data_retorno_prevista)}</TD>
+                  {/* Finalidade e destino são texto livre: cortados numa linha,
+                      com o texto inteiro no title. Quebrando, cada linha virava
+                      um bloco de cinco linhas. */}
+                  <TD className="max-w-[16rem] truncate font-medium" title={s.finalidade}>
+                    {s.finalidade}
+                  </TD>
+                  <TD className="max-w-[12rem] truncate text-muted-foreground" title={s.destino}>
+                    {s.destino}
+                  </TD>
+                  <TD className="whitespace-nowrap tabular-nums">{fmtDataHora(s.data_saida_prevista)}</TD>
+                  <TD className="whitespace-nowrap tabular-nums">{fmtDataHora(s.data_retorno_prevista)}</TD>
                   <TD className="text-right tabular-nums">{s.quantidade_passageiros}</TD>
                   <TD className="text-muted-foreground">{unidadeNome(s.id_unidade_solicitante)}</TD>
                   <TD>
@@ -497,7 +519,7 @@ export default function SolicitacoesPage() {
                         {s.data_saida_real && (
                           <div>
                             <span className="text-muted-foreground">Saída: </span>
-                            {fmt(s.data_saida_real)}
+                            {fmtDataHora(s.data_saida_real)}
                             {s.km_saida != null && (
                               <span className="text-muted-foreground"> · {s.km_saida} km</span>
                             )}
@@ -506,7 +528,7 @@ export default function SolicitacoesPage() {
                         {s.data_retorno_real && (
                           <div>
                             <span className="text-muted-foreground">Retorno: </span>
-                            {fmt(s.data_retorno_real)}
+                            {fmtDataHora(s.data_retorno_real)}
                             {s.km_retorno != null && (
                               <span className="text-muted-foreground"> · {s.km_retorno} km</span>
                             )}
@@ -521,87 +543,86 @@ export default function SolicitacoesPage() {
                     <Badge intent={STATUS_INTENT[s.status]}>{STATUS_LABEL[s.status]}</Badge>
                   </TD>
                   <TD className="text-right">
-                    <div className="inline-flex flex-wrap justify-end gap-2">
-                      {canEdit && isSolicitada && (
-                        <Button variant="secondary" size="sm" onClick={() => openEdit(s)}>
-                          Editar
-                        </Button>
-                      )}
-                      {canEdit && isSolicitada && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={aprovarM.isPending}
-                          onClick={() => aprovarM.mutate(s.id)}
-                        >
-                          Aprovar
-                        </Button>
-                      )}
-                      {canEdit && isSolicitada && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={rejeitarM.isPending}
-                          onClick={() => onRejeitar(s)}
-                        >
-                          Rejeitar
-                        </Button>
-                      )}
-                      {canEdit && isAprovada && (
-                        <Button variant="secondary" size="sm" onClick={() => openDesignar(s)}>
-                          Designar
-                        </Button>
-                      )}
-                      {canEdit && isAprovada && s.id_veiculo_designado && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={limparDesignacaoM.isPending}
-                          onClick={async () => {
+                    {/* Só o próximo passo do fluxo fica à vista (Aprovar →
+                        Designar → Registrar saída → Registrar retorno); o resto
+                        vai para o ⋯. Antes eram até cinco botões empilhados. */}
+                    <AcoesDaLinha
+                      visiveis={1}
+                      acoes={[
+                        {
+                          label: "Aprovar",
+                          icon: ThumbsUp,
+                          oculta: !(canEdit && isSolicitada),
+                          disabled: aprovarM.isPending,
+                          onClick: () => aprovarM.mutate(s.id),
+                        },
+                        {
+                          label: "Registrar saída",
+                          icon: LogOut,
+                          oculta: !(canEdit && isAprovada && s.id_veiculo_designado),
+                          onClick: () => openSaida(s),
+                        },
+                        {
+                          label: s.id_veiculo_designado ? "Trocar designação" : "Designar",
+                          icon: Car,
+                          oculta: !(canEdit && isAprovada),
+                          onClick: () => openDesignar(s),
+                        },
+                        {
+                          label: "Registrar retorno",
+                          icon: LogIn,
+                          oculta: !(canEdit && isEmUso),
+                          onClick: () => openRetorno(s),
+                        },
+                        {
+                          label: "Rejeitar",
+                          icon: ThumbsDown,
+                          oculta: !(canEdit && isSolicitada),
+                          disabled: rejeitarM.isPending,
+                          onClick: () => onRejeitar(s),
+                        },
+                        {
+                          label: "Editar",
+                          icon: Pencil,
+                          oculta: !(canEdit && isSolicitada),
+                          onClick: () => openEdit(s),
+                        },
+                        {
+                          label: "Limpar designação",
+                          icon: Eraser,
+                          oculta: !(canEdit && isAprovada && s.id_veiculo_designado),
+                          disabled: limparDesignacaoM.isPending,
+                          onClick: async () => {
                             const ok = await confirm({
                               title: "Limpar designação",
                               message: "Remover o veículo/motorista designados desta solicitação?",
                               confirmLabel: "Limpar",
                             });
                             if (ok) limparDesignacaoM.mutate(s.id);
-                          }}
-                        >
-                          Limpar designação
-                        </Button>
-                      )}
-                      {canEdit && isAprovada && s.id_veiculo_designado && (
-                        <Button variant="secondary" size="sm" onClick={() => openSaida(s)}>
-                          Registrar saída
-                        </Button>
-                      )}
-                      {canEdit && isEmUso && (
-                        <Button variant="secondary" size="sm" onClick={() => openRetorno(s)}>
-                          Registrar retorno
-                        </Button>
-                      )}
-                      {canEdit && (isSolicitada || isAprovada) && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={cancelarM.isPending}
-                          onClick={async () => {
+                          },
+                        },
+                        {
+                          label: "Cancelar",
+                          icon: Ban,
+                          perigo: true,
+                          oculta: !(canEdit && (isSolicitada || isAprovada)),
+                          disabled: cancelarM.isPending,
+                          onClick: async () => {
                             const ok = await confirm({
                               title: "Cancelar solicitação",
                               message: `Cancelar a solicitação "${s.finalidade}"?`,
                               confirmLabel: "Cancelar solicitação",
                             });
                             if (ok) cancelarM.mutate(s.id);
-                          }}
-                        >
-                          Cancelar
-                        </Button>
-                      )}
-                      {canDelete && (
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          disabled={deleteM.isPending}
-                          onClick={async () => {
+                          },
+                        },
+                        {
+                          label: "Excluir",
+                          icon: Trash2,
+                          perigo: true,
+                          oculta: !canDelete,
+                          disabled: deleteM.isPending,
+                          onClick: async () => {
                             const ok = await confirm({
                               title: "Excluir solicitação",
                               message: "Esta ação não pode ser desfeita. Excluir a solicitação?",
@@ -609,12 +630,10 @@ export default function SolicitacoesPage() {
                               intent: "danger",
                             });
                             if (ok) deleteM.mutate(s.id);
-                          }}
-                        >
-                          Excluir
-                        </Button>
-                      )}
-                    </div>
+                          },
+                        },
+                      ]}
+                    />
                   </TD>
                 </TR>
               );
@@ -725,12 +744,11 @@ export default function SolicitacoesPage() {
                 />
               </div>
               <div className="flex items-center gap-2 sm:col-span-2">
-                <input
+                <Checkbox
                   id="necessita_motorista"
-                  type="checkbox"
                   checked={form.necessita_motorista}
                   onChange={(e) => set("necessita_motorista", e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300"
+                  className="h-4 w-4"
                 />
                 <Label htmlFor="necessita_motorista" className="!mb-0">
                   Necessita motorista
