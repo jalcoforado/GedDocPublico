@@ -2,12 +2,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Banknote, ChevronDown, ChevronRight, FileText, Paperclip, Send, Upload, XCircle,
+  Banknote, ChevronDown, ChevronRight, FileText, Paperclip, Send, Trash2, Upload, XCircle,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { fmtData, fmtDataHora, fmtMoeda } from "@/components/pagamentos/format";
 import { RitoPagamento } from "@/components/pagamentos/RitoPagamento";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -194,11 +195,11 @@ function TabSelecionar({ onLoteCriado }: { onLoteCriado: () => void }) {
                   {p.nome_fornecedor ?? `Débito #${p.id_debito}`} · parcela {p.numero}
                 </p>
                 {p.descricao_debito && (
-                  <p className="truncate text-xs text-muted-foreground">
+                  <p className="truncate text-xs text-foreground-muted">
                     Solicitação #{p.id_debito} — {p.descricao_debito}
                   </p>
                 )}
-                <p className="truncate text-xs text-muted-foreground">
+                <p className="truncate text-xs text-foreground-muted">
                   vencimento {fmtData(p.vencimento)}
                   {p.data_prevista_pagamento && <> · previsto {fmtData(p.data_prevista_pagamento)}</>}
                 </p>
@@ -260,13 +261,13 @@ function TabLotes() {
             aria-expanded={expandido === lote.id}
           >
             {expandido === lote.id ? (
-              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <ChevronDown className="h-4 w-4 shrink-0 text-foreground-muted" aria-hidden="true" />
             ) : (
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <ChevronRight className="h-4 w-4 shrink-0 text-foreground-muted" aria-hidden="true" />
             )}
             <span className="min-w-0 flex-1">
               <span className="font-semibold text-foreground">{lote.numero}</span>{" "}
-              <span className="text-xs text-muted-foreground">criado em {fmtDataHora(lote.criado_em)}</span>
+              <span className="text-xs text-foreground-muted">criado em {fmtDataHora(lote.criado_em)}</span>
             </span>
             <Badge intent={SITUACAO_LOTE_INTENT[lote.situacao]}>{SITUACAO_LOTE_ROTULO[lote.situacao]}</Badge>
             <span className="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums text-foreground">
@@ -377,7 +378,7 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
                   >
                     {p.situacao}
                   </Badge>
-                  {p.motivo_falha && <p className="text-xs text-muted-foreground">{p.motivo_falha}</p>}
+                  {p.motivo_falha && <p className="text-xs text-foreground-muted">{p.motivo_falha}</p>}
                 </TD>
                 {lote.situacao === "ENVIADO" && (
                   <TD>
@@ -412,19 +413,23 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
                         )}
                       </div>
                     ) : (
-                      <span className="text-xs text-muted-foreground">já resolvida</span>
+                      <span className="text-xs text-foreground-muted">já resolvida</span>
                     )}
                   </TD>
                 )}
                 {lote.situacao === "RASCUNHO" && (
                   <TD className="text-right">
-                    <Button
-                      variant="ghost" size="sm"
-                      onClick={() => removerParcelaM.mutate(p.id_parcela)}
-                      disabled={removerParcelaM.isPending}
-                    >
-                      Remover
-                    </Button>
+                    <AcoesDaLinha
+                      acoes={[
+                        {
+                          label: "Remover",
+                          icon: Trash2,
+                          perigo: true,
+                          onClick: () => removerParcelaM.mutate(p.id_parcela),
+                          disabled: removerParcelaM.isPending,
+                        },
+                      ]}
+                    />
                   </TD>
                 )}
               </TR>
@@ -441,7 +446,7 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
           <Button onClick={() => programarM.mutate()} disabled={!dataProgramada || programarM.isPending}>
             Programar
           </Button>
-          <Button variant="danger" onClick={() => cancelarM.mutate()} disabled={cancelarM.isPending}>
+          <Button variant="danger-outline" onClick={() => cancelarM.mutate()} disabled={cancelarM.isPending}>
             <XCircle className="mr-1 h-4 w-4" aria-hidden="true" />
             Cancelar lote
           </Button>
@@ -454,7 +459,7 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
             <Send className="mr-1 h-4 w-4" aria-hidden="true" />
             {enviarM.isPending ? "Enviando…" : "Enviar ao banco"}
           </Button>
-          <Button variant="danger" onClick={() => cancelarM.mutate()} disabled={cancelarM.isPending}>
+          <Button variant="danger-outline" onClick={() => cancelarM.mutate()} disabled={cancelarM.isPending}>
             <XCircle className="mr-1 h-4 w-4" aria-hidden="true" />
             Cancelar lote
           </Button>
@@ -582,7 +587,7 @@ function TabOps() {
         </TBody>
       </Table>
       {ordens.length > MAX_ORDENS && (
-        <p className="px-4 py-2 text-xs text-muted-foreground">
+        <p className="px-4 py-2 text-xs text-foreground-muted">
           + {ordens.length - MAX_ORDENS} anteriores
         </p>
       )}

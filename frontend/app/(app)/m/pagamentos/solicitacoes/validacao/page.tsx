@@ -25,8 +25,8 @@ const SECOES: SecaoDaFila[] = [
 export default function ValidacaoPage() {
   return (
     <FilaPorEtapa
-      titulo="Fila de Validação"
-      descricao="Solicitações aguardando validação financeira"
+      titulo="Fila de validação"
+      descricao="Solicitações que esperam a conferência da unidade financeira."
       icon={ShieldCheck}
       secoes={SECOES}
       vazio={{

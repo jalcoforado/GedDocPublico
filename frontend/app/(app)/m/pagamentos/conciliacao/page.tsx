@@ -11,6 +11,7 @@ import {
   Landmark,
   Link2,
   ListChecks,
+  X,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
@@ -21,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -242,7 +244,7 @@ export default function ConciliacaoPage() {
         icon={Landmark}
         breadcrumbs={[{ label: "Pagamentos", href: "/m/pagamentos" }, { label: "Conciliação" }]}
         title="Conciliação bancária"
-        description="Importe o extrato da conta e case cada lançamento com o pagamento correspondente. Quando todas as movimentações de um débito pago ficam conciliadas, ele passa a CONCILIADO automaticamente."
+        description="Importe o extrato da conta e case cada lançamento com o pagamento; o débito com tudo casado fica conciliado sozinho."
         actions={
           <Button
             onClick={() => {
@@ -258,14 +260,11 @@ export default function ConciliacaoPage() {
         }
       />
 
-      <SectionCard title="Extratos importados">
-        <div className="mb-4 flex items-center gap-3">
-          <Label htmlFor="filtro-conta" className="whitespace-nowrap text-sm">
-            Conta
-          </Label>
+      <FilterBar>
+        <FilterBar.Group className="min-w-64">
+          <Label htmlFor="filtro-conta">Conta</Label>
           <Select
             id="filtro-conta"
-            className="max-w-xs"
             value={contaFiltro ?? ""}
             onChange={(e) => {
               const v = e.target.value;
@@ -280,10 +279,27 @@ export default function ConciliacaoPage() {
               </option>
             ))}
           </Select>
-        </div>
+        </FilterBar.Group>
+        {contaFiltro !== null && (
+          <FilterBar.Actions>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setContaFiltro(null);
+                setExtratoSel(null);
+              }}
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
+
+      <SectionCard title="Extratos importados">
 
         {extratosQ.isLoading ? (
-          <Carregando className="text-sm text-muted" />
+          <Carregando className="text-sm text-foreground-muted" />
         ) : extratos.length === 0 ? (
           <EmptyState
             icon={FileUp}
@@ -330,7 +346,7 @@ export default function ConciliacaoPage() {
         <>
           <SectionCard
             title="Sugestões de baixa"
-            description="EXATA = mesmo valor e mesma data. PROVÁVEL = mesmo valor, até 3 dias de diferença — confira antes de conciliar."
+            description="Exata: mesmo valor e mesma data. Provável: mesmo valor, até 3 dias de diferença — confira antes de conciliar."
           >
             {exatas > 0 && (
               <div className="mb-4 flex justify-end">
@@ -345,7 +361,7 @@ export default function ConciliacaoPage() {
               </div>
             )}
             {sugestoesQ.isLoading ? (
-              <Carregando className="text-sm text-muted" />
+              <Carregando className="text-sm text-foreground-muted" />
             ) : sugestoes.length === 0 ? (
               <EmptyState
                 icon={ListChecks}
@@ -372,12 +388,12 @@ export default function ConciliacaoPage() {
                     <TR key={s.id_lancamento}>
                       <TD>
                         <div className="font-medium">{s.lancamento_historico}</div>
-                        <div className="text-xs text-muted">{fmtData(s.lancamento_data)}</div>
+                        <div className="text-xs text-foreground-muted">{fmtData(s.lancamento_data)}</div>
                       </TD>
                       <TD className="text-right tabular-nums">{fmtMoeda(s.lancamento_valor)}</TD>
                       <TD>
                         <div>{s.nome_fornecedor ?? "—"}</div>
-                        <div className="text-xs text-muted">
+                        <div className="text-xs text-foreground-muted">
                           {fmtData(s.movimentacao_data)}
                           {s.id_debito ? ` · débito #${s.id_debito}` : ""}
                         </div>
@@ -427,7 +443,7 @@ export default function ConciliacaoPage() {
               </div>
             )}
             {lancamentosQ.isLoading ? (
-              <Carregando className="text-sm text-muted" />
+              <Carregando className="text-sm text-foreground-muted" />
             ) : (
               <Table>
                 <THead>
@@ -534,13 +550,13 @@ export default function ConciliacaoPage() {
 
             <dl className="grid grid-cols-2 gap-3 text-sm">
               <div className="rounded-card border border-border bg-surface-1 p-3">
-                <dt className="text-xs text-muted">Ignorados por ID externo</dt>
+                <dt className="text-xs text-foreground-muted">Ignorados por ID externo</dt>
                 <dd className="text-lg font-semibold tabular-nums">
                   {relatoImport.ignorados_por_id_externo} ignorado(s)
                 </dd>
               </div>
               <div className="rounded-card border border-border bg-surface-1 p-3">
-                <dt className="text-xs text-muted">Possíveis duplicatas</dt>
+                <dt className="text-xs text-foreground-muted">Possíveis duplicatas</dt>
                 <dd className="text-lg font-semibold tabular-nums">
                   {relatoImport.possiveis_duplicatas} possível duplicata(s)
                 </dd>
@@ -559,7 +575,7 @@ export default function ConciliacaoPage() {
             )}
 
             {relatoImport.ignorados_por_id_externo > 0 && (
-              <p className="text-xs text-muted">
+              <p className="text-xs text-foreground-muted">
                 Linhas ignoradas por ID externo já tinham o mesmo identificador do banco
                 (FITID/documento) importado antes nesta conta — não foram duplicadas.
               </p>
@@ -618,17 +634,17 @@ export default function ConciliacaoPage() {
                 }}
               />
               {form.formato === "CSV" && (
-                <p className="mt-1 text-xs text-muted">
+                <p className="mt-1 text-xs text-foreground-muted">
                   Colunas: <code>{MODELO_CSV}</code>. Separador <code>;</code> ou{" "}
                   <code>,</code>; cabeçalho opcional; tipo <code>CREDITO</code> ou{" "}
                   <code>DEBITO</code>.
                 </p>
               )}
               {form.formato === "OFX" && (
-                <p className="mt-1 text-xs text-muted">Extrato OFX (versão 1.x SGML ou 2.x XML).</p>
+                <p className="mt-1 text-xs text-foreground-muted">Extrato OFX (versão 1.x SGML ou 2.x XML).</p>
               )}
               {form.formato === "CNAB240" && (
-                <p className="mt-1 text-xs text-muted">
+                <p className="mt-1 text-xs text-foreground-muted">
                   Retorno CNAB240 (layout FEBRABAN, registros de 240 posições).
                 </p>
               )}
@@ -655,13 +671,13 @@ export default function ConciliacaoPage() {
                   onChange={(e) => setForm((s) => ({ ...s, conteudo: e.target.value }))}
                   placeholder={`${MODELO_CSV}\n01/07/2026;PAGAMENTO FORNECEDOR;DOC123;ACME LTDA;1234,56;DEBITO`}
                 />
-                <p className="mt-1 text-xs text-muted">
+                <p className="mt-1 text-xs text-foreground-muted">
                   Também pode colar o conteúdo aqui em vez de escolher um arquivo.
                 </p>
               </div>
             )}
 
-            <p className="text-xs text-muted">
+            <p className="text-xs text-foreground-muted">
               Reimportar o mesmo arquivo na mesma conta é recusado — a checagem é por hash
               do conteúdo.
             </p>
@@ -745,7 +761,7 @@ export default function ConciliacaoPage() {
           <div className="space-y-4">
             <div className="rounded-card border border-border bg-surface-1 p-3 text-sm">
               <div className="font-medium">{manual.historico}</div>
-              <div className="text-muted">
+              <div className="text-foreground-muted">
                 {fmtData(manual.data)} · {fmtMoeda(manual.valor)}
                 {manual.favorecido ? ` · ${manual.favorecido}` : ""}
               </div>
@@ -768,7 +784,7 @@ export default function ConciliacaoPage() {
                   </option>
                 ))}
               </Select>
-              <p className="mt-1 text-xs text-muted">
+              <p className="mt-1 text-xs text-foreground-muted">
                 Só saídas de pagamento desta conta. As já conciliadas são recusadas pelo
                 servidor.
               </p>

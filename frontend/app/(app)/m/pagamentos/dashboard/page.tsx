@@ -36,7 +36,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { api, type ComposicaoItem } from "@/lib/api";
 import { PAGAMENTO_ROTULO, TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
-import { GRAFICO } from "@/lib/chart-theme";
+import { EIXO, GRAFICO } from "@/lib/chart-theme";
 import { cn } from "@/lib/utils";
 
 // Dataviz: cores vêm de `lib/chart-theme` (tokens; trocam no tema escuro).
@@ -147,25 +147,25 @@ function ComposicaoChart({ titulo, itens }: { titulo: string; itens: ComposicaoI
                 layout="vertical"
                 margin={{ top: 5, right: 72, left: 8, bottom: 5 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke={GRAFICO.grade} horizontal={false} />
                 <XAxis type="number" hide />
                 <YAxis
                   dataKey="nome"
                   type="category"
                   width={140}
-                  tick={{ fontSize: 11 }}
+                  tick={EIXO.tick}
                   tickFormatter={(nome: string) => truncaNome(nome)}
                   axisLine={false}
                   tickLine={false}
                 />
-                <Tooltip content={<TooltipBRL />} cursor={{ fill: "hsl(var(--muted))" }} />
+                <Tooltip content={<TooltipBRL />} cursor={{ fill: GRAFICO.cursor }} />
                 <Bar dataKey="valor" fill={COR_BRAND} radius={[0, 4, 4, 0]} barSize={16}>
                   {/* Rótulo direto (BRL compacto) — texto em token de texto, não na cor da série. */}
                   <LabelList
                     dataKey="valor"
                     position="right"
                     formatter={fmtBRLCompacto}
-                    style={{ fill: "hsl(var(--foreground))", fontSize: 11 }}
+                    style={{ fill: GRAFICO.texto, fontSize: 11 }}
                   />
                 </Bar>
               </BarChart>
@@ -350,10 +350,12 @@ export default function PagamentosDashboardPage() {
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={fluxo} margin={{ top: 10, right: 20, left: 0, bottom: 0 }} barGap={4}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                  <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtBRL(v)} width={90} />
-                  <Tooltip content={<TooltipBRL />} cursor={{ fill: "hsl(var(--muted))" }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRAFICO.grade} vertical={false} />
+                  <XAxis dataKey="mes" {...EIXO} />
+                  {/* Eixo em BRL compacto: o valor cheio ("R$ 1.400.000,00") não cabia
+                      na largura do eixo e saía cortado. O exato fica no tooltip. */}
+                  <YAxis {...EIXO} tickFormatter={fmtBRLCompacto} width={72} />
+                  <Tooltip content={<TooltipBRL />} cursor={{ fill: GRAFICO.cursor }} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                   <Bar dataKey="entradas" name="Entradas" fill={COR_ENTRADAS} radius={[4, 4, 0, 0]} barSize={14} />
                   <Bar dataKey="saidas" name="Saídas" fill={COR_SAIDAS} radius={[4, 4, 0, 0]} barSize={14} />

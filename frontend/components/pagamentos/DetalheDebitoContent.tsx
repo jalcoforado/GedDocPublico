@@ -55,7 +55,7 @@ import {
   TRANSACAO_PAGAMENTOS,
   TRANSACAO_PAGAMENTOS_ROTULO,
 } from "@/components/pagamentos/situacoes";
-import { fmtData, fmtDataHora, fmtMoeda, fmtTamanho } from "@/components/pagamentos/format";
+import { fmtCompetencia, fmtData, fmtDataHora, fmtMoeda, fmtTamanho } from "@/components/pagamentos/format";
 import {
   ApiError,
   api,
@@ -671,7 +671,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
               </div>
               <div>
                 <div className="text-xs font-medium text-foreground-muted">Competência</div>
-                <div className="text-foreground">{debito.competencia}</div>
+                <div className="text-foreground">{fmtCompetencia(debito.competencia)}</div>
               </div>
               {!debito.id_contrato && (
                 <div>

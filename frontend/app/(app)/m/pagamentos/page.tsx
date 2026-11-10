@@ -1,13 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CheckCircle2, GitBranch, MessageSquareWarning, Wallet } from "lucide-react";
+import { ArrowRight, CheckCircle2, GitBranch, Inbox, MessageSquareWarning, Wallet } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -263,7 +264,7 @@ export default function PagamentosHomePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        icon={Wallet}
+        icon={Inbox}
         title="Visão geral"
         description="O que espera por você em Pagamentos, do pedido ao pagamento."
         actions={
@@ -299,13 +300,12 @@ export default function PagamentosHomePage() {
               Na sua mesa
             </h2>
             {comItens.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 px-5 py-10 text-center">
-                <CheckCircle2 className="h-8 w-8 text-success" aria-hidden="true" />
-                <p className="text-sm font-medium text-foreground">Nada esperando por você.</p>
-                <p className="text-xs text-foreground-muted">
-                  Quando um débito chegar a uma etapa sua, ele aparece aqui.
-                </p>
-              </div>
+              <EmptyState
+                icon={CheckCircle2}
+                title="Nada esperando por você"
+                description="Quando um débito chegar a uma etapa sua, ele aparece aqui."
+                className="rounded-none border-0"
+              />
             ) : (
               comItens.map((f) => <BlocoDaFila key={f.titulo} fila={f} />)
             )}
@@ -338,8 +338,13 @@ export default function PagamentosHomePage() {
             <TBody>
               {!painelQ.isLoading && painel.length === 0 && (
                 <TR>
-                  <TD colSpan={4} className="py-6 text-center text-sm text-muted-foreground">
-                    Nenhuma conta cadastrada.
+                  <TD colSpan={4} className="p-0">
+                    <EmptyState
+                      icon={Wallet}
+                      title="Nenhuma conta bancária cadastrada"
+                      description="As contas cadastradas em Contas bancárias aparecem aqui com o saldo."
+                      className="rounded-none border-0 bg-transparent"
+                    />
                   </TD>
                 </TR>
               )}

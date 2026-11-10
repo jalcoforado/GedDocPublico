@@ -287,15 +287,28 @@ export function FormularioDebito({ debito }: { debito?: DebitoDetalhe }) {
 
       <div>
         <Label htmlFor="deb-valor" required>Valor total</Label>
-        <Input
-          id="deb-valor"
-          type="number"
-          step="0.01"
-          value={form.valor_total}
-          onChange={(e) => mudar("valor_total", e.target.value)}
-          placeholder="0.00"
-          disabled={variasParcelas}
-        />
+        {/* "R$" fora do campo e placeholder com vírgula: o "0.00" de antes
+            parecia valor já preenchido, e em notação americana. */}
+        <div className="relative">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-foreground-subtle"
+          >
+            R$
+          </span>
+          <Input
+            id="deb-valor"
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            min="0"
+            value={form.valor_total}
+            onChange={(e) => mudar("valor_total", e.target.value)}
+            placeholder="0,00"
+            disabled={variasParcelas}
+            className="pl-10"
+          />
+        </div>
         {erro("valor_total")}
       </div>
 
@@ -410,7 +423,7 @@ export function FormularioDebito({ debito }: { debito?: DebitoDetalhe }) {
             ? "Salvando..."
             : editando
               ? "Salvar alterações"
-              : "Criar Solicitação"}
+              : "Criar solicitação"}
         </Button>
       </div>
     </div>

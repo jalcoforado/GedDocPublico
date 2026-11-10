@@ -1,13 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ExternalLink, FileText, ShieldCheck } from "lucide-react";
+import { AlertCircle, AlertTriangle, ExternalLink, FileText, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { GrupoContaCard } from "@/components/pagamentos/GrupoContaCard";
-import { fmtData, fmtDataCurta, fmtMoeda } from "@/components/pagamentos/format";
+import { fmtCompetencia, fmtData, fmtDataCurta, fmtMoeda } from "@/components/pagamentos/format";
 import { RitoPagamento } from "@/components/pagamentos/RitoPagamento";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,7 +51,7 @@ export default function AutorizacaoPagamentosPage() {
       <PageHeader
         icon={ShieldCheck}
         title="Autorizações"
-        description="Autorize a despesa (gera a Ordem de Pagamento) e depois libere o pagamento para a tesouraria — os dois atos do rito da Lei 4.320/64."
+        description="Autorize a despesa, que gera a Ordem de Pagamento, e depois libere o pagamento para a tesouraria."
         tabs={
           <TabList
             aria-label="Etapa da autorização"
@@ -222,13 +222,13 @@ function TabDespesa() {
                   />
                   <span>
                     Fonte {grupo.codigo_fonte}
-                    <span className="ml-1 font-normal text-muted-foreground" title={grupo.descricao_fonte}>
+                    <span className="ml-1 font-normal text-foreground-muted" title={grupo.descricao_fonte}>
                       · {grupo.descricao_fonte}
                     </span>
                   </span>
                 </label>
                 {somaGrupo > 0 && (
-                  <span className="text-sm tabular-nums text-muted-foreground">
+                  <span className="text-sm tabular-nums text-foreground-muted">
                     Σ selecionado <span className="font-semibold text-foreground">{fmtMoeda(somaGrupo)}</span>
                   </span>
                 )}
@@ -268,7 +268,7 @@ function TabDespesa() {
                     <p
                       className={cn(
                         "pb-1.5 text-xs tabular-nums",
-                        excede ? "text-warning-soft-foreground" : "text-muted-foreground",
+                        excede ? "text-warning-soft-foreground" : "text-foreground-muted",
                       )}
                     >
                       Disponível {fmtMoeda(contaSel.disponivel)}
@@ -299,14 +299,14 @@ function TabDespesa() {
                       <Link
                         href={`/m/pagamentos/contas-a-pagar/${d.id}`}
                         aria-label={`Ver detalhe de ${d.nome_fornecedor}`}
-                        className="shrink-0 text-muted-foreground hover:text-foreground"
+                        className="shrink-0 text-foreground-muted hover:text-foreground"
                       >
                         <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                       </Link>
-                      {d.urgente && <Badge intent="danger">URGENTE</Badge>}
+                      {d.urgente && <Badge intent="danger" icon={AlertCircle}>Urgente</Badge>}
                     </div>
-                    <p className="truncate text-xs text-muted-foreground">
-                      <span title={d.natureza_descricao}>{d.natureza_codigo}</span> · comp. {d.competencia}
+                    <p className="truncate text-xs text-foreground-muted">
+                      <span title={d.natureza_descricao}>{d.natureza_codigo}</span> · comp. {fmtCompetencia(d.competencia)}
                       {d.aprovado_por && (
                         <> · aprovado por {d.aprovado_por} em {fmtDataCurta(d.aprovado_em)}</>
                       )}
@@ -361,7 +361,7 @@ function TabDespesa() {
             gera uma Ordem de Pagamento reservando o valor na conta escolhida — ação não reversível.
           </p>
           <div className="space-y-1.5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">
               Por fonte → conta pagadora
             </p>
             {gruposSelecionados.map(({ grupo, soma, conta }) => {
@@ -511,13 +511,13 @@ function TabPagamento() {
                     <Link
                       href={`/m/pagamentos/contas-a-pagar/${p.id_debito}`}
                       aria-label={`Ver detalhe de ${p.nome_fornecedor}`}
-                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                      className="shrink-0 text-foreground-muted hover:text-foreground"
                     >
                       <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                     </Link>
                     {p.vencida && <Badge intent="danger">vencida há {p.dias_atraso}d</Badge>}
                   </div>
-                  <p className="truncate text-xs text-muted-foreground">
+                  <p className="truncate text-xs text-foreground-muted">
                     parcela {p.numero}/{p.qtd_parcelas} · vence {fmtData(p.vencimento)}
                     {p.op_numero && (
                       <>
@@ -528,7 +528,7 @@ function TabPagamento() {
                             href={api.pagamentos.ordens.pdfUrl(p.op_id)}
                             target="_blank"
                             rel="noopener"
-                            className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground hover:underline"
+                            className="inline-flex items-center gap-0.5 text-foreground-muted hover:text-foreground hover:underline"
                           >
                             {p.op_numero}
                             <FileText className="h-3 w-3" aria-hidden="true" />
@@ -602,7 +602,7 @@ function TabPagamento() {
             )}
           </p>
           <div className="space-y-1.5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Por conta</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Por conta</p>
             {resumoPorConta.map(({ grupo, soma }) => (
               <div
                 key={grupo.id_conta}

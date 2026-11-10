@@ -193,7 +193,7 @@ describe("nova solicitação", () => {
     fireEvent.change(screen.getByLabelText(/Competência/), { target: { value: "2026-10" } });
     fireEvent.change(screen.getByLabelText(/Vencimento da parcela/), { target: { value: "2026-11-05" } });
     fireEvent.change(screen.getByLabelText(/Descrição/), { target: { value: "Reforma" } });
-    fireEvent.click(screen.getByRole("button", { name: "Criar Solicitação" }));
+    fireEvent.click(screen.getByRole("button", { name: "Criar solicitação" }));
 
     await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
     expect(createMock).toHaveBeenCalledWith(expect.objectContaining({

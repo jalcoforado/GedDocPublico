@@ -7,6 +7,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
@@ -113,28 +114,29 @@ export default function AuditoriaPagamentosPage() {
         icon={ScrollText}
       />
 
-      <div className="grid gap-3 rounded-card border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4">
-        <FormField label="Ato">
-          <Select value={f.acao} onChange={(e) => setF({ ...f, acao: e.target.value, page: 1 })}>
-            <option value="">Todos os atos</option>
-            {ATOS_AUDITADOS.map((a) => (
-              <option key={a.acao} value={a.acao}>{a.rotulo}</option>
-            ))}
-          </Select>
-        </FormField>
-        <FormField label="De">
-          <Input type="date" value={f.desde} onChange={(e) => setF({ ...f, desde: e.target.value, page: 1 })} />
-        </FormField>
-        <FormField label="Até">
-          <Input type="date" value={f.ate} onChange={(e) => setF({ ...f, ate: e.target.value, page: 1 })} />
-        </FormField>
-        <div className="flex items-end">
-          <Button variant="ghost" onClick={() => setF(FILTROS_VAZIOS)} disabled={!filtrando}>
-            Limpar filtros
-          </Button>
-        </div>
+      <FilterBar>
+        <FilterBar.Group className="min-w-56 flex-1">
+          <FormField label="Ato">
+            <Select value={f.acao} onChange={(e) => setF({ ...f, acao: e.target.value, page: 1 })}>
+              <option value="">Todos os atos</option>
+              {ATOS_AUDITADOS.map((a) => (
+                <option key={a.acao} value={a.acao}>{a.rotulo}</option>
+              ))}
+            </Select>
+          </FormField>
+        </FilterBar.Group>
+        <FilterBar.Group className="min-w-40">
+          <FormField label="De">
+            <Input type="date" value={f.desde} onChange={(e) => setF({ ...f, desde: e.target.value, page: 1 })} />
+          </FormField>
+        </FilterBar.Group>
+        <FilterBar.Group className="min-w-40">
+          <FormField label="Até">
+            <Input type="date" value={f.ate} onChange={(e) => setF({ ...f, ate: e.target.value, page: 1 })} />
+          </FormField>
+        </FilterBar.Group>
         {f.id_usuario && (
-          <div className="sm:col-span-2 lg:col-span-4">
+          <FilterBar.Group className="flex h-[var(--density-row-h)] items-center">
             <Button
               variant="secondary"
               size="sm"
@@ -142,11 +144,19 @@ export default function AuditoriaPagamentosPage() {
               aria-label={`Remover filtro por ${f.nome_usuario ?? "pessoa"}`}
             >
               Só atos de {f.nome_usuario ?? `usuário #${f.id_usuario}`}
-              <X className="ml-1 h-4 w-4" aria-hidden="true" />
+              <X className="h-4 w-4" aria-hidden="true" />
             </Button>
-          </div>
+          </FilterBar.Group>
         )}
-      </div>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={() => setF(FILTROS_VAZIOS)}>
+              <X className="h-4 w-4" aria-hidden="true" />
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {q.isError ? (
         <EmptyState

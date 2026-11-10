@@ -45,7 +45,14 @@ export function FilaSecao({ titulo, icon, itens, acaoLabel }: FilaSecaoProps) {
               const rotulo = TRAMITACAO_ROTULO[d.situacao_tramitacao];
               return (
                 <TR key={d.id}>
-                  <TD className="font-mono text-sm">#{d.id}</TD>
+                  <TD className="font-mono text-sm">
+                    <Link
+                      href={`/m/pagamentos/solicitacoes/${d.id}`}
+                      className="text-primary hover:underline"
+                    >
+                      #{d.id}
+                    </Link>
+                  </TD>
                   <TD>{d.nome_fornecedor}</TD>
                   <TD className="text-right tabular-nums">{fmtMoeda(d.valor_total)}</TD>
                   <TD>
