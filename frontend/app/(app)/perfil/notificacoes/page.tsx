@@ -14,8 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Carregando } from "@/components/ui/carregando";
 import { Checkbox } from "@/components/ui/checkbox";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
@@ -23,12 +23,25 @@ import {
   notificacoesApi,
   type NotificacaoPreferenciaEvento,
 } from "@/lib/api";
+import { aplicarMascara } from "@/lib/mascaras";
 
 const CANAL_ICON: Record<"in_app" | "email" | "whatsapp", React.ComponentType<{ className?: string }>> = {
   in_app: Bell,
   email: Mail,
   whatsapp: MessageCircle,
 };
+
+const ERRO_TELEFONE =
+  "Use só números, com o código do país e o DDD. Ex.: +5588999998888.";
+
+/**
+ * "+5588999998888" → "+55 (88) 99999-8888", só para mostrar: o que se grava
+ * continua sendo o número cru. Número de fora do Brasil volta como veio.
+ */
+function telefoneLegivel(t: string): string {
+  const m = /^\+?55(\d{10,11})$/.exec(t);
+  return m ? `+55 ${aplicarMascara("telefone", m[1]).valor}` : t;
+}
 
 const CANAL_LABEL: Record<"in_app" | "email" | "whatsapp", string> = {
   in_app: "No app",
@@ -44,11 +57,14 @@ const CANAL_LABEL: Record<"in_app" | "email" | "whatsapp", string> = {
  */
 function CelulaCanal({
   canal,
+  evento,
   valor,
   disabled,
   onChange,
 }: {
   canal: "in_app" | "email" | "whatsapp";
+  /** Nome do evento, para o nome acessível da caixa ("E-mail — Processo recebido"). */
+  evento: string;
   valor: boolean | null;
   disabled?: boolean;
   onChange: (v: boolean) => void;
@@ -75,6 +91,7 @@ function CelulaCanal({
         checked={valor}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
+        aria-label={`${CANAL_LABEL[canal]} — ${evento}`}
       />
     </label>
   );
@@ -95,6 +112,7 @@ export default function PreferenciasNotificacoesPage() {
   });
 
   const [telefone, setTelefone] = useState<string>("");
+  const [telTocado, setTelTocado] = useState(false);
   useEffect(() => {
     if (telQ.data) setTelefone(telQ.data.telefone ?? "");
   }, [telQ.data]);
@@ -159,6 +177,16 @@ export default function PreferenciasNotificacoesPage() {
   const telMudou = telLimpo !== (telSalvo ?? "");
   const telValido = telLimpo === "" || /^\+?[1-9]\d{7,14}$/.test(telLimpo);
 
+  function salvarTelefone() {
+    // Erro só depois da tentativa: ao sair do campo ou ao salvar.
+    if (!telValido) {
+      setTelTocado(true);
+      document.getElementById("tel")?.focus();
+      return;
+    }
+    saveTel.mutate(telLimpo || null);
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -204,6 +232,7 @@ export default function PreferenciasNotificacoesPage() {
                       <TD key={canal} className="p-0 text-center">
                         <CelulaCanal
                           canal={canal}
+                          evento={linha.label}
                           valor={linha[canal]}
                           disabled={canal === "whatsapp" && !telSalvo}
                           onChange={(v) =>
@@ -230,36 +259,57 @@ export default function PreferenciasNotificacoesPage() {
         <Card>
           <CardHeader>
             <CardTitle>Telefone para WhatsApp</CardTitle>
+            <CardDescription>
+              Usado só nos avisos que você ligar no canal WhatsApp.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="space-y-1">
-              <Label htmlFor="tel">Número com DDD (E.164 sugerido)</Label>
-              <div className="flex gap-2">
+            <form
+              noValidate
+              onSubmit={(e) => {
+                e.preventDefault();
+                salvarTelefone();
+              }}
+              className="flex flex-wrap items-start gap-2"
+            >
+              <FormField
+                label="Celular com WhatsApp"
+                className="min-w-0 flex-1 basis-60"
+                error={telTocado && !telValido ? ERRO_TELEFONE : undefined}
+                hint={
+                  telLimpo && telValido
+                    ? `Os avisos vão para ${telefoneLegivel(telLimpo)}.`
+                    : "Com o código do país e o DDD. Pode digitar com espaços ou traços."
+                }
+              >
                 <Input
                   id="tel"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
                   value={telefone}
-                  onChange={(e) => setTelefone(e.target.value)}
-                  placeholder="+5588999998888"
-                  aria-invalid={!telValido}
+                  // Espaço, parêntese, ponto e traço saem na hora: o envio
+                  // espera só "+" e dígitos (E.164), e assim quem digita
+                  // "(88) 99999-8888" não leva um erro por isso.
+                  onChange={(e) => setTelefone(e.target.value.replace(/[\s().-]/g, ""))}
+                  onBlur={() => setTelTocado(true)}
+                  placeholder="Ex.: +55 88 99999-8888"
                 />
-                {/* Primário só quando há o que salvar: desligado, o laranja
-                    pálido parecia um botão quebrado, não um "nada mudou". */}
-                <Button
-                  size="md"
-                  variant={telMudou && telValido ? "primary" : "secondary"}
-                  disabled={!telMudou || !telValido || saveTel.isPending}
-                  onClick={() => saveTel.mutate(telLimpo || null)}
-                >
-                  <Phone className="h-4 w-4" aria-hidden="true" />
-                  {saveTel.isPending ? "Salvando…" : "Salvar"}
-                </Button>
-              </div>
-              {!telValido && (
-                <p className="text-xs text-danger-soft-foreground">
-                  Use só dígitos e opcionalmente prefixo +. Ex: +5588999998888.
-                </p>
-              )}
-            </div>
+              </FormField>
+              {/* Primário só quando há o que salvar: desligado, o laranja
+                  pálido parecia um botão quebrado, não um "nada mudou". */}
+              <Button
+                type="submit"
+                size="md"
+                className="mt-6"
+                variant={telMudou ? "primary" : "secondary"}
+                disabled={!telMudou}
+                loading={saveTel.isPending}
+              >
+                {!saveTel.isPending && <Phone className="h-4 w-4" aria-hidden="true" />}
+                {saveTel.isPending ? "Salvando…" : "Salvar telefone"}
+              </Button>
+            </form>
 
             {telSalvo && (
               <div className="flex items-center justify-between gap-3 rounded-md border border-dashed border-border bg-surface-2 p-3">
