@@ -15,17 +15,20 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { hojeLocal, rotuloVeiculo, useErrosDoFormulario } from "@/components/frota/formulario";
 import { fmtData } from "@/components/pagamentos/format";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada, type OpcaoEscolha } from "@/components/ui/escolha-segmentada";
 import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { KpiCard } from "@/components/ui/kpi-card";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -52,6 +55,14 @@ const GRAVIDADES: { value: OcorrenciaGravidade; label: string }[] = [
   { value: "media", label: "Média" },
   { value: "alta", label: "Alta" },
   { value: "critica", label: "Crítica" },
+];
+// Quatro gravidades: à vista no formulário, cada uma com o que quer dizer —
+// "média" sozinha não diz a ninguém quando usar.
+const GRAVIDADES_ESCOLHA: OpcaoEscolha<OcorrenciaGravidade>[] = [
+  { valor: "baixa", rotulo: "Baixa", descricao: "Não atrapalha o uso do veículo." },
+  { valor: "media", rotulo: "Média", descricao: "Precisa de atenção, mas o veículo segue rodando." },
+  { valor: "alta", rotulo: "Alta", descricao: "Compromete o uso: resolver logo." },
+  { valor: "critica", rotulo: "Crítica", descricao: "Risco ou veículo parado: resolver já. Entra no alerta de críticas abertas." },
 ];
 const TIPO_LABEL: Record<string, string> = Object.fromEntries(TIPOS.map((t) => [t.value, t.label]));
 const GRAV_LABEL: Record<string, string> = Object.fromEntries(GRAVIDADES.map((g) => [g.value, g.label]));
@@ -115,6 +126,10 @@ export default function OcorrenciasPage() {
   const [editing, setEditing] = useState<VeiculoOcorrencia | null>(null);
   const [form, setForm] = useState<OcorrForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
+  const campos = useErrosDoFormulario({
+    veiculo: !editing && form.id_veiculo == null ? "Escolha o veículo." : undefined,
+    descricao: form.descricao.trim() ? undefined : "Conte o que aconteceu.",
+  });
   const [resolvendo, setResolvendo] = useState<VeiculoOcorrencia | null>(null);
   const [resForm, setResForm] = useState({ data_resolucao: "", providencias: "" });
 
@@ -191,8 +206,9 @@ export default function OcorrenciasPage() {
   }
   function openNew() {
     setEditing(null);
-    setForm(EMPTY);
+    setForm({ ...EMPTY, data_ocorrencia: hojeLocal() });
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
   function openEdit(o: VeiculoOcorrencia) {
@@ -207,6 +223,7 @@ export default function OcorrenciasPage() {
       providencias: o.providencias ?? "",
     });
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
   function closeDialog() {
@@ -216,14 +233,7 @@ export default function OcorrenciasPage() {
   }
   function salvar() {
     setErr(null);
-    if (!editing && form.id_veiculo == null) {
-      setErr("Selecione o veículo.");
-      return;
-    }
-    if (form.descricao.trim() === "") {
-      setErr("Descrição é obrigatória.");
-      return;
-    }
+    if (!campos.podeEnviar()) return;
     const comum = {
       id_motorista: form.id_motorista ?? null,
       tipo: form.tipo,
@@ -377,7 +387,7 @@ export default function OcorrenciasPage() {
                           oculta: !(canEdit && tratavel),
                           onClick: () => {
                             setResolvendo(o);
-                            setResForm({ data_resolucao: "", providencias: o.providencias ?? "" });
+                            setResForm({ data_resolucao: hojeLocal(), providencias: o.providencias ?? "" });
                           },
                         },
                         {
@@ -430,151 +440,167 @@ export default function OcorrenciasPage() {
         open={dialogOpen}
         onClose={closeDialog}
         title={editing ? "Editar ocorrência" : "Nova ocorrência"}
+        description={
+          editing
+            ? `${placaDe.get(editing.id_veiculo) ?? `Veículo #${editing.id_veiculo}`} · ${fmtData(editing.data_ocorrencia)}`
+            : "Avaria, multa, sinistro ou outro fato com um veículo da frota."
+        }
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button type="submit" form="form-ocorrencia" loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Registrar ocorrência"}
             </Button>
           </>
         }
       >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <form
+          id="form-ocorrencia"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            salvar();
+          }}
+        >
           {!editing && (
-            <div className="sm:col-span-2">
-              <Label htmlFor="veiculo" required>
-                Veículo
-              </Label>
+            <FormField label="Veículo" required error={campos.erro("veiculo")}>
               <Select
                 id="veiculo"
                 value={form.id_veiculo ?? ""}
                 onChange={(e) => set("id_veiculo", e.target.value ? Number(e.target.value) : null)}
+                onBlur={campos.tocar("veiculo")}
               >
-                <option value="">Selecione...</option>
+                <option value="">Selecione o veículo</option>
                 {(veiculosQ.data ?? []).map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.placa} {v.marca ? `— ${v.marca}` : ""}
+                    {rotuloVeiculo(v)}
                   </option>
                 ))}
               </Select>
-            </div>
+            </FormField>
           )}
-          <div>
-            <Label htmlFor="motorista">Motorista</Label>
+          <GradeCampos>
+            <FormField label="Tipo" required>
+              <Select id="tipo" value={form.tipo} onChange={(e) => set("tipo", e.target.value as OcorrenciaTipo)}>
+                {TIPOS.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField
+              label="Data"
+              hint={!editing && form.data_ocorrencia === hojeLocal() ? "Já vem com a data de hoje." : "Quando aconteceu."}
+            >
+              <Input
+                id="data"
+                type="date"
+                value={form.data_ocorrencia}
+                onChange={(e) => set("data_ocorrencia", e.target.value)}
+              />
+            </FormField>
+          </GradeCampos>
+          <EscolhaSegmentada
+            nome="gravidade"
+            titulo="Gravidade"
+            moldura={false}
+            valor={form.gravidade}
+            opcoes={GRAVIDADES_ESCOLHA}
+            onChange={(g) => set("gravidade", g)}
+          />
+          <FormField label="O que aconteceu" required error={campos.erro("descricao")}>
+            <Textarea
+              id="descricao"
+              rows={3}
+              value={form.descricao}
+              onChange={(e) => set("descricao", e.target.value)}
+              onBlur={campos.tocar("descricao")}
+              placeholder="Ex.: Retrovisor direito quebrado ao manobrar no pátio da Secretaria"
+            />
+          </FormField>
+          <FormField label="Motorista envolvido" opcional>
             <Select
               id="motorista"
               value={form.id_motorista ?? ""}
               onChange={(e) => set("id_motorista", e.target.value ? Number(e.target.value) : null)}
             >
-              <option value="">—</option>
+              <option value="">Nenhum ou não se sabe</option>
               {(motoristasQ.data ?? []).map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.nome}
                 </option>
               ))}
             </Select>
-          </div>
-          <div>
-            <Label htmlFor="data">Data</Label>
-            <Input
-              id="data"
-              type="date"
-              value={form.data_ocorrencia}
-              onChange={(e) => set("data_ocorrencia", e.target.value)}
-            />
-          </div>
-          <div>
-            <Label htmlFor="tipo" required>
-              Tipo
-            </Label>
-            <Select id="tipo" value={form.tipo} onChange={(e) => set("tipo", e.target.value as OcorrenciaTipo)}>
-              {TIPOS.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="gravidade">Gravidade</Label>
-            <Select
-              id="gravidade"
-              value={form.gravidade}
-              onChange={(e) => set("gravidade", e.target.value as OcorrenciaGravidade)}
-            >
-              {GRAVIDADES.map((g) => (
-                <option key={g.value} value={g.value}>
-                  {g.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="descricao" required>
-              Descrição
-            </Label>
-            <Textarea
-              id="descricao"
-              rows={2}
-              value={form.descricao}
-              onChange={(e) => set("descricao", e.target.value)}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="prov">Providências</Label>
+          </FormField>
+          <FormField label="Providências" opcional hint="O que já foi feito ou está combinado.">
             <Textarea
               id="prov"
               rows={2}
               value={form.providencias}
               onChange={(e) => set("providencias", e.target.value)}
+              placeholder="Ex.: Orçamento pedido à oficina; boletim de ocorrência registrado"
             />
-          </div>
+          </FormField>
           {err && (
-            <div role="alert" className="sm:col-span-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+            <Alert intent="danger" title="Não foi possível salvar">
               {err}
-            </div>
+            </Alert>
           )}
-        </div>
+        </form>
       </Dialog>
 
       <Dialog
         open={resolvendo != null}
         onClose={() => setResolvendo(null)}
         title="Resolver ocorrência"
+        description={
+          resolvendo
+            ? `${placaDe.get(resolvendo.id_veiculo) ?? `Veículo #${resolvendo.id_veiculo}`} · ${TIPO_LABEL[resolvendo.tipo] ?? resolvendo.tipo} · ${resolvendo.descricao}`
+            : undefined
+        }
         footer={
           <>
-            <Button variant="secondary" onClick={() => setResolvendo(null)}>
+            <Button variant="ghost" onClick={() => setResolvendo(null)}>
               Cancelar
             </Button>
-            <Button onClick={resolver} disabled={resolverM.isPending}>
-              {resolverM.isPending ? "Resolvendo..." : "Resolver"}
+            <Button type="submit" form="form-resolver" loading={resolverM.isPending}>
+              Marcar como resolvida
             </Button>
           </>
         }
       >
-        <div className="space-y-4">
-          <div>
-            <Label htmlFor="r_data">Data de resolução</Label>
+        <form
+          id="form-resolver"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            resolver();
+          }}
+        >
+          <FormField label="Data de resolução" hint="Já vem com a data de hoje.">
             <Input
               id="r_data"
               type="date"
               value={resForm.data_resolucao}
               onChange={(e) => setResForm((f) => ({ ...f, data_resolucao: e.target.value }))}
             />
-          </div>
-          <div>
-            <Label htmlFor="r_prov">Providências</Label>
+          </FormField>
+          <FormField label="Providências" opcional hint="Como foi resolvida — fica no histórico do veículo.">
             <Textarea
               id="r_prov"
               rows={3}
               value={resForm.providencias}
               onChange={(e) => setResForm((f) => ({ ...f, providencias: e.target.value }))}
+              placeholder="Ex.: Retrovisor trocado na oficina; multa paga e recurso arquivado"
             />
-          </div>
-        </div>
+          </FormField>
+        </form>
       </Dialog>
     </div>
   );

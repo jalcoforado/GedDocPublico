@@ -4,16 +4,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, CheckCircle2, Inbox, Pencil, Play, Plus, SearchX, Trash2, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { hojeLocal, numeroOuNulo, rotuloVeiculo, useErrosDoFormulario } from "@/components/frota/formulario";
 import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada, type OpcaoEscolha } from "@/components/ui/escolha-segmentada";
 import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -74,6 +78,45 @@ function nullify(v: string): string | null {
   return t === "" ? null : t;
 }
 
+// Dois tipos: à vista, com o que cada um quer dizer.
+const TIPOS_ESCOLHA: OpcaoEscolha<ManutencaoTipo>[] = [
+  { valor: "preventiva", rotulo: "Preventiva", descricao: "Revisão programada: óleo, filtros, pneus, alinhamento." },
+  { valor: "corretiva", rotulo: "Corretiva", descricao: "Conserto de um defeito ou de uma avaria." },
+];
+
+const KM_INTEIRO = "Use só números inteiros, sem ponto nem vírgula.";
+
+/** Km opcional digitado como texto: vazio passa; senão, inteiro ≥ 0. */
+function erroInteiroOpcional(v: string): string | undefined {
+  if (v.trim() === "") return undefined;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? undefined : KM_INTEIRO;
+}
+
+/** Valor opcional digitado como texto: vazio passa; senão, ≥ 0. */
+function erroValorOpcional(v: string): string | undefined {
+  if (v.trim() === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? undefined : "Informe um valor de zero para cima.";
+}
+
+// Mesmas exigências do backend: veículo e descrição na abertura; km inteiro
+// e custo não negativo quando preenchidos.
+function validar(form: ManutForm, novo: boolean): Record<string, string | undefined> {
+  return {
+    veiculo: novo && form.id_veiculo == null ? "Escolha o veículo." : undefined,
+    descricao: form.descricao.trim() ? undefined : "Descreva o serviço a fazer.",
+    km_atual:
+      form.km_atual != null && (!Number.isInteger(form.km_atual) || form.km_atual < 0)
+        ? KM_INTEIRO
+        : undefined,
+    custo_estimado:
+      form.custo_estimado != null && form.custo_estimado < 0
+        ? "Informe um valor de zero para cima."
+        : undefined,
+  };
+}
+
 export default function ManutencoesPage() {
   const { can } = useAuth();
   const canCreate = can("frota", "inserir");
@@ -91,6 +134,11 @@ export default function ManutencoesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [concluindo, setConcluindo] = useState<VeiculoManutencao | null>(null);
   const [concForm, setConcForm] = useState({ data_conclusao: "", custo_final: "", km_atual: "" });
+  const campos = useErrosDoFormulario(validar(form, editing == null));
+  const camposConcluir = useErrosDoFormulario({
+    c_km: erroInteiroOpcional(concForm.km_atual),
+    c_custo: erroValorOpcional(concForm.custo_final),
+  });
 
   const veiculosQ = useQuery({ queryKey: ["frota-veiculos"], queryFn: () => api.frota.listAll() });
   const placaDe = useMemo(() => {
@@ -165,6 +213,7 @@ export default function ManutencoesPage() {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
   function openEdit(m: VeiculoManutencao) {
@@ -180,6 +229,7 @@ export default function ManutencoesPage() {
       observacoes: m.observacoes ?? "",
     });
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
   function closeDialog() {
@@ -189,14 +239,7 @@ export default function ManutencoesPage() {
   }
   function salvar() {
     setErr(null);
-    if (!editing && form.id_veiculo == null) {
-      setErr("Selecione o veículo.");
-      return;
-    }
-    if (form.descricao.trim() === "") {
-      setErr("Descrição é obrigatória.");
-      return;
-    }
+    if (!campos.podeEnviar()) return;
     const comum = {
       tipo: form.tipo,
       descricao: form.descricao.trim(),
@@ -209,6 +252,7 @@ export default function ManutencoesPage() {
     saveM.mutate(editing ? comum : { id_veiculo: form.id_veiculo, ...comum });
   }
   function concluir() {
+    if (!camposConcluir.podeEnviar()) return;
     concluirM.mutate({
       id: concluindo!.id,
       data: {
@@ -348,7 +392,8 @@ export default function ManutencoesPage() {
                           oculta: !(canEdit && encerravel),
                           onClick: () => {
                             setConcluindo(m);
-                            setConcForm({ data_conclusao: "", custo_final: "", km_atual: "" });
+                            setConcForm({ data_conclusao: hojeLocal(), custo_final: "", km_atual: "" });
+                            camposConcluir.limpar();
                           },
                         },
                         {
@@ -401,154 +446,216 @@ export default function ManutencoesPage() {
         open={dialogOpen}
         onClose={closeDialog}
         title={editing ? "Editar manutenção" : "Nova manutenção"}
+        description={
+          editing
+            ? (placaDe.get(editing.id_veiculo) ?? `Veículo #${editing.id_veiculo}`)
+            : "Ao abrir, um veículo disponível passa para a situação Manutenção."
+        }
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button type="submit" form="form-manutencao" loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Abrir manutenção"}
             </Button>
           </>
         }
       >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <form
+          id="form-manutencao"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            salvar();
+          }}
+        >
           {!editing && (
-            <div className="sm:col-span-2">
-              <Label htmlFor="veiculo" required>
-                Veículo
-              </Label>
+            <FormField label="Veículo" required error={campos.erro("veiculo")}>
               <Select
                 id="veiculo"
                 value={form.id_veiculo ?? ""}
                 onChange={(e) => set("id_veiculo", e.target.value ? Number(e.target.value) : null)}
+                onBlur={campos.tocar("veiculo")}
               >
-                <option value="">Selecione...</option>
+                <option value="">Selecione o veículo</option>
                 {(veiculosQ.data ?? []).map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.placa} {v.marca ? `— ${v.marca}` : ""}
+                    {rotuloVeiculo(v)}
                   </option>
                 ))}
               </Select>
-            </div>
+            </FormField>
           )}
-          <div>
-            <Label htmlFor="tipo" required>
-              Tipo
-            </Label>
-            <Select id="tipo" value={form.tipo} onChange={(e) => set("tipo", e.target.value as ManutencaoTipo)}>
-              {TIPOS.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="data_prevista">Data prevista</Label>
-            <Input
-              id="data_prevista"
-              type="date"
-              value={form.data_prevista}
-              onChange={(e) => set("data_prevista", e.target.value)}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="descricao" required>
-              Descrição
-            </Label>
+          <EscolhaSegmentada
+            nome="tipo_manutencao"
+            titulo="Tipo"
+            moldura={false}
+            valor={form.tipo}
+            opcoes={TIPOS_ESCOLHA}
+            onChange={(t) => set("tipo", t)}
+          />
+          <FormField label="O que será feito" required error={campos.erro("descricao")}>
             <Textarea
               id="descricao"
               rows={2}
               value={form.descricao}
               onChange={(e) => set("descricao", e.target.value)}
+              onBlur={campos.tocar("descricao")}
+              placeholder={
+                form.tipo === "preventiva"
+                  ? "Ex.: Revisão dos 30.000 km — óleo, filtros e alinhamento"
+                  : "Ex.: Embreagem patinando; trocar o kit"
+              }
             />
-          </div>
-          <div>
-            <Label htmlFor="km_atual">Km atual</Label>
-            <Input
-              id="km_atual"
-              type="number"
-              min={0}
-              value={form.km_atual ?? ""}
-              onChange={(e) => set("km_atual", e.target.value ? Number(e.target.value) : null)}
+          </FormField>
+          <GradeCampos>
+            <FormField label="Data prevista" opcional hint="Quando o serviço deve ficar pronto.">
+              <Input
+                id="data_prevista"
+                type="date"
+                value={form.data_prevista}
+                onChange={(e) => set("data_prevista", e.target.value)}
+              />
+            </FormField>
+            <FormField label="Quilometragem" opcional hint="O que marca o painel na entrada." error={campos.erro("km_atual")}>
+              <CampoComUnidade
+                id="km_atual"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                sufixo="km"
+                value={form.km_atual ?? ""}
+                onChange={(e) => set("km_atual", numeroOuNulo(e.target.value))}
+                onBlur={campos.tocar("km_atual")}
+              />
+            </FormField>
+          </GradeCampos>
+          <GradeCampos>
+            <FormField label="Oficina ou fornecedor" opcional>
+              <Input
+                id="fornecedor"
+                value={form.fornecedor}
+                onChange={(e) => set("fornecedor", e.target.value)}
+                placeholder="Ex.: Auto Center Silva"
+                maxLength={150}
+              />
+            </FormField>
+            <FormField
+              label="Custo estimado"
+              opcional
+              hint="O do orçamento. O custo final é informado ao concluir."
+              error={campos.erro("custo_estimado")}
+            >
+              <CampoComUnidade
+                id="custo_estimado"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step="0.01"
+                prefixo="R$"
+                value={form.custo_estimado ?? ""}
+                onChange={(e) => set("custo_estimado", numeroOuNulo(e.target.value))}
+                onBlur={campos.tocar("custo_estimado")}
+                placeholder="Ex.: 850"
+              />
+            </FormField>
+          </GradeCampos>
+          <FormField label="Observações" opcional>
+            <Textarea
+              id="obs"
+              rows={2}
+              value={form.observacoes}
+              onChange={(e) => set("observacoes", e.target.value)}
+              placeholder="Ex.: orçamento nº 552 anexado ao processo"
             />
-          </div>
-          <div>
-            <Label htmlFor="fornecedor">Fornecedor</Label>
-            <Input id="fornecedor" value={form.fornecedor} onChange={(e) => set("fornecedor", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="custo_estimado">Custo estimado (R$)</Label>
-            <Input
-              id="custo_estimado"
-              type="number"
-              min={0}
-              step="0.01"
-              value={form.custo_estimado ?? ""}
-              onChange={(e) => set("custo_estimado", e.target.value ? Number(e.target.value) : null)}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="obs">Observações</Label>
-            <Textarea id="obs" rows={2} value={form.observacoes} onChange={(e) => set("observacoes", e.target.value)} />
-          </div>
+          </FormField>
           {err && (
-            <div role="alert" className="sm:col-span-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+            <Alert intent="danger" title="Não foi possível salvar">
               {err}
-            </div>
+            </Alert>
           )}
-        </div>
+        </form>
       </Dialog>
 
       <Dialog
         open={concluindo != null}
         onClose={() => setConcluindo(null)}
         title="Concluir manutenção"
+        description={
+          concluindo
+            ? `${placaDe.get(concluindo.id_veiculo) ?? `Veículo #${concluindo.id_veiculo}`} · ${concluindo.descricao}`
+            : undefined
+        }
         footer={
           <>
-            <Button variant="secondary" onClick={() => setConcluindo(null)}>
+            <Button variant="ghost" onClick={() => setConcluindo(null)}>
               Cancelar
             </Button>
-            <Button onClick={concluir} disabled={concluirM.isPending}>
-              {concluirM.isPending ? "Concluindo..." : "Concluir"}
+            <Button type="submit" form="form-concluir" loading={concluirM.isPending}>
+              Concluir manutenção
             </Button>
           </>
         }
       >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="c_data">Data de conclusão</Label>
-            <Input
-              id="c_data"
-              type="date"
-              value={concForm.data_conclusao}
-              onChange={(e) => setConcForm((f) => ({ ...f, data_conclusao: e.target.value }))}
-            />
-          </div>
-          <div>
-            <Label htmlFor="c_km">Km atual</Label>
-            <Input
-              id="c_km"
-              type="number"
-              min={0}
-              value={concForm.km_atual}
-              onChange={(e) => setConcForm((f) => ({ ...f, km_atual: e.target.value }))}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="c_custo">Custo final (R$)</Label>
-            <Input
+        <form
+          id="form-concluir"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            concluir();
+          }}
+        >
+          <p className="text-sm text-foreground-muted">
+            O veículo volta a ficar disponível. Quilometragem e custo podem ficar em branco.
+          </p>
+          <GradeCampos>
+            <FormField label="Data de conclusão" hint="Já vem com a data de hoje.">
+              <Input
+                id="c_data"
+                type="date"
+                value={concForm.data_conclusao}
+                onChange={(e) => setConcForm((f) => ({ ...f, data_conclusao: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Quilometragem" hint="O que marca o painel na saída da oficina." error={camposConcluir.erro("c_km")}>
+              <CampoComUnidade
+                id="c_km"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                sufixo="km"
+                value={concForm.km_atual}
+                onChange={(e) => setConcForm((f) => ({ ...f, km_atual: e.target.value }))}
+                onBlur={camposConcluir.tocar("c_km")}
+              />
+            </FormField>
+          </GradeCampos>
+          <FormField
+            label="Custo final"
+            hint={
+              concluindo?.custo_estimado != null
+                ? `Estimado na abertura: ${fmtMoeda(concluindo.custo_estimado)}.`
+                : "O valor da nota do serviço."
+            }
+            error={camposConcluir.erro("c_custo")}
+          >
+            <CampoComUnidade
               id="c_custo"
               type="number"
+              inputMode="decimal"
               min={0}
               step="0.01"
+              prefixo="R$"
               value={concForm.custo_final}
               onChange={(e) => setConcForm((f) => ({ ...f, custo_final: e.target.value }))}
+              onBlur={camposConcluir.tocar("c_custo")}
             />
-          </div>
-        </div>
+          </FormField>
+        </form>
       </Dialog>
     </div>
   );

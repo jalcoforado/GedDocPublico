@@ -4,17 +4,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardCheck, Inbox, Pencil, Plus, SearchX, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { hojeLocal, rotuloVeiculo, useErrosDoFormulario } from "@/components/frota/formulario";
 import { fmtData } from "@/components/pagamentos/format";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada, type OpcaoEscolha } from "@/components/ui/escolha-segmentada";
 import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -45,6 +48,27 @@ const RES_INTENT: Record<string, "success" | "danger" | "warning"> = {
   reprovada: "danger",
   com_ressalvas: "warning",
 };
+
+// No formulário, tipo e resultado ficam à vista (três opções cada), com o que
+// cada um quer dizer.
+const TIPOS_ESCOLHA: OpcaoEscolha<VistoriaTipo>[] = [
+  { valor: "saida", rotulo: "Saída", descricao: "Antes de o veículo sair para uma viagem." },
+  { valor: "retorno", rotulo: "Retorno", descricao: "Na volta de uma viagem." },
+  { valor: "periodica", rotulo: "Periódica", descricao: "Conferência de rotina, fora de viagem." },
+];
+const RESULTADOS_ESCOLHA: OpcaoEscolha<VistoriaResultado>[] = [
+  { valor: "aprovada", rotulo: "Aprovada", descricao: "Tudo em ordem: o veículo pode rodar." },
+  {
+    valor: "com_ressalvas",
+    rotulo: "Com ressalvas",
+    descricao: "Pode rodar, mas há algo a resolver — diga o quê nas observações.",
+  },
+  {
+    valor: "reprovada",
+    rotulo: "Reprovada",
+    descricao: "Não deve rodar até resolver — diga o motivo nas observações.",
+  },
+];
 
 const ITENS: { key: keyof VeiculoVistoria; label: string }[] = [
   { key: "pneus_ok", label: "Pneus" },
@@ -102,6 +126,9 @@ export default function VistoriasPage() {
   const [editing, setEditing] = useState<VeiculoVistoria | null>(null);
   const [form, setForm] = useState<VistForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
+  const campos = useErrosDoFormulario({
+    veiculo: !editing && form.id_veiculo == null ? "Escolha o veículo." : undefined,
+  });
 
   const veiculosQ = useQuery({ queryKey: ["frota-veiculos"], queryFn: () => api.frota.listAll() });
   const placaDe = useMemo(() => {
@@ -142,8 +169,9 @@ export default function VistoriasPage() {
   }
   function openNew() {
     setEditing(null);
-    setForm(EMPTY);
+    setForm({ ...EMPTY, data_vistoria: hojeLocal() });
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
   function openEdit(v: VeiculoVistoria) {
@@ -162,6 +190,7 @@ export default function VistoriasPage() {
       observacoes: v.observacoes ?? "",
     });
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
   function closeDialog() {
@@ -169,12 +198,14 @@ export default function VistoriasPage() {
     setEditing(null);
     setForm(EMPTY);
   }
+  function marcarTodos(marcar: boolean) {
+    setForm((f) => ({ ...f, ...Object.fromEntries(ITENS.map((i) => [i.key, marcar])) }));
+  }
+  const itensOk = ITENS.filter((i) => form[i.key as keyof VistForm]).length;
+
   function salvar() {
     setErr(null);
-    if (!editing && form.id_veiculo == null) {
-      setErr("Selecione o veículo.");
-      return;
-    }
+    if (!campos.podeEnviar()) return;
     const comum = {
       data_vistoria: nullify(form.data_vistoria),
       tipo: form.tipo,
@@ -330,83 +361,95 @@ export default function VistoriasPage() {
         open={dialogOpen}
         onClose={closeDialog}
         title={editing ? "Editar vistoria" : "Nova vistoria"}
+        description={
+          editing
+            ? `${placaDe.get(editing.id_veiculo) ?? `Veículo #${editing.id_veiculo}`} · ${fmtData(editing.data_vistoria)}`
+            : "Confira item por item e dê o resultado no fim."
+        }
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button type="submit" form="form-vistoria" loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Registrar vistoria"}
             </Button>
           </>
         }
       >
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            {!editing && (
-              <div className="sm:col-span-3">
-                <Label htmlFor="veiculo" required>
-                  Veículo
-                </Label>
-                <Select
-                  id="veiculo"
-                  value={form.id_veiculo ?? ""}
-                  onChange={(e) => set("id_veiculo", e.target.value ? Number(e.target.value) : null)}
-                >
-                  <option value="">Selecione...</option>
-                  {(veiculosQ.data ?? []).map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.placa} {v.marca ? `— ${v.marca}` : ""}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            )}
-            <div>
-              <Label htmlFor="data">Data</Label>
+        <form
+          id="form-vistoria"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            salvar();
+          }}
+        >
+          {!editing && (
+            <FormField label="Veículo" required error={campos.erro("veiculo")}>
+              <Select
+                id="veiculo"
+                value={form.id_veiculo ?? ""}
+                onChange={(e) => set("id_veiculo", e.target.value ? Number(e.target.value) : null)}
+                onBlur={campos.tocar("veiculo")}
+              >
+                <option value="">Selecione o veículo</option>
+                {(veiculosQ.data ?? []).map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {rotuloVeiculo(v)}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          )}
+          <GradeCampos>
+            <FormField
+              label="Data"
+              hint={!editing && form.data_vistoria === hojeLocal() ? "Já vem com a data de hoje." : undefined}
+            >
               <Input
                 id="data"
                 type="date"
                 value={form.data_vistoria}
                 onChange={(e) => set("data_vistoria", e.target.value)}
               />
-            </div>
-            <div>
-              <Label htmlFor="tipo" required>
-                Tipo
-              </Label>
-              <Select id="tipo" value={form.tipo} onChange={(e) => set("tipo", e.target.value as VistoriaTipo)}>
-                {TIPOS.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="resultado" required>
-                Resultado
-              </Label>
-              <Select
-                id="resultado"
-                value={form.resultado}
-                onChange={(e) => set("resultado", e.target.value as VistoriaResultado)}
-              >
-                {RESULTADOS.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
+            </FormField>
+            <EscolhaSegmentada
+              nome="tipo_vistoria"
+              titulo="Tipo de vistoria"
+              moldura={false}
+              valor={form.tipo}
+              opcoes={TIPOS_ESCOLHA}
+              onChange={(t) => set("tipo", t)}
+            />
+          </GradeCampos>
 
-          <fieldset className="rounded-md border border-border p-3">
-            <legend className="px-1 text-sm font-medium text-foreground-muted">Checklist</legend>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {/* Checklist: um fieldset de verdade, com o total à vista — "4 de 6"
+              diz na hora se falta conferir algo antes de dar o resultado. */}
+          <fieldset className="rounded-lg border border-border bg-surface-1 p-3">
+            <legend className="sr-only">Itens conferidos</legend>
+            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+              <div aria-hidden="true" className="text-sm font-medium text-foreground">
+                Itens em ordem
+              </div>
+              <div className="flex items-center gap-3 text-xs">
+                <span className="tabular-nums text-foreground-muted" aria-live="polite">
+                  {itensOk} de {ITENS.length}
+                </span>
+                <button
+                  type="button"
+                  className="font-medium text-primary hover:underline"
+                  onClick={() => marcarTodos(itensOk < ITENS.length)}
+                >
+                  {itensOk < ITENS.length ? "Marcar todos" : "Desmarcar todos"}
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
               {ITENS.map((i) => (
-                <label key={i.key} className="flex items-center gap-2 text-sm">
+                <label key={i.key} className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
                   <Checkbox
                     className="h-4 w-4"
                     checked={form[i.key as keyof VistForm] as boolean}
@@ -416,19 +459,37 @@ export default function VistoriasPage() {
                 </label>
               ))}
             </div>
+            <p className="mt-2 text-xs text-foreground-muted">Marque o que está em ordem; o que ficar sem marca conta como problema.</p>
           </fieldset>
 
-          <div>
-            <Label htmlFor="obs">Observações</Label>
-            <Textarea id="obs" rows={2} value={form.observacoes} onChange={(e) => set("observacoes", e.target.value)} />
-          </div>
+          <EscolhaSegmentada
+            nome="resultado_vistoria"
+            titulo="Resultado"
+            valor={form.resultado}
+            opcoes={RESULTADOS_ESCOLHA}
+            onChange={(r) => set("resultado", r)}
+          />
+
+          <FormField
+            label="Observações"
+            opcional={form.resultado === "aprovada"}
+            hint={form.resultado !== "aprovada" ? "Diga o que precisa ser resolvido." : undefined}
+          >
+            <Textarea
+              id="obs"
+              rows={2}
+              value={form.observacoes}
+              onChange={(e) => set("observacoes", e.target.value)}
+              placeholder="Ex.: pneu traseiro esquerdo careca; trocar antes da próxima viagem"
+            />
+          </FormField>
 
           {err && (
-            <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+            <Alert intent="danger" title="Não foi possível salvar">
               {err}
-            </div>
+            </Alert>
           )}
-        </div>
+        </form>
       </Dialog>
     </div>
   );
