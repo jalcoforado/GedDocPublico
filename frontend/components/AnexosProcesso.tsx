@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/form-field";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { AnexoDesentranhar } from "@/components/AnexoDesentranhar";
@@ -292,13 +292,18 @@ function UploadDialog({
     setIdTipo("");
     setPublico(true);
     setErr(null);
+    setTentou(false);
   }
+
+  // Erro sob o campo só depois de tentar enviar.
+  const [tentou, setTentou] = useState(false);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
+    setTentou(true);
     if (!file) {
-      setErr("Selecione um arquivo");
+      document.getElementById("file")?.focus();
       return;
     }
     uploadM.mutate();
@@ -315,7 +320,7 @@ function UploadDialog({
       footer={
         <>
           <Button
-            variant="secondary"
+            variant="ghost"
             onClick={() => {
               reset();
               onClose();
@@ -323,16 +328,24 @@ function UploadDialog({
           >
             Cancelar
           </Button>
-          <Button onClick={submit} disabled={uploadM.isPending || !file}>
-            {uploadM.isPending ? "Enviando..." : "Enviar"}
+          <Button onClick={submit} loading={uploadM.isPending}>
+            {uploadM.isPending ? "Enviando…" : "Enviar anexo"}
           </Button>
         </>
       }
     >
-      <form onSubmit={submit} className="space-y-3">
+      <form onSubmit={submit} noValidate className="space-y-4">
         <CotaAnexacaoBar cota={cota} arquivoBytes={file?.size ?? 0} />
-        <div>
-          <Label htmlFor="file">Arquivo *</Label>
+        <FormField
+          label="Arquivo"
+          required
+          hint={
+            file
+              ? `${file.name} — ${(file.size / 1024).toFixed(1)} KB`
+              : "PDF, imagem, texto, planilha ou documento do Office."
+          }
+          error={tentou && !file ? "Escolha o arquivo a anexar." : undefined}
+        >
           <input
             id="file"
             type="file"
@@ -344,42 +357,45 @@ function UploadDialog({
             accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods"
             className="block w-full text-sm text-foreground file:mr-3 file:rounded-button file:border-0 file:bg-brand file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary-foreground hover:file:bg-brand-light"
           />
-          {file && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              {file.name} — {(file.size / 1024).toFixed(1)} KB
-            </p>
-          )}
-        </div>
-        <div>
-          <Label htmlFor="desc">Descrição</Label>
+        </FormField>
+        <FormField
+          label="Descrição"
+          opcional
+          hint="Em branco, vale o nome do arquivo."
+        >
           <Input
             id="desc"
             value={descricao}
             onChange={(e) => setDescricao(e.target.value)}
-            placeholder="Ex: RG do requerente"
+            placeholder="Ex.: RG do requerente"
           />
-        </div>
-        <div>
-          <Label htmlFor="tipo">Tipo de anexo</Label>
+        </FormField>
+        <FormField label="Tipo de anexo" opcional>
           <Select
             id="tipo"
             value={idTipo}
             onChange={(e) => setIdTipo(e.target.value ? Number(e.target.value) : "")}
           >
-            <option value="">—</option>
+            <option value="">Sem tipo</option>
             {tiposQ.data?.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.tipo_anexo}
               </option>
             ))}
           </Select>
-        </div>
-        <label className="flex items-center gap-2 text-sm">
+        </FormField>
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border bg-surface-1 px-3 py-2.5 transition-colors duration-fast hover:bg-surface-2">
           <Checkbox
             checked={publico}
             onChange={(e) => setPublico(e.target.checked)}
+            className="mt-0.5 h-4 w-4"
           />
-          Público (visível para consulta)
+          <span className="text-sm">
+            <span className="block font-medium text-foreground">Público</span>
+            <span className="block text-xs text-foreground-muted">
+              Aparece na consulta pública do processo.
+            </span>
+          </span>
         </label>
         {err && (
           <div

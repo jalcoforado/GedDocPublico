@@ -126,10 +126,14 @@ describe("AnexoDesentranhar — dialog acessível", () => {
     const submit = within(screen.getByRole("dialog")).getByRole("button", {
       name: /^desentranhar$/i,
     });
-    expect(submit).toBeDisabled();
+    // Padrão de formulário: o botão não fica desabilitado; clicar vazio
+    // mostra o que falta e não chama a API.
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+    expect(screen.getByText(/pelo menos 3 letras/)).toBeInTheDocument();
+    expect(desentranharMock).not.toHaveBeenCalled();
     await user.type(screen.getByLabelText(/motivo/i), "Juntado por engano");
     await user.type(screen.getByLabelText(/autoridade/i), "Diretora, Portaria 1");
-    expect(submit).toBeEnabled();
     await user.click(submit);
     await waitFor(() =>
       expect(desentranharMock).toHaveBeenCalledWith(1, 10, {
@@ -179,8 +183,11 @@ describe("ProcessoApensados — dialog de apensar", () => {
     const dialog = screen.getByRole("dialog");
     const apensarBtn = screen.getByRole("button", { name: /^apensar$/i });
     expect(dialog.contains(apensarBtn)).toBe(true);
-    // Sem processo principal escolhido, submissão fica bloqueada
-    expect(apensarBtn).toBeDisabled();
+    // Sem processo principal escolhido, clicar não envia: mostra o que falta
+    // sob o campo (padrão de formulário — o botão não fica desabilitado).
+    fireEvent.click(apensarBtn);
+    expect(await screen.findByText("Escolha o processo principal.")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /cancelar/i }));
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
@@ -218,7 +225,7 @@ describe("ProcessoVolumes — dialog de volume", () => {
     const user = userEvent.setup();
     volumeCreateMock.mockResolvedValue({});
     await abrir();
-    await user.click(screen.getByRole("button", { name: /^criar$/i }));
+    await user.click(screen.getByRole("button", { name: /^criar volume$/i }));
     await waitFor(() =>
       expect(volumeCreateMock).toHaveBeenCalledWith(7, {
         numero: 1,

@@ -3,7 +3,7 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Clock, PenLine, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, PenLine, XCircle } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ValidacaoPublicaCard } from "@/components/ValidacaoPublicaCard";
 import {
@@ -282,87 +282,157 @@ function SolicitarDialog({
     return set.includes(item) ? set.filter((x) => x !== item) : [...set, item];
   }
 
+  // Erro sob o grupo só depois de tentar enviar; o botão não fica cinza.
+  const [tentou, setTentou] = useState(false);
+  const [filtro, setFiltro] = useState("");
+  const faltaAnexo = idsAnexos.length === 0;
+  const faltaAssinante = idsAssinantes.length === 0;
+
+  // Até 100 servidores numa lista: o filtro poupa a rolagem.
+  const termo = filtro.trim().toLowerCase();
+  const usuariosVisiveis = (usuariosQ.data?.items ?? []).filter(
+    (u) =>
+      !termo ||
+      u.nome.toLowerCase().includes(termo) ||
+      (u.email ?? "").toLowerCase().includes(termo) ||
+      idsAssinantes.includes(u.id),
+  );
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
-    if (idsAssinantes.length === 0) return setErr("Escolha pelo menos um assinante.");
-    if (idsAnexos.length === 0) return setErr("Escolha pelo menos um anexo.");
+    setTentou(true);
+    if (faltaAnexo || faltaAssinante) return;
     m.mutate();
   }
+
+  function fechar() {
+    reset();
+    setTentou(false);
+    setFiltro("");
+    onClose();
+  }
+
+  const grupo = "max-h-48 overflow-y-auto rounded-md border border-border p-2";
+  const erroGrupo = "mt-1.5 flex items-start gap-1 text-xs font-medium text-danger-soft-foreground";
 
   return (
     <Dialog
       open={open}
-      onClose={() => {
-        reset();
-        onClose();
-      }}
+      onClose={fechar}
       title="Solicitar assinatura"
+      description="Cada assinante precisa assinar todos os anexos marcados."
       size="lg"
       footer={
         <>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              reset();
-              onClose();
-            }}
-          >
+          <Button variant="ghost" onClick={fechar}>
             Cancelar
           </Button>
-          <Button onClick={submit} disabled={m.isPending}>
-            {m.isPending ? "Enviando..." : "Solicitar"}
+          <Button onClick={submit} loading={m.isPending}>
+            {m.isPending ? "Enviando…" : "Solicitar assinatura"}
           </Button>
         </>
       }
     >
-      <form onSubmit={submit} className="space-y-4">
-        <div>
-          <Label>Anexos a assinar</Label>
+      <form onSubmit={submit} noValidate className="space-y-5">
+        <fieldset>
+          <legend className="mb-1 flex w-full items-baseline justify-between text-sm font-medium text-foreground">
+            <span>
+              Anexos a assinar
+              <span className="ml-0.5 text-danger" aria-hidden="true">
+                *
+              </span>
+            </span>
+            {idsAnexos.length > 0 && (
+              <span className="text-xs font-normal tabular-nums text-foreground-muted">
+                {idsAnexos.length} marcado{idsAnexos.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </legend>
           {anexosCandidatos.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-foreground-muted">
               Este processo não tem anexos para assinar.
             </p>
           ) : (
-            <div className="max-h-40 overflow-y-auto rounded-md border border-border p-2">
+            <div className={grupo}>
               {anexosCandidatos.map((a) => (
                 <label
                   key={a.id}
-                  className="flex items-center gap-2 py-1 text-sm"
+                  className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-surface-2"
                 >
                   <Checkbox
                     checked={idsAnexos.includes(a.id)}
                     onChange={() => setIdsAnexos((s) => toggle(s, a.id))}
+                    className="h-4 w-4"
                   />
-                  <span>
-                    {a.descricao ?? `Anexo #${a.id}`}
-                    <span className="ml-1 text-muted-foreground">({a.e_doc})</span>
+                  <span className="text-foreground">
+                    {a.descricao ?? `Anexo ${a.id}`}
+                    <span className="ml-1 text-foreground-muted">({a.e_doc})</span>
                   </span>
                 </label>
               ))}
             </div>
           )}
-        </div>
+          {tentou && faltaAnexo && (
+            <p className={erroGrupo}>
+              <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              Marque pelo menos um anexo.
+            </p>
+          )}
+        </fieldset>
 
-        <div>
-          <Label>Destinatários (assinantes)</Label>
-          <div className="max-h-48 overflow-y-auto rounded-md border border-border p-2">
-            {usuariosQ.data?.items.map((u) => (
-              <label key={u.id} className="flex items-center gap-2 py-1 text-sm">
-                <Checkbox
-                  checked={idsAssinantes.includes(u.id)}
-                  onChange={() => setIdsAssinantes((s) => toggle(s, u.id))}
-                />
-                <span>
-                  {u.nome} <span className="text-muted-foreground">· {u.email}</span>
-                </span>
-              </label>
-            ))}
+        <fieldset>
+          <legend className="mb-1 flex w-full items-baseline justify-between text-sm font-medium text-foreground">
+            <span>
+              Assinantes
+              <span className="ml-0.5 text-danger" aria-hidden="true">
+                *
+              </span>
+            </span>
+            {idsAssinantes.length > 0 && (
+              <span className="text-xs font-normal tabular-nums text-foreground-muted">
+                {idsAssinantes.length} marcado{idsAssinantes.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </legend>
+          <Input
+            type="search"
+            value={filtro}
+            onChange={(e) => setFiltro(e.target.value)}
+            placeholder="Filtrar por nome ou e-mail…"
+            aria-label="Filtrar assinantes"
+            className="mb-2"
+          />
+          <div className={grupo}>
+            {usuariosVisiveis.length === 0 ? (
+              <p className="px-1 py-1 text-xs text-foreground-muted">
+                Ninguém com esse nome ou e-mail.
+              </p>
+            ) : (
+              usuariosVisiveis.map((u) => (
+                <label
+                  key={u.id}
+                  className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-surface-2"
+                >
+                  <Checkbox
+                    checked={idsAssinantes.includes(u.id)}
+                    onChange={() => setIdsAssinantes((s) => toggle(s, u.id))}
+                    className="h-4 w-4"
+                  />
+                  <span className="text-foreground">
+                    {u.nome} <span className="text-foreground-muted">· {u.email}</span>
+                  </span>
+                </label>
+              ))
+            )}
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Cada destinatário precisará assinar TODOS os anexos selecionados.
-          </p>
-        </div>
+          {tentou && faltaAssinante && (
+            <p className={erroGrupo}>
+              <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              Marque pelo menos um assinante.
+            </p>
+          )}
+        </fieldset>
 
         {err && (
           <div

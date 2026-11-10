@@ -1,13 +1,13 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, FileMinus, Loader2, ScrollText } from "lucide-react";
+import { AlertTriangle, FileMinus, ScrollText } from "lucide-react";
 import { useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/form-field";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -98,6 +98,21 @@ function DesentranharDialog({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Mesma regra de antes (motivo 3+, autoridade 2+); o botão não fica cinza
+  // — clicar mostra, sob cada campo, o que falta.
+  const [tentou, setTentou] = useState(false);
+  const faltaMotivo = motivo.trim().length < 3;
+  const faltaAutoridade = autoridade.trim().length < 2;
+
+  function desentranhar() {
+    setTentou(true);
+    if (faltaMotivo || faltaAutoridade) {
+      document.getElementById(faltaMotivo ? "desent-motivo" : "desent-aut")?.focus();
+      return;
+    }
+    mutateM.mutate();
+  }
+
   return (
     <Dialog
       open
@@ -105,27 +120,15 @@ function DesentranharDialog({
       title="Desentranhar documento do processo"
       footer={
         <>
-          <span className="mr-auto flex items-center gap-1 self-center text-[10px] text-foreground-muted">
-            <ScrollText className="h-3 w-3" aria-hidden="true" />
-            Audit + termo PDF gerados na ação
+          <span className="mr-auto flex items-center gap-1 self-center text-xs text-foreground-muted">
+            <ScrollText className="h-3.5 w-3.5" aria-hidden="true" />
+            Gera o termo em PDF e fica na auditoria.
           </span>
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
-          <Button
-            type="submit"
-            form={formId}
-            disabled={
-              mutateM.isPending ||
-              motivo.trim().length < 3 ||
-              autoridade.trim().length < 2
-            }
-            className="bg-danger hover:bg-danger/90 text-danger-foreground"
-          >
-            {mutateM.isPending && (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />
-            )}
-            <FileMinus className="mr-1 h-4 w-4" aria-hidden="true" />
+          <Button type="submit" form={formId} variant="danger" loading={mutateM.isPending}>
+            {!mutateM.isPending && <FileMinus className="h-4 w-4" aria-hidden="true" />}
             Desentranhar
           </Button>
         </>
@@ -133,67 +136,75 @@ function DesentranharDialog({
     >
       <form
         id={formId}
+        noValidate
         onSubmit={(e) => {
           e.preventDefault();
-          mutateM.mutate();
+          desentranhar();
         }}
         className="space-y-4"
       >
         {/* Aviso severo: operação formal com efeito em audit + arquivo físico */}
-        <div className="flex items-start gap-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2.5">
+        <div className="flex items-start gap-3 rounded-md border border-danger/30 bg-danger-soft px-3 py-2.5">
           <span
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-danger/10 text-danger"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-danger/10 text-danger-soft-foreground"
             aria-hidden="true"
           >
             <AlertTriangle className="h-4 w-4" />
           </span>
-          <p className="text-xs text-foreground-muted">
-            Operação formal. Gera termo PDF que vai pro audit log e ao arquivo
-            físico. O documento <strong>não é destruído</strong> — permanece
+          <p className="text-xs text-danger-soft-foreground">
+            Operação formal. Gera um termo em PDF, que vai para a auditoria e para o
+            arquivo físico. O documento <strong>não é destruído</strong>: fica
             arquivado em separado.
           </p>
         </div>
 
         {descricaoAnexo && (
-            <div className="rounded-md border border-border bg-surface-1 px-3 py-2">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
-                Documento
-              </div>
-              <div className="mt-0.5 text-sm">{descricaoAnexo}</div>
+          <div className="rounded-md border border-border bg-surface-1 px-3 py-2">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
+              Documento
             </div>
-          )}
-
-          <div>
-            <Label htmlFor="desent-motivo">
-              Motivo <span className="text-danger">*</span>
-            </Label>
-            <Textarea
-              id="desent-motivo"
-              value={motivo}
-              onChange={(e) => setMotivo(e.target.value)}
-              rows={3}
-              maxLength={1000}
-              placeholder="Ex: documento juntado por engano, pertence a outro processo"
-              autoFocus
-            />
+            <div className="mt-0.5 text-sm text-foreground">{descricaoAnexo}</div>
           </div>
+        )}
 
-          <div>
-            <Label htmlFor="desent-aut">
-              Autoridade <span className="text-danger">*</span>
-            </Label>
-            <Input
-              id="desent-aut"
-              value={autoridade}
-              onChange={(e) => setAutoridade(e.target.value)}
-              maxLength={300}
-              placeholder="Ex: Diretora de Protocolo, Portaria 123/2026"
-            />
-            <p className="mt-1 text-[10px] text-foreground-muted">
-              Cargo + ato administrativo que autoriza o desentranhamento.
-              Aparece no termo PDF.
-            </p>
-          </div>
+        <FormField
+          label="Motivo"
+          required
+          error={
+            tentou && faltaMotivo
+              ? "Escreva o motivo, com pelo menos 3 letras."
+              : undefined
+          }
+        >
+          <Textarea
+            id="desent-motivo"
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            rows={3}
+            maxLength={1000}
+            placeholder="Ex.: Documento juntado por engano; pertence a outro processo."
+            autoFocus
+          />
+        </FormField>
+
+        <FormField
+          label="Autoridade"
+          required
+          hint="Cargo e ato que autoriza o desentranhamento. Sai no termo em PDF."
+          error={
+            tentou && faltaAutoridade
+              ? "Informe quem autoriza: cargo e ato (ex.: Portaria 123/2026)."
+              : undefined
+          }
+        >
+          <Input
+            id="desent-aut"
+            value={autoridade}
+            onChange={(e) => setAutoridade(e.target.value)}
+            maxLength={300}
+            placeholder="Ex.: Diretora de Protocolo, Portaria 123/2026"
+          />
+        </FormField>
       </form>
     </Dialog>
   );
