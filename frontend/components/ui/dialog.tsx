@@ -163,7 +163,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
       >
         <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
           <div className="min-w-0">
-            <h2 id={titleId} className="text-md font-semibold text-primary">
+            <h2 id={titleId} className="font-display text-lg font-semibold tracking-tight text-titulo">
               {title}
             </h2>
             {description && (
