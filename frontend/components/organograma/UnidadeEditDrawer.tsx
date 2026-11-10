@@ -1,14 +1,15 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Building2, Loader2, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Building2, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Dialog } from "@/components/ui/dialog";
+import { FormField, GradeCampos, focarPrimeiroInvalido } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
@@ -51,6 +52,23 @@ function getInvalidParents(
   return invalid;
 }
 
+/** Caminho dos ancestrais, da raiz até o pai: "PREF › SEMAS". */
+function caminhoAte(no: OrganogramaNo, porId: Map<number, OrganogramaNo>): string {
+  const partes: string[] = [];
+  const vistos = new Set<number>();
+  let pai = no.id_unidade_pai != null ? porId.get(no.id_unidade_pai) : undefined;
+  while (pai && !vistos.has(pai.id)) {
+    vistos.add(pai.id);
+    partes.unshift(pai.sigla || pai.unidade_trabalho);
+    pai = pai.id_unidade_pai != null ? porId.get(pai.id_unidade_pai) : undefined;
+  }
+  return partes.join(" › ");
+}
+
+/**
+ * Formulário de unidade de trabalho — o mesmo no Organograma e na lista de
+ * Unidades, para a unidade ser cadastrada de um jeito só nas duas telas.
+ */
 export function UnidadeEditDrawer({
   open,
   mode,
@@ -67,6 +85,9 @@ export function UnidadeEditDrawer({
   const [parentId, setParentId] = useState<number | null>(null);
   const [tipoId, setTipoId] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Erro do nome só depois da tentativa (saiu do campo ou tentou salvar).
+  const [nomeTocado, setNomeTocado] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const tiposQ = useQuery({
     queryKey: ["tipos-unidade"],
@@ -78,6 +99,7 @@ export function UnidadeEditDrawer({
   useEffect(() => {
     if (!open || !mode) return;
     setErr(null);
+    setNomeTocado(false);
     if (mode.kind === "create") {
       setNome("");
       setSigla("");
@@ -96,15 +118,20 @@ export function UnidadeEditDrawer({
     [mode, allNos],
   );
 
+  const porId = useMemo(() => new Map(allNos.map((n) => [n.id, n])), [allNos]);
+
+  // Cada opção mostra onde a unidade fica ("PREF › SEMAS"): numa prefeitura
+  // com dois "Departamento Administrativo", o nome sozinho não decide.
   const parentOptions: ComboboxOption[] = useMemo(() => {
     return allNos
       .filter((n) => !invalidParents.has(n.id))
       .map((n) => ({
         value: n.id,
-        label: n.unidade_trabalho,
-        hint: n.sigla ?? undefined,
-      }));
-  }, [allNos, invalidParents]);
+        label: n.unidade_trabalho + (n.sigla ? ` (${n.sigla})` : ""),
+        hint: caminhoAte(n, porId) || undefined,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  }, [allNos, invalidParents, porId]);
 
   const saveM = useMutation({
     mutationFn: async () => {
@@ -123,6 +150,8 @@ export function UnidadeEditDrawer({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["organograma"] });
       qc.invalidateQueries({ queryKey: ["unidades"] });
+      // A lista de Unidades mostra o nome do pai a partir desta consulta.
+      qc.invalidateQueries({ queryKey: ["unidades-all"] });
       toast.success(
         mode?.kind === "create" ? "Unidade criada." : "Unidade atualizada.",
       );
@@ -139,6 +168,7 @@ export function UnidadeEditDrawer({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["organograma"] });
       qc.invalidateQueries({ queryKey: ["unidades"] });
+      qc.invalidateQueries({ queryKey: ["unidades-all"] });
       toast.success("Unidade excluída.");
       onClose();
     },
@@ -177,11 +207,14 @@ export function UnidadeEditDrawer({
     if (ok) deleteM.mutate();
   }
 
+  const erroNome = nome.trim() ? undefined : "Informe o nome da unidade.";
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
-    if (!nome.trim()) {
-      setErr("Informe o nome da unidade.");
+    if (erroNome) {
+      flushSync(() => setNomeTocado(true));
+      focarPrimeiroInvalido(formRef.current ?? document);
       return;
     }
     saveM.mutate();
@@ -189,59 +222,56 @@ export function UnidadeEditDrawer({
 
   if (!open || !mode) return null;
 
-  const title =
-    mode.kind === "create"
-      ? mode.parentId == null
-        ? "Nova unidade (raiz)"
-        : "Nova subunidade"
-      : `Editar: ${mode.unidade.unidade_trabalho}`;
-
   const isEdit = mode.kind === "edit";
+  const paiInicial = mode.kind === "create" && mode.parentId != null ? porId.get(mode.parentId) : undefined;
+
+  const title = isEdit ? "Editar unidade" : paiInicial ? "Nova subunidade" : "Nova unidade";
+  const description = isEdit
+    ? mode.unidade.unidade_trabalho
+    : paiInicial
+      ? `Dentro de ${paiInicial.unidade_trabalho}.`
+      : "Secretaria, setor ou equipamento onde os servidores trabalham.";
+
+  // Consequência da escolha do pai, dita por extenso.
+  const pai = parentId != null ? porId.get(parentId) : undefined;
+  const dicaPai = pai
+    ? `Fica dentro de ${[caminhoAte(pai, porId), pai.sigla || pai.unidade_trabalho].filter(Boolean).join(" › ")}.`
+    : "Em branco, a unidade fica no topo do organograma.";
 
   return (
     <Dialog
       open={open}
       onClose={onClose}
       title={title}
+      description={description}
       size="md"
       footer={
-        <div className="flex w-full items-center justify-between">
+        <div className="flex w-full flex-wrap items-center justify-between gap-2">
           {isEdit && canDelete ? (
             <Button
               type="button"
               variant="danger-outline"
               onClick={handleDelete}
-              disabled={deleteM.isPending}
+              loading={deleteM.isPending}
             >
-              <Trash2 className="h-4 w-4" aria-hidden="true" />
+              {!deleteM.isPending && <Trash2 className="h-4 w-4" aria-hidden="true" />}
               {deleteM.isPending ? "Excluindo…" : "Excluir"}
             </Button>
           ) : (
             <span />
           )}
           <div className="flex gap-2">
-            <Button type="button" variant="secondary" onClick={onClose}>
+            <Button type="button" variant="ghost" onClick={onClose}>
               Cancelar
             </Button>
-            <Button
-              type="submit"
-              form="unidade-form"
-              disabled={saveM.isPending}
-            >
-              {saveM.isPending ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  Salvando…
-                </>
-              ) : (
-                "Salvar"
-              )}
+            <Button type="submit" form="unidade-form" loading={saveM.isPending}>
+              {saveM.isPending ? "Salvando…" : isEdit ? "Salvar alterações" : "Cadastrar unidade"}
             </Button>
           </div>
         </div>
       }
     >
-      <form id="unidade-form" onSubmit={submit} className="space-y-4" noValidate>
+      <form ref={formRef} id="unidade-form" onSubmit={submit} className="space-y-4" noValidate>
         {err && (
           <div
             role="alert"
@@ -251,41 +281,40 @@ export function UnidadeEditDrawer({
           </div>
         )}
 
-        <div>
-          <Label htmlFor="u-nome" required>
-            Nome da unidade
-          </Label>
+        <FormField label="Nome da unidade" required error={nomeTocado ? erroNome : undefined}>
           <Input
             id="u-nome"
             value={nome}
             onChange={(e) => setNome(e.target.value)}
-            placeholder="Ex: Secretaria de Planejamento e Gestão"
+            onBlur={() => setNomeTocado(true)}
+            placeholder="Ex.: Secretaria de Planejamento e Gestão"
             autoFocus
-            required
           />
-        </div>
+        </FormField>
 
-        <div className="grid gap-4 sm:grid-cols-[1fr_2fr]">
-          <div>
-            <Label htmlFor="u-sigla">Sigla</Label>
+        <GradeCampos>
+          <FormField
+            label="Sigla"
+            opcional
+            hint="Aparece nas listas e no organograma."
+          >
             <Input
               id="u-sigla"
               value={sigla}
               onChange={(e) => setSigla(e.target.value.toUpperCase())}
-              placeholder="Ex: SEPLAG"
+              placeholder="Ex.: SEPLAG"
               maxLength={20}
               className="font-mono uppercase"
             />
-          </div>
+          </FormField>
 
-          <div>
-            <Label htmlFor="u-tipo">Tipo</Label>
+          <FormField label="Tipo" opcional>
             <Select
               id="u-tipo"
               value={tipoId ?? ""}
               onChange={(e) => setTipoId(e.target.value ? Number(e.target.value) : null)}
             >
-              <option value="">— Sem tipo —</option>
+              <option value="">Sem tipo</option>
               {tiposQ.data?.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.tipo_unidade_trabalho}
@@ -293,33 +322,36 @@ export function UnidadeEditDrawer({
                 </option>
               ))}
             </Select>
-          </div>
-        </div>
+          </FormField>
+        </GradeCampos>
 
-        <div>
-          <Label htmlFor="u-pai">Unidade superior</Label>
+        <FormField
+          label="Unidade superior"
+          opcional
+          hint={
+            <span className="flex items-start gap-1">
+              <Building2 className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+              <span>
+                {dicaPai}
+                {isEdit && " Ela não pode ficar abaixo dela mesma nem de uma subordinada."}
+              </span>
+            </span>
+          }
+        >
           <Combobox
             id="u-pai"
             options={parentOptions}
             value={parentId}
             onChange={(v) => setParentId(typeof v === "number" ? v : null)}
-            placeholder="(raiz — nenhuma)"
-            searchPlaceholder="Buscar superior…"
+            placeholder="Nenhuma — topo do organograma"
+            searchPlaceholder="Buscar pelo nome ou pela sigla…"
             emptyText={
               isEdit
                 ? "Nenhuma unidade disponível (não pode ser ela mesma nem subordinada)."
-                : "Nenhuma unidade cadastrada."
+                : "Nenhuma unidade com esse nome."
             }
-            loading={false}
           />
-          <p className="mt-1 flex items-start gap-1 text-xs text-foreground-subtle">
-            <Building2 className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-            <span>
-              Deixe em branco para criar uma unidade-raiz (topo do organograma).
-              {isEdit && " Você não pode mover esta unidade para baixo de uma subordinada."}
-            </span>
-          </p>
-        </div>
+        </FormField>
       </form>
     </Dialog>
   );
