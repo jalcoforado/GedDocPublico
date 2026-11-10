@@ -87,7 +87,14 @@ export function Popover({
       onClose();
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        // Escape fecha só o painel. Sem isto o mesmo Escape chegava ao
+        // `window`, onde o Dialog ouve, e fechava o diálogo inteiro junto —
+        // perdendo o que já estava preenchido. (Listener do document roda
+        // antes do do window na subida.)
+        e.stopPropagation();
+        onClose();
+      }
     }
     document.addEventListener("mousedown", onDocMouseDown);
     document.addEventListener("keydown", onKey);
@@ -99,13 +106,20 @@ export function Popover({
 
   if (!open || typeof document === "undefined") return null;
 
+  // Aberto de dentro de um diálogo, o painel sobe para `z-popover`: no
+  // `z-dropdown` (abaixo de `z-modal`) a lista de um campo de busca abria
+  // ATRÁS do diálogo. Fora de diálogo continua em `z-dropdown`, sob o
+  // cabeçalho fixo (ver `margens`).
+  const dentroDeDialogo = !!anchorRef.current?.closest('[role="dialog"]');
+
   return createPortal(
     <div
       ref={refs.setFloating}
       data-popover=""
       style={floatingStyles}
       className={cn(
-        "z-dropdown flex flex-col overflow-hidden rounded-dropdown border border-border bg-card shadow-dropdown origin-top animate-scale-in",
+        dentroDeDialogo ? "z-popover" : "z-dropdown",
+        "flex flex-col overflow-hidden rounded-dropdown border border-border bg-card shadow-dropdown origin-top animate-scale-in",
         className,
       )}
     >
