@@ -110,6 +110,45 @@ daqui; quem acha uma tela fora dele, conserta.
 10. **Gráfico** pega cor de `lib/chart-theme.ts` (`SERIES`, `GRAFICO`), nunca
     hex. O tema escuro vem de graça.
 
+## Padrão de formulário (desde 2026-11-10)
+
+Formulário bom é o que a pessoa preenche sem precisar perguntar nada.
+
+1. **Campo = `FormField`** (`components/ui/form-field.tsx`): rótulo, controle,
+   dica e erro com a fiação ARIA pronta. Nada de `<Label>` + `<Input>` +
+   `<p>` montados à mão.
+2. **Rótulo curto e de gente** ("Valor total", não "Valor total (R$)"). A
+   unidade vai no campo, com `CampoComUnidade` (`prefixo="R$"`,
+   `sufixo="km"`). O placeholder é EXEMPLO ("Ex.: OF-123/2026"), nunca o
+   rótulo repetido nem a instrução.
+3. **Obrigatório = asterisco** (`required`). Num grupo de obrigatórios, o
+   campo que não é ganha `opcional`. A dica diz o formato ou para que serve,
+   numa linha.
+4. **Erro só depois da tentativa**: ao sair do campo ou ao enviar, nunca ao
+   abrir a tela. A mensagem diz como consertar ("Use o formato
+   000.000.000-00"), não só que está errado. Ao enviar com erro: foco no
+   primeiro inválido (`focarPrimeiroInvalido`) e, se forem vários, um resumo
+   no topo com link para cada um.
+5. **Uma coluna**, lida de cima para baixo. Duas (`GradeCampos`) só para
+   pares que andam juntos: cidade + UF, início + fim, quantidade + unidade.
+6. **Poucas opções à vista**: 2 a 4 opções → `EscolhaSegmentada` (todas
+   nomeadas, com a consequência da escolha embaixo), não `<select>`. Lista
+   longa ou que cresce → `Combobox` com busca. Ligar/desligar → checkbox.
+7. **Formulário longo = etapas**: `SectionCard` com `step` e `id`, na
+   ordem em que a pessoa pensa (quem → o quê → detalhes). Com 3 etapas ou
+   mais, `LayoutFormulario` + `RoteiroFormulario` ao lado: o que já está
+   feito ✓ e o que falta, cada item levando ao campo.
+8. **Ações em `BarraAcoesFormulario`** (fixa embaixo): Cancelar (ghost) →
+   secundária ("Salvar como rascunho") → principal com o VERBO do
+   formulário ("Abrir processo", "Criar solicitação"; "Salvar" só em
+   edição). À esquerda, o status: o que falta (`resumoDoQueFalta`) ou
+   "rascunho salvo".
+9. **Botão principal nunca desabilitado por validação**: clicar é o que
+   mostra o que falta. Desabilitado só enquanto envia (`loading`).
+10. **Diálogo** para cadastro curto (≤ 8 campos, `CrudPage`); página
+    própria para o resto. Título do diálogo diz o que se edita ("Editar
+    cidade").
+
 ## Do / Don't
 
 | ✔ Do | ✘ Don't |
