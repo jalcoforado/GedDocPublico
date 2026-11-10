@@ -3,7 +3,7 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Clock, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, PenLine, XCircle } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toast";
 import { ValidacaoPublicaCard } from "@/components/ValidacaoPublicaCard";
@@ -60,7 +61,7 @@ export function AssinaturasProcesso({ processo }: { processo: ProcessoDetail }) 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="text-sm text-gray-600">
+        <div className="text-sm text-foreground-muted">
           {listQ.data?.length ?? 0} solicitação(ões)
         </div>
         <Button onClick={() => setOpenSolic(true)} disabled={!podeSolicitar}>
@@ -68,7 +69,7 @@ export function AssinaturasProcesso({ processo }: { processo: ProcessoDetail }) 
         </Button>
       </div>
 
-      {listQ.isLoading && <Carregando className="text-sm text-gray-500" />}
+      {listQ.isLoading && <Carregando className="text-sm text-muted-foreground" />}
 
       {(listQ.data ?? []).map((s) => (
         <SolicitacaoCard
@@ -89,7 +90,12 @@ export function AssinaturasProcesso({ processo }: { processo: ProcessoDetail }) 
       ))}
 
       {listQ.data && listQ.data.length === 0 && (
-        <p className="text-sm text-gray-500">Sem solicitações de assinatura.</p>
+        <EmptyState
+          icon={PenLine}
+          title="Sem solicitações de assinatura"
+          description="Peça a assinatura de um anexo com “Solicitar assinatura”."
+          className="p-6"
+        />
       )}
 
       <SolicitarDialog

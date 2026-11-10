@@ -284,12 +284,12 @@ export function RedigirDocumentoDialog({
               </label>
 
               {!hasGoogleCredentials && (
-                <div className="ml-6 text-xs text-amber-600 space-y-1">
+                <div className="ml-6 space-y-1 text-xs text-warning-soft-foreground">
                   <p>⚠️ Você precisa conectar sua conta Google Docs primeiro.</p>
                   <button
                     type="button"
                     onClick={() => setShowGoogleConnect(true)}
-                    className="text-blue-600 hover:underline font-medium"
+                    className="font-medium text-primary hover:underline"
                   >
                     Conectar agora →
                   </button>
