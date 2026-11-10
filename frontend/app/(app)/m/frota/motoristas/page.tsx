@@ -2,7 +2,6 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  FileText,
   IdCard,
   Inbox,
   Pencil,
@@ -10,19 +9,23 @@ import {
   RotateCcw,
   Settings2,
   Trash2,
+  UserRound,
   UserX,
 } from "lucide-react";
 import { useState } from "react";
 
+import { useErrosDoFormulario } from "@/components/frota/formulario";
 import { fmtData } from "@/components/pagamentos/format";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada, type OpcaoEscolha } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
@@ -36,7 +39,7 @@ import {
   type MotoristaSituacao,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { aplicarMascara } from "@/lib/mascaras";
+import { aplicarMascara, soDigitos, telefoneParaExibir } from "@/lib/mascaras";
 
 const SITUACOES: {
   value: MotoristaSituacao;
@@ -47,8 +50,30 @@ const SITUACOES: {
   { value: "afastado", label: "Afastado", intent: "warning" },
   { value: "inativo", label: "Inativo", intent: "neutral" },
 ];
-const CATEGORIAS: CnhCategoria[] = ["A", "B", "AB", "C", "D", "E", "AC", "AD", "AE"];
+// A letra sozinha obriga a lembrar o que cada categoria dirige.
+const CATEGORIAS: { valor: CnhCategoria; rotulo: string }[] = [
+  { valor: "A", rotulo: "A — moto" },
+  { valor: "B", rotulo: "B — carro" },
+  { valor: "AB", rotulo: "AB — moto e carro" },
+  { valor: "C", rotulo: "C — caminhão" },
+  { valor: "D", rotulo: "D — ônibus e micro-ônibus" },
+  { valor: "E", rotulo: "E — carreta" },
+  { valor: "AC", rotulo: "AC — moto e caminhão" },
+  { valor: "AD", rotulo: "AD — moto e ônibus" },
+  { valor: "AE", rotulo: "AE — moto e carreta" },
+];
 const SITUACAO_POR_VALOR = Object.fromEntries(SITUACOES.map((s) => [s.value, s]));
+// No formulário, as três situações ficam à vista com a consequência de cada
+// uma: só o motorista ativo aparece para ser designado numa solicitação.
+const SITUACOES_ESCOLHA: OpcaoEscolha<MotoristaSituacao>[] = [
+  { valor: "ativo", rotulo: "Ativo", descricao: "Pode ser designado para as viagens." },
+  { valor: "afastado", rotulo: "Afastado", descricao: "Fica fora das designações até voltar." },
+  { valor: "inativo", rotulo: "Inativo", descricao: "Deixa de constar como condutor da frota." },
+];
+
+// Formato do e-mail como o backend confere (schemas/frota.py::EMAIL_PATTERN)
+// — nem mais nem menos exigente, para não recusar o que o servidor aceita.
+const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 interface MotoristaForm {
   nome: string;
@@ -95,6 +120,26 @@ function cnhVencida(validade: string): boolean {
   return validade < new Date().toISOString().slice(0, 10);
 }
 
+// As mesmas exigências do backend (11 dígitos no CPF e na CNH, validade
+// obrigatória), ditas sob o campo e com o jeito de consertar.
+function validar(form: MotoristaForm): Record<string, string | undefined> {
+  const cpf = soDigitos(form.cpf);
+  const cnh = soDigitos(form.cnh_numero);
+  const email = form.email.trim();
+  return {
+    nome: form.nome.trim() ? undefined : "Informe o nome do motorista.",
+    cpf: !cpf ? "Informe o CPF." : cpf.length !== 11 ? "O CPF tem 11 dígitos: 000.000.000-00." : undefined,
+    cnh_numero: !cnh
+      ? "Informe o número da CNH."
+      : cnh.length !== 11
+        ? "O número da CNH tem 11 dígitos."
+        : undefined,
+    cnh_validade: form.cnh_validade ? undefined : "Informe a validade da CNH.",
+    email:
+      email && !EMAIL.test(email) ? "Confira o e-mail — ex.: nome@prefeitura.gov.br." : undefined,
+  };
+}
+
 export default function MotoristasPage() {
   const { can } = useAuth();
   const canCreate = can("frota", "inserir");
@@ -108,6 +153,7 @@ export default function MotoristasPage() {
   const [editing, setEditing] = useState<Motorista | null>(null);
   const [form, setForm] = useState<MotoristaForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
+  const campos = useErrosDoFormulario(validar(form));
 
   const motoristasQ = useQuery({
     queryKey: ["frota-motoristas"],
@@ -160,6 +206,7 @@ export default function MotoristasPage() {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
 
@@ -167,12 +214,12 @@ export default function MotoristasPage() {
     setEditing(m);
     setForm({
       nome: m.nome,
-      cpf: m.cpf,
+      cpf: cpfParaExibir(m.cpf),
       matricula: m.matricula ?? "",
       cnh_numero: m.cnh_numero,
       cnh_categoria: m.cnh_categoria,
       cnh_validade: m.cnh_validade ?? "",
-      telefone: m.telefone ?? "",
+      telefone: telefoneParaExibir(m.telefone),
       email: m.email ?? "",
       id_unidade: m.id_unidade,
       id_usuario: m.id_usuario,
@@ -180,6 +227,7 @@ export default function MotoristasPage() {
       observacoes: m.observacoes ?? "",
     });
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
 
@@ -191,9 +239,11 @@ export default function MotoristasPage() {
 
   function salvar() {
     setErr(null);
+    if (!campos.podeEnviar()) return;
     const payload = {
       nome: form.nome.trim(),
-      cpf: form.cpf.trim(),
+      // O backend guarda só os dígitos; a máscara é da tela.
+      cpf: soDigitos(form.cpf),
       matricula: nullify(form.matricula),
       cnh_numero: form.cnh_numero.trim(),
       cnh_categoria: form.cnh_categoria,
@@ -344,169 +394,203 @@ export default function MotoristasPage() {
       <Dialog
         open={dialogOpen}
         onClose={closeDialog}
-        title={editing ? `Editar — ${editing.nome}` : "Novo motorista"}
+        title={editing ? "Editar motorista" : "Novo motorista"}
+        description={editing ? editing.nome : undefined}
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button type="submit" form="form-motorista" loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Cadastrar motorista"}
             </Button>
           </>
         }
       >
-        <div className="space-y-4">
+        <form
+          id="form-motorista"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            salvar();
+          }}
+        >
+          <SectionCard icon={UserRound} title="Quem é" description="Identificação do condutor.">
+            <div className="space-y-4">
+              <FormField label="Nome completo" required error={campos.erro("nome")}>
+                <Input
+                  id="nome"
+                  value={form.nome}
+                  onChange={(e) => set("nome", e.target.value)}
+                  onBlur={campos.tocar("nome")}
+                  placeholder="Ex.: Francisco das Chagas Lima"
+                  maxLength={150}
+                  autoComplete="off"
+                />
+              </FormField>
+              <GradeCampos>
+                <FormField label="CPF" required error={campos.erro("cpf")}>
+                  <Input
+                    id="cpf"
+                    value={form.cpf}
+                    onChange={(e) => set("cpf", aplicarMascara("cpf", e.target.value).valor)}
+                    onBlur={campos.tocar("cpf")}
+                    inputMode="numeric"
+                    className="font-mono"
+                    placeholder="000.000.000-00"
+                    autoComplete="off"
+                  />
+                </FormField>
+                <FormField label="Matrícula" opcional hint="Se for servidor do município.">
+                  <Input
+                    id="matricula"
+                    value={form.matricula}
+                    onChange={(e) => set("matricula", e.target.value)}
+                    placeholder="Ex.: 20231045"
+                    maxLength={40}
+                  />
+                </FormField>
+              </GradeCampos>
+            </div>
+          </SectionCard>
+
           <SectionCard
-            icon={FileText}
-            title="Identificação"
-            description="Dados pessoais e habilitação do condutor."
+            icon={IdCard}
+            title="Habilitação"
+            description="Os dados da CNH, para saber o que ele pode dirigir e até quando."
           >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <Label htmlFor="nome" required>
-                  Nome
-                </Label>
-                <Input id="nome" value={form.nome} onChange={(e) => set("nome", e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="cpf" required>
-                  CPF
-                </Label>
-                <Input
-                  id="cpf"
-                  value={form.cpf}
-                  onChange={(e) => set("cpf", e.target.value)}
-                  className="font-mono"
-                  placeholder="00000000000"
-                />
-              </div>
-              <div>
-                <Label htmlFor="matricula">Matrícula</Label>
-                <Input
-                  id="matricula"
-                  value={form.matricula}
-                  onChange={(e) => set("matricula", e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="cnh_numero" required>
-                  CNH (número)
-                </Label>
+            <div className="space-y-4">
+              <FormField
+                label="Número da CNH"
+                required
+                hint="O número de registro: 11 dígitos."
+                error={campos.erro("cnh_numero")}
+              >
                 <Input
                   id="cnh_numero"
                   value={form.cnh_numero}
                   onChange={(e) => set("cnh_numero", e.target.value)}
+                  onBlur={campos.tocar("cnh_numero")}
+                  inputMode="numeric"
                   className="font-mono"
-                  placeholder="00000000000"
+                  placeholder="Ex.: 01234567890"
+                  maxLength={14}
+                  autoComplete="off"
                 />
-              </div>
-              <div>
-                <Label htmlFor="cnh_categoria" required>
-                  CNH (categoria)
-                </Label>
-                <Select
-                  id="cnh_categoria"
-                  value={form.cnh_categoria}
-                  onChange={(e) => set("cnh_categoria", e.target.value as CnhCategoria)}
+              </FormField>
+              <GradeCampos>
+                <FormField label="Categoria" required>
+                  <Select
+                    id="cnh_categoria"
+                    value={form.cnh_categoria}
+                    onChange={(e) => set("cnh_categoria", e.target.value as CnhCategoria)}
+                  >
+                    {CATEGORIAS.map((c) => (
+                      <option key={c.valor} value={c.valor}>
+                        {c.rotulo}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField
+                  label="Validade"
+                  required
+                  hint={
+                    cnhVencida(form.cnh_validade) ? (
+                      // Não é erro (o backend aceita: o cadastro pode ser de quem
+                      // está renovando), mas é a informação que mais importa ali.
+                      <span className="font-medium text-warning-soft-foreground">
+                        CNH vencida — renove antes de designar este motorista.
+                      </span>
+                    ) : (
+                      "Data impressa na CNH."
+                    )
+                  }
+                  error={campos.erro("cnh_validade")}
                 >
-                  {CATEGORIAS.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="cnh_validade" required>
-                  CNH (validade)
-                </Label>
-                <Input
-                  id="cnh_validade"
-                  type="date"
-                  value={form.cnh_validade}
-                  onChange={(e) => set("cnh_validade", e.target.value)}
-                />
-                {cnhVencida(form.cnh_validade) && (
-                  <p className="mt-1 text-xs text-danger">CNH vencida nesta data.</p>
-                )}
-              </div>
+                  <Input
+                    id="cnh_validade"
+                    type="date"
+                    value={form.cnh_validade}
+                    onChange={(e) => set("cnh_validade", e.target.value)}
+                    onBlur={campos.tocar("cnh_validade")}
+                  />
+                </FormField>
+              </GradeCampos>
             </div>
           </SectionCard>
 
           <SectionCard
             icon={Settings2}
-            title="Contato, lotação e situação"
-            description="Telefone/e-mail, unidade de lotação, vínculo com usuário e situação."
+            title="Contato e lotação"
+            description="Como falar com ele, onde está lotado e se pode ser designado."
           >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <Label htmlFor="telefone">Telefone</Label>
-                <Input
-                  id="telefone"
-                  value={form.telefone}
-                  onChange={(e) => set("telefone", e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="email">E-mail</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => set("email", e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="unidade">Unidade (lotação)</Label>
+            <div className="space-y-4">
+              <GradeCampos>
+                <FormField label="Telefone" opcional>
+                  <Input
+                    id="telefone"
+                    type="tel"
+                    inputMode="numeric"
+                    value={form.telefone}
+                    onChange={(e) => set("telefone", aplicarMascara("telefone", e.target.value).valor)}
+                    placeholder="(00) 00000-0000"
+                  />
+                </FormField>
+                <FormField label="E-mail" opcional error={campos.erro("email")}>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => set("email", e.target.value)}
+                    onBlur={campos.tocar("email")}
+                    placeholder="Ex.: nome@prefeitura.gov.br"
+                    maxLength={255}
+                  />
+                </FormField>
+              </GradeCampos>
+              <FormField label="Unidade de lotação" opcional>
                 <Select
                   id="unidade"
                   value={form.id_unidade ?? ""}
-                  onChange={(e) =>
-                    set("id_unidade", e.target.value ? Number(e.target.value) : null)
-                  }
+                  onChange={(e) => set("id_unidade", e.target.value ? Number(e.target.value) : null)}
                 >
-                  <option value="">—</option>
+                  <option value="">Nenhuma</option>
                   {unidades.map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.unidade_trabalho}
                     </option>
                   ))}
                 </Select>
-              </div>
-              <div>
-                <Label htmlFor="situacao">Situação</Label>
-                <Select
-                  id="situacao"
-                  value={form.situacao}
-                  onChange={(e) => set("situacao", e.target.value as MotoristaSituacao)}
-                >
-                  {SITUACOES.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="sm:col-span-2">
-                <Label htmlFor="obs">Observações</Label>
+              </FormField>
+              <EscolhaSegmentada
+                nome="situacao_motorista"
+                titulo="Situação"
+                moldura={false}
+                valor={form.situacao}
+                opcoes={SITUACOES_ESCOLHA}
+                onChange={(s) => set("situacao", s)}
+              />
+              <FormField label="Observações" opcional>
                 <Textarea
                   id="obs"
                   rows={3}
                   value={form.observacoes}
                   onChange={(e) => set("observacoes", e.target.value)}
+                  placeholder="Ex.: dirige só no turno da manhã"
                 />
-              </div>
+              </FormField>
             </div>
           </SectionCard>
 
           {err && (
-            <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+            <Alert intent="danger" title="Não foi possível salvar">
               {err}
-            </div>
+            </Alert>
           )}
-        </div>
+        </form>
       </Dialog>
     </div>
   );
