@@ -464,8 +464,6 @@ export default function SolicitacoesPage() {
                   motorista + o que aconteceu) numa célula de duas linhas. */}
               <TH>Solicitação</TH>
               <TH>Previsto</TH>
-              <TH className="text-right">Passag.</TH>
-              <TH>Unidade</TH>
               <TH>Execução</TH>
               <TH>Status</TH>
               <TH className="text-right">Ações</TH>
@@ -474,7 +472,7 @@ export default function SolicitacoesPage() {
           <TBody>
             {listQ.isLoading && (
               <TR>
-                <TD colSpan={8} className="text-center text-muted-foreground">
+                <TD colSpan={6} className="text-center text-muted-foreground">
                   Carregando solicitações...
                 </TD>
               </TR>
@@ -488,12 +486,20 @@ export default function SolicitacoesPage() {
                   {/* Finalidade e destino são texto livre: cortados numa linha,
                       com o texto inteiro no title. Quebrando, cada linha virava
                       um bloco de cinco linhas. */}
-                  <TD className="max-w-[18rem]">
+                  <TD className="max-w-[20rem]">
                     <div className="truncate font-medium" title={s.finalidade}>
                       {s.finalidade}
                     </div>
-                    <div className="truncate text-xs text-muted-foreground" title={s.destino}>
+                    {/* Destino, passageiros e unidade: o "para onde, quantos e
+                        quem pede" — eram três colunas, duas quase sempre "—". */}
+                    <div
+                      className="truncate text-xs text-muted-foreground"
+                      title={[s.destino, unidadeNome(s.id_unidade_solicitante)].filter((x) => x && x !== "—").join(" · ")}
+                    >
                       {s.destino}
+                      {" · "}
+                      {s.quantidade_passageiros} {s.quantidade_passageiros === 1 ? "passageiro" : "passageiros"}
+                      {unidadeNome(s.id_unidade_solicitante) !== "—" && ` · ${unidadeNome(s.id_unidade_solicitante)}`}
                     </div>
                   </TD>
                   <TD className="whitespace-nowrap tabular-nums">
@@ -502,8 +508,6 @@ export default function SolicitacoesPage() {
                       até {fmtDataHora(s.data_retorno_prevista)}
                     </div>
                   </TD>
-                  <TD className="text-right tabular-nums">{s.quantidade_passageiros}</TD>
-                  <TD className="text-muted-foreground">{unidadeNome(s.id_unidade_solicitante)}</TD>
                   <TD className="max-w-[16rem]">
                     {s.id_veiculo_designado ? (
                       <>
