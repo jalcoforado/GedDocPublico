@@ -17,15 +17,25 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { fmtData } from "@/components/pagamentos/format";
+import {
+  dataBR,
+  diasEntre,
+  duracaoLegivel,
+  GrupoCampos,
+  somarDias,
+  useValidacao,
+} from "@/components/transporte/formulario";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
 import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -76,6 +86,33 @@ const EMPTY: CicloForm = {
   situacao: "rascunho",
   observacoes: "",
 };
+
+const DESCRICAO_SITUACAO: Record<CicloSituacao, string> = {
+  rascunho: "Em preparação.",
+  aberto: "Em andamento.",
+  encerrado: "Não gera convocações nem aceita ajuste de prazo.",
+};
+
+const FAIXAS = 10;
+
+/**
+ * Prazo de cada final de documento (0 a 9), na forma `dd/mm` (ou
+ * `dd/mm/aaaa` quando a janela atravessa o ano). Espelha
+ * `prazo_do_regulado` do backend: o prazo é o FIM da faixa. `null` quando
+ * não há o que mostrar (sem escalonamento ou janela incompleta).
+ */
+function faixasDoCiclo(f: CicloForm): string[] | null {
+  if (f.criterio_escalonamento !== "final_documento") return null;
+  if (!f.data_inicio || !f.data_fim || f.data_fim < f.data_inicio) return null;
+  const total = diasEntre(f.data_inicio, f.data_fim);
+  if (total === null) return null;
+  const mesmoAno = f.data_inicio.slice(0, 4) === f.data_fim.slice(0, 4);
+  return Array.from({ length: FAIXAS }, (_, faixa) => {
+    const dias = Math.floor(((faixa + 1) * total) / FAIXAS);
+    const prazo = dataBR(somarDias(f.data_inicio, dias));
+    return mesmoAno ? prazo.slice(0, 5) : prazo;
+  });
+}
 
 function nullify(v: string): string | null {
   const t = v.trim();
@@ -147,6 +184,7 @@ export default function RecadastramentoPage() {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+    val.reiniciar();
     setDialogOpen(true);
   }
 
@@ -161,6 +199,7 @@ export default function RecadastramentoPage() {
       observacoes: c.observacoes ?? "",
     });
     setErr(null);
+    val.reiniciar();
     setDialogOpen(true);
   }
 
@@ -171,20 +210,25 @@ export default function RecadastramentoPage() {
     setErr(null);
   }
 
+  // Mesmas regras do backend (`RecadastramentoCicloCreate`), no campo.
+  const val = useValidacao<"nome" | "data_inicio" | "data_fim">({
+    nome: form.nome.trim() === "" ? "Informe o nome do ciclo." : undefined,
+    data_inicio: form.data_inicio === "" ? "Informe o início da janela." : undefined,
+    data_fim:
+      form.data_fim === ""
+        ? "Informe o fim da janela."
+        : form.data_inicio && form.data_fim < form.data_inicio
+          ? "O fim não pode ser antes do início. Confira o ano."
+          : undefined,
+  });
+
+  // A consequência do escalonamento, antes de gerar: o prazo de cada final
+  // de documento. Mesma conta de `prazo_do_regulado` no backend.
+  const faixas = faixasDoCiclo(form);
+
   function submit() {
     setErr(null);
-    if (form.nome.trim() === "") {
-      setErr("Nome do ciclo é obrigatório.");
-      return;
-    }
-    if (!form.data_inicio || !form.data_fim) {
-      setErr("Informe o início e o fim da janela.");
-      return;
-    }
-    if (form.data_inicio > form.data_fim) {
-      setErr("Data de início não pode ser posterior à data de fim.");
-      return;
-    }
+    if (!val.conferir()) return;
     const payload = {
       nome: form.nome.trim(),
       data_inicio: form.data_inicio,
@@ -365,102 +409,134 @@ export default function RecadastramentoPage() {
       <Dialog
         open={dialogOpen}
         onClose={closeDialog}
-        title={editing ? "Editar ciclo" : "Novo ciclo de recadastramento"}
+        title={editing ? `Editar ciclo — ${editing.nome}` : "Novo ciclo de recadastramento"}
+        description={
+          editing ? undefined : "O ciclo nasce como rascunho. As convocações se geram depois, na tela do ciclo."
+        }
+        size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={submit} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button onClick={submit} loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Criar ciclo"}
             </Button>
           </>
         }
       >
-        <div className="space-y-3">
-          {err && <div className="text-sm text-danger">{err}</div>}
-          <div>
-            <Label htmlFor="c_nome">Nome</Label>
+        <div ref={val.ref} className="space-y-5">
+          <FormField label="Nome" required error={val.erro("nome")}>
             <Input
               id="c_nome"
               value={form.nome}
               onChange={(e) => setForm({ ...form, nome: e.target.value })}
-              placeholder="Recadastramento 2026"
+              onBlur={val.sair("nome")}
+              placeholder="Ex.: Recadastramento 2026"
             />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="c_ini">Início</Label>
-              <Input
-                id="c_ini"
-                type="date"
-                value={form.data_inicio}
-                onChange={(e) => setForm({ ...form, data_inicio: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="c_fim">Fim</Label>
-              <Input
-                id="c_fim"
-                type="date"
-                value={form.data_fim}
-                onChange={(e) => setForm({ ...form, data_fim: e.target.value })}
-              />
-            </div>
-          </div>
-          <div>
-            <Label htmlFor="c_crit">Escalonamento</Label>
-            <Select
-              id="c_crit"
-              value={form.criterio_escalonamento}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  criterio_escalonamento: e.target.value as CriterioEscalonamento,
-                })
-              }
-            >
-              {CRITERIOS.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </Select>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Mudar a janela depois de gerar <strong>não</strong> remarca quem já foi
-              convocado — o prazo comunicado permanece.
-            </p>
-          </div>
-          {editing && (
-            <div>
-              <Label htmlFor="c_sit">Situação</Label>
-              <Select
-                id="c_sit"
-                value={form.situacao}
-                onChange={(e) =>
-                  setForm({ ...form, situacao: e.target.value as CicloSituacao })
+          </FormField>
+
+          <GrupoCampos titulo="Janela" descricao="O período em que os regulados devem se recadastrar.">
+            <GradeCampos>
+              <FormField label="Início" required error={val.erro("data_inicio")}>
+                <Input
+                  id="c_ini"
+                  type="date"
+                  value={form.data_inicio}
+                  onChange={(e) => setForm({ ...form, data_inicio: e.target.value })}
+                  onBlur={val.sair("data_inicio")}
+                />
+              </FormField>
+              <FormField
+                label="Fim"
+                required
+                error={val.erro("data_fim")}
+                hint={
+                  form.data_inicio && form.data_fim && form.data_fim >= form.data_inicio
+                    ? `Janela de ${duracaoLegivel(form.data_inicio, form.data_fim)}.`
+                    : "Último dia para se recadastrar."
                 }
               >
-                {SITUACOES.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </Select>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Ciclo encerrado não gera convocações nem aceita ajuste de prazo.
-              </p>
-            </div>
-          )}
-          <div>
-            <Label htmlFor="c_obs">Observações</Label>
-            <Textarea
-              id="c_obs"
-              value={form.observacoes}
-              onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
-              rows={3}
+                <Input
+                  id="c_fim"
+                  type="date"
+                  value={form.data_fim}
+                  onChange={(e) => setForm({ ...form, data_fim: e.target.value })}
+                  onBlur={val.sair("data_fim")}
+                />
+              </FormField>
+            </GradeCampos>
+
+            <EscolhaSegmentada<CriterioEscalonamento>
+              nome="c_crit"
+              titulo="Prazo de cada regulado"
+              valor={form.criterio_escalonamento}
+              onChange={(c) => setForm({ ...form, criterio_escalonamento: c })}
+              opcoes={[
+                {
+                  valor: "final_documento",
+                  rotulo: "Pelo final do CPF/CNPJ",
+                  descricao:
+                    "A janela é dividida em dez faixas; o último dígito do documento escolhe a faixa, e o prazo é o fim dela.",
+                },
+                {
+                  valor: "sem_escalonamento",
+                  rotulo: "Todos no fim",
+                  descricao: "Todos têm até o último dia da janela.",
+                },
+              ]}
             />
+            {faixas && (
+              <div className="rounded-lg border border-border bg-surface-1 p-3">
+                <p className="mb-2 text-xs font-medium text-foreground">Prazo por final do documento</p>
+                <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-5">
+                  {faixas.map((prazo, final) => (
+                    <li key={final} className="flex items-baseline justify-between gap-2 tabular-nums">
+                      <span className="text-foreground-muted">Final {final}</span>
+                      <span className="text-foreground">{prazo}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {editing && (
+              <p className="text-xs text-foreground-muted">
+                Mudar a janela depois de gerar <strong>não</strong> remarca quem já foi convocado — o prazo
+                comunicado permanece.
+              </p>
+            )}
+          </GrupoCampos>
+
+          {editing && (
+            <GrupoCampos titulo="Situação">
+              <EscolhaSegmentada<CicloSituacao>
+                nome="c_sit"
+                titulo="Situação do ciclo"
+                moldura={false}
+                valor={form.situacao}
+                onChange={(s) => setForm({ ...form, situacao: s })}
+                opcoes={SITUACOES.map((s) => ({
+                  valor: s.value,
+                  rotulo: s.label,
+                  descricao: DESCRICAO_SITUACAO[s.value],
+                }))}
+              />
+            </GrupoCampos>
+          )}
+
+          <div className="border-t border-border pt-5">
+            <FormField label="Observações" opcional>
+              <Textarea
+                id="c_obs"
+                value={form.observacoes}
+                onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
+                placeholder="Ex.: decreto municipal nº 123/2026"
+                rows={3}
+              />
+            </FormField>
           </div>
+
+          {err && <Alert intent="danger">{err}</Alert>}
         </div>
       </Dialog>
     </div>

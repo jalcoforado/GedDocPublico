@@ -169,6 +169,12 @@ export function somarMeses(iso: string, meses: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Soma dias corridos a uma data ISO. */
+export function somarDias(iso: string, dias: number): string {
+  const t = paraUTC(iso);
+  return t === null ? iso : new Date(t + dias * 86_400_000).toISOString().slice(0, 10);
+}
+
 /** Dias corridos de `de` até `ate` (negativo se `ate` vem antes). */
 export function diasEntre(de: string, ate: string): number | null {
   const a = paraUTC(de);

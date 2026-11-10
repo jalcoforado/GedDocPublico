@@ -7,13 +7,14 @@ import { Inbox, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { fmtData } from "@/components/pagamentos/format";
+import { useValidacao } from "@/components/transporte/formulario";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import { FormField } from "@/components/ui/form-field";
 import { useToast } from "@/components/ui/toast";
 import {
   api,
@@ -66,6 +67,7 @@ export function AlvaraVeiculosModal({
         queryKey: [`/transporte-regulado/alvaras/${alvaraId}/veiculos`],
       });
       setSelectedVeiculo(null);
+      val.reiniciar();
     },
     onError: (err: any) => {
       const msg = err.message || "Erro ao vincular veículo";
@@ -99,56 +101,79 @@ export function AlvaraVeiculosModal({
     (v) => !veiculosVinculadosIds.has(v.id),
   );
 
+  // O botão não fica desabilitado sem escolha: clicar diz o que falta, sob
+  // o campo (antes o erro "Selecione um veículo" só existia como toast).
+  const val = useValidacao<"veiculo">({
+    veiculo: selectedVeiculo === null ? "Escolha o veículo a vincular." : undefined,
+  });
+
+  function fechar() {
+    val.reiniciar();
+    onOpenChange(false);
+  }
+
+  function vincular() {
+    if (!val.conferir()) return;
+    vincularMutation.mutate();
+  }
+
   return (
     // O Dialog já desenha título, botão de fechar e rodapé. O conteúdo
     // repetia os três (com fundo branco fixo, que sumia no tema escuro).
     <Dialog
       open={open}
-      onClose={() => onOpenChange(false)}
+      onClose={fechar}
       title="Veículos do alvará"
       size="lg"
       footer={
-        <Button variant="secondary" onClick={() => onOpenChange(false)}>
+        <Button variant="secondary" onClick={fechar}>
           Fechar
         </Button>
       }
     >
       <div className="space-y-6">
         {/* Form para vincular */}
-        <div className="space-y-3 rounded-lg border border-border bg-surface-2/50 p-4">
-          <h3 className="font-semibold text-foreground">Vincular veículo</h3>
-          <div className="flex gap-2">
-            <Select
-              aria-label="Veículo a vincular"
-              value={selectedVeiculo?.toString() || ""}
-              onChange={(e) =>
-                setSelectedVeiculo(e.target.value ? parseInt(e.target.value) : null)
+        <section
+          aria-label="Vincular veículo"
+          className="space-y-3 rounded-lg border border-border bg-surface-1 p-4"
+        >
+          <h3 className="text-sm font-semibold text-foreground">Vincular veículo</h3>
+          <div ref={val.ref} className="flex flex-col gap-3 sm:flex-row sm:items-start">
+            <FormField
+              label="Veículo"
+              error={val.erro("veiculo")}
+              hint={
+                veiculosDisponiveis.length === 0
+                  ? "Todos os veículos cadastrados já estão neste alvará."
+                  : "Busque pela placa, marca ou modelo."
               }
-              disabled={veiculosDisponiveis.length === 0}
+              className="min-w-0 flex-1"
             >
-              <option value="">
-                {veiculosDisponiveis.length === 0
-                  ? "Todos os veículos já estão vinculados"
-                  : "Selecione um veículo..."}
-              </option>
-              {veiculosDisponiveis.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.placa} — {v.marca} {v.modelo}
-                </option>
-              ))}
-            </Select>
+              <Combobox
+                id="alvara-veiculo"
+                options={veiculosDisponiveis.map((v) => ({
+                  value: v.id,
+                  label: v.placa,
+                  hint: `${v.marca} ${v.modelo}`,
+                }))}
+                value={selectedVeiculo}
+                onChange={(v) => setSelectedVeiculo(v == null ? null : Number(v))}
+                placeholder="Escolha o veículo…"
+                searchPlaceholder="Placa, marca ou modelo…"
+                emptyText="Nenhum veículo disponível com essa busca."
+                disabled={veiculosDisponiveis.length === 0}
+              />
+            </FormField>
             <Button
-              onClick={() => vincularMutation.mutate()}
-              disabled={
-                !selectedVeiculo || vincularMutation.isPending
-              }
-              className="whitespace-nowrap"
+              onClick={vincular}
+              loading={vincularMutation.isPending}
+              className="whitespace-nowrap sm:mt-6"
             >
               <Plus className="mr-2 h-4 w-4" />
-              Vincular
+              Vincular veículo
             </Button>
           </div>
-        </div>
+        </section>
 
         {/* Lista de veículos vinculados */}
         <div className="space-y-3">

@@ -27,6 +27,8 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 const createMock = vi.fn((_d: Record<string, unknown>) => Promise.resolve({ id: 1 }));
+const registrarMock = vi.fn((_d: Record<string, unknown>) => Promise.resolve({ id: 1 }));
+const vazio = () => Promise.resolve({ items: [], total: 0, page: 1, page_size: 50 });
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -38,6 +40,24 @@ vi.mock("@/lib/api", async () => {
         ...actual.api.permissionarios,
         list: () => Promise.resolve({ items: [], total: 0, page: 1, page_size: 50 }),
         create: (d: Record<string, unknown>) => createMock(d),
+      },
+      empresas: { ...actual.api.empresas, list: () => vazio() },
+      veiculosRegulados: { ...actual.api.veiculosRegulados, list: () => vazio() },
+      ocorrenciasTransporte: {
+        ...actual.api.ocorrenciasTransporte,
+        list: () => vazio(),
+        tipos: {
+          ...actual.api.ocorrenciasTransporte.tipos,
+          list: () =>
+            Promise.resolve([
+              { id: 4, nome: "Sem alvará", descricao: "Operando sem alvará válido", ativo: true, criado_em: "", atualizado_em: null },
+            ]),
+        },
+        registrar: (d: Record<string, unknown>) => registrarMock(d),
+      },
+      recadastramento: {
+        ...actual.api.recadastramento,
+        ciclos: { ...actual.api.recadastramento.ciclos, list: () => vazio() },
       },
     },
   };
@@ -61,7 +81,10 @@ async function abrirPermissionarios() {
   return screen.getByRole("dialog", { name: "Novo permissionário" });
 }
 
-beforeEach(() => createMock.mockClear());
+beforeEach(() => {
+  createMock.mockClear();
+  registrarMock.mockClear();
+});
 afterEach(cleanup);
 
 describe("formulário do permissionário", () => {
@@ -151,5 +174,64 @@ describe("datas da vigência", () => {
   it("validade antes do início é erro", () => {
     expect(erroValidade("2026-11-10", "2026-11-09")).toMatch(/não pode ser antes do início/);
     expect(erroValidade("2026-11-10", "")).toBeUndefined();
+  });
+});
+
+async function renderizar(caminho: () => Promise<{ default: React.ComponentType }>) {
+  const { default: Pagina } = await caminho();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <ConfirmProvider>
+          <Pagina />
+        </ConfirmProvider>
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+}
+
+describe("registrar ocorrência", () => {
+  it("sem alvo, o erro é do grupo; a data do fato já vem com hoje", async () => {
+    await renderizar(() => import("@/app/(app)/m/transporte/ocorrencias/page"));
+    fireEvent.click(screen.getAllByRole("button", { name: /Registrar ocorrência/ })[0]);
+    const dialogo = screen.getByRole("dialog", { name: "Registrar ocorrência" });
+
+    expect(within(dialogo).getByLabelText(/Data do fato/)).not.toHaveValue("");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Registrar ocorrência" }));
+
+    const grupo = within(dialogo).getByRole("group", { name: "Alvo da ocorrência" });
+    expect(grupo).toHaveAttribute("aria-invalid", "true");
+    expect(
+      within(dialogo).getByText("Escolha ao menos um alvo: permissionário, empresa ou veículo."),
+    ).toBeInTheDocument();
+    expect(within(dialogo).getByText("Escolha o tipo da ocorrência.")).toBeInTheDocument();
+    expect(within(dialogo).getByText("Descreva o que aconteceu.")).toBeInTheDocument();
+    // Foco no primeiro inválido: o grupo de alvos, que vem antes no formulário.
+    await waitFor(() => expect(grupo).toHaveFocus());
+    expect(registrarMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("ciclo de recadastramento", () => {
+  it("mostra o prazo de cada final de documento antes de criar", async () => {
+    await renderizar(() => import("@/app/(app)/m/transporte/recadastramento/page"));
+    fireEvent.click(screen.getAllByRole("button", { name: /Novo ciclo/ })[0]);
+    const dialogo = screen.getByRole("dialog", { name: "Novo ciclo de recadastramento" });
+    expect(within(dialogo).queryByText("Prazo por final do documento")).toBeNull();
+
+    fireEvent.change(within(dialogo).getByLabelText(/^Início/), { target: { value: "2026-01-01" } });
+    fireEvent.change(within(dialogo).getByLabelText(/^Fim/), { target: { value: "2026-01-31" } });
+
+    expect(within(dialogo).getByText("Prazo por final do documento")).toBeInTheDocument();
+    // 30 dias em 10 faixas: final 0 até o dia 4, final 9 no último dia.
+    const final0 = within(dialogo).getByText("Final 0").parentElement!;
+    expect(final0).toHaveTextContent("04/01");
+    expect(within(dialogo).getByText("Final 9").parentElement!).toHaveTextContent("31/01");
+    expect(within(dialogo).getByText("Janela de 30 dias.")).toBeInTheDocument();
+
+    // "Todos no fim" não escalona: a prévia some.
+    fireEvent.click(within(dialogo).getByRole("radio", { name: "Todos no fim" }));
+    expect(within(dialogo).queryByText("Prazo por final do documento")).toBeNull();
   });
 });

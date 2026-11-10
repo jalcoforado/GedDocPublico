@@ -18,15 +18,17 @@ import Link from "next/link";
 import { use, useEffect, useState } from "react";
 
 import { fmtData } from "@/components/pagamentos/format";
+import { useValidacao } from "@/components/transporte/formulario";
 import { SITUACAO_CONVOCACAO } from "@/components/transporte/rotulos";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -134,11 +136,27 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
     onError: (e: Error) => setAjusteErr(e.message),
   });
 
+  // A justificativa é obrigatória também no formulário, e não só no backend:
+  // descobrir a regra por mensagem de erro depois de digitar tudo é pior.
+  const janela = cicloQ.data;
+  const valAjuste = useValidacao<"prazo" | "justificativa">({
+    prazo: !prazo
+      ? "Informe o novo prazo."
+      : janela && (prazo < janela.data_inicio || prazo > janela.data_fim)
+        ? `Escolha uma data dentro da janela do ciclo (${fmtData(janela.data_inicio)} a ${fmtData(janela.data_fim)}).`
+        : undefined,
+    justificativa:
+      justificativa.trim().length < 5
+        ? `Justifique o ajuste: mínimo de 5 caracteres${justificativa.trim() ? ` (faltam ${5 - justificativa.trim().length})` : ""}.`
+        : undefined,
+  });
+
   function abrirAjuste(c: RecadastramentoConvocacao) {
     setAlvo(c);
     setPrazo(c.prazo);
     setJustificativa("");
     setAjusteErr(null);
+    valAjuste.reiniciar();
     setAjusteAberto(true);
   }
 
@@ -152,16 +170,7 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
 
   function submeterAjuste() {
     setAjusteErr(null);
-    if (!prazo) {
-      setAjusteErr("Informe o novo prazo.");
-      return;
-    }
-    // A justificativa é obrigatória também no formulário, e não só no backend:
-    // descobrir a regra por mensagem de erro depois de digitar tudo é pior.
-    if (justificativa.trim().length < 5) {
-      setAjusteErr("Justifique o ajuste (mínimo de 5 caracteres).");
-      return;
-    }
+    if (!valAjuste.conferir()) return;
     ajusteM.mutate();
   }
 
@@ -370,26 +379,29 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
         open={ajusteAberto}
         onClose={fecharAjuste}
         title={`Ajustar prazo — ${alvo?.nome_regulado ?? ""}`}
+        description="Data no passado é permitida — regularizar alguém retroativamente é caso de balcão."
         footer={
           <>
-            <Button variant="secondary" onClick={fecharAjuste}>
+            <Button variant="ghost" onClick={fecharAjuste}>
               Cancelar
             </Button>
-            <Button onClick={submeterAjuste} disabled={ajusteM.isPending}>
-              {ajusteM.isPending ? "Salvando..." : "Salvar ajuste"}
+            <Button onClick={submeterAjuste} loading={ajusteM.isPending}>
+              Ajustar prazo
             </Button>
           </>
         }
       >
-        <div className="space-y-3">
-          {ajusteErr && <div className="text-sm text-danger">{ajusteErr}</div>}
-          <p className="text-sm text-muted-foreground">
-            O prazo tem de ficar dentro da janela do ciclo ({fmtData(ciclo.data_inicio)} a{" "}
-            {fmtData(ciclo.data_fim)}). Data no passado é permitida — regularizar alguém
-            retroativamente é caso de balcão.
-          </p>
-          <div>
-            <Label htmlFor="a_prazo">Novo prazo</Label>
+        <div ref={valAjuste.ref} className="space-y-4">
+          <FormField
+            label="Novo prazo"
+            required
+            error={valAjuste.erro("prazo")}
+            hint={
+              alvo
+                ? `Pela regra do ciclo seria ${fmtData(alvo.prazo_original)}. A janela vai de ${fmtData(ciclo.data_inicio)} a ${fmtData(ciclo.data_fim)}.`
+                : undefined
+            }
+          >
             <Input
               id="a_prazo"
               type="date"
@@ -397,27 +409,26 @@ export default function CicloRecadastramentoPage({ params }: PageParams) {
               max={ciclo.data_fim}
               value={prazo}
               onChange={(e) => setPrazo(e.target.value)}
+              onBlur={valAjuste.sair("prazo")}
+              className="max-w-xs"
             />
-            {alvo && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Prazo calculado pela regra: {fmtData(alvo.prazo_original)}
-              </p>
-            )}
-          </div>
-          <div>
-            <Label htmlFor="a_just">Justificativa</Label>
+          </FormField>
+          <FormField
+            label="Justificativa"
+            required
+            error={valAjuste.erro("justificativa")}
+            hint="Fica registrada com autor e data: sem ela o ajuste vira favor invisível."
+          >
             <Textarea
               id="a_just"
               rows={3}
               value={justificativa}
               onChange={(e) => setJustificativa(e.target.value)}
-              placeholder="Por que este regulado recebe prazo diferente?"
+              onBlur={valAjuste.sair("justificativa")}
+              placeholder="Ex.: permissionário internado no período; laudo anexado ao processo."
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Obrigatória: sem ela o ajuste vira favor invisível. Fica registrada com
-              autor e data.
-            </p>
-          </div>
+          </FormField>
+          {ajusteErr && <Alert intent="danger">{ajusteErr}</Alert>}
         </div>
       </Dialog>
     </div>

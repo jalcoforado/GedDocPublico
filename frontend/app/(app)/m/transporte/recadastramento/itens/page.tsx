@@ -6,15 +6,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardList, Inbox, Pencil, Plus, SearchX, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { useValidacao } from "@/components/transporte/formulario";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
 import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -113,6 +117,7 @@ export default function ItensRecadastramentoPage() {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+    val.reiniciar();
     setDialogOpen(true);
   }
 
@@ -126,6 +131,7 @@ export default function ItensRecadastramentoPage() {
       ativo: i.ativo,
     });
     setErr(null);
+    val.reiniciar();
     setDialogOpen(true);
   }
 
@@ -136,17 +142,17 @@ export default function ItensRecadastramentoPage() {
     setErr(null);
   }
 
+  // Antes o primeiro erro ia para o topo e escondia o resto; agora cada
+  // um aparece no seu campo, depois de sair dele ou de tentar salvar.
+  const val = useValidacao<"descricao" | "ordem">({
+    descricao: form.descricao.trim() === "" ? "Informe o que o regulado precisa apresentar." : undefined,
+    ordem: !Number.isFinite(Number(form.ordem)) ? "Use um número inteiro (ex.: 10)." : undefined,
+  });
+
   function submit() {
     setErr(null);
-    if (form.descricao.trim() === "") {
-      setErr("Descrição é obrigatória.");
-      return;
-    }
+    if (!val.conferir()) return;
     const ordem = Number(form.ordem);
-    if (!Number.isFinite(ordem)) {
-      setErr("Ordem tem de ser um número.");
-      return;
-    }
     saveM.mutate({
       descricao: form.descricao.trim(),
       aplica_a: form.aplica_a,
@@ -303,84 +309,85 @@ export default function ItensRecadastramentoPage() {
       <Dialog
         open={dialogOpen}
         onClose={closeDialog}
-        title={editing ? "Editar item" : "Novo item do recadastramento"}
+        title={editing ? `Editar item — ${editing.descricao}` : "Novo item do recadastramento"}
+        description={editing ? undefined : "O que o regulado precisa apresentar. Vira uma linha do checklist do atendimento."}
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={submit} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button onClick={submit} loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Criar item"}
             </Button>
           </>
         }
       >
-        <div className="space-y-3">
-          {err && <div className="text-sm text-danger">{err}</div>}
-          <div>
-            <Label htmlFor="i_desc">Descrição</Label>
+        <div ref={val.ref} className="space-y-5">
+          <FormField label="Descrição" required error={val.erro("descricao")}>
             <Input
               id="i_desc"
               value={form.descricao}
               onChange={(e) => setForm({ ...form, descricao: e.target.value })}
-              placeholder="CNH válida"
+              onBlur={val.sair("descricao")}
+              placeholder="Ex.: CNH válida"
             />
-          </div>
-          <div>
-            <Label htmlFor="i_aplica">Aplica-se a</Label>
-            <Select
-              id="i_aplica"
-              value={form.aplica_a}
-              onChange={(e) =>
-                setForm({ ...form, aplica_a: e.target.value as AplicaA })
-              }
-            >
-              {APLICA_A.map((a) => (
-                <option key={a.value} value={a.value}>
-                  {a.label}
-                </option>
-              ))}
-            </Select>
-            <p className="mt-1 text-xs text-muted-foreground">
-              CNH é de pessoa; contrato social é de empresa. Item que não se aplica
-              não aparece na ficha.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="i_ordem">Ordem</Label>
-              <Input
-                id="i_ordem"
-                type="number"
-                value={form.ordem}
-                onChange={(e) => setForm({ ...form, ordem: e.target.value })}
+          </FormField>
+          <EscolhaSegmentada<AplicaA>
+            nome="i_aplica"
+            titulo="Vale para"
+            valor={form.aplica_a}
+            onChange={(a) => setForm({ ...form, aplica_a: a })}
+            opcoes={[
+              { valor: "ambos", rotulo: "Os dois", descricao: "Entra na ficha de permissionários e de empresas." },
+              { valor: "permissionario", rotulo: "Permissionários", descricao: "Documento de pessoa, como a CNH. Não aparece na ficha de empresa." },
+              { valor: "empresa", rotulo: "Empresas", descricao: "Documento de empresa, como o contrato social. Não aparece na ficha de permissionário." },
+            ]}
+          />
+          <div className="space-y-3 rounded-lg border border-border bg-surface-1 p-3">
+            <label className="flex items-start gap-2 text-sm text-foreground">
+              <Checkbox
+                checked={form.obrigatorio}
+                onChange={(e) => setForm({ ...form, obrigatorio: e.target.checked })}
+                className="mt-0.5"
               />
-            </div>
-            <div className="space-y-2 pt-6">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.obrigatorio}
-                  onChange={(e) =>
-                    setForm({ ...form, obrigatorio: e.target.checked })
-                  }
-                />
+              <span>
                 Obrigatório
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.ativo}
-                  onChange={(e) => setForm({ ...form, ativo: e.target.checked })}
-                />
+                <span className="block text-xs text-foreground-muted">
+                  Enquanto ativo, sem ele marcado o atendimento não pode ser deferido.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm text-foreground">
+              <Checkbox
+                checked={form.ativo}
+                onChange={(e) => setForm({ ...form, ativo: e.target.checked })}
+                className="mt-0.5"
+              />
+              <span>
                 Ativo
-              </label>
-            </div>
+                <span className="block text-xs text-foreground-muted">
+                  Desligar tira o item das fichas novas; as marcações já feitas ficam.
+                </span>
+              </span>
+            </label>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Só item <strong>obrigatório e ativo</strong> trava o deferimento. Desligar
-            um item não apaga as marcações já feitas.
-          </p>
+          <FormField
+            label="Ordem"
+            opcional
+            error={val.erro("ordem")}
+            hint="Posição no checklist: menor vem primeiro."
+            className="max-w-40"
+          >
+            <Input
+              id="i_ordem"
+              type="number"
+              inputMode="numeric"
+              value={form.ordem}
+              onChange={(e) => setForm({ ...form, ordem: e.target.value })}
+              onBlur={val.sair("ordem")}
+            />
+          </FormField>
+          {err && <Alert intent="danger">{err}</Alert>}
         </div>
       </Dialog>
     </div>
