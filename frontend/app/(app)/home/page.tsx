@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import { Panorama } from "@/components/home/Panorama";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -90,8 +91,8 @@ export default function HomePage() {
           </>
         }
         actions={
-          // "Abrir processo" e a lista de módulos moram no menu lateral, que
-          // desde o menu único também aparece aqui.
+          // A lista de módulos mora no menu lateral, que desde o menu único
+          // também aparece aqui.
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="secondary">
               <Link href="/para-assinar">
@@ -140,6 +141,19 @@ export default function HomePage() {
           })()
         )}
       </section>
+
+      {modulosQ.data && (
+        <Panorama
+          acesso={{
+            // O panorama do Protocolo vem do dashboard executivo, que tem
+            // permissão própria (`dashboard`) além da de processos.
+            protocolo: contratado("protocolo") && can("dashboard"),
+            pagamentos: vePagamentos,
+            frota: veFrota,
+            transporte: veTransporte,
+          }}
+        />
+      )}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Notificacoes />
