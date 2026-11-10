@@ -19,6 +19,12 @@ export interface AcaoDaLinha {
   disabled?: boolean;
   /** Some da linha (sem permissão, estado que não admite a ação). */
   oculta?: boolean;
+  /**
+   * Nome acessível completo quando o rótulo sozinho é ambíguo numa tabela
+   * ("Estornar" → "Estornar pagamento da parcela 1"). Leitor de tela navega
+   * botão a botão, sem a linha em volta.
+   */
+  ariaLabel?: string;
 }
 
 interface AcoesDaLinhaProps {
@@ -58,7 +64,7 @@ export function AcoesDaLinha({ acoes, visiveis = 2, className }: AcoesDaLinhaPro
         );
         const variante = a.perigo ? "danger-outline" : "secondary";
         return a.href && !a.disabled ? (
-          <Button key={a.label} asChild variant={variante} size="sm">
+          <Button key={a.label} asChild variant={variante} size="sm" aria-label={a.ariaLabel}>
             <Link href={a.href}>{conteudo}</Link>
           </Button>
         ) : (
@@ -67,6 +73,7 @@ export function AcoesDaLinha({ acoes, visiveis = 2, className }: AcoesDaLinhaPro
             variant={variante}
             size="sm"
             disabled={a.disabled}
+            aria-label={a.ariaLabel}
             onClick={a.onClick}
           >
             {conteudo}
