@@ -20,6 +20,8 @@ vi.mock("@/lib/api", () => ({
     unidades: { list: vi.fn() },
     grupos: { list: vi.fn() },
   },
+  // O campo de unidade é o UnidadePicker, que lê a árvore do organograma.
+  organogramaApi: { tree: vi.fn().mockResolvedValue([]) },
   NIVEL_SIGILO_LABEL: {
     ostensivo: "Ostensivo", interno: "Interno", reservado: "Reservado",
     secreto: "Secreto", ultrassecreto: "Ultrassecreto",
