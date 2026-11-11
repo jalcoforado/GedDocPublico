@@ -7,17 +7,32 @@ Algoritmo de "etapas":
   - Encaminhamentos não recebidos viram etapa "em trânsito" sem data de chegada
   - Última etapa fica em aberto (saiu_em=None) se o processo está parado numa unidade
 
-Atrasos: comparação `data_hora_recebimento > data_prazo` do encaminhamento que
-trouxe o processo para aquela unidade.
+Atraso (SI-34): o prazo do encaminhamento é o compromisso de quem RECEBE o
+processo e vale até o FIM do dia marcado, em hora local — a mesma definição de
+`prazos.prazo_da_caixa`. A etapa atrasou se o processo saiu da unidade (ou
+continua nela) depois disso. Antes comparava a CHEGADA com a meia-noite do
+dia do prazo: media a coisa errada e cortava o último dia inteiro.
+
+Datas saem em hora local (`relatorios_comum.hora_local`); o cálculo de
+minutos e de atraso roda em UTC, como está no banco.
 """
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
+
+from .relatorios_comum import (
+    aplicar_filtros_processo,
+    descrever_filtros,
+    hora_local,
+    intervalo_utc,
+    no_intervalo,
+    situacao,
+)
 
 from ..models import (
     Acao,
@@ -40,32 +55,35 @@ from ..schemas.relatorio_tramitacao import (
 def _filter_processos(
     stmt, f: RelatorioFiltro, tenant_id: int, niveis_permitidos: list[str] | None
 ):
-    # E3 — rascunho não tramitou (só tem a movimentação de ABERTURA) e não
-    # tem numero_processo; fora do relatório de tramitação por padrão.
-    stmt = stmt.where(
-        Processo.excluido.is_(False),
-        Processo.tenant_id == tenant_id,
-        Processo.situacao != "rascunho",
-    )
-    # SI-34 — sigilo de quem consulta (ver `relatorios._apply_filters`).
-    if niveis_permitidos is not None:
-        stmt = stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
-    if f.id_unidade:
-        stmt = stmt.where(
-            (Processo.id_unidade_proprietaria == f.id_unidade)
-            | (Processo.id_local_atual == f.id_unidade)
+    """Recorte comum (`relatorios_comum`) com o período pela abertura ou pela
+    chegada. "Chegada" é a abertura na unidade dona ou um recebimento — na
+    unidade filtrada, quando há uma; em qualquer unidade, quando não há."""
+    if f.data_base != "chegada":
+        return aplicar_filtros_processo(
+            stmt, f, tenant_id=tenant_id, niveis_permitidos=niveis_permitidos,
+            coluna_data=Processo.data_hora_abertura,
         )
-    if f.id_assunto:
-        stmt = stmt.where(Processo.id_assunto == f.id_assunto)
-    if f.id_tipo_processo:
-        stmt = stmt.where(Assunto.id_tipo_processo == f.id_tipo_processo)
-    if f.desde:
-        stmt = stmt.where(Processo.data_hora_abertura >= f.desde)
-    if f.ate:
-        stmt = stmt.where(Processo.data_hora_abertura <= f.ate)
-    if f.apenas_ativos:
-        stmt = stmt.where(Processo.ativo.is_(True))
-    return stmt
+    sem_periodo = f.model_copy(update={"desde": None, "ate": None})
+    stmt = aplicar_filtros_processo(
+        stmt, sem_periodo, tenant_id=tenant_id, niveis_permitidos=niveis_permitidos,
+        coluna_data=Processo.data_hora_abertura,
+    )
+    if not (f.desde or f.ate):
+        return stmt
+    recebimento = [
+        Encaminhamento.id_processo == Processo.id,
+        Encaminhamento.tenant_id == tenant_id,
+        Encaminhamento.recebido.is_(True),
+        Encaminhamento.excluido.is_(False),
+        *no_intervalo(Encaminhamento.data_hora_recebimento, f.desde, f.ate),
+    ]
+    abertura = no_intervalo(Processo.data_hora_abertura, f.desde, f.ate)
+    if f.id_unidade:
+        recebimento.append(Encaminhamento.id_unidade_destino == f.id_unidade)
+        abertura.append(Processo.id_unidade_proprietaria == f.id_unidade)
+    return stmt.where(
+        or_(and_(*abertura), select(Encaminhamento.id).where(*recebimento).exists())
+    )
 
 
 def _delta_min(a: datetime | None, b: datetime | None) -> int | None:
@@ -93,6 +111,7 @@ async def gerar_tramitacao(
             UnidadeTrabalho.unidade_trabalho.label("ut_propr"),
             UnidadeTrabalho.id.label("ut_propr_id"),
             LocalAtual.unidade_trabalho.label("ut_local"),
+            situacao(tenant_id).label("situacao"),
         )
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(Manifestante, Manifestante.id == Processo.id_manifestante, isouter=True)
@@ -104,14 +123,25 @@ async def gerar_tramitacao(
         .join(LocalAtual, LocalAtual.id == Processo.id_local_atual, isouter=True)
     )
     proc_stmt = _filter_processos(proc_stmt, f, tenant_id, niveis_permitidos)
-    proc_stmt = proc_stmt.order_by(Processo.data_hora_abertura.desc()).limit(max_processos)
+    # Total do recorte, sem o teto da lista: o relatório diz quantos ficaram
+    # de fora em vez de apresentar uma amostra como se fosse o todo.
+    total = (
+        await db.execute(select(func.count()).select_from(proc_stmt.order_by(None).subquery()))
+    ).scalar_one()
+    proc_stmt = proc_stmt.order_by(Processo.data_hora_abertura.desc(), Processo.id.desc()).limit(
+        max_processos
+    )
     proc_rows = (await db.execute(proc_stmt)).all()
     processo_ids = [row[0].id for row in proc_rows]
+    descricao = await descrever_filtros(db, f, tenant_id=tenant_id)
     if not processo_ids:
         return RelatorioTramitacaoResposta(
             filtros_aplicados=f,
+            descricao_filtros=descricao,
             nome_unidade=await _nome_unidade(db, f.id_unidade, tenant_id),
             qtd_processos=0,
+            qtd_listados=0,
+            cortado=False,
             qtd_processos_com_atraso=0,
             minutos_medio_por_processo=0.0,
             por_unidade=[],
@@ -197,21 +227,18 @@ async def gerar_tramitacao(
             etapas.append(etapa_atual)
 
             if enc.recebido and enc.data_hora_recebimento is not None:
-                # nova etapa em unidade destino
-                prazo = (
-                    datetime.combine(enc.data_prazo, datetime.min.time())
-                    if enc.data_prazo
-                    else None
-                )
-                atrasou = bool(prazo and enc.data_hora_recebimento > prazo)
+                # nova etapa em unidade destino; o prazo (fim do dia local, em
+                # UTC) é o dela — `atrasou` só se decide quando ela termina.
                 etapa_atual = TramitacaoEtapa(
                     id_unidade=enc.id_unidade_destino,
                     unidade=ud_nome,
                     chegou_em=enc.data_hora_recebimento,
                     saiu_em=None,
                     minutos_no_local=None,
-                    prazo_estipulado=prazo,
-                    atrasou=atrasou,
+                    prazo_estipulado=(
+                        intervalo_utc(None, enc.data_prazo)[1] if enc.data_prazo else None
+                    ),
+                    atrasou=False,
                 )
             else:
                 # em trânsito; cria etapa aberta sem chegada e sai
@@ -231,6 +258,11 @@ async def gerar_tramitacao(
 
         if etapa_atual is not None:
             etapas.append(etapa_atual)
+
+        # Atraso: saiu (ou segue lá) depois do fim do dia do prazo.
+        for e in etapas:
+            if e.prazo_estipulado is not None and e.chegou_em is not None:
+                e.atrasou = (e.saiu_em or now) >= e.prazo_estipulado
 
         # Agregar
         teve_atraso = any(e.atrasou for e in etapas)
@@ -259,12 +291,20 @@ async def gerar_tramitacao(
         qtd_encs = sum(1 for _, fl in movs if fl == "ENCAMINHAMENTO")
         qtd_unid = len({e.id_unidade for e in etapas if e.id_unidade is not None})
 
+        # Saída em hora local; os minutos já foram contados em UTC.
+        for e in etapas:
+            e.chegou_em = hora_local(e.chegou_em)
+            e.saiu_em = hora_local(e.saiu_em)
+            if e.prazo_estipulado is not None:
+                # fim exclusivo → último segundo do dia do prazo, para exibir
+                e.prazo_estipulado = hora_local(e.prazo_estipulado) - timedelta(seconds=1)
+
         processos_out.append(
             TramitacaoProcesso(
                 id=p.id,
                 numero_processo=p.numero_processo,
-                data_hora_abertura=p.data_hora_abertura,
-                ativo=p.ativo,
+                data_hora_abertura=hora_local(p.data_hora_abertura),
+                situacao=row.situacao,
                 manifestante=row.manif_nome,
                 assunto=row.assunto_nome,
                 qtd_encaminhamentos=qtd_encs,
@@ -299,8 +339,11 @@ async def gerar_tramitacao(
 
     return RelatorioTramitacaoResposta(
         filtros_aplicados=f,
+        descricao_filtros=descricao,
         nome_unidade=await _nome_unidade(db, f.id_unidade, tenant_id),
-        qtd_processos=n,
+        qtd_processos=total,
+        qtd_listados=n,
+        cortado=n < total,
         qtd_processos_com_atraso=qtd_com_atraso,
         minutos_medio_por_processo=media,
         por_unidade=por_unidade_out,

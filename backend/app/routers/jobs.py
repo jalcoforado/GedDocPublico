@@ -202,11 +202,12 @@ async def disparar_relatorio_tramitacao(
 
     filtros = {
         "id_unidade": payload.id_unidade,
+        "modo_unidade": payload.modo_unidade,
         "id_assunto": payload.id_assunto,
         "id_tipo_processo": payload.id_tipo_processo,
         "desde": payload.desde.isoformat() if payload.desde else None,
         "ate": payload.ate.isoformat() if payload.ate else None,
-        "apenas_ativos": payload.apenas_ativos,
+        "data_base": payload.data_base,
     }
     # SI-34 — o worker não tem usuário: os níveis de sigilo são decididos
     # aqui, por quem pediu, e viajam com a task.

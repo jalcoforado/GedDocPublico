@@ -8,10 +8,11 @@ Três formatos compartilham os mesmos filtros via query string:
 from __future__ import annotations
 
 import csv
-from datetime import datetime
+from datetime import date, datetime
 from io import StringIO
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +21,7 @@ from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Usuario
-from ..schemas.relatorio import RelatorioFiltro, RelatorioResposta
+from ..schemas.relatorio import ModoUnidade, RelatorioFiltro, RelatorioResposta
 from ..schemas.relatorio_assinaturas import (
     AssinaturasFiltro,
     RelatorioAssinaturasResposta,
@@ -32,28 +33,65 @@ from ..services.pdf_relatorio_assinaturas import gerar_assinaturas_pdf
 from ..services.pdf_relatorio_tramitacao import gerar_tramitacao_pdf
 from ..services.relatorios import gerar_relatorio
 from ..services.relatorios_assinaturas import gerar_assinaturas
+from ..services.relatorios_comum import ROTULO_SITUACAO
 from ..services.relatorios_tramitacao import gerar_tramitacao
 from ..services.sigilo import niveis_acesso_usuario
 
 router = APIRouter(prefix="/relatorios", tags=["relatorios"])
 
 
+# Por qual data o período conta, por relatório (SI-34). O schema aceita as
+# três; cada rota estreita para as que fazem sentido nela.
+DataBaseProcessos = Literal["abertura", "arquivamento"]
+DataBaseTramitacao = Literal["abertura", "chegada"]
+
+
 def _filtro(
     id_unidade: int | None,
+    modo_unidade: ModoUnidade,
     id_assunto: int | None,
     id_tipo_processo: int | None,
-    desde: datetime | None,
-    ate: datetime | None,
-    apenas_ativos: bool,
+    desde: date | None,
+    ate: date | None,
+    data_base: str,
 ) -> RelatorioFiltro:
+    if desde and ate and desde > ate:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A data inicial do período é posterior à final.",
+        )
     return RelatorioFiltro(
         id_unidade=id_unidade,
+        modo_unidade=modo_unidade,
         id_assunto=id_assunto,
         id_tipo_processo=id_tipo_processo,
         desde=desde,
         ate=ate,
-        apenas_ativos=apenas_ativos,
+        data_base=data_base,
     )
+
+
+def _exige_completo(cortado: bool, total: int, teto: int, formato: str) -> None:
+    """Exportação não corta em silêncio: acima do teto, recusa e diz por quê.
+
+    Um CSV com 10 mil linhas de um recorte de 12 mil parece o recorte inteiro
+    — quem soma a planilha erra sem saber.
+    """
+    if cortado:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"O recorte tem {total} processos e o {formato} vai até {teto}. "
+                "Diminua o período ou filtre por unidade, tipo ou assunto."
+            ),
+        )
+
+
+def _cabecalho_csv(w, descricao: list[str]) -> None:
+    """O recorte no topo do CSV, como na tela e no PDF, e uma linha em branco."""
+    for linha in descricao:
+        w.writerow([linha])
+    w.writerow([])
 
 
 @router.get(
@@ -66,14 +104,15 @@ async def relatorio_json(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     id_unidade: int | None = None,
+    modo_unidade: ModoUnidade = "envolvida",
     id_assunto: int | None = None,
     id_tipo_processo: int | None = None,
-    desde: datetime | None = None,
-    ate: datetime | None = None,
-    apenas_ativos: bool = False,
+    desde: date | None = None,
+    ate: date | None = None,
+    data_base: DataBaseProcessos = "abertura",
     max_rows: int = Query(1000, ge=1, le=10000),
 ) -> RelatorioResposta:
-    f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
+    f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base)
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     return await gerar_relatorio(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
@@ -89,33 +128,38 @@ async def relatorio_csv(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     id_unidade: int | None = None,
+    modo_unidade: ModoUnidade = "envolvida",
     id_assunto: int | None = None,
     id_tipo_processo: int | None = None,
-    desde: datetime | None = None,
-    ate: datetime | None = None,
-    apenas_ativos: bool = False,
-    max_rows: int = Query(10000, ge=1, le=50000),
+    desde: date | None = None,
+    ate: date | None = None,
+    data_base: DataBaseProcessos = "abertura",
+    max_rows: int = Query(50000, ge=1, le=50000),
 ):
-    f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
+    f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base)
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     r = await gerar_relatorio(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
     )
 
+    _exige_completo(r.cortado, r.totais.total, max_rows, "CSV")
+
     buf = StringIO()
     buf.write("﻿")
     w = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    _cabecalho_csv(w, r.descricao_filtros)
     w.writerow(
         [
             "id",
             "numero_processo",
             "data_hora_abertura",
+            "data_hora_arquivamento",
+            "situacao",
             "manifestante",
             "tipo_processo",
             "assunto",
             "unidade_proprietaria",
             "local_atual",
-            "ativo",
             "publico",
             "externo",
         ]
@@ -126,12 +170,15 @@ async def relatorio_csv(
                 p.id,
                 p.numero_processo,
                 p.data_hora_abertura.strftime("%Y-%m-%d %H:%M:%S"),
+                p.data_hora_arquivamento.strftime("%Y-%m-%d %H:%M:%S")
+                if p.data_hora_arquivamento
+                else "",
+                ROTULO_SITUACAO[p.situacao],
                 p.manifestante or "",
                 p.tipo_processo or "",
                 p.assunto or "",
                 p.unidade_proprietaria or "",
                 p.local_atual or "",
-                "1" if p.ativo else "0",
                 "1" if p.publico else "0",
                 "1" if p.externo else "0",
             ]
@@ -154,14 +201,15 @@ async def relatorio_pdf(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     id_unidade: int | None = None,
+    modo_unidade: ModoUnidade = "envolvida",
     id_assunto: int | None = None,
     id_tipo_processo: int | None = None,
-    desde: datetime | None = None,
-    ate: datetime | None = None,
-    apenas_ativos: bool = False,
+    desde: date | None = None,
+    ate: date | None = None,
+    data_base: DataBaseProcessos = "abertura",
     max_rows: int = Query(1000, ge=1, le=5000),
 ):
-    f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
+    f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base)
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     r = await gerar_relatorio(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
@@ -189,14 +237,15 @@ async def tramitacao_json(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     id_unidade: int | None = None,
+    modo_unidade: ModoUnidade = "envolvida",
     id_assunto: int | None = None,
     id_tipo_processo: int | None = None,
-    desde: datetime | None = None,
-    ate: datetime | None = None,
-    apenas_ativos: bool = False,
+    desde: date | None = None,
+    ate: date | None = None,
+    data_base: DataBaseTramitacao = "abertura",
     max_processos: int = Query(200, ge=1, le=2000),
 ) -> RelatorioTramitacaoResposta:
-    f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
+    f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base)
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     return await gerar_tramitacao(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_processos=max_processos
@@ -212,22 +261,26 @@ async def tramitacao_csv(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     id_unidade: int | None = None,
+    modo_unidade: ModoUnidade = "envolvida",
     id_assunto: int | None = None,
     id_tipo_processo: int | None = None,
-    desde: datetime | None = None,
-    ate: datetime | None = None,
-    apenas_ativos: bool = False,
-    max_processos: int = Query(2000, ge=1, le=10000),
+    desde: date | None = None,
+    ate: date | None = None,
+    data_base: DataBaseTramitacao = "abertura",
+    max_processos: int = Query(10000, ge=1, le=10000),
 ):
-    f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
+    f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base)
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     r = await gerar_tramitacao(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_processos=max_processos
     )
 
+    _exige_completo(r.cortado, r.qtd_processos, max_processos, "CSV")
+
     buf = StringIO()
     buf.write("﻿")
     w = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    _cabecalho_csv(w, r.descricao_filtros)
     w.writerow(
         [
             "id_processo",
@@ -315,14 +368,15 @@ async def tramitacao_pdf(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     id_unidade: int | None = None,
+    modo_unidade: ModoUnidade = "envolvida",
     id_assunto: int | None = None,
     id_tipo_processo: int | None = None,
-    desde: datetime | None = None,
-    ate: datetime | None = None,
-    apenas_ativos: bool = False,
+    desde: date | None = None,
+    ate: date | None = None,
+    data_base: DataBaseTramitacao = "abertura",
     max_processos: int = Query(200, ge=1, le=1000),
 ):
-    f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
+    f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base)
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     r = await gerar_tramitacao(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_processos=max_processos

@@ -211,6 +211,49 @@ def _ids_unidade_e_subordinadas(tenant_id: int, raiz: int):
     return select(raiz_cte.c.id)
 
 
+def condicao_encaminhamento_pendente(tenant_id: int):
+    """Encaminhamento do processo ainda não recebido nem desfeito.
+
+    `id_local_atual` só muda no recebimento (`acoes_processo.receber`), então
+    é o encaminhamento, e não o local, que diz que o processo está em trânsito.
+    Para usar dentro de `select(Encaminhamento...)`; correlaciona com
+    `Processo`.
+    """
+    return and_(
+        Encaminhamento.id_processo == Processo.id,
+        Encaminhamento.tenant_id == tenant_id,
+        Encaminhamento.excluido.is_(False),
+        Encaminhamento.recebido.is_(False),
+        Encaminhamento.cancelado.is_(False),
+    )
+
+
+def condicao_em_transito(tenant_id: int):
+    """Condição sobre `Processo`: há encaminhamento pendente."""
+    return select(Encaminhamento.id).where(condicao_encaminhamento_pendente(tenant_id)).exists()
+
+
+def condicao_arquivado(tenant_id: int):
+    """Condição sobre `Processo`: foi arquivado.
+
+    `Movimentacao.id_arquivamento IS NOT NULL`, o critério de
+    `acoes_processo.arquivar` e do dashboard. `Processo.ativo` não serve:
+    nenhum caminho o escreve. Caixas de trabalho e relatórios leem daqui —
+    duas cópias divergiriam, e o relatório contaria arquivados que a caixa
+    não mostra.
+    """
+    return (
+        select(Movimentacao.id)
+        .where(
+            Movimentacao.id_processo == Processo.id,
+            Movimentacao.tenant_id == tenant_id,
+            Movimentacao.id_arquivamento.is_not(None),
+            Movimentacao.excluido.is_(False),
+        )
+        .exists()
+    )
+
+
 def _predicado_caixa(
     caixa: CaixaProcesso,
     *,
@@ -238,24 +281,9 @@ def _predicado_caixa(
       `acoes_processo.arquivar` e do dashboard. `Processo.ativo` não serve:
       nenhum caminho o escreve.
     """
-    pendente = and_(
-        Encaminhamento.id_processo == Processo.id,
-        Encaminhamento.tenant_id == tenant_id,
-        Encaminhamento.excluido.is_(False),
-        Encaminhamento.recebido.is_(False),
-        Encaminhamento.cancelado.is_(False),
-    )
-    em_transito = select(Encaminhamento.id).where(pendente).exists()
-    arquivado = (
-        select(Movimentacao.id)
-        .where(
-            Movimentacao.id_processo == Processo.id,
-            Movimentacao.tenant_id == tenant_id,
-            Movimentacao.id_arquivamento.is_not(None),
-            Movimentacao.excluido.is_(False),
-        )
-        .exists()
-    )
+    pendente = condicao_encaminhamento_pendente(tenant_id)
+    em_transito = condicao_em_transito(tenant_id)
+    arquivado = condicao_arquivado(tenant_id)
 
     if caixa in (
         CaixaProcesso.aguardando_assinatura,
