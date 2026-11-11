@@ -476,6 +476,89 @@
     mix-blend-mode: normal;
   }
 
+  /* === Listas de escolha (<select>) no padrão das listas do sistema ===
+     A lista aberta de um `<select>` era a do sistema operacional — fundo
+     branco, destaque azul-claro, fonte de outra família —, destoando dos
+     campos de busca (Combobox) logo ao lado, sobretudo no escuro. Onde o
+     navegador aceita estilizar a lista (`appearance: base-select`, Chrome e
+     Edge atuais), ela abre como as outras: cartão com borda, linha
+     destacada ao passar, a escolhida em negrito com o ✓ na cor da marca.
+     Onde não aceita, continua a nativa — o campo funciona igual. Vale para
+     todo `<select>` simples sem tocar nas telas: a API (`<option>`,
+     `onChange`, `required`) não muda. */
+  @supports (appearance: base-select) {
+    select:not([multiple]):not([size]),
+    select:not([multiple]):not([size])::picker(select) {
+      appearance: base-select;
+    }
+    select:not([multiple]):not([size]) {
+      align-items: center;
+      gap: 0.5rem;
+      white-space: nowrap;
+    }
+    select:not([multiple]):not([size])::picker-icon {
+      color: hsl(var(--foreground-muted));
+      transition: rotate 150ms ease;
+    }
+    select:not([multiple]):not([size]):open::picker-icon {
+      rotate: 180deg;
+    }
+    /* Nada escolhido ainda ("Escolha a conta"): o texto fica apagado, como
+       o placeholder dos outros campos. */
+    select:not([multiple]):not([size]):has(> option[value=""]:checked) {
+      color: hsl(var(--foreground-subtle));
+    }
+    select:not([multiple]):not([size])::picker(select) {
+      margin-block: 4px;
+      padding-block: 0.25rem;
+      max-block-size: min(22rem, 70dvh);
+      border: 1px solid hsl(var(--border));
+      border-radius: var(--dropdown-radius);
+      background: hsl(var(--card));
+      color: hsl(var(--foreground));
+      box-shadow: var(--dropdown-shadow);
+    }
+    select:not([multiple]):not([size]) option {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+      color: hsl(var(--foreground));
+      background: transparent;
+      cursor: pointer;
+      white-space: normal;
+    }
+    select:not([multiple]):not([size]) option:is(:hover, :focus-visible) {
+      background: hsl(var(--muted));
+      outline: none;
+    }
+    select:not([multiple]):not([size]) option:checked {
+      font-weight: 600;
+    }
+    select:not([multiple]):not([size]) option::checkmark {
+      order: 1;
+      margin-inline-start: auto;
+      color: hsl(var(--brand));
+    }
+    select:not([multiple]):not([size]) option[value=""] {
+      color: hsl(var(--foreground-subtle));
+    }
+    select:not([multiple]):not([size]) option:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    select:not([multiple]):not([size]) optgroup legend {
+      padding: 0.5rem 0.75rem 0.25rem;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: hsl(var(--foreground-subtle));
+    }
+  }
+
   /* === Workflow editor — handles visíveis === */
   .workflow-editor .react-flow__handle {
     width: 12px;
