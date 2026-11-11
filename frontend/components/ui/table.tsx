@@ -1,7 +1,6 @@
 "use client";
 
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
-import { useRouter } from "next/navigation";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
@@ -93,24 +92,32 @@ const INTERATIVO_NA_LINHA = "a, button, input, select, textarea, label, [role='m
  * (pedido do Heitor, 2026-11-11). O botão e os links continuam lá, fazendo o
  * deles: clique neles não chega à linha. Ctrl/⌘+clique abre em outra aba,
  * e arrastar para selecionar texto não navega.
+ *
+ * Navegar = clicar no link da própria linha que aponta para `href` (o
+ * `<Link>` do Next faz a navegação no cliente). Sem router aqui: a tabela é
+ * primitivo usado em toda parte, inclusive fora do App Router.
  */
 export function TRLink({
   href,
   ...props
 }: Omit<TRProps, "onClick" | "onClickRow"> & { href: string }) {
-  const router = useRouter();
   return (
     <TR
       {...props}
       onClick={(e) => {
+        const linha = e.currentTarget;
         const alvo = e.target as HTMLElement;
-        if (alvo !== e.currentTarget && alvo.closest(INTERATIVO_NA_LINHA)) return;
-        if (typeof window !== "undefined" && window.getSelection()?.toString()) return;
+        if (alvo !== linha && alvo.closest(INTERATIVO_NA_LINHA)) return;
+        if (window.getSelection()?.toString()) return;
         if (e.metaKey || e.ctrlKey) {
           window.open(href, "_blank", "noopener");
           return;
         }
-        router.push(href);
+        const link = Array.from(linha.querySelectorAll("a")).find(
+          (a) => a.getAttribute("href") === href,
+        );
+        if (link) link.click();
+        else window.location.assign(href);
       }}
     />
   );
