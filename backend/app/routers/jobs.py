@@ -30,6 +30,7 @@ from ..services.jobs import (
     get_job,
     listar_jobs,
 )
+from ..services.sigilo import niveis_acesso_usuario
 
 settings = get_settings()
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -207,6 +208,9 @@ async def disparar_relatorio_tramitacao(
         "ate": payload.ate.isoformat() if payload.ate else None,
         "apenas_ativos": payload.apenas_ativos,
     }
+    # SI-34 — o worker não tem usuário: os níveis de sigilo são decididos
+    # aqui, por quem pediu, e viajam com a task.
+    niveis = await niveis_acesso_usuario(db, current, tenant_id=tenant_id)
     job = await criar_job_relatorio_tramitacao(
         db,
         tenant_id=tenant_id,
@@ -214,7 +218,10 @@ async def disparar_relatorio_tramitacao(
         max_processos=payload.max_processos,
         usuario_id=current.id,
     )
-    run_task.delay(job.id, filtros, payload.max_processos, tenant_id, tenant_slug)
+    run_task.delay(
+        job.id, filtros, payload.max_processos, tenant_id, tenant_slug,
+        niveis_permitidos=niveis,
+    )
     out = JobOut.model_validate(job)
     out.nome_usuario = current.nome
     return out

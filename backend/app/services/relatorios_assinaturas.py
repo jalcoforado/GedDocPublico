@@ -50,7 +50,13 @@ def _delta_min(a: datetime | None, b: datetime | None) -> int | None:
 
 
 async def gerar_assinaturas(
-    db: AsyncSession, f: AssinaturasFiltro, *, tenant_id: int, max_rows: int = 500
+    db: AsyncSession,
+    f: AssinaturasFiltro,
+    *,
+    tenant_id: int,
+    # Sem default: ver `relatorios.gerar_relatorio`.
+    niveis_permitidos: list[str] | None,
+    max_rows: int = 500,
 ) -> RelatorioAssinaturasResposta:
     Solicitante = aliased(Usuario, name="solic")
     sol_stmt = (
@@ -64,8 +70,16 @@ async def gerar_assinaturas(
         .where(
             SolicitacaoAssinatura.tenant_id == tenant_id,
             SolicitacaoAssinatura.excluido.is_(False),
+            # SI-34 — a solicitação expõe número e nome do processo: segue as
+            # regras do processo. Excluído e rascunho ficam fora como nos
+            # outros relatórios (rascunho é de quem o criou, SI-16).
+            Processo.tenant_id == tenant_id,
+            Processo.excluido.is_(False),
+            Processo.situacao != "rascunho",
         )
     )
+    if niveis_permitidos is not None:
+        sol_stmt = sol_stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
     if f.desde:
         sol_stmt = sol_stmt.where(SolicitacaoAssinatura.dt_inicio >= f.desde)
     if f.ate:
