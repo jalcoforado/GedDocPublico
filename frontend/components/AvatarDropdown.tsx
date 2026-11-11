@@ -12,7 +12,6 @@ import {
 import Link from "next/link";
 import { useRef, useState } from "react";
 
-import { PreferenciasAparencia } from "@/components/PreferenciasAparencia";
 import { ListaLotacoes } from "@/components/UnidadeAtiva";
 import { Popover } from "@/components/ui/popover";
 import { useAuth } from "@/lib/auth";
@@ -120,10 +119,8 @@ export function AvatarDropdown() {
             </div>
           </div>
 
-          {/* Tema — radiogroups compartilhados com /perfil (fatia 3.7) */}
-          <div className="border-b border-border px-3 py-2">
-            <PreferenciasAparencia />
-          </div>
+          {/* O tema saiu daqui (2026-11-11, pedido do Heitor): já há o botão
+              sol/lua na barra de cima, e a escolha completa fica em /perfil. */}
 
           {/* Lotação ativa — "alterar setor" (E1, benchmark SUiTE). Só
               aparece com 2+ lotações: com uma só não há o que escolher. */}
