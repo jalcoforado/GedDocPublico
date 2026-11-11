@@ -230,3 +230,20 @@ async def test_relatorios_nao_mostram_dados_de_outra_prefeitura(admin_engine):
         assert not alheios & {s["id_processo"] for s in ass.json()["solicitacoes"]}
     finally:
         await _fechar()
+
+
+@pytest.mark.asyncio
+async def test_pagina_gerencial_respeita_o_sigilo(admin_engine):
+    cen = await _cenario(admin_engine, "relger")
+    try:
+        async with await _cliente_como(admin_engine, cen, "comum") as c:
+            comum = (await c.get("/api/v2/relatorios/gerencial.json")).json()
+        await _fechar()
+        async with await _cliente_como(admin_engine, cen, "admin") as c:
+            admin = (await c.get("/api/v2/relatorios/gerencial.json")).json()
+        # o reservado conta para o super-usuário e some para o comum, em todas
+        # as seções — inclusive nos números, não só nas listas
+        assert admin["entrada"]["abertos"] == 3 and comum["entrada"]["abertos"] == 2
+        assert admin["assinaturas"]["total"] == 3 and comum["assinaturas"]["total"] == 2
+    finally:
+        await _fechar()

@@ -21,19 +21,22 @@ from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Usuario
-from ..schemas.relatorio import ModoUnidade, RelatorioFiltro, RelatorioResposta
+from ..schemas.relatorio import ModoUnidade, RelatorioFiltro, RelatorioResposta, Situacao
 from ..schemas.relatorio_assinaturas import (
     AssinaturasFiltro,
     RelatorioAssinaturasResposta,
     StatusSolicitacao,
 )
+from ..schemas.relatorio_gerencial import GerencialResposta
 from ..schemas.relatorio_tramitacao import RelatorioTramitacaoResposta
 from ..services.pdf_relatorio import gerar_relatorio_pdf
 from ..services.pdf_relatorio_assinaturas import gerar_assinaturas_pdf
+from ..services.pdf_relatorio_gerencial import gerar_gerencial_pdf
 from ..services.pdf_relatorio_tramitacao import gerar_tramitacao_pdf
 from ..services.relatorios import gerar_relatorio
 from ..services.relatorios_assinaturas import gerar_assinaturas
 from ..services.relatorios_comum import ROTULO_SITUACAO
+from ..services.relatorios_gerencial import gerar_gerencial
 from ..services.relatorios_tramitacao import gerar_tramitacao
 from ..services.sigilo import niveis_acesso_usuario
 
@@ -110,9 +113,12 @@ async def relatorio_json(
     desde: date | None = None,
     ate: date | None = None,
     data_base: DataBaseProcessos = "abertura",
+    situacao: Situacao | None = None,
+    parado_ha_dias: int | None = Query(None, ge=1, le=3650),
     max_rows: int = Query(1000, ge=1, le=10000),
 ) -> RelatorioResposta:
     f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base)
+    f = f.model_copy(update={"situacao": situacao, "parado_ha_dias": parado_ha_dias})
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     return await gerar_relatorio(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
@@ -134,9 +140,12 @@ async def relatorio_csv(
     desde: date | None = None,
     ate: date | None = None,
     data_base: DataBaseProcessos = "abertura",
+    situacao: Situacao | None = None,
+    parado_ha_dias: int | None = Query(None, ge=1, le=3650),
     max_rows: int = Query(50000, ge=1, le=50000),
 ):
     f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base)
+    f = f.model_copy(update={"situacao": situacao, "parado_ha_dias": parado_ha_dias})
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     r = await gerar_relatorio(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
@@ -207,9 +216,12 @@ async def relatorio_pdf(
     desde: date | None = None,
     ate: date | None = None,
     data_base: DataBaseProcessos = "abertura",
+    situacao: Situacao | None = None,
+    parado_ha_dias: int | None = Query(None, ge=1, le=3650),
     max_rows: int = Query(1000, ge=1, le=5000),
 ):
     f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base)
+    f = f.model_copy(update={"situacao": situacao, "parado_ha_dias": parado_ha_dias})
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     r = await gerar_relatorio(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
@@ -219,6 +231,67 @@ async def relatorio_pdf(
     disposition = "inline" if inline else "attachment"
     return Response(
         content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'{disposition}; filename="{fname}"'},
+    )
+
+
+# ---------- Página gerencial (SI-34) ----------
+
+
+async def _gerencial(db, user, tenant_id, id_unidade, modo_unidade, id_assunto,
+                     id_tipo_processo, desde, ate, dias_parado) -> GerencialResposta:
+    f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, "abertura")
+    niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
+    return await gerar_gerencial(
+        db, f, tenant_id=tenant_id, niveis_permitidos=niveis, dias_parado=dias_parado
+    )
+
+
+@router.get(
+    "/gerencial.json",
+    response_model=GerencialResposta,
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
+)
+async def gerencial_json(
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    id_unidade: int | None = None,
+    modo_unidade: ModoUnidade = "envolvida",
+    id_assunto: int | None = None,
+    id_tipo_processo: int | None = None,
+    desde: date | None = None,
+    ate: date | None = None,
+    dias_parado: int = Query(15, ge=1, le=3650),
+) -> GerencialResposta:
+    return await _gerencial(db, user, tenant_id, id_unidade, modo_unidade, id_assunto,
+                            id_tipo_processo, desde, ate, dias_parado)
+
+
+@router.get(
+    "/gerencial.pdf",
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
+)
+async def gerencial_pdf(
+    inline: bool = Query(True),
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    id_unidade: int | None = None,
+    modo_unidade: ModoUnidade = "envolvida",
+    id_assunto: int | None = None,
+    id_tipo_processo: int | None = None,
+    desde: date | None = None,
+    ate: date | None = None,
+    dias_parado: int = Query(15, ge=1, le=3650),
+):
+    r = await _gerencial(db, user, tenant_id, id_unidade, modo_unidade, id_assunto,
+                         id_tipo_processo, desde, ate, dias_parado)
+    fname = f"relatorio-gerencial-{datetime.now().strftime('%Y%m%d-%H%M')}.pdf"
+    disposition = "inline" if inline else "attachment"
+    return Response(
+        content=gerar_gerencial_pdf(r),
         media_type="application/pdf",
         headers={"Content-Disposition": f'{disposition}; filename="{fname}"'},
     )

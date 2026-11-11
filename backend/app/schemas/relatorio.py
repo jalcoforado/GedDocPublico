@@ -21,6 +21,10 @@ class RelatorioFiltro(BaseModel):
     desde: date | None = None
     ate: date | None = None
     data_base: DataBase = "abertura"
+    # Lista de uma seção da página gerencial: "Andamento" filtra a situação de
+    # hoje; "parados" são os não arquivados sem movimentação há N dias.
+    situacao: Situacao | None = None
+    parado_ha_dias: int | None = None
 
 
 class RelatorioTotais(BaseModel):
@@ -44,6 +48,9 @@ class RelatorioProcessoRow(BaseModel):
     # Hora local (Brasília), sem fuso — ver `relatorios_comum.hora_local`.
     data_hora_abertura: datetime
     data_hora_arquivamento: datetime | None = None
+    # Última movimentação registrada (ou a abertura, se nenhuma) — é dela que
+    # se contam os dias parado.
+    ultima_movimentacao: datetime | None = None
     situacao: Situacao
     manifestante: str | None
     tipo_processo: str | None

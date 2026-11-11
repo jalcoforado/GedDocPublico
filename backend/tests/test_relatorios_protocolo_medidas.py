@@ -408,3 +408,46 @@ async def test_assinaturas_periodo_unidade_e_assinante(cen, admin_engine):
     do_assinante = (await _get("assinaturas.json", id_assinante=admin, max_rows=1)).json()
     assert {x["id"] for x in do_assinante["solicitacoes"]} == {ids["concluida"]}
     assert do_assinante["totais"]["total"] == 1
+
+# ------------------------------------------------------------ página gerencial
+
+
+@pytest.mark.asyncio
+async def test_cada_numero_da_pagina_e_o_total_da_lista_da_secao(cen, admin_engine):
+    """O "ver lista" de cada seção abre a lista que dá aquele número. Se a
+    página contasse por conta própria, divergiria da lista no primeiro ajuste."""
+    await _solicitacoes(cen, admin_engine)
+    outubro = {"desde": "2026-10-01", "ate": "2026-10-31"}
+    g = (await _get("gerencial.json", **outubro)).json()
+
+    async def total(path, chave="totais", **p):
+        return (await _get(path, **p)).json()[chave]["total"]
+
+    assert g["entrada"]["abertos"] == await total("processos.json", **outubro) == 6
+    # processos antigos, sem canal gravado, aparecem como "Não informado"
+    assert g["entrada"]["por_canal"] == [{"canal": None, "rotulo": "Não informado", "count": 6}]
+
+    assert g["andamento"]["em_transito"] == await total("processos.json", situacao="em_transito") == 1
+    assert g["andamento"]["em_andamento"] == await total("processos.json", situacao="em_andamento") == 4
+    # tudo foi mexido em outubro de 2026: com 15 dias, os 5 não arquivados estão parados
+    assert g["andamento"]["parados"] == await total("processos.json", parado_ha_dias=15) == 5
+    longe = (await _get("gerencial.json", dias_parado=3650)).json()
+    assert longe["andamento"]["parados"] == 0
+
+    assert g["saida"]["arquivados"] == await total(
+        "processos.json", data_base="arquivamento", **outubro
+    ) == 1
+    # 01/10 13:00 → 20/10 15:00 (UTC) = 19,08 dias
+    assert g["saida"]["dias_medio_ate_arquivar"] == 19.1
+
+    # entradas na unidade = abertura (na dona) ou recebimento: A abriu 5 em
+    # outubro; B abriu o `arquivado` e recebeu o `passou`; C recebeu o `passou`.
+    # Envio pendente e recusado não entram — ninguém recebeu.
+    assert {(u["unidade"], u["chegadas"], u["atrasos"]) for u in g["gargalos"]["unidades"]} == {
+        ("Protocolo Geral", 5, 0), ("Unidade B", 2, 0), ("Unidade C", 1, 0),
+    }
+
+    assert g["assinaturas"]["total"] == await total("assinaturas.json", **outubro) == 4
+    assert g["descricao_filtros"][0].startswith("Período: 01/10/2026 a 31/10/2026 — cada seção")
+    pdf = await _get("gerencial.pdf", **outubro)
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")

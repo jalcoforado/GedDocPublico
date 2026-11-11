@@ -24,7 +24,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Assunto, Encaminhamento, Movimentacao, Processo, TipoProcesso, UnidadeTrabalho
@@ -120,6 +120,31 @@ def data_arquivamento(tenant_id: int):
     )
 
 
+def ultima_movimentacao(tenant_id: int):
+    """Subconsulta escalar: a movimentação mais recente do processo, ou a
+    abertura se não houver nenhuma. Envio, recebimento, despacho, assinatura —
+    qualquer ato registrado conta."""
+    return func.coalesce(
+        select(func.max(Movimentacao.data_hora_movimentacao))
+        .where(
+            Movimentacao.id_processo == Processo.id,
+            Movimentacao.tenant_id == tenant_id,
+            Movimentacao.excluido.is_(False),
+        )
+        .scalar_subquery(),
+        Processo.data_hora_abertura,
+    )
+
+
+def condicao_parado(tenant_id: int, dias: int, agora_utc: datetime):
+    """Não arquivado e sem movimentação há `dias` dias ou mais (decisão de
+    2026-11-11: conta da última movimentação de qualquer tipo)."""
+    return and_(
+        ~condicao_arquivado(tenant_id),
+        ultima_movimentacao(tenant_id) <= agora_utc - timedelta(days=dias),
+    )
+
+
 def situacao(tenant_id: int):
     """Expressão SQL com a situação do processo. Arquivado vence trânsito:
     processo arquivado com encaminhamento esquecido já teve a decisão."""
@@ -187,7 +212,9 @@ def aplicar_filtros_processo(
     return stmt.where(*no_intervalo(coluna_data, f.desde, f.ate))
 
 
-async def descrever_filtros(db: AsyncSession, f: FiltroComum, *, tenant_id: int) -> list[str]:
+async def descrever_filtros(
+    db: AsyncSession, f: FiltroComum, *, tenant_id: int, por_secao: bool = False
+) -> list[str]:
     """O recorte em frases curtas, para a tela, o CSV e o PDF dizerem o mesmo.
 
     Nomes buscados com o `tenant_id`: id de outra prefeitura vira "não
@@ -203,9 +230,17 @@ async def descrever_filtros(db: AsyncSession, f: FiltroComum, *, tenant_id: int)
     if f.desde or f.ate:
         de = f.desde.strftime("%d/%m/%Y") if f.desde else "o início"
         ate = f.ate.strftime("%d/%m/%Y") if f.ate else "hoje"
-        linhas.append(f"Período: {de} a {ate}, pela {ROTULO_DATA_BASE[f.data_base]}")
+        periodo = f"Período: {de} a {ate}"
     else:
-        linhas.append(f"Período: todo o histórico (contado pela {ROTULO_DATA_BASE[f.data_base]})")
+        periodo = "Período: todo o histórico"
+    if por_secao:
+        # Página gerencial: cada seção conta pela sua data (ver
+        # `schemas/relatorio_gerencial.py`); dizer uma só seria falso.
+        linhas.append(
+            f"{periodo} — cada seção diz por qual data conta; Andamento é a situação de hoje"
+        )
+    else:
+        linhas.append(f"{periodo}, pela {ROTULO_DATA_BASE[f.data_base]}")
     if f.id_unidade:
         nome = await _nome(UnidadeTrabalho.unidade_trabalho, UnidadeTrabalho, f.id_unidade)
         linhas.append(
@@ -217,5 +252,11 @@ async def descrever_filtros(db: AsyncSession, f: FiltroComum, *, tenant_id: int)
     if f.id_assunto:
         nome = await _nome(Assunto.assunto, Assunto, f.id_assunto)
         linhas.append(f"Assunto: {nome or 'não encontrado'}")
+    if getattr(f, "situacao", None):
+        linhas.append(f"Situação hoje: {ROTULO_SITUACAO[f.situacao]}")
+    if getattr(f, "parado_ha_dias", None):
+        linhas.append(
+            f"Parados: sem nenhuma movimentação há {f.parado_ha_dias} dias ou mais (não arquivados)"
+        )
     linhas.append("Horários em hora de Brasília. Só entram processos que a sua credencial de sigilo alcança.")
     return linhas

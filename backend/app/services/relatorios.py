@@ -28,12 +28,15 @@ from ..schemas.relatorio import (
     RelatorioResposta,
     RelatorioTotais,
 )
+from ..utils.relogio import agora_utc
 from .relatorios_comum import (
     aplicar_filtros_processo,
+    condicao_parado,
     data_arquivamento,
     descrever_filtros,
     hora_local,
     situacao,
+    ultima_movimentacao,
 )
 
 
@@ -44,8 +47,8 @@ def _pct(part: int, total: int) -> float:
 
 
 def _base(f: RelatorioFiltro, *, tenant_id: int, niveis_permitidos: list[str] | None):
-    """Ids, situação e data de arquivamento de cada processo do recorte."""
-    arquivado_em = data_arquivamento(tenant_id).label("arquivado_em")
+    """Ids, situação, data de arquivamento e última movimentação de cada
+    processo do recorte."""
     coluna_data = (
         data_arquivamento(tenant_id)
         if f.data_base == "arquivamento"
@@ -54,11 +57,17 @@ def _base(f: RelatorioFiltro, *, tenant_id: int, niveis_permitidos: list[str] | 
     stmt = select(
         Processo.id.label("id"),
         situacao(tenant_id).label("situacao"),
-        arquivado_em,
+        data_arquivamento(tenant_id).label("arquivado_em"),
+        ultima_movimentacao(tenant_id).label("ultima_mov"),
     ).join(Assunto, Assunto.id == Processo.id_assunto)
-    return aplicar_filtros_processo(
+    stmt = aplicar_filtros_processo(
         stmt, f, tenant_id=tenant_id, niveis_permitidos=niveis_permitidos, coluna_data=coluna_data
-    ).subquery("recorte")
+    )
+    if f.situacao:
+        stmt = stmt.where(situacao(tenant_id) == f.situacao)
+    if f.parado_ha_dias:
+        stmt = stmt.where(condicao_parado(tenant_id, f.parado_ha_dias, agora_utc()))
+    return stmt.subquery("recorte")
 
 
 async def gerar_relatorio(
@@ -132,6 +141,7 @@ async def gerar_relatorio(
             Processo,
             rec.c.situacao,
             rec.c.arquivado_em,
+            rec.c.ultima_mov,
             Assunto.assunto.label("assunto_nome"),
             TipoProcesso.tipo_processo.label("tipo_nome"),
             Manifestante.nome.label("manif_nome"),
@@ -154,6 +164,7 @@ async def gerar_relatorio(
             numero_processo=row[0].numero_processo,
             data_hora_abertura=hora_local(row[0].data_hora_abertura),
             data_hora_arquivamento=hora_local(row.arquivado_em),
+            ultima_movimentacao=hora_local(row.ultima_mov),
             situacao=row.situacao,
             manifestante=row.manif_nome,
             tipo_processo=row.tipo_nome,
