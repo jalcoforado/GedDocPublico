@@ -36,6 +36,7 @@ from .relatorios_comum import (
     descrever_filtros,
     hora_local,
     situacao,
+    situacao_prazo,
     ultima_movimentacao,
 )
 
@@ -67,6 +68,8 @@ def _base(f: RelatorioFiltro, *, tenant_id: int, niveis_permitidos: list[str] | 
         stmt = stmt.where(situacao(tenant_id) == f.situacao)
     if f.parado_ha_dias:
         stmt = stmt.where(condicao_parado(tenant_id, f.parado_ha_dias, agora_utc()))
+    if f.prazo:
+        stmt = stmt.where(situacao_prazo(tenant_id, agora_utc()) == f.prazo)
     return stmt.subquery("recorte")
 
 

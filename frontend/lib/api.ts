@@ -695,6 +695,7 @@ export interface RelatorioFiltroInput {
   data_base?: "abertura" | "arquivamento" | "chegada";
   situacao?: SituacaoRelatorio;
   parado_ha_dias?: number;
+  prazo?: StatusPrazoRelatorio;
   max_rows?: number;
 }
 
@@ -879,14 +880,42 @@ export interface GerencialFiltroInput {
   dias_parado?: number;
 }
 
+/** Status do prazo do SERVIÇO (`prazos.calcular_prazo`). */
+export type StatusPrazoRelatorio =
+  | "sem_prazo"
+  | "dentro_do_prazo"
+  | "vencendo"
+  | "atrasado"
+  | "concluido_no_prazo"
+  | "concluido_atrasado";
+
 export interface GerencialResposta {
   descricao_filtros: string[];
   entrada: {
     abertos: number;
     por_canal: { canal: string | null; rotulo: string; count: number }[];
+    top_assuntos: { id_assunto: number; assunto: string | null; count: number }[];
   };
   andamento: { em_andamento: number; em_transito: number; parados: number; dias_parado: number };
   saida: { arquivados: number; dias_medio_ate_arquivar: number | null };
+  /** Prazo do serviço; os `*_sem_prazo` dizem quantos ficaram fora da conta. */
+  prazos: {
+    concluidos_no_prazo: number;
+    concluidos_atrasados: number;
+    concluidos_sem_prazo: number;
+    dentro_do_prazo: number;
+    vencendo: number;
+    atrasados: number;
+    em_aberto_sem_prazo: number;
+  };
+  tendencia: {
+    granularidade: "semana" | "mes";
+    desde: string;
+    ate: string;
+    pontos: { inicio: string; abertos: number; arquivados: number }[];
+  };
+  /** Mesmo recorte no período anterior de mesmo tamanho; só com início e fim. */
+  comparacao: { desde: string; ate: string; abertos: number; arquivados: number } | null;
   gargalos: {
     unidades: {
       id_unidade: number | null;
@@ -1246,6 +1275,7 @@ function relatorioQs(f: RelatorioFiltroInput): string {
     data_base: f.data_base,
     situacao: f.situacao,
     parado_ha_dias: f.parado_ha_dias,
+    prazo: f.prazo,
     max_rows: f.max_rows,
   });
 }

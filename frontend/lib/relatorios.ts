@@ -14,6 +14,7 @@ import type {
   ModoUnidadeRelatorio,
   RelatorioFiltroInput,
   SituacaoRelatorio,
+  StatusPrazoRelatorio,
 } from "@/lib/api";
 
 export const ROTA_RELATORIOS = "/m/protocolo/relatorios";
@@ -34,8 +35,18 @@ export const ROTULO_SITUACAO: Record<SituacaoRelatorio, string> = {
   arquivado: "Arquivado",
 };
 
+export const ROTULO_PRAZO: Record<StatusPrazoRelatorio, string> = {
+  sem_prazo: "Sem prazo de serviço",
+  dentro_do_prazo: "Dentro do prazo",
+  vencendo: "Vencendo",
+  atrasado: "Prazo vencido",
+  concluido_no_prazo: "Arquivado no prazo",
+  concluido_atrasado: "Arquivado com atraso",
+};
+
 const MODOS = Object.keys(ROTULO_MODO_UNIDADE) as ModoUnidadeRelatorio[];
 const SITUACOES = Object.keys(ROTULO_SITUACAO) as SituacaoRelatorio[];
+const PRAZOS = Object.keys(ROTULO_PRAZO) as StatusPrazoRelatorio[];
 const DATAS_BASE: DataBaseRelatorio[] = ["abertura", "arquivamento", "chegada", "pedido", "conclusao"];
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -59,6 +70,7 @@ function inteiro(v: string | null): number | undefined {
 export function filtroDaUrl(sp: URLSearchParams): FiltroDaUrl {
   const modo = sp.get("modo_unidade") as ModoUnidadeRelatorio | null;
   const situacao = sp.get("situacao") as SituacaoRelatorio | null;
+  const prazo = sp.get("prazo") as StatusPrazoRelatorio | null;
   const desde = sp.get("desde");
   const ate = sp.get("ate");
   const dataBase = sp.get("data_base");
@@ -74,6 +86,7 @@ export function filtroDaUrl(sp: URLSearchParams): FiltroDaUrl {
       : undefined,
     situacao: situacao && SITUACOES.includes(situacao) ? situacao : undefined,
     parado_ha_dias: inteiro(sp.get("parado_ha_dias")),
+    prazo: prazo && PRAZOS.includes(prazo) ? prazo : undefined,
     dias_parado: inteiro(sp.get("dias_parado")),
   };
 }
@@ -91,6 +104,7 @@ export function filtroParaUrl(f: FiltroDaUrl): string {
     ["data_base", f.data_base],
     ["situacao", f.situacao],
     ["parado_ha_dias", f.parado_ha_dias],
+    ["prazo", f.prazo],
     ["dias_parado", f.dias_parado],
   ];
   for (const [k, v] of campos) if (v !== undefined && v !== "") sp.set(k, String(v));

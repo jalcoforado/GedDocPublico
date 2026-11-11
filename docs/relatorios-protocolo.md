@@ -20,20 +20,27 @@ código vence e este arquivo deve ser corrigido.
 
 ## A página de relatórios
 
-Uma página, um filtro no topo (período, unidade, tipo, assunto) e cinco seções.
+Uma página, um filtro no topo (período, unidade, tipo, assunto), um gráfico de
+tendência e seis seções.
 **Cada seção conta pela sua própria data** e diz qual é:
 
 | Seção | Conta | Pela data de |
 |---|---|---|
-| Entrada | processos abertos, por canal de entrada | abertura |
+| Entrada e saída no tempo (gráfico) | abertos e arquivados por semana (mês, acima de ~6 meses) | abertura / arquivamento; sem período no filtro, as últimas 12 semanas |
+| Entrada | processos abertos, por canal, e os 5 principais assuntos | abertura |
 | Andamento | em andamento, em trânsito, parados | **hoje** — não usa o período |
 | Saída | arquivados e tempo médio até arquivar | arquivamento |
+| Prazos | arquivados no prazo ou com atraso; em aberto dentro do prazo, vencendo, vencidos | arquivamento / **hoje** |
 | Gargalos | entradas em cada unidade, atrasos, permanência média | entrada na unidade |
 | Assinaturas | pedidas, pendentes, concluídas, canceladas, tempo médio | pedido |
 
 Por que não um seletor único de data: com o período pela abertura, a Saída
 contaria "abertos em outubro que um dia foram arquivados" — número plausível
 que responde outra pergunta.
+
+Com início e fim no filtro, Entrada e Saída mostram a diferença para o período
+anterior de mesmo tamanho — **em números**, não em %: com base pequena a
+porcentagem engana ("+850%" para 19 processos).
 
 Cada número tem **"Ver lista"** (a lista que o produziu, com o mesmo recorte na
 URL) e **CSV**. O teste garante que o número da seção é o total dessa lista. A
@@ -57,6 +64,13 @@ página inteira sai em PDF.
   recebimento. Envio pendente ou recusado não é entrada.
 - **Atraso:** a estadia na unidade terminou (ou segue) depois do **fim do dia**
   do prazo do envio que trouxe o processo — a definição das caixas de trabalho.
+- **Prazo do serviço:** abertura + N dias **corridos** (o N é congelado na
+  abertura). Arquivado até o prazo = no prazo. Em aberto: *vencido* se já
+  passou; *vencendo* se faltam 20% do prazo ou menos (mínimo 1 dia). Processo
+  sem prazo de serviço (legado, ou serviço sem prazo) **fica fora da conta** e a
+  página diz quantos são. A regra é a de `prazos.calcular_prazo` (a do detalhe
+  do processo); a versão em SQL, que permite listar e contar, é comparada a ela
+  por teste.
 - **Assinatura concluída:** realizada **e** com data de fim. Realizada sem data
   de fim conta como pendente.
 

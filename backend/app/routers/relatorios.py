@@ -21,7 +21,13 @@ from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Usuario
-from ..schemas.relatorio import ModoUnidade, RelatorioFiltro, RelatorioResposta, Situacao
+from ..schemas.relatorio import (
+    ModoUnidade,
+    RelatorioFiltro,
+    RelatorioResposta,
+    Situacao,
+    StatusPrazoRelatorio,
+)
 from ..schemas.relatorio_assinaturas import (
     AssinaturasFiltro,
     RelatorioAssinaturasResposta,
@@ -115,10 +121,13 @@ async def relatorio_json(
     data_base: DataBaseProcessos = "abertura",
     situacao: Situacao | None = None,
     parado_ha_dias: int | None = Query(None, ge=1, le=3650),
+    prazo: StatusPrazoRelatorio | None = None,
     max_rows: int = Query(1000, ge=1, le=10000),
 ) -> RelatorioResposta:
     f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base)
-    f = f.model_copy(update={"situacao": situacao, "parado_ha_dias": parado_ha_dias})
+    f = f.model_copy(
+        update={"situacao": situacao, "parado_ha_dias": parado_ha_dias, "prazo": prazo}
+    )
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     return await gerar_relatorio(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
@@ -142,10 +151,13 @@ async def relatorio_csv(
     data_base: DataBaseProcessos = "abertura",
     situacao: Situacao | None = None,
     parado_ha_dias: int | None = Query(None, ge=1, le=3650),
+    prazo: StatusPrazoRelatorio | None = None,
     max_rows: int = Query(50000, ge=1, le=50000),
 ):
     f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base)
-    f = f.model_copy(update={"situacao": situacao, "parado_ha_dias": parado_ha_dias})
+    f = f.model_copy(
+        update={"situacao": situacao, "parado_ha_dias": parado_ha_dias, "prazo": prazo}
+    )
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     r = await gerar_relatorio(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
@@ -218,10 +230,13 @@ async def relatorio_pdf(
     data_base: DataBaseProcessos = "abertura",
     situacao: Situacao | None = None,
     parado_ha_dias: int | None = Query(None, ge=1, le=3650),
+    prazo: StatusPrazoRelatorio | None = None,
     max_rows: int = Query(1000, ge=1, le=5000),
 ):
     f = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base)
-    f = f.model_copy(update={"situacao": situacao, "parado_ha_dias": parado_ha_dias})
+    f = f.model_copy(
+        update={"situacao": situacao, "parado_ha_dias": parado_ha_dias, "prazo": prazo}
+    )
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     r = await gerar_relatorio(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows

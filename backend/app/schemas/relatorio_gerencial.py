@@ -6,6 +6,9 @@ assinaturas pelo pedido. "Andamento" é a situação de HOJE e não usa período
 Um seletor único de data no topo faria a saída contar "abertos em outubro que
 um dia foram arquivados" — número plausível que responde outra pergunta.
 """
+from datetime import date
+from typing import Literal
+
 from pydantic import BaseModel
 
 from .relatorio_assinaturas import AssinaturasTotais
@@ -17,9 +20,58 @@ class CanalContagem(BaseModel):
     count: int
 
 
+class AssuntoContagem(BaseModel):
+    id_assunto: int
+    assunto: str | None
+    count: int
+
+
 class SecaoEntrada(BaseModel):
     abertos: int
     por_canal: list[CanalContagem]
+    # Os cinco assuntos com mais processos abertos no período.
+    top_assuntos: list[AssuntoContagem]
+
+
+class SecaoPrazos(BaseModel):
+    """Prazo do SERVIÇO (`prazos.calcular_prazo`): abertura + N dias corridos.
+
+    Só processos com prazo entram nas contas de prazo; os `*_sem_prazo` dizem
+    quantos ficaram de fora, para um "95% no prazo" não esconder que fala de
+    um quinto dos processos.
+    """
+    # Arquivados no período (pela data de arquivamento).
+    concluidos_no_prazo: int
+    concluidos_atrasados: int
+    concluidos_sem_prazo: int
+    # Não arquivados, hoje (sem período).
+    dentro_do_prazo: int
+    vencendo: int
+    atrasados: int
+    em_aberto_sem_prazo: int
+
+
+class PontoTendencia(BaseModel):
+    inicio: date  # segunda-feira da semana, ou dia 1 do mês (dia local)
+    abertos: int
+    arquivados: int
+
+
+class SecaoTendencia(BaseModel):
+    granularidade: Literal["semana", "mes"]
+    # O período do gráfico: o do filtro, ou as últimas 12 semanas sem filtro.
+    desde: date
+    ate: date
+    pontos: list[PontoTendencia]
+
+
+class Comparacao(BaseModel):
+    """Mesmo recorte no período imediatamente anterior, de mesmo tamanho.
+    Diferença em números, não em %: com bases pequenas a % engana."""
+    desde: date
+    ate: date
+    abertos: int
+    arquivados: int
 
 
 class SecaoAndamento(BaseModel):
@@ -57,5 +109,9 @@ class GerencialResposta(BaseModel):
     entrada: SecaoEntrada
     andamento: SecaoAndamento
     saida: SecaoSaida
+    prazos: SecaoPrazos
+    tendencia: SecaoTendencia
+    # Só quando o filtro tem início e fim.
+    comparacao: Comparacao | None
     gargalos: SecaoGargalos
     assinaturas: AssinaturasTotais

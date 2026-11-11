@@ -13,7 +13,7 @@ atraso. Por isso as seções reaproveitam os relatórios em vez de contar de nov
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,22 +22,32 @@ from ..models import Assunto, Processo
 from ..schemas.relatorio import RelatorioFiltro
 from ..schemas.relatorio_assinaturas import AssinaturasFiltro
 from ..schemas.relatorio_gerencial import (
+    AssuntoContagem,
     CanalContagem,
+    Comparacao,
     GargaloUnidade,
     GerencialResposta,
     SecaoAndamento,
     SecaoEntrada,
     SecaoGargalos,
+    SecaoPrazos,
     SecaoSaida,
+    SecaoTendencia,
+    PontoTendencia,
 )
 from ..utils.relogio import agora_utc
 from .relatorios_assinaturas import gerar_assinaturas
+from .processos import condicao_arquivado
 from .relatorios_comum import (
+    FUSO_RELATORIO,
     aplicar_filtros_processo,
     condicao_parado,
     data_arquivamento,
     descrever_filtros,
+    hora_local,
+    semana_local,
     situacao,
+    situacao_prazo,
 )
 from .relatorios_tramitacao import gerar_tramitacao
 
@@ -94,7 +104,23 @@ async def gerar_gerencial(
          for c, n in linhas),
         key=lambda x: (-x.count, x.rotulo),
     )
-    entrada = SecaoEntrada(abertos=sum(x.count for x in por_canal), por_canal=por_canal)
+    top = (
+        await db.execute(
+            _recorte(
+                select(Assunto.id, Assunto.assunto, func.count()).select_from(Processo),
+                f,
+                Processo.data_hora_abertura,
+            )
+            .group_by(Assunto.id, Assunto.assunto)
+            .order_by(func.count().desc(), Assunto.assunto)
+            .limit(5)
+        )
+    ).all()
+    entrada = SecaoEntrada(
+        abertos=sum(x.count for x in por_canal),
+        por_canal=por_canal,
+        top_assuntos=[AssuntoContagem(id_assunto=i, assunto=a, count=int(n)) for i, a, n in top],
+    )
 
     # Andamento — hoje, sem período.
     hoje = f.model_copy(update={"desde": None, "ate": None})
@@ -193,11 +219,117 @@ async def gerar_gerencial(
         max_rows=0,
     )
 
+    # Prazos do serviço — arquivados no período, e os em aberto hoje.
+    agora = agora_utc()
+    prazo = situacao_prazo(tenant_id, agora)
+    concluidos = dict(
+        (await db.execute(
+            _recorte(select(prazo, func.count()).select_from(Processo), f, arq).group_by(prazo)
+        )).all()
+    )
+    em_aberto = dict(
+        (await db.execute(
+            _recorte(select(prazo, func.count()).select_from(Processo), hoje, Processo.data_hora_abertura)
+            .where(~condicao_arquivado(tenant_id))
+            .group_by(prazo)
+        )).all()
+    )
+    prazos = SecaoPrazos(
+        concluidos_no_prazo=int(concluidos.get("concluido_no_prazo", 0)),
+        concluidos_atrasados=int(concluidos.get("concluido_atrasado", 0)),
+        concluidos_sem_prazo=int(concluidos.get("sem_prazo", 0)),
+        dentro_do_prazo=int(em_aberto.get("dentro_do_prazo", 0)),
+        vencendo=int(em_aberto.get("vencendo", 0)),
+        atrasados=int(em_aberto.get("atrasado", 0)),
+        em_aberto_sem_prazo=int(em_aberto.get("sem_prazo", 0)),
+    )
+
+    tendencia = await _tendencia(db, f, _recorte, tenant_id, agora)
+    comparacao = await _comparacao(db, f, _recorte, arq)
+
     return GerencialResposta(
         descricao_filtros=await descrever_filtros(db, f, tenant_id=tenant_id, por_secao=True),
         entrada=entrada,
         andamento=andamento,
         saida=saida,
+        prazos=prazos,
+        tendencia=tendencia,
+        comparacao=comparacao,
         gargalos=gargalos,
         assinaturas=ass.totais,
+    )
+
+
+# Até ~6 meses o gráfico é por semana; acima, por mês (53 barras de semana
+# num ano viram ruído).
+MAX_DIAS_POR_SEMANA = 183
+SEMANAS_SEM_FILTRO = 12
+
+
+async def _tendencia(db, f: RelatorioFiltro, _recorte, tenant_id: int, agora) -> SecaoTendencia:
+    """Abertos e arquivados por semana (ou mês) do período — mesmo recorte.
+
+    Sem período no filtro, as últimas 12 semanas: um gráfico de todo o
+    histórico não mostra tendência nenhuma."""
+    hoje_local = hora_local(agora).date()
+    ate = f.ate or hoje_local
+    desde = f.desde or (ate - timedelta(weeks=SEMANAS_SEM_FILTRO) + timedelta(days=1))
+    por_mes = (ate - desde).days > MAX_DIAS_POR_SEMANA
+    janela = f.model_copy(update={"desde": desde, "ate": ate})
+
+    def balde(coluna):
+        if por_mes:
+            local = func.timezone(FUSO_RELATORIO.key, func.timezone("UTC", coluna))
+            return func.date(func.date_trunc("month", local))
+        return semana_local(coluna)
+
+    async def serie(coluna) -> dict[date, int]:
+        b = balde(coluna)
+        linhas = await db.execute(
+            _recorte(select(b, func.count()).select_from(Processo), janela, coluna).group_by(b)
+        )
+        return {d: int(n) for d, n in linhas.all()}
+
+    abertos = await serie(Processo.data_hora_abertura)
+    arquivados = await serie(data_arquivamento(tenant_id))
+
+    # Todos os baldes do período, inclusive os vazios — um gráfico que pula a
+    # semana sem processo esconde justamente a parada.
+    if por_mes:
+        cursor = desde.replace(day=1)
+    else:
+        cursor = desde - timedelta(days=desde.weekday())
+    pontos: list[PontoTendencia] = []
+    while cursor <= ate:
+        pontos.append(
+            PontoTendencia(inicio=cursor, abertos=abertos.get(cursor, 0), arquivados=arquivados.get(cursor, 0))
+        )
+        if por_mes:
+            cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+        else:
+            cursor += timedelta(weeks=1)
+    return SecaoTendencia(
+        granularidade="mes" if por_mes else "semana", desde=desde, ate=ate, pontos=pontos
+    )
+
+
+async def _comparacao(db, f: RelatorioFiltro, _recorte, arq) -> Comparacao | None:
+    """O período imediatamente anterior, de mesmo tamanho, mesmo recorte."""
+    if not (f.desde and f.ate):
+        return None
+    dias = (f.ate - f.desde).days + 1
+    antes = f.model_copy(
+        update={"desde": f.desde - timedelta(days=dias), "ate": f.desde - timedelta(days=1)}
+    )
+
+    async def contar(coluna) -> int:
+        return int(
+            (await db.execute(_recorte(select(func.count()).select_from(Processo), antes, coluna))).scalar_one()
+        )
+
+    return Comparacao(
+        desde=antes.desde,
+        ate=antes.ate,
+        abertos=await contar(Processo.data_hora_abertura),
+        arquivados=await contar(arq),
     )

@@ -8,7 +8,7 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { GerencialResposta } from "@/lib/api";
 import {
@@ -51,9 +51,25 @@ function resposta(): GerencialResposta {
         { canal: "balcao", rotulo: "Balcão", count: 100 },
         { canal: null, rotulo: "Não informado", count: 42 },
       ],
+      top_assuntos: [
+        { id_assunto: 9, assunto: "Iluminação pública", count: 40 },
+        { id_assunto: 4, assunto: "Poda de árvore", count: 20 },
+      ],
     },
     andamento: { em_andamento: 88, em_transito: 9, parados: 12, dias_parado: 15 },
     saida: { arquivados: 41, dias_medio_ate_arquivar: 18.25 },
+    prazos: {
+      concluidos_no_prazo: 32, concluidos_atrasados: 9, concluidos_sem_prazo: 0,
+      dentro_do_prazo: 51, vencendo: 8, atrasados: 6, em_aberto_sem_prazo: 23,
+    },
+    tendencia: {
+      granularidade: "semana", desde: "2026-10-01", ate: "2026-10-31",
+      pontos: [
+        { inicio: "2026-09-28", abertos: 30, arquivados: 10 },
+        { inicio: "2026-10-05", abertos: 40, arquivados: 12 },
+      ],
+    },
+    comparacao: { desde: "2026-08-31", ate: "2026-09-30", abertos: 125, arquivados: 50 },
     gargalos: {
       unidades: [
         { id_unidade: 3, unidade: "Secretaria de Obras", chegadas: 20, com_prazo: 10, atrasos: 7, dias_medio: 4.5 },
@@ -83,6 +99,13 @@ function linkDaSecao(secao: string, indice = 0): { rota: string; params: URLSear
   const [rota, qs = ""] = href.split("?");
   return { rota, params: new URLSearchParams(qs) };
 }
+
+// A página traz a biblioteca de gráficos: o primeiro import é lento (7s numa
+// máquina ocupada) e estourava o limite de 5s do primeiro teste. Carrega uma
+// vez aqui, com folga, e os testes medem a página, não o import.
+beforeAll(async () => {
+  await import("@/app/(app)/m/protocolo/relatorios/page");
+}, 60_000);
 
 beforeEach(() => {
   gerencialMock.mockClear();
@@ -137,6 +160,41 @@ describe("página gerencial — o recorte vai da URL para a consulta e para os l
     expect(ass.rota).toBe("/m/protocolo/relatorios/assinaturas");
     expect(ass.params.get("data_base")).toBe("pedido");
     expect(ass.params.get("id_unidade")).toBe("3");
+  });
+});
+
+describe("página gerencial — prazos, tendência e comparação", () => {
+  it("Prazos: arquivados pelo período de arquivamento; em aberto sem período", async () => {
+    await abrir(RECORTE);
+    const vencidos = linkDaSecao("Prazos", 4);
+    expect(vencidos.params.get("prazo")).toBe("atrasado");
+    expect(vencidos.params.has("desde")).toBe(false);
+    const comAtraso = linkDaSecao("Prazos", 1);
+    expect(comAtraso.params.get("prazo")).toBe("concluido_atrasado");
+    expect(comAtraso.params.get("data_base")).toBe("arquivamento");
+    expect(comAtraso.params.get("desde")).toBe("2026-10-01");
+    const regiao = screen.getByRole("region", { name: "Prazos" });
+    // 32 de 41 com prazo; os sem prazo são ditos, não escondidos
+    expect(within(regiao).getByText("78% dos arquivados com prazo")).toBeTruthy();
+    expect(within(regiao).getByText(/23 em aberto sem prazo de serviço/)).toBeTruthy();
+  });
+
+  it("comparação em números, não em %", async () => {
+    await abrir(RECORTE);
+    const entrada = screen.getByRole("region", { name: "Entrada" });
+    expect(within(entrada).getByText("+17 vs. 31/08–30/09/2026 (125)")).toBeTruthy();
+    const saida = screen.getByRole("region", { name: "Saída" });
+    expect(within(saida).getByText("-9 vs. 31/08–30/09/2026 (50)")).toBeTruthy();
+  });
+
+  it("assunto leva à lista dele; gráfico tem a tabela para leitor de tela", async () => {
+    await abrir(RECORTE);
+    const link = screen.getByRole("link", { name: /Iluminação pública/ });
+    const params = new URLSearchParams(link.getAttribute("href")!.split("?")[1]);
+    expect(params.get("id_assunto")).toBe("9");
+    expect(params.get("data_base")).toBe("abertura");
+    const tabela = within(screen.getByRole("region", { name: "Entrada e saída no tempo" })).getByRole("table");
+    expect(within(tabela).getAllByRole("row")).toHaveLength(3);
   });
 });
 

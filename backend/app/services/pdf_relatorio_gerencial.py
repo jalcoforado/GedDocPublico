@@ -65,11 +65,39 @@ def gerar_gerencial_pdf(r: GerencialResposta) -> bytes:
     ]
     s += [Paragraph(html.escape(linha), normal) for linha in r.descricao_filtros]
 
+    tend = r.tendencia
+    unidade_t = "mês" if tend.granularidade == "mes" else "semana (início)"
+    s += [
+        Spacer(1, 0.4 * cm),
+        Paragraph(
+            f"Entrada e saída no tempo — {tend.desde:%d/%m/%Y} a {tend.ate:%d/%m/%Y}", h2
+        ),
+        tabela(
+            [[unidade_t.capitalize(), "Abertos", "Arquivados"]]
+            + [[p.inicio.strftime("%m/%Y" if tend.granularidade == "mes" else "%d/%m/%Y"),
+                str(p.abertos), str(p.arquivados)] for p in tend.pontos],
+            [7 * cm, 5 * cm, 5 * cm],
+        ),
+    ]
+
     e = r.entrada
+    comp = r.comparacao
     s += [Spacer(1, 0.4 * cm), Paragraph(f"Entrada — {e.abertos} abertos no período (pela abertura)", h2)]
+    if comp:
+        s.append(Paragraph(
+            f"Período anterior ({comp.desde:%d/%m/%Y} a {comp.ate:%d/%m/%Y}): {comp.abertos} abertos, "
+            f"{comp.arquivados} arquivados.", small,
+        ))
     if e.por_canal:
         s.append(tabela(
             [["Canal", "Processos"]] + [[c.rotulo, str(c.count)] for c in e.por_canal],
+            [12 * cm, 5 * cm],
+        ))
+    if e.top_assuntos:
+        s.append(Spacer(1, 0.2 * cm))
+        s.append(tabela(
+            [["Principais assuntos", "Processos"]]
+            + [[Paragraph(html.escape(x.assunto or "—"), normal), str(x.count)] for x in e.top_assuntos],
             [12 * cm, 5 * cm],
         ))
 
@@ -92,6 +120,19 @@ def gerar_gerencial_pdf(r: GerencialResposta) -> bytes:
             [["Arquivados", "Tempo médio da abertura ao arquivamento"],
              [str(sa.arquivados), _dias(sa.dias_medio_ate_arquivar)]],
             [5.6 * cm, 11.4 * cm],
+        ),
+    ]
+
+    pz = r.prazos
+    s += [
+        Spacer(1, 0.4 * cm),
+        Paragraph("Prazos do serviço — abertura + N dias corridos", h2),
+        tabela(
+            [["Arquivados no período", "No prazo", "Com atraso", "Sem prazo (fora)"],
+             ["", str(pz.concluidos_no_prazo), str(pz.concluidos_atrasados), str(pz.concluidos_sem_prazo)],
+             ["Em aberto hoje", "Dentro / vencendo", "Vencidos", "Sem prazo (fora)"],
+             ["", f"{pz.dentro_do_prazo} / {pz.vencendo}", str(pz.atrasados), str(pz.em_aberto_sem_prazo)]],
+            [5.6 * cm, 4 * cm, 3.4 * cm, 4 * cm],
         ),
     ]
 

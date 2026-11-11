@@ -9,6 +9,11 @@ from pydantic import BaseModel
 DataBase = Literal["abertura", "arquivamento", "chegada"]
 ModoUnidade = Literal["envolvida", "dona", "atual", "passou"]
 Situacao = Literal["em_andamento", "em_transito", "arquivado"]
+# Status do prazo do serviço — os de `prazos.StatusPrazo`.
+StatusPrazoRelatorio = Literal[
+    "sem_prazo", "dentro_do_prazo", "vencendo", "atrasado",
+    "concluido_no_prazo", "concluido_atrasado",
+]
 
 
 class RelatorioFiltro(BaseModel):
@@ -25,6 +30,8 @@ class RelatorioFiltro(BaseModel):
     # hoje; "parados" são os não arquivados sem movimentação há N dias.
     situacao: Situacao | None = None
     parado_ha_dias: int | None = None
+    # Lista de um número do bloco Prazos (status do prazo do serviço).
+    prazo: StatusPrazoRelatorio | None = None
 
 
 class RelatorioTotais(BaseModel):

@@ -451,3 +451,125 @@ async def test_cada_numero_da_pagina_e_o_total_da_lista_da_secao(cen, admin_engi
     assert g["descricao_filtros"][0].startswith("Período: 01/10/2026 a 31/10/2026 — cada seção")
     pdf = await _get("gerencial.pdf", **outubro)
     assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
+
+# ------------------------------------------------------------- prazos e gráficos
+
+
+@pytest.mark.asyncio
+async def test_prazo_em_sql_igual_a_calcular_prazo(cen, admin_engine):
+    """`relatorios_comum.situacao_prazo` (SQL, para a lista filtrar e contar)
+    tem de dar o mesmo status que `prazos.calcular_prazo` (Python, o do
+    detalhe do processo), inclusive nos limites de cada faixa."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app.models import Processo
+    from app.services.prazos import calcular_prazo
+    from app.services.relatorios_comum import data_arquivamento, situacao_prazo
+
+    agora = datetime(2026, 11, 11, 15, 0)
+    t = cen["tenant"]
+    # (rótulo, dias de prazo, abertura relativa a agora, arquivado relativo à abertura)
+    casos = [
+        ("sem_prazo", None, timedelta(days=-3), None),
+        ("vencido", 10, timedelta(days=-11), None),
+        ("vence_agora_mesmo", 10, timedelta(days=-10, seconds=1), None),
+        ("ultimo_dia_do_limiar", 10, timedelta(days=-7, minutes=-1), None),   # faltam 2d23h59 → 2 dias
+        ("logo_apos_o_limiar", 10, timedelta(days=-7, minutes=1), None),     # faltam 3d00h01 → 3 dias
+        ("folgado", 30, timedelta(days=-1), None),
+        ("prazo_1_dia", 1, timedelta(hours=-1), None),
+        ("arquivou_no_limite", 5, timedelta(days=-20), timedelta(days=5)),
+        ("arquivou_atrasado", 5, timedelta(days=-20), timedelta(days=5, seconds=1)),
+    ]
+    async with _sm(admin_engine)() as s:
+        base = (await s.execute(text(
+            "SELECT id_assunto, id_manifestante, id_usuario, id_unidade_proprietaria "
+            "FROM protocolos.processo WHERE id=:p"), {"p": cen["procs"]["noite_10"]})).one()
+        status_arq = (await s.execute(text(
+            "SELECT id FROM protocolos.status_arquivamento WHERE excluido=false ORDER BY id LIMIT 1"
+        ))).scalar_one()
+        acao_arq = (await s.execute(text(
+            "SELECT id FROM protocolos.acao WHERE flag='ARQUIVAMENTO'"))).scalar_one()
+        ids: dict[str, tuple[int, int | None, datetime, datetime | None]] = {}
+        for rotulo, dias, rel_abertura, rel_arq in casos:
+            abertura = agora + rel_abertura
+            pid = (await s.execute(text(
+                """
+                INSERT INTO protocolos.processo
+                    (tenant_id, id_assunto, id_manifestante, id_unidade_proprietaria, id_local_atual,
+                     numero_processo, nivel_sigilo, situacao, id_usuario, virtual, externo, ativo,
+                     excluido, migrado, data_hora_abertura, prazo_servico_dias_snapshot)
+                VALUES (:t, :a, :m, :u, :u, :n, 'ostensivo', 'protocolado', :usr, true, false, true,
+                        false, false, :ab, :dias) RETURNING id
+                """),
+                {"t": t.id, "a": base.id_assunto, "m": base.id_manifestante, "u": base.id_unidade_proprietaria,
+                 "usr": base.id_usuario, "n": f"pz-{rotulo}-{uuid.uuid4().hex[:4]}", "ab": abertura, "dias": dias},
+            )).scalar_one()
+            arquivado = abertura + rel_arq if rel_arq is not None else None
+            if arquivado is not None:
+                arq = (await s.execute(text(
+                    "INSERT INTO protocolos.arquivamento (tenant_id, id_status_arquivamento, id_usuario) "
+                    "VALUES (:t, :st, :u) RETURNING id"), {"t": t.id, "st": status_arq, "u": base.id_usuario},
+                )).scalar_one()
+                await s.execute(text(
+                    "INSERT INTO protocolos.movimentacao (tenant_id, id_processo, id_unidade_responsavel, "
+                    "id_acao, id_arquivamento, data_hora_movimentacao) VALUES (:t, :p, :u, :ac, :arq, :em)"),
+                    {"t": t.id, "p": pid, "u": base.id_unidade_proprietaria, "ac": acao_arq, "arq": arq, "em": arquivado},
+                )
+            ids[rotulo] = (pid, dias, abertura, arquivado)
+        await s.commit()
+
+        sql = dict((await s.execute(
+            select(Processo.id, situacao_prazo(t.id, agora)).where(
+                Processo.id.in_([v[0] for v in ids.values()])
+            )
+        )).all())
+        _ = data_arquivamento  # a expressão usa a mesma subconsulta de arquivamento
+
+    for rotulo, (pid, dias, abertura, arquivado) in ids.items():
+        esperado = calcular_prazo(
+            data_abertura=abertura, prazo_snapshot_dias=dias, data_conclusao=arquivado, now=agora,
+        ).status
+        assert sql[pid] == esperado, f"{rotulo}: SQL={sql[pid]} calcular_prazo={esperado}"
+    # o cenário cobre todas as faixas — senão o teste passaria por vacuidade
+    assert {sql[v[0]] for v in ids.values()} == {
+        "sem_prazo", "atrasado", "vencendo", "dentro_do_prazo", "concluido_no_prazo", "concluido_atrasado",
+    }
+
+
+@pytest.mark.asyncio
+async def test_prazos_tendencia_e_comparacao_batem_com_as_listas(cen, admin_engine):
+    outubro = {"desde": "2026-10-01", "ate": "2026-10-31"}
+    g = (await _get("gerencial.json", **outubro)).json()
+
+    async def total(**p):
+        return (await _get("processos.json", **p)).json()["totais"]["total"]
+
+    # Prazos: os processos do cenário não têm prazo de serviço — ficam fora da
+    # conta, e a página diz quantos
+    pz = g["prazos"]
+    assert pz["em_aberto_sem_prazo"] == await total(prazo="sem_prazo", situacao="em_andamento") + await total(
+        prazo="sem_prazo", situacao="em_transito"
+    ) == 5
+    assert pz["concluidos_sem_prazo"] == await total(prazo="sem_prazo", data_base="arquivamento", **outubro) == 1
+    assert pz["atrasados"] == await total(prazo="atrasado") == 0
+
+    # Tendência: as barras somam os números das seções no mesmo período
+    tend = g["tendencia"]
+    assert tend["granularidade"] == "semana"
+    assert sum(p["abertos"] for p in tend["pontos"]) == g["entrada"]["abertos"] == 6
+    assert sum(p["arquivados"] for p in tend["pontos"]) == g["saida"]["arquivados"] == 1
+    # semanas começam na segunda-feira e não pulam semana vazia
+    assert tend["pontos"][0]["inicio"] == "2026-09-28"
+    assert [p["inicio"] for p in tend["pontos"]][-1] == "2026-10-26"
+    assert len(tend["pontos"]) == 5
+
+    # Comparação: setembro (mesmo tamanho, 31 dias → 31/08 a 30/09)
+    comp = g["comparacao"]
+    assert (comp["desde"], comp["ate"]) == ("2026-08-31", "2026-09-30")
+    assert comp["abertos"] == await total(desde="2026-08-31", ate="2026-09-30") == 0
+    assert (await _get("gerencial.json")).json()["comparacao"] is None
+
+    # Assuntos: o cenário tem um só
+    assert [(a["assunto"], a["count"]) for a in g["entrada"]["top_assuntos"]] == [("Pedido", 6)]

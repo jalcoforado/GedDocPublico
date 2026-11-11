@@ -6,17 +6,20 @@ import {
   AlertTriangle,
   Archive,
   BarChart3,
+  Clock,
   Download,
   FileText,
   Inbox,
   List,
   PenLine,
+  TrendingUp,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 
 import { FiltrosDoRelatorio } from "@/components/relatorios/FiltrosDoRelatorio";
+import { GraficoEntradaSaida } from "@/components/relatorios/GraficoEntradaSaida";
 import { Carregando } from "@/components/ui/carregando";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -35,6 +38,7 @@ import {
   ROTA_LISTA_TRAMITACAO,
   filtroDaUrl,
   filtroParaUrl,
+  fmtData,
   fmtDias,
   fmtMinutos,
   recorteComum,
@@ -122,6 +126,42 @@ function Secao({
   );
 }
 
+/** Número com o seu "ver lista" logo abaixo. */
+function NumeroComLista({
+  label,
+  value,
+  hint,
+  intent,
+  href,
+}: {
+  label: string;
+  value: number;
+  hint?: string;
+  intent?: "warning" | "danger";
+  href: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <KpiCard label={label} value={value} hint={hint} intent={intent} />
+      <LinkLista href={href}>Ver lista</LinkLista>
+    </div>
+  );
+}
+
+/** "78% no prazo" — só com base que sustente a porcentagem. */
+function percentual(noPrazo: number, atrasados: number): string | undefined {
+  const base = noPrazo + atrasados;
+  if (base === 0) return undefined;
+  return `${Math.round((noPrazo / base) * 100)}% dos arquivados com prazo`;
+}
+
+/** "+17 vs. 31/08–30/09": diferença em números — com base pequena, % engana. */
+function diferenca(atual: number, anterior: number, periodo: { desde: string; ate: string }): string {
+  const d = atual - anterior;
+  const sinal = d > 0 ? `+${d}` : d < 0 ? `${d}` : "igual";
+  return `${sinal} vs. ${fmtData(periodo.desde).slice(0, 5)}–${fmtData(periodo.ate)} (${anterior})`;
+}
+
 export default function RelatoriosPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -180,6 +220,19 @@ export default function RelatoriosPage() {
           </ul>
 
           <Secao
+            id="tendencia"
+            titulo="Entrada e saída no tempo"
+            regra={`Abertos (pela abertura) e arquivados (pelo arquivamento) por ${
+              g.tendencia.granularidade === "mes" ? "mês" : "semana"
+            }, de ${fmtData(g.tendencia.desde)} a ${fmtData(g.tendencia.ate)}${
+              recorte.desde || recorte.ate ? "" : " (sem período no filtro: as últimas 12 semanas)"
+            }. Abertos acima dos arquivados, seguidamente, é estoque crescendo.`}
+            icon={TrendingUp}
+          >
+            <GraficoEntradaSaida tendencia={g.tendencia} />
+          </Secao>
+
+          <Secao
             id="entrada"
             titulo="Entrada"
             regra="Processos abertos no período — pela data de abertura."
@@ -197,7 +250,11 @@ export default function RelatoriosPage() {
             }
           >
             <div className="grid gap-3 md:grid-cols-[minmax(0,14rem)_1fr]">
-              <KpiCard label="Abertos" value={g.entrada.abertos} />
+              <KpiCard
+                label="Abertos"
+                value={g.entrada.abertos}
+                hint={g.comparacao ? diferenca(g.entrada.abertos, g.comparacao.abertos, g.comparacao) : undefined}
+              />
               {g.entrada.por_canal.length > 0 ? (
                 <Table>
                   <THead>
@@ -223,6 +280,30 @@ export default function RelatoriosPage() {
                 <p className="text-sm text-foreground-muted">Nenhum processo aberto no período.</p>
               )}
             </div>
+            {g.entrada.top_assuntos.length > 0 && (
+              <div>
+                <h3 className="mb-2 text-sm font-medium text-foreground">Principais assuntos</h3>
+                <ul className="space-y-1.5">
+                  {g.entrada.top_assuntos.map((a) => (
+                    <li key={a.id_assunto}>
+                      <Link
+                        href={lista(ROTA_LISTA_PROCESSOS, { id_assunto: a.id_assunto, data_base: "abertura" })}
+                        className="group grid grid-cols-[minmax(0,16rem)_1fr_3rem] items-center gap-3 rounded text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <span className="truncate text-foreground group-hover:underline">{a.assunto ?? "—"}</span>
+                        <span className="h-2.5 rounded-full bg-muted" aria-hidden="true">
+                          <span
+                            className="block h-full rounded-full bg-brand"
+                            style={{ width: `${(a.count / g.entrada.top_assuntos[0].count) * 100}%` }}
+                          />
+                        </span>
+                        <span className="text-right tabular-nums text-foreground">{a.count}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </Secao>
 
           <Secao
@@ -295,12 +376,72 @@ export default function RelatoriosPage() {
             }
           >
             <div className="grid gap-3 md:grid-cols-2">
-              <KpiCard label="Arquivados" value={g.saida.arquivados} />
+              <KpiCard
+                label="Arquivados"
+                value={g.saida.arquivados}
+                hint={g.comparacao ? diferenca(g.saida.arquivados, g.comparacao.arquivados, g.comparacao) : undefined}
+              />
               <KpiCard
                 label="Tempo médio até arquivar"
                 value={fmtDias(g.saida.dias_medio_ate_arquivar)}
                 hint="da abertura ao arquivamento, dos arquivados no período"
               />
+            </div>
+          </Secao>
+
+          <Secao
+            id="prazos"
+            titulo="Prazos"
+            regra="Prazo do serviço prometido ao cidadão: abertura + N dias corridos. Só entram processos com prazo; quantos ficaram fora está dito abaixo."
+            icon={Clock}
+          >
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-foreground">Arquivados no período</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <NumeroComLista
+                    label="No prazo"
+                    value={g.prazos.concluidos_no_prazo}
+                    hint={percentual(g.prazos.concluidos_no_prazo, g.prazos.concluidos_atrasados)}
+                    href={lista(ROTA_LISTA_PROCESSOS, { data_base: "arquivamento", prazo: "concluido_no_prazo" })}
+                  />
+                  <NumeroComLista
+                    label="Com atraso"
+                    value={g.prazos.concluidos_atrasados}
+                    intent="danger"
+                    href={lista(ROTA_LISTA_PROCESSOS, { data_base: "arquivamento", prazo: "concluido_atrasado" })}
+                  />
+                </div>
+                <p className="text-xs text-foreground-muted">
+                  {g.prazos.concluidos_sem_prazo} arquivado(s) no período sem prazo de serviço — fora da conta.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-foreground">Em aberto hoje</h3>
+                <div className="grid grid-cols-3 gap-3">
+                  <NumeroComLista
+                    label="Dentro do prazo"
+                    value={g.prazos.dentro_do_prazo}
+                    href={lista(ROTA_LISTA_PROCESSOS, { ...semPeriodo, prazo: "dentro_do_prazo" })}
+                  />
+                  <NumeroComLista
+                    label="Vencendo"
+                    value={g.prazos.vencendo}
+                    intent="warning"
+                    href={lista(ROTA_LISTA_PROCESSOS, { ...semPeriodo, prazo: "vencendo" })}
+                  />
+                  <NumeroComLista
+                    label="Vencidos"
+                    value={g.prazos.atrasados}
+                    intent="danger"
+                    href={lista(ROTA_LISTA_PROCESSOS, { ...semPeriodo, prazo: "atrasado" })}
+                  />
+                </div>
+                <p className="text-xs text-foreground-muted">
+                  {g.prazos.em_aberto_sem_prazo} em aberto sem prazo de serviço — fora da conta. &ldquo;Vencendo&rdquo;:
+                  faltam 20% do prazo ou menos.
+                </p>
+              </div>
             </div>
           </Secao>
 

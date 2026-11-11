@@ -24,7 +24,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import Integer, and_, case, cast, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Assunto, Encaminhamento, Movimentacao, Processo, TipoProcesso, UnidadeTrabalho
@@ -51,6 +51,14 @@ ROTULO_MODO_UNIDADE: dict[str, str] = {
     "dona": "dona do processo",
     "atual": "onde o processo está agora",
     "passou": "por onde o processo passou",
+}
+ROTULO_PRAZO: dict[str, str] = {
+    "sem_prazo": "sem prazo de serviço",
+    "dentro_do_prazo": "em andamento, dentro do prazo",
+    "vencendo": "em andamento, vencendo",
+    "atrasado": "em andamento, prazo vencido",
+    "concluido_no_prazo": "arquivado dentro do prazo",
+    "concluido_atrasado": "arquivado com atraso",
 }
 ROTULO_SITUACAO: dict[str, str] = {
     "em_andamento": "Em andamento",
@@ -143,6 +151,43 @@ def condicao_parado(tenant_id: int, dias: int, agora_utc: datetime):
         ~condicao_arquivado(tenant_id),
         ultima_movimentacao(tenant_id) <= agora_utc - timedelta(days=dias),
     )
+
+
+def situacao_prazo(tenant_id: int, agora_utc: datetime):
+    """Status do prazo do SERVIÇO em SQL — espelho de `prazos.calcular_prazo`.
+
+    Existe para a lista poder filtrar e contar no banco ("ver lista" dos
+    vencidos). Duas cópias de uma regra divergem; por isso
+    `test_relatorios_protocolo_medidas.py::test_prazo_em_sql_igual_a_calcular_prazo`
+    compara as duas, caso a caso e nos limites de cada faixa. Mudou
+    `calcular_prazo`? Mude aqui — o teste reprova se esquecer.
+
+    - sem snapshot → `sem_prazo`;
+    - arquivado → `concluido_no_prazo` se arquivou até abertura + N dias
+      corridos, senão `concluido_atrasado`;
+    - aberto → `atrasado` se já passou; `vencendo` se faltam menos de
+      `limiar + 1` dias (o `.days` do Python arredonda para baixo), com
+      limiar = 20% do prazo, mínimo 1; senão `dentro_do_prazo`.
+    """
+    dias = Processo.prazo_servico_dias_snapshot
+    previsto = Processo.data_hora_abertura + func.make_interval(0, 0, 0, dias)
+    # `ceil` devolve double; `make_interval` só aceita inteiro em dias.
+    limiar = func.greatest(1, cast(func.ceil(dias * 0.2), Integer))
+    arquivado_em = data_arquivamento(tenant_id)
+    return case(
+        (dias.is_(None), "sem_prazo"),
+        (arquivado_em.is_not(None),
+         case((arquivado_em <= previsto, "concluido_no_prazo"), else_="concluido_atrasado")),
+        (literal(agora_utc) > previsto, "atrasado"),
+        (previsto - literal(agora_utc) < func.make_interval(0, 0, 0, limiar + 1), "vencendo"),
+        else_="dentro_do_prazo",
+    )
+
+
+def semana_local(coluna):
+    """Segunda-feira (dia local) da semana de `coluna`, que guarda UTC."""
+    local = func.timezone(FUSO_RELATORIO.key, func.timezone("UTC", coluna))
+    return func.date(func.date_trunc("week", local))
 
 
 def situacao(tenant_id: int):
@@ -254,6 +299,8 @@ async def descrever_filtros(
         linhas.append(f"Assunto: {nome or 'não encontrado'}")
     if getattr(f, "situacao", None):
         linhas.append(f"Situação hoje: {ROTULO_SITUACAO[f.situacao]}")
+    if getattr(f, "prazo", None):
+        linhas.append(f"Prazo do serviço: {ROTULO_PRAZO[f.prazo]}")
     if getattr(f, "parado_ha_dias", None):
         linhas.append(
             f"Parados: sem nenhuma movimentação há {f.parado_ha_dias} dias ou mais (não arquivados)"

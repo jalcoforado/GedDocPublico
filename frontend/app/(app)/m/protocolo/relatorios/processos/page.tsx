@@ -24,6 +24,7 @@ import {
 } from "@/lib/api";
 import {
   ROTA_RELATORIOS,
+  ROTULO_PRAZO,
   ROTULO_SITUACAO,
   filtroDaUrl,
   filtroParaUrl,
@@ -43,14 +44,17 @@ export default function RelatorioProcessosPage() {
   const pathname = usePathname();
   const busca = useSearchParams().toString();
   const filtro = useMemo(() => filtroDaUrl(new URLSearchParams(busca)), [busca]);
-  // "Andamento" (situação de hoje, parados) não usa período nem data base.
-  const fotoDeHoje = !!(filtro.situacao || filtro.parado_ha_dias);
+  // "Andamento" (situação de hoje, parados) e o prazo dos que estão em
+  // aberto não usam período nem data base.
+  const prazoDeHoje = !!filtro.prazo && !filtro.prazo.startsWith("concluido");
+  const fotoDeHoje = !!(filtro.situacao || filtro.parado_ha_dias || prazoDeHoje);
   const dataBase = filtro.data_base === "arquivamento" ? "arquivamento" : "abertura";
   const consulta: RelatorioFiltroInput = {
     ...recorteComum(filtro),
     data_base: dataBase,
     situacao: filtro.situacao,
     parado_ha_dias: filtro.parado_ha_dias,
+    prazo: filtro.prazo,
   };
 
   const q = useQuery({
@@ -97,12 +101,31 @@ export default function RelatorioProcessosPage() {
       <FiltrosDoRelatorio
         valor={recorteComum(filtro)}
         onAplicar={(f) =>
-          irPara({ ...f, data_base: filtro.data_base, situacao: filtro.situacao, parado_ha_dias: filtro.parado_ha_dias })
+          irPara({
+            ...f,
+            data_base: filtro.data_base,
+            situacao: filtro.situacao,
+            parado_ha_dias: filtro.parado_ha_dias,
+            prazo: filtro.prazo,
+          })
         }
       />
 
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        {fotoDeHoje ? (
+        {filtro.prazo && (
+          <span className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1">
+            Prazo do serviço: {ROTULO_PRAZO[filtro.prazo]}
+            <button
+              type="button"
+              aria-label="Tirar o filtro de prazo"
+              className="rounded hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => irPara({ ...filtro, prazo: undefined })}
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </span>
+        )}
+        {fotoDeHoje && !filtro.situacao && !filtro.parado_ha_dias ? null : fotoDeHoje ? (
           <span className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1">
             {filtro.situacao
               ? `Situação hoje: ${ROTULO_SITUACAO[filtro.situacao]}`
