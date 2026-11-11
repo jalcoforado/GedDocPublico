@@ -486,6 +486,13 @@
      Onde não aceita, continua a nativa — o campo funciona igual. Vale para
      todo `<select>` simples sem tocar nas telas: a API (`<option>`,
      `onChange`, `required`) não muda. */
+  /* Caixas de marcar e botões de opção na cor da marca — eram o azul do
+     navegador, a única cor fora da paleta nas listas de seleção em lote. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: hsl(var(--brand));
+  }
+
   @supports (appearance: base-select) {
     select:not([multiple]):not([size]),
     select:not([multiple]):not([size])::picker(select) {
