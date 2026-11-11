@@ -1,20 +1,17 @@
 "use client";
 
-import { Carregando } from "@/components/ui/carregando";
-
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ChevronDown, ChevronUp, Download, FileText } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
 
-import { RelatoriosNav } from "@/components/RelatoriosNav";
+import { FiltrosDoRelatorio } from "@/components/relatorios/FiltrosDoRelatorio";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Carregando } from "@/components/ui/carregando";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
@@ -26,41 +23,39 @@ import {
   type TramitacaoEtapa,
   type TramitacaoProcesso,
 } from "@/lib/api";
+import {
+  ROTA_RELATORIOS,
+  ROTULO_SITUACAO,
+  filtroDaUrl,
+  filtroParaUrl,
+  fmtData as fmtDate,
+  fmtDataHora as fmtDateTime,
+  fmtMinutos as fmtMin,
+  recorteComum,
+  type FiltroDaUrl,
+} from "@/lib/relatorios";
 
-function fmtDateTime(s: string | null) {
-  if (!s) return "—";
-  const d = new Date(s);
-  return (
-    d.toLocaleDateString("pt-BR") +
-    " " +
-    d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
-  );
-}
-
-function fmtDate(s: string | null) {
-  if (!s) return "—";
-  return new Date(s).toLocaleDateString("pt-BR");
-}
-
-function fmtMin(m: number | null): string {
-  if (m === null || m === undefined) return "—";
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  if (h < 24) return `${h}h ${String(rem).padStart(2, "0")}min`;
-  const d = Math.floor(h / 24);
-  const rh = h % 24;
-  return `${d}d ${rh}h`;
-}
-
+/**
+ * Tramitação (SI-34) — o "ver lista" da seção Gargalos da página de
+ * relatórios: tempo de cada processo em cada unidade e os atrasos. O recorte
+ * vem da URL. Atraso = a estadia terminou (ou segue) depois do FIM do dia do
+ * prazo do envio que trouxe o processo (`relatorios_tramitacao.py`).
+ */
 export default function RelatorioTramitacaoPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const toast = useToast();
-  const [draft, setDraft] = useState<RelatorioFiltroInput>({});
-  const [applied, setApplied] = useState<RelatorioFiltroInput>({});
+  const busca = useSearchParams().toString();
+  const filtro = useMemo(() => filtroDaUrl(new URLSearchParams(busca)), [busca]);
+  const dataBase = filtro.data_base === "chegada" ? "chegada" : "abertura";
+  const consulta: RelatorioFiltroInput = { ...recorteComum(filtro), data_base: dataBase };
+
+  function irPara(f: FiltroDaUrl) {
+    router.replace(`${pathname}${filtroParaUrl(f)}`, { scroll: false });
+  }
 
   const gerarBg = useMutation({
-    mutationFn: () => api.jobs.relatorioTramitacao(applied),
+    mutationFn: () => api.jobs.relatorioTramitacao(consulta),
     onSuccess: () => {
       toast.success("Relatório enfileirado em background.");
       router.push("/m/administracao/jobs");
@@ -68,153 +63,67 @@ export default function RelatorioTramitacaoPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const unidadesQ = useQuery({
-    queryKey: ["unidades-all"],
-    queryFn: () => api.unidades.list({ page_size: 200 }),
-  });
-  const tiposQ = useQuery({
-    queryKey: ["tipos-processo"],
-    queryFn: () => api.tiposProcesso.list(),
-  });
-
   const relQ = useQuery({
-    queryKey: ["relatorio-tramitacao", applied],
-    queryFn: () => api.relatorios.tramitacao(applied),
+    queryKey: ["relatorio-tramitacao", busca],
+    queryFn: () => api.relatorios.tramitacao(consulta),
   });
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold text-primary">Relatórios</h1>
-      <RelatoriosNav />
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-lg font-semibold text-foreground">
-          Tramitação (tempo em cada unidade + atrasos)
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          <a
-            href={tramitacaoCsvUrl(applied)}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-muted px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Download className="h-4 w-4" aria-hidden="true" /> CSV
-          </a>
-          <a
-            href={tramitacaoPdfUrl(applied)}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-aprimora-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <FileText className="h-4 w-4" aria-hidden="true" /> PDF
-          </a>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => gerarBg.mutate()}
-            disabled={gerarBg.isPending}
-            title="Gera o PDF em background — útil para recortes grandes"
-          >
-            {gerarBg.isPending ? "Enfileirando..." : "Gerar em background"}
-          </Button>
-        </div>
-      </div>
-
-      <Card>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <div>
-              <Label htmlFor="unidade">Unidade</Label>
-              <Select
-                id="unidade"
-                value={draft.id_unidade ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    id_unidade: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-              >
-                <option value="">Todas</option>
-                {unidadesQ.data?.items.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.unidade_trabalho}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="tipo">Tipo de processo</Label>
-              <Select
-                id="tipo"
-                value={draft.id_tipo_processo ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    id_tipo_processo: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-              >
-                <option value="">Todos</option>
-                {tiposQ.data?.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.tipo_processo}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="desde">Aberto desde</Label>
-              <Input
-                id="desde"
-                type="date"
-                value={draft.desde?.slice(0, 10) ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    desde: e.target.value ? `${e.target.value}T00:00:00` : undefined,
-                  })
-                }
-              />
-            </div>
-            <div>
-              <Label htmlFor="ate">Aberto até</Label>
-              <Input
-                id="ate"
-                type="date"
-                value={draft.ate?.slice(0, 10) ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    ate: e.target.value ? `${e.target.value}T23:59:59` : undefined,
-                  })
-                }
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="ativos"
-                checked={!!draft.apenas_ativos}
-                onChange={(e) => setDraft({ ...draft, apenas_ativos: e.target.checked })}
-              />
-              <Label htmlFor="ativos" className="!mb-0">
-                Apenas ativos
-              </Label>
-            </div>
-            <div className="md:col-span-3 flex items-end gap-2">
-              <Button onClick={() => setApplied({ ...draft })}>Gerar relatório</Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setDraft({});
-                  setApplied({});
-                }}
-              >
-                Limpar
-              </Button>
-            </div>
+      <PageHeader
+        breadcrumbs={[
+          { label: "Relatórios", href: `${ROTA_RELATORIOS}${filtroParaUrl(recorteComum(filtro))}` },
+          { label: "Tramitação" },
+        ]}
+        title="Tramitação"
+        description="Quanto tempo cada processo ficou em cada unidade, e onde atrasou."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={tramitacaoCsvUrl(consulta)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-muted px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Download className="h-4 w-4" aria-hidden="true" /> CSV
+            </a>
+            <a
+              href={tramitacaoPdfUrl(consulta)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <FileText className="h-4 w-4" aria-hidden="true" /> PDF
+            </a>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => gerarBg.mutate()}
+              disabled={gerarBg.isPending}
+              title="Gera o PDF em background — útil para recortes grandes"
+            >
+              {gerarBg.isPending ? "Enfileirando..." : "Gerar em background"}
+            </Button>
           </div>
-        </CardContent>
-      </Card>
+        }
+      />
+
+      <FiltrosDoRelatorio
+        valor={recorteComum(filtro)}
+        onAplicar={(f) => irPara({ ...f, data_base: filtro.data_base })}
+      />
+
+      <label className="flex items-center gap-2 text-sm">
+        Período conta pela data de
+        <Select
+          className="h-9 w-56"
+          value={dataBase}
+          onChange={(e) => irPara({ ...filtro, data_base: e.target.value as "abertura" | "chegada" })}
+        >
+          <option value="abertura">abertura do processo</option>
+          <option value="chegada">entrada na unidade</option>
+        </Select>
+      </label>
 
       {relQ.isLoading && <Carregando className="text-sm text-muted-foreground" />}
       {relQ.error && (
@@ -224,6 +133,20 @@ export default function RelatorioTramitacaoPage() {
         >
           {relQ.error instanceof Error ? relQ.error.message : "Erro ao gerar relatório"}
         </div>
+      )}
+
+      {relQ.data && (
+        <ul className="space-y-0.5 text-xs text-muted-foreground" aria-label="Recorte do relatório">
+          {relQ.data.descricao_filtros.map((l) => (
+            <li key={l}>{l}</li>
+          ))}
+          {relQ.data.cortado && (
+            <li className="font-medium text-foreground">
+              O recorte tem {relQ.data.qtd_processos} processos; a tela detalha os {relQ.data.qtd_listados} mais
+              recentes, e atrasos, tempos e médias abaixo são desses. Para todos, use o CSV.
+            </li>
+          )}
+        </ul>
       )}
 
       {relQ.data && (
@@ -350,7 +273,11 @@ function ProcessoTramitacaoCard({ p }: { p: TramitacaoProcesso }) {
                 {p.qtd_atrasos} atraso(s)
               </Badge>
             )}
-            {!p.ativo && <Badge intent="neutral">Inativo</Badge>}
+            {p.situacao !== "em_andamento" && (
+              <Badge intent={p.situacao === "em_transito" ? "info" : "neutral"}>
+                {ROTULO_SITUACAO[p.situacao]}
+              </Badge>
+            )}
           </div>
           <div className="text-xs text-muted-foreground">
             {p.manifestante ?? "—"} · {p.assunto ?? "—"}

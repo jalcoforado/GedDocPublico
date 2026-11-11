@@ -150,20 +150,3 @@ describe("tesouraria", () => {
     await conferirVinculoDeAbas(3);
   });
 });
-
-describe("relatórios — navegação, não abas", () => {
-  it('não usa `role="tab"`: são links para outras rotas', async () => {
-    const { RelatoriosNav } = await import("@/components/RelatoriosNav");
-    envolver(<RelatoriosNav />);
-
-    // A correção aqui foi TIRAR os papéis, não completá-los. O APG não admite
-    // `role="tab"` em link que navega para outra página: a promessa de um
-    // `tabpanel` na mesma página não pode ser cumprida.
-    expect(screen.queryAllByRole("tab")).toEqual([]);
-    expect(screen.queryByRole("tablist")).toBeNull();
-
-    const nav = screen.getByRole("navigation", { name: "Tipos de relatório" });
-    expect(nav).toBeTruthy();
-    expect(screen.getAllByRole("link").length).toBe(3);
-  });
-});

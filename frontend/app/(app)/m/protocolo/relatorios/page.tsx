@@ -2,358 +2,391 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
-  CheckCircle2,
+  Activity,
+  AlertTriangle,
+  Archive,
+  BarChart3,
   Download,
-  Eye,
   FileText,
-  Lock,
-  Pause,
+  Inbox,
+  List,
+  PenLine,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useMemo } from "react";
 
-import { RelatoriosNav } from "@/components/RelatoriosNav";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FiltrosDoRelatorio } from "@/components/relatorios/FiltrosDoRelatorio";
+import { Carregando } from "@/components/ui/carregando";
+import { KpiCard } from "@/components/ui/kpi-card";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import { useAssuntosAll } from "@/lib/assuntos";
 import {
   api,
-  NIVEL_SIGILO_LABEL,
+  assinaturasCsvUrl,
+  gerencialPdfUrl,
   relatorioCsvUrl,
-  relatorioPdfUrl,
-  type RelatorioFiltroInput,
+  tramitacaoCsvUrl,
 } from "@/lib/api";
+import {
+  ROTA_LISTA_ASSINATURAS,
+  ROTA_LISTA_PROCESSOS,
+  ROTA_LISTA_TRAMITACAO,
+  filtroDaUrl,
+  filtroParaUrl,
+  fmtDias,
+  fmtMinutos,
+  recorteComum,
+  type FiltroDaUrl,
+} from "@/lib/relatorios";
 
-function fmtDateTime(s: string) {
-  const d = new Date(s);
+/**
+ * Relatórios do protocolo — página gerencial (SI-34, decisão de 2026-11-11).
+ *
+ * Uma tela, filtro único no topo, cinco seções. Cada seção conta pela SUA
+ * data e diz qual é; "Andamento" é a situação de hoje. Cada número leva à
+ * lista que o produziu (mesmo recorte, pela URL) e exporta o CSV dela — o
+ * backend garante que o número da seção é o total dessa lista
+ * (`tests/test_relatorios_protocolo_medidas.py`).
+ *
+ * É diferente do Painel de controle (o que a minha unidade tem para fazer
+ * agora) e do Dashboard executivo (`/dashboard`, gráficos), que continua
+ * separado.
+ */
+
+const OPCOES_DIAS_PARADO = [7, 15, 30, 60, 90];
+
+function LinkLista({ href, children }: { href: string; children: React.ReactNode }) {
   return (
-    d.toLocaleDateString("pt-BR") +
-    " " +
-    d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+    <Link
+      href={href}
+      className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <List className="h-4 w-4" aria-hidden="true" /> {children}
+    </Link>
+  );
+}
+
+function LinkCsv({ href, rotulo }: { href: string; rotulo: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={rotulo}
+      className="inline-flex h-9 items-center gap-1.5 rounded-md bg-muted px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <Download className="h-4 w-4" aria-hidden="true" /> CSV
+    </a>
+  );
+}
+
+function Secao({
+  id,
+  titulo,
+  regra,
+  icon: Icon,
+  acoes,
+  children,
+}: {
+  id: string;
+  titulo: string;
+  /** Por qual data a seção conta — dito em toda seção, de propósito. */
+  regra: string;
+  icon: React.ComponentType<{ className?: string }>;
+  acoes?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      aria-labelledby={`secao-${id}`}
+      className="space-y-3 rounded-card border border-border bg-card p-4 shadow-card"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+            <Icon className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 id={`secao-${id}`} className="font-display text-base font-semibold text-foreground">
+              {titulo}
+            </h2>
+            <p className="text-xs text-foreground-muted">{regra}</p>
+          </div>
+        </div>
+        {acoes && <div className="flex flex-wrap gap-2">{acoes}</div>}
+      </div>
+      {children}
+    </section>
   );
 }
 
 export default function RelatoriosPage() {
-  const [draft, setDraft] = useState<RelatorioFiltroInput>({});
-  const [applied, setApplied] = useState<RelatorioFiltroInput>({});
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const busca = searchParams.toString();
+  const filtro = useMemo(() => filtroDaUrl(new URLSearchParams(busca)), [busca]);
+  const recorte = recorteComum(filtro);
+  const diasParado = filtro.dias_parado ?? 15;
 
-  const unidadesQ = useQuery({
-    queryKey: ["unidades-all"],
-    queryFn: () => api.unidades.list({ page_size: 200 }),
-  });
-  const assuntosQ = useAssuntosAll();
-  const tiposQ = useQuery({
-    queryKey: ["tipos-processo"],
-    queryFn: () => api.tiposProcesso.list(),
+  const q = useQuery({
+    queryKey: ["relatorio-gerencial", busca],
+    queryFn: () => api.relatorios.gerencial({ ...recorte, dias_parado: diasParado }),
   });
 
-  const relQ = useQuery({
-    queryKey: ["relatorio-processos", applied],
-    queryFn: () => api.relatorios.processos(applied),
-  });
+  function irPara(f: FiltroDaUrl) {
+    router.replace(`${pathname}${filtroParaUrl(f)}`, { scroll: false });
+  }
+
+  const lista = (rota: string, extra: FiltroDaUrl) => `${rota}${filtroParaUrl({ ...recorte, ...extra })}`;
+  const semPeriodo = { desde: undefined, ate: undefined };
+  const g = q.data;
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold text-primary">Relatórios</h1>
-      <RelatoriosNav />
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-lg font-semibold text-foreground">
-          Processos por unidade/período
-        </h2>
-        <div className="flex flex-wrap gap-2">
+      <PageHeader
+        icon={BarChart3}
+        title="Relatórios"
+        description="Como o protocolo andou no período. Cada seção diz por qual data conta; a lista e o CSV de cada número estão na própria seção."
+        actions={
           <a
-            href={relatorioCsvUrl(applied)}
+            href={gerencialPdfUrl({ ...recorte, dias_parado: diasParado })}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-muted px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Download className="h-4 w-4" aria-hidden="true" /> CSV
+            <FileText className="h-4 w-4" aria-hidden="true" /> PDF desta página
           </a>
-          <a
-            href={relatorioPdfUrl(applied)}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-aprimora-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <FileText className="h-4 w-4" aria-hidden="true" /> PDF
-          </a>
-        </div>
-      </div>
+        }
+      />
 
-      <Card>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <div>
-              <Label htmlFor="unidade">Unidade (proprietária ou local atual)</Label>
-              <Select
-                id="unidade"
-                value={draft.id_unidade ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    id_unidade: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-              >
-                <option value="">Todas</option>
-                {unidadesQ.data?.items.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.unidade_trabalho}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="tipo">Tipo de processo</Label>
-              <Select
-                id="tipo"
-                value={draft.id_tipo_processo ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    id_tipo_processo: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-              >
-                <option value="">Todos</option>
-                {tiposQ.data?.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.tipo_processo}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="assunto">Assunto</Label>
-              <Select
-                id="assunto"
-                value={draft.id_assunto ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    id_assunto: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-              >
-                <option value="">Todos</option>
-                {assuntosQ.data?.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.assunto.length > 60 ? a.assunto.slice(0, 60) + "…" : a.assunto}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="flex items-center gap-2 md:pt-6">
-              <Checkbox
-                id="ativos"
-                checked={!!draft.apenas_ativos}
-                onChange={(e) => setDraft({ ...draft, apenas_ativos: e.target.checked })}
-              />
-              <Label htmlFor="ativos" className="!mb-0">
-                Apenas ativos
-              </Label>
-            </div>
-            <div>
-              <Label htmlFor="desde">Aberto desde</Label>
-              <Input
-                id="desde"
-                type="date"
-                value={draft.desde?.slice(0, 10) ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    desde: e.target.value ? `${e.target.value}T00:00:00` : undefined,
-                  })
-                }
-              />
-            </div>
-            <div>
-              <Label htmlFor="ate">Aberto até</Label>
-              <Input
-                id="ate"
-                type="date"
-                value={draft.ate?.slice(0, 10) ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    ate: e.target.value ? `${e.target.value}T23:59:59` : undefined,
-                  })
-                }
-              />
-            </div>
-            <div className="flex flex-wrap items-end gap-2 md:col-span-2">
-              <Button onClick={() => setApplied({ ...draft })}>Gerar relatório</Button>
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setDraft({});
-                  setApplied({});
-                }}
-              >
-                Limpar
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <FiltrosDoRelatorio valor={recorte} onAplicar={(f) => irPara({ ...f, dias_parado: filtro.dias_parado })} />
 
-      {relQ.isLoading && (
-        <p className="text-sm text-muted-foreground">Carregando relatório...</p>
-      )}
-      {relQ.error && (
-        <div
-          role="alert"
-          className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
-        >
-          {relQ.error instanceof Error ? relQ.error.message : "Erro ao gerar relatório"}
+      {q.isLoading && <Carregando />}
+      {q.error && (
+        <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+          {q.error instanceof Error ? q.error.message : "Não foi possível gerar o relatório."}
         </div>
       )}
 
-      {relQ.data && (
+      {g && (
         <>
-          {relQ.data.nome_unidade && (
-            <p className="text-sm text-muted-foreground">
-              Filtro: <b>{relQ.data.nome_unidade}</b>
-            </p>
-          )}
+          <ul className="space-y-0.5 text-xs text-foreground-muted" aria-label="Recorte do relatório">
+            {g.descricao_filtros.map((linha) => (
+              <li key={linha}>{linha}</li>
+            ))}
+          </ul>
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            <TotalCard label="Total" value={relQ.data.totais.total} />
-            <TotalCard label="Ativos" value={relQ.data.totais.ativos} />
-            <TotalCard label="Inativos" value={relQ.data.totais.inativos} />
-            <TotalCard label="Sigilosos" value={relQ.data.totais.sigilosos} />
-            <TotalCard label="Externos" value={relQ.data.totais.externos} />
-          </div>
+          <Secao
+            id="entrada"
+            titulo="Entrada"
+            regra="Processos abertos no período — pela data de abertura."
+            icon={Inbox}
+            acoes={
+              <>
+                <LinkLista href={lista(ROTA_LISTA_PROCESSOS, { data_base: "abertura" })}>
+                  Ver lista
+                </LinkLista>
+                <LinkCsv
+                  href={relatorioCsvUrl({ ...recorte, data_base: "abertura" })}
+                  rotulo="CSV dos processos abertos no período"
+                />
+              </>
+            }
+          >
+            <div className="grid gap-3 md:grid-cols-[minmax(0,14rem)_1fr]">
+              <KpiCard label="Abertos" value={g.entrada.abertos} />
+              {g.entrada.por_canal.length > 0 ? (
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>Canal de entrada</TH>
+                      <TH className="text-right">Processos</TH>
+                      <TH className="text-right">%</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {g.entrada.por_canal.map((c) => (
+                      <TR key={c.rotulo}>
+                        <TD>{c.rotulo}</TD>
+                        <TD className="text-right tabular-nums">{c.count}</TD>
+                        <TD className="text-right tabular-nums">
+                          {g.entrada.abertos ? ((c.count / g.entrada.abertos) * 100).toFixed(0) : 0}%
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              ) : (
+                <p className="text-sm text-foreground-muted">Nenhum processo aberto no período.</p>
+              )}
+            </div>
+          </Secao>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Por tipo de processo</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <BreakdownTable rows={relQ.data.por_tipo_processo} />
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Por unidade proprietária</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <BreakdownTable rows={relQ.data.por_unidade_proprietaria} />
-              </CardContent>
-            </Card>
-          </div>
+          <Secao
+            id="andamento"
+            titulo="Andamento"
+            regra="Situação de hoje — não usa o período. Unidade, tipo e assunto continuam valendo."
+            icon={Activity}
+          >
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="space-y-2">
+                <KpiCard label="Em andamento" value={g.andamento.em_andamento} hint="com uma unidade, sem envio pendente" />
+                <LinkLista href={lista(ROTA_LISTA_PROCESSOS, { ...semPeriodo, situacao: "em_andamento" })}>
+                  Ver lista
+                </LinkLista>
+              </div>
+              <div className="space-y-2">
+                <KpiCard label="Em trânsito" value={g.andamento.em_transito} hint="enviados, ainda não recebidos" intent="info" />
+                <LinkLista href={lista(ROTA_LISTA_PROCESSOS, { ...semPeriodo, situacao: "em_transito" })}>
+                  Ver lista
+                </LinkLista>
+              </div>
+              <div className="space-y-2">
+                <KpiCard
+                  label={`Parados há ${g.andamento.dias_parado}+ dias`}
+                  value={g.andamento.parados}
+                  hint="sem nenhuma movimentação; não arquivados"
+                  intent="warning"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <LinkLista
+                    href={lista(ROTA_LISTA_PROCESSOS, { ...semPeriodo, parado_ha_dias: g.andamento.dias_parado })}
+                  >
+                    Ver lista
+                  </LinkLista>
+                  <label className="flex items-center gap-1 text-xs text-foreground-muted">
+                    Parado há
+                    <Select
+                      aria-label="Dias sem movimentação para contar como parado"
+                      className="h-9 w-24"
+                      value={diasParado}
+                      onChange={(e) => irPara({ ...filtro, dias_parado: Number(e.target.value) })}
+                    >
+                      {OPCOES_DIAS_PARADO.map((d) => (
+                        <option key={d} value={d}>
+                          {d} dias
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </Secao>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Processos ({relQ.data.processos.length})</CardTitle>
-            </CardHeader>
-            <CardContent>
+          <Secao
+            id="saida"
+            titulo="Saída"
+            regra="Processos arquivados no período — pela data de arquivamento."
+            icon={Archive}
+            acoes={
+              <>
+                <LinkLista href={lista(ROTA_LISTA_PROCESSOS, { data_base: "arquivamento" })}>
+                  Ver lista
+                </LinkLista>
+                <LinkCsv
+                  href={relatorioCsvUrl({ ...recorte, data_base: "arquivamento" })}
+                  rotulo="CSV dos processos arquivados no período"
+                />
+              </>
+            }
+          >
+            <div className="grid gap-3 md:grid-cols-2">
+              <KpiCard label="Arquivados" value={g.saida.arquivados} />
+              <KpiCard
+                label="Tempo médio até arquivar"
+                value={fmtDias(g.saida.dias_medio_ate_arquivar)}
+                hint="da abertura ao arquivamento, dos arquivados no período"
+              />
+            </div>
+          </Secao>
+
+          <Secao
+            id="gargalos"
+            titulo="Gargalos"
+            regra="Entradas nas unidades no período (abertura na unidade dona ou recebimento) — pela data de entrada. Atraso: saiu depois do fim do dia do prazo, ou segue lá."
+            icon={AlertTriangle}
+            acoes={
+              <>
+                <LinkLista href={lista(ROTA_LISTA_TRAMITACAO, { data_base: "chegada" })}>
+                  Ver lista
+                </LinkLista>
+                <LinkCsv
+                  href={tramitacaoCsvUrl({ ...recorte, data_base: "chegada" })}
+                  rotulo="CSV da tramitação no período"
+                />
+              </>
+            }
+          >
+            {g.gargalos.unidades.length > 0 ? (
               <Table>
                 <THead>
                   <TR>
-                    <TH>Número</TH>
-                    <TH>Aberto em</TH>
-                    <TH>Manifestante</TH>
-                    <TH>Tipo</TH>
-                    <TH>Unid. propr.</TH>
-                    <TH>Local atual</TH>
-                    <TH>Status</TH>
+                    <TH>Unidade</TH>
+                    <TH className="text-right">Entradas</TH>
+                    <TH className="text-right">Com prazo</TH>
+                    <TH className="text-right">Atrasos</TH>
+                    <TH className="text-right">Permanência média</TH>
                   </TR>
                 </THead>
                 <TBody>
-                  {relQ.data.processos.length === 0 && (
-                    <TR>
-                      <TD colSpan={7} className="text-center text-muted-foreground">
-                        Nenhum processo no recorte.
+                  {g.gargalos.unidades.map((u) => (
+                    <TR key={`${u.id_unidade}-${u.unidade}`}>
+                      <TD>{u.unidade ?? "—"}</TD>
+                      <TD className="text-right tabular-nums">{u.chegadas}</TD>
+                      <TD className="text-right tabular-nums">{u.com_prazo}</TD>
+                      <TD className={u.atrasos ? "text-right font-semibold tabular-nums text-danger" : "text-right tabular-nums"}>
+                        {u.atrasos}
                       </TD>
-                    </TR>
-                  )}
-                  {relQ.data.processos.map((p) => (
-                    <TR key={p.id}>
-                      <TD>
-                        <Link
-                          href={`/m/protocolo/processos/${p.id}`}
-                          className="font-mono text-xs text-primary hover:underline"
-                        >
-                          {p.numero_processo}
-                        </Link>
-                      </TD>
-                      <TD className="text-xs tabular-nums">{fmtDateTime(p.data_hora_abertura)}</TD>
-                      <TD className="text-sm">{p.manifestante ?? "—"}</TD>
-                      <TD className="text-sm">{p.tipo_processo ?? "—"}</TD>
-                      <TD className="text-sm">{p.unidade_proprietaria ?? "—"}</TD>
-                      <TD className="text-sm">{p.local_atual ?? "—"}</TD>
-                      <TD>
-                        <div className="flex flex-wrap gap-1">
-                          {p.ativo ? (
-                            <Badge intent="success" icon={CheckCircle2}>Ativo</Badge>
-                          ) : (
-                            <Badge intent="neutral" icon={Pause}>Inativo</Badge>
-                          )}
-                          {!p.publico && (
-                            <Badge intent="warning" icon={Lock}>
-                              {NIVEL_SIGILO_LABEL[p.nivel_sigilo]}
-                            </Badge>
-                          )}
-                          {p.externo && <Badge intent="info" icon={Eye}>Externo</Badge>}
-                        </div>
-                      </TD>
+                      <TD className="text-right tabular-nums">{fmtDias(u.dias_medio)}</TD>
                     </TR>
                   ))}
                 </TBody>
               </Table>
-            </CardContent>
-          </Card>
+            ) : (
+              <p className="text-sm text-foreground-muted">Nenhuma entrada em unidade no período.</p>
+            )}
+            {g.gargalos.cortado && (
+              <p className="text-xs text-foreground-muted">
+                Recorte grande: a análise cobre os processos mais recentes. Diminua o período para ver todos.
+              </p>
+            )}
+          </Secao>
+
+          <Secao
+            id="assinaturas"
+            titulo="Assinaturas"
+            regra="Pedidos de assinatura feitos no período — pela data do pedido."
+            icon={PenLine}
+            acoes={
+              <>
+                <LinkLista href={lista(ROTA_LISTA_ASSINATURAS, { data_base: "pedido" })}>
+                  Ver lista
+                </LinkLista>
+                <LinkCsv
+                  href={assinaturasCsvUrl({ ...recorte, data_base: "pedido" })}
+                  rotulo="CSV das assinaturas pedidas no período"
+                />
+              </>
+            }
+          >
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+              <KpiCard label="Pedidas" value={g.assinaturas.total} />
+              <KpiCard label="Pendentes" value={g.assinaturas.pendentes} intent="warning" />
+              <KpiCard label="Concluídas" value={g.assinaturas.concluidas} />
+              <KpiCard label="Canceladas" value={g.assinaturas.canceladas} />
+              <KpiCard
+                label="Tempo médio"
+                value={g.assinaturas.concluidas ? fmtMinutos(g.assinaturas.minutos_medio_conclusao) : "—"}
+                hint="do pedido à conclusão"
+              />
+            </div>
+          </Secao>
         </>
       )}
     </div>
-  );
-}
-
-function TotalCard({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-md border border-border bg-card p-3 text-center">
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </div>
-      <div className="text-2xl font-bold text-primary tabular-nums">{value}</div>
-    </div>
-  );
-}
-
-function BreakdownTable({
-  rows,
-}: {
-  rows: { label: string; count: number; pct: number }[];
-}) {
-  if (rows.length === 0) {
-    return <p className="text-sm text-muted-foreground">Sem dados.</p>;
-  }
-  return (
-    <Table>
-      <THead>
-        <TR>
-          <TH>Item</TH>
-          <TH className="text-right">Qtd</TH>
-          <TH className="text-right">%</TH>
-        </TR>
-      </THead>
-      <TBody>
-        {rows.map((r) => (
-          <TR key={r.label}>
-            <TD>{r.label}</TD>
-            <TD className="text-right tabular-nums">{r.count}</TD>
-            <TD className="text-right tabular-nums">{r.pct.toFixed(1)}%</TD>
-          </TR>
-        ))}
-      </TBody>
-    </Table>
   );
 }
