@@ -118,9 +118,44 @@ function fmtHora(s: string | null) {
 /** Tecla de atalho à vista (os atalhos são o que faz o balcão andar rápido). */
 function Tecla({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-foreground">
+    <kbd className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-border-strong bg-surface-2 px-1.5 font-mono text-[11px] font-medium leading-none text-foreground shadow-[inset_0_-1px_0_hsl(var(--border-strong))]">
       {children}
     </kbd>
+  );
+}
+
+/**
+ * Cartão da coluna lateral, com o mesmo cabeçalho dos cartões do formulário
+ * (ícone num quadrado, título, uma linha de descrição) — antes eram caixas
+ * com título solto e texto miúdo colado.
+ */
+function CartaoLateral({
+  icon: Icon,
+  titulo,
+  descricao,
+  children,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  titulo: string;
+  descricao?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-card border border-border bg-card shadow-card">
+      <header className="flex items-start gap-3 border-b border-border px-5 py-4">
+        <span
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand/8 text-brand"
+          aria-hidden="true"
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="min-w-0">
+          <h2 className="font-display text-sm font-semibold tracking-tight text-titulo">{titulo}</h2>
+          {descricao && <p className="mt-0.5 text-xs text-foreground-muted">{descricao}</p>}
+        </div>
+      </header>
+      <div className="px-5 py-4">{children}</div>
+    </section>
   );
 }
 
@@ -654,36 +689,37 @@ export default function ProtocoloBalcaoPage() {
           </div>
 
           <aside className="space-y-4 lg:sticky lg:top-24">
-            <div className="rounded-card border border-border bg-card p-4 shadow-card">
-              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Clock className="h-4 w-4 text-foreground-muted" aria-hidden="true" />
-                Protocolos recentes
-              </div>
+            <CartaoLateral
+              icon={Clock}
+              titulo="Protocolos recentes"
+              descricao={
+                recentes.length > 0
+                  ? `Os últimos ${recentes.length} feitos neste navegador.`
+                  : undefined
+              }
+            >
               {recentes.length === 0 ? (
-                <p className="text-xs text-foreground-muted">
-                  Os últimos {HISTORY_MAX} protocolos feitos neste navegador aparecem aqui.
+                <p className="text-sm leading-relaxed text-foreground-muted">
+                  Os últimos {HISTORY_MAX} protocolos feitos neste navegador aparecem aqui, para
+                  reabrir ou reimprimir sem procurar.
                 </p>
               ) : (
-                <ul className="space-y-1.5">
+                <ul className="-mx-2 divide-y divide-border">
                   {recentes.map((r) => (
-                    <li
-                      key={r.id}
-                      className="rounded-md border border-border bg-surface-1 px-2.5 py-1.5"
-                    >
+                    <li key={r.id}>
                       <Link
                         href={`/m/protocolo/processos/${r.id}`}
-                        className="group flex items-center justify-between gap-2 text-xs"
+                        className="group flex items-start justify-between gap-3 rounded-md px-2 py-2.5 transition-colors duration-fast hover:bg-surface-2"
                       >
-                        <span className="min-w-0 flex-1 truncate">
-                          <span className="font-mono font-semibold text-primary group-hover:underline">
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-mono text-sm font-semibold text-primary group-hover:underline">
                             {r.numero_processo}
                           </span>
-                          <span className="ml-1.5 text-foreground-muted">
-                            {r.especie_documental ?? "—"} ·{" "}
-                            {r.manifestante.slice(0, 28)}
+                          <span className="mt-0.5 block truncate text-xs text-foreground-muted">
+                            {r.especie_documental ?? "Sem espécie"} · {r.manifestante}
                           </span>
                         </span>
-                        <span className="shrink-0 tabular-nums text-foreground-muted">
+                        <span className="shrink-0 pt-0.5 text-xs tabular-nums text-foreground-subtle">
                           {fmtHora(r.data_recepcao)}
                         </span>
                       </Link>
@@ -691,25 +727,28 @@ export default function ProtocoloBalcaoPage() {
                   ))}
                 </ul>
               )}
-            </div>
+            </CartaoLateral>
 
-            <div className="rounded-card border border-border bg-card p-4 text-xs text-foreground-muted shadow-card">
-              <div className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Keyboard className="h-4 w-4 text-foreground-muted" aria-hidden="true" />
-                Atalhos
-              </div>
-              <ul className="space-y-1.5">
-                <li>
-                  <Tecla>Ctrl + Enter</Tecla> protocola (e, depois, começa o próximo)
-                </li>
-                <li>
-                  <Tecla>Tab</Tecla> vai para o próximo campo
-                </li>
-                <li>
-                  <Tecla>Esc</Tecla> fecha a lista aberta
-                </li>
-              </ul>
-            </div>
+            <CartaoLateral icon={Keyboard} titulo="Atalhos" descricao="Para protocolar sem tirar a mão do teclado.">
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-3 text-sm">
+                <dt className="flex items-center gap-1">
+                  <Tecla>Ctrl</Tecla>
+                  <span className="text-xs text-foreground-subtle">+</span>
+                  <Tecla>Enter</Tecla>
+                </dt>
+                <dd className="leading-snug text-foreground-muted">
+                  Protocola — e, depois, começa o próximo
+                </dd>
+                <dt>
+                  <Tecla>Tab</Tecla>
+                </dt>
+                <dd className="leading-snug text-foreground-muted">Vai para o próximo campo</dd>
+                <dt>
+                  <Tecla>Esc</Tecla>
+                </dt>
+                <dd className="leading-snug text-foreground-muted">Fecha a lista aberta</dd>
+              </dl>
+            </CartaoLateral>
           </aside>
         </form>
       )}
