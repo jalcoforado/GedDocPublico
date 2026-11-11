@@ -27,7 +27,7 @@ import { AbasSolicitacoes } from "@/components/pagamentos/AbasSolicitacoes";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { SkeletonRow } from "@/components/ui/skeleton";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { TBody, TD, TH, THead, TR, TRLink, Table } from "@/components/ui/table";
 import { api, type SituacaoTramitacao } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
@@ -273,7 +273,7 @@ export default function SolicitacoesPage() {
               </TR>
             )}
             {debitos.map((d) => (
-              <TR key={d.id}>
+              <TRLink key={d.id} href={`/m/pagamentos/solicitacoes/${d.id}`}>
                 <TD className="font-mono text-sm">
                   <Link
                     href={`/m/pagamentos/solicitacoes/${d.id}`}
@@ -293,7 +293,7 @@ export default function SolicitacoesPage() {
                     <Link href={`/m/pagamentos/solicitacoes/${d.id}`}>Ver</Link>
                   </Button>
                 </TD>
-              </TR>
+              </TRLink>
             ))}
           </TBody>
         </Table>

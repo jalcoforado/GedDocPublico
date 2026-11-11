@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SectionCard } from "@/components/ui/section-card";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { TBody, TD, TH, THead, TR, TRLink, Table } from "@/components/ui/table";
 import type { DebitoOut } from "@/lib/api";
 import { TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
 import { fmtMoeda } from "@/components/pagamentos/format";
@@ -44,7 +44,7 @@ export function FilaSecao({ titulo, icon, itens, acaoLabel }: FilaSecaoProps) {
             {itens.map((d) => {
               const rotulo = TRAMITACAO_ROTULO[d.situacao_tramitacao];
               return (
-                <TR key={d.id}>
+                <TRLink key={d.id} href={`/m/pagamentos/solicitacoes/${d.id}`}>
                   <TD className="font-mono text-sm">
                     <Link
                       href={`/m/pagamentos/solicitacoes/${d.id}`}
@@ -63,7 +63,7 @@ export function FilaSecao({ titulo, icon, itens, acaoLabel }: FilaSecaoProps) {
                       <Link href={`/m/pagamentos/solicitacoes/${d.id}`}>{acaoLabel}</Link>
                     </Button>
                   </TD>
-                </TR>
+                </TRLink>
               );
             })}
           </TBody>
