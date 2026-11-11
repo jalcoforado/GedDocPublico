@@ -29,6 +29,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Assunto, Encaminhamento, Movimentacao, Processo, TipoProcesso, UnidadeTrabalho
 from ..schemas.relatorio import ModoUnidade, RelatorioFiltro
+from ..schemas.relatorio_assinaturas import AssinaturasFiltro
+
+# Os dois filtros têm os campos do recorte comum (unidade, assunto, tipo,
+# período, data base); só a lista de datas base muda.
+FiltroComum = RelatorioFiltro | AssinaturasFiltro
 from .processos import condicao_arquivado, condicao_em_transito
 
 FUSO_RELATORIO = ZoneInfo("America/Fortaleza")
@@ -37,6 +42,8 @@ ROTULO_DATA_BASE: dict[str, str] = {
     "abertura": "data de abertura",
     "arquivamento": "data de arquivamento",
     "chegada": "data de chegada na unidade",
+    "pedido": "data do pedido de assinatura",
+    "conclusao": "data de conclusão da assinatura",
 }
 
 ROTULO_MODO_UNIDADE: dict[str, str] = {
@@ -149,7 +156,7 @@ def condicao_unidade(id_unidade: int, modo: ModoUnidade, tenant_id: int):
 
 def aplicar_filtros_processo(
     stmt,
-    f: RelatorioFiltro,
+    f: FiltroComum,
     *,
     tenant_id: int,
     niveis_permitidos: list[str] | None,
@@ -180,7 +187,7 @@ def aplicar_filtros_processo(
     return stmt.where(*no_intervalo(coluna_data, f.desde, f.ate))
 
 
-async def descrever_filtros(db: AsyncSession, f: RelatorioFiltro, *, tenant_id: int) -> list[str]:
+async def descrever_filtros(db: AsyncSession, f: FiltroComum, *, tenant_id: int) -> list[str]:
     """O recorte em frases curtas, para a tela, o CSV e o PDF dizerem o mesmo.
 
     Nomes buscados com o `tenant_id`: id de outra prefeitura vira "não

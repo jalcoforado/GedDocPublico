@@ -395,15 +395,22 @@ async def tramitacao_pdf(
 
 
 def _filtro_assinaturas(
-    desde: datetime | None,
-    ate: datetime | None,
+    id_unidade: int | None,
+    modo_unidade: ModoUnidade,
+    id_assunto: int | None,
+    id_tipo_processo: int | None,
+    desde: date | None,
+    ate: date | None,
+    data_base: str,
     id_solicitante: int | None,
     id_assinante: int | None,
     status: StatusSolicitacao | None,
 ) -> AssinaturasFiltro:
+    # Mesma validação de período e mesmos campos do recorte comum.
+    comum = _filtro(id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, "abertura")
     return AssinaturasFiltro(
-        desde=desde,
-        ate=ate,
+        **comum.model_dump(exclude={"data_base"}),
+        data_base=data_base,
         id_solicitante=id_solicitante,
         id_assinante=id_assinante,
         status=status,
@@ -419,14 +426,22 @@ async def assinaturas_json(
     user: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-    desde: datetime | None = None,
-    ate: datetime | None = None,
+    id_unidade: int | None = None,
+    modo_unidade: ModoUnidade = "envolvida",
+    id_assunto: int | None = None,
+    id_tipo_processo: int | None = None,
+    desde: date | None = None,
+    ate: date | None = None,
+    data_base: Literal["pedido", "conclusao"] = "pedido",
     id_solicitante: int | None = None,
     id_assinante: int | None = None,
     status: StatusSolicitacao | None = None,
     max_rows: int = Query(500, ge=1, le=5000),
 ) -> RelatorioAssinaturasResposta:
-    f = _filtro_assinaturas(desde, ate, id_solicitante, id_assinante, status)
+    f = _filtro_assinaturas(
+        id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base,
+        id_solicitante, id_assinante, status,
+    )
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     return await gerar_assinaturas(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
@@ -441,22 +456,33 @@ async def assinaturas_csv(
     user: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-    desde: datetime | None = None,
-    ate: datetime | None = None,
+    id_unidade: int | None = None,
+    modo_unidade: ModoUnidade = "envolvida",
+    id_assunto: int | None = None,
+    id_tipo_processo: int | None = None,
+    desde: date | None = None,
+    ate: date | None = None,
+    data_base: Literal["pedido", "conclusao"] = "pedido",
     id_solicitante: int | None = None,
     id_assinante: int | None = None,
     status: StatusSolicitacao | None = None,
-    max_rows: int = Query(5000, ge=1, le=50000),
+    max_rows: int = Query(50000, ge=1, le=50000),
 ):
-    f = _filtro_assinaturas(desde, ate, id_solicitante, id_assinante, status)
+    f = _filtro_assinaturas(
+        id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base,
+        id_solicitante, id_assinante, status,
+    )
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     r = await gerar_assinaturas(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
     )
 
+    _exige_completo(r.cortado, r.totais.total, max_rows, "CSV")
+
     buf = StringIO()
     buf.write("﻿")
     w = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    _cabecalho_csv(w, r.descricao_filtros)
     w.writerow(
         [
             "id_solicitacao",
@@ -481,7 +507,7 @@ async def assinaturas_csv(
                 s.id_processo,
                 s.numero_processo or "",
                 s.nome_solicitante or "",
-                s.status,
+                {"pendente": "Pendente", "concluida": "Concluída", "cancelada": "Cancelada"}[s.status],
                 s.dt_inicio.strftime("%Y-%m-%d %H:%M"),
                 s.dt_fim.strftime("%Y-%m-%d %H:%M") if s.dt_fim else "",
                 s.minutos_decorridos if s.minutos_decorridos is not None else "",
@@ -509,14 +535,22 @@ async def assinaturas_pdf(
     user: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
-    desde: datetime | None = None,
-    ate: datetime | None = None,
+    id_unidade: int | None = None,
+    modo_unidade: ModoUnidade = "envolvida",
+    id_assunto: int | None = None,
+    id_tipo_processo: int | None = None,
+    desde: date | None = None,
+    ate: date | None = None,
+    data_base: Literal["pedido", "conclusao"] = "pedido",
     id_solicitante: int | None = None,
     id_assinante: int | None = None,
     status: StatusSolicitacao | None = None,
     max_rows: int = Query(500, ge=1, le=5000),
 ):
-    f = _filtro_assinaturas(desde, ate, id_solicitante, id_assinante, status)
+    f = _filtro_assinaturas(
+        id_unidade, modo_unidade, id_assunto, id_tipo_processo, desde, ate, data_base,
+        id_solicitante, id_assinante, status,
+    )
     niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
     r = await gerar_assinaturas(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows

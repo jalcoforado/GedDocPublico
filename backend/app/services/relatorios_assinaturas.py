@@ -13,12 +13,13 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from ..models import (
     AssinaturaAnexo,
+    Assunto,
     Processo,
     SolicitacaoAssinatura,
     Usuario,
@@ -33,6 +34,7 @@ from ..schemas.relatorio_assinaturas import (
     SolicitanteAgregado,
     StatusSolicitacao,
 )
+from .relatorios_comum import aplicar_filtros_processo, descrever_filtros, hora_local
 
 
 def _status(s: SolicitacaoAssinatura) -> StatusSolicitacao:
@@ -66,42 +68,56 @@ async def gerar_assinaturas(
             Solicitante.nome.label("nome_solicitante"),
         )
         .join(Processo, Processo.id == SolicitacaoAssinatura.id_processo)
+        .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(Solicitante, Solicitante.id == SolicitacaoAssinatura.id_solicitante, isouter=True)
         .where(
             SolicitacaoAssinatura.tenant_id == tenant_id,
             SolicitacaoAssinatura.excluido.is_(False),
-            # SI-34 — a solicitação expõe número e nome do processo: segue as
-            # regras do processo. Excluído e rascunho ficam fora como nos
-            # outros relatórios (rascunho é de quem o criou, SI-16).
-            Processo.tenant_id == tenant_id,
-            Processo.excluido.is_(False),
-            Processo.situacao != "rascunho",
         )
     )
-    if niveis_permitidos is not None:
-        sol_stmt = sol_stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
-    if f.desde:
-        sol_stmt = sol_stmt.where(SolicitacaoAssinatura.dt_inicio >= f.desde)
-    if f.ate:
-        sol_stmt = sol_stmt.where(SolicitacaoAssinatura.dt_inicio <= f.ate)
+    # SI-34 — a solicitação expõe número e nome do processo: segue o recorte
+    # do processo (prefeitura, excluído, rascunho, sigilo, unidade, assunto,
+    # tipo). O período é sobre a própria solicitação: pedido ou conclusão.
+    sol_stmt = aplicar_filtros_processo(
+        sol_stmt, f, tenant_id=tenant_id, niveis_permitidos=niveis_permitidos,
+        coluna_data=(
+            SolicitacaoAssinatura.dt_fim
+            if f.data_base == "conclusao"
+            else SolicitacaoAssinatura.dt_inicio
+        ),
+    )
     if f.id_solicitante:
         sol_stmt = sol_stmt.where(SolicitacaoAssinatura.id_solicitante == f.id_solicitante)
+    if f.id_assinante:
+        # Em SQL, antes do teto: filtrar depois dele escondia solicitações.
+        sol_stmt = sol_stmt.where(
+            select(UsuarioAssinatura.id)
+            .where(
+                UsuarioAssinatura.id_solicitacao_assinatura == SolicitacaoAssinatura.id,
+                UsuarioAssinatura.tenant_id == tenant_id,
+                UsuarioAssinatura.excluido.is_(False),
+                UsuarioAssinatura.id_assinante == f.id_assinante,
+            )
+            .exists()
+        )
 
-    # status precisa ser filtrado em Python (campo derivado), exceto quando podemos otimizar
+    # Mesmas regras de `_status`. Antes "concluída" aqui não exigia `dt_fim`,
+    # e a solicitação filtrada como concluída era contada como pendente.
+    concluida = and_(
+        SolicitacaoAssinatura.cancelada.is_(False),
+        SolicitacaoAssinatura.realizada.is_(True),
+        SolicitacaoAssinatura.dt_fim.is_not(None),
+    )
     if f.status == "cancelada":
         sol_stmt = sol_stmt.where(SolicitacaoAssinatura.cancelada.is_(True))
     elif f.status == "concluida":
-        sol_stmt = sol_stmt.where(
-            SolicitacaoAssinatura.cancelada.is_(False),
-            SolicitacaoAssinatura.realizada.is_(True),
-        )
+        sol_stmt = sol_stmt.where(concluida)
     elif f.status == "pendente":
-        sol_stmt = sol_stmt.where(
-            SolicitacaoAssinatura.cancelada.is_(False),
-            SolicitacaoAssinatura.realizada.is_(False),
-        )
+        sol_stmt = sol_stmt.where(SolicitacaoAssinatura.cancelada.is_(False), ~concluida)
 
-    sol_stmt = sol_stmt.order_by(SolicitacaoAssinatura.dt_inicio.desc()).limit(max_rows)
+    # Sem teto aqui: totais e agregados contam o recorte inteiro. O teto vale
+    # só para a lista devolvida (`max_rows`, mais abaixo).
+    sol_stmt = sol_stmt.order_by(SolicitacaoAssinatura.dt_inicio.desc(), SolicitacaoAssinatura.id.desc())
     sol_rows = (await db.execute(sol_stmt)).all()
     solic_ids = [row[0].id for row in sol_rows]
 
@@ -132,16 +148,6 @@ async def gerar_assinaturas(
         )
         for aa in (await db.execute(an_stmt)).scalars().all():
             anexo_por_ua[aa.id_usuario_assinatura].append(aa)
-
-    # filtro por id_assinante (precisa estar entre os assinantes da solicitação)
-    if f.id_assinante:
-        sol_rows = [
-            row
-            for row in sol_rows
-            if any(
-                ua.id_assinante == f.id_assinante for ua, _ in ua_por_sol.get(row[0].id, [])
-            )
-        ]
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -214,6 +220,8 @@ async def gerar_assinaturas(
                 if not s.cancelada:
                     asg[ua.id_assinante]["pendentes"] += 1
 
+        if len(solic_out) >= max_rows:
+            continue  # já agregado acima; a lista para no teto
         solic_out.append(
             SolicitacaoRow(
                 id=s.id,
@@ -222,8 +230,8 @@ async def gerar_assinaturas(
                 id_solicitante=s.id_solicitante,
                 nome_solicitante=row.nome_solicitante,
                 status=status,
-                dt_inicio=s.dt_inicio,
-                dt_fim=s.dt_fim,
+                dt_inicio=hora_local(s.dt_inicio),
+                dt_fim=hora_local(s.dt_fim),
                 minutos_decorridos=minutos,
                 qtd_assinantes=qtd_assinantes,
                 qtd_assinantes_concluidos=qtd_conc,
@@ -266,6 +274,8 @@ async def gerar_assinaturas(
 
     return RelatorioAssinaturasResposta(
         filtros_aplicados=f,
+        descricao_filtros=await descrever_filtros(db, f, tenant_id=tenant_id),
+        cortado=len(solic_out) < total,
         totais=AssinaturasTotais(
             total=total,
             pendentes=pendentes,

@@ -339,3 +339,72 @@ async def _monta_prazo(cen, admin_engine):
                     mv=mov, prazo=prazo, rec=recebido,
                 )
         await s.commit()
+
+
+# --------------------------------------------------------------- assinaturas
+
+
+async def _solicitacoes(cen, admin_engine) -> dict[str, int]:
+    """Quatro pedidos de assinatura, todos com um assinante (o admin):
+
+    - `noite`: pedido às 23:30 de 10/10 (Brasília) no `noite_10`, pendente;
+    - `concluida`: no `dia_11`, realizada com data de fim;
+    - `sem_fim`: no `dia_11`, `realizada=true` mas SEM `dt_fim` — é pendente;
+    - `em_b`: no `arquivado` (dono B), cancelada.
+    """
+    t, procs = cen["tenant"], cen["procs"]
+    ids: dict[str, int] = {}
+    async with _sm(admin_engine)() as s:
+        admin = (await s.execute(text(
+            "SELECT id_usuario FROM protocolos.processo WHERE id=:p"), {"p": procs["noite_10"]}
+        )).scalar_one()
+        for rotulo, proc, inicio, fim, realizada, cancelada in (
+            ("noite", "noite_10", datetime(2026, 10, 11, 2, 30), None, False, False),
+            ("concluida", "dia_11", datetime(2026, 10, 11, 16, 0), datetime(2026, 10, 12, 16, 0), True, False),
+            ("sem_fim", "dia_11", datetime(2026, 10, 11, 17, 0), None, True, False),
+            ("em_b", "arquivado", datetime(2026, 10, 5, 12, 0), None, False, True),
+        ):
+            ids[rotulo] = (await s.execute(text(
+                "INSERT INTO protocolos.solicitacao_assinatura (tenant_id, id_processo, "
+                "id_solicitante, id_usuario, dt_inicio, dt_fim, realizada, cancelada) "
+                "VALUES (:t, :p, :u, :u, :i, :f, :r, :c) RETURNING id"),
+                {"t": t.id, "p": procs[proc], "u": admin, "i": inicio, "f": fim, "r": realizada,
+                 "c": cancelada},
+            )).scalar_one()
+        await s.execute(text(
+            "INSERT INTO protocolos.usuario_assinatura (tenant_id, id_solicitacao_assinatura, "
+            "id_assinante, id_unidade_trabalho, ordem, id_usuario, realizada) "
+            "VALUES (:t, :s, :u, :ut, 1, :u, false)"),
+            {"t": t.id, "s": ids["concluida"], "u": admin, "ut": cen["unid"]["A"]},
+        )
+        await s.commit()
+    return ids
+
+
+@pytest.mark.asyncio
+async def test_assinaturas_totais_contam_tudo_mesmo_com_lista_cortada(cen, admin_engine):
+    await _solicitacoes(cen, admin_engine)
+    r = (await _get("assinaturas.json", max_rows=1)).json()
+    assert len(r["solicitacoes"]) == 1 and r["cortado"] is True
+    # `sem_fim` é pendente: "concluída" exige data de fim, na contagem e no filtro
+    assert r["totais"] | {"minutos_medio_conclusao": 0} == {
+        "total": 4, "pendentes": 2, "concluidas": 1, "canceladas": 1, "minutos_medio_conclusao": 0,
+    }
+    concluidas = (await _get("assinaturas.json", status="concluida")).json()
+    assert concluidas["totais"]["total"] == 1
+    assert (await _get("assinaturas.csv", max_rows=1)).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_assinaturas_periodo_unidade_e_assinante(cen, admin_engine):
+    ids = await _solicitacoes(cen, admin_engine)
+    dia10 = (await _get("assinaturas.json", desde="2026-10-10", ate="2026-10-10")).json()
+    assert {x["id"] for x in dia10["solicitacoes"]} == {ids["noite"]}
+    assert dia10["solicitacoes"][0]["dt_inicio"].startswith("2026-10-10T23:30")
+    em_b = (await _get("assinaturas.json", id_unidade=cen["unid"]["B"], modo_unidade="dona")).json()
+    assert {x["id"] for x in em_b["solicitacoes"]} == {ids["em_b"]}
+    # o assinante filtra em SQL, antes do teto: com max_rows=1 ainda acha a dele
+    admin = em_b["solicitacoes"][0]["id_solicitante"]
+    do_assinante = (await _get("assinaturas.json", id_assinante=admin, max_rows=1)).json()
+    assert {x["id"] for x in do_assinante["solicitacoes"]} == {ids["concluida"]}
+    assert do_assinante["totais"]["total"] == 1
