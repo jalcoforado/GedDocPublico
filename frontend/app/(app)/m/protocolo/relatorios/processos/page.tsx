@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Download, Eye, FileText, Lock, X } from "lucide-react";
+import { Download, Eye, FileText, Lock } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
@@ -20,42 +20,38 @@ import {
   relatorioCsvUrl,
   relatorioPdfUrl,
   type RelatorioBreakdownItem,
-  type RelatorioFiltroInput,
 } from "@/lib/api";
 import {
   ROTA_RELATORIOS,
-  ROTULO_PRAZO,
   ROTULO_SITUACAO,
+  VISOES_PROCESSOS,
+  comVisao,
+  consultaDaLista,
   filtroDaUrl,
   filtroParaUrl,
   fmtData,
   fmtDataHora,
   recorteComum,
+  visaoDe,
   type FiltroDaUrl,
+  type VisaoProcessos,
 } from "@/lib/relatorios";
 
 /**
- * Lista de processos do relatório (SI-34) — o "ver lista" das seções
- * Entrada, Andamento e Saída da página gerencial. O recorte vem da URL, então
- * abre com o mesmo filtro que produziu o número da seção.
+ * Lista de processos do relatório (SI-34) — o "ver lista de processos" do
+ * grupo Processos da página gerencial. O "Mostrar" escolhe o recorte de cada
+ * número daquele grupo (abertos, arquivados, andamento de hoje, prazos): cada
+ * opção é a mesma consulta que produziu o número na página.
  */
 export default function RelatorioProcessosPage() {
   const router = useRouter();
   const pathname = usePathname();
   const busca = useSearchParams().toString();
   const filtro = useMemo(() => filtroDaUrl(new URLSearchParams(busca)), [busca]);
-  // "Andamento" (situação de hoje, parados) e o prazo dos que estão em
-  // aberto não usam período nem data base.
-  const prazoDeHoje = !!filtro.prazo && !filtro.prazo.startsWith("concluido");
-  const fotoDeHoje = !!(filtro.situacao || filtro.parado_ha_dias || prazoDeHoje);
-  const dataBase = filtro.data_base === "arquivamento" ? "arquivamento" : "abertura";
-  const consulta: RelatorioFiltroInput = {
-    ...recorteComum(filtro),
-    data_base: dataBase,
-    situacao: filtro.situacao,
-    parado_ha_dias: filtro.parado_ha_dias,
-    prazo: filtro.prazo,
-  };
+  const visao = visaoDe(filtro);
+  const consulta = consultaDaLista(filtro);
+  const dataBase = consulta.data_base;
+  const grupos = [...new Set(VISOES_PROCESSOS.map((v) => v.grupo))];
 
   const q = useQuery({
     queryKey: ["relatorio-processos", busca],
@@ -75,7 +71,7 @@ export default function RelatorioProcessosPage() {
           { label: "Processos" },
         ]}
         title="Processos do relatório"
-        description="A lista por trás de um número da página de relatórios, com o mesmo recorte."
+        description="A lista por trás dos números do grupo Processos da página de relatórios, com o mesmo recorte."
         actions={
           <div className="flex flex-wrap gap-2">
             <a
@@ -100,60 +96,34 @@ export default function RelatorioProcessosPage() {
 
       <FiltrosDoRelatorio
         valor={recorteComum(filtro)}
-        onAplicar={(f) =>
-          irPara({
-            ...f,
-            data_base: filtro.data_base,
-            situacao: filtro.situacao,
-            parado_ha_dias: filtro.parado_ha_dias,
-            prazo: filtro.prazo,
-          })
-        }
+        onAplicar={(f) => irPara(comVisao({ ...f, dias_parado: filtro.dias_parado }, visao.id))}
       />
 
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        {filtro.prazo && (
-          <span className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1">
-            Prazo do serviço: {ROTULO_PRAZO[filtro.prazo]}
-            <button
-              type="button"
-              aria-label="Tirar o filtro de prazo"
-              className="rounded hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => irPara({ ...filtro, prazo: undefined })}
-            >
-              <X className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          </span>
-        )}
-        {fotoDeHoje && !filtro.situacao && !filtro.parado_ha_dias ? null : fotoDeHoje ? (
-          <span className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1">
-            {filtro.situacao
-              ? `Situação hoje: ${ROTULO_SITUACAO[filtro.situacao]}`
-              : `Parados há ${filtro.parado_ha_dias}+ dias`}
-            <button
-              type="button"
-              aria-label="Tirar o filtro de situação"
-              className="rounded hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => irPara({ ...filtro, situacao: undefined, parado_ha_dias: undefined })}
-            >
-              <X className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          </span>
-        ) : (
-          <label className="flex items-center gap-2">
-            Período conta pela data de
-            <Select
-              className="h-9 w-44"
-              value={dataBase}
-              onChange={(e) =>
-                irPara({ ...filtro, data_base: e.target.value as "abertura" | "arquivamento" })
-              }
-            >
-              <option value="abertura">abertura</option>
-              <option value="arquivamento">arquivamento</option>
-            </Select>
-          </label>
-        )}
+      <div className="flex flex-wrap items-center gap-3 rounded-card border border-border bg-card p-3 text-sm shadow-card">
+        <label htmlFor="rel-visao" className="font-medium text-foreground">
+          Mostrar
+        </label>
+        <Select
+          id="rel-visao"
+          className="h-9 w-72"
+          value={visao.id}
+          onChange={(e) => irPara(comVisao(filtro, e.target.value as VisaoProcessos))}
+        >
+          {grupos.map((g) => (
+            <optgroup key={g} label={g}>
+              {VISOES_PROCESSOS.filter((v) => v.grupo === g).map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.id === "parados" ? `Parados há ${consulta.parado_ha_dias ?? filtro.dias_parado ?? 15}+ dias` : v.rotulo}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </Select>
+        <span className="text-xs text-foreground-muted">
+          {visao.hoje
+            ? "Situação de hoje: o período do filtro não se aplica (unidade, tipo e assunto, sim)."
+            : `No período do filtro, pela data de ${dataBase === "arquivamento" ? "arquivamento" : "abertura"}.`}
+        </span>
       </div>
 
       {q.isLoading && <Carregando />}

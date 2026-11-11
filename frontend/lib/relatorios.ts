@@ -155,3 +155,102 @@ export function fmtMinutos(m: number | null | undefined): string {
   if (h < 24) return `${h}h ${String(v % 60).padStart(2, "0")}min`;
   return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
+
+/**
+ * As "visões" da lista de processos — o seletor "Mostrar" (SI-34).
+ *
+ * A página gerencial tem um único "Ver lista de processos"; cada número dos
+ * subgrupos (Entrada, Andamento, Saída, Prazos) é uma destas visões, e a lista
+ * deixa escolher qual. Cada visão é EXATAMENTE a consulta que produziu o
+ * número na página — é o que mantém "número da página = total da lista"
+ * (garantido pelo backend em `test_relatorios_protocolo_medidas.py`).
+ *
+ * `hoje`: a visão é a situação de hoje e ignora o período. O período continua
+ * na URL, para voltar a uma visão "no período" sem perder o filtro.
+ */
+export type VisaoProcessos =
+  | "abertos"
+  | "arquivados"
+  | "em_andamento"
+  | "em_transito"
+  | "parados"
+  | "no_prazo"
+  | "com_atraso"
+  | "dentro_do_prazo"
+  | "vencendo"
+  | "vencidos";
+
+interface DefVisao {
+  id: VisaoProcessos;
+  rotulo: string;
+  grupo: string;
+  hoje: boolean;
+  campos: (diasParado: number) => Pick<FiltroDaUrl, "data_base" | "situacao" | "parado_ha_dias" | "prazo">;
+}
+
+export const VISOES_PROCESSOS: DefVisao[] = [
+  { id: "abertos", rotulo: "Abertos no período", grupo: "Entrada e saída (no período)", hoje: false,
+    campos: () => ({ data_base: "abertura" }) },
+  { id: "arquivados", rotulo: "Arquivados no período", grupo: "Entrada e saída (no período)", hoje: false,
+    campos: () => ({ data_base: "arquivamento" }) },
+  { id: "em_andamento", rotulo: "Em andamento", grupo: "Andamento (hoje)", hoje: true,
+    campos: () => ({ situacao: "em_andamento" }) },
+  { id: "em_transito", rotulo: "Em trânsito", grupo: "Andamento (hoje)", hoje: true,
+    campos: () => ({ situacao: "em_transito" }) },
+  { id: "parados", rotulo: "Parados", grupo: "Andamento (hoje)", hoje: true,
+    campos: (d) => ({ parado_ha_dias: d }) },
+  { id: "no_prazo", rotulo: "Arquivados no prazo", grupo: "Prazos — arquivados no período", hoje: false,
+    campos: () => ({ data_base: "arquivamento", prazo: "concluido_no_prazo" }) },
+  { id: "com_atraso", rotulo: "Arquivados com atraso", grupo: "Prazos — arquivados no período", hoje: false,
+    campos: () => ({ data_base: "arquivamento", prazo: "concluido_atrasado" }) },
+  { id: "dentro_do_prazo", rotulo: "Dentro do prazo", grupo: "Prazos — em aberto hoje", hoje: true,
+    campos: () => ({ prazo: "dentro_do_prazo" }) },
+  { id: "vencendo", rotulo: "Vencendo", grupo: "Prazos — em aberto hoje", hoje: true,
+    campos: () => ({ prazo: "vencendo" }) },
+  { id: "vencidos", rotulo: "Vencidos", grupo: "Prazos — em aberto hoje", hoje: true,
+    campos: () => ({ prazo: "atrasado" }) },
+];
+
+const DIAS_PARADO_PADRAO = 15;
+
+/** Qual visão a URL descreve. Sem nada específico, "abertos no período". */
+export function visaoDe(f: FiltroDaUrl): DefVisao {
+  const dias = f.dias_parado ?? DIAS_PARADO_PADRAO;
+  const igual = (v: DefVisao) => {
+    const c = v.campos(dias);
+    return (
+      (c.data_base ?? "abertura") === (f.data_base ?? "abertura") &&
+      c.situacao === f.situacao &&
+      (c.parado_ha_dias !== undefined) === (f.parado_ha_dias !== undefined) &&
+      c.prazo === f.prazo
+    );
+  };
+  return VISOES_PROCESSOS.find(igual) ?? VISOES_PROCESSOS[0];
+}
+
+/** A URL com a visão trocada — o recorte comum e o período ficam. */
+export function comVisao(f: FiltroDaUrl, id: VisaoProcessos): FiltroDaUrl {
+  const v = VISOES_PROCESSOS.find((x) => x.id === id) ?? VISOES_PROCESSOS[0];
+  const dias = f.dias_parado ?? DIAS_PARADO_PADRAO;
+  return {
+    ...recorteComum(f),
+    dias_parado: f.dias_parado,
+    ...v.campos(dias),
+    ...(id === "parados" ? { parado_ha_dias: f.parado_ha_dias ?? dias } : {}),
+  };
+}
+
+/** O que a lista pede ao servidor para a visão da URL: visão "de hoje" não
+ * leva período. */
+export function consultaDaLista(f: FiltroDaUrl): RelatorioFiltroInput {
+  const v = visaoDe(f);
+  const c = v.campos(f.dias_parado ?? DIAS_PARADO_PADRAO);
+  return {
+    ...recorteComum(f),
+    ...(v.hoje ? { desde: undefined, ate: undefined } : {}),
+    data_base: c.data_base === "arquivamento" ? "arquivamento" : "abertura",
+    situacao: c.situacao,
+    parado_ha_dias: v.id === "parados" ? (f.parado_ha_dias ?? c.parado_ha_dias) : undefined,
+    prazo: c.prazo,
+  };
+}

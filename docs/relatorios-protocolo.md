@@ -42,9 +42,24 @@ Com início e fim no filtro, Entrada e Saída mostram a diferença para o perío
 anterior de mesmo tamanho — **em números**, não em %: com base pequena a
 porcentagem engana ("+850%" para 19 processos).
 
-Cada número tem **"Ver lista"** (a lista que o produziu, com o mesmo recorte na
-URL) e **CSV**. O teste garante que o número da seção é o total dessa lista. A
-página inteira sai em PDF.
+As seções ficam em **três grupos, um por tela de destino**, com **um botão de
+lista por grupo** (antes eram 11 botões levando a só 3 telas):
+
+| Grupo | Subgrupos | Botão leva a |
+|---|---|---|
+| Processos | Entrada e saída no tempo, Entrada, Andamento, Saída, Prazos | lista de processos |
+| Tramitação | Gargalos por unidade | tramitação, pela data de chegada |
+| Assinaturas | Pedidos no período | assinaturas, pela data do pedido |
+
+Na lista de processos, o seletor **"Mostrar"** escolhe o recorte de cada número
+do grupo (abertos, arquivados, em andamento, em trânsito, parados, no prazo, com
+atraso, dentro do prazo, vencendo, vencidos). Cada opção é a mesma consulta que
+produziu o número: o backend garante que o número é o total dessa lista, e o
+frontend garante que cada opção pede esses mesmos parâmetros
+(`VISOES_PROCESSOS` em `frontend/lib/relatorios.ts`). Nas opções "de hoje" o
+período não entra na consulta, mas fica na URL e volta a valer ao trocar de
+opção. **CSV e PDF de lista ficam nas listas**; a página de relatórios sai
+inteira em PDF.
 
 ## Definições
 

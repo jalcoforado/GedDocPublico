@@ -10,12 +10,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { GerencialResposta } from "@/lib/api";
+import type { GerencialResposta, RelatorioFiltroInput } from "@/lib/api";
 import {
+  VISOES_PROCESSOS,
+  comVisao,
+  consultaDaLista,
   filtroDaUrl,
   filtroParaUrl,
   fmtDataHora,
   fmtDias,
+  visaoDe,
+  type VisaoProcessos,
 } from "@/lib/relatorios";
 
 const nav = { busca: "", replace: vi.fn() };
@@ -92,12 +97,15 @@ async function abrir(busca = "") {
   await screen.findByRole("heading", { name: "Entrada" });
 }
 
-/** Os parâmetros do link "Ver lista" dentro da seção. */
-function linkDaSecao(secao: string, indice = 0): { rota: string; params: URLSearchParams } {
-  const regiao = screen.getByRole("region", { name: secao });
-  const href = within(regiao).getAllByRole("link", { name: /Ver lista/ })[indice].getAttribute("href")!;
-  const [rota, qs = ""] = href.split("?");
-  return { rota, params: new URLSearchParams(qs) };
+/** Os links da página (todos os "Ver …"), por grupo. */
+function linksDoGrupo(grupo: string): { rota: string; params: URLSearchParams }[] {
+  const regiao = screen.getByRole("region", { name: grupo });
+  return within(regiao)
+    .queryAllByRole("link")
+    .map((a) => {
+      const [rota, qs = ""] = a.getAttribute("href")!.split("?");
+      return { rota, params: new URLSearchParams(qs) };
+    });
 }
 
 // A página traz a biblioteca de gráficos: o primeiro import é lento (7s numa
@@ -114,9 +122,12 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 const RECORTE = "desde=2026-10-01&ate=2026-10-31&id_unidade=3&modo_unidade=passou&id_assunto=9";
+const RECORTE_PARAMS = {
+  desde: "2026-10-01", ate: "2026-10-31", id_unidade: "3", modo_unidade: "passou", id_assunto: "9",
+};
 
-describe("página gerencial — o recorte vai da URL para a consulta e para os links", () => {
-  it("consulta com o recorte da URL e mostra os números de cada seção", async () => {
+describe("página gerencial — grupos por tela de destino, um botão por grupo", () => {
+  it("consulta com o recorte da URL e mostra os números", async () => {
     await abrir(RECORTE);
     expect(gerencialMock).toHaveBeenCalledWith({
       id_unidade: 3, modo_unidade: "passou", id_assunto: 9, id_tipo_processo: undefined,
@@ -124,59 +135,53 @@ describe("página gerencial — o recorte vai da URL para a consulta e para os l
     });
     expect(within(screen.getByRole("region", { name: "Entrada" })).getByText("142")).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Saída" })).getByText("18,3 dias")).toBeTruthy();
-    expect(within(screen.getByRole("region", { name: "Gargalos" })).getByText("Secretaria de Obras")).toBeTruthy();
-    expect(screen.getByText(/cada seção diz por qual data conta/)).toBeTruthy();
+    expect(
+      within(screen.getByRole("region", { name: "Gargalos por unidade" })).getByText("Secretaria de Obras"),
+    ).toBeTruthy();
   });
 
-  it("Entrada e Saída abrem a lista do mesmo período, cada uma pela sua data", async () => {
+  it("três grupos, um link cada — antes eram 11 botões para 3 telas", async () => {
     await abrir(RECORTE);
-    const entrada = linkDaSecao("Entrada");
-    expect(entrada.rota).toBe("/m/protocolo/relatorios/processos");
-    expect(Object.fromEntries(entrada.params)).toEqual({
-      desde: "2026-10-01", ate: "2026-10-31", id_unidade: "3", modo_unidade: "passou",
-      id_assunto: "9", data_base: "abertura",
-    });
-    expect(linkDaSecao("Saída").params.get("data_base")).toBe("arquivamento");
+    const processos = linksDoGrupo("Processos");
+    const tramitacao = linksDoGrupo("Tramitação");
+    const assinaturas = linksDoGrupo("Assinaturas");
+    expect([processos.length, tramitacao.length, assinaturas.length]).toEqual([1, 1, 1]);
+    // nenhum outro link na área dos números (o PDF da página fica no cabeçalho)
+    const main = document.body;
+    const todos = within(main).getAllByRole("link").map((a) => a.getAttribute("href") ?? "");
+    expect(todos.filter((h) => h.startsWith("/m/protocolo/relatorios/"))).toHaveLength(3);
+    // e nenhum CSV solto na página: exportar é na lista
+    expect(screen.queryByRole("link", { name: /CSV/ })).toBeNull();
   });
 
-  it("Andamento é foto de hoje: o link tira o período e leva a situação", async () => {
+  it("cada botão leva o recorte do filtro à sua tela", async () => {
     await abrir(RECORTE);
-    const emTransito = linkDaSecao("Andamento", 1);
-    expect(emTransito.params.get("situacao")).toBe("em_transito");
-    expect(emTransito.params.has("desde")).toBe(false);
-    expect(emTransito.params.has("ate")).toBe(false);
-    // unidade e assunto continuam valendo
-    expect(emTransito.params.get("id_unidade")).toBe("3");
-    const parados = linkDaSecao("Andamento", 2);
-    expect(parados.params.get("parado_ha_dias")).toBe("15");
+    const [processos] = linksDoGrupo("Processos");
+    expect(processos.rota).toBe("/m/protocolo/relatorios/processos");
+    // só o recorte: a lista abre em "abertos no período" e o Mostrar troca
+    expect(Object.fromEntries(processos.params)).toEqual(RECORTE_PARAMS);
+    const [tramitacao] = linksDoGrupo("Tramitação");
+    expect(tramitacao.rota).toBe("/m/protocolo/relatorios/tramitacao");
+    expect(Object.fromEntries(tramitacao.params)).toEqual({ ...RECORTE_PARAMS, data_base: "chegada" });
+    const [assinaturas] = linksDoGrupo("Assinaturas");
+    expect(assinaturas.rota).toBe("/m/protocolo/relatorios/assinaturas");
+    expect(Object.fromEntries(assinaturas.params)).toEqual({ ...RECORTE_PARAMS, data_base: "pedido" });
   });
 
-  it("Gargalos e Assinaturas abrem as suas listas pela data de entrada e de pedido", async () => {
+  it("Prazos: cinco cartões numa grade só; os sem prazo são ditos", async () => {
     await abrir(RECORTE);
-    const garg = linkDaSecao("Gargalos");
-    expect(garg.rota).toBe("/m/protocolo/relatorios/tramitacao");
-    expect(garg.params.get("data_base")).toBe("chegada");
-    const ass = linkDaSecao("Assinaturas");
-    expect(ass.rota).toBe("/m/protocolo/relatorios/assinaturas");
-    expect(ass.params.get("data_base")).toBe("pedido");
-    expect(ass.params.get("id_unidade")).toBe("3");
-  });
-});
-
-describe("página gerencial — prazos, tendência e comparação", () => {
-  it("Prazos: arquivados pelo período de arquivamento; em aberto sem período", async () => {
-    await abrir(RECORTE);
-    const vencidos = linkDaSecao("Prazos", 4);
-    expect(vencidos.params.get("prazo")).toBe("atrasado");
-    expect(vencidos.params.has("desde")).toBe(false);
-    const comAtraso = linkDaSecao("Prazos", 1);
-    expect(comAtraso.params.get("prazo")).toBe("concluido_atrasado");
-    expect(comAtraso.params.get("data_base")).toBe("arquivamento");
-    expect(comAtraso.params.get("desde")).toBe("2026-10-01");
     const regiao = screen.getByRole("region", { name: "Prazos" });
-    // 32 de 41 com prazo; os sem prazo são ditos, não escondidos
+    for (const rotulo of ["No prazo", "Com atraso", "Dentro do prazo", "Vencendo", "Vencidos"]) {
+      expect(within(regiao).getByText(rotulo)).toBeTruthy();
+    }
+    // 32 de 41 com prazo
     expect(within(regiao).getByText("78% dos arquivados com prazo")).toBeTruthy();
-    expect(within(regiao).getByText(/23 em aberto sem prazo de serviço/)).toBeTruthy();
+    expect(within(regiao).getByText(/0 arquivado\(s\) no período e 23 em aberto/)).toBeTruthy();
+    // todos os cartões na MESMA grade — é o que iguala a altura
+    const grades = new Set(
+      ["No prazo", "Vencidos"].map((r) => within(regiao).getByText(r).closest(".grid")),
+    );
+    expect(grades.size).toBe(1);
   });
 
   it("comparação em números, não em %", async () => {
@@ -187,14 +192,52 @@ describe("página gerencial — prazos, tendência e comparação", () => {
     expect(within(saida).getByText("-9 vs. 31/08–30/09/2026 (50)")).toBeTruthy();
   });
 
-  it("assunto leva à lista dele; gráfico tem a tabela para leitor de tela", async () => {
+  it("assuntos e gráfico: barras sem link; tabela do gráfico para leitor de tela", async () => {
     await abrir(RECORTE);
-    const link = screen.getByRole("link", { name: /Iluminação pública/ });
-    const params = new URLSearchParams(link.getAttribute("href")!.split("?")[1]);
-    expect(params.get("id_assunto")).toBe("9");
-    expect(params.get("data_base")).toBe("abertura");
+    expect(screen.getByText("Iluminação pública").closest("a")).toBeNull();
     const tabela = within(screen.getByRole("region", { name: "Entrada e saída no tempo" })).getByRole("table");
     expect(within(tabela).getAllByRole("row")).toHaveLength(3);
+  });
+});
+
+describe("lista de processos — o Mostrar é a consulta de cada número da página", () => {
+  // Os parâmetros que o backend usa para provar "número da página = total da
+  // lista" (`test_relatorios_protocolo_medidas.py`). Cada visão tem de pedir
+  // exatamente isto; mudar um lado sem o outro quebra a conferência.
+  const ESPERADO: Record<VisaoProcessos, Partial<RelatorioFiltroInput>> = {
+    abertos: { data_base: "abertura" },
+    arquivados: { data_base: "arquivamento" },
+    em_andamento: { data_base: "abertura", situacao: "em_andamento" },
+    em_transito: { data_base: "abertura", situacao: "em_transito" },
+    parados: { data_base: "abertura", parado_ha_dias: 15 },
+    no_prazo: { data_base: "arquivamento", prazo: "concluido_no_prazo" },
+    com_atraso: { data_base: "arquivamento", prazo: "concluido_atrasado" },
+    dentro_do_prazo: { data_base: "abertura", prazo: "dentro_do_prazo" },
+    vencendo: { data_base: "abertura", prazo: "vencendo" },
+    vencidos: { data_base: "abertura", prazo: "atrasado" },
+  };
+
+  it.each(VISOES_PROCESSOS.map((v) => [v.id, v.hoje] as const))(
+    "%s pede a consulta certa (hoje=%s)",
+    (id, hoje) => {
+      const url = comVisao(filtroDaUrl(new URLSearchParams(RECORTE)), id);
+      expect(visaoDe(url).id).toBe(id);
+      const c = consultaDaLista(url);
+      const { situacao, parado_ha_dias, prazo, data_base } = c;
+      expect(
+        Object.fromEntries(
+          Object.entries({ situacao, parado_ha_dias, prazo, data_base }).filter(([, v]) => v !== undefined),
+        ),
+      ).toEqual(ESPERADO[id]);
+      // "de hoje" ignora o período na consulta, mas a URL o guarda
+      expect(c.desde).toBe(hoje ? undefined : "2026-10-01");
+      expect(url.desde).toBe("2026-10-01");
+      expect(c.id_unidade).toBe(3);
+    },
+  );
+
+  it("sem nada na URL, a lista abre em abertos no período", () => {
+    expect(visaoDe(filtroDaUrl(new URLSearchParams(RECORTE))).id).toBe("abertos");
   });
 });
 
