@@ -141,9 +141,13 @@ function NumeroComLista({
   href: string;
 }) {
   return (
-    <div className="space-y-2">
-      <KpiCard label={label} value={value} hint={hint} intent={intent} />
-      <LinkLista href={href}>Ver lista</LinkLista>
+    // Coluna em flex com o cartão esticado: cartões da mesma linha ficam da
+    // mesma altura, e os "Ver lista" alinhados mesmo quando só um tem dica.
+    <div className="flex flex-col gap-2">
+      <KpiCard label={label} value={value} hint={hint} intent={intent} className="flex-1" />
+      <div>
+        <LinkLista href={href}>Ver lista</LinkLista>
+      </div>
     </div>
   );
 }
