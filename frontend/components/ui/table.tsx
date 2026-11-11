@@ -83,6 +83,46 @@ export function TR({ className, highlighted, onClickRow, onClick, ...props }: TR
   );
 }
 
+/** O que, clicado dentro da linha, faz a própria coisa — não abre a linha. */
+const INTERATIVO_NA_LINHA = "a, button, input, select, textarea, label, [role='menuitem'], [role='checkbox']";
+
+/**
+ * Linha inteira que abre um endereço — o mesmo do botão da linha ("Analisar",
+ * "Ver"). Antes só o número e o botão eram alvo; agora a linha toda é
+ * (pedido do Heitor, 2026-11-11). O botão e os links continuam lá, fazendo o
+ * deles: clique neles não chega à linha. Ctrl/⌘+clique abre em outra aba,
+ * e arrastar para selecionar texto não navega.
+ *
+ * Navegar = clicar no link da própria linha que aponta para `href` (o
+ * `<Link>` do Next faz a navegação no cliente). Sem router aqui: a tabela é
+ * primitivo usado em toda parte, inclusive fora do App Router.
+ */
+export function TRLink({
+  href,
+  ...props
+}: Omit<TRProps, "onClick" | "onClickRow"> & { href: string }) {
+  return (
+    <TR
+      {...props}
+      onClick={(e) => {
+        const linha = e.currentTarget;
+        const alvo = e.target as HTMLElement;
+        if (alvo !== linha && alvo.closest(INTERATIVO_NA_LINHA)) return;
+        if (window.getSelection()?.toString()) return;
+        if (e.metaKey || e.ctrlKey) {
+          window.open(href, "_blank", "noopener");
+          return;
+        }
+        const link = Array.from(linha.querySelectorAll("a")).find(
+          (a) => a.getAttribute("href") === href,
+        );
+        if (link) link.click();
+        else window.location.assign(href);
+      }}
+    />
+  );
+}
+
 interface THProps extends React.ThHTMLAttributes<HTMLTableCellElement> {
   /** Coluna ordenável. */
   sortable?: boolean;
