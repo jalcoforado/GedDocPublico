@@ -56,7 +56,12 @@ export function Popover({
   children,
   className,
 }: PopoverProps) {
-  const { refs, floatingStyles } = useFloating({
+  // `open` liga o `isPositioned`: até a primeira conta de posição o painel
+  // nasce em (0,0), no alto da tela, e com a animação de entrada aparecia ali
+  // por um instante antes de pular para baixo do campo. Fica invisível até
+  // estar no lugar.
+  const { refs, floatingStyles, isPositioned } = useFloating({
+    open,
     placement,
     strategy: "fixed",
     whileElementsMounted: autoUpdate,
@@ -116,7 +121,7 @@ export function Popover({
     <div
       ref={refs.setFloating}
       data-popover=""
-      style={floatingStyles}
+      style={isPositioned ? floatingStyles : { ...floatingStyles, visibility: "hidden" }}
       className={cn(
         dentroDeDialogo ? "z-popover" : "z-dropdown",
         "flex flex-col overflow-hidden rounded-dropdown border border-border bg-card shadow-dropdown origin-top animate-scale-in",

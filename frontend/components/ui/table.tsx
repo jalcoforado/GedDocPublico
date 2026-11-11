@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { useRouter } from "next/navigation";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
@@ -79,6 +80,38 @@ export function TR({ className, highlighted, onClickRow, onClick, ...props }: TR
         className,
       )}
       {...props}
+    />
+  );
+}
+
+/** O que, clicado dentro da linha, faz a própria coisa — não abre a linha. */
+const INTERATIVO_NA_LINHA = "a, button, input, select, textarea, label, [role='menuitem'], [role='checkbox']";
+
+/**
+ * Linha inteira que abre um endereço — o mesmo do botão da linha ("Analisar",
+ * "Ver"). Antes só o número e o botão eram alvo; agora a linha toda é
+ * (pedido do Heitor, 2026-11-11). O botão e os links continuam lá, fazendo o
+ * deles: clique neles não chega à linha. Ctrl/⌘+clique abre em outra aba,
+ * e arrastar para selecionar texto não navega.
+ */
+export function TRLink({
+  href,
+  ...props
+}: Omit<TRProps, "onClick" | "onClickRow"> & { href: string }) {
+  const router = useRouter();
+  return (
+    <TR
+      {...props}
+      onClick={(e) => {
+        const alvo = e.target as HTMLElement;
+        if (alvo !== e.currentTarget && alvo.closest(INTERATIVO_NA_LINHA)) return;
+        if (typeof window !== "undefined" && window.getSelection()?.toString()) return;
+        if (e.metaKey || e.ctrlKey) {
+          window.open(href, "_blank", "noopener");
+          return;
+        }
+        router.push(href);
+      }}
     />
   );
 }
