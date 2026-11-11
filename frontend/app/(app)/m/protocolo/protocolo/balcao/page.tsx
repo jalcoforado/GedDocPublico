@@ -142,7 +142,7 @@ function CartaoLateral({
 }) {
   return (
     <section className="rounded-card border border-border bg-card shadow-card">
-      <header className="flex items-start gap-3 border-b border-border px-5 py-4">
+      <header className="flex items-center gap-3 border-b border-border px-5 py-4">
         <span
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand/8 text-brand"
           aria-hidden="true"
