@@ -63,6 +63,11 @@ export function Popover({
   // acessibilidade desde o primeiro quadro).
   const { refs, floatingStyles, isPositioned } = useFloating({
     open,
+    // Posição por top/left, não por `transform`: a animação de entrada
+    // (scale-in) também anima `transform` e, enquanto rodava (~150 ms),
+    // apagava o translate — o painel abria no canto (0,0) da tela e só
+    // depois pulava para baixo do campo. Era o "aparece lá em cima primeiro".
+    transform: false,
     placement,
     strategy: "fixed",
     whileElementsMounted: autoUpdate,
