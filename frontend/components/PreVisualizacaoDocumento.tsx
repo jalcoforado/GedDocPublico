@@ -117,7 +117,7 @@ export function PreVisualizacaoDocumento({
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span>
             {pendentes.length === 1 ? "Um campo não foi preenchido" : `${pendentes.length} campos não foram preenchidos`}{" "}
-            e vai{pendentes.length === 1 ? "" : "ão"} sair assim no PDF: {pendentes.join(", ")}
+            e {pendentes.length === 1 ? "vai" : "vão"} sair assim no PDF: {pendentes.join(", ")}
           </span>
         </p>
       )}

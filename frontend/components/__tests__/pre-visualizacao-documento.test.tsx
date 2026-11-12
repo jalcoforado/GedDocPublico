@@ -55,7 +55,7 @@ describe("PreVisualizacaoDocumento", () => {
   it("acusa campo não preenchido, na folha e no aviso", async () => {
     montar("Ofício", "<p>Processo {{processo.numero}} de {{ requerente.nome }}</p>");
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "2 campos não foram preenchidos",
+      "2 campos não foram preenchidos e vão sair assim no PDF",
     );
     await waitFor(() => expect(folha().querySelectorAll("mark.campo-pendente")).toHaveLength(2));
   });
