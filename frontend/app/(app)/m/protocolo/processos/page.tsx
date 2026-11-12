@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonRow } from "@/components/ui/skeleton";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import type { EscopoProcesso } from "@/lib/api";
 import {
   api,
@@ -321,7 +321,7 @@ export default function ProcessosPage() {
               </TR>
             )}
             {processosQ.data?.items.map((p) => (
-              <TR key={p.id}>
+              <TRLink key={p.id} href={`/m/protocolo/processos/${p.id}`}>
                 <TD className="font-mono text-xs tabular-nums">
                   <div className="flex items-center gap-1">
                     <FavoritoStar processo={p} size="sm" />
@@ -410,7 +410,7 @@ export default function ProcessosPage() {
                     Abrir →
                   </Link>
                 </TD>
-              </TR>
+              </TRLink>
             ))}
           </TBody>
         </Table>

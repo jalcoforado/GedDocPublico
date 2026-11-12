@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { AcoesDoFiltro, RelatorioCabecalho, temFiltro } from "@/components/protocolo/RelatorioCabecalho";
 import { RankingEmBarras } from "@/components/protocolo/RankingEmBarras";
@@ -35,10 +35,10 @@ import {
   tramitacaoPdfUrl,
   type RelatorioFiltroInput,
   type TramitacaoEtapa,
-  type TramitacaoPorUnidade,
   type TramitacaoProcesso,
 } from "@/lib/api";
 import { useFiltroNaUrl } from "@/lib/filtro-na-url";
+import { tempoPorUnidade } from "@/lib/tempo-por-unidade";
 
 function fmtDateTime(s: string | null) {
   if (!s) return "—";
@@ -98,6 +98,9 @@ export default function RelatorioTramitacaoPage() {
     queryKey: ["relatorio-tramitacao", applied],
     queryFn: () => api.relatorios.tramitacao(applied),
   });
+  const porUnidade = useMemo(() => tempoPorUnidade(relQ.data?.processos ?? []), [relQ.data]);
+  // Topo só quando há tempo de verdade: "Protocolo Geral — 0 min" não responde nada.
+  const topo = porUnidade[0] && porUnidade[0].medio > 0 ? porUnidade[0] : undefined;
 
   return (
     <div className="space-y-4">
@@ -234,12 +237,8 @@ export default function RelatorioTramitacaoPage() {
             />
             <KpiCard
               label="Onde mais demora"
-              value={maisLenta(relQ.data.por_unidade)?.unidade ?? "—"}
-              hint={
-                maisLenta(relQ.data.por_unidade)
-                  ? `${fmtMin(maisLenta(relQ.data.por_unidade)!.minutos_medio)} em média por passagem`
-                  : undefined
-              }
+              value={topo ? topo.unidade : "—"}
+              hint={topo ? `${fmtMin(topo.medio)} em média por passagem` : "Sem tempo registrado"}
               icon={Hourglass}
               intent="warning"
             />
@@ -250,35 +249,34 @@ export default function RelatorioTramitacaoPage() {
               <CardHeader>
                 <CardTitle>Onde o processo para?</CardTitle>
                 <CardDescription>
-                  Unidades pelo tempo médio que um processo fica nelas. Em vermelho, as que
-                  estouraram prazo.
+                  Unidades pelo tempo médio que um processo fica nelas, contando quem está lá
+                  agora. Em vermelho, as que estouraram prazo.
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <RankingEmBarras
                   rotuloDoValor="tempo médio por passagem"
                   vazio={<EmptyState icon={Inbox} title="Sem dados no recorte" className="p-6" />}
-                  itens={[...relQ.data.por_unidade]
-                    .sort((a, b) => b.minutos_medio - a.minutos_medio)
-                    .map((u, i) => ({
-                      chave: `${u.id_unidade ?? "null"}-${i}`,
-                      rotulo: u.unidade ?? "—",
-                      valor: u.minutos_medio,
-                      valorTexto: fmtMin(Math.round(u.minutos_medio)),
-                      alerta: u.qtd_atrasos > 0,
-                      detalhe: (
-                        <>
-                          {u.qtd_passagens} {u.qtd_passagens === 1 ? "passagem" : "passagens"} ·{" "}
-                          {fmtMin(u.minutos_total)} no total
-                          {u.qtd_atrasos > 0 && (
-                            <span className="font-semibold text-danger-soft-foreground">
-                              {" "}
-                              · {u.qtd_atrasos} {u.qtd_atrasos === 1 ? "atraso" : "atrasos"}
-                            </span>
-                          )}
-                        </>
-                      ),
-                    }))}
+                  itens={porUnidade.map((u) => ({
+                    chave: u.chave,
+                    rotulo: u.unidade,
+                    valor: u.medio,
+                    valorTexto: fmtMin(u.medio),
+                    alerta: u.atrasos > 0,
+                    detalhe: (
+                      <>
+                        {u.passagens} {u.passagens === 1 ? "passagem" : "passagens"}
+                        {u.paradosAgora > 0 &&
+                          ` · ${u.paradosAgora} ${u.paradosAgora === 1 ? "parado" : "parados"} aqui agora`}
+                        {u.atrasos > 0 && (
+                          <span className="font-semibold text-danger-soft-foreground">
+                            {" "}
+                            · {u.atrasos} {u.atrasos === 1 ? "atraso" : "atrasos"}
+                          </span>
+                        )}
+                      </>
+                    ),
+                  }))}
                 />
               </CardContent>
             </Card>
@@ -451,13 +449,5 @@ function EtapasTimeline({ etapas }: { etapas: TramitacaoEtapa[] }) {
         </div>
       ))}
     </div>
-  );
-}
-
-/** A unidade de maior tempo médio por passagem (o topo do ranking). */
-function maisLenta(us: TramitacaoPorUnidade[]): TramitacaoPorUnidade | undefined {
-  return us.reduce<TramitacaoPorUnidade | undefined>(
-    (m, u) => (!m || u.minutos_medio > m.minutos_medio ? u : m),
-    undefined,
   );
 }
