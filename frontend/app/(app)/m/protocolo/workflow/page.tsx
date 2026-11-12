@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonRow } from "@/components/ui/skeleton";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { workflowApi } from "@/lib/api";
 
 function fmtDate(s: string | null) {
@@ -94,7 +94,7 @@ export default function WorkflowListPage() {
           {q.isLoading &&
             Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={6} />)}
           {q.data?.map((w) => (
-            <TR key={w.id}>
+            <TRLink key={w.id} href={`/m/protocolo/workflow/${w.id}`}>
               <TD className="font-mono text-xs tabular-nums">{w.id}</TD>
               <TD>
                 <Link
@@ -111,7 +111,7 @@ export default function WorkflowListPage() {
                 <BadgeAtivo ativo={w.ativo} />
               </TD>
               <TD className="text-xs tabular-nums">{fmtDate(w.criado_em)}</TD>
-            </TR>
+            </TRLink>
           ))}
         </TBody>
       </Table>
