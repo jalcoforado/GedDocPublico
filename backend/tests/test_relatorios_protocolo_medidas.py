@@ -539,7 +539,7 @@ async def test_prazo_em_sql_igual_a_calcular_prazo(cen, admin_engine):
 
 
 @pytest.mark.asyncio
-async def test_prazos_tendencia_e_comparacao_batem_com_as_listas(cen, admin_engine):
+async def test_prazos_e_tendencia_batem_com_as_listas(cen, admin_engine):
     outubro = {"desde": "2026-10-01", "ate": "2026-10-31"}
     g = (await _get("gerencial.json", **outubro)).json()
 
@@ -565,11 +565,6 @@ async def test_prazos_tendencia_e_comparacao_batem_com_as_listas(cen, admin_engi
     assert [p["inicio"] for p in tend["pontos"]][-1] == "2026-10-26"
     assert len(tend["pontos"]) == 5
 
-    # Comparação: setembro (mesmo tamanho, 31 dias → 31/08 a 30/09)
-    comp = g["comparacao"]
-    assert (comp["desde"], comp["ate"]) == ("2026-08-31", "2026-09-30")
-    assert comp["abertos"] == await total(desde="2026-08-31", ate="2026-09-30") == 0
-    assert (await _get("gerencial.json")).json()["comparacao"] is None
-
-    # Assuntos: o cenário tem um só
-    assert [(a["assunto"], a["count"]) for a in g["entrada"]["top_assuntos"]] == [("Pedido", 6)]
+    # comparação com o período anterior e principais assuntos saíram da
+    # página (decisão de 2026-11-11); assuntos viraram quebra da lista
+    assert "comparacao" not in g and "top_assuntos" not in g["entrada"]

@@ -11,16 +11,21 @@
  * ou navegador fora do fuso.
  */
 import type {
+  DocumentacaoFiltroInput,
+  FiltroOrigemRelatorio,
+  FiltroSigiloRelatorio,
   ModoUnidadeRelatorio,
   RelatorioFiltroInput,
   SituacaoRelatorio,
   StatusPrazoRelatorio,
+  VisaoDocumentacao,
 } from "@/lib/api";
 
 export const ROTA_RELATORIOS = "/m/protocolo/relatorios";
 export const ROTA_LISTA_PROCESSOS = "/m/protocolo/relatorios/processos";
 export const ROTA_LISTA_TRAMITACAO = "/m/protocolo/relatorios/tramitacao";
 export const ROTA_LISTA_ASSINATURAS = "/m/protocolo/relatorios/assinaturas";
+export const ROTA_LISTA_DOCUMENTACAO = "/m/protocolo/relatorios/documentacao";
 
 export const ROTULO_MODO_UNIDADE: Record<ModoUnidadeRelatorio, string> = {
   envolvida: "dona ou onde está agora",
@@ -59,6 +64,8 @@ export interface FiltroDaUrl extends Omit<RelatorioFiltroInput, "data_base"> {
    * (assinaturas). */
   data_base?: DataBaseRelatorio;
   dias_parado?: number;
+  /** Lista de documentação: qual número dela está aberto. */
+  visao?: VisaoDocumentacao;
 }
 
 function inteiro(v: string | null): number | undefined {
@@ -74,11 +81,15 @@ export function filtroDaUrl(sp: URLSearchParams): FiltroDaUrl {
   const desde = sp.get("desde");
   const ate = sp.get("ate");
   const dataBase = sp.get("data_base");
+  const sigilo = sp.get("sigilo");
+  const origem = sp.get("origem");
+  const visao = sp.get("visao");
   return {
     id_unidade: inteiro(sp.get("id_unidade")),
     modo_unidade: modo && MODOS.includes(modo) ? modo : undefined,
     id_assunto: inteiro(sp.get("id_assunto")),
     id_tipo_processo: inteiro(sp.get("id_tipo_processo")),
+    id_servico: inteiro(sp.get("id_servico")),
     desde: desde && DIA.test(desde) ? desde : undefined,
     ate: ate && DIA.test(ate) ? ate : undefined,
     data_base: (DATAS_BASE as string[]).includes(dataBase ?? "")
@@ -88,6 +99,10 @@ export function filtroDaUrl(sp: URLSearchParams): FiltroDaUrl {
     parado_ha_dias: inteiro(sp.get("parado_ha_dias")),
     prazo: prazo && PRAZOS.includes(prazo) ? prazo : undefined,
     dias_parado: inteiro(sp.get("dias_parado")),
+    sigilo: sigilo === "ostensivo" || sigilo === "sigiloso" ? sigilo : undefined,
+    origem: origem === "interna" || origem === "externa" ? origem : undefined,
+    com_atraso: sp.get("com_atraso") === "true" || undefined,
+    visao: VISOES_DOCUMENTACAO.some((v) => v.id === visao) ? (visao as VisaoDocumentacao) : undefined,
   };
 }
 
@@ -99,6 +114,7 @@ export function filtroParaUrl(f: FiltroDaUrl): string {
     ["modo_unidade", f.id_unidade ? f.modo_unidade : undefined],
     ["id_assunto", f.id_assunto],
     ["id_tipo_processo", f.id_tipo_processo],
+    ["id_servico", f.id_servico],
     ["desde", f.desde],
     ["ate", f.ate],
     ["data_base", f.data_base],
@@ -106,6 +122,10 @@ export function filtroParaUrl(f: FiltroDaUrl): string {
     ["parado_ha_dias", f.parado_ha_dias],
     ["prazo", f.prazo],
     ["dias_parado", f.dias_parado],
+    ["sigilo", f.sigilo],
+    ["origem", f.origem],
+    ["com_atraso", f.com_atraso ? "true" : undefined],
+    ["visao", f.visao],
   ];
   for (const [k, v] of campos) if (v !== undefined && v !== "") sp.set(k, String(v));
   const s = sp.toString();
@@ -119,10 +139,20 @@ export function recorteComum(f: FiltroDaUrl): FiltroDaUrl {
     modo_unidade: f.modo_unidade,
     id_assunto: f.id_assunto,
     id_tipo_processo: f.id_tipo_processo,
+    id_servico: f.id_servico,
     desde: f.desde,
     ate: f.ate,
   };
 }
+
+export const ROTULO_SIGILO: Record<FiltroSigiloRelatorio, string> = {
+  ostensivo: "Só ostensivos (públicos)",
+  sigiloso: "Só sigilosos",
+};
+export const ROTULO_ORIGEM: Record<FiltroOrigemRelatorio, string> = {
+  interna: "Só internos",
+  externa: "Só externos",
+};
 
 /** `2026-10-10T23:30:00` → `10/10/2026 23:30`. */
 export function fmtDataHora(s: string | null | undefined): string {
@@ -235,6 +265,9 @@ export function comVisao(f: FiltroDaUrl, id: VisaoProcessos): FiltroDaUrl {
   return {
     ...recorteComum(f),
     dias_parado: f.dias_parado,
+    // os filtros próprios da lista ficam ao trocar de visão
+    sigilo: f.sigilo,
+    origem: f.origem,
     ...v.campos(dias),
     ...(id === "parados" ? { parado_ha_dias: f.parado_ha_dias ?? dias } : {}),
   };
@@ -252,5 +285,53 @@ export function consultaDaLista(f: FiltroDaUrl): RelatorioFiltroInput {
     situacao: c.situacao,
     parado_ha_dias: v.id === "parados" ? (f.parado_ha_dias ?? c.parado_ha_dias) : undefined,
     prazo: c.prazo,
+    sigilo: f.sigilo,
+    origem: f.origem,
+  };
+}
+
+/**
+ * As visões da lista de documentação — o "Mostrar" dela. Cada uma é a lista
+ * de um número do grupo Documentação da página gerencial; o backend conta a
+ * mesma consulta (`relatorios_documentacao`). `hoje`: sem período.
+ */
+interface DefVisaoDoc {
+  id: VisaoDocumentacao;
+  rotulo: string;
+  grupo: string;
+  hoje: boolean;
+  /** Por qual data o período conta. */
+  data: string;
+}
+
+export const VISOES_DOCUMENTACAO: DefVisaoDoc[] = [
+  { id: "documentos", rotulo: "Todos que exigem documentos", grupo: "Documentos exigidos (abertos no período)",
+    hoje: false, data: "abertura" },
+  { id: "doc_pendente", rotulo: "Pendentes", grupo: "Documentos exigidos (abertos no período)",
+    hoje: false, data: "abertura" },
+  { id: "doc_parcial", rotulo: "Parciais", grupo: "Documentos exigidos (abertos no período)",
+    hoje: false, data: "abertura" },
+  { id: "doc_completo", rotulo: "Completos", grupo: "Documentos exigidos (abertos no período)",
+    hoje: false, data: "abertura" },
+  { id: "compl_pedida", rotulo: "Complementação pedida no período", grupo: "Complementação",
+    hoje: false, data: "pedido" },
+  { id: "compl_aberta", rotulo: "Aguardando o cidadão (hoje)", grupo: "Complementação",
+    hoje: true, data: "" },
+  { id: "compl_respondida", rotulo: "Respondida no período", grupo: "Complementação",
+    hoje: false, data: "resposta do cidadão" },
+];
+
+export function visaoDocDe(f: FiltroDaUrl): DefVisaoDoc {
+  return VISOES_DOCUMENTACAO.find((v) => v.id === f.visao) ?? VISOES_DOCUMENTACAO[0];
+}
+
+/** O que a lista de documentação pede ao servidor: visão "de hoje" sem período. */
+export function consultaDaDocumentacao(f: FiltroDaUrl): DocumentacaoFiltroInput {
+  const v = visaoDocDe(f);
+  return {
+    ...recorteComum(f),
+    data_base: undefined,
+    ...(v.hoje ? { desde: undefined, ate: undefined } : {}),
+    visao: v.id,
   };
 }

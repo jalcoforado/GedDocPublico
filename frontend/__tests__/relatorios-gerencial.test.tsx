@@ -1,6 +1,6 @@
 /**
- * Página gerencial de relatórios (SI-34). Uma tela, filtro no topo, cinco
- * seções; cada número leva à lista que o produziu, com o MESMO recorte. O
+ * Página gerencial de relatórios (SI-34). Uma tela, filtro no topo, quatro
+ * grupos; cada número leva à lista que o produziu, com o MESMO recorte. O
  * backend garante que o número da seção é o total dessa lista
  * (`tests/test_relatorios_protocolo_medidas.py`); aqui se garante que o link
  * da seção carrega o recorte certo — sem isso a lista abriria com outro
@@ -12,14 +12,17 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import type { GerencialResposta, RelatorioFiltroInput } from "@/lib/api";
 import {
+  VISOES_DOCUMENTACAO,
   VISOES_PROCESSOS,
   comVisao,
+  consultaDaDocumentacao,
   consultaDaLista,
   filtroDaUrl,
   filtroParaUrl,
   fmtDataHora,
   fmtDias,
   visaoDe,
+  visaoDocDe,
   type VisaoProcessos,
 } from "@/lib/relatorios";
 
@@ -39,7 +42,11 @@ vi.mock("@/lib/api", async () => {
     ...actual,
     api: {
       ...actual.api,
-      relatorios: { ...actual.api.relatorios, gerencial: (f: unknown) => gerencialMock(f) },
+      relatorios: {
+        ...actual.api.relatorios,
+        gerencial: (f: unknown) => gerencialMock(f),
+        servicos: () => Promise.resolve([{ id: 5, nome: "Alvará", ativo: true }]),
+      },
       tiposProcesso: { ...actual.api.tiposProcesso, list: () => Promise.resolve([]) },
       assuntos: { ...actual.api.assuntos, list: () => Promise.resolve({ items: [], total: 0 }) },
     },
@@ -56,10 +63,6 @@ function resposta(): GerencialResposta {
         { canal: "balcao", rotulo: "Balcão", count: 100 },
         { canal: null, rotulo: "Não informado", count: 42 },
       ],
-      top_assuntos: [
-        { id_assunto: 9, assunto: "Iluminação pública", count: 40 },
-        { id_assunto: 4, assunto: "Poda de árvore", count: 20 },
-      ],
     },
     andamento: { em_andamento: 88, em_transito: 9, parados: 12, dias_parado: 15 },
     saida: { arquivados: 41, dias_medio_ate_arquivar: 18.25 },
@@ -74,7 +77,6 @@ function resposta(): GerencialResposta {
         { inicio: "2026-10-05", abertos: 40, arquivados: 12 },
       ],
     },
-    comparacao: { desde: "2026-08-31", ate: "2026-09-30", abertos: 125, arquivados: 50 },
     gargalos: {
       unidades: [
         { id_unidade: 3, unidade: "Secretaria de Obras", chegadas: 20, com_prazo: 10, atrasos: 7, dias_medio: 4.5 },
@@ -82,6 +84,10 @@ function resposta(): GerencialResposta {
       cortado: false,
     },
     assinaturas: { total: 30, pendentes: 6, concluidas: 22, canceladas: 2, minutos_medio_conclusao: 2880 },
+    documentacao: {
+      pendentes: 5, parciais: 3, completos: 12, sem_documentos_exigidos: 122,
+      complementacao_pedida: 7, aguardando_cidadao: 4, complementacao_respondida: 2, dias_medio_resposta: 3.5,
+    },
   };
 }
 
@@ -140,16 +146,16 @@ describe("página gerencial — grupos por tela de destino, um botão por grupo"
     ).toBeTruthy();
   });
 
-  it("três grupos, um link cada — antes eram 11 botões para 3 telas", async () => {
+  it("quatro grupos, um link cada, cada um para uma tela diferente", async () => {
     await abrir(RECORTE);
-    const processos = linksDoGrupo("Processos");
-    const tramitacao = linksDoGrupo("Tramitação");
-    const assinaturas = linksDoGrupo("Assinaturas");
-    expect([processos.length, tramitacao.length, assinaturas.length]).toEqual([1, 1, 1]);
+    const grupos = ["Processos", "Tramitação", "Documentação", "Assinaturas"];
+    expect(grupos.map((g) => linksDoGrupo(g).length)).toEqual([1, 1, 1, 1]);
     // nenhum outro link na área dos números (o PDF da página fica no cabeçalho)
     const main = document.body;
     const todos = within(main).getAllByRole("link").map((a) => a.getAttribute("href") ?? "");
-    expect(todos.filter((h) => h.startsWith("/m/protocolo/relatorios/"))).toHaveLength(3);
+    const telas = todos.filter((h) => h.startsWith("/m/protocolo/relatorios/")).map((h) => h.split("?")[0]);
+    expect(new Set(telas).size).toBe(4);
+    expect(telas).toHaveLength(4);
     // e nenhum CSV solto na página: exportar é na lista
     expect(screen.queryByRole("link", { name: /CSV/ })).toBeNull();
   });
@@ -166,6 +172,31 @@ describe("página gerencial — grupos por tela de destino, um botão por grupo"
     const [assinaturas] = linksDoGrupo("Assinaturas");
     expect(assinaturas.rota).toBe("/m/protocolo/relatorios/assinaturas");
     expect(Object.fromEntries(assinaturas.params)).toEqual({ ...RECORTE_PARAMS, data_base: "pedido" });
+    const [documentacao] = linksDoGrupo("Documentação");
+    expect(documentacao.rota).toBe("/m/protocolo/relatorios/documentacao");
+    expect(Object.fromEntries(documentacao.params)).toEqual(RECORTE_PARAMS);
+  });
+
+  it("o serviço é filtro do recorte comum e vai para todas as telas", async () => {
+    await abrir(`${RECORTE}&id_servico=5`);
+    expect(gerencialMock).toHaveBeenCalledWith(expect.objectContaining({ id_servico: 5 }));
+    for (const g of ["Processos", "Tramitação", "Documentação", "Assinaturas"]) {
+      expect(linksDoGrupo(g)[0].params.get("id_servico")).toBe("5");
+    }
+  });
+
+  it("Documentação: documentos exigidos e complementação, cada número dizendo sua data", async () => {
+    await abrir(RECORTE);
+    const docs = screen.getByRole("region", { name: "Documentos exigidos" });
+    for (const [rotulo, n] of [["Pendentes", "5"], ["Parciais", "3"], ["Completos", "12"]]) {
+      const card = within(docs).getByText(rotulo).closest(".rounded-card");
+      expect(card?.querySelector("[data-testid=kpi-valor]")?.textContent).toBe(n);
+    }
+    expect(within(docs).getByText(/122 aberto\(s\) no período/)).toBeTruthy();
+    const compl = screen.getByRole("region", { name: "Complementação" });
+    expect(within(compl).getByText("pela data do pedido")).toBeTruthy();
+    expect(within(compl).getByText("situação de hoje")).toBeTruthy();
+    expect(within(compl).getByText("3,5 dias")).toBeTruthy();
   });
 
   it("Prazos: cinco cartões numa grade só; os sem prazo são ditos", async () => {
@@ -184,19 +215,60 @@ describe("página gerencial — grupos por tela de destino, um botão por grupo"
     expect(grades.size).toBe(1);
   });
 
-  it("comparação em números, não em %", async () => {
+  it("sem comparação com o período anterior nem principais assuntos (decisão de 2026-11-11)", async () => {
     await abrir(RECORTE);
-    const entrada = screen.getByRole("region", { name: "Entrada" });
-    expect(within(entrada).getByText("+17 vs. 31/08–30/09/2026 (125)")).toBeTruthy();
-    const saida = screen.getByRole("region", { name: "Saída" });
-    expect(within(saida).getByText("-9 vs. 31/08–30/09/2026 (50)")).toBeTruthy();
+    expect(screen.queryByText(/ vs\. /)).toBeNull();
+    // os assuntos viraram o "Agrupar por" da lista de processos
+    expect(screen.queryByText("Principais assuntos")).toBeNull();
   });
 
-  it("assuntos e gráfico: barras sem link; tabela do gráfico para leitor de tela", async () => {
+  it("gráfico com tabela para leitor de tela", async () => {
     await abrir(RECORTE);
-    expect(screen.getByText("Iluminação pública").closest("a")).toBeNull();
     const tabela = within(screen.getByRole("region", { name: "Entrada e saída no tempo" })).getByRole("table");
     expect(within(tabela).getAllByRole("row")).toHaveLength(3);
+  });
+});
+
+describe("filtros próprios das listas, na URL", () => {
+  it("serviço, sigilo, origem e atraso vão e voltam pela URL; valor estranho é ignorado", () => {
+    const f = filtroDaUrl(
+      new URLSearchParams("id_servico=5&sigilo=sigiloso&origem=externa&com_atraso=true&visao=doc_parcial"),
+    );
+    expect(f).toMatchObject({
+      id_servico: 5, sigilo: "sigiloso", origem: "externa", com_atraso: true, visao: "doc_parcial",
+    });
+    expect(filtroDaUrl(new URLSearchParams(filtroParaUrl(f).slice(1)))).toEqual(f);
+    const estranho = filtroDaUrl(new URLSearchParams("sigilo=secreto&origem=x&com_atraso=1&visao=tudo"));
+    expect([estranho.sigilo, estranho.origem, estranho.com_atraso, estranho.visao]).toEqual([
+      undefined, undefined, undefined, undefined,
+    ]);
+  });
+
+  it("trocar o Mostrar mantém sigilo e origem; a consulta os leva", () => {
+    const f = filtroDaUrl(new URLSearchParams(`${RECORTE}&sigilo=sigiloso&origem=interna`));
+    const vencidos = comVisao(f, "vencidos");
+    expect([vencidos.sigilo, vencidos.origem]).toEqual(["sigiloso", "interna"]);
+    expect(consultaDaLista(vencidos)).toMatchObject({ sigilo: "sigiloso", origem: "interna", prazo: "atrasado" });
+  });
+});
+
+describe("lista de documentação — o Mostrar é a consulta de cada número do grupo", () => {
+  it.each(VISOES_DOCUMENTACAO.map((v) => [v.id, v.hoje] as const))("%s (hoje=%s)", (id, hoje) => {
+    const f = { ...filtroDaUrl(new URLSearchParams(RECORTE)), visao: id };
+    expect(visaoDocDe(f).id).toBe(id);
+    const c = consultaDaDocumentacao(f);
+    expect(c.visao).toBe(id);
+    expect(c.desde).toBe(hoje ? undefined : "2026-10-01");
+    expect(c.id_unidade).toBe(3);
+    expect(c.data_base).toBeUndefined();
+  });
+
+  it("só \"aguardando o cidadão\" é situação de hoje", () => {
+    expect(VISOES_DOCUMENTACAO.filter((v) => v.hoje).map((v) => v.id)).toEqual(["compl_aberta"]);
+  });
+
+  it("sem visão na URL, abre em todos os que exigem documentos", () => {
+    expect(visaoDocDe(filtroDaUrl(new URLSearchParams(RECORTE))).id).toBe("documentos");
   });
 });
 

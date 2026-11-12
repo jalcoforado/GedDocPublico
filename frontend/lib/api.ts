@@ -687,6 +687,7 @@ export interface RelatorioFiltroInput {
   modo_unidade?: ModoUnidadeRelatorio;
   id_assunto?: number;
   id_tipo_processo?: number;
+  id_servico?: number;
   /** Dia LOCAL (Brasília), `AAAA-MM-DD`, inclusive. */
   desde?: string;
   ate?: string;
@@ -696,8 +697,16 @@ export interface RelatorioFiltroInput {
   situacao?: SituacaoRelatorio;
   parado_ha_dias?: number;
   prazo?: StatusPrazoRelatorio;
+  /** Lista de processos: o critério dos cartões Sigilosos e Externos. */
+  sigilo?: FiltroSigiloRelatorio;
+  origem?: FiltroOrigemRelatorio;
+  /** Tramitação: só processos com alguma etapa atrasada. */
+  com_atraso?: boolean;
   max_rows?: number;
 }
+
+export type FiltroSigiloRelatorio = "ostensivo" | "sigiloso";
+export type FiltroOrigemRelatorio = "interna" | "externa";
 
 export interface RelatorioTotais {
   total: number;
@@ -741,6 +750,8 @@ export interface RelatorioResposta {
   totais: RelatorioTotais;
   por_tipo_processo: RelatorioBreakdownItem[];
   por_unidade_proprietaria: RelatorioBreakdownItem[];
+  por_assunto: RelatorioBreakdownItem[];
+  por_servico: RelatorioBreakdownItem[];
   processos: RelatorioProcessoRow[];
   /** A lista tem teto; os totais, não. */
   cortado: boolean;
@@ -806,6 +817,7 @@ export interface AssinaturasFiltroInput {
   modo_unidade?: ModoUnidadeRelatorio;
   id_assunto?: number;
   id_tipo_processo?: number;
+  id_servico?: number;
   /** Dia LOCAL, `AAAA-MM-DD`, pela data do pedido ou da conclusão. */
   desde?: string;
   ate?: string;
@@ -875,6 +887,7 @@ export interface GerencialFiltroInput {
   modo_unidade?: ModoUnidadeRelatorio;
   id_assunto?: number;
   id_tipo_processo?: number;
+  id_servico?: number;
   desde?: string;
   ate?: string;
   dias_parado?: number;
@@ -894,7 +907,6 @@ export interface GerencialResposta {
   entrada: {
     abertos: number;
     por_canal: { canal: string | null; rotulo: string; count: number }[];
-    top_assuntos: { id_assunto: number; assunto: string | null; count: number }[];
   };
   andamento: { em_andamento: number; em_transito: number; parados: number; dias_parado: number };
   saida: { arquivados: number; dias_medio_ate_arquivar: number | null };
@@ -914,8 +926,6 @@ export interface GerencialResposta {
     ate: string;
     pontos: { inicio: string; abertos: number; arquivados: number }[];
   };
-  /** Mesmo recorte no período anterior de mesmo tamanho; só com início e fim. */
-  comparacao: { desde: string; ate: string; abertos: number; arquivados: number } | null;
   gargalos: {
     unidades: {
       id_unidade: number | null;
@@ -929,6 +939,64 @@ export interface GerencialResposta {
     cortado: boolean;
   };
   assinaturas: AssinaturasTotais;
+  /** Cada número é o total de uma visão de `/relatorios/documentacao`. */
+  documentacao: {
+    /** Abertos no período cujo serviço exige documentos; situação de hoje. */
+    pendentes: number;
+    parciais: number;
+    completos: number;
+    sem_documentos_exigidos: number;
+    /** Processos: pedido no período / aguardando hoje / respondido no período. */
+    complementacao_pedida: number;
+    aguardando_cidadao: number;
+    complementacao_respondida: number;
+    dias_medio_resposta: number | null;
+  };
+}
+
+/** Uma visão = a lista de um número do grupo Documentação. */
+export type VisaoDocumentacao =
+  | "documentos"
+  | "doc_pendente"
+  | "doc_parcial"
+  | "doc_completo"
+  | "compl_pedida"
+  | "compl_aberta"
+  | "compl_respondida";
+
+export interface DocumentacaoFiltroInput extends RelatorioFiltroInput {
+  visao?: VisaoDocumentacao;
+}
+
+export interface DocumentacaoProcessoRow {
+  id: number;
+  numero_processo: string;
+  /** Hora de Brasília, sem fuso. */
+  data_hora_abertura: string;
+  servico: string | null;
+  status_documental: StatusDocumental;
+  obrigatorios_total: number;
+  obrigatorios_enviados: number;
+  /** O pedido de complementação mais recente do processo. */
+  complementacao_status: "aberta" | "respondida" | "cancelada" | null;
+  complementacao_pedida_em: string | null;
+  complementacao_respondida_em: string | null;
+  local_atual: string | null;
+  nivel_sigilo: NivelSigilo;
+}
+
+export interface RelatorioDocumentacaoResposta {
+  visao: VisaoDocumentacao;
+  descricao_filtros: string[];
+  totais: {
+    total: number;
+    pendentes: number;
+    parciais: number;
+    completos: number;
+    aguardando_cidadao: number;
+  };
+  processos: DocumentacaoProcessoRow[];
+  cortado: boolean;
 }
 
 // Fase 7 — Jobs assíncronos
@@ -1270,14 +1338,36 @@ function relatorioQs(f: RelatorioFiltroInput): string {
     modo_unidade: f.id_unidade ? f.modo_unidade : undefined,
     id_assunto: f.id_assunto,
     id_tipo_processo: f.id_tipo_processo,
+    id_servico: f.id_servico,
     desde: f.desde,
     ate: f.ate,
     data_base: f.data_base,
     situacao: f.situacao,
     parado_ha_dias: f.parado_ha_dias,
     prazo: f.prazo,
+    sigilo: f.sigilo,
+    origem: f.origem,
+    com_atraso: f.com_atraso || undefined,
     max_rows: f.max_rows,
   });
+}
+
+function documentacaoQs(f: DocumentacaoFiltroInput): string {
+  return qs({
+    id_unidade: f.id_unidade,
+    modo_unidade: f.id_unidade ? f.modo_unidade : undefined,
+    id_assunto: f.id_assunto,
+    id_tipo_processo: f.id_tipo_processo,
+    id_servico: f.id_servico,
+    desde: f.desde,
+    ate: f.ate,
+    visao: f.visao,
+    max_rows: f.max_rows,
+  });
+}
+
+export function documentacaoCsvUrl(f: DocumentacaoFiltroInput): string {
+  return `${BROWSER_API_URL}/relatorios/documentacao.csv${documentacaoQs(f)}`;
 }
 
 function gerencialQs(f: GerencialFiltroInput): string {
@@ -1286,6 +1376,7 @@ function gerencialQs(f: GerencialFiltroInput): string {
     modo_unidade: f.id_unidade ? f.modo_unidade : undefined,
     id_assunto: f.id_assunto,
     id_tipo_processo: f.id_tipo_processo,
+    id_servico: f.id_servico,
     desde: f.desde,
     ate: f.ate,
     dias_parado: f.dias_parado,
@@ -1324,6 +1415,7 @@ function assinaturasQs(f: AssinaturasFiltroInput): string {
     modo_unidade: f.id_unidade ? f.modo_unidade : undefined,
     id_assunto: f.id_assunto,
     id_tipo_processo: f.id_tipo_processo,
+    id_servico: f.id_servico,
     desde: f.desde,
     ate: f.ate,
     data_base: f.data_base,
@@ -5167,6 +5259,13 @@ export const api = {
       request<RelatorioAssinaturasResposta>(
         `/relatorios/assinaturas.json${assinaturasQs(f)}`,
       ),
+    documentacao: (f: DocumentacaoFiltroInput) =>
+      request<RelatorioDocumentacaoResposta>(
+        `/relatorios/documentacao.json${documentacaoQs(f)}`,
+      ),
+    /** Opções do filtro de serviço — basta a transação `processo`. */
+    servicos: () =>
+      request<{ id: number; nome: string; ativo: boolean }[]>("/relatorios/servicos.json"),
   },
 
   // Fase 7 — Jobs assíncronos
@@ -5192,9 +5291,11 @@ export const api = {
           modo_unidade: f.id_unidade ? f.modo_unidade : undefined,
           id_assunto: f.id_assunto,
           id_tipo_processo: f.id_tipo_processo,
+          id_servico: f.id_servico,
           desde: f.desde,
           ate: f.ate,
           data_base: f.data_base === "chegada" ? "chegada" : "abertura",
+          com_atraso: !!f.com_atraso,
           max_processos: f.max_rows ?? 200,
         }),
       }),

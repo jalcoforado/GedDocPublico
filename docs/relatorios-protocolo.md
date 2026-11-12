@@ -5,8 +5,9 @@
 > Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
 
 Fonte de verdade executável: `backend/app/services/relatorios_comum.py` (as
-regras), `relatorios_gerencial.py` (a página) e os testes
-`backend/tests/test_relatorios_protocolo_medidas.py` (o que cada número mede) e
+regras), `relatorios_gerencial.py` (a página), `relatorios_documentacao.py` e
+os testes `backend/tests/test_relatorios_protocolo_medidas.py` e
+`test_relatorios_protocolo_filtros.py` (o que cada número mede) e
 `test_relatorios_protocolo_acesso.py` (quem vê). Se este doc divergir deles, o
 código vence e este arquivo deve ser corrigido.
 
@@ -20,35 +21,39 @@ código vence e este arquivo deve ser corrigido.
 
 ## A página de relatórios
 
-Uma página, um filtro no topo (período, unidade, tipo, assunto), um gráfico de
-tendência e seis seções.
+Uma página, um filtro no topo (período, unidade, tipo, assunto, serviço), um
+gráfico de tendência e as seções abaixo. O filtro é o **recorte comum**: vale
+igual na página, nas quatro listas, nos CSVs e nos PDFs.
 **Cada seção conta pela sua própria data** e diz qual é:
 
 | Seção | Conta | Pela data de |
 |---|---|---|
 | Entrada e saída no tempo (gráfico) | abertos e arquivados por semana (mês, acima de ~6 meses) | abertura / arquivamento; sem período no filtro, as últimas 12 semanas |
-| Entrada | processos abertos, por canal, e os 5 principais assuntos | abertura |
+| Entrada | processos abertos e por canal | abertura |
 | Andamento | em andamento, em trânsito, parados | **hoje** — não usa o período |
 | Saída | arquivados e tempo médio até arquivar | arquivamento |
 | Prazos | arquivados no prazo ou com atraso; em aberto dentro do prazo, vencendo, vencidos | arquivamento / **hoje** |
 | Gargalos | entradas em cada unidade, atrasos, permanência média | entrada na unidade |
+| Documentos exigidos | abertos cujo serviço exige documentos: pendentes, parciais, completos | abertura; situação dos documentos **hoje** |
+| Complementação | processos com pedido feito / aguardando o cidadão / respondido; tempo médio de resposta | pedido / **hoje** / resposta |
 | Assinaturas | pedidas, pendentes, concluídas, canceladas, tempo médio | pedido |
 
 Por que não um seletor único de data: com o período pela abertura, a Saída
 contaria "abertos em outubro que um dia foram arquivados" — número plausível
 que responde outra pergunta.
 
-Com início e fim no filtro, Entrada e Saída mostram a diferença para o período
-anterior de mesmo tamanho — **em números**, não em %: com base pequena a
-porcentagem engana ("+850%" para 19 processos).
+A comparação com o período anterior e os "principais assuntos" saíram da
+página em 2026-11-11, para deixá-la mais limpa. Os assuntos
+viraram o quadro **"Agrupar por"** da lista de processos.
 
-As seções ficam em **três grupos, um por tela de destino**, com **um botão de
-lista por grupo** (antes eram 11 botões levando a só 3 telas):
+As seções ficam em **quatro grupos, um por tela de destino**, com **um botão de
+lista por grupo**:
 
 | Grupo | Subgrupos | Botão leva a |
 |---|---|---|
 | Processos | Entrada e saída no tempo, Entrada, Andamento, Saída, Prazos | lista de processos |
 | Tramitação | Gargalos por unidade | tramitação, pela data de chegada |
+| Documentação | Documentos exigidos, Complementação | lista de documentação |
 | Assinaturas | Pedidos no período | assinaturas, pela data do pedido |
 
 Na lista de processos, o seletor **"Mostrar"** escolhe o recorte de cada número
@@ -60,6 +65,24 @@ frontend garante que cada opção pede esses mesmos parâmetros
 período não entra na consulta, mas fica na URL e volta a valer ao trocar de
 opção. **CSV e PDF de lista ficam nas listas**; a página de relatórios sai
 inteira em PDF.
+
+Cada lista tem, além do recorte comum, **os filtros do que ela mostra**:
+
+| Lista | Filtros próprios |
+|---|---|
+| Processos | Mostrar (a visão); **Sigilo** (só ostensivos / só sigilosos) e **Origem** (internos / externos) — os critérios dos cartões "Sigilosos" e "Externos", que passam a ser o total da lista filtrada; quadro **Agrupar por** tipo, unidade dona, assunto ou serviço |
+| Tramitação | Período pela abertura ou pela entrada na unidade; **Só processos com atraso** |
+| Documentação | Mostrar (a visão: todos que exigem documentos, pendentes, parciais, completos, complementação pedida / aguardando / respondida) |
+| Assinaturas | Data do pedido ou da conclusão, solicitante, assinante, status |
+
+"Só com atraso" analisa o recorte inteiro antes de cortar a lista (o atraso sai
+das etapas, calculadas por processo); acima de 10 mil processos no recorte, a
+tela pede para filtrar mais em vez de responder pela metade.
+
+As opções do filtro de serviço vêm de `GET /relatorios/servicos.json` (basta a
+transação `processo`), não de `GET /servicos`, que exige administrar o
+catálogo — quem só consulta relatórios veria o filtro vazio. Serviços inativos
+entram: processo antigo pode ser de um serviço que saiu do catálogo.
 
 ## Definições
 
@@ -88,6 +111,20 @@ inteira em PDF.
   por teste.
 - **Assinatura concluída:** realizada **e** com data de fim. Realizada sem data
   de fim conta como pendente.
+- **Sigiloso** (lista de processos): qualquer nível acima de ostensivo — sempre
+  dentro do que a credencial de quem consulta alcança.
+- **Documentos exigidos:** a situação da tela do processo
+  (`checklist_documentos`): sem serviço ou serviço sem documento → fora da
+  conta; só itens opcionais → completo; obrigatórios: nenhum enviado →
+  pendente, parte → parcial, todos → completo. "Enviado" = anexo ativo, não
+  excluído, marcado com aquele documento. A versão em SQL é comparada à da tela
+  por teste. O Dashboard executivo diverge num caso (só opcionais lá é "sem
+  documento exigido").
+- **Complementação:** pedido do servidor ao cidadão para mandar documentos.
+  Os números contam **processos**; o tempo médio de resposta é por pedido
+  respondido no período. A lista mostra o pedido mais recente de cada processo.
+  A **mensagem do pedido não aparece** em tela nem em CSV: é texto livre e pode
+  trazer dado pessoal.
 
 ## Quem vê o quê
 
@@ -116,6 +153,8 @@ inteira em PDF.
   antes.
 - **Canal de entrada antigo.** O campo é recente: processos anteriores aparecem
   como "Não informado" na seção Entrada.
+- **Documentação sem PDF.** A lista de documentação exporta CSV; PDF não foi
+  feito nesta rodada.
 - **Horas nas outras telas.** Os relatórios mostram hora de Brasília; o detalhe
   do processo e as caixas ainda mostram a hora UTC como se fosse local (3h a
   mais). Card separado.

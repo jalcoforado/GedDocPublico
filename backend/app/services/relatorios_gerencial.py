@@ -8,7 +8,8 @@ atraso. Por isso as seções reaproveitam os relatórios em vez de contar de nov
 - Andamento→ `processos` sem período, por situação de hoje e parados;
 - Saída    → `processos` pelo arquivamento;
 - Gargalos → `tramitação` pela chegada, etapas que CHEGARAM no período;
-- Assinaturas → `assinaturas` pelo pedido.
+- Assinaturas → `assinaturas` pelo pedido;
+- Documentação → `documentacao`, uma visão por número.
 """
 from __future__ import annotations
 
@@ -22,12 +23,11 @@ from ..models import Assunto, Processo
 from ..schemas.relatorio import RelatorioFiltro
 from ..schemas.relatorio_assinaturas import AssinaturasFiltro
 from ..schemas.relatorio_gerencial import (
-    AssuntoContagem,
     CanalContagem,
-    Comparacao,
     GargaloUnidade,
     GerencialResposta,
     SecaoAndamento,
+    SecaoDocumentacao,
     SecaoEntrada,
     SecaoGargalos,
     SecaoPrazos,
@@ -49,6 +49,7 @@ from .relatorios_comum import (
     situacao,
     situacao_prazo,
 )
+from .relatorios_documentacao import contar_visao, dias_medio_resposta
 from .relatorios_tramitacao import gerar_tramitacao
 
 ROTULO_CANAL: dict[str | None, str] = {
@@ -104,23 +105,7 @@ async def gerar_gerencial(
          for c, n in linhas),
         key=lambda x: (-x.count, x.rotulo),
     )
-    top = (
-        await db.execute(
-            _recorte(
-                select(Assunto.id, Assunto.assunto, func.count()).select_from(Processo),
-                f,
-                Processo.data_hora_abertura,
-            )
-            .group_by(Assunto.id, Assunto.assunto)
-            .order_by(func.count().desc(), Assunto.assunto)
-            .limit(5)
-        )
-    ).all()
-    entrada = SecaoEntrada(
-        abertos=sum(x.count for x in por_canal),
-        por_canal=por_canal,
-        top_assuntos=[AssuntoContagem(id_assunto=i, assunto=a, count=int(n)) for i, a, n in top],
-    )
+    entrada = SecaoEntrada(abertos=sum(x.count for x in por_canal), por_canal=por_canal)
 
     # Andamento — hoje, sem período.
     hoje = f.model_copy(update={"desde": None, "ate": None})
@@ -211,7 +196,7 @@ async def gerar_gerencial(
         db,
         AssinaturasFiltro(
             **f.model_dump(include={"id_unidade", "modo_unidade", "id_assunto",
-                                    "id_tipo_processo", "desde", "ate"}),
+                                    "id_tipo_processo", "id_servico", "desde", "ate"}),
             data_base="pedido",
         ),
         tenant_id=tenant_id,
@@ -245,7 +230,25 @@ async def gerar_gerencial(
     )
 
     tendencia = await _tendencia(db, f, _recorte, tenant_id, agora)
-    comparacao = await _comparacao(db, f, _recorte, arq)
+
+    # Documentação — cada número é o total de uma visão da lista.
+    async def doc(visao) -> int:
+        return await contar_visao(db, f, visao, tenant_id=tenant_id, niveis_permitidos=niveis_permitidos)
+
+    abertos_com_servico = await doc("documentos")
+    pendentes, parciais = await doc("doc_pendente"), await doc("doc_parcial")
+    documentacao = SecaoDocumentacao(
+        pendentes=pendentes,
+        parciais=parciais,
+        completos=await doc("doc_completo"),
+        sem_documentos_exigidos=entrada.abertos - abertos_com_servico,
+        complementacao_pedida=await doc("compl_pedida"),
+        aguardando_cidadao=await doc("compl_aberta"),
+        complementacao_respondida=await doc("compl_respondida"),
+        dias_medio_resposta=await dias_medio_resposta(
+            db, f, tenant_id=tenant_id, niveis_permitidos=niveis_permitidos
+        ),
+    )
 
     return GerencialResposta(
         descricao_filtros=await descrever_filtros(db, f, tenant_id=tenant_id, por_secao=True),
@@ -254,9 +257,9 @@ async def gerar_gerencial(
         saida=saida,
         prazos=prazos,
         tendencia=tendencia,
-        comparacao=comparacao,
         gargalos=gargalos,
         assinaturas=ass.totais,
+        documentacao=documentacao,
     )
 
 
@@ -310,26 +313,4 @@ async def _tendencia(db, f: RelatorioFiltro, _recorte, tenant_id: int, agora) ->
             cursor += timedelta(weeks=1)
     return SecaoTendencia(
         granularidade="mes" if por_mes else "semana", desde=desde, ate=ate, pontos=pontos
-    )
-
-
-async def _comparacao(db, f: RelatorioFiltro, _recorte, arq) -> Comparacao | None:
-    """O período imediatamente anterior, de mesmo tamanho, mesmo recorte."""
-    if not (f.desde and f.ate):
-        return None
-    dias = (f.ate - f.desde).days + 1
-    antes = f.model_copy(
-        update={"desde": f.desde - timedelta(days=dias), "ate": f.desde - timedelta(days=1)}
-    )
-
-    async def contar(coluna) -> int:
-        return int(
-            (await db.execute(_recorte(select(func.count()).select_from(Processo), antes, coluna))).scalar_one()
-        )
-
-    return Comparacao(
-        desde=antes.desde,
-        ate=antes.ate,
-        abertos=await contar(Processo.data_hora_abertura),
-        arquivados=await contar(arq),
     )

@@ -27,7 +27,15 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Integer, and_, case, cast, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Assunto, Encaminhamento, Movimentacao, Processo, TipoProcesso, UnidadeTrabalho
+from ..models import (
+    Assunto,
+    Encaminhamento,
+    Movimentacao,
+    Processo,
+    Servico,
+    TipoProcesso,
+    UnidadeTrabalho,
+)
 from ..schemas.relatorio import ModoUnidade, RelatorioFiltro
 from ..schemas.relatorio_assinaturas import AssinaturasFiltro
 
@@ -238,7 +246,7 @@ def aplicar_filtros_processo(
     - prefeitura, excluído e rascunho (relatório é documento numerado; rascunho
       é de quem o criou, SI-16);
     - sigilo de quem consulta (`None` = super-usuário);
-    - unidade no modo escolhido, assunto e tipo;
+    - unidade no modo escolhido, assunto, tipo e serviço;
     - período sobre `coluna_data`, em dias locais.
     """
     stmt = stmt.where(
@@ -254,11 +262,14 @@ def aplicar_filtros_processo(
         stmt = stmt.where(Processo.id_assunto == f.id_assunto)
     if f.id_tipo_processo:
         stmt = stmt.where(Assunto.id_tipo_processo == f.id_tipo_processo)
+    if f.id_servico:
+        stmt = stmt.where(Processo.id_servico == f.id_servico)
     return stmt.where(*no_intervalo(coluna_data, f.desde, f.ate))
 
 
 async def descrever_filtros(
-    db: AsyncSession, f: FiltroComum, *, tenant_id: int, por_secao: bool = False
+    db: AsyncSession, f: FiltroComum, *, tenant_id: int, por_secao: bool = False,
+    rotulo_data: str | None = None,
 ) -> list[str]:
     """O recorte em frases curtas, para a tela, o CSV e o PDF dizerem o mesmo.
 
@@ -285,7 +296,7 @@ async def descrever_filtros(
             f"{periodo} — cada seção diz por qual data conta; Andamento é a situação de hoje"
         )
     else:
-        linhas.append(f"{periodo}, pela {ROTULO_DATA_BASE[f.data_base]}")
+        linhas.append(f"{periodo}, pela {rotulo_data or ROTULO_DATA_BASE[f.data_base]}")
     if f.id_unidade:
         nome = await _nome(UnidadeTrabalho.unidade_trabalho, UnidadeTrabalho, f.id_unidade)
         linhas.append(
@@ -297,6 +308,18 @@ async def descrever_filtros(
     if f.id_assunto:
         nome = await _nome(Assunto.assunto, Assunto, f.id_assunto)
         linhas.append(f"Assunto: {nome or 'não encontrado'}")
+    if f.id_servico:
+        nome = await _nome(Servico.nome, Servico, f.id_servico)
+        linhas.append(f"Serviço: {nome or 'não encontrado'}")
+    if getattr(f, "sigilo", None):
+        linhas.append(
+            "Sigilo: só ostensivos (públicos)" if f.sigilo == "ostensivo"
+            else "Sigilo: só sigilosos (qualquer nível acima de ostensivo)"
+        )
+    if getattr(f, "origem", None):
+        linhas.append("Origem: só externos" if f.origem == "externa" else "Origem: só internos")
+    if getattr(f, "com_atraso", False):
+        linhas.append("Só processos com atraso na tramitação (prazo do envio)")
     if getattr(f, "situacao", None):
         linhas.append(f"Situação hoje: {ROTULO_SITUACAO[f.situacao]}")
     if getattr(f, "prazo", None):

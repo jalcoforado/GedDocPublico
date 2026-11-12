@@ -15,6 +15,7 @@ class AssinaturasFiltro(BaseModel):
     modo_unidade: ModoUnidade = "envolvida"
     id_assunto: int | None = None
     id_tipo_processo: int | None = None
+    id_servico: int | None = None
     # Dias LOCAIS (Brasília), inclusive; pela data do pedido ou da conclusão.
     desde: date | None = None
     ate: date | None = None

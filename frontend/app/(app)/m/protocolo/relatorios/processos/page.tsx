@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Download, Eye, FileText, Lock } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { FiltrosDoRelatorio } from "@/components/relatorios/FiltrosDoRelatorio";
 import { Badge } from "@/components/ui/badge";
@@ -19,10 +19,15 @@ import {
   api,
   relatorioCsvUrl,
   relatorioPdfUrl,
+  type FiltroOrigemRelatorio,
+  type FiltroSigiloRelatorio,
   type RelatorioBreakdownItem,
+  type RelatorioResposta,
 } from "@/lib/api";
 import {
   ROTA_RELATORIOS,
+  ROTULO_ORIGEM,
+  ROTULO_SIGILO,
   ROTULO_SITUACAO,
   VISOES_PROCESSOS,
   comVisao,
@@ -42,7 +47,20 @@ import {
  * grupo Processos da página gerencial. O "Mostrar" escolhe o recorte de cada
  * número daquele grupo (abertos, arquivados, andamento de hoje, prazos): cada
  * opção é a mesma consulta que produziu o número na página.
+ *
+ * Sigilo e Origem são os filtros dos cartões "Sigilosos" e "Externos" — com
+ * eles, o cartão é o total da lista. O quadro "Agrupar por" é a quebra do
+ * recorte por tipo, unidade dona, assunto ou serviço (antes, os principais
+ * assuntos ficavam na página gerencial).
  */
+
+type Dimensao = "tipo" | "unidade" | "assunto" | "servico";
+const DIMENSOES: { id: Dimensao; rotulo: string; linhas: (r: RelatorioResposta) => RelatorioBreakdownItem[]; vazio: string }[] = [
+  { id: "assunto", rotulo: "Assunto", linhas: (r) => r.por_assunto, vazio: "—" },
+  { id: "servico", rotulo: "Serviço", linhas: (r) => r.por_servico, vazio: "Sem serviço" },
+  { id: "tipo", rotulo: "Tipo de processo", linhas: (r) => r.por_tipo_processo, vazio: "—" },
+  { id: "unidade", rotulo: "Unidade dona", linhas: (r) => r.por_unidade_proprietaria, vazio: "—" },
+];
 export default function RelatorioProcessosPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -52,6 +70,7 @@ export default function RelatorioProcessosPage() {
   const consulta = consultaDaLista(filtro);
   const dataBase = consulta.data_base;
   const grupos = [...new Set(VISOES_PROCESSOS.map((v) => v.grupo))];
+  const [dimensao, setDimensao] = useState<Dimensao>("assunto");
 
   const q = useQuery({
     queryKey: ["relatorio-processos", busca],
@@ -96,34 +115,78 @@ export default function RelatorioProcessosPage() {
 
       <FiltrosDoRelatorio
         valor={recorteComum(filtro)}
-        onAplicar={(f) => irPara(comVisao({ ...f, dias_parado: filtro.dias_parado }, visao.id))}
+        onAplicar={(f) =>
+          irPara(comVisao({ ...f, dias_parado: filtro.dias_parado, sigilo: filtro.sigilo, origem: filtro.origem }, visao.id))
+        }
       />
 
-      <div className="flex flex-wrap items-center gap-3 rounded-card border border-border bg-card p-3 text-sm shadow-card">
-        <label htmlFor="rel-visao" className="font-medium text-foreground">
-          Mostrar
-        </label>
-        <Select
-          id="rel-visao"
-          className="h-9 w-72"
-          value={visao.id}
-          onChange={(e) => irPara(comVisao(filtro, e.target.value as VisaoProcessos))}
-        >
-          {grupos.map((g) => (
-            <optgroup key={g} label={g}>
-              {VISOES_PROCESSOS.filter((v) => v.grupo === g).map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.id === "parados" ? `Parados há ${consulta.parado_ha_dias ?? filtro.dias_parado ?? 15}+ dias` : v.rotulo}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </Select>
-        <span className="text-xs text-foreground-muted">
+      <div
+        role="group"
+        aria-label="Filtros desta lista"
+        className="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-card border border-border bg-card p-3 text-sm shadow-card"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="rel-visao" className="font-medium text-foreground">
+            Mostrar
+          </label>
+          <Select
+            id="rel-visao"
+            className="h-9 w-72"
+            value={visao.id}
+            onChange={(e) => irPara(comVisao(filtro, e.target.value as VisaoProcessos))}
+          >
+            {grupos.map((g) => (
+              <optgroup key={g} label={g}>
+                {VISOES_PROCESSOS.filter((v) => v.grupo === g).map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.id === "parados" ? `Parados há ${consulta.parado_ha_dias ?? filtro.dias_parado ?? 15}+ dias` : v.rotulo}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="rel-sigilo" className="font-medium text-foreground">
+            Sigilo
+          </label>
+          <Select
+            id="rel-sigilo"
+            className="h-9 w-48"
+            value={filtro.sigilo ?? ""}
+            onChange={(e) => irPara({ ...filtro, sigilo: (e.target.value || undefined) as FiltroSigiloRelatorio | undefined })}
+          >
+            <option value="">Todos</option>
+            {(Object.keys(ROTULO_SIGILO) as FiltroSigiloRelatorio[]).map((s) => (
+              <option key={s} value={s}>
+                {ROTULO_SIGILO[s]}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="rel-origem" className="font-medium text-foreground">
+            Origem
+          </label>
+          <Select
+            id="rel-origem"
+            className="h-9 w-40"
+            value={filtro.origem ?? ""}
+            onChange={(e) => irPara({ ...filtro, origem: (e.target.value || undefined) as FiltroOrigemRelatorio | undefined })}
+          >
+            <option value="">Todas</option>
+            {(Object.keys(ROTULO_ORIGEM) as FiltroOrigemRelatorio[]).map((o) => (
+              <option key={o} value={o}>
+                {ROTULO_ORIGEM[o]}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <p className="basis-full text-xs text-foreground-muted">
           {visao.hoje
-            ? "Situação de hoje: o período do filtro não se aplica (unidade, tipo e assunto, sim)."
+            ? "Situação de hoje: o período do filtro não se aplica (unidade, tipo, assunto e serviço, sim)."
             : `No período do filtro, pela data de ${dataBase === "arquivamento" ? "arquivamento" : "abertura"}.`}
-        </span>
+        </p>
       </div>
 
       {q.isLoading && <Carregando />}
@@ -150,10 +213,7 @@ export default function RelatorioProcessosPage() {
             <KpiCard label="Externos" value={r.totais.externos} />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Quebra titulo="Por tipo de processo" linhas={r.por_tipo_processo} />
-            <Quebra titulo="Por unidade dona" linhas={r.por_unidade_proprietaria} />
-          </div>
+          <Quebra resposta={r} dimensao={dimensao} onDimensao={setDimensao} />
 
           <Card>
             <CardHeader>
@@ -235,28 +295,66 @@ export default function RelatorioProcessosPage() {
   );
 }
 
-function Quebra({ titulo, linhas }: { titulo: string; linhas: RelatorioBreakdownItem[] }) {
+/** Um quadro só, com a dimensão escolhida — antes eram dois quadros fixos. */
+function Quebra({
+  resposta,
+  dimensao,
+  onDimensao,
+}: {
+  resposta: RelatorioResposta;
+  dimensao: Dimensao;
+  onDimensao: (d: Dimensao) => void;
+}) {
+  const def = DIMENSOES.find((d) => d.id === dimensao) ?? DIMENSOES[0];
+  const linhas = def.linhas(resposta);
+  const maior = linhas[0]?.count ?? 0;
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{titulo}</CardTitle>
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
+        <CardTitle>Quebra do recorte</CardTitle>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="font-medium text-foreground">Agrupar por</span>
+          <Select
+            aria-label="Agrupar por"
+            className="h-9 w-48"
+            value={dimensao}
+            onChange={(e) => onDimensao(e.target.value as Dimensao)}
+          >
+            {DIMENSOES.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.rotulo}
+              </option>
+            ))}
+          </Select>
+        </label>
       </CardHeader>
       <CardContent>
         {linhas.length === 0 ? (
-          <p className="text-sm text-foreground-muted">Sem dados.</p>
+          <p className="text-sm text-foreground-muted">Nenhum processo no recorte.</p>
         ) : (
           <Table>
             <THead>
               <TR>
-                <TH>Item</TH>
-                <TH className="text-right">Qtd</TH>
+                <TH>{def.rotulo}</TH>
+                <TH className="w-1/3">
+                  <span className="sr-only">Proporção</span>
+                </TH>
+                <TH className="text-right">Processos</TH>
                 <TH className="text-right">%</TH>
               </TR>
             </THead>
             <TBody>
               {linhas.map((l) => (
                 <TR key={l.label}>
-                  <TD>{l.label}</TD>
+                  <TD>{l.label === "—" ? def.vazio : l.label}</TD>
+                  <TD>
+                    <span className="block h-2 rounded-full bg-muted" aria-hidden="true">
+                      <span
+                        className="block h-full rounded-full bg-brand"
+                        style={{ width: `${maior ? (l.count / maior) * 100 : 0}%` }}
+                      />
+                    </span>
+                  </TD>
                   <TD className="text-right tabular-nums">{l.count}</TD>
                   <TD className="text-right tabular-nums">{l.pct.toFixed(1).replace(".", ",")}%</TD>
                 </TR>

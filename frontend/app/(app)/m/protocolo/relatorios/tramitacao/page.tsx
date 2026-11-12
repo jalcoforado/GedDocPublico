@@ -48,7 +48,11 @@ export default function RelatorioTramitacaoPage() {
   const busca = useSearchParams().toString();
   const filtro = useMemo(() => filtroDaUrl(new URLSearchParams(busca)), [busca]);
   const dataBase = filtro.data_base === "chegada" ? "chegada" : "abertura";
-  const consulta: RelatorioFiltroInput = { ...recorteComum(filtro), data_base: dataBase };
+  const consulta: RelatorioFiltroInput = {
+    ...recorteComum(filtro),
+    data_base: dataBase,
+    com_atraso: filtro.com_atraso,
+  };
 
   function irPara(f: FiltroDaUrl) {
     router.replace(`${pathname}${filtroParaUrl(f)}`, { scroll: false });
@@ -110,20 +114,38 @@ export default function RelatorioTramitacaoPage() {
 
       <FiltrosDoRelatorio
         valor={recorteComum(filtro)}
-        onAplicar={(f) => irPara({ ...f, data_base: filtro.data_base })}
+        onAplicar={(f) => irPara({ ...f, data_base: filtro.data_base, com_atraso: filtro.com_atraso })}
       />
 
-      <label className="flex items-center gap-2 text-sm">
-        Período conta pela data de
-        <Select
-          className="h-9 w-56"
-          value={dataBase}
-          onChange={(e) => irPara({ ...filtro, data_base: e.target.value as "abertura" | "chegada" })}
-        >
-          <option value="abertura">abertura do processo</option>
-          <option value="chegada">entrada na unidade</option>
-        </Select>
-      </label>
+      <div
+        role="group"
+        aria-label="Filtros desta lista"
+        className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-card border border-border bg-card p-3 text-sm shadow-card"
+      >
+        <label className="flex items-center gap-2">
+          <span className="font-medium text-foreground">Período conta pela data de</span>
+          <Select
+            className="h-9 w-56"
+            value={dataBase}
+            onChange={(e) => irPara({ ...filtro, data_base: e.target.value as "abertura" | "chegada" })}
+          >
+            <option value="abertura">abertura do processo</option>
+            <option value="chegada">entrada na unidade</option>
+          </Select>
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-border accent-brand"
+            checked={!!filtro.com_atraso}
+            onChange={(e) => irPara({ ...filtro, com_atraso: e.target.checked || undefined })}
+          />
+          <span className="font-medium text-foreground">Só processos com atraso</span>
+          <span className="text-xs text-foreground-muted">
+            (alguma unidade passou do prazo do envio — o mesmo número do cartão “Com atraso”)
+          </span>
+        </label>
+      </div>
 
       {relQ.isLoading && <Carregando className="text-sm text-muted-foreground" />}
       {relQ.error && (
@@ -283,7 +305,10 @@ function ProcessoTramitacaoCard({ p }: { p: TramitacaoProcesso }) {
             {p.manifestante ?? "—"} · {p.assunto ?? "—"}
           </div>
         </div>
-        <div className="hidden gap-6 text-xs text-muted-foreground md:flex">
+        {/* Colunas de largura fixa: alinham de uma linha para outra, e o nome
+            longo da unidade quebra dentro da sua coluna em vez de invadir as
+            vizinhas. */}
+        <div className="hidden shrink-0 grid-cols-[3.5rem_4.5rem_4.5rem_4.5rem_minmax(0,13rem)] items-start gap-3 text-xs text-muted-foreground md:grid xl:grid-cols-[3.5rem_4.5rem_4.5rem_4.5rem_minmax(0,18rem)]">
           <Stat label="encs" value={String(p.qtd_encaminhamentos)} />
           <Stat label="unidades" value={String(p.qtd_unidades_visitadas)} />
           <Stat label="total" value={fmtMin(p.minutos_total)} />
@@ -291,7 +316,7 @@ function ProcessoTramitacaoCard({ p }: { p: TramitacaoProcesso }) {
             label="em aberto"
             value={p.minutos_em_andamento > 0 ? fmtMin(p.minutos_em_andamento) : "—"}
           />
-          <Stat label="local" value={p.local_atual ?? "—"} />
+          <Stat label="local" value={p.local_atual ?? "—"} texto />
         </div>
         {open ? (
           <ChevronUp className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -308,11 +333,18 @@ function ProcessoTramitacaoCard({ p }: { p: TramitacaoProcesso }) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+/** `texto`: valor longo (nome de unidade) — alinhado à esquerda, até duas
+ * linhas, e o nome inteiro no title. */
+function Stat({ label, value, texto = false }: { label: string; value: string; texto?: boolean }) {
   return (
-    <div className="text-center">
+    <div className={texto ? "min-w-0 text-left" : "text-center"}>
       <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="font-medium text-foreground tabular-nums">{value}</div>
+      <div
+        className={"font-medium text-foreground " + (texto ? "line-clamp-2 break-words" : "tabular-nums")}
+        title={texto ? value : undefined}
+      >
+        {value}
+      </div>
     </div>
   );
 }

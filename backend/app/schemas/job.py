@@ -37,9 +37,11 @@ class DispararRelatorioTramitacaoRequest(BaseModel):
     modo_unidade: Literal["envolvida", "dona", "atual", "passou"] = "envolvida"
     id_assunto: int | None = None
     id_tipo_processo: int | None = None
+    id_servico: int | None = None
     desde: date | None = None
     ate: date | None = None
     data_base: Literal["abertura", "chegada"] = "abertura"
+    com_atraso: bool = False
     max_processos: int = 200
 
 

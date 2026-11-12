@@ -20,17 +20,9 @@ class CanalContagem(BaseModel):
     count: int
 
 
-class AssuntoContagem(BaseModel):
-    id_assunto: int
-    assunto: str | None
-    count: int
-
-
 class SecaoEntrada(BaseModel):
     abertos: int
     por_canal: list[CanalContagem]
-    # Os cinco assuntos com mais processos abertos no período.
-    top_assuntos: list[AssuntoContagem]
 
 
 class SecaoPrazos(BaseModel):
@@ -65,13 +57,22 @@ class SecaoTendencia(BaseModel):
     pontos: list[PontoTendencia]
 
 
-class Comparacao(BaseModel):
-    """Mesmo recorte no período imediatamente anterior, de mesmo tamanho.
-    Diferença em números, não em %: com bases pequenas a % engana."""
-    desde: date
-    ate: date
-    abertos: int
-    arquivados: int
+class SecaoDocumentacao(BaseModel):
+    """Cada número é o total de uma visão de `relatorios_documentacao`."""
+    # Abertos no período cujo serviço exige documentos; situação de hoje.
+    pendentes: int
+    parciais: int
+    completos: int
+    # Abertos no período sem documento exigido (fora da conta acima).
+    sem_documentos_exigidos: int
+    # Processos com pedido de complementação feito no período (data do pedido).
+    complementacao_pedida: int
+    # Processos com pedido aguardando o cidadão hoje (sem período).
+    aguardando_cidadao: int
+    # Processos com pedido respondido no período (data da resposta).
+    complementacao_respondida: int
+    # Do pedido à resposta, por pedido respondido no período.
+    dias_medio_resposta: float | None
 
 
 class SecaoAndamento(BaseModel):
@@ -111,7 +112,6 @@ class GerencialResposta(BaseModel):
     saida: SecaoSaida
     prazos: SecaoPrazos
     tendencia: SecaoTendencia
-    # Só quando o filtro tem início e fim.
-    comparacao: Comparacao | None
     gargalos: SecaoGargalos
     assinaturas: AssinaturasTotais
+    documentacao: SecaoDocumentacao

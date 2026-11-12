@@ -7,6 +7,9 @@ from pydantic import BaseModel
 # subconjunto (o router valida): processos = abertura|arquivamento,
 # tramitação = abertura|chegada.
 DataBase = Literal["abertura", "arquivamento", "chegada"]
+# Filtros próprios da lista de processos (os cartões Sigilosos e Externos).
+FiltroSigilo = Literal["ostensivo", "sigiloso"]
+FiltroOrigem = Literal["interna", "externa"]
 ModoUnidade = Literal["envolvida", "dona", "atual", "passou"]
 Situacao = Literal["em_andamento", "em_transito", "arquivado"]
 # Status do prazo do serviço — os de `prazos.StatusPrazo`.
@@ -21,6 +24,7 @@ class RelatorioFiltro(BaseModel):
     modo_unidade: ModoUnidade = "envolvida"
     id_assunto: int | None = None
     id_tipo_processo: int | None = None
+    id_servico: int | None = None
     # Dias LOCAIS (Brasília), inclusive nas duas pontas. A conversão para o
     # UTC das colunas é de `relatorios_comum.intervalo_utc`.
     desde: date | None = None
@@ -32,6 +36,12 @@ class RelatorioFiltro(BaseModel):
     parado_ha_dias: int | None = None
     # Lista de um número do bloco Prazos (status do prazo do serviço).
     prazo: StatusPrazoRelatorio | None = None
+    # Lista de processos: sigiloso = qualquer nível acima de ostensivo (dentro
+    # do que a credencial de quem consulta alcança); origem pelo `externo`.
+    sigilo: FiltroSigilo | None = None
+    origem: FiltroOrigem | None = None
+    # Tramitação: só processos com alguma etapa atrasada (prazo do envio).
+    com_atraso: bool = False
 
 
 class RelatorioTotais(BaseModel):
@@ -78,6 +88,8 @@ class RelatorioResposta(BaseModel):
     totais: RelatorioTotais
     por_tipo_processo: list[RelatorioBreakdownItem]
     por_unidade_proprietaria: list[RelatorioBreakdownItem]
+    por_assunto: list[RelatorioBreakdownItem]
+    por_servico: list[RelatorioBreakdownItem]
     processos: list[RelatorioProcessoRow]
     # A lista tem teto; os totais, não. `cortado` avisa quando a lista mostra
     # menos processos do que `totais.total` — antes o corte era silencioso.

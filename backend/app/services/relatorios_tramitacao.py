@@ -86,6 +86,13 @@ def _filter_processos(
     )
 
 
+TETO_FILTRO_ATRASO = 10000
+
+
+class RecorteGrandeDemais(ValueError):
+    """O filtro pedido exige analisar mais processos do que o teto."""
+
+
 def _delta_min(a: datetime | None, b: datetime | None) -> int | None:
     if a is None or b is None:
         return None
@@ -128,8 +135,21 @@ async def gerar_tramitacao(
     total = (
         await db.execute(select(func.count()).select_from(proc_stmt.order_by(None).subquery()))
     ).scalar_one()
+    # "Só com atraso": o atraso sai das etapas, calculadas aqui em Python —
+    # filtrar depois do teto contaria só os mais recentes. Então analisa o
+    # recorte inteiro (até um teto) e corta a lista DEPOIS de filtrar.
+    if f.com_atraso:
+        if total > TETO_FILTRO_ATRASO:
+            raise RecorteGrandeDemais(
+                f"O recorte tem {total} processos; o filtro de atraso analisa até "
+                f"{TETO_FILTRO_ATRASO}. Diminua o período ou filtre por unidade, tipo, "
+                "assunto ou serviço."
+            )
+        limite = TETO_FILTRO_ATRASO
+    else:
+        limite = max_processos
     proc_stmt = proc_stmt.order_by(Processo.data_hora_abertura.desc(), Processo.id.desc()).limit(
-        max_processos
+        limite
     )
     proc_rows = (await db.execute(proc_stmt)).all()
     processo_ids = [row[0].id for row in proc_rows]
@@ -185,14 +205,7 @@ async def gerar_tramitacao(
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # Agregado por unidade
-    por_unidade_acum: dict[
-        tuple[int | None, str | None], dict[str, int]
-    ] = defaultdict(lambda: {"passagens": 0, "atrasos": 0, "minutos": 0})
-
     processos_out: list[TramitacaoProcesso] = []
-    qtd_com_atraso = 0
-    soma_minutos = 0
 
     for row in proc_rows:
         p: Processo = row[0]
@@ -264,11 +277,8 @@ async def gerar_tramitacao(
             if e.prazo_estipulado is not None and e.chegou_em is not None:
                 e.atrasou = (e.saiu_em or now) >= e.prazo_estipulado
 
-        # Agregar
         teve_atraso = any(e.atrasou for e in etapas)
         qtd_atrasos = sum(1 for e in etapas if e.atrasou)
-        if teve_atraso:
-            qtd_com_atraso += 1
 
         minutos_total = sum(e.minutos_no_local or 0 for e in etapas if e.saiu_em is not None)
         # tempo em aberto na última etapa
@@ -276,17 +286,6 @@ async def gerar_tramitacao(
         minutos_em_andamento = 0
         if ultima and ultima.saiu_em is None and ultima.chegou_em is not None:
             minutos_em_andamento = _delta_min(ultima.chegou_em, now) or 0
-
-        soma_minutos += minutos_total + minutos_em_andamento
-
-        # Agregar por unidade
-        for e in etapas:
-            key = (e.id_unidade, e.unidade)
-            por_unidade_acum[key]["passagens"] += 1
-            if e.atrasou:
-                por_unidade_acum[key]["atrasos"] += 1
-            if e.minutos_no_local is not None:
-                por_unidade_acum[key]["minutos"] += e.minutos_no_local
 
         qtd_encs = sum(1 for _, fl in movs if fl == "ENCAMINHAMENTO")
         qtd_unid = len({e.id_unidade for e in etapas if e.id_unidade is not None})
@@ -317,6 +316,27 @@ async def gerar_tramitacao(
                 etapas=etapas,
             )
         )
+
+    if f.com_atraso:
+        processos_out = [p for p in processos_out if p.teve_atraso]
+        total = len(processos_out)
+        processos_out = processos_out[:max_processos]
+
+    # Agregados sobre a lista que a tela mostra (os `qtd_listados`).
+    por_unidade_acum: dict[
+        tuple[int | None, str | None], dict[str, int]
+    ] = defaultdict(lambda: {"passagens": 0, "atrasos": 0, "minutos": 0})
+    qtd_com_atraso = 0
+    soma_minutos = 0
+    for p in processos_out:
+        qtd_com_atraso += int(p.teve_atraso)
+        soma_minutos += p.minutos_total + p.minutos_em_andamento
+        for e in p.etapas:
+            a = por_unidade_acum[(e.id_unidade, e.unidade)]
+            a["passagens"] += 1
+            a["atrasos"] += int(e.atrasou)
+            if e.minutos_no_local is not None:
+                a["minutos"] += e.minutos_no_local
 
     por_unidade_out = [
         TramitacaoPorUnidade(

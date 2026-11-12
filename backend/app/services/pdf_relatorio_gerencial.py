@@ -81,23 +81,10 @@ def gerar_gerencial_pdf(r: GerencialResposta) -> bytes:
     ]
 
     e = r.entrada
-    comp = r.comparacao
     s += [Spacer(1, 0.4 * cm), Paragraph(f"Entrada — {e.abertos} abertos no período (pela abertura)", h2)]
-    if comp:
-        s.append(Paragraph(
-            f"Período anterior ({comp.desde:%d/%m/%Y} a {comp.ate:%d/%m/%Y}): {comp.abertos} abertos, "
-            f"{comp.arquivados} arquivados.", small,
-        ))
     if e.por_canal:
         s.append(tabela(
             [["Canal", "Processos"]] + [[c.rotulo, str(c.count)] for c in e.por_canal],
-            [12 * cm, 5 * cm],
-        ))
-    if e.top_assuntos:
-        s.append(Spacer(1, 0.2 * cm))
-        s.append(tabela(
-            [["Principais assuntos", "Processos"]]
-            + [[Paragraph(html.escape(x.assunto or "—"), normal), str(x.count)] for x in e.top_assuntos],
             [12 * cm, 5 * cm],
         ))
 
@@ -159,6 +146,29 @@ def gerar_gerencial_pdf(r: GerencialResposta) -> bytes:
              [str(t.total), str(t.pendentes), str(t.concluidas), str(t.canceladas),
               _horas_de_minutos(t.minutos_medio_conclusao)]],
             [3.4 * cm] * 5,
+        ),
+    ]
+
+    d = r.documentacao
+    s += [
+        Spacer(1, 0.4 * cm),
+        Paragraph("Documentação — documentos exigidos pelo serviço e complementações", h2),
+        tabela(
+            [["Documentos exigidos", "Pendentes", "Parciais", "Completos"],
+             ["", str(d.pendentes), str(d.parciais), str(d.completos)]],
+            [8.2 * cm, 2.9 * cm, 2.9 * cm, 3 * cm],
+        ),
+        Paragraph(
+            "Abertos no período, situação de hoje. Sem documento exigido (fora da conta): "
+            f"{d.sem_documentos_exigidos}. Complementação conta processos: pedida e respondida "
+            "no período; aguardando, hoje.", small,
+        ),
+        Spacer(1, 0.2 * cm),
+        tabela(
+            [["Complementação", "Pedida", "Aguardando (hoje)", "Respondida", "Tempo de resposta"],
+             ["Processos", str(d.complementacao_pedida), str(d.aguardando_cidadao),
+              str(d.complementacao_respondida), _dias(d.dias_medio_resposta)]],
+            [3 * cm, 3.2 * cm, 3.8 * cm, 3.4 * cm, 3.6 * cm],
         ),
     ]
     doc.build(s)

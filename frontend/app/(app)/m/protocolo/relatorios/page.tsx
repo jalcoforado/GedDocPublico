@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
   BarChart3,
+  FileCheck,
   FileText,
   Inbox,
   List,
@@ -23,6 +24,7 @@ import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { api, gerencialPdfUrl } from "@/lib/api";
 import {
   ROTA_LISTA_ASSINATURAS,
+  ROTA_LISTA_DOCUMENTACAO,
   ROTA_LISTA_PROCESSOS,
   ROTA_LISTA_TRAMITACAO,
   filtroDaUrl,
@@ -37,9 +39,9 @@ import {
 /**
  * Relatórios do protocolo — página gerencial (SI-34, decisão de 2026-11-11).
  *
- * Uma tela, filtro único no topo e três grupos — um por tela de destino:
+ * Uma tela, filtro único no topo e quatro grupos — um por tela de destino:
  * Processos (subgrupos Entrada e saída no tempo, Entrada, Andamento, Saída,
- * Prazos), Tramitação e Assinaturas. Cada subgrupo conta pela SUA data e diz
+ * Prazos), Tramitação, Documentação e Assinaturas. Cada subgrupo conta pela SUA data e diz
  * qual é; Andamento é a situação de hoje. Um "ver lista" por grupo; na lista,
  * o "Mostrar" escolhe o recorte de cada número (`lib/relatorios.ts`,
  * `VISOES_PROCESSOS`), e o backend garante que o número é o total dessa lista
@@ -142,13 +144,6 @@ function percentual(noPrazo: number, atrasados: number): string | undefined {
   return `${Math.round((noPrazo / base) * 100)}% dos arquivados com prazo`;
 }
 
-/** "+17 vs. 31/08–30/09": diferença em números — com base pequena, % engana. */
-function diferenca(atual: number, anterior: number, periodo: { desde: string; ate: string }): string {
-  const d = atual - anterior;
-  const sinal = d > 0 ? `+${d}` : d < 0 ? `${d}` : "igual";
-  return `${sinal} vs. ${fmtData(periodo.desde).slice(0, 5)}–${fmtData(periodo.ate)} (${anterior})`;
-}
-
 export default function RelatoriosPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -226,11 +221,7 @@ export default function RelatoriosPage() {
 
             <Subgrupo id="entrada" titulo="Entrada" regra="Abertos no período — pela data de abertura.">
               <div className="grid gap-3 md:grid-cols-[minmax(0,14rem)_1fr]">
-                <KpiCard
-                  label="Abertos"
-                  value={g.entrada.abertos}
-                  hint={g.comparacao ? diferenca(g.entrada.abertos, g.comparacao.abertos, g.comparacao) : undefined}
-                />
+                <KpiCard label="Abertos" value={g.entrada.abertos} />
                 {g.entrada.por_canal.length > 0 ? (
                   <Table>
                     <THead>
@@ -256,30 +247,6 @@ export default function RelatoriosPage() {
                   <p className="text-sm text-foreground-muted">Nenhum processo aberto no período.</p>
                 )}
               </div>
-              {g.entrada.top_assuntos.length > 0 && (
-                <div>
-                  <h4 className="mb-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">
-                    Principais assuntos
-                  </h4>
-                  <ul className="space-y-1.5">
-                    {g.entrada.top_assuntos.map((a) => (
-                      <li
-                        key={a.id_assunto}
-                        className="grid grid-cols-[minmax(0,16rem)_1fr_3rem] items-center gap-3 text-sm"
-                      >
-                        <span className="truncate text-foreground">{a.assunto ?? "—"}</span>
-                        <span className="h-2.5 rounded-full bg-muted" aria-hidden="true">
-                          <span
-                            className="block h-full rounded-full bg-brand"
-                            style={{ width: `${(a.count / g.entrada.top_assuntos[0].count) * 100}%` }}
-                          />
-                        </span>
-                        <span className="text-right tabular-nums text-foreground">{a.count}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
             </Subgrupo>
 
             <Subgrupo
@@ -318,11 +285,7 @@ export default function RelatoriosPage() {
 
             <Subgrupo id="saida" titulo="Saída" regra="Arquivados no período — pela data de arquivamento.">
               <div className="grid gap-3 md:grid-cols-2">
-                <KpiCard
-                  label="Arquivados"
-                  value={g.saida.arquivados}
-                  hint={g.comparacao ? diferenca(g.saida.arquivados, g.comparacao.arquivados, g.comparacao) : undefined}
-                />
+                <KpiCard label="Arquivados" value={g.saida.arquivados} />
                 <KpiCard
                   label="Tempo médio até arquivar"
                   value={fmtDias(g.saida.dias_medio_ate_arquivar)}
@@ -412,6 +375,64 @@ export default function RelatoriosPage() {
                   Recorte grande: a análise cobre os processos mais recentes. Diminua o período para ver todos.
                 </p>
               )}
+            </Subgrupo>
+          </Grupo>
+
+          <Grupo
+            id="documentacao"
+            titulo="Documentação"
+            descricao="Documentos que o serviço exige e pedidos de complementação ao cidadão. Conta processos."
+            icon={FileCheck}
+            acao={<LinkLista href={lista(ROTA_LISTA_DOCUMENTACAO, {})}>Ver documentação</LinkLista>}
+          >
+            <Subgrupo
+              id="documentos-exigidos"
+              titulo="Documentos exigidos"
+              regra="Abertos no período cujo serviço exige documentos — pela data de abertura; situação dos documentos hoje."
+            >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <KpiCard
+                  label="Pendentes"
+                  value={g.documentacao.pendentes}
+                  intent="warning"
+                  hint="nenhum obrigatório enviado"
+                />
+                <KpiCard label="Parciais" value={g.documentacao.parciais} hint="parte dos obrigatórios enviada" />
+                <KpiCard label="Completos" value={g.documentacao.completos} hint="todos os obrigatórios enviados" />
+              </div>
+              <p className="text-xs text-foreground-muted">
+                Fora da conta, por não ter documento exigido: {g.documentacao.sem_documentos_exigidos} aberto(s) no
+                período.
+              </p>
+            </Subgrupo>
+            <Subgrupo
+              id="complementacao"
+              titulo="Complementação"
+              regra="Pedidos do servidor ao cidadão para mandar documentos. Cada número diz por qual data conta."
+            >
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                <KpiCard
+                  label="Pedida no período"
+                  value={g.documentacao.complementacao_pedida}
+                  hint="pela data do pedido"
+                />
+                <KpiCard
+                  label="Aguardando o cidadão"
+                  value={g.documentacao.aguardando_cidadao}
+                  intent="warning"
+                  hint="situação de hoje"
+                />
+                <KpiCard
+                  label="Respondida no período"
+                  value={g.documentacao.complementacao_respondida}
+                  hint="pela data da resposta"
+                />
+                <KpiCard
+                  label="Tempo de resposta"
+                  value={fmtDias(g.documentacao.dias_medio_resposta)}
+                  hint="média, do pedido à resposta"
+                />
+              </div>
             </Subgrupo>
           </Grupo>
 

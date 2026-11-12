@@ -14,8 +14,8 @@ import { ROTULO_MODO_UNIDADE, filtroParaUrl, type FiltroDaUrl } from "@/lib/rela
 
 /**
  * Barra do recorte comum dos relatórios (SI-34): período, unidade no sentido
- * escolhido, assunto e tipo. A mesma na página gerencial e nas listas, para
- * que o filtro de uma seja o da outra.
+ * escolhido, tipo, assunto e serviço. A mesma na página gerencial e nas
+ * listas, para que o filtro de uma seja o da outra.
  *
  * Edita um rascunho e só aplica no botão: cada mudança de filtro dispara
  * consultas de cinco seções, e aplicar a cada tecla de data martelaria o
@@ -63,6 +63,8 @@ export function FiltrosDoRelatorio({
   const organogramaQ = useQuery({ queryKey: ["organograma"], queryFn: () => organogramaApi.tree() });
   const tiposQ = useQuery({ queryKey: ["tipos-processo"], queryFn: () => api.tiposProcesso.list() });
   const assuntosQ = useAssuntosAll();
+  // Rota dos relatórios, não `/servicos`: aquela exige administrar o catálogo.
+  const servicosQ = useQuery({ queryKey: ["relatorios-servicos"], queryFn: () => api.relatorios.servicos() });
 
   const unidades = useMemo<ComboboxOption[]>(
     () =>
@@ -81,6 +83,16 @@ export function FiltrosDoRelatorio({
         .filter((a) => !rascunho.id_tipo_processo || a.id_tipo_processo === rascunho.id_tipo_processo)
         .map((a) => ({ value: a.id, label: a.assunto })),
     [assuntosQ.data, rascunho.id_tipo_processo],
+  );
+
+  const servicos = useMemo<ComboboxOption[]>(
+    () =>
+      (servicosQ.data ?? []).map((s) => ({
+        value: s.id,
+        label: s.nome,
+        hint: s.ativo ? undefined : "inativo",
+      })),
+    [servicosQ.data],
   );
 
   const periodoInvertido = !!(rascunho.desde && rascunho.ate && rascunho.desde > rascunho.ate);
@@ -146,6 +158,18 @@ export function FiltrosDoRelatorio({
             onChange={(v) => setRascunho({ ...rascunho, id_assunto: num(v) })}
             placeholder="Todos"
             loading={assuntosQ.isLoading}
+          />
+        </div>
+        <div className="md:col-span-2">
+          <Label htmlFor="rel-servico">Serviço</Label>
+          <Combobox
+            id="rel-servico"
+            options={servicos}
+            value={rascunho.id_servico ?? null}
+            onChange={(v) => setRascunho({ ...rascunho, id_servico: num(v) })}
+            placeholder="Todos"
+            searchPlaceholder="Nome do serviço…"
+            loading={servicosQ.isLoading}
           />
         </div>
         <div className="md:col-span-2">

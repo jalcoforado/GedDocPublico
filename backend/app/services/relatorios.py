@@ -10,7 +10,7 @@ não, e `cortado` diz quando a lista ficou menor que o total.
 """
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -18,6 +18,7 @@ from ..models import (
     Assunto,
     Manifestante,
     Processo,
+    Servico,
     TipoProcesso,
     UnidadeTrabalho,
 )
@@ -70,6 +71,11 @@ def _base(f: RelatorioFiltro, *, tenant_id: int, niveis_permitidos: list[str] | 
         stmt = stmt.where(condicao_parado(tenant_id, f.parado_ha_dias, agora_utc()))
     if f.prazo:
         stmt = stmt.where(situacao_prazo(tenant_id, agora_utc()) == f.prazo)
+    # Os mesmos critérios dos cartões "Sigilosos" e "Externos".
+    if f.sigilo:
+        stmt = stmt.where(Processo.publico.is_(f.sigilo == "ostensivo"))
+    if f.origem:
+        stmt = stmt.where(Processo.externo.is_(f.origem == "externa"))
     return stmt.subquery("recorte")
 
 
@@ -130,6 +136,15 @@ async def gerar_relatorio(
     por_unidade = await _quebra(
         UnidadeTrabalho.unidade_trabalho,
         (UnidadeTrabalho, UnidadeTrabalho.id == Processo.id_unidade_proprietaria),
+    )
+    por_assunto = await _quebra(
+        Assunto.assunto, (Assunto, Assunto.id == Processo.id_assunto),
+    )
+    # Processo sem serviço (anterior ao catálogo, ou aberto sem escolher um)
+    # aparece como "—", como as outras quebras.
+    por_servico = await _quebra(
+        Servico.nome,
+        (Servico, and_(Servico.id == Processo.id_servico, Servico.tenant_id == tenant_id)),
     )
 
     # Lista (com teto), mais recente primeiro pela data que define o período.
@@ -199,6 +214,8 @@ async def gerar_relatorio(
         totais=totais,
         por_tipo_processo=por_tipo,
         por_unidade_proprietaria=por_unidade,
+        por_assunto=por_assunto,
+        por_servico=por_servico,
         processos=processos,
         cortado=len(processos) < total,
     )

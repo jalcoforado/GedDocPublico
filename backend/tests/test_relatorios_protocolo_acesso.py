@@ -247,3 +247,68 @@ async def test_pagina_gerencial_respeita_o_sigilo(admin_engine):
         assert admin["assinaturas"]["total"] == 3 and comum["assinaturas"]["total"] == 2
     finally:
         await _fechar()
+
+# ------------------------------------------------------------- documentação
+
+
+async def _pedido_aberto_em_todos(admin_engine, cen: dict) -> None:
+    t = cen["tenant"]
+    async with _sm(admin_engine)() as s:
+        for pid, _ in cen["processos"].values():
+            await s.execute(text(
+                "INSERT INTO protocolos.complementacao_documental (tenant_id, id_processo, "
+                "id_usuario_solicitante, status, mensagem, documentos_solicitados) "
+                "VALUES (:t, :p, :u, 'aberta', 'teste', '[]'::jsonb)"),
+                {"t": t.id, "p": pid, "u": cen["admin"]},
+            )
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_relatorio_de_documentacao_respeita_sigilo_rascunho_e_prefeitura(admin_engine):
+    cen = await _cenario(admin_engine, "reldoc")
+    outra = await _cenario(admin_engine, "reldoco")
+    await _pedido_aberto_em_todos(admin_engine, cen)
+    await _pedido_aberto_em_todos(admin_engine, outra)
+    try:
+        async with await _cliente_como(admin_engine, cen, "comum") as c:
+            r = await c.get("/api/v2/relatorios/documentacao.json", params={"visao": "compl_aberta"})
+            csv_ = await c.get("/api/v2/relatorios/documentacao.csv", params={"visao": "compl_aberta"})
+            g = (await c.get("/api/v2/relatorios/gerencial.json")).json()
+        assert r.status_code == 200, r.text
+        # nem o reservado (acima da credencial), nem o rascunho, nem a outra prefeitura
+        assert {p["id"] for p in r.json()["processos"]} == _ids(cen, "ostensivo", "interno")
+        assert r.json()["totais"]["total"] == 2
+        assert g["documentacao"]["aguardando_cidadao"] == 2
+        assert cen["processos"]["reservado"][1] not in csv_.text
+        assert not {n for _, n in outra["processos"].values() if n} & set(csv_.text.split(";"))
+    finally:
+        await _fechar()
+
+
+@pytest.mark.asyncio
+async def test_opcoes_de_servico_do_filtro_para_quem_so_consulta_relatorio(admin_engine):
+    """O filtro de serviço não pode depender da transação `servico` (catálogo):
+    quem só tem `processo` levaria 403 e veria o filtro vazio. E só serviços da
+    própria prefeitura."""
+    cen = await _cenario(admin_engine, "relsv")
+    outra = await _cenario(admin_engine, "relsvo")
+    async with _sm(admin_engine)() as s:
+        for c, nome in ((cen, "Alvará daqui"), (outra, "Alvará de lá")):
+            await s.execute(text(
+                "INSERT INTO protocolos.servico (tenant_id, nome, slug, ativo) VALUES (:t, :n, :s, false)"),
+                {"t": c["tenant"].id, "n": nome, "s": f"sv-{uuid.uuid4().hex[:6]}"},
+            )
+        await s.commit()
+    try:
+        async with await _cliente_como(admin_engine, cen, "comum") as c:
+            r = await c.get("/api/v2/relatorios/servicos.json")
+            catalogo = await c.get("/api/v2/servicos")
+        # o catálogo ele não administra — é exatamente o caso desta rota
+        assert catalogo.status_code == 403
+        assert r.status_code == 200, r.text
+        nomes = {x["nome"] for x in r.json()}
+        assert "Alvará daqui" in nomes  # inativo também: processo antigo pode ser dele
+        assert "Alvará de lá" not in nomes
+    finally:
+        await _fechar()
