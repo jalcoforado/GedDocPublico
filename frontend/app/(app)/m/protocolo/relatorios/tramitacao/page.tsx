@@ -1,15 +1,24 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ChevronDown, ChevronUp, FileText, Inbox, Timer } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  Hourglass,
+  Inbox,
+  Timer,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AcoesDoFiltro, RelatorioCabecalho, temFiltro } from "@/components/protocolo/RelatorioCabecalho";
+import { RankingEmBarras } from "@/components/protocolo/RankingEmBarras";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Carregando } from "@/components/ui/carregando";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -18,7 +27,7 @@ import { Input } from "@/components/ui/input";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+
 import { useToast } from "@/components/ui/toast";
 import {
   api,
@@ -26,8 +35,10 @@ import {
   tramitacaoPdfUrl,
   type RelatorioFiltroInput,
   type TramitacaoEtapa,
+  type TramitacaoPorUnidade,
   type TramitacaoProcesso,
 } from "@/lib/api";
+import { useFiltroNaUrl } from "@/lib/filtro-na-url";
 
 function fmtDateTime(s: string | null) {
   if (!s) return "—";
@@ -46,6 +57,8 @@ function fmtDate(s: string | null) {
 
 function fmtMin(m: number | null): string {
   if (m === null || m === undefined) return "—";
+  // Médias chegam fracionadas (123.4 min); sem arredondar saía "2h 03.4min".
+  m = Math.round(m);
   if (m < 60) return `${m} min`;
   const h = Math.floor(m / 60);
   const rem = m % 60;
@@ -58,8 +71,10 @@ function fmtMin(m: number | null): string {
 export default function RelatorioTramitacaoPage() {
   const router = useRouter();
   const toast = useToast();
-  const [draft, setDraft] = useState<RelatorioFiltroInput>({});
-  const [applied, setApplied] = useState<RelatorioFiltroInput>({});
+  // Filtro aplicado mora na URL: recarregar, voltar ou mandar o link reabre o mesmo recorte.
+  const [applied, aplicar] = useFiltroNaUrl<RelatorioFiltroInput>();
+  const [draft, setDraft] = useState<RelatorioFiltroInput>(applied);
+  useEffect(() => setDraft(applied), [applied]);
 
   const gerarBg = useMutation({
     mutationFn: () => api.jobs.relatorioTramitacao(applied),
@@ -184,10 +199,10 @@ export default function RelatorioTramitacaoPage() {
         </div>
         <AcoesDoFiltro
           filtrado={temFiltro(draft) || temFiltro(applied)}
-          onGerar={() => setApplied({ ...draft })}
+          onGerar={() => aplicar({ ...draft })}
           onLimpar={() => {
             setDraft({});
-            setApplied({});
+            aplicar({});
           }}
         />
       </FilterBar>
@@ -204,7 +219,7 @@ export default function RelatorioTramitacaoPage() {
 
       {relQ.data && (
         <>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <KpiCard label="Processos" value={relQ.data.qtd_processos} icon={FileText} />
             <KpiCard
               label="Com atraso"
@@ -217,47 +232,96 @@ export default function RelatorioTramitacaoPage() {
               value={fmtMin(relQ.data.minutos_medio_por_processo)}
               icon={Timer}
             />
+            <KpiCard
+              label="Onde mais demora"
+              value={maisLenta(relQ.data.por_unidade)?.unidade ?? "—"}
+              hint={
+                maisLenta(relQ.data.por_unidade)
+                  ? `${fmtMin(maisLenta(relQ.data.por_unidade)!.minutos_medio)} em média por passagem`
+                  : undefined
+              }
+              icon={Hourglass}
+              intent="warning"
+            />
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Tempo por unidade</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {relQ.data.por_unidade.length === 0 ? (
-                <EmptyState icon={Inbox} title="Sem dados no recorte" className="p-6" />
-              ) : (
-                <Table>
-                  <THead>
-                    <TR>
-                      <TH>Unidade</TH>
-                      <TH className="text-right">Passagens</TH>
-                      <TH className="text-right">Atrasos</TH>
-                      <TH className="text-right">Tempo total</TH>
-                      <TH className="text-right">Tempo médio</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {relQ.data.por_unidade.map((u, i) => (
-                      <TR key={`${u.id_unidade ?? "null"}-${i}`}>
-                        <TD>{u.unidade ?? "—"}</TD>
-                        <TD className="text-right tabular-nums">{u.qtd_passagens}</TD>
-                        <TD className="text-right tabular-nums">
-                          {u.qtd_atrasos > 0 ? (
-                            <span className="font-semibold text-danger-soft-foreground">{u.qtd_atrasos}</span>
-                          ) : (
-                            u.qtd_atrasos
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Onde o processo para?</CardTitle>
+                <CardDescription>
+                  Unidades pelo tempo médio que um processo fica nelas. Em vermelho, as que
+                  estouraram prazo.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <RankingEmBarras
+                  rotuloDoValor="tempo médio por passagem"
+                  vazio={<EmptyState icon={Inbox} title="Sem dados no recorte" className="p-6" />}
+                  itens={[...relQ.data.por_unidade]
+                    .sort((a, b) => b.minutos_medio - a.minutos_medio)
+                    .map((u, i) => ({
+                      chave: `${u.id_unidade ?? "null"}-${i}`,
+                      rotulo: u.unidade ?? "—",
+                      valor: u.minutos_medio,
+                      valorTexto: fmtMin(Math.round(u.minutos_medio)),
+                      alerta: u.qtd_atrasos > 0,
+                      detalhe: (
+                        <>
+                          {u.qtd_passagens} {u.qtd_passagens === 1 ? "passagem" : "passagens"} ·{" "}
+                          {fmtMin(u.minutos_total)} no total
+                          {u.qtd_atrasos > 0 && (
+                            <span className="font-semibold text-danger-soft-foreground">
+                              {" "}
+                              · {u.qtd_atrasos} {u.qtd_atrasos === 1 ? "atraso" : "atrasos"}
+                            </span>
                           )}
-                        </TD>
-                        <TD className="text-right tabular-nums">{fmtMin(u.minutos_total)}</TD>
-                        <TD className="text-right tabular-nums">{fmtMin(u.minutos_medio)}</TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+                        </>
+                      ),
+                    }))}
+                />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Quem está parado há mais tempo?</CardTitle>
+                <CardDescription>
+                  Processos ativos pelo tempo desde que chegaram onde estão agora.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <RankingEmBarras
+                  rotuloDoValor="parado há"
+                  vazio={
+                    <EmptyState icon={Inbox} title="Nenhum processo ativo parado" className="p-6" />
+                  }
+                  itens={relQ.data.processos
+                    .filter((p) => p.ativo && p.minutos_em_andamento > 0)
+                    .sort((a, b) => b.minutos_em_andamento - a.minutos_em_andamento)
+                    .map((p) => ({
+                      chave: p.id,
+                      rotulo: (
+                        <Link
+                          href={`/m/protocolo/processos/${p.id}`}
+                          className="font-mono text-primary hover:underline"
+                        >
+                          {p.numero_processo}
+                        </Link>
+                      ),
+                      valor: p.minutos_em_andamento,
+                      valorTexto: fmtMin(p.minutos_em_andamento),
+                      alerta: p.teve_atraso,
+                      detalhe: (
+                        <>
+                          em {p.local_atual ?? "—"} · {p.assunto ?? "—"}
+                        </>
+                      ),
+                    }))}
+                />
+              </CardContent>
+            </Card>
+          </div>
 
           <Card>
             <CardHeader>
@@ -387,5 +451,13 @@ function EtapasTimeline({ etapas }: { etapas: TramitacaoEtapa[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/** A unidade de maior tempo médio por passagem (o topo do ranking). */
+function maisLenta(us: TramitacaoPorUnidade[]): TramitacaoPorUnidade | undefined {
+  return us.reduce<TramitacaoPorUnidade | undefined>(
+    (m, u) => (!m || u.minutos_medio > m.minutos_medio ? u : m),
+    undefined,
   );
 }

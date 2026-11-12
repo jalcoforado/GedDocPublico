@@ -13,7 +13,7 @@ import { FormField } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
 import { PasswordInput } from "@/components/ui/password-input";
 import { SkeletonRow } from "@/components/ui/skeleton";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -142,7 +142,7 @@ export default function ParaAssinarPage() {
             {q.isLoading &&
               Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={5} />)}
             {q.data?.map((p) => (
-              <TR key={p.id_assinatura_anexo}>
+              <TRLink key={p.id_assinatura_anexo} href={`/m/protocolo/processos/${p.id_processo}`}>
                 <TD>
                   <Link
                     href={`/m/protocolo/processos/${p.id_processo}`}
@@ -193,7 +193,7 @@ export default function ParaAssinarPage() {
                     ]}
                   />
                 </TD>
-              </TR>
+              </TRLink>
             ))}
           </TBody>
         </Table>

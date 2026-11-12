@@ -6,7 +6,7 @@ import Link from "next/link";
 
 import { nivelDeEspera, textoDoPrazo } from "@/components/TabelaCaixaProcessos";
 import { SkeletonRow } from "@/components/ui/skeleton";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { hrefDaCaixa } from "@/lib/caixas-processos";
 import { decorridoDesde } from "@/lib/duracao";
@@ -108,7 +108,7 @@ export function ParadosHaMaisTempo({ intervalo }: { intervalo: number }) {
             {itens.map((p) => {
               const prazo = textoDoPrazo(p.prazo_caixa_status, p.prazo_caixa_vence_em);
               return (
-                <TR key={p.id}>
+                <TRLink key={p.id} href={`/m/protocolo/processos/${p.id}`}>
                   <TD className="font-mono text-xs tabular-nums">
                     <Link
                       href={`/m/protocolo/processos/${p.id}`}
@@ -136,7 +136,7 @@ export function ParadosHaMaisTempo({ intervalo }: { intervalo: number }) {
                     )}
                     {prazo && <span className="mt-0.5 block text-xs text-muted-foreground">{prazo}</span>}
                   </TD>
-                </TR>
+                </TRLink>
               );
             })}
           </TBody>

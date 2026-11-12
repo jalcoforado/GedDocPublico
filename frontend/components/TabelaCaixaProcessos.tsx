@@ -8,7 +8,7 @@ import { FavoritoStar } from "@/components/FavoritoStar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonRow } from "@/components/ui/skeleton";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import type { ColunaProcesso, PrazoCaixaStatus, ProcessoListItem } from "@/lib/api";
 import { decorridoDesde } from "@/lib/duracao";
 import { cn } from "@/lib/utils";
@@ -152,7 +152,7 @@ export function TabelaCaixaProcessos({ itens, carregando, selecao, colunaOrdenav
           const espera = ESPERA[nivelDeEspera(p.prazo_caixa_status)];
           const prazo = textoDoPrazo(p.prazo_caixa_status, p.prazo_caixa_vence_em);
           return (
-            <TR key={p.id}>
+            <TRLink key={p.id} href={href}>
               {selecao && (
                 <TD className="w-10">
                   <Checkbox
@@ -216,7 +216,7 @@ export function TabelaCaixaProcessos({ itens, carregando, selecao, colunaOrdenav
                   Abrir →
                 </Link>
               </TD>
-            </TR>
+            </TRLink>
           );
         })}
       </TBody>

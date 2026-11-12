@@ -3,11 +3,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Clock, FileSignature, Inbox, Timer, XCircle } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AcoesDoFiltro, RelatorioCabecalho, temFiltro } from "@/components/protocolo/RelatorioCabecalho";
+import { RankingEmBarras } from "@/components/protocolo/RankingEmBarras";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Carregando } from "@/components/ui/carregando";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterBar } from "@/components/ui/filter-bar";
@@ -23,6 +24,7 @@ import {
   type AssinaturasFiltroInput,
   type StatusSolicitacaoAssin,
 } from "@/lib/api";
+import { useFiltroNaUrl } from "@/lib/filtro-na-url";
 
 function fmtDateTime(s: string | null) {
   if (!s) return "—";
@@ -36,6 +38,8 @@ function fmtDateTime(s: string | null) {
 
 function fmtMin(m: number | null): string {
   if (m === null || m === undefined) return "—";
+  // Médias chegam fracionadas (123.4 min); sem arredondar saía "2h 03.4min".
+  m = Math.round(m);
   if (m < 60) return `${m} min`;
   const h = Math.floor(m / 60);
   const rem = m % 60;
@@ -69,8 +73,10 @@ function statusBadge(status: StatusSolicitacaoAssin) {
 }
 
 export default function RelatorioAssinaturasPage() {
-  const [draft, setDraft] = useState<AssinaturasFiltroInput>({});
-  const [applied, setApplied] = useState<AssinaturasFiltroInput>({});
+  // Filtro aplicado mora na URL: recarregar, voltar ou mandar o link reabre o mesmo recorte.
+  const [applied, aplicar] = useFiltroNaUrl<AssinaturasFiltroInput>();
+  const [draft, setDraft] = useState<AssinaturasFiltroInput>(applied);
+  useEffect(() => setDraft(applied), [applied]);
 
   const usuariosQ = useQuery({
     queryKey: ["usuarios-list-relatorio"],
@@ -182,10 +188,10 @@ export default function RelatorioAssinaturasPage() {
         </div>
         <AcoesDoFiltro
           filtrado={temFiltro(draft) || temFiltro(applied)}
-          onGerar={() => setApplied({ ...draft })}
+          onGerar={() => aplicar({ ...draft })}
           onLimpar={() => {
             setDraft({});
-            setApplied({});
+            aplicar({});
           }}
         />
       </FilterBar>
@@ -228,41 +234,38 @@ export default function RelatorioAssinaturasPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle>Por assinante</CardTitle>
+                <CardTitle>Com quem estão as assinaturas pendentes?</CardTitle>
+                <CardDescription>
+                  Assinantes pelo número de assinaturas que ainda esperam por eles.
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                {relQ.data.por_assinante.length === 0 ? (
-                  <EmptyState icon={Inbox} title="Sem dados no recorte" className="p-6" />
-                ) : (
-                  <Table>
-                    <THead>
-                      <TR>
-                        <TH>Assinante</TH>
-                        <TH className="text-right">Pendentes</TH>
-                        <TH className="text-right">Concluídas</TH>
-                        <TH className="text-right">Tempo médio</TH>
-                      </TR>
-                    </THead>
-                    <TBody>
-                      {relQ.data.por_assinante.map((a) => (
-                        <TR key={a.id_assinante}>
-                          <TD>{a.nome ?? `#${a.id_assinante}`}</TD>
-                          <TD className="text-right tabular-nums">
-                            {a.pendentes > 0 ? (
-                              <span className="font-semibold text-warning-soft-foreground">
-                                {a.pendentes}
-                              </span>
-                            ) : (
-                              a.pendentes
-                            )}
-                          </TD>
-                          <TD className="text-right tabular-nums">{a.concluidas}</TD>
-                          <TD className="text-right tabular-nums">{fmtMin(a.minutos_medio)}</TD>
-                        </TR>
-                      ))}
-                    </TBody>
-                  </Table>
-                )}
+                <RankingEmBarras
+                  rotuloDoValor="pendentes"
+                  vazio={
+                    <EmptyState
+                      icon={CheckCircle2}
+                      title="Ninguém com assinatura pendente"
+                      className="p-6"
+                    />
+                  }
+                  itens={relQ.data.por_assinante
+                    .filter((a) => a.pendentes > 0)
+                    .sort((a, b) => b.pendentes - a.pendentes)
+                    .map((a) => ({
+                      chave: a.id_assinante,
+                      rotulo: a.nome ?? `#${a.id_assinante}`,
+                      valor: a.pendentes,
+                      valorTexto: String(a.pendentes),
+                      detalhe: (
+                        <>
+                          {a.concluidas} {a.concluidas === 1 ? "concluída" : "concluídas"}
+                          {a.concluidas > 0 &&
+                            ` · assina em ${fmtMin(Math.round(a.minutos_medio))} em média`}
+                        </>
+                      ),
+                    }))}
+                />
               </CardContent>
             </Card>
 

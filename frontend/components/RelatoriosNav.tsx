@@ -6,9 +6,9 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
-  { href: "/m/protocolo/relatorios", label: "Processos" },
-  { href: "/m/protocolo/relatorios/tramitacao", label: "Tramitação" },
-  { href: "/m/protocolo/relatorios/assinaturas", label: "Assinaturas" },
+  { href: "/m/protocolo/relatorios/tramitacao", label: "Onde o processo para" },
+  { href: "/m/protocolo/relatorios/assinaturas", label: "Assinaturas pendentes" },
+  { href: "/m/protocolo/relatorios/processos", label: "Lista de processos" },
 ];
 
 /**

@@ -1,11 +1,13 @@
 "use client";
 
-import { BarChart3, Download, FileText } from "lucide-react";
+import { BarChart3, Download, FileText, TrendingUp } from "lucide-react";
+import Link from "next/link";
 import * as React from "react";
 
 import { RelatoriosNav } from "@/components/RelatoriosNav";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import { useAuth } from "@/lib/auth";
 
 /**
  * Topo comum dos três relatórios do Protocolo (Processos, Tramitação,
@@ -25,12 +27,25 @@ export function RelatorioCabecalho({
   /** Ação além das exportações (ex.: gerar em background). */
   acoesExtras?: React.ReactNode;
 }) {
+  const { can } = useAuth();
   return (
     <>
       <PageHeader
         icon={BarChart3}
         title="Relatórios"
-        description="Processos, tramitação e assinaturas em números, com exportação em CSV e PDF."
+        description="Onde os processos param, quem está com assinatura pendente e a lista para exportar. O endereço guarda o filtro: dá para mandar o link."
+        actions={
+          // O Dashboard executivo (/dashboard) não estava em menu nenhum: só
+          // abria quem sabia o endereço. Mora aqui porque responde a mesma
+          // pergunta em escala de gestão; quem não tem `dashboard` não vê.
+          can("dashboard") ? (
+            <Button asChild variant="secondary" size="sm">
+              <Link href="/dashboard">
+                <TrendingUp className="h-4 w-4" aria-hidden="true" /> Dashboard executivo
+              </Link>
+            </Button>
+          ) : undefined
+        }
       />
       <RelatoriosNav />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
