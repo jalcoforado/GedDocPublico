@@ -20,7 +20,13 @@ from datetime import datetime
 import pytest
 from sqlalchemy import select, text
 
-from tests.test_relatorios_protocolo_medidas import _get, _monta_prazo, _sm, cen  # noqa: F401
+from tests.test_relatorios_protocolo_medidas import (  # noqa: F401
+    _get,
+    _monta_prazo,
+    _sm,
+    _solicitacoes,
+    cen,
+)
 
 OUTUBRO = {"desde": "2026-10-01", "ate": "2026-10-31"}
 MENSAGEM_PRIVADA = "favor reenviar o RG da Sra. Fulana, CPF 000"
@@ -313,3 +319,41 @@ async def test_so_com_atraso_olha_o_recorte_inteiro_e_nao_so_os_listados(cen, ad
 
 def _ids_lista_json(r: dict) -> set[int]:
     return {p["id"] for p in r["processos"]}
+
+
+# ------------------------------------------------- revisão: as contas fecham
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("periodo", [{}, OUTUBRO], ids=["sem_periodo", "outubro"])
+async def test_as_contas_da_pagina_fecham(cen, admin_engine, periodo):
+    """Identidades que valem em qualquer recorte. Cada uma pegaria um número
+    que conta o conjunto errado — como a Saída sem período, que somava os
+    processos abertos aos arquivados (20 "arquivados" com 1 arquivado)."""
+    await _documentacao(cen, admin_engine)
+    await _solicitacoes(cen, admin_engine)
+    g = (await _get("gerencial.json", **periodo)).json()
+    an, sa, pz, doc, ass = g["andamento"], g["saida"], g["prazos"], g["documentacao"], g["assinaturas"]
+    em_aberto_hoje = an["em_andamento"] + an["em_transito"]
+
+    # Prazos: os arquivados do bloco são os da Saída; os em aberto, os do Andamento
+    assert pz["concluidos_no_prazo"] + pz["concluidos_atrasados"] + pz["concluidos_sem_prazo"] == sa["arquivados"]
+    assert pz["dentro_do_prazo"] + pz["vencendo"] + pz["atrasados"] + pz["em_aberto_sem_prazo"] == em_aberto_hoje
+    # Documentação: todo aberto no período está numa das quatro situações
+    assert doc["pendentes"] + doc["parciais"] + doc["completos"] + doc["sem_documentos_exigidos"] == g["entrada"]["abertos"]
+    # Assinaturas: pedida = pendente + concluída + cancelada
+    assert ass["pendentes"] + ass["concluidas"] + ass["canceladas"] == ass["total"]
+
+    # Lista de processos: total = andamento + trânsito + arquivados
+    lista = (await _get("processos.json", **periodo)).json()["totais"]
+    assert lista["em_andamento"] + lista["em_transito"] + lista["arquivados"] == lista["total"]
+    # "Arquivados" na lista = Saída, também sem período
+    arq = (await _get("processos.json", data_base="arquivamento", **periodo)).json()["totais"]
+    assert arq["total"] == arq["arquivados"] == sa["arquivados"]
+
+    if not periodo:
+        # Sem período: todo processo está aberto hoje ou arquivado
+        assert g["entrada"]["abertos"] == em_aberto_hoje + sa["arquivados"]
+        # "Pela data de conclusão" só conta o que tem conclusão
+        concl = (await _get("assinaturas.json", data_base="conclusao")).json()["totais"]
+        assert concl["pendentes"] == 0

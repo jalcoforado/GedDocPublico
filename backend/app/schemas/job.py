@@ -34,7 +34,7 @@ class DispararRelatorioTramitacaoRequest(BaseModel):
     # Mesmos filtros de `GET /relatorios/tramitacao.*` (SI-34): dias locais,
     # modo de unidade e data base.
     id_unidade: int | None = None
-    modo_unidade: Literal["envolvida", "dona", "atual", "passou"] = "envolvida"
+    modo_unidade: Literal["envolvida", "dona", "atual"] = "envolvida"
     id_assunto: int | None = None
     id_tipo_processo: int | None = None
     id_servico: int | None = None

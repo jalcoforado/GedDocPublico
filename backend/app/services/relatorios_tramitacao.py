@@ -63,12 +63,15 @@ def _filter_processos(
             stmt, f, tenant_id=tenant_id, niveis_permitidos=niveis_permitidos,
             coluna_data=Processo.data_hora_abertura,
         )
-    sem_periodo = f.model_copy(update={"desde": None, "ate": None})
+    # Pela entrada, a unidade é "onde o processo deu entrada" — e não o sentido
+    # do filtro (dona ou onde está): processo que entrou em B e já saiu é
+    # entrada de B, e os Gargalos da página contam exatamente isso.
+    sem_periodo = f.model_copy(update={"desde": None, "ate": None, "id_unidade": None})
     stmt = aplicar_filtros_processo(
         stmt, sem_periodo, tenant_id=tenant_id, niveis_permitidos=niveis_permitidos,
         coluna_data=Processo.data_hora_abertura,
     )
-    if not (f.desde or f.ate):
+    if not (f.desde or f.ate or f.id_unidade):
         return stmt
     recebimento = [
         Encaminhamento.id_processo == Processo.id,

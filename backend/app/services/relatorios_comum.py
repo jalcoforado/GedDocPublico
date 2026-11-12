@@ -11,9 +11,10 @@ número em todos eles moram aqui, uma vez só:
   caixas de trabalho (`processos.condicao_*`); `Processo.ativo` não é escrito
   por nenhum caminho e não entra em conta nenhuma.
 - **Unidade.** "Dona" é a unidade proprietária escolhida na abertura (decisão
-  de produto de 2026-11-10). "Passou pela unidade" conta a dona e quem RECEBEU
-  o processo; envio não recebido e recusa não contam — a unidade nunca esteve
-  com ele.
+  de produto de 2026-11-10). O filtro tem três sentidos: dona ou onde está
+  (padrão), só a dona, só onde está. Na tramitação pela data de entrada, a
+  unidade é onde o processo DEU ENTRADA (abertura na dona ou recebimento);
+  envio não recebido e recusa não contam — a unidade nunca esteve com ele.
 
 O fuso é fixo (`America/Fortaleza`) porque todos os municípios atendidos hoje
 estão no Ceará e o tenant não guarda fuso. Município em outro fuso exige essa
@@ -58,7 +59,6 @@ ROTULO_MODO_UNIDADE: dict[str, str] = {
     "envolvida": "dona do processo ou onde ele está agora",
     "dona": "dona do processo",
     "atual": "onde o processo está agora",
-    "passou": "por onde o processo passou",
 }
 ROTULO_PRAZO: dict[str, str] = {
     "sem_prazo": "sem prazo de serviço",
@@ -97,9 +97,15 @@ def intervalo_utc(de: date | None, ate: date | None) -> tuple[datetime | None, d
 
 
 def no_intervalo(coluna, de: date | None, ate: date | None):
-    """Condições de `coluna` dentro dos dias locais `[de, ate]`."""
+    """Condições de `coluna` dentro dos dias locais `[de, ate]`.
+
+    "Pela data X" exige que X exista, COM ou SEM período. Antes, sem período
+    não sobrava condição nenhuma: "arquivados pela data de arquivamento" sem
+    período contava todos os processos, abertos inclusive (a Saída dizia 20
+    com 1 arquivado), e "concluídas pela data de conclusão" contava pendentes.
+    """
     inicio, fim = intervalo_utc(de, ate)
-    conds = []
+    conds = [coluna.is_not(None)]
     if inicio is not None:
         conds.append(coluna >= inicio)
     if fim is not None:
@@ -216,19 +222,9 @@ def condicao_unidade(id_unidade: int, modo: ModoUnidade, tenant_id: int):
         return dona
     if modo == "atual":
         return atual
-    if modo == "passou":
-        recebeu = (
-            select(Encaminhamento.id)
-            .where(
-                Encaminhamento.id_processo == Processo.id,
-                Encaminhamento.tenant_id == tenant_id,
-                Encaminhamento.id_unidade_destino == id_unidade,
-                Encaminhamento.recebido.is_(True),
-                Encaminhamento.excluido.is_(False),
-            )
-            .exists()
-        )
-        return or_(dona, recebeu)
+    # "Por onde passou" saiu do filtro em 2026-11-12 (decisão do usuário). O
+    # sentido continua na tramitação pela data de entrada, que conta as
+    # entradas na unidade (`relatorios_tramitacao._filter_processos`).
     return or_(dona, atual)
 
 
@@ -299,9 +295,12 @@ async def descrever_filtros(
         linhas.append(f"{periodo}, pela {rotulo_data or ROTULO_DATA_BASE[f.data_base]}")
     if f.id_unidade:
         nome = await _nome(UnidadeTrabalho.unidade_trabalho, UnidadeTrabalho, f.id_unidade)
-        linhas.append(
-            f"Unidade: {nome or 'não encontrada'} ({ROTULO_MODO_UNIDADE[f.modo_unidade]})"
+        sentido = (
+            "onde o processo deu entrada: abertura ou recebimento"
+            if f.data_base == "chegada"
+            else ROTULO_MODO_UNIDADE[f.modo_unidade]
         )
+        linhas.append(f"Unidade: {nome or 'não encontrada'} ({sentido})")
     if f.id_tipo_processo:
         nome = await _nome(TipoProcesso.tipo_processo, TipoProcesso, f.id_tipo_processo)
         linhas.append(f"Tipo de processo: {nome or 'não encontrado'}")

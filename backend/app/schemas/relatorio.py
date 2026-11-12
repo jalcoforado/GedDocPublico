@@ -10,7 +10,7 @@ DataBase = Literal["abertura", "arquivamento", "chegada"]
 # Filtros próprios da lista de processos (os cartões Sigilosos e Externos).
 FiltroSigilo = Literal["ostensivo", "sigiloso"]
 FiltroOrigem = Literal["interna", "externa"]
-ModoUnidade = Literal["envolvida", "dona", "atual", "passou"]
+ModoUnidade = Literal["envolvida", "dona", "atual"]
 Situacao = Literal["em_andamento", "em_transito", "arquivado"]
 # Status do prazo do serviço — os de `prazos.StatusPrazo`.
 StatusPrazoRelatorio = Literal[

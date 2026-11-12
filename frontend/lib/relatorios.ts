@@ -31,7 +31,6 @@ export const ROTULO_MODO_UNIDADE: Record<ModoUnidadeRelatorio, string> = {
   envolvida: "dona ou onde está agora",
   dona: "só a dona do processo",
   atual: "só onde está agora",
-  passou: "por onde o processo passou",
 };
 
 export const ROTULO_SITUACAO: Record<SituacaoRelatorio, string> = {

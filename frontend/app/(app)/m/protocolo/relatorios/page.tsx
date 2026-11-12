@@ -328,8 +328,9 @@ export default function RelatoriosPage() {
                 <KpiCard label="Vencidos" value={g.prazos.atrasados} intent="danger" hint="prazo já passou" />
               </div>
               <p className="text-xs text-foreground-muted">
-                Fora da conta, por não ter prazo de serviço: {g.prazos.concluidos_sem_prazo} arquivado(s) no
-                período e {g.prazos.em_aberto_sem_prazo} em aberto.
+                Sem prazo de serviço, e por isso fora dos cartões acima: {g.prazos.concluidos_sem_prazo}{" "}
+                arquivado(s) e {g.prazos.em_aberto_sem_prazo} em aberto. Somados aos cartões, dão os arquivados da
+                Saída e os em aberto do Andamento.
               </p>
             </Subgrupo>
           </Grupo>

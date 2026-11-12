@@ -7,7 +7,8 @@ plausível e falso — o tipo de defeito que ninguém percebe olhando a tela:
   em UTC, e pertence ao dia 10;
 - situação real (em andamento / em trânsito / arquivado), não `Processo.ativo`,
   que nenhum caminho escreve;
-- unidade em quatro sentidos; "passou" conta quem RECEBEU, não quem só foi
+- unidade em três sentidos (dona ou onde está, dona, onde está); na
+  tramitação pela entrada, conta quem RECEBEU, não quem só foi
   destino de envio pendente ou recusado;
 - período pela data de arquivamento;
 - lista com teto avisa que cortou; CSV recusa em vez de cortar;
@@ -204,12 +205,10 @@ async def test_totais_pela_situacao_real_e_nao_pelo_campo_ativo(cen):
     ("dona", "B", {"arquivado"}),
     ("atual", "B", {"arquivado"}),
     ("envolvida", "B", {"arquivado"}),
-    # passou: recebeu `passou`; pendente e recusado nunca estiveram em B
-    ("passou", "B", {"arquivado", "passou"}),
     ("atual", "C", {"passou"}),
     ("envolvida", "A", {"noite_10", "dia_11", "passou", "pendente", "recusado"}),
 ])
-async def test_unidade_nos_quatro_sentidos(cen, modo, unidade, esperado):
+async def test_unidade_nos_tres_sentidos(cen, modo, unidade, esperado):
     r = await _get("processos.json", id_unidade=cen["unid"][unidade], modo_unidade=modo)
     assert _ids(r) == {cen["procs"][x] for x in esperado}
     assert r.json()["totais"]["total"] == len(esperado)
@@ -277,10 +276,25 @@ async def test_tramitacao_pela_chegada_na_unidade(cen, admin_engine):
     await _monta_prazo(cen, admin_engine)
     r = await _get(
         "tramitacao.json", desde="2026-10-15", ate="2026-10-15", data_base="chegada",
-        id_unidade=cen["unid"]["B"], modo_unidade="passou",
+        id_unidade=cen["unid"]["B"],
     )
-    # chegou a B em 15/10 (local) só o `no_ultimo_dia`
+    # chegou a B em 15/10 (local) só o `no_ultimo_dia` — que é de A e está em
+    # C: pela entrada, o sentido "dona ou onde está" do filtro não se aplica
     assert {p["id"] for p in r.json()["processos"]} == {cen["procs"]["no_ultimo_dia"]}
+    assert "onde o processo deu entrada" in " ".join(r.json()["descricao_filtros"])
+
+    # sem período: todo processo que deu entrada em B (dono B, ou recebido em
+    # B); envio pendente e recusado para B não contam
+    sem = await _get("tramitacao.json", data_base="chegada", id_unidade=cen["unid"]["B"])
+    assert {p["id"] for p in sem.json()["processos"]} == {
+        cen["procs"][x] for x in ("arquivado", "passou", "no_ultimo_dia", "depois_do_prazo")
+    }
+
+
+@pytest.mark.asyncio
+async def test_sentido_por_onde_passou_saiu_do_filtro(cen):
+    r = await _get("processos.json", id_unidade=cen["unid"]["B"], modo_unidade="passou")
+    assert r.status_code == 422
 
 
 async def _monta_prazo(cen, admin_engine):

@@ -127,16 +127,16 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-const RECORTE = "desde=2026-10-01&ate=2026-10-31&id_unidade=3&modo_unidade=passou&id_assunto=9";
+const RECORTE = "desde=2026-10-01&ate=2026-10-31&id_unidade=3&modo_unidade=dona&id_assunto=9";
 const RECORTE_PARAMS = {
-  desde: "2026-10-01", ate: "2026-10-31", id_unidade: "3", modo_unidade: "passou", id_assunto: "9",
+  desde: "2026-10-01", ate: "2026-10-31", id_unidade: "3", modo_unidade: "dona", id_assunto: "9",
 };
 
 describe("página gerencial — grupos por tela de destino, um botão por grupo", () => {
   it("consulta com o recorte da URL e mostra os números", async () => {
     await abrir(RECORTE);
     expect(gerencialMock).toHaveBeenCalledWith({
-      id_unidade: 3, modo_unidade: "passou", id_assunto: 9, id_tipo_processo: undefined,
+      id_unidade: 3, modo_unidade: "dona", id_assunto: 9, id_tipo_processo: undefined,
       desde: "2026-10-01", ate: "2026-10-31", dias_parado: 15,
     });
     expect(within(screen.getByRole("region", { name: "Entrada" })).getByText("142")).toBeTruthy();
@@ -207,7 +207,7 @@ describe("página gerencial — grupos por tela de destino, um botão por grupo"
     }
     // 32 de 41 com prazo
     expect(within(regiao).getByText("78% dos arquivados com prazo")).toBeTruthy();
-    expect(within(regiao).getByText(/0 arquivado\(s\) no período e 23 em aberto/)).toBeTruthy();
+    expect(within(regiao).getByText(/0 arquivado\(s\) e 23 em aberto/)).toBeTruthy();
     // todos os cartões na MESMA grade — é o que iguala a altura
     const grades = new Set(
       ["No prazo", "Vencidos"].map((r) => within(regiao).getByText(r).closest(".grid")),
@@ -230,6 +230,10 @@ describe("página gerencial — grupos por tela de destino, um botão por grupo"
 });
 
 describe("filtros próprios das listas, na URL", () => {
+  it("link antigo com o sentido “por onde passou” cai no padrão, sem erro do servidor", () => {
+    expect(filtroDaUrl(new URLSearchParams("id_unidade=3&modo_unidade=passou")).modo_unidade).toBeUndefined();
+  });
+
   it("serviço, sigilo, origem e atraso vão e voltam pela URL; valor estranho é ignorado", () => {
     const f = filtroDaUrl(
       new URLSearchParams("id_servico=5&sigilo=sigiloso&origem=externa&com_atraso=true&visao=doc_parcial"),

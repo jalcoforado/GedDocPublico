@@ -675,10 +675,10 @@ export interface Prioridade {
 }
 
 // Fase 6 — Relatórios (refeitos no SI-34: `backend/app/services/relatorios_comum.py`)
-/** Unidade em quatro sentidos: dona ou onde está (padrão), só a dona (a
- * proprietária), só onde está agora, ou por onde passou (dona ou quem
- * RECEBEU — envio pendente e recusa não contam). */
-export type ModoUnidadeRelatorio = "envolvida" | "dona" | "atual" | "passou";
+/** Unidade em três sentidos: dona ou onde está (padrão), só a dona (a
+ * proprietária) ou só onde está agora. "Por onde passou" saiu em 2026-11-12;
+ * na tramitação pela data de entrada, a unidade é onde o processo deu entrada. */
+export type ModoUnidadeRelatorio = "envolvida" | "dona" | "atual";
 /** Situação real, pelas mesmas condições das caixas de trabalho. */
 export type SituacaoRelatorio = "em_andamento" | "em_transito" | "arquivado";
 

@@ -88,16 +88,24 @@ entram: processo antigo pode ser de um serviço que saiu do catálogo.
 
 - **Período:** dias em **hora de Brasília**, inclusive nas duas pontas. O banco
   grava UTC; "até 10/11" vai até 11/11 03:00 UTC.
+- **"Pela data X" só conta quem tem X**, com ou sem período. Sem período, os
+  arquivados são os que têm arquivamento, e as assinaturas pela conclusão são
+  as concluídas. (Até 2026-11-12, sem período, a Saída contava todos os
+  processos, abertos inclusive.) Por isso as contas da página fecham: arquivados
+  de Prazos = Saída; em aberto de Prazos = Andamento; sem período, Entrada =
+  Andamento + Saída — `test_as_contas_da_pagina_fecham` confere todas.
 - **Situação:** *arquivado* = tem movimentação de arquivamento; *em trânsito* =
   envio ainda não recebido nem desfeito; *em andamento* = o resto. São as
   mesmas condições das caixas de trabalho. O campo `processo.ativo` **não é
   usado**: nenhuma parte do sistema o escreve.
 - **Parado:** não arquivado e **sem nenhuma movimentação** (envio, recebimento,
   despacho, assinatura…) há N dias — padrão 15, escolhido na tela.
-- **Unidade, em quatro sentidos:** *envolvida* (dona ou onde está agora —
-  padrão), *dona* (a unidade proprietária escolhida na abertura), *onde está
-  agora*, e *por onde passou* (dona ou quem **recebeu** o processo; envio
-  pendente e recusa não contam).
+- **Unidade, em três sentidos:** *envolvida* (dona ou onde está agora —
+  padrão), *dona* (a unidade proprietária escolhida na abertura) e *onde está
+  agora*. "Por onde passou" saiu do filtro em 2026-11-12. Na **tramitação pela
+  data de entrada** (e nos Gargalos), a unidade é **onde o processo deu
+  entrada**, qualquer que seja o sentido escolhido: processo que entrou em B e
+  já saiu é entrada de B.
 - **Entradas na unidade (Gargalos):** a abertura, na unidade dona, ou um
   recebimento. Envio pendente ou recusado não é entrada.
 - **Atraso:** a estadia na unidade terminou (ou segue) depois do **fim do dia**
