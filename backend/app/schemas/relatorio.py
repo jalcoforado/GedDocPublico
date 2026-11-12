@@ -88,6 +88,7 @@ class RelatorioResposta(BaseModel):
     totais: RelatorioTotais
     por_tipo_processo: list[RelatorioBreakdownItem]
     por_unidade_proprietaria: list[RelatorioBreakdownItem]
+    por_local_atual: list[RelatorioBreakdownItem]
     por_assunto: list[RelatorioBreakdownItem]
     por_servico: list[RelatorioBreakdownItem]
     processos: list[RelatorioProcessoRow]

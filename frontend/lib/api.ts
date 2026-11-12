@@ -750,6 +750,8 @@ export interface RelatorioResposta {
   totais: RelatorioTotais;
   por_tipo_processo: RelatorioBreakdownItem[];
   por_unidade_proprietaria: RelatorioBreakdownItem[];
+  /** Onde o processo está agora (arquivado: onde foi arquivado). */
+  por_local_atual: RelatorioBreakdownItem[];
   por_assunto: RelatorioBreakdownItem[];
   por_servico: RelatorioBreakdownItem[];
   processos: RelatorioProcessoRow[];

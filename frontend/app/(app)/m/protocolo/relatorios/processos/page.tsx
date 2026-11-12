@@ -50,16 +50,18 @@ import {
  *
  * Sigilo e Origem são os filtros dos cartões "Sigilosos" e "Externos" — com
  * eles, o cartão é o total da lista. O quadro "Agrupar por" é a quebra do
- * recorte por tipo, unidade dona, assunto ou serviço (antes, os principais
+ * recorte por tipo, unidade dona, unidade onde está, assunto ou serviço (antes, os principais
  * assuntos ficavam na página gerencial).
  */
 
-type Dimensao = "tipo" | "unidade" | "assunto" | "servico";
+type Dimensao = "tipo" | "unidade" | "local" | "assunto" | "servico";
 const DIMENSOES: { id: Dimensao; rotulo: string; linhas: (r: RelatorioResposta) => RelatorioBreakdownItem[]; vazio: string }[] = [
   { id: "assunto", rotulo: "Assunto", linhas: (r) => r.por_assunto, vazio: "—" },
   { id: "servico", rotulo: "Serviço", linhas: (r) => r.por_servico, vazio: "Sem serviço" },
   { id: "tipo", rotulo: "Tipo de processo", linhas: (r) => r.por_tipo_processo, vazio: "—" },
   { id: "unidade", rotulo: "Unidade dona", linhas: (r) => r.por_unidade_proprietaria, vazio: "—" },
+  // Arquivado conta onde foi arquivado.
+  { id: "local", rotulo: "Onde está agora", linhas: (r) => r.por_local_atual, vazio: "—" },
 ];
 export default function RelatorioProcessosPage() {
   const router = useRouter();
@@ -306,7 +308,9 @@ function Quebra({
   onDimensao: (d: Dimensao) => void;
 }) {
   const def = DIMENSOES.find((d) => d.id === dimensao) ?? DIMENSOES[0];
-  const linhas = def.linhas(resposta);
+  // `?? []`: resposta de um backend mais antigo (deploy em andamento) não
+  // tem a quebra nova — melhor um quadro vazio que a tela em branco.
+  const linhas = def.linhas(resposta) ?? [];
   const maior = linhas[0]?.count ?? 0;
   return (
     <Card>

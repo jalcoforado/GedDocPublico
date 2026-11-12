@@ -137,6 +137,12 @@ async def gerar_relatorio(
         UnidadeTrabalho.unidade_trabalho,
         (UnidadeTrabalho, UnidadeTrabalho.id == Processo.id_unidade_proprietaria),
     )
+    # Onde o processo está agora (para arquivado, onde foi arquivado).
+    UnidadeAtual = aliased(UnidadeTrabalho, name="ua")
+    por_local_atual = await _quebra(
+        UnidadeAtual.unidade_trabalho,
+        (UnidadeAtual, UnidadeAtual.id == Processo.id_local_atual),
+    )
     por_assunto = await _quebra(
         Assunto.assunto, (Assunto, Assunto.id == Processo.id_assunto),
     )
@@ -214,6 +220,7 @@ async def gerar_relatorio(
         totais=totais,
         por_tipo_processo=por_tipo,
         por_unidade_proprietaria=por_unidade,
+        por_local_atual=por_local_atual,
         por_assunto=por_assunto,
         por_servico=por_servico,
         processos=processos,

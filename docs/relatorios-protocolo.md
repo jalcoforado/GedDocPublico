@@ -70,7 +70,7 @@ Cada lista tem, além do recorte comum, **os filtros do que ela mostra**:
 
 | Lista | Filtros próprios |
 |---|---|
-| Processos | Mostrar (a visão); **Sigilo** (só ostensivos / só sigilosos) e **Origem** (internos / externos) — os critérios dos cartões "Sigilosos" e "Externos", que passam a ser o total da lista filtrada; quadro **Agrupar por** tipo, unidade dona, assunto ou serviço |
+| Processos | Mostrar (a visão); **Sigilo** (só ostensivos / só sigilosos) e **Origem** (internos / externos) — os critérios dos cartões "Sigilosos" e "Externos", que passam a ser o total da lista filtrada; quadro **Agrupar por** tipo, unidade dona, unidade onde está agora (arquivado: onde foi arquivado), assunto ou serviço |
 | Tramitação | Período pela abertura ou pela entrada na unidade; **Só processos com atraso** |
 | Documentação | Mostrar (a visão: todos que exigem documentos, pendentes, parciais, completos, complementação pedida / aguardando / respondida) |
 | Assinaturas | Data do pedido ou da conclusão, solicitante, assinante, status |

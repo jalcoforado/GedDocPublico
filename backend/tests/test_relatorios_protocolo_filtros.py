@@ -269,8 +269,12 @@ async def test_quebras_por_assunto_e_servico_somam_o_total(cen, admin_engine):
     await _documentacao(cen, admin_engine)
     r = (await _get("processos.json", **OUTUBRO)).json()
     total = r["totais"]["total"]
-    for chave in ("por_tipo_processo", "por_unidade_proprietaria", "por_assunto", "por_servico"):
+    for chave in ("por_tipo_processo", "por_unidade_proprietaria", "por_local_atual", "por_assunto", "por_servico"):
         assert sum(x["count"] for x in r[chave]) == total, chave
+    # dona x onde está: o `passou` é da unidade A e está na C
+    dona = {x["label"]: x["count"] for x in r["por_unidade_proprietaria"]}
+    atual = {x["label"]: x["count"] for x in r["por_local_atual"]}
+    assert "Unidade C" not in dona and atual["Unidade C"] == 1
     por_servico = {x["label"]: x["count"] for x in r["por_servico"]}
     # os 6 do cenário não têm serviço: aparecem como "—", não somem
     assert por_servico == {"Alvará": 4, "Só opcionais": 1, "Sem lista": 1, "—": 6}
