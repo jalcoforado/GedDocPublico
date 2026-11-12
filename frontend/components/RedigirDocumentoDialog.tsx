@@ -11,7 +11,41 @@ import { RichTextEditor, RichTextView } from "@/components/ui/rich-text-editor";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { GoogleConnectDialog } from "@/components/GoogleConnectDialog";
+import { PreVisualizacaoDocumento } from "@/components/PreVisualizacaoDocumento";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+type Modo = "editar" | "lado" | "previa";
+
+const MODOS: { valor: Modo; rotulo: string }[] = [
+  { valor: "editar", rotulo: "Editar" },
+  { valor: "lado", rotulo: "Lado a lado" },
+  { valor: "previa", rotulo: "Pré-visualizar" },
+];
+
+/** Escolha entre só o editor, editor + documento, ou só o documento (SI-30). */
+function ModoDeVisualizacao({ modo, onChange }: { modo: Modo; onChange: (m: Modo) => void }) {
+  return (
+    <div role="group" aria-label="Visualização" className="inline-flex rounded-md border border-border p-0.5">
+      {MODOS.map((m) => (
+        <button
+          key={m.valor}
+          type="button"
+          aria-pressed={modo === m.valor}
+          onClick={() => onChange(m.valor)}
+          className={cn(
+            "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            modo === m.valor
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          )}
+        >
+          {m.rotulo}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 interface Props {
   open: boolean;
@@ -46,6 +80,8 @@ export function RedigirDocumentoDialog({
   const [corpo, setCorpo] = useState("");
   const [versao, setVersao] = useState<number | undefined>(undefined);
   const [showGoogleConnect, setShowGoogleConnect] = useState(false);
+  // Abre lado a lado: ver o documento enquanto escreve é o ponto (SI-30).
+  const [modo, setModo] = useState<Modo>("lado");
 
   const credentialQ = useQuery({
     queryKey: ["user", "google-credential"],
@@ -231,7 +267,7 @@ export function RedigirDocumentoDialog({
       open={open}
       onClose={onClose}
       title={emEdicao ? "Editar documento" : "Redigir documento"}
-      size="xl"
+      size={emEdicao && !ehGoogle && modo === "lado" ? "2xl" : "xl"}
       footer={footer}
     >
       {!emEdicao ? (
@@ -336,9 +372,12 @@ export function RedigirDocumentoDialog({
               <p className="text-xs font-medium text-foreground-muted">
                 Conteúdo trazido do Google Docs (v{minutaQ.data.versao})
               </p>
-              <div className="max-h-80 overflow-y-auto rounded-md border border-border bg-card p-3">
-                <RichTextView html={minutaQ.data.corpo_html} />
-              </div>
+              {/* Como o PDF vai sair (SI-30), não o texto cru da tela. */}
+              <PreVisualizacaoDocumento
+                titulo={minutaQ.data.titulo}
+                corpoHtml={minutaQ.data.corpo_html}
+                className="h-96"
+              />
               <p className="text-xs text-foreground-subtle">
                 Vêm negrito, itálico, títulos, listas, alinhamento e tabelas.
                 Imagens, links, cores e fontes continuam só no Google Docs.
@@ -370,17 +409,31 @@ export function RedigirDocumentoDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Conteúdo</Label>
-            <RichTextEditor
-              value={corpo}
-              onChange={setCorpo}
-              minHeight={320}
-              ariaLabel="Editor do documento"
-              onUploadImage={async (file) => {
-                const { url } = await api.editorImagens.upload(file);
-                return url;
-              }}
-            />
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <Label>Conteúdo</Label>
+              <ModoDeVisualizacao modo={modo} onChange={setModo} />
+            </div>
+            <div className={cn("grid gap-4", modo === "lado" && "lg:grid-cols-2")}>
+              {modo !== "previa" && (
+                <RichTextEditor
+                  value={corpo}
+                  onChange={setCorpo}
+                  minHeight={320}
+                  ariaLabel="Editor do documento"
+                  onUploadImage={async (file) => {
+                    const { url } = await api.editorImagens.upload(file);
+                    return url;
+                  }}
+                />
+              )}
+              {modo !== "editar" && (
+                <PreVisualizacaoDocumento
+                  titulo={titulo}
+                  corpoHtml={corpo}
+                  className={modo === "previa" ? "min-h-[60vh]" : undefined}
+                />
+              )}
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">
             Versão atual: v{versao}. Cada "Salvar rascunho" registra uma nova versão.

@@ -4400,6 +4400,9 @@ export const api = {
       }),
     placeholders: () =>
       request<PlaceholderInfo[]>("/templates-documento/placeholders-disponiveis"),
+    /** SI-30 — CSS com que o PDF final é impresso; a pré-visualização usa o mesmo. */
+    estiloImpressao: () =>
+      request<{ css: string; css_tela: string }>("/templates-documento/estilo-impressao"),
   },
 
   // Imagens embutidas no editor rico (Novo Processo, Templates, Minutas)

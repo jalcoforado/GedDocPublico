@@ -30,7 +30,10 @@ vi.mock("@/lib/api", async (importOriginal) => {
     api: {
       ...real.api,
       minutas: { get: (id: number) => get(id), sincronizarGoogle: (id: number) => sincronizarGoogle(id) },
-      templatesDocumento: { list: () => Promise.resolve([]) },
+      templatesDocumento: {
+        list: () => Promise.resolve([]),
+        estiloImpressao: () => Promise.resolve({ css: "body { color: black; }", css_tela: "" }),
+      },
     },
   };
 });
@@ -57,7 +60,11 @@ describe("minuta do Google — sincronizar de volta", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Sincronizar do Google Docs/ }));
 
     expect(sincronizarGoogle).toHaveBeenCalledWith(7);
-    await waitFor(() => expect(screen.getByText("Texto do Google")).toBeInTheDocument());
+    // A prévia é o documento como o PDF sai (SI-30), dentro de um iframe.
+    await waitFor(() => {
+      const folha = screen.getByTitle("Pré-visualização do documento") as HTMLIFrameElement;
+      expect(folha.contentDocument?.body.textContent).toContain("Texto do Google");
+    });
     expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("v2"));
   });
 

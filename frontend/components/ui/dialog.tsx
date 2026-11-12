@@ -13,7 +13,7 @@ interface DialogProps {
   description?: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: "sm" | "md" | "lg" | "xl" | "2xl";
 }
 
 const SIZES = {
@@ -21,6 +21,9 @@ const SIZES = {
   md: "max-w-xl",
   lg: "max-w-3xl",
   xl: "max-w-5xl",
+  // Editor e pré-visualização lado a lado (SI-30): duas colunas que precisam
+  // de largura de verdade cada uma.
+  "2xl": "max-w-[min(96rem,calc(100vw-2rem))]",
 };
 
 const FOCUSABLE =
