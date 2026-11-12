@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ChevronDown, ChevronUp, Download, FileText } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -8,13 +8,11 @@ import { useMemo, useState } from "react";
 
 import { FiltrosDoRelatorio } from "@/components/relatorios/FiltrosDoRelatorio";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Carregando } from "@/components/ui/carregando";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import { useToast } from "@/components/ui/toast";
 import {
   api,
   tramitacaoCsvUrl,
@@ -44,7 +42,6 @@ import {
 export default function RelatorioTramitacaoPage() {
   const router = useRouter();
   const pathname = usePathname();
-  const toast = useToast();
   const busca = useSearchParams().toString();
   const filtro = useMemo(() => filtroDaUrl(new URLSearchParams(busca)), [busca]);
   const dataBase = filtro.data_base === "chegada" ? "chegada" : "abertura";
@@ -58,14 +55,10 @@ export default function RelatorioTramitacaoPage() {
     router.replace(`${pathname}${filtroParaUrl(f)}`, { scroll: false });
   }
 
-  const gerarBg = useMutation({
-    mutationFn: () => api.jobs.relatorioTramitacao(consulta),
-    onSuccess: () => {
-      toast.success("Relatório enfileirado em background.");
-      router.push("/m/administracao/jobs");
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  // "Gerar em background" saiu em 2026-11-12: gerava o mesmo PDF de 200
+  // processos que o botão PDF, deixava o arquivo em Administração → Jobs e o
+  // download não confere quem pediu. Endpoint e task continuam; voltar é
+  // decisão de card próprio (docs/relatorios-protocolo.md, Limitações).
 
   const relQ = useQuery({
     queryKey: ["relatorio-tramitacao", busca],
@@ -99,15 +92,6 @@ export default function RelatorioTramitacaoPage() {
             >
               <FileText className="h-4 w-4" aria-hidden="true" /> PDF
             </a>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => gerarBg.mutate()}
-              disabled={gerarBg.isPending}
-              title="Gera o PDF em background — útil para recortes grandes"
-            >
-              {gerarBg.isPending ? "Enfileirando..." : "Gerar em background"}
-            </Button>
           </div>
         }
       />

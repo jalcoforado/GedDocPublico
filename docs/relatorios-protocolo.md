@@ -159,5 +159,8 @@ entram: processo antigo pode ser de um serviço que saiu do catálogo.
 - **Dashboard executivo** (`/dashboard`) saiu do menu em 2026-08-07 e só abre
   pela URL, para quem tem a transação `dashboard`. O Ctrl+K "dashboard" leva ao
   Início, não a ele. O quadro "Ativos agora" dele ainda conta `processo.ativo`.
-- **Download de tarefas em segundo plano** (`/jobs/{id}/resultado`) não confere
-  quem pediu o arquivo. Card separado.
+- **PDF da tramitação em segundo plano:** o botão "Gerar em background" saiu da
+  tela em 2026-11-12. Gerava o mesmo PDF de 200 processos que o botão PDF,
+  deixava o arquivo em Administração → Jobs (outro módulo) e o download
+  (`/jobs/{id}/resultado`) não confere quem pediu o arquivo. O endpoint
+  `POST /jobs/relatorio-tramitacao` e a task continuam; refazer é card separado.
