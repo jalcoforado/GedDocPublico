@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { statusProcessoBadge } from "@/lib/badges";
 import { useRequireCidadao } from "@/lib/cidadao-auth";
@@ -128,7 +128,7 @@ export default function CidadaoProcessosPage() {
                 </THead>
                 <TBody>
                   {itens.map((p) => (
-                    <TR key={p.id}>
+                    <TRLink key={p.id} href={`/cidadao/processos/${p.id}`}>
                       <TD className="font-mono text-xs tabular-nums">
                         <Link
                           href={`/cidadao/processos/${p.id}`}
@@ -156,7 +156,7 @@ export default function CidadaoProcessosPage() {
                           </Link>
                         </Button>
                       </TD>
-                    </TR>
+                    </TRLink>
                   ))}
                 </TBody>
               </Table>
