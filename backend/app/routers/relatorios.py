@@ -47,7 +47,12 @@ from ..services.pdf_relatorio_tramitacao import gerar_tramitacao_pdf
 from ..services.relatorios import gerar_relatorio
 from ..services.relatorios_assinaturas import gerar_assinaturas
 from ..services.relatorios_comum import ROTULO_SITUACAO
-from ..services.relatorios_documentacao import gerar_documentacao
+from ..services.pdf_relatorio_documentacao import gerar_documentacao_pdf
+from ..services.relatorios_documentacao import (
+    ROTULO_COMPLEMENTACAO,
+    ROTULO_STATUS_DOC,
+    gerar_documentacao,
+)
 from ..services.relatorios_gerencial import gerar_gerencial
 from ..services.relatorios_tramitacao import RecorteGrandeDemais, gerar_tramitacao
 from ..services.sigilo import niveis_acesso_usuario
@@ -541,15 +546,6 @@ async def documentacao_json(
     )
 
 
-ROTULO_STATUS_DOC = {
-    "sem_documentos_exigidos": "Sem documento exigido",
-    "pendente": "Pendente",
-    "parcial": "Parcial",
-    "completo": "Completo",
-}
-ROTULO_COMPLEMENTACAO = {"aberta": "Aguardando o cidadão", "respondida": "Respondida", "cancelada": "Cancelada"}
-
-
 @router.get("/documentacao.csv", dependencies=ACESSO)
 async def documentacao_csv(
     f: RelatorioFiltro = Depends(recorte_comum),
@@ -588,3 +584,20 @@ async def documentacao_csv(
             p.local_atual or "",
         ])
     return _csv(buf, "documentacao")
+
+
+@router.get("/documentacao.pdf", dependencies=ACESSO)
+async def documentacao_pdf(
+    f: RelatorioFiltro = Depends(recorte_comum),
+    visao: VisaoDocumentacao = "documentos",
+    inline: bool = Query(True),
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    max_rows: int = Query(1000, ge=1, le=5000),
+):
+    niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
+    r = await gerar_documentacao(
+        db, f, visao, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
+    )
+    return _pdf(gerar_documentacao_pdf(r), "documentacao", inline)

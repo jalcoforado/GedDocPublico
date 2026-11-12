@@ -204,6 +204,14 @@ async def test_documentacao_nao_expoe_a_mensagem_do_pedido(cen, admin_engine):
         assert r.status_code == 200
         assert MENSAGEM_PRIVADA not in r.text
         assert "Fulana" not in r.text
+    # o PDF sai comprimido (texto não se lê nos bytes); a garantia é o schema
+    # da resposta, que não tem campo de mensagem — o PDF só sabe o que ele traz
+    from app.schemas.relatorio_documentacao import DocumentacaoProcessoRow
+
+    assert not {"mensagem", "motivo_cancelamento"} & set(DocumentacaoProcessoRow.model_fields)
+    for visao in ("compl_pedida", "documentos"):
+        pdf = await _get("documentacao.pdf", visao=visao, **OUTUBRO)
+        assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
 
 
 # ------------------------------------------------------------ serviço (comum)

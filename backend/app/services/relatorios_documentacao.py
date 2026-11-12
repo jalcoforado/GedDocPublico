@@ -62,6 +62,18 @@ DATA_DA_VISAO: dict[str, str | None] = {
     "compl_aberta": None,
     "compl_respondida": "data da resposta do cidadão",
 }
+# Rótulos da situação, iguais no CSV e no PDF.
+ROTULO_STATUS_DOC: dict[str, str] = {
+    "sem_documentos_exigidos": "Sem documento exigido",
+    "pendente": "Pendente",
+    "parcial": "Parcial",
+    "completo": "Completo",
+}
+ROTULO_COMPLEMENTACAO: dict[str, str] = {
+    "aberta": "Aguardando o cidadão",
+    "respondida": "Respondida",
+    "cancelada": "Cancelada",
+}
 ROTULO_VISAO: dict[str, str] = {
     "documentos": "processos cujo serviço exige documentos",
     "doc_pendente": "documentos pendentes (nenhum obrigatório enviado)",

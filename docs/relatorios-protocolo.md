@@ -153,8 +153,6 @@ entram: processo antigo pode ser de um serviço que saiu do catálogo.
   antes.
 - **Canal de entrada antigo.** O campo é recente: processos anteriores aparecem
   como "Não informado" na seção Entrada.
-- **Documentação sem PDF.** A lista de documentação exporta CSV; PDF não foi
-  feito nesta rodada.
 - **Horas nas outras telas.** Os relatórios mostram hora de Brasília; o detalhe
   do processo e as caixas ainda mostram a hora UTC como se fosse local (3h a
   mais). Card separado.

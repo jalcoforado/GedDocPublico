@@ -1370,6 +1370,10 @@ export function documentacaoCsvUrl(f: DocumentacaoFiltroInput): string {
   return `${BROWSER_API_URL}/relatorios/documentacao.csv${documentacaoQs(f)}`;
 }
 
+export function documentacaoPdfUrl(f: DocumentacaoFiltroInput): string {
+  return `${BROWSER_API_URL}/relatorios/documentacao.pdf${documentacaoQs(f)}`;
+}
+
 function gerencialQs(f: GerencialFiltroInput): string {
   return qs({
     id_unidade: f.id_unidade,

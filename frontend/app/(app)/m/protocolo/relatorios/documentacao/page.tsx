@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Download, Lock } from "lucide-react";
+import { Download, FileText, Lock } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
@@ -18,6 +18,7 @@ import {
   NIVEL_SIGILO_LABEL,
   api,
   documentacaoCsvUrl,
+  documentacaoPdfUrl,
   type DocumentacaoProcessoRow,
   type StatusDocumental,
   type VisaoDocumentacao,
@@ -88,14 +89,24 @@ export default function RelatorioDocumentacaoPage() {
         title="Documentação dos processos"
         description="Documentos que o serviço exige e pedidos de complementação ao cidadão, processo a processo."
         actions={
-          <a
-            href={documentacaoCsvUrl(consulta)}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-muted px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Download className="h-4 w-4" aria-hidden="true" /> CSV
-          </a>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={documentacaoCsvUrl(consulta)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-muted px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Download className="h-4 w-4" aria-hidden="true" /> CSV
+            </a>
+            <a
+              href={documentacaoPdfUrl(consulta)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <FileText className="h-4 w-4" aria-hidden="true" /> PDF
+            </a>
+          </div>
         }
       />
 
