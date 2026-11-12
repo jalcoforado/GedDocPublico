@@ -143,3 +143,34 @@ def test_toda_rota_de_relatorio_resolve_o_sigilo():
     assert len(rotas) == 9
     sem_sigilo = [r.path for r in rotas if acesso_niveis_dep not in set(deps(r.dependant))]
     assert sem_sigilo == []
+
+
+async def test_busca_global_nao_lista_processo_sigiloso(admin_engine, sigilo_env):
+    """A busca (Ctrl+K) não pode revelar o número de processo que o detalhe
+    esconde com 404."""
+    from app.routers.busca import busca_global
+
+    tid = sigilo_env["tenant_id"]
+    aberto, reservado = await _dois_processos(admin_engine, sigilo_env)
+
+    async with _session(admin_engine) as s:
+        num = {
+            r.id: r.numero_processo
+            for r in (
+                await s.execute(
+                    text("SELECT id, numero_processo FROM protocolos.processo WHERE id = ANY(:ids)"),
+                    {"ids": [aberto, reservado]},
+                )
+            ).all()
+        }
+        # Os dois números terminam em "/2026"; "/2026" acha os dois.
+        r = await busca_global(q="/2026", _=None, tenant_id=tid, db=s, niveis=INTERNO)
+        achados = {p["id"] for p in r["processos"]}
+        assert aberto in achados
+        assert reservado not in achados
+
+        r = await busca_global(q=num[reservado], _=None, tenant_id=tid, db=s, niveis=INTERNO)
+        assert r["processos"] == []
+
+        tudo = await busca_global(q=num[reservado], _=None, tenant_id=tid, db=s, niveis=None)
+        assert [p["id"] for p in tudo["processos"]] == [reservado]
