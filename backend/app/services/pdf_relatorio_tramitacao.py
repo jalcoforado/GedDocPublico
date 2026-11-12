@@ -1,7 +1,9 @@
 """PDF do Relatório de Tramitação."""
 from __future__ import annotations
 
+
 from datetime import datetime
+from html import escape as _esc
 from io import BytesIO
 
 from reportlab.lib import colors
@@ -18,6 +20,7 @@ from reportlab.platypus import (
 )
 
 from ..schemas.relatorio_tramitacao import RelatorioTramitacaoResposta
+from .pdf_emissao import Emissao, canvas_numerado
 
 APRIMORA = HexColor("#1e3a5f")
 GRAY = HexColor("#6b7280")
@@ -44,7 +47,8 @@ def _fmt_dt(d: datetime | None) -> str:
     return d.strftime("%d/%m/%Y %H:%M")
 
 
-def gerar_tramitacao_pdf(r: RelatorioTramitacaoResposta) -> bytes:
+def gerar_tramitacao_pdf(r: RelatorioTramitacaoResposta, emissao: Emissao | None = None) -> bytes:
+    emissao = emissao or Emissao()
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -69,8 +73,8 @@ def gerar_tramitacao_pdf(r: RelatorioTramitacaoResposta) -> bytes:
     normal = ParagraphStyle("normal", parent=styles["Normal"], fontSize=9, leading=11)
 
     story: list = []
-    story.append(Paragraph("APRIMORA — Relatório de tramitação", h1))
-    story.append(Paragraph(f"Emitido em {datetime.now().strftime('%d/%m/%Y %H:%M')}", small))
+    story.append(Paragraph(_esc(emissao.titulo("Relatório de tramitação")), h1))
+    story.append(Paragraph(_esc(emissao.linha()), small))
     story.append(Spacer(1, 0.3 * cm))
 
     f = r.filtros_aplicados
@@ -185,21 +189,9 @@ def gerar_tramitacao_pdf(r: RelatorioTramitacaoResposta) -> bytes:
             story.append(et_tab)
         story.append(Spacer(1, 0.3 * cm))
 
-    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    doc.build(story, canvasmaker=canvas_numerado(emissao))
     return buf.getvalue()
 
-
-def _footer(canvas_obj, doc):
-    canvas_obj.saveState()
-    canvas_obj.setFont("Helvetica", 8)
-    canvas_obj.setFillColor(GRAY)
-    canvas_obj.drawString(1.5 * cm, 1.0 * cm, "Documento gerado eletronicamente pelo Aprimora")
-    canvas_obj.drawRightString(
-        doc.pagesize[0] - 1.5 * cm,
-        1.0 * cm,
-        f"Página {doc.page}",
-    )
-    canvas_obj.restoreState()
 
 
 def _table_style(secondary: bool = False) -> TableStyle:

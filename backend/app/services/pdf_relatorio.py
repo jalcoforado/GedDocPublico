@@ -6,7 +6,9 @@ Platypus (SimpleDocTemplate + Table).
 """
 from __future__ import annotations
 
+
 from datetime import datetime
+from html import escape as _esc
 from io import BytesIO
 
 from reportlab.lib import colors
@@ -23,6 +25,7 @@ from reportlab.platypus import (
 )
 
 from ..schemas.relatorio import RelatorioResposta
+from .pdf_emissao import Emissao, canvas_numerado
 
 APRIMORA = HexColor("#1e3a5f")
 GRAY = HexColor("#6b7280")
@@ -41,7 +44,8 @@ def _fmt_d(d: datetime | None) -> str:
     return d.strftime("%d/%m/%Y")
 
 
-def gerar_relatorio_pdf(r: RelatorioResposta) -> bytes:
+def gerar_relatorio_pdf(r: RelatorioResposta, emissao: Emissao | None = None) -> bytes:
+    emissao = emissao or Emissao()
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -65,13 +69,8 @@ def gerar_relatorio_pdf(r: RelatorioResposta) -> bytes:
     story: list = []
 
     # Cabeçalho
-    story.append(Paragraph("APRIMORA — Relatório de processos", h1))
-    story.append(
-        Paragraph(
-            f"Emitido em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-            small,
-        )
-    )
+    story.append(Paragraph(_esc(emissao.titulo("Relatório de processos")), h1))
+    story.append(Paragraph(_esc(emissao.linha()), small))
     story.append(Spacer(1, 0.4 * cm))
 
     # Filtros aplicados
@@ -179,21 +178,9 @@ def gerar_relatorio_pdf(r: RelatorioResposta) -> bytes:
     else:
         story.append(Paragraph("Nenhum processo no recorte.", small))
 
-    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    doc.build(story, canvasmaker=canvas_numerado(emissao))
     return buf.getvalue()
 
-
-def _footer(canvas_obj, doc):
-    canvas_obj.saveState()
-    canvas_obj.setFont("Helvetica", 8)
-    canvas_obj.setFillColor(GRAY)
-    canvas_obj.drawString(1.5 * cm, 1.0 * cm, "Documento gerado eletronicamente pelo Aprimora")
-    canvas_obj.drawRightString(
-        doc.pagesize[0] - 1.5 * cm,
-        1.0 * cm,
-        f"Página {doc.page}",
-    )
-    canvas_obj.restoreState()
 
 
 def _table_style() -> TableStyle:

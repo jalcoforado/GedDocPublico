@@ -12,6 +12,7 @@ from typing import Any
 from ..config import get_settings, tenant_jobs_dir
 from ..models import Job, Usuario
 from ..schemas.relatorio import RelatorioFiltro
+from ..services.pdf_emissao import emissao_de
 from ..services.pdf_relatorio_tramitacao import gerar_tramitacao_pdf
 from ..services.relatorios_tramitacao import gerar_tramitacao
 from ..services.sigilo import niveis_acesso_usuario
@@ -63,6 +64,7 @@ async def _run_async(
                 if dono is None:
                     raise RuntimeError("Job sem usuário: o sigilo não pode ser decidido")
                 niveis = await niveis_acesso_usuario(db, dono, tenant_id=tenant_id)
+                emissao = await emissao_de(db, tenant_id=tenant_id, usuario=dono)
                 resposta = await gerar_tramitacao(
                     db,
                     f,
@@ -70,7 +72,7 @@ async def _run_async(
                     niveis_permitidos=niveis,
                     max_processos=max_processos,
                 )
-            pdf_bytes = gerar_tramitacao_pdf(resposta)
+            pdf_bytes = gerar_tramitacao_pdf(resposta, emissao)
 
             out_dir = tenant_jobs_dir(tenant_slug) / str(job_id)
             out_dir.mkdir(parents=True, exist_ok=True)

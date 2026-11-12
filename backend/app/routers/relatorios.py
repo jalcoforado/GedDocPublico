@@ -27,6 +27,7 @@ from ..schemas.relatorio_assinaturas import (
     StatusSolicitacao,
 )
 from ..schemas.relatorio_tramitacao import RelatorioTramitacaoResposta
+from ..services.pdf_emissao import emissao_de
 from ..services.pdf_relatorio import gerar_relatorio_pdf
 from ..services.pdf_relatorio_assinaturas import gerar_assinaturas_pdf
 from ..services.pdf_relatorio_tramitacao import gerar_tramitacao_pdf
@@ -146,7 +147,7 @@ async def relatorio_csv(
 )
 async def relatorio_pdf(
     inline: bool = Query(True),
-    _: Usuario = Depends(get_current_user),
+    usuario: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
@@ -160,7 +161,8 @@ async def relatorio_pdf(
 ):
     f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
     r = await gerar_relatorio(db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows)
-    pdf_bytes = gerar_relatorio_pdf(r)
+    emissao = await emissao_de(db, tenant_id=tenant_id, usuario=usuario)
+    pdf_bytes = gerar_relatorio_pdf(r, emissao)
     fname = f"relatorio-processos-{datetime.now().strftime('%Y%m%d-%H%M')}.pdf"
     disposition = "inline" if inline else "attachment"
     return Response(
@@ -301,7 +303,7 @@ async def tramitacao_csv(
 )
 async def tramitacao_pdf(
     inline: bool = Query(True),
-    _: Usuario = Depends(get_current_user),
+    usuario: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
@@ -315,7 +317,8 @@ async def tramitacao_pdf(
 ):
     f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
     r = await gerar_tramitacao(db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_processos=max_processos)
-    pdf_bytes = gerar_tramitacao_pdf(r)
+    emissao = await emissao_de(db, tenant_id=tenant_id, usuario=usuario)
+    pdf_bytes = gerar_tramitacao_pdf(r, emissao)
     fname = f"tramitacao-{datetime.now().strftime('%Y%m%d-%H%M')}.pdf"
     disposition = "inline" if inline else "attachment"
     return Response(
@@ -436,7 +439,7 @@ async def assinaturas_csv(
 )
 async def assinaturas_pdf(
     inline: bool = Query(True),
-    _: Usuario = Depends(get_current_user),
+    usuario: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
@@ -449,7 +452,8 @@ async def assinaturas_pdf(
 ):
     f = _filtro_assinaturas(desde, ate, id_solicitante, id_assinante, status)
     r = await gerar_assinaturas(db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows)
-    pdf_bytes = gerar_assinaturas_pdf(r)
+    emissao = await emissao_de(db, tenant_id=tenant_id, usuario=usuario)
+    pdf_bytes = gerar_assinaturas_pdf(r, emissao)
     fname = f"assinaturas-{datetime.now().strftime('%Y%m%d-%H%M')}.pdf"
     disposition = "inline" if inline else "attachment"
     return Response(
