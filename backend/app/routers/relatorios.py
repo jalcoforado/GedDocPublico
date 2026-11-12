@@ -33,6 +33,7 @@ from ..services.pdf_relatorio_tramitacao import gerar_tramitacao_pdf
 from ..services.relatorios import gerar_relatorio
 from ..services.relatorios_assinaturas import gerar_assinaturas
 from ..services.relatorios_tramitacao import gerar_tramitacao
+from .processos import acesso_niveis_dep
 
 router = APIRouter(prefix="/relatorios", tags=["relatorios"])
 
@@ -64,6 +65,7 @@ async def relatorio_json(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
     id_unidade: int | None = None,
     id_assunto: int | None = None,
     id_tipo_processo: int | None = None,
@@ -73,7 +75,7 @@ async def relatorio_json(
     max_rows: int = Query(1000, ge=1, le=10000),
 ) -> RelatorioResposta:
     f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
-    return await gerar_relatorio(db, f, tenant_id=tenant_id, max_rows=max_rows)
+    return await gerar_relatorio(db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows)
 
 
 @router.get(
@@ -84,6 +86,7 @@ async def relatorio_csv(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
     id_unidade: int | None = None,
     id_assunto: int | None = None,
     id_tipo_processo: int | None = None,
@@ -93,7 +96,7 @@ async def relatorio_csv(
     max_rows: int = Query(10000, ge=1, le=50000),
 ):
     f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
-    r = await gerar_relatorio(db, f, tenant_id=tenant_id, max_rows=max_rows)
+    r = await gerar_relatorio(db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows)
 
     buf = StringIO()
     buf.write("﻿")
@@ -146,6 +149,7 @@ async def relatorio_pdf(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
     id_unidade: int | None = None,
     id_assunto: int | None = None,
     id_tipo_processo: int | None = None,
@@ -155,7 +159,7 @@ async def relatorio_pdf(
     max_rows: int = Query(1000, ge=1, le=5000),
 ):
     f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
-    r = await gerar_relatorio(db, f, tenant_id=tenant_id, max_rows=max_rows)
+    r = await gerar_relatorio(db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows)
     pdf_bytes = gerar_relatorio_pdf(r)
     fname = f"relatorio-processos-{datetime.now().strftime('%Y%m%d-%H%M')}.pdf"
     disposition = "inline" if inline else "attachment"
@@ -178,6 +182,7 @@ async def tramitacao_json(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
     id_unidade: int | None = None,
     id_assunto: int | None = None,
     id_tipo_processo: int | None = None,
@@ -187,7 +192,7 @@ async def tramitacao_json(
     max_processos: int = Query(200, ge=1, le=2000),
 ) -> RelatorioTramitacaoResposta:
     f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
-    return await gerar_tramitacao(db, f, tenant_id=tenant_id, max_processos=max_processos)
+    return await gerar_tramitacao(db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_processos=max_processos)
 
 
 @router.get(
@@ -198,6 +203,7 @@ async def tramitacao_csv(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
     id_unidade: int | None = None,
     id_assunto: int | None = None,
     id_tipo_processo: int | None = None,
@@ -207,7 +213,7 @@ async def tramitacao_csv(
     max_processos: int = Query(2000, ge=1, le=10000),
 ):
     f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
-    r = await gerar_tramitacao(db, f, tenant_id=tenant_id, max_processos=max_processos)
+    r = await gerar_tramitacao(db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_processos=max_processos)
 
     buf = StringIO()
     buf.write("﻿")
@@ -298,6 +304,7 @@ async def tramitacao_pdf(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
     id_unidade: int | None = None,
     id_assunto: int | None = None,
     id_tipo_processo: int | None = None,
@@ -307,7 +314,7 @@ async def tramitacao_pdf(
     max_processos: int = Query(200, ge=1, le=1000),
 ):
     f = _filtro(id_unidade, id_assunto, id_tipo_processo, desde, ate, apenas_ativos)
-    r = await gerar_tramitacao(db, f, tenant_id=tenant_id, max_processos=max_processos)
+    r = await gerar_tramitacao(db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_processos=max_processos)
     pdf_bytes = gerar_tramitacao_pdf(r)
     fname = f"tramitacao-{datetime.now().strftime('%Y%m%d-%H%M')}.pdf"
     disposition = "inline" if inline else "attachment"
@@ -346,6 +353,7 @@ async def assinaturas_json(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
     desde: datetime | None = None,
     ate: datetime | None = None,
     id_solicitante: int | None = None,
@@ -354,7 +362,7 @@ async def assinaturas_json(
     max_rows: int = Query(500, ge=1, le=5000),
 ) -> RelatorioAssinaturasResposta:
     f = _filtro_assinaturas(desde, ate, id_solicitante, id_assinante, status)
-    return await gerar_assinaturas(db, f, tenant_id=tenant_id, max_rows=max_rows)
+    return await gerar_assinaturas(db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows)
 
 
 @router.get(
@@ -365,6 +373,7 @@ async def assinaturas_csv(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
     desde: datetime | None = None,
     ate: datetime | None = None,
     id_solicitante: int | None = None,
@@ -373,7 +382,7 @@ async def assinaturas_csv(
     max_rows: int = Query(5000, ge=1, le=50000),
 ):
     f = _filtro_assinaturas(desde, ate, id_solicitante, id_assinante, status)
-    r = await gerar_assinaturas(db, f, tenant_id=tenant_id, max_rows=max_rows)
+    r = await gerar_assinaturas(db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows)
 
     buf = StringIO()
     buf.write("﻿")
@@ -430,6 +439,7 @@ async def assinaturas_pdf(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
     desde: datetime | None = None,
     ate: datetime | None = None,
     id_solicitante: int | None = None,
@@ -438,7 +448,7 @@ async def assinaturas_pdf(
     max_rows: int = Query(500, ge=1, le=5000),
 ):
     f = _filtro_assinaturas(desde, ate, id_solicitante, id_assinante, status)
-    r = await gerar_assinaturas(db, f, tenant_id=tenant_id, max_rows=max_rows)
+    r = await gerar_assinaturas(db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows)
     pdf_bytes = gerar_assinaturas_pdf(r)
     fname = f"assinaturas-{datetime.now().strftime('%Y%m%d-%H%M')}.pdf"
     disposition = "inline" if inline else "attachment"

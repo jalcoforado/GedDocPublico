@@ -50,8 +50,14 @@ def _delta_min(a: datetime | None, b: datetime | None) -> int | None:
 
 
 async def gerar_assinaturas(
-    db: AsyncSession, f: AssinaturasFiltro, *, tenant_id: int, max_rows: int = 500
+    db: AsyncSession,
+    f: AssinaturasFiltro,
+    *,
+    tenant_id: int,
+    niveis_permitidos: list[str] | None,
+    max_rows: int = 500,
 ) -> RelatorioAssinaturasResposta:
+    """`niveis_permitidos` sem default: quem chama decide o sigilo."""
     Solicitante = aliased(Usuario, name="solic")
     sol_stmt = (
         select(
@@ -66,6 +72,10 @@ async def gerar_assinaturas(
             SolicitacaoAssinatura.excluido.is_(False),
         )
     )
+    # Sigilo: a solicitação expõe o número do processo; de processo que o
+    # usuário não alcança na listagem, não aparece. `None` = super-usuário.
+    if niveis_permitidos is not None:
+        sol_stmt = sol_stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
     if f.desde:
         sol_stmt = sol_stmt.where(SolicitacaoAssinatura.dt_inicio >= f.desde)
     if f.ate:

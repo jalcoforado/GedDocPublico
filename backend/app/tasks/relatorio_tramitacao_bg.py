@@ -10,10 +10,11 @@ from datetime import datetime
 from typing import Any
 
 from ..config import get_settings, tenant_jobs_dir
-from ..models import Job
+from ..models import Job, Usuario
 from ..schemas.relatorio import RelatorioFiltro
 from ..services.pdf_relatorio_tramitacao import gerar_tramitacao_pdf
 from ..services.relatorios_tramitacao import gerar_tramitacao
+from ..services.sigilo import niveis_acesso_usuario
 from ._task_db import task_session_scope
 from .celery_app import celery_app
 
@@ -55,8 +56,19 @@ async def _run_async(
         try:
             f = RelatorioFiltro.model_validate(filtros)
             async with Session() as db:
+                # Sigilo decidido pelo dono do job, na hora de gerar: o PDF não
+                # pode trazer processo que ele não veria na listagem.
+                job = await db.get(Job, job_id)
+                dono = await db.get(Usuario, job.id_usuario) if job else None
+                if dono is None:
+                    raise RuntimeError("Job sem usuário: o sigilo não pode ser decidido")
+                niveis = await niveis_acesso_usuario(db, dono, tenant_id=tenant_id)
                 resposta = await gerar_tramitacao(
-                    db, f, tenant_id=tenant_id, max_processos=max_processos
+                    db,
+                    f,
+                    tenant_id=tenant_id,
+                    niveis_permitidos=niveis,
+                    max_processos=max_processos,
                 )
             pdf_bytes = gerar_tramitacao_pdf(resposta)
 

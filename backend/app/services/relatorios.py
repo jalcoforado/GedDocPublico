@@ -26,7 +26,9 @@ from ..schemas.relatorio import (
 )
 
 
-def _apply_filters(stmt, f: RelatorioFiltro, tenant_id: int):
+def _apply_filters(
+    stmt, f: RelatorioFiltro, tenant_id: int, niveis_permitidos: list[str] | None
+):
     # E3 — rascunho não tem numero_processo; relatório é documento numerado
     # (PDF/CSV), então fica fora por padrão, mesma política de list_processos.
     stmt = stmt.where(
@@ -49,6 +51,12 @@ def _apply_filters(stmt, f: RelatorioFiltro, tenant_id: int):
         stmt = stmt.where(Processo.data_hora_abertura <= f.ate)
     if f.apenas_ativos:
         stmt = stmt.where(Processo.ativo.is_(True))
+    # Sigilo: o relatório mostra só o que a listagem (Caixas) mostraria a quem
+    # o pede. `None` = super-usuário. Sem isto, processo reservado/secreto (com
+    # o nome do manifestante) saía no JSON, no CSV e no PDF para qualquer um
+    # com a permissão `processo`.
+    if niveis_permitidos is not None:
+        stmt = stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
     return stmt
 
 
@@ -59,10 +67,17 @@ def _pct(part: int, total: int) -> float:
 
 
 async def gerar_relatorio(
-    db: AsyncSession, f: RelatorioFiltro, *, tenant_id: int, max_rows: int = 1000
+    db: AsyncSession,
+    f: RelatorioFiltro,
+    *,
+    tenant_id: int,
+    niveis_permitidos: list[str] | None,
+    max_rows: int = 1000,
 ) -> RelatorioResposta:
+    """`niveis_permitidos` é obrigatório (sem default) de propósito: quem
+    chama tem de decidir o sigilo — esquecer não pode virar "vê tudo"."""
     base = select(Processo).join(Assunto, Assunto.id == Processo.id_assunto)
-    base = _apply_filters(base, f, tenant_id)
+    base = _apply_filters(base, f, tenant_id, niveis_permitidos)
 
     # Totais — usar colunas da subquery senão SQLAlchemy cross-joina com a tabela original
     sq = base.subquery()
@@ -95,7 +110,7 @@ async def gerar_relatorio(
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
     )
-    tp_stmt = _apply_filters(tp_stmt, f, tenant_id)
+    tp_stmt = _apply_filters(tp_stmt, f, tenant_id, niveis_permitidos)
     tp_stmt = tp_stmt.group_by(TipoProcesso.tipo_processo).order_by(func.count(Processo.id).desc())
     tp_rows = (await db.execute(tp_stmt)).all()
     por_tipo = [
@@ -113,7 +128,7 @@ async def gerar_relatorio(
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(UnidadeTrabalho, UnidadeTrabalho.id == Processo.id_unidade_proprietaria, isouter=True)
     )
-    un_stmt = _apply_filters(un_stmt, f, tenant_id)
+    un_stmt = _apply_filters(un_stmt, f, tenant_id, niveis_permitidos)
     un_stmt = un_stmt.group_by(UnidadeTrabalho.unidade_trabalho).order_by(func.count(Processo.id).desc())
     un_rows = (await db.execute(un_stmt)).all()
     por_unidade = [
@@ -142,7 +157,7 @@ async def gerar_relatorio(
         )
         .join(LocalAtual, LocalAtual.id == Processo.id_local_atual, isouter=True)
     )
-    list_stmt = _apply_filters(list_stmt, f, tenant_id)
+    list_stmt = _apply_filters(list_stmt, f, tenant_id, niveis_permitidos)
     list_stmt = list_stmt.order_by(Processo.data_hora_abertura.desc()).limit(max_rows)
     list_rows = (await db.execute(list_stmt)).all()
     processos = [

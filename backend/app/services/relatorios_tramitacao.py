@@ -37,7 +37,9 @@ from ..schemas.relatorio_tramitacao import (
 )
 
 
-def _filter_processos(stmt, f: RelatorioFiltro, tenant_id: int):
+def _filter_processos(
+    stmt, f: RelatorioFiltro, tenant_id: int, niveis_permitidos: list[str] | None
+):
     # E3 — rascunho não tramitou (só tem a movimentação de ABERTURA) e não
     # tem numero_processo; fora do relatório de tramitação por padrão.
     stmt = stmt.where(
@@ -60,6 +62,9 @@ def _filter_processos(stmt, f: RelatorioFiltro, tenant_id: int):
         stmt = stmt.where(Processo.data_hora_abertura <= f.ate)
     if f.apenas_ativos:
         stmt = stmt.where(Processo.ativo.is_(True))
+    # Sigilo: mesmo recorte da listagem (Caixas). `None` = super-usuário.
+    if niveis_permitidos is not None:
+        stmt = stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
     return stmt
 
 
@@ -70,8 +75,14 @@ def _delta_min(a: datetime | None, b: datetime | None) -> int | None:
 
 
 async def gerar_tramitacao(
-    db: AsyncSession, f: RelatorioFiltro, *, tenant_id: int, max_processos: int = 200
+    db: AsyncSession,
+    f: RelatorioFiltro,
+    *,
+    tenant_id: int,
+    niveis_permitidos: list[str] | None,
+    max_processos: int = 200,
 ) -> RelatorioTramitacaoResposta:
+    """`niveis_permitidos` sem default: quem chama decide o sigilo."""
     LocalAtual = aliased(UnidadeTrabalho, name="la")
 
     proc_stmt = (
@@ -92,7 +103,7 @@ async def gerar_tramitacao(
         )
         .join(LocalAtual, LocalAtual.id == Processo.id_local_atual, isouter=True)
     )
-    proc_stmt = _filter_processos(proc_stmt, f, tenant_id)
+    proc_stmt = _filter_processos(proc_stmt, f, tenant_id, niveis_permitidos)
     proc_stmt = proc_stmt.order_by(Processo.data_hora_abertura.desc()).limit(max_processos)
     proc_rows = (await db.execute(proc_stmt)).all()
     processo_ids = [row[0].id for row in proc_rows]
