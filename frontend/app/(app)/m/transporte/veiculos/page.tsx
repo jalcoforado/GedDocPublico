@@ -45,7 +45,7 @@ import { SkeletonRow } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -482,7 +482,7 @@ export default function VeiculosReguladosPage() {
             {listaQ.isLoading &&
               Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={7} />)}
             {listaQ.data?.items.map((v) => (
-              <TR key={v.id}>
+              <TRLink key={v.id} href={`/m/transporte/veiculos/${v.id}`}>
                 <TD className="whitespace-nowrap font-mono font-medium">
                   <Link
                     href={`/m/transporte/veiculos/${v.id}`}
@@ -564,7 +564,7 @@ export default function VeiculosReguladosPage() {
                     ]}
                   />
                 </TD>
-              </TR>
+              </TRLink>
             ))}
           </TBody>
         </Table>

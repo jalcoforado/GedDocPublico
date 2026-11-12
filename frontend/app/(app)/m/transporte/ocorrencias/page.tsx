@@ -23,7 +23,7 @@ import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -359,7 +359,7 @@ export default function OcorrenciasPage() {
           </THead>
           <TBody>
             {itens.map((o) => (
-              <TR key={o.id}>
+              <TRLink key={o.id} href={`/m/transporte/ocorrencias/${o.id}`}>
                 <TD className="font-medium">
                   <Link
                     href={`/m/transporte/ocorrencias/${o.id}`}
@@ -394,7 +394,7 @@ export default function OcorrenciasPage() {
                     ]}
                   />
                 </TD>
-              </TR>
+              </TRLink>
             ))}
           </TBody>
         </Table>

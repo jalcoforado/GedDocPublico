@@ -21,7 +21,7 @@ import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import {
   api,
@@ -319,7 +319,7 @@ export default function LinhasPage() {
           </THead>
           <TBody>
             {itens.map((l) => (
-              <TR key={l.id}>
+              <TRLink key={l.id} href={`/m/transporte/linhas/${l.id}`}>
                 <TD className="font-medium">
                   <Link
                     href={`/m/transporte/linhas/${l.id}`}
@@ -365,7 +365,7 @@ export default function LinhasPage() {
                     ]}
                   />
                 </TD>
-              </TR>
+              </TRLink>
             ))}
           </TBody>
         </Table>

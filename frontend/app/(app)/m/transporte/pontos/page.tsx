@@ -22,7 +22,7 @@ import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import {
   api,
@@ -351,7 +351,7 @@ export default function PontosPage() {
           </THead>
           <TBody>
             {itens.map((p) => (
-              <TR key={p.id}>
+              <TRLink key={p.id} href={`/m/transporte/pontos/${p.id}`}>
                 <TD className="font-medium">
                   <Link
                     href={`/m/transporte/pontos/${p.id}`}
@@ -401,7 +401,7 @@ export default function PontosPage() {
                     ]}
                   />
                 </TD>
-              </TR>
+              </TRLink>
             ))}
           </TBody>
         </Table>

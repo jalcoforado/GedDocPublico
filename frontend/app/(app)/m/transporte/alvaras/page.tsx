@@ -46,7 +46,7 @@ import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -635,7 +635,7 @@ export default function AlvarasPage() {
           </THead>
           <TBody>
             {filteredData.map((a) => (
-              <TR key={a.id}>
+              <TRLink key={a.id} href={`/m/transporte/alvaras/${a.id}`}>
                 <TD className="whitespace-nowrap font-mono font-medium">
                   <Link
                     href={`/m/transporte/alvaras/${a.id}`}
@@ -712,7 +712,7 @@ export default function AlvarasPage() {
                     ]}
                   />
                 </TD>
-              </TR>
+              </TRLink>
             ))}
           </TBody>
         </Table>

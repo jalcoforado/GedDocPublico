@@ -25,7 +25,7 @@ import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { SkeletonKpi } from "@/components/ui/skeleton";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import {
   api,
@@ -229,7 +229,7 @@ export default function RelatorioPage() {
                   intent: "neutral" as const,
                 };
                 return (
-                  <TR key={alvara.id}>
+                  <TRLink key={alvara.id} href={`/m/transporte/alvaras/${alvara.id}`}>
                     <TD className="font-mono font-medium">
                       <Link
                         href={`/m/transporte/alvaras/${alvara.id}`}
@@ -244,7 +244,7 @@ export default function RelatorioPage() {
                     </TD>
                     <TD className="tabular-nums">{fmtData(alvara.data_validade)}</TD>
                     <TD className="text-foreground-muted">{prazo(alvara.dias_para_vencimento)}</TD>
-                  </TR>
+                  </TRLink>
                 );
               })}
             </TBody>
