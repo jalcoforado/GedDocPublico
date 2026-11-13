@@ -536,6 +536,13 @@ ROTAS_POR_MODULO: dict[tuple[str, str], str | tuple[str, ...]] = {
     ("GET", "/api/v2/relatorios/documentacao.csv"): "protocolo",
     ("GET", "/api/v2/relatorios/documentacao.pdf"): "protocolo",
     ("GET", "/api/v2/relatorios/servicos.json"): "protocolo",
+    # SI-35 — relatório montado e os salvos da pessoa
+    ("GET", "/api/v2/relatorios/montado.json"): "protocolo",
+    ("GET", "/api/v2/relatorios/montado.csv"): "protocolo",
+    ("GET", "/api/v2/relatorios/montado.pdf"): "protocolo",
+    ("GET", "/api/v2/relatorios/montado/catalogo.json"): "protocolo",
+    ("GET", "/api/v2/relatorios/salvos"): "protocolo",
+    ("GET", "/api/v2/relatorios/salvos/{id_salvo}"): "protocolo",
     ("GET", "/api/v2/relatorios/processos.csv"): "protocolo",
     ("GET", "/api/v2/relatorios/processos.json"): "protocolo",
     ("GET", "/api/v2/relatorios/processos.pdf"): "protocolo",

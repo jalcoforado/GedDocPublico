@@ -1,14 +1,15 @@
 # Relatórios do Protocolo
 
 > **Status:** vivo · **Autoridade sobre:** o que cada número de `/m/protocolo/relatorios` mede, quem vê, e as limitações conhecidas.
-> **Última verificação:** 2026-11-11 (SI-34).
+> **Última verificação:** 2026-11-12 (SI-35).
 > Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
 
 Fonte de verdade executável: `backend/app/services/relatorios_comum.py` (as
 regras), `relatorios_gerencial.py` (a página), `relatorios_documentacao.py` e
 os testes `backend/tests/test_relatorios_protocolo_medidas.py` e
 `test_relatorios_protocolo_filtros.py` (o que cada número mede) e
-`test_relatorios_protocolo_acesso.py` (quem vê). Se este doc divergir deles, o
+`test_relatorios_protocolo_acesso.py` (quem vê); o relatório montado, em
+`relatorios_montado.py` e `test_relatorio_montado.py`. Se este doc divergir deles, o
 código vence e este arquivo deve ser corrigido.
 
 ## Três telas, três perguntas
@@ -133,6 +134,52 @@ entram: processo antigo pode ser de um serviço que saiu do catálogo.
   respondido no período. A lista mostra o pedido mais recente de cada processo.
   A **mensagem do pedido não aparece** em tela nem em CSV: é texto livre e pode
   trazer dado pessoal.
+
+## Relatório montado pela própria pessoa (SI-35)
+
+Em `/m/protocolo/relatorios/montar`, com o grupo **Meus relatórios** no topo
+da página de relatórios. A pessoa escolhe colunas e filtros, gera o resultado e
+salva com um nome para abrir de novo. Código: `relatorios_montado.py` (a
+consulta), `relatorios_salvos.py` (os salvos), `schemas/relatorio_montado.py`
+(o catálogo); testes em `backend/tests/test_relatorio_montado.py`.
+
+- **Uma linha por processo.** O recorte é o MESMO da lista de processos
+  (`relatorios._base`): prefeitura, rascunho, sigilo, unidade nos três
+  sentidos, assunto, tipo, serviço, período pela abertura ou pelo
+  arquivamento, situação, prazo, parados, sigilo e origem. O montador só
+  acrescenta filtros que estreitam esse conjunto: situação dos documentos,
+  complementação aguardando o cidadão, etapa atrasada na tramitação e
+  assinatura pendente — cada um com a regra da tela de origem (os testes
+  comparam com a Documentação, a Tramitação e as Assinaturas).
+- **Tramitação e assinaturas são colunas resumidas do processo** (envios,
+  unidades por onde passou, etapas atrasadas, último envio, unidade onde ficou
+  mais tempo; assinaturas pedidas, concluídas, pendentes, última conclusão),
+  não uma fonte própria. As etapas vêm de
+  `relatorios_tramitacao.resumir_tramitacao`, a mesma função da tela de
+  Tramitação. O filtro "com etapa atrasada" analisa até 10 mil processos, como
+  o "só com atraso" de lá.
+- **Catálogo fechado.** Coluna, ordem e agrupamento são uma lista no schema; o
+  backend recusa (422) coluna ou chave fora dela. **Sem dado pessoal além do
+  nome do manifestante:** CPF/CNPJ, telefones e e-mail ficaram fora por
+  decisão do PO (2026-11-12), mesmo o CPF aparecendo na tela do processo.
+  Observação, corpo e despachos (texto livre) também.
+- **Período fixo ou relativo** ("últimos N dias", "este mês", "mês passado",
+  "este ano"). O relativo é resolvido no dia em que o relatório abre, em dia
+  local, e a descrição do recorte diz isso.
+- **Agrupar por** situação, tipo, unidade dona, onde está, assunto ou serviço:
+  a contagem aparece acima da lista e soma o total.
+- **Salvos são pessoais.** O relatório salvo (`aprimora_py.relatorio_salvo`,
+  migration 0138) pertence a `(tenant_id, id_usuario)`; o de outra pessoa ou
+  de outra prefeitura responde **404**. Guarda só a **definição**, nunca os
+  dados: cada abertura roda de novo com o sigilo de quem abre, naquele momento
+  — credencial rebaixada hoje tira o processo do relatório hoje. Nome único
+  por pessoa (sem diferença de maiúsculas), até 50 por pessoa. Coluna que
+  sair do catálogo depois de salva é tirada ao abrir, com aviso.
+- **Exportação:** CSV (lista completa, com o mesmo teto de 50 mil) e PDF
+  (lista limitada), com a definição aplicada no parâmetro `d`. No CSV do
+  montador as datas saem em `dd/mm/aaaa hh:mm`, para abrir direto na planilha.
+- **Compartilhar** um relatório salvo com outra pessoa fica para uma próxima
+  versão.
 
 ## Quem vê o quê
 

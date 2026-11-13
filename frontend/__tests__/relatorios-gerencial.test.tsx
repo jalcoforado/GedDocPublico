@@ -35,6 +35,9 @@ vi.mock("next/navigation", () => ({
 }));
 
 const gerencialMock = vi.fn((_f: unknown) => Promise.resolve(resposta()));
+const salvosMock = vi.fn(() =>
+  Promise.resolve([{ id: 7, nome: "Alvarás parados", criado_em: "2026-11-12T10:00:00", atualizado_em: "2026-11-12T10:30:00" }]),
+);
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -46,6 +49,7 @@ vi.mock("@/lib/api", async () => {
         ...actual.api.relatorios,
         gerencial: (f: unknown) => gerencialMock(f),
         servicos: () => Promise.resolve([{ id: 5, nome: "Alvará", ativo: true }]),
+        salvos: { ...actual.api.relatorios.salvos, list: () => salvosMock() },
       },
       tiposProcesso: { ...actual.api.tiposProcesso, list: () => Promise.resolve([]) },
       assuntos: { ...actual.api.assuntos, list: () => Promise.resolve({ items: [], total: 0 }) },
@@ -153,11 +157,27 @@ describe("página gerencial — grupos por tela de destino, um botão por grupo"
     // nenhum outro link na área dos números (o PDF da página fica no cabeçalho)
     const main = document.body;
     const todos = within(main).getAllByRole("link").map((a) => a.getAttribute("href") ?? "");
-    const telas = todos.filter((h) => h.startsWith("/m/protocolo/relatorios/")).map((h) => h.split("?")[0]);
+    // "Meus relatórios" (SI-35) leva ao montador; os quatro grupos de números, cada um à sua lista.
+    const telas = todos
+      .filter((h) => h.startsWith("/m/protocolo/relatorios/") && !h.startsWith("/m/protocolo/relatorios/montar"))
+      .map((h) => h.split("?")[0]);
     expect(new Set(telas).size).toBe(4);
     expect(telas).toHaveLength(4);
     // e nenhum CSV solto na página: exportar é na lista
     expect(screen.queryByRole("link", { name: /CSV/ })).toBeNull();
+  });
+
+  it("Meus relatórios lista os salvos da pessoa e leva ao montador", async () => {
+    await abrir(RECORTE);
+    const grupo = screen.getByRole("region", { name: "Meus relatórios" });
+    expect(within(grupo).getByRole("link", { name: /Montar relatório/ })).toHaveAttribute(
+      "href",
+      "/m/protocolo/relatorios/montar",
+    );
+    const salvo = await within(grupo).findByRole("link", { name: /Alvarás parados/ });
+    // abre pelo id: a definição vem do servidor, que só devolve o que é da pessoa
+    expect(salvo).toHaveAttribute("href", "/m/protocolo/relatorios/montar?salvo=7");
+    expect(salvo).toHaveTextContent("alterado em 12/11/2026 10:30");
   });
 
   it("cada botão leva o recorte do filtro à sua tela", async () => {

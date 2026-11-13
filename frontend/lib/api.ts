@@ -1001,6 +1001,105 @@ export interface RelatorioDocumentacaoResposta {
   cortado: boolean;
 }
 
+// SI-35 — relatório montado pela própria pessoa. Espelha
+// `backend/app/schemas/relatorio_montado.py`: catálogo FECHADO, o backend
+// recusa (422) coluna ou chave fora dele. Sem CPF, telefone e e-mail.
+export type ColunaMontado =
+  | "nup" | "aberto_em" | "arquivado_em" | "situacao" | "tipo" | "assunto" | "servico"
+  | "unidade_dona" | "local_atual" | "responsavel" | "manifestante" | "sigilo" | "origem" | "canal"
+  | "ultima_movimentacao" | "dias_parado" | "prazo_situacao" | "prazo_previsto"
+  | "doc_situacao" | "doc_obrigatorios" | "complementacao"
+  | "tram_envios" | "tram_unidades" | "tram_atrasos" | "tram_ultimo_envio" | "tram_unidade_mais_tempo"
+  | "ass_pedidas" | "ass_concluidas" | "ass_pendentes" | "ass_ultima_conclusao";
+export type OrdemMontado =
+  | "numero" | "aberto_em" | "arquivado_em" | "ultima_movimentacao"
+  | "assunto" | "servico" | "unidade_dona" | "local_atual";
+export type AgruparPorMontado = "situacao" | "tipo" | "unidade_dona" | "local_atual" | "assunto" | "servico";
+export type TipoPeriodoMontado = "sem" | "fixo" | "ultimos_dias" | "mes_atual" | "mes_anterior" | "ano_atual";
+export type StatusDocFiltroMontado = "sem_documentos_exigidos" | "pendente" | "parcial" | "completo";
+
+export interface PeriodoMontado {
+  tipo: TipoPeriodoMontado;
+  desde?: string | null;
+  ate?: string | null;
+  dias?: number | null;
+}
+
+export interface FiltrosMontado {
+  id_unidade?: number | null;
+  modo_unidade?: ModoUnidadeRelatorio;
+  id_assunto?: number | null;
+  id_tipo_processo?: number | null;
+  id_servico?: number | null;
+  data_base?: "abertura" | "arquivamento";
+  situacao?: SituacaoRelatorio | null;
+  parado_ha_dias?: number | null;
+  prazo?: StatusPrazoRelatorio | null;
+  sigilo?: FiltroSigiloRelatorio | null;
+  origem?: FiltroOrigemRelatorio | null;
+  documentacao?: StatusDocFiltroMontado | null;
+  complementacao_aberta?: boolean;
+  com_atraso?: boolean;
+  assinatura_pendente?: boolean;
+}
+
+export interface DefinicaoMontado {
+  versao?: 1;
+  colunas: ColunaMontado[];
+  filtros?: FiltrosMontado;
+  periodo?: PeriodoMontado;
+  agrupar_por?: AgruparPorMontado | null;
+  ordem?: OrdemMontado | null;
+  ordem_desc?: boolean;
+}
+
+export interface ColunaMontadoInfo {
+  chave: ColunaMontado;
+  rotulo: string;
+  grupo: string;
+  tipo: "texto" | "numero" | "data" | "data_hora";
+}
+
+export interface CatalogoMontado {
+  colunas: ColunaMontadoInfo[];
+  colunas_padrao: ColunaMontado[];
+  ordens: Record<OrdemMontado, string>;
+  agrupamentos: Record<AgruparPorMontado, string>;
+  max_colunas: number;
+}
+
+export interface ResultadoMontado {
+  definicao: DefinicaoMontado;
+  colunas: ColunaMontadoInfo[];
+  descricao_filtros: string[];
+  desde: string | null;
+  ate: string | null;
+  totais: { total: number; em_andamento: number; em_transito: number; arquivados: number };
+  rotulo_agrupamento: string | null;
+  agrupamento: RelatorioBreakdownItem[] | null;
+  linhas: {
+    id: number;
+    numero_processo: string;
+    nivel_sigilo: NivelSigilo;
+    /** Data e hora em ISO, hora de Brasília, sem fuso. */
+    valores: Partial<Record<ColunaMontado, string | number | null>>;
+  }[];
+  cortado: boolean;
+  avisos: string[];
+}
+
+export interface RelatorioSalvoResumo {
+  id: number;
+  nome: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export interface RelatorioSalvoOut extends RelatorioSalvoResumo {
+  definicao: DefinicaoMontado;
+  avisos: string[];
+}
+
 // Fase 7 — Jobs assíncronos
 export type JobStatus = "pendente" | "em_andamento" | "concluido" | "falhou";
 
@@ -1374,6 +1473,19 @@ export function documentacaoCsvUrl(f: DocumentacaoFiltroInput): string {
 
 export function documentacaoPdfUrl(f: DocumentacaoFiltroInput): string {
   return `${BROWSER_API_URL}/relatorios/documentacao.pdf${documentacaoQs(f)}`;
+}
+
+/** SI-35 — a definição vai em JSON no `d`: o CSV e o PDF são links comuns. */
+function montadoQs(d: DefinicaoMontado, extra: Record<string, string | undefined> = {}): string {
+  return qs({ d: JSON.stringify(d), ...extra });
+}
+
+export function montadoCsvUrl(d: DefinicaoMontado): string {
+  return `${BROWSER_API_URL}/relatorios/montado.csv${montadoQs(d)}`;
+}
+
+export function montadoPdfUrl(d: DefinicaoMontado, nome?: string): string {
+  return `${BROWSER_API_URL}/relatorios/montado.pdf${montadoQs(d, { nome: nome || undefined })}`;
 }
 
 function gerencialQs(f: GerencialFiltroInput): string {
@@ -5281,6 +5393,19 @@ export const api = {
     /** Opções do filtro de serviço — basta a transação `processo`. */
     servicos: () =>
       request<{ id: number; nome: string; ativo: boolean }[]>("/relatorios/servicos.json"),
+    // SI-35 — relatório montado e os "meus relatórios" (só da pessoa).
+    montadoCatalogo: () => request<CatalogoMontado>("/relatorios/montado/catalogo.json"),
+    montado: (d: DefinicaoMontado) =>
+      request<ResultadoMontado>(`/relatorios/montado.json${montadoQs(d)}`),
+    salvos: {
+      list: () => request<RelatorioSalvoResumo[]>("/relatorios/salvos"),
+      get: (id: number) => request<RelatorioSalvoOut>(`/relatorios/salvos/${id}`),
+      create: (body: { nome: string; definicao: DefinicaoMontado }) =>
+        request<RelatorioSalvoOut>("/relatorios/salvos", { method: "POST", body: JSON.stringify(body) }),
+      update: (id: number, body: { nome?: string; definicao?: DefinicaoMontado }) =>
+        request<RelatorioSalvoOut>(`/relatorios/salvos/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+      remove: (id: number) => request<void>(`/relatorios/salvos/${id}`, { method: "DELETE" }),
+    },
   },
 
   // Fase 7 — Jobs assíncronos

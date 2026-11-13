@@ -119,6 +119,7 @@ from .transporte_regulado import (
     VeiculoAvaliacao,
 )
 from .marcador import Marcador, ProcessoFavorito, ProcessoMarcador
+from .relatorio_salvo import RelatorioSalvo
 from .unidade_trabalho import TipoUnidadeTrabalho, UnidadeTrabalho
 from .usuario import Usuario
 from .usuario_externo import UsuarioExterno
@@ -164,6 +165,7 @@ __all__ = [
     "Processo",
     "ProcessoApensamento",
     "ProcessoFavorito",
+    "RelatorioSalvo",
     "ProcessoMarcador",
     "ProcessoVolume",
     "SolicitacaoAssinatura",

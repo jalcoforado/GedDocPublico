@@ -11,6 +11,8 @@
  * ou navegador fora do fuso.
  */
 import type {
+  ColunaMontadoInfo,
+  DefinicaoMontado,
   DocumentacaoFiltroInput,
   FiltroOrigemRelatorio,
   FiltroSigiloRelatorio,
@@ -18,6 +20,7 @@ import type {
   RelatorioFiltroInput,
   SituacaoRelatorio,
   StatusPrazoRelatorio,
+  TipoPeriodoMontado,
   VisaoDocumentacao,
 } from "@/lib/api";
 
@@ -333,4 +336,59 @@ export function consultaDaDocumentacao(f: FiltroDaUrl): DocumentacaoFiltroInput 
     ...(v.hoje ? { desde: undefined, ate: undefined } : {}),
     visao: v.id,
   };
+}
+
+// ---------- Relatório montado (SI-35) ----------
+
+export const ROTA_MONTAR = "/m/protocolo/relatorios/montar";
+
+export const ROTULO_TIPO_PERIODO: Record<TipoPeriodoMontado, string> = {
+  sem: "Todo o histórico",
+  fixo: "De uma data a outra",
+  ultimos_dias: "Últimos N dias",
+  mes_atual: "Este mês",
+  mes_anterior: "Mês passado",
+  ano_atual: "Este ano",
+};
+
+/** Ponto de partida de um relatório novo: o mesmo de `COLUNAS_PADRAO` no backend. */
+export function definicaoInicial(): DefinicaoMontado {
+  return {
+    colunas: ["aberto_em", "situacao", "assunto", "unidade_dona", "local_atual"],
+    filtros: {},
+    periodo: { tipo: "ultimos_dias", dias: 30 },
+    agrupar_por: null,
+    ordem: null,
+    ordem_desc: true,
+  };
+}
+
+/** A definição que está na URL (`?d=`), ou `null`. Não valida a fundo: o
+ * backend é quem recusa (422) o que não é do catálogo, e a tela mostra o motivo. */
+export function definicaoDaUrl(sp: URLSearchParams): DefinicaoMontado | null {
+  const bruto = sp.get("d");
+  if (!bruto) return null;
+  try {
+    const d = JSON.parse(bruto) as DefinicaoMontado;
+    return d && Array.isArray(d.colunas) ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Endereço do montador com a definição aplicada e, se houver, o relatório salvo. */
+export function urlDoMontador(d?: DefinicaoMontado | null, salvo?: number | null): string {
+  const sp = new URLSearchParams();
+  if (salvo) sp.set("salvo", String(salvo));
+  if (d) sp.set("d", JSON.stringify(d));
+  const s = sp.toString();
+  return s ? `${ROTA_MONTAR}?${s}` : ROTA_MONTAR;
+}
+
+/** Valor de uma célula do relatório montado, para a tela. */
+export function fmtValorMontado(v: string | number | null | undefined, tipo: ColunaMontadoInfo["tipo"]): string {
+  if (v === null || v === undefined || v === "") return "—";
+  if (tipo === "data_hora") return fmtDataHora(String(v));
+  if (tipo === "data") return fmtData(String(v));
+  return String(v);
 }
