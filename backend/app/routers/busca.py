@@ -12,6 +12,7 @@ from ..auth.deps import get_current_user, require_tenant_id
 from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Manifestante, Processo, Usuario
+from .processos import acesso_niveis_dep
 
 router = APIRouter(prefix="/busca", tags=["busca"])
 
@@ -25,6 +26,7 @@ async def busca_global(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
 ):
     """Retorna resultados em 3 buckets (processos/manifestantes/usuarios).
     Cada bucket tem no máximo 8 resultados."""
@@ -47,6 +49,10 @@ async def busca_global(
                 Processo.tenant_id == tenant_id,
                 Processo.excluido.is_(False),
                 Processo.numero_processo.ilike(like),
+                # Sigilo: o mesmo recorte da listagem. O detalhe de processo
+                # sigiloso responde 404 para não revelar que ele existe; a
+                # busca listava o número dele a qualquer um com `processo`.
+                *([Processo.nivel_sigilo.in_(niveis)] if niveis is not None else []),
             )
             .order_by(Processo.data_hora_abertura.desc())
             .limit(8)
