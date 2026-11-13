@@ -1,34 +1,18 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
-import {
-  AlertTriangle,
-  ChevronDown,
-  ChevronUp,
-  FileText,
-  Hourglass,
-  Inbox,
-  Timer,
-} from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, ChevronDown, ChevronUp, Download, FileText } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
 
-import { AcoesDoFiltro, RelatorioCabecalho, temFiltro } from "@/components/protocolo/RelatorioCabecalho";
-import { RankingEmBarras } from "@/components/protocolo/RankingEmBarras";
+import { FiltrosDoRelatorio } from "@/components/relatorios/FiltrosDoRelatorio";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Carregando } from "@/components/ui/carregando";
-import { Checkbox } from "@/components/ui/checkbox";
-import { EmptyState } from "@/components/ui/empty-state";
-import { FilterBar } from "@/components/ui/filter-bar";
-import { Input } from "@/components/ui/input";
-import { KpiCard } from "@/components/ui/kpi-card";
-import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
-
-import { useToast } from "@/components/ui/toast";
+import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import {
   api,
   tramitacaoCsvUrl,
@@ -37,178 +21,115 @@ import {
   type TramitacaoEtapa,
   type TramitacaoProcesso,
 } from "@/lib/api";
-import { useFiltroNaUrl } from "@/lib/filtro-na-url";
-import { tempoPorUnidade } from "@/lib/tempo-por-unidade";
+import {
+  ROTA_RELATORIOS,
+  ROTULO_SITUACAO,
+  filtroDaUrl,
+  filtroParaUrl,
+  fmtData as fmtDate,
+  fmtDataHora as fmtDateTime,
+  fmtMinutos as fmtMin,
+  recorteComum,
+  type FiltroDaUrl,
+} from "@/lib/relatorios";
 
-function fmtDateTime(s: string | null) {
-  if (!s) return "—";
-  const d = new Date(s);
-  return (
-    d.toLocaleDateString("pt-BR") +
-    " " +
-    d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
-  );
-}
-
-function fmtDate(s: string | null) {
-  if (!s) return "—";
-  return new Date(s).toLocaleDateString("pt-BR");
-}
-
-function fmtMin(m: number | null): string {
-  if (m === null || m === undefined) return "—";
-  // Médias chegam fracionadas (123.4 min); sem arredondar saía "2h 03.4min".
-  m = Math.round(m);
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  if (h < 24) return `${h}h ${String(rem).padStart(2, "0")}min`;
-  const d = Math.floor(h / 24);
-  const rh = h % 24;
-  return `${d}d ${rh}h`;
-}
-
+/**
+ * Tramitação (SI-34) — o "ver lista" da seção Gargalos da página de
+ * relatórios: tempo de cada processo em cada unidade e os atrasos. O recorte
+ * vem da URL. Atraso = a estadia terminou (ou segue) depois do FIM do dia do
+ * prazo do envio que trouxe o processo (`relatorios_tramitacao.py`).
+ */
 export default function RelatorioTramitacaoPage() {
   const router = useRouter();
-  const toast = useToast();
-  // Filtro aplicado mora na URL: recarregar, voltar ou mandar o link reabre o mesmo recorte.
-  const [applied, aplicar] = useFiltroNaUrl<RelatorioFiltroInput>();
-  const [draft, setDraft] = useState<RelatorioFiltroInput>(applied);
-  useEffect(() => setDraft(applied), [applied]);
+  const pathname = usePathname();
+  const busca = useSearchParams().toString();
+  const filtro = useMemo(() => filtroDaUrl(new URLSearchParams(busca)), [busca]);
+  const dataBase = filtro.data_base === "chegada" ? "chegada" : "abertura";
+  const consulta: RelatorioFiltroInput = {
+    ...recorteComum(filtro),
+    data_base: dataBase,
+    com_atraso: filtro.com_atraso,
+  };
 
-  const gerarBg = useMutation({
-    mutationFn: () => api.jobs.relatorioTramitacao(applied),
-    onSuccess: () => {
-      toast.success("Relatório enfileirado em background.");
-      router.push("/m/administracao/jobs");
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  function irPara(f: FiltroDaUrl) {
+    router.replace(`${pathname}${filtroParaUrl(f)}`, { scroll: false });
+  }
 
-  const unidadesQ = useQuery({
-    queryKey: ["unidades-all"],
-    queryFn: () => api.unidades.list({ page_size: 200 }),
-  });
-  const tiposQ = useQuery({
-    queryKey: ["tipos-processo"],
-    queryFn: () => api.tiposProcesso.list(),
-  });
+  // "Gerar em background" saiu em 2026-11-12: gerava o mesmo PDF de 200
+  // processos que o botão PDF, deixava o arquivo em Administração → Jobs e o
+  // download não confere quem pediu. Endpoint e task continuam; voltar é
+  // decisão de card próprio (docs/relatorios-protocolo.md, Limitações).
 
   const relQ = useQuery({
-    queryKey: ["relatorio-tramitacao", applied],
-    queryFn: () => api.relatorios.tramitacao(applied),
+    queryKey: ["relatorio-tramitacao", busca],
+    queryFn: () => api.relatorios.tramitacao(consulta),
   });
-  const porUnidade = useMemo(() => tempoPorUnidade(relQ.data?.processos ?? []), [relQ.data]);
-  // Topo só quando há tempo de verdade: "Protocolo Geral — 0 min" não responde nada.
-  const topo = porUnidade[0] && porUnidade[0].medio > 0 ? porUnidade[0] : undefined;
 
   return (
     <div className="space-y-4">
-      <RelatorioCabecalho
-        subtitulo="Tramitação (tempo em cada unidade + atrasos)"
-        csvUrl={tramitacaoCsvUrl(applied)}
-        pdfUrl={tramitacaoPdfUrl(applied)}
-        acoesExtras={
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => gerarBg.mutate()}
-            disabled={gerarBg.isPending}
-            title="Gera o PDF em background — útil para recortes grandes"
-          >
-            {gerarBg.isPending ? "Enfileirando..." : "Gerar em background"}
-          </Button>
+      <PageHeader
+        breadcrumbs={[
+          { label: "Relatórios", href: `${ROTA_RELATORIOS}${filtroParaUrl(recorteComum(filtro))}` },
+          { label: "Tramitação" },
+        ]}
+        title="Tramitação"
+        description="Quanto tempo cada processo ficou em cada unidade, e onde atrasou."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={tramitacaoCsvUrl(consulta)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-muted px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Download className="h-4 w-4" aria-hidden="true" /> CSV
+            </a>
+            <a
+              href={tramitacaoPdfUrl(consulta)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <FileText className="h-4 w-4" aria-hidden="true" /> PDF
+            </a>
+          </div>
         }
       />
 
-      <FilterBar>
-        <div className="w-full sm:w-56">
-          <Label htmlFor="unidade">Unidade</Label>
+      <FiltrosDoRelatorio
+        valor={recorteComum(filtro)}
+        onAplicar={(f) => irPara({ ...f, data_base: filtro.data_base, com_atraso: filtro.com_atraso })}
+      />
+
+      <div
+        role="group"
+        aria-label="Filtros desta lista"
+        className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-card border border-border bg-card p-3 text-sm shadow-card"
+      >
+        <label className="flex items-center gap-2">
+          <span className="font-medium text-foreground">Período conta pela data de</span>
           <Select
-            id="unidade"
-            value={draft.id_unidade ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                id_unidade: e.target.value ? Number(e.target.value) : undefined,
-              })
-            }
+            className="h-9 w-56"
+            value={dataBase}
+            onChange={(e) => irPara({ ...filtro, data_base: e.target.value as "abertura" | "chegada" })}
           >
-            <option value="">Todas</option>
-            {unidadesQ.data?.items.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.unidade_trabalho}
-              </option>
-            ))}
+            <option value="abertura">abertura do processo</option>
+            <option value="chegada">entrada na unidade</option>
           </Select>
-        </div>
-        <div className="w-full sm:w-48">
-          <Label htmlFor="tipo">Tipo de processo</Label>
-          <Select
-            id="tipo"
-            value={draft.id_tipo_processo ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                id_tipo_processo: e.target.value ? Number(e.target.value) : undefined,
-              })
-            }
-          >
-            <option value="">Todos</option>
-            {tiposQ.data?.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.tipo_processo}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="w-full sm:w-40">
-          <Label htmlFor="desde">Aberto desde</Label>
-          <Input
-            id="desde"
-            type="date"
-            value={draft.desde?.slice(0, 10) ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                desde: e.target.value ? `${e.target.value}T00:00:00` : undefined,
-              })
-            }
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-border accent-brand"
+            checked={!!filtro.com_atraso}
+            onChange={(e) => irPara({ ...filtro, com_atraso: e.target.checked || undefined })}
           />
-        </div>
-        <div className="w-full sm:w-40">
-          <Label htmlFor="ate">Aberto até</Label>
-          <Input
-            id="ate"
-            type="date"
-            value={draft.ate?.slice(0, 10) ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                ate: e.target.value ? `${e.target.value}T23:59:59` : undefined,
-              })
-            }
-          />
-        </div>
-        <div className="flex h-11 items-center gap-2">
-          <Checkbox
-            id="ativos"
-            checked={!!draft.apenas_ativos}
-            onChange={(e) => setDraft({ ...draft, apenas_ativos: e.target.checked })}
-          />
-          <Label htmlFor="ativos" className="!mb-0">
-            Apenas ativos
-          </Label>
-        </div>
-        <AcoesDoFiltro
-          filtrado={temFiltro(draft) || temFiltro(applied)}
-          onGerar={() => aplicar({ ...draft })}
-          onLimpar={() => {
-            setDraft({});
-            aplicar({});
-          }}
-        />
-      </FilterBar>
+          <span className="font-medium text-foreground">Só processos com atraso</span>
+          <span className="text-xs text-foreground-muted">
+            (alguma unidade passou do prazo do envio — o mesmo número do cartão “Com atraso”)
+          </span>
+        </label>
+      </div>
 
       {relQ.isLoading && <Carregando className="text-sm text-muted-foreground" />}
       {relQ.error && (
@@ -221,105 +142,73 @@ export default function RelatorioTramitacaoPage() {
       )}
 
       {relQ.data && (
+        <ul className="space-y-0.5 text-xs text-muted-foreground" aria-label="Recorte do relatório">
+          {relQ.data.descricao_filtros.map((l) => (
+            <li key={l}>{l}</li>
+          ))}
+          {relQ.data.cortado && (
+            <li className="font-medium text-foreground">
+              O recorte tem {relQ.data.qtd_processos} processos; a tela detalha os {relQ.data.qtd_listados} mais
+              recentes, e atrasos, tempos e médias abaixo são desses. Para todos, use o CSV.
+            </li>
+          )}
+        </ul>
+      )}
+
+      {relQ.data && (
         <>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <KpiCard label="Processos" value={relQ.data.qtd_processos} icon={FileText} />
-            <KpiCard
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+            <StatCard label="Processos" value={String(relQ.data.qtd_processos)} />
+            <StatCard
               label="Com atraso"
-              value={relQ.data.qtd_processos_com_atraso}
-              icon={AlertTriangle}
-              intent={relQ.data.qtd_processos_com_atraso > 0 ? "danger" : "default"}
+              value={String(relQ.data.qtd_processos_com_atraso)}
+              danger={relQ.data.qtd_processos_com_atraso > 0}
             />
-            <KpiCard
+            <StatCard
               label="Tempo médio por processo"
               value={fmtMin(relQ.data.minutos_medio_por_processo)}
-              icon={Timer}
-            />
-            <KpiCard
-              label="Onde mais demora"
-              value={topo ? topo.unidade : "—"}
-              hint={topo ? `${fmtMin(topo.medio)} em média por passagem` : "Sem tempo registrado"}
-              icon={Hourglass}
-              intent="warning"
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Onde o processo para?</CardTitle>
-                <CardDescription>
-                  Unidades pelo tempo médio que um processo fica nelas, contando quem está lá
-                  agora. Em vermelho, as que estouraram prazo.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <RankingEmBarras
-                  rotuloDoValor="tempo médio por passagem"
-                  vazio={<EmptyState icon={Inbox} title="Sem dados no recorte" className="p-6" />}
-                  itens={porUnidade.map((u) => ({
-                    chave: u.chave,
-                    rotulo: u.unidade,
-                    valor: u.medio,
-                    valorTexto: fmtMin(u.medio),
-                    alerta: u.atrasos > 0,
-                    detalhe: (
-                      <>
-                        {u.passagens} {u.passagens === 1 ? "passagem" : "passagens"}
-                        {u.paradosAgora > 0 &&
-                          ` · ${u.paradosAgora} ${u.paradosAgora === 1 ? "parado" : "parados"} aqui agora`}
-                        {u.atrasos > 0 && (
-                          <span className="font-semibold text-danger-soft-foreground">
-                            {" "}
-                            · {u.atrasos} {u.atrasos === 1 ? "atraso" : "atrasos"}
-                          </span>
-                        )}
-                      </>
-                    ),
-                  }))}
-                />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Quem está parado há mais tempo?</CardTitle>
-                <CardDescription>
-                  Processos ativos pelo tempo desde que chegaram onde estão agora.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <RankingEmBarras
-                  rotuloDoValor="parado há"
-                  vazio={
-                    <EmptyState icon={Inbox} title="Nenhum processo ativo parado" className="p-6" />
-                  }
-                  itens={relQ.data.processos
-                    .filter((p) => p.ativo && p.minutos_em_andamento > 0)
-                    .sort((a, b) => b.minutos_em_andamento - a.minutos_em_andamento)
-                    .map((p) => ({
-                      chave: p.id,
-                      rotulo: (
-                        <Link
-                          href={`/m/protocolo/processos/${p.id}`}
-                          className="font-mono text-primary hover:underline"
-                        >
-                          {p.numero_processo}
-                        </Link>
-                      ),
-                      valor: p.minutos_em_andamento,
-                      valorTexto: fmtMin(p.minutos_em_andamento),
-                      alerta: p.teve_atraso,
-                      detalhe: (
-                        <>
-                          em {p.local_atual ?? "—"} · {p.assunto ?? "—"}
-                        </>
-                      ),
-                    }))}
-                />
-              </CardContent>
-            </Card>
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Tempo por unidade</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {relQ.data.por_unidade.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Sem dados.</p>
+              ) : (
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>Unidade</TH>
+                      <TH className="text-right">Passagens</TH>
+                      <TH className="text-right">Atrasos</TH>
+                      <TH className="text-right">Tempo total</TH>
+                      <TH className="text-right">Tempo médio</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {relQ.data.por_unidade.map((u, i) => (
+                      <TR key={`${u.id_unidade ?? "null"}-${i}`}>
+                        <TD>{u.unidade ?? "—"}</TD>
+                        <TD className="text-right tabular-nums">{u.qtd_passagens}</TD>
+                        <TD className="text-right tabular-nums">
+                          {u.qtd_atrasos > 0 ? (
+                            <span className="font-semibold text-danger">{u.qtd_atrasos}</span>
+                          ) : (
+                            u.qtd_atrasos
+                          )}
+                        </TD>
+                        <TD className="text-right tabular-nums">{fmtMin(u.minutos_total)}</TD>
+                        <TD className="text-right tabular-nums">{fmtMin(u.minutos_medio)}</TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>
@@ -327,11 +216,7 @@ export default function RelatorioTramitacaoPage() {
             </CardHeader>
             <CardContent>
               {relQ.data.processos.length === 0 ? (
-                <EmptyState
-                  icon={Inbox}
-                  title="Nenhum processo no recorte"
-                  description="Ajuste os filtros acima e gere o relatório de novo."
-                />
+                <p className="text-sm text-muted-foreground">Nenhum processo no recorte.</p>
               ) : (
                 <div className="space-y-3">
                   {relQ.data.processos.map((p) => (
@@ -343,6 +228,29 @@ export default function RelatorioTramitacaoPage() {
           </Card>
         </>
       )}
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: string;
+  danger?: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-card p-3 text-center">
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div
+        className={"text-xl font-bold tabular-nums " + (danger ? "text-danger" : "text-primary")}
+      >
+        {value}
+      </div>
     </div>
   );
 }
@@ -371,13 +279,20 @@ function ProcessoTramitacaoCard({ p }: { p: TramitacaoProcesso }) {
                 {p.qtd_atrasos} atraso(s)
               </Badge>
             )}
-            {!p.ativo && <Badge intent="neutral">Inativo</Badge>}
+            {p.situacao !== "em_andamento" && (
+              <Badge intent={p.situacao === "em_transito" ? "info" : "neutral"}>
+                {ROTULO_SITUACAO[p.situacao]}
+              </Badge>
+            )}
           </div>
           <div className="text-xs text-muted-foreground">
             {p.manifestante ?? "—"} · {p.assunto ?? "—"}
           </div>
         </div>
-        <div className="hidden gap-6 text-xs text-muted-foreground md:flex">
+        {/* Colunas de largura fixa: alinham de uma linha para outra, e o nome
+            longo da unidade quebra dentro da sua coluna em vez de invadir as
+            vizinhas. */}
+        <div className="hidden shrink-0 grid-cols-[3.5rem_4.5rem_4.5rem_4.5rem_minmax(0,13rem)] items-start gap-3 text-xs text-muted-foreground md:grid xl:grid-cols-[3.5rem_4.5rem_4.5rem_4.5rem_minmax(0,18rem)]">
           <Stat label="encs" value={String(p.qtd_encaminhamentos)} />
           <Stat label="unidades" value={String(p.qtd_unidades_visitadas)} />
           <Stat label="total" value={fmtMin(p.minutos_total)} />
@@ -385,7 +300,7 @@ function ProcessoTramitacaoCard({ p }: { p: TramitacaoProcesso }) {
             label="em aberto"
             value={p.minutos_em_andamento > 0 ? fmtMin(p.minutos_em_andamento) : "—"}
           />
-          <Stat label="local" value={p.local_atual ?? "—"} />
+          <Stat label="local" value={p.local_atual ?? "—"} texto />
         </div>
         {open ? (
           <ChevronUp className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -402,11 +317,18 @@ function ProcessoTramitacaoCard({ p }: { p: TramitacaoProcesso }) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+/** `texto`: valor longo (nome de unidade) — alinhado à esquerda, até duas
+ * linhas, e o nome inteiro no title. */
+function Stat({ label, value, texto = false }: { label: string; value: string; texto?: boolean }) {
   return (
-    <div className="text-center">
+    <div className={texto ? "min-w-0 text-left" : "text-center"}>
       <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="font-medium text-foreground tabular-nums">{value}</div>
+      <div
+        className={"font-medium text-foreground " + (texto ? "line-clamp-2 break-words" : "tabular-nums")}
+        title={texto ? value : undefined}
+      >
+        {value}
+      </div>
     </div>
   );
 }
@@ -442,7 +364,7 @@ function EtapasTimeline({ etapas }: { etapas: TramitacaoEtapa[] }) {
             <span>
               prazo: {fmtDate(e.prazo_estipulado)}
               {e.atrasou && (
-                <span className="ml-1 font-semibold text-danger-soft-foreground">ATRASO</span>
+                <span className="ml-1 font-semibold text-danger">ATRASO</span>
               )}
             </span>
           </div>

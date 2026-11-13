@@ -1,12 +1,16 @@
-"""Relatórios agregados de processos.
+"""Relatório "Processos no período" (SI-34).
 
-A query agregadora roda 3 SELECTs: totais, breakdown por tipo_processo,
-breakdown por unidade_proprietaria. A lista de processos é a 4ª query e
-respeita o limite de `max_rows` para não estourar PDF/CSV.
+Responde: quantos processos foram abertos (ou arquivados) no período, de que
+tipo e assunto, em que unidade, e quais são eles.
+
+Uma consulta-base com todo o recorte (`relatorios_comum.aplicar_filtros_processo`)
+alimenta totais, quebras e lista — os quatro contam o MESMO conjunto, e o
+total bate com a soma das quebras. A lista tem teto (`max_rows`); os totais,
+não, e `cortado` diz quando a lista ficou menor que o total.
 """
 from __future__ import annotations
 
-from sqlalchemy import Integer, func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -14,6 +18,7 @@ from ..models import (
     Assunto,
     Manifestante,
     Processo,
+    Servico,
     TipoProcesso,
     UnidadeTrabalho,
 )
@@ -24,32 +29,17 @@ from ..schemas.relatorio import (
     RelatorioResposta,
     RelatorioTotais,
 )
-
-
-def _apply_filters(stmt, f: RelatorioFiltro, tenant_id: int):
-    # E3 — rascunho não tem numero_processo; relatório é documento numerado
-    # (PDF/CSV), então fica fora por padrão, mesma política de list_processos.
-    stmt = stmt.where(
-        Processo.excluido.is_(False),
-        Processo.tenant_id == tenant_id,
-        Processo.situacao != "rascunho",
-    )
-    if f.id_unidade:
-        stmt = stmt.where(
-            (Processo.id_unidade_proprietaria == f.id_unidade)
-            | (Processo.id_local_atual == f.id_unidade)
-        )
-    if f.id_assunto:
-        stmt = stmt.where(Processo.id_assunto == f.id_assunto)
-    if f.id_tipo_processo:
-        stmt = stmt.where(Assunto.id_tipo_processo == f.id_tipo_processo)
-    if f.desde:
-        stmt = stmt.where(Processo.data_hora_abertura >= f.desde)
-    if f.ate:
-        stmt = stmt.where(Processo.data_hora_abertura <= f.ate)
-    if f.apenas_ativos:
-        stmt = stmt.where(Processo.ativo.is_(True))
-    return stmt
+from ..utils.relogio import agora_utc
+from .relatorios_comum import (
+    aplicar_filtros_processo,
+    condicao_parado,
+    data_arquivamento,
+    descrever_filtros,
+    hora_local,
+    situacao,
+    situacao_prazo,
+    ultima_movimentacao,
+)
 
 
 def _pct(part: int, total: int) -> float:
@@ -58,109 +48,158 @@ def _pct(part: int, total: int) -> float:
     return round((part / total) * 100, 1)
 
 
-async def gerar_relatorio(
-    db: AsyncSession, f: RelatorioFiltro, *, tenant_id: int, max_rows: int = 1000
-) -> RelatorioResposta:
-    base = select(Processo).join(Assunto, Assunto.id == Processo.id_assunto)
-    base = _apply_filters(base, f, tenant_id)
-
-    # Totais — usar colunas da subquery senão SQLAlchemy cross-joina com a tabela original
-    sq = base.subquery()
-    totais_stmt = select(
-        func.count(sq.c.id),
-        func.sum(func.cast(sq.c.ativo, Integer)),
-        func.sum(func.cast(~sq.c.publico, Integer)),
-        func.sum(func.cast(sq.c.externo, Integer)),
+def _base(f: RelatorioFiltro, *, tenant_id: int, niveis_permitidos: list[str] | None):
+    """Ids, situação, data de arquivamento e última movimentação de cada
+    processo do recorte."""
+    coluna_data = (
+        data_arquivamento(tenant_id)
+        if f.data_base == "arquivamento"
+        else Processo.data_hora_abertura
     )
-    total_row = (await db.execute(totais_stmt)).one()
-    total = int(total_row[0] or 0)
-    ativos = int(total_row[1] or 0)
-    sigilosos = int(total_row[2] or 0)
-    externos = int(total_row[3] or 0)
+    stmt = select(
+        Processo.id.label("id"),
+        situacao(tenant_id).label("situacao"),
+        data_arquivamento(tenant_id).label("arquivado_em"),
+        ultima_movimentacao(tenant_id).label("ultima_mov"),
+    ).join(Assunto, Assunto.id == Processo.id_assunto)
+    stmt = aplicar_filtros_processo(
+        stmt, f, tenant_id=tenant_id, niveis_permitidos=niveis_permitidos, coluna_data=coluna_data
+    )
+    if f.situacao:
+        stmt = stmt.where(situacao(tenant_id) == f.situacao)
+    if f.parado_ha_dias:
+        stmt = stmt.where(condicao_parado(tenant_id, f.parado_ha_dias, agora_utc()))
+    if f.prazo:
+        stmt = stmt.where(situacao_prazo(tenant_id, agora_utc()) == f.prazo)
+    # Os mesmos critérios dos cartões "Sigilosos" e "Externos".
+    if f.sigilo:
+        stmt = stmt.where(Processo.publico.is_(f.sigilo == "ostensivo"))
+    if f.origem:
+        stmt = stmt.where(Processo.externo.is_(f.origem == "externa"))
+    return stmt.subquery("recorte")
+
+
+async def gerar_relatorio(
+    db: AsyncSession,
+    f: RelatorioFiltro,
+    *,
+    tenant_id: int,
+    # Sem default de propósito: esquecer o sigilo tem de quebrar a chamada,
+    # não liberar tudo em silêncio.
+    niveis_permitidos: list[str] | None,
+    max_rows: int = 1000,
+) -> RelatorioResposta:
+    rec = _base(f, tenant_id=tenant_id, niveis_permitidos=niveis_permitidos)
+
+    # Totais — um SELECT sobre o recorte.
+    t = (
+        await db.execute(
+            select(
+                func.count(),
+                func.count().filter(rec.c.situacao == "em_andamento"),
+                func.count().filter(rec.c.situacao == "em_transito"),
+                func.count().filter(rec.c.situacao == "arquivado"),
+                func.count().filter(Processo.publico.is_(False)),
+                func.count().filter(Processo.externo.is_(True)),
+            )
+            .select_from(rec)
+            .join(Processo, Processo.id == rec.c.id)
+        )
+    ).one()
+    total = int(t[0])
     totais = RelatorioTotais(
         total=total,
-        ativos=ativos,
-        inativos=total - ativos,
-        sigilosos=sigilosos,
-        externos=externos,
+        em_andamento=int(t[1]),
+        em_transito=int(t[2]),
+        arquivados=int(t[3]),
+        sigilosos=int(t[4]),
+        externos=int(t[5]),
     )
 
-    # Breakdown por tipo_processo
-    tp_stmt = (
-        select(
-            TipoProcesso.tipo_processo.label("label"),
-            func.count(Processo.id).label("count"),
+    async def _quebra(coluna, *joins) -> list[RelatorioBreakdownItem]:
+        stmt = select(coluna.label("label"), func.count().label("count")).select_from(rec).join(
+            Processo, Processo.id == rec.c.id
         )
-        .select_from(Processo)
-        .join(Assunto, Assunto.id == Processo.id_assunto)
-        .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
-    )
-    tp_stmt = _apply_filters(tp_stmt, f, tenant_id)
-    tp_stmt = tp_stmt.group_by(TipoProcesso.tipo_processo).order_by(func.count(Processo.id).desc())
-    tp_rows = (await db.execute(tp_stmt)).all()
-    por_tipo = [
-        RelatorioBreakdownItem(label=r.label or "—", count=int(r.count), pct=_pct(int(r.count), total))
-        for r in tp_rows
-    ]
+        for alvo, cond in joins:
+            stmt = stmt.join(alvo, cond, isouter=True)
+        stmt = stmt.group_by(coluna).order_by(func.count().desc(), coluna)
+        return [
+            RelatorioBreakdownItem(label=r.label or "—", count=int(r.count), pct=_pct(int(r.count), total))
+            for r in (await db.execute(stmt)).all()
+        ]
 
-    # Breakdown por unidade proprietária
-    un_stmt = (
-        select(
-            UnidadeTrabalho.unidade_trabalho.label("label"),
-            func.count(Processo.id).label("count"),
-        )
-        .select_from(Processo)
-        .join(Assunto, Assunto.id == Processo.id_assunto)
-        .join(UnidadeTrabalho, UnidadeTrabalho.id == Processo.id_unidade_proprietaria, isouter=True)
+    por_tipo = await _quebra(
+        TipoProcesso.tipo_processo,
+        (Assunto, Assunto.id == Processo.id_assunto),
+        (TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo),
     )
-    un_stmt = _apply_filters(un_stmt, f, tenant_id)
-    un_stmt = un_stmt.group_by(UnidadeTrabalho.unidade_trabalho).order_by(func.count(Processo.id).desc())
-    un_rows = (await db.execute(un_stmt)).all()
-    por_unidade = [
-        RelatorioBreakdownItem(label=r.label or "—", count=int(r.count), pct=_pct(int(r.count), total))
-        for r in un_rows
-    ]
+    por_unidade = await _quebra(
+        UnidadeTrabalho.unidade_trabalho,
+        (UnidadeTrabalho, UnidadeTrabalho.id == Processo.id_unidade_proprietaria),
+    )
+    # Onde o processo está agora (para arquivado, onde foi arquivado).
+    UnidadeAtual = aliased(UnidadeTrabalho, name="ua")
+    por_local_atual = await _quebra(
+        UnidadeAtual.unidade_trabalho,
+        (UnidadeAtual, UnidadeAtual.id == Processo.id_local_atual),
+    )
+    por_assunto = await _quebra(
+        Assunto.assunto, (Assunto, Assunto.id == Processo.id_assunto),
+    )
+    # Processo sem serviço (anterior ao catálogo, ou aberto sem escolher um)
+    # aparece como "—", como as outras quebras.
+    por_servico = await _quebra(
+        Servico.nome,
+        (Servico, and_(Servico.id == Processo.id_servico, Servico.tenant_id == tenant_id)),
+    )
 
-    # Lista de processos (limitada)
+    # Lista (com teto), mais recente primeiro pela data que define o período.
     LocalAtual = aliased(UnidadeTrabalho, name="la")
+    ordem = (
+        rec.c.arquivado_em.desc().nulls_last()
+        if f.data_base == "arquivamento"
+        else Processo.data_hora_abertura.desc()
+    )
     list_stmt = (
         select(
             Processo,
+            rec.c.situacao,
+            rec.c.arquivado_em,
+            rec.c.ultima_mov,
             Assunto.assunto.label("assunto_nome"),
             TipoProcesso.tipo_processo.label("tipo_nome"),
             Manifestante.nome.label("manif_nome"),
             UnidadeTrabalho.unidade_trabalho.label("ut_propr"),
             LocalAtual.unidade_trabalho.label("ut_local"),
         )
+        .select_from(rec)
+        .join(Processo, Processo.id == rec.c.id)
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
         .join(Manifestante, Manifestante.id == Processo.id_manifestante, isouter=True)
-        .join(
-            UnidadeTrabalho,
-            UnidadeTrabalho.id == Processo.id_unidade_proprietaria,
-            isouter=True,
-        )
+        .join(UnidadeTrabalho, UnidadeTrabalho.id == Processo.id_unidade_proprietaria, isouter=True)
         .join(LocalAtual, LocalAtual.id == Processo.id_local_atual, isouter=True)
+        .order_by(ordem, Processo.id.desc())
+        .limit(max_rows)
     )
-    list_stmt = _apply_filters(list_stmt, f, tenant_id)
-    list_stmt = list_stmt.order_by(Processo.data_hora_abertura.desc()).limit(max_rows)
-    list_rows = (await db.execute(list_stmt)).all()
     processos = [
         RelatorioProcessoRow(
             id=row[0].id,
             numero_processo=row[0].numero_processo,
-            data_hora_abertura=row[0].data_hora_abertura,
+            data_hora_abertura=hora_local(row[0].data_hora_abertura),
+            data_hora_arquivamento=hora_local(row.arquivado_em),
+            ultima_movimentacao=hora_local(row.ultima_mov),
+            situacao=row.situacao,
             manifestante=row.manif_nome,
             tipo_processo=row.tipo_nome,
             assunto=row.assunto_nome,
             unidade_proprietaria=row.ut_propr,
             local_atual=row.ut_local,
-            ativo=row[0].ativo,
             publico=row[0].publico,
             nivel_sigilo=row[0].nivel_sigilo,
             externo=row[0].externo,
         )
-        for row in list_rows
+        for row in (await db.execute(list_stmt)).all()
     ]
 
     nome_unidade: str | None = None
@@ -176,9 +215,14 @@ async def gerar_relatorio(
 
     return RelatorioResposta(
         filtros_aplicados=f,
+        descricao_filtros=await descrever_filtros(db, f, tenant_id=tenant_id),
         nome_unidade=nome_unidade,
         totais=totais,
         por_tipo_processo=por_tipo,
         por_unidade_proprietaria=por_unidade,
+        por_local_atual=por_local_atual,
+        por_assunto=por_assunto,
+        por_servico=por_servico,
         processos=processos,
+        cortado=len(processos) < total,
     )

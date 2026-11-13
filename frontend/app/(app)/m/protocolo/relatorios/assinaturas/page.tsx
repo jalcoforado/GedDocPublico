@@ -1,20 +1,17 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Clock, FileSignature, Inbox, Timer, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Download, FileText, XCircle } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
 
-import { AcoesDoFiltro, RelatorioCabecalho, temFiltro } from "@/components/protocolo/RelatorioCabecalho";
-import { RankingEmBarras } from "@/components/protocolo/RankingEmBarras";
+import { FiltrosDoRelatorio } from "@/components/relatorios/FiltrosDoRelatorio";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Carregando } from "@/components/ui/carregando";
-import { EmptyState } from "@/components/ui/empty-state";
-import { FilterBar } from "@/components/ui/filter-bar";
-import { Input } from "@/components/ui/input";
-import { KpiCard } from "@/components/ui/kpi-card";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import {
@@ -24,30 +21,15 @@ import {
   type AssinaturasFiltroInput,
   type StatusSolicitacaoAssin,
 } from "@/lib/api";
-import { useFiltroNaUrl } from "@/lib/filtro-na-url";
-
-function fmtDateTime(s: string | null) {
-  if (!s) return "—";
-  const d = new Date(s);
-  return (
-    d.toLocaleDateString("pt-BR") +
-    " " +
-    d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
-  );
-}
-
-function fmtMin(m: number | null): string {
-  if (m === null || m === undefined) return "—";
-  // Médias chegam fracionadas (123.4 min); sem arredondar saía "2h 03.4min".
-  m = Math.round(m);
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  if (h < 24) return `${h}h ${String(rem).padStart(2, "0")}min`;
-  const d = Math.floor(h / 24);
-  const rh = h % 24;
-  return `${d}d ${rh}h`;
-}
+import {
+  ROTA_RELATORIOS,
+  filtroDaUrl,
+  filtroParaUrl,
+  fmtDataHora as fmtDateTime,
+  fmtMinutos as fmtMin,
+  recorteComum,
+  type FiltroDaUrl,
+} from "@/lib/relatorios";
 
 function statusBadge(status: StatusSolicitacaoAssin) {
   switch (status) {
@@ -72,11 +54,26 @@ function statusBadge(status: StatusSolicitacaoAssin) {
   }
 }
 
+/**
+ * Assinaturas (SI-34) — o "ver lista" da seção Assinaturas da página de
+ * relatórios. O recorte comum (período, unidade, assunto, tipo — sobre o
+ * processo de cada pedido) vem da URL; situação, solicitante e assinante são
+ * filtros próprios desta tela.
+ */
 export default function RelatorioAssinaturasPage() {
-  // Filtro aplicado mora na URL: recarregar, voltar ou mandar o link reabre o mesmo recorte.
-  const [applied, aplicar] = useFiltroNaUrl<AssinaturasFiltroInput>();
-  const [draft, setDraft] = useState<AssinaturasFiltroInput>(applied);
-  useEffect(() => setDraft(applied), [applied]);
+  const router = useRouter();
+  const pathname = usePathname();
+  const busca = useSearchParams().toString();
+  const filtro = useMemo(() => filtroDaUrl(new URLSearchParams(busca)), [busca]);
+  const dataBase = filtro.data_base === "conclusao" ? "conclusao" : "pedido";
+  const [proprios, setProprios] = useState<
+    Pick<AssinaturasFiltroInput, "status" | "id_solicitante" | "id_assinante">
+  >({});
+  const consulta: AssinaturasFiltroInput = { ...recorteComum(filtro), data_base: dataBase, ...proprios };
+
+  function irPara(f: FiltroDaUrl) {
+    router.replace(`${pathname}${filtroParaUrl(f)}`, { scroll: false });
+  }
 
   const usuariosQ = useQuery({
     queryKey: ["usuarios-list-relatorio"],
@@ -85,116 +82,121 @@ export default function RelatorioAssinaturasPage() {
   });
 
   const relQ = useQuery({
-    queryKey: ["relatorio-assinaturas", applied],
-    queryFn: () => api.relatorios.assinaturas(applied),
+    queryKey: ["relatorio-assinaturas", busca, proprios],
+    queryFn: () => api.relatorios.assinaturas(consulta),
   });
+
+  const num = (v: string) => (v ? Number(v) : undefined);
 
   return (
     <div className="space-y-4">
-      <RelatorioCabecalho
-        subtitulo="Assinaturas — pendências, conclusões e tempo"
-        csvUrl={assinaturasCsvUrl(applied)}
-        pdfUrl={assinaturasPdfUrl(applied)}
+      <PageHeader
+        breadcrumbs={[
+          { label: "Relatórios", href: `${ROTA_RELATORIOS}${filtroParaUrl(recorteComum(filtro))}` },
+          { label: "Assinaturas" },
+        ]}
+        title="Assinaturas"
+        description="Pedidos de assinatura do período: quem pediu, quem assina, o que está pendente e quanto tempo levou."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={assinaturasCsvUrl(consulta)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-muted px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Download className="h-4 w-4" aria-hidden="true" /> CSV
+            </a>
+            <a
+              href={assinaturasPdfUrl(consulta)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <FileText className="h-4 w-4" aria-hidden="true" /> PDF
+            </a>
+          </div>
+        }
       />
 
-      <FilterBar>
-        <div className="w-full sm:w-40">
-          <Label htmlFor="status">Status</Label>
-          <Select
-            id="status"
-            value={draft.status ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                status: e.target.value
-                  ? (e.target.value as StatusSolicitacaoAssin)
-                  : undefined,
-              })
-            }
-          >
-            <option value="">Todos</option>
-            <option value="pendente">Pendente</option>
-            <option value="concluida">Concluída</option>
-            <option value="cancelada">Cancelada</option>
-          </Select>
-        </div>
-        <div className="w-full sm:w-52">
-          <Label htmlFor="solicitante">Solicitante</Label>
-          <Select
-            id="solicitante"
-            value={draft.id_solicitante ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                id_solicitante: e.target.value ? Number(e.target.value) : undefined,
-              })
-            }
-          >
-            <option value="">Todos</option>
-            {usuariosQ.data?.items.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.nome}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="w-full sm:w-52">
-          <Label htmlFor="assinante">Assinante</Label>
-          <Select
-            id="assinante"
-            value={draft.id_assinante ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                id_assinante: e.target.value ? Number(e.target.value) : undefined,
-              })
-            }
-          >
-            <option value="">Todos</option>
-            {usuariosQ.data?.items.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.nome}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="w-full sm:w-40">
-          <Label htmlFor="desde">Iniciada desde</Label>
-          <Input
-            id="desde"
-            type="date"
-            value={draft.desde?.slice(0, 10) ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                desde: e.target.value ? `${e.target.value}T00:00:00` : undefined,
-              })
-            }
-          />
-        </div>
-        <div className="w-full sm:w-40">
-          <Label htmlFor="ate">Iniciada até</Label>
-          <Input
-            id="ate"
-            type="date"
-            value={draft.ate?.slice(0, 10) ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                ate: e.target.value ? `${e.target.value}T23:59:59` : undefined,
-              })
-            }
-          />
-        </div>
-        <AcoesDoFiltro
-          filtrado={temFiltro(draft) || temFiltro(applied)}
-          onGerar={() => aplicar({ ...draft })}
-          onLimpar={() => {
-            setDraft({});
-            aplicar({});
-          }}
-        />
-      </FilterBar>
+      <FiltrosDoRelatorio
+        valor={recorteComum(filtro)}
+        onAplicar={(f) => irPara({ ...f, data_base: filtro.data_base })}
+      />
+
+      <Card>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div>
+              <Label htmlFor="ass-data-base">Período conta pela data do</Label>
+              <Select
+                id="ass-data-base"
+                value={dataBase}
+                onChange={(e) => irPara({ ...filtro, data_base: e.target.value as "pedido" | "conclusao" })}
+              >
+                <option value="pedido">pedido</option>
+                <option value="conclusao">conclusão</option>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="status">Situação</Label>
+              <Select
+                id="status"
+                value={proprios.status ?? ""}
+                onChange={(e) =>
+                  setProprios({
+                    ...proprios,
+                    status: e.target.value ? (e.target.value as StatusSolicitacaoAssin) : undefined,
+                  })
+                }
+              >
+                <option value="">Todas</option>
+                <option value="pendente">Pendente</option>
+                <option value="concluida">Concluída</option>
+                <option value="cancelada">Cancelada</option>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="solicitante">Solicitante</Label>
+              <Select
+                id="solicitante"
+                value={proprios.id_solicitante ?? ""}
+                onChange={(e) => setProprios({ ...proprios, id_solicitante: num(e.target.value) })}
+              >
+                <option value="">Todos</option>
+                {usuariosQ.data?.items.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.nome}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="assinante">Assinante</Label>
+              <Select
+                id="assinante"
+                value={proprios.id_assinante ?? ""}
+                onChange={(e) => setProprios({ ...proprios, id_assinante: num(e.target.value) })}
+              >
+                <option value="">Todos</option>
+                {usuariosQ.data?.items.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.nome}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {relQ.data && (
+        <ul className="space-y-0.5 text-xs text-muted-foreground" aria-label="Recorte do relatório">
+          {relQ.data.descricao_filtros.map((l) => (
+            <li key={l}>{l}</li>
+          ))}
+        </ul>
+      )}
 
       {relQ.isLoading && <Carregando className="text-sm text-muted-foreground" />}
       {relQ.error && (
@@ -209,63 +211,62 @@ export default function RelatorioAssinaturasPage() {
       {relQ.data && (
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            {/* Mesmos ícones e cores dos selos de status da tabela abaixo. */}
-            <KpiCard label="Total" value={relQ.data.totais.total} icon={FileSignature} />
-            <KpiCard
+            <StatCard label="Total" value={String(relQ.data.totais.total)} />
+            <StatCard
               label="Pendentes"
-              value={relQ.data.totais.pendentes}
-              icon={Clock}
-              intent="warning"
+              value={String(relQ.data.totais.pendentes)}
+              tone="warning"
             />
-            <KpiCard
+            <StatCard
               label="Concluídas"
-              value={relQ.data.totais.concluidas}
-              icon={CheckCircle2}
-              intent="success"
+              value={String(relQ.data.totais.concluidas)}
+              tone="success"
             />
-            <KpiCard label="Canceladas" value={relQ.data.totais.canceladas} icon={XCircle} />
-            <KpiCard
+            <StatCard label="Canceladas" value={String(relQ.data.totais.canceladas)} />
+            <StatCard
               label="Tempo médio de conclusão"
               value={fmtMin(relQ.data.totais.minutos_medio_conclusao)}
-              icon={Timer}
             />
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle>Com quem estão as assinaturas pendentes?</CardTitle>
-                <CardDescription>
-                  Assinantes pelo número de assinaturas que ainda esperam por eles.
-                </CardDescription>
+                <CardTitle>Por assinante</CardTitle>
               </CardHeader>
               <CardContent>
-                <RankingEmBarras
-                  rotuloDoValor="pendentes"
-                  vazio={
-                    <EmptyState
-                      icon={CheckCircle2}
-                      title="Ninguém com assinatura pendente"
-                      className="p-6"
-                    />
-                  }
-                  itens={relQ.data.por_assinante
-                    .filter((a) => a.pendentes > 0)
-                    .sort((a, b) => b.pendentes - a.pendentes)
-                    .map((a) => ({
-                      chave: a.id_assinante,
-                      rotulo: a.nome ?? `#${a.id_assinante}`,
-                      valor: a.pendentes,
-                      valorTexto: String(a.pendentes),
-                      detalhe: (
-                        <>
-                          {a.concluidas} {a.concluidas === 1 ? "concluída" : "concluídas"}
-                          {a.concluidas > 0 &&
-                            ` · assina em ${fmtMin(Math.round(a.minutos_medio))} em média`}
-                        </>
-                      ),
-                    }))}
-                />
+                {relQ.data.por_assinante.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Sem dados.</p>
+                ) : (
+                  <Table>
+                    <THead>
+                      <TR>
+                        <TH>Assinante</TH>
+                        <TH className="text-right">Pendentes</TH>
+                        <TH className="text-right">Concluídas</TH>
+                        <TH className="text-right">Tempo médio</TH>
+                      </TR>
+                    </THead>
+                    <TBody>
+                      {relQ.data.por_assinante.map((a) => (
+                        <TR key={a.id_assinante}>
+                          <TD>{a.nome ?? `#${a.id_assinante}`}</TD>
+                          <TD className="text-right tabular-nums">
+                            {a.pendentes > 0 ? (
+                              <span className="font-semibold text-warning-soft-foreground">
+                                {a.pendentes}
+                              </span>
+                            ) : (
+                              a.pendentes
+                            )}
+                          </TD>
+                          <TD className="text-right tabular-nums">{a.concluidas}</TD>
+                          <TD className="text-right tabular-nums">{fmtMin(a.minutos_medio)}</TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                )}
               </CardContent>
             </Card>
 
@@ -275,7 +276,7 @@ export default function RelatorioAssinaturasPage() {
               </CardHeader>
               <CardContent>
                 {relQ.data.por_solicitante.length === 0 ? (
-                  <EmptyState icon={Inbox} title="Sem dados no recorte" className="p-6" />
+                  <p className="text-sm text-muted-foreground">Sem dados.</p>
                 ) : (
                   <Table>
                     <THead>
@@ -306,59 +307,62 @@ export default function RelatorioAssinaturasPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Solicitações ({relQ.data.solicitacoes.length})</CardTitle>
+              <CardTitle>
+                {relQ.data.cortado
+                  ? `Solicitações (as ${relQ.data.solicitacoes.length} mais recentes de ${relQ.data.totais.total}; os totais contam todas — use o CSV)`
+                  : `Solicitações (${relQ.data.solicitacoes.length})`}
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              {relQ.data.solicitacoes.length === 0 ? (
-                <EmptyState
-                  icon={Inbox}
-                  title="Nenhuma solicitação no recorte"
-                  description="Ajuste os filtros acima e gere o relatório de novo."
-                />
-              ) : (
-                <Table>
-                  <THead>
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>Processo</TH>
+                    <TH>Solicitante</TH>
+                    <TH>Status</TH>
+                    <TH>Iniciada</TH>
+                    <TH>Tempo</TH>
+                    <TH>Assinantes</TH>
+                    <TH>Anexos</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {relQ.data.solicitacoes.length === 0 && (
                     <TR>
-                      <TH>Processo</TH>
-                      <TH>Solicitante</TH>
-                      <TH>Status</TH>
-                      <TH>Iniciada</TH>
-                      <TH>Tempo</TH>
-                      <TH>Assinantes</TH>
-                      <TH>Anexos</TH>
+                      <TD colSpan={7} className="text-center text-muted-foreground">
+                        Nenhuma solicitação no recorte.
+                      </TD>
                     </TR>
-                  </THead>
-                  <TBody>
-                    {relQ.data.solicitacoes.map((s) => (
-                      <TR key={s.id}>
-                        <TD>
-                          <Link
-                            href={`/m/protocolo/processos/${s.id_processo}`}
-                            className="font-mono text-xs text-primary hover:underline"
-                          >
-                            {s.numero_processo ?? `#${s.id_processo}`}
-                          </Link>
-                        </TD>
-                        <TD className="text-sm">{s.nome_solicitante ?? "—"}</TD>
-                        <TD>{statusBadge(s.status)}</TD>
-                        <TD className="text-xs tabular-nums">{fmtDateTime(s.dt_inicio)}</TD>
-                        <TD className="text-xs tabular-nums">{fmtMin(s.minutos_decorridos)}</TD>
-                        <TD className="text-xs">
-                          <span className="tabular-nums">
-                            {s.qtd_assinantes_concluidos}/{s.qtd_assinantes}
-                          </span>
-                          <div className="text-xs text-muted-foreground">
-                            {s.assinantes_resumo.join(" · ")}
-                          </div>
-                        </TD>
-                        <TD className="text-xs tabular-nums">
-                          {s.qtd_anexos_assinados}/{s.qtd_anexos}
-                        </TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </Table>
-              )}
+                  )}
+                  {relQ.data.solicitacoes.map((s) => (
+                    <TR key={s.id}>
+                      <TD>
+                        <Link
+                          href={`/m/protocolo/processos/${s.id_processo}`}
+                          className="font-mono text-xs text-primary hover:underline"
+                        >
+                          {s.numero_processo ?? `#${s.id_processo}`}
+                        </Link>
+                      </TD>
+                      <TD className="text-sm">{s.nome_solicitante ?? "—"}</TD>
+                      <TD>{statusBadge(s.status)}</TD>
+                      <TD className="text-xs tabular-nums">{fmtDateTime(s.dt_inicio)}</TD>
+                      <TD className="text-xs tabular-nums">{fmtMin(s.minutos_decorridos)}</TD>
+                      <TD className="text-xs">
+                        <span className="tabular-nums">
+                          {s.qtd_assinantes_concluidos}/{s.qtd_assinantes}
+                        </span>
+                        <div className="text-xs text-muted-foreground">
+                          {s.assinantes_resumo.join(" · ")}
+                        </div>
+                      </TD>
+                      <TD className="text-xs tabular-nums">
+                        {s.qtd_anexos_assinados}/{s.qtd_anexos}
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
             </CardContent>
           </Card>
         </>
@@ -367,3 +371,27 @@ export default function RelatorioAssinaturasPage() {
   );
 }
 
+function StatCard({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "warning" | "success";
+}) {
+  const color =
+    tone === "warning"
+      ? "text-warning-soft-foreground"
+      : tone === "success"
+        ? "text-success-soft-foreground"
+        : "text-primary";
+  return (
+    <div className="rounded-md border border-border bg-card p-3 text-center">
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className={"text-xl font-bold tabular-nums " + color}>{value}</div>
+    </div>
+  );
+}

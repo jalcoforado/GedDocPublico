@@ -1,292 +1,294 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import {
-  CheckCircle2,
-  Eye,
-  FileText,
-  Inbox,
-  Lock,
-  Pause,
-} from "lucide-react";
+import { Download, Eye, FileText, Lock } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
 
-import { AcoesDoFiltro, RelatorioCabecalho, temFiltro } from "@/components/protocolo/RelatorioCabecalho";
+import { FiltrosDoRelatorio } from "@/components/relatorios/FiltrosDoRelatorio";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Carregando } from "@/components/ui/carregando";
-import { Checkbox } from "@/components/ui/checkbox";
-import { EmptyState } from "@/components/ui/empty-state";
-import { FilterBar } from "@/components/ui/filter-bar";
-import { Input } from "@/components/ui/input";
 import { KpiCard } from "@/components/ui/kpi-card";
-import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
-import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
-import { useAssuntosAll } from "@/lib/assuntos";
+import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import {
-  api,
   NIVEL_SIGILO_LABEL,
+  api,
   relatorioCsvUrl,
   relatorioPdfUrl,
-  type RelatorioFiltroInput,
+  type FiltroOrigemRelatorio,
+  type FiltroSigiloRelatorio,
+  type RelatorioBreakdownItem,
+  type RelatorioResposta,
 } from "@/lib/api";
-import { useFiltroNaUrl } from "@/lib/filtro-na-url";
+import {
+  ROTA_RELATORIOS,
+  ROTULO_ORIGEM,
+  ROTULO_SIGILO,
+  ROTULO_SITUACAO,
+  VISOES_PROCESSOS,
+  comVisao,
+  consultaDaLista,
+  filtroDaUrl,
+  filtroParaUrl,
+  fmtData,
+  fmtDataHora,
+  recorteComum,
+  visaoDe,
+  type FiltroDaUrl,
+  type VisaoProcessos,
+} from "@/lib/relatorios";
 
-function fmtDateTime(s: string) {
-  const d = new Date(s);
-  return (
-    d.toLocaleDateString("pt-BR") +
-    " " +
-    d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
-  );
-}
+/**
+ * Lista de processos do relatório (SI-34) — o "ver lista de processos" do
+ * grupo Processos da página gerencial. O "Mostrar" escolhe o recorte de cada
+ * número daquele grupo (abertos, arquivados, andamento de hoje, prazos): cada
+ * opção é a mesma consulta que produziu o número na página.
+ *
+ * Sigilo e Origem são os filtros dos cartões "Sigilosos" e "Externos" — com
+ * eles, o cartão é o total da lista. O quadro "Agrupar por" é a quebra do
+ * recorte por tipo, unidade dona, unidade onde está, assunto ou serviço (antes, os principais
+ * assuntos ficavam na página gerencial).
+ */
 
-export default function RelatoriosPage() {
-  // Filtro aplicado mora na URL: recarregar, voltar ou mandar o link reabre o mesmo recorte.
-  const [applied, aplicar] = useFiltroNaUrl<RelatorioFiltroInput>();
-  const [draft, setDraft] = useState<RelatorioFiltroInput>(applied);
-  useEffect(() => setDraft(applied), [applied]);
+type Dimensao = "tipo" | "unidade" | "local" | "assunto" | "servico";
+const DIMENSOES: { id: Dimensao; rotulo: string; linhas: (r: RelatorioResposta) => RelatorioBreakdownItem[]; vazio: string }[] = [
+  { id: "assunto", rotulo: "Assunto", linhas: (r) => r.por_assunto, vazio: "—" },
+  { id: "servico", rotulo: "Serviço", linhas: (r) => r.por_servico, vazio: "Sem serviço" },
+  { id: "tipo", rotulo: "Tipo de processo", linhas: (r) => r.por_tipo_processo, vazio: "—" },
+  { id: "unidade", rotulo: "Unidade dona", linhas: (r) => r.por_unidade_proprietaria, vazio: "—" },
+  // Arquivado conta onde foi arquivado.
+  { id: "local", rotulo: "Onde está agora", linhas: (r) => r.por_local_atual, vazio: "—" },
+];
+export default function RelatorioProcessosPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const busca = useSearchParams().toString();
+  const filtro = useMemo(() => filtroDaUrl(new URLSearchParams(busca)), [busca]);
+  const visao = visaoDe(filtro);
+  const consulta = consultaDaLista(filtro);
+  const dataBase = consulta.data_base;
+  const grupos = [...new Set(VISOES_PROCESSOS.map((v) => v.grupo))];
+  const [dimensao, setDimensao] = useState<Dimensao>("assunto");
 
-  const unidadesQ = useQuery({
-    queryKey: ["unidades-all"],
-    queryFn: () => api.unidades.list({ page_size: 200 }),
+  const q = useQuery({
+    queryKey: ["relatorio-processos", busca],
+    queryFn: () => api.relatorios.processos(consulta),
   });
-  const assuntosQ = useAssuntosAll();
-  const tiposQ = useQuery({
-    queryKey: ["tipos-processo"],
-    queryFn: () => api.tiposProcesso.list(),
-  });
 
-  const relQ = useQuery({
-    queryKey: ["relatorio-processos", applied],
-    queryFn: () => api.relatorios.processos(applied),
-  });
+  function irPara(f: FiltroDaUrl) {
+    router.replace(`${pathname}${filtroParaUrl(f)}`, { scroll: false });
+  }
 
+  const r = q.data;
   return (
     <div className="space-y-4">
-      <RelatorioCabecalho
-        subtitulo="Processos por unidade/período"
-        csvUrl={relatorioCsvUrl(applied)}
-        pdfUrl={relatorioPdfUrl(applied)}
+      <PageHeader
+        breadcrumbs={[
+          { label: "Relatórios", href: `${ROTA_RELATORIOS}${filtroParaUrl(recorteComum(filtro))}` },
+          { label: "Processos" },
+        ]}
+        title="Processos do relatório"
+        description="A lista por trás dos números do grupo Processos da página de relatórios, com o mesmo recorte."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={relatorioCsvUrl(consulta)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-muted px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Download className="h-4 w-4" aria-hidden="true" /> CSV
+            </a>
+            <a
+              href={relatorioPdfUrl(consulta)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <FileText className="h-4 w-4" aria-hidden="true" /> PDF
+            </a>
+          </div>
+        }
       />
 
-      <FilterBar>
-        <div className="w-full sm:w-56">
-          <Label htmlFor="unidade">Unidade (proprietária ou local atual)</Label>
+      <FiltrosDoRelatorio
+        valor={recorteComum(filtro)}
+        onAplicar={(f) =>
+          irPara(comVisao({ ...f, dias_parado: filtro.dias_parado, sigilo: filtro.sigilo, origem: filtro.origem }, visao.id))
+        }
+      />
+
+      <div
+        role="group"
+        aria-label="Filtros desta lista"
+        className="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-card border border-border bg-card p-3 text-sm shadow-card"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="rel-visao" className="font-medium text-foreground">
+            Mostrar
+          </label>
           <Select
-            id="unidade"
-            value={draft.id_unidade ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                id_unidade: e.target.value ? Number(e.target.value) : undefined,
-              })
-            }
+            id="rel-visao"
+            className="h-9 w-72"
+            value={visao.id}
+            onChange={(e) => irPara(comVisao(filtro, e.target.value as VisaoProcessos))}
+          >
+            {grupos.map((g) => (
+              <optgroup key={g} label={g}>
+                {VISOES_PROCESSOS.filter((v) => v.grupo === g).map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.id === "parados" ? `Parados há ${consulta.parado_ha_dias ?? filtro.dias_parado ?? 15}+ dias` : v.rotulo}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="rel-sigilo" className="font-medium text-foreground">
+            Sigilo
+          </label>
+          <Select
+            id="rel-sigilo"
+            className="h-9 w-48"
+            value={filtro.sigilo ?? ""}
+            onChange={(e) => irPara({ ...filtro, sigilo: (e.target.value || undefined) as FiltroSigiloRelatorio | undefined })}
+          >
+            <option value="">Todos</option>
+            {(Object.keys(ROTULO_SIGILO) as FiltroSigiloRelatorio[]).map((s) => (
+              <option key={s} value={s}>
+                {ROTULO_SIGILO[s]}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="rel-origem" className="font-medium text-foreground">
+            Origem
+          </label>
+          <Select
+            id="rel-origem"
+            className="h-9 w-40"
+            value={filtro.origem ?? ""}
+            onChange={(e) => irPara({ ...filtro, origem: (e.target.value || undefined) as FiltroOrigemRelatorio | undefined })}
           >
             <option value="">Todas</option>
-            {unidadesQ.data?.items.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.unidade_trabalho}
+            {(Object.keys(ROTULO_ORIGEM) as FiltroOrigemRelatorio[]).map((o) => (
+              <option key={o} value={o}>
+                {ROTULO_ORIGEM[o]}
               </option>
             ))}
           </Select>
         </div>
-        <div className="w-full sm:w-48">
-          <Label htmlFor="tipo">Tipo de processo</Label>
-          <Select
-            id="tipo"
-            value={draft.id_tipo_processo ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                id_tipo_processo: e.target.value ? Number(e.target.value) : undefined,
-              })
-            }
-          >
-            <option value="">Todos</option>
-            {tiposQ.data?.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.tipo_processo}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="w-full sm:w-56">
-          <Label htmlFor="assunto">Assunto</Label>
-          <Select
-            id="assunto"
-            value={draft.id_assunto ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                id_assunto: e.target.value ? Number(e.target.value) : undefined,
-              })
-            }
-          >
-            <option value="">Todos</option>
-            {assuntosQ.data?.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.assunto.length > 60 ? a.assunto.slice(0, 60) + "…" : a.assunto}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="w-full sm:w-40">
-          <Label htmlFor="desde">Aberto desde</Label>
-          <Input
-            id="desde"
-            type="date"
-            value={draft.desde?.slice(0, 10) ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                desde: e.target.value ? `${e.target.value}T00:00:00` : undefined,
-              })
-            }
-          />
-        </div>
-        <div className="w-full sm:w-40">
-          <Label htmlFor="ate">Aberto até</Label>
-          <Input
-            id="ate"
-            type="date"
-            value={draft.ate?.slice(0, 10) ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                ate: e.target.value ? `${e.target.value}T23:59:59` : undefined,
-              })
-            }
-          />
-        </div>
-        <div className="flex h-11 items-center gap-2">
-          <Checkbox
-            id="ativos"
-            checked={!!draft.apenas_ativos}
-            onChange={(e) => setDraft({ ...draft, apenas_ativos: e.target.checked })}
-          />
-          <Label htmlFor="ativos" className="!mb-0">
-            Apenas ativos
-          </Label>
-        </div>
-        <AcoesDoFiltro
-          filtrado={temFiltro(draft) || temFiltro(applied)}
-          onGerar={() => aplicar({ ...draft })}
-          onLimpar={() => {
-            setDraft({});
-            aplicar({});
-          }}
-        />
-      </FilterBar>
+        <p className="basis-full text-xs text-foreground-muted">
+          {visao.hoje
+            ? "Situação de hoje: o período do filtro não se aplica (unidade, tipo, assunto e serviço, sim)."
+            : `No período do filtro, pela data de ${dataBase === "arquivamento" ? "arquivamento" : "abertura"}.`}
+        </p>
+      </div>
 
-      {relQ.isLoading && <Carregando className="text-sm text-muted-foreground" />}
-      {relQ.error && (
-        <div
-          role="alert"
-          className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
-        >
-          {relQ.error instanceof Error ? relQ.error.message : "Erro ao gerar relatório"}
+      {q.isLoading && <Carregando />}
+      {q.error && (
+        <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+          {q.error instanceof Error ? q.error.message : "Não foi possível gerar o relatório."}
         </div>
       )}
 
-      {relQ.data && (
+      {r && (
         <>
-          {relQ.data.nome_unidade && (
-            <p className="text-sm text-muted-foreground">
-              Filtro: <b>{relQ.data.nome_unidade}</b>
-            </p>
-          )}
+          <ul className="space-y-0.5 text-xs text-foreground-muted" aria-label="Recorte do relatório">
+            {r.descricao_filtros.map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
 
-          {/* Mesmos ícones e cores dos selos de status da tabela abaixo. */}
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            <KpiCard label="Total" value={relQ.data.totais.total} icon={FileText} />
-            <KpiCard label="Ativos" value={relQ.data.totais.ativos} icon={CheckCircle2} intent="success" />
-            <KpiCard label="Inativos" value={relQ.data.totais.inativos} icon={Pause} />
-            <KpiCard label="Sigilosos" value={relQ.data.totais.sigilosos} icon={Lock} intent="warning" />
-            <KpiCard label="Externos" value={relQ.data.totais.externos} icon={Eye} intent="info" />
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+            <KpiCard label="Total" value={r.totais.total} />
+            <KpiCard label="Em andamento" value={r.totais.em_andamento} />
+            <KpiCard label="Em trânsito" value={r.totais.em_transito} intent="info" />
+            <KpiCard label="Arquivados" value={r.totais.arquivados} />
+            <KpiCard label="Sigilosos" value={r.totais.sigilosos} />
+            <KpiCard label="Externos" value={r.totais.externos} />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Por tipo de processo</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <BreakdownTable rows={relQ.data.por_tipo_processo} />
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Por unidade proprietária</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <BreakdownTable rows={relQ.data.por_unidade_proprietaria} />
-              </CardContent>
-            </Card>
-          </div>
+          <Quebra resposta={r} dimensao={dimensao} onDimensao={setDimensao} />
 
           <Card>
             <CardHeader>
-              <CardTitle>Processos ({relQ.data.processos.length})</CardTitle>
+              <CardTitle>
+                {r.cortado
+                  ? `Processos (os ${r.processos.length} mais recentes de ${r.totais.total})`
+                  : `Processos (${r.processos.length})`}
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              {relQ.data.processos.length === 0 ? (
-                <EmptyState
-                  icon={Inbox}
-                  title="Nenhum processo no recorte"
-                  description="Ajuste os filtros acima e gere o relatório de novo."
-                />
-              ) : (
-                <Table>
-                  <THead>
-                    <TR>
-                      <TH>Número</TH>
-                      <TH>Aberto em</TH>
-                      <TH>Manifestante</TH>
-                      <TH>Tipo</TH>
-                      <TH>Unid. propr.</TH>
-                      <TH>Local atual</TH>
-                      <TH>Status</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {relQ.data.processos.map((p) => (
-                      <TRLink key={p.id} href={`/m/protocolo/processos/${p.id}`}>
-                        <TD>
-                          <Link
-                            href={`/m/protocolo/processos/${p.id}`}
-                            className="font-mono text-xs text-primary hover:underline"
-                          >
-                            {p.numero_processo}
-                          </Link>
-                        </TD>
-                        <TD className="text-xs tabular-nums">{fmtDateTime(p.data_hora_abertura)}</TD>
-                        <TD className="text-sm">{p.manifestante ?? "—"}</TD>
-                        <TD className="text-sm">{p.tipo_processo ?? "—"}</TD>
-                        <TD className="text-sm">{p.unidade_proprietaria ?? "—"}</TD>
-                        <TD className="text-sm">{p.local_atual ?? "—"}</TD>
-                        <TD>
-                          <div className="flex flex-wrap gap-1">
-                            {p.ativo ? (
-                              <Badge intent="success" icon={CheckCircle2}>Ativo</Badge>
-                            ) : (
-                              <Badge intent="neutral" icon={Pause}>Inativo</Badge>
-                            )}
-                            {!p.publico && (
-                              <Badge intent="warning" icon={Lock}>
-                                {NIVEL_SIGILO_LABEL[p.nivel_sigilo]}
-                              </Badge>
-                            )}
-                            {p.externo && <Badge intent="info" icon={Eye}>Externo</Badge>}
-                          </div>
-                        </TD>
-                      </TRLink>
-                    ))}
-                  </TBody>
-                </Table>
+              {r.cortado && (
+                <p className="mb-3 text-sm text-foreground-muted">
+                  A lista na tela tem limite; os totais acima contam o recorte inteiro. Para todos os processos, use o CSV.
+                </p>
               )}
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>Número</TH>
+                    <TH>Aberto em</TH>
+                    <TH>Situação</TH>
+                    <TH>{dataBase === "arquivamento" ? "Arquivado em" : "Última movimentação"}</TH>
+                    <TH>Manifestante</TH>
+                    <TH>Tipo</TH>
+                    <TH>Unidade dona</TH>
+                    <TH>Onde está</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {r.processos.length === 0 && (
+                    <TR>
+                      <TD colSpan={8} className="text-center text-foreground-muted">
+                        Nenhum processo no recorte.
+                      </TD>
+                    </TR>
+                  )}
+                  {r.processos.map((p) => (
+                    <TR key={p.id}>
+                      <TD>
+                        <Link
+                          href={`/m/protocolo/processos/${p.id}`}
+                          className="font-mono text-xs text-primary hover:underline"
+                        >
+                          {p.numero_processo}
+                        </Link>
+                      </TD>
+                      <TD className="text-xs tabular-nums">{fmtDataHora(p.data_hora_abertura)}</TD>
+                      <TD>
+                        <div className="flex flex-wrap gap-1">
+                          <Badge intent={p.situacao === "em_transito" ? "info" : "neutral"}>
+                            {ROTULO_SITUACAO[p.situacao]}
+                          </Badge>
+                          {!p.publico && (
+                            <Badge intent="warning" icon={Lock}>
+                              {NIVEL_SIGILO_LABEL[p.nivel_sigilo]}
+                            </Badge>
+                          )}
+                          {p.externo && <Badge intent="info" icon={Eye}>Externo</Badge>}
+                        </div>
+                      </TD>
+                      <TD className="text-xs tabular-nums">
+                        {dataBase === "arquivamento"
+                          ? fmtDataHora(p.data_hora_arquivamento)
+                          : fmtData(p.ultima_movimentacao)}
+                      </TD>
+                      <TD className="text-sm">{p.manifestante ?? "—"}</TD>
+                      <TD className="text-sm">{p.tipo_processo ?? "—"}</TD>
+                      <TD className="text-sm">{p.unidade_proprietaria ?? "—"}</TD>
+                      <TD className="text-sm">{p.local_atual ?? "—"}</TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
             </CardContent>
           </Card>
         </>
@@ -295,32 +297,76 @@ export default function RelatoriosPage() {
   );
 }
 
-function BreakdownTable({
-  rows,
+/** Um quadro só, com a dimensão escolhida — antes eram dois quadros fixos. */
+function Quebra({
+  resposta,
+  dimensao,
+  onDimensao,
 }: {
-  rows: { label: string; count: number; pct: number }[];
+  resposta: RelatorioResposta;
+  dimensao: Dimensao;
+  onDimensao: (d: Dimensao) => void;
 }) {
-  if (rows.length === 0) {
-    return <EmptyState icon={Inbox} title="Sem dados no recorte" className="p-6" />;
-  }
+  const def = DIMENSOES.find((d) => d.id === dimensao) ?? DIMENSOES[0];
+  // `?? []`: resposta de um backend mais antigo (deploy em andamento) não
+  // tem a quebra nova — melhor um quadro vazio que a tela em branco.
+  const linhas = def.linhas(resposta) ?? [];
+  const maior = linhas[0]?.count ?? 0;
   return (
-    <Table>
-      <THead>
-        <TR>
-          <TH>Item</TH>
-          <TH className="text-right">Qtd</TH>
-          <TH className="text-right">%</TH>
-        </TR>
-      </THead>
-      <TBody>
-        {rows.map((r) => (
-          <TR key={r.label}>
-            <TD>{r.label}</TD>
-            <TD className="text-right tabular-nums">{r.count}</TD>
-            <TD className="text-right tabular-nums">{r.pct.toFixed(1)}%</TD>
-          </TR>
-        ))}
-      </TBody>
-    </Table>
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
+        <CardTitle>Quebra do recorte</CardTitle>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="font-medium text-foreground">Agrupar por</span>
+          <Select
+            aria-label="Agrupar por"
+            className="h-9 w-48"
+            value={dimensao}
+            onChange={(e) => onDimensao(e.target.value as Dimensao)}
+          >
+            {DIMENSOES.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.rotulo}
+              </option>
+            ))}
+          </Select>
+        </label>
+      </CardHeader>
+      <CardContent>
+        {linhas.length === 0 ? (
+          <p className="text-sm text-foreground-muted">Nenhum processo no recorte.</p>
+        ) : (
+          <Table>
+            <THead>
+              <TR>
+                <TH>{def.rotulo}</TH>
+                <TH className="w-1/3">
+                  <span className="sr-only">Proporção</span>
+                </TH>
+                <TH className="text-right">Processos</TH>
+                <TH className="text-right">%</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {linhas.map((l) => (
+                <TR key={l.label}>
+                  <TD>{l.label === "—" ? def.vazio : l.label}</TD>
+                  <TD>
+                    <span className="block h-2 rounded-full bg-muted" aria-hidden="true">
+                      <span
+                        className="block h-full rounded-full bg-brand"
+                        style={{ width: `${maior ? (l.count / maior) * 100 : 0}%` }}
+                      />
+                    </span>
+                  </TD>
+                  <TD className="text-right tabular-nums">{l.count}</TD>
+                  <TD className="text-right tabular-nums">{l.pct.toFixed(1).replace(".", ",")}%</TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
