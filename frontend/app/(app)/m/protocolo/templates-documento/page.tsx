@@ -2,8 +2,9 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, FileText, Pause, Pencil, Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
+import { EditorDeModelo, type ModoEdicao } from "@/components/protocolo/EditorDeModelo";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,10 +16,15 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
-import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { api, protocoloApi, type TemplateDocumento } from "@/lib/api";
+import { blocosParaHtml, htmlParaBlocos, type Bloco } from "@/lib/template-blocos";
+
+async function enviarImagem(file: File): Promise<string> {
+  const { url } = await api.editorImagens.upload(file);
+  return url;
+}
 
 interface FormState {
   nome: string;
@@ -46,6 +52,22 @@ export default function TemplatesDocumentoPage() {
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
+  const [modo, setModo] = useState<ModoEdicao>("blocos");
+  const [blocos, setBlocos] = useState<Bloco[]>([]);
+
+  // Em modo blocos o HTML gravado é sempre o dos blocos: uma fonte só.
+  function mudarBlocos(nova: Bloco[]) {
+    setBlocos(nova);
+    setForm((f) => ({ ...f, corpo_html: blocosParaHtml(nova) }));
+  }
+
+  function trocarModo(novo: ModoEdicao) {
+    if (novo === modo) return;
+    // Voltar do editor livre relê o HTML: o que ainda tem marca de bloco volta
+    // a ser bloco, o resto vira bloco de Texto.
+    if (novo === "blocos") setBlocos(htmlParaBlocos(form.corpo_html));
+    setModo(novo);
+  }
 
   const listQ = useQuery({
     queryKey: ["templates-documento"],
@@ -91,6 +113,8 @@ export default function TemplatesDocumentoPage() {
     setTentou(false);
     setEditId(null);
     setForm(EMPTY);
+    setBlocos([]);
+    setModo("blocos");
     setOpen(true);
   }
 
@@ -106,6 +130,9 @@ export default function TemplatesDocumentoPage() {
       corpo_html: t.corpo_html,
       ativo: t.ativo,
     });
+    // Modelo antigo (sem marca de bloco) abre como um bloco de Texto: nada se perde.
+    setBlocos(htmlParaBlocos(t.corpo_html));
+    setModo("blocos");
     setOpen(true);
   }
 
@@ -159,10 +186,6 @@ export default function TemplatesDocumentoPage() {
     ) {
       removeM.mutate(id);
     }
-  }
-
-  function inserirPlaceholder(chave: string) {
-    setForm((f) => ({ ...f, corpo_html: `${f.corpo_html}<p>{{${chave}}}</p>` }));
   }
 
   const templates = listQ.data ?? [];
@@ -254,7 +277,7 @@ export default function TemplatesDocumentoPage() {
         open={open}
         onClose={() => setOpen(false)}
         title={editId === null ? "Novo modelo de documento" : "Editar modelo de documento"}
-        size="xl"
+        size="2xl"
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setOpen(false)}>
@@ -340,43 +363,21 @@ export default function TemplatesDocumentoPage() {
             />
           </FormField>
 
-          <div className="space-y-1.5">
-            <p className="text-sm font-medium text-foreground">Campos automáticos</p>
-            <p className="text-xs text-foreground-muted">
-              Clique para inserir no texto. Ao usar o modelo, cada campo vira o dado do processo.
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {(placeholdersQ.data ?? []).map((p) => (
-                <button
-                  key={p.chave}
-                  type="button"
-                  onClick={() => inserirPlaceholder(p.chave)}
-                  title={p.descricao}
-                  className="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground transition-colors duration-fast hover:border-primary/40 hover:bg-primary/10"
-                >
-                  {`{{${p.chave}}}`}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <FormField
             label="Conteúdo do modelo"
             required
             error={tentou && faltaCorpo ? "Escreva o texto do modelo." : undefined}
           >
-            {/* O editor não aceita id: o rótulo aponta para o invólucro e o
-                nome acessível vem do ariaLabel. */}
             <div>
-              <RichTextEditor
-                value={form.corpo_html}
-                onChange={(html) => setForm({ ...form, corpo_html: html })}
-                minHeight={280}
-                ariaLabel="Conteúdo do template"
-                onUploadImage={async (file) => {
-                  const { url } = await api.editorImagens.upload(file);
-                  return url;
-                }}
+              <EditorDeModelo
+                modo={modo}
+                onTrocarModo={trocarModo}
+                blocos={blocos}
+                onBlocos={mudarBlocos}
+                corpoHtml={form.corpo_html}
+                onCorpoHtml={(html) => setForm({ ...form, corpo_html: html })}
+                campos={placeholdersQ.data ?? []}
+                onUploadImage={enviarImagem}
               />
             </div>
           </FormField>

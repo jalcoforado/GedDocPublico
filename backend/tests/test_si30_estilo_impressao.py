@@ -27,3 +27,10 @@ def test_rota_vem_antes_da_rota_de_id():
     estilo = caminhos.index("/templates-documento/estilo-impressao")
     por_id = caminhos.index("/templates-documento/{template_id}")
     assert estilo < por_id
+
+
+def test_marca_de_campo_do_modelo_so_na_tela():
+    """SI-31: na prévia do MODELO o `{{campo}}` é marcado como campo — estilo
+    da tela, nunca do PDF."""
+    assert "mark.campo-modelo" in html_pdf.CSS_PRE_VISUALIZACAO
+    assert "campo-modelo" not in html_pdf.CSS_DOCUMENTO
