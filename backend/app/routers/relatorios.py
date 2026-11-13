@@ -49,6 +49,7 @@ from ..schemas.relatorio_montado import (
     ResultadoMontado,
 )
 from ..schemas.relatorio_tramitacao import RelatorioTramitacaoResposta
+from ..services.pdf_emissao import emissao_de
 from ..services.pdf_relatorio import gerar_relatorio_pdf
 from ..services.pdf_relatorio_assinaturas import gerar_assinaturas_pdf
 from ..services.pdf_relatorio_gerencial import gerar_gerencial_pdf
@@ -280,7 +281,8 @@ async def relatorio_pdf(
     r = await gerar_relatorio(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
     )
-    return _pdf(gerar_relatorio_pdf(r), "relatorio-processos", inline)
+    emissao = await emissao_de(db, tenant_id=tenant_id, usuario=user)
+    return _pdf(gerar_relatorio_pdf(r, emissao), "relatorio-processos", inline)
 
 
 # ---------- Página gerencial (SI-34) ----------
@@ -419,7 +421,8 @@ async def tramitacao_pdf(
     max_processos: int = Query(200, ge=1, le=1000),
 ):
     r = await _tramitacao(db, user, tenant_id, f, max_processos)
-    return _pdf(gerar_tramitacao_pdf(r), "tramitacao", inline)
+    emissao = await emissao_de(db, tenant_id=tenant_id, usuario=user)
+    return _pdf(gerar_tramitacao_pdf(r, emissao), "tramitacao", inline)
 
 
 # ---------- Assinaturas ----------
@@ -507,7 +510,8 @@ async def assinaturas_pdf(
     r = await gerar_assinaturas(
         db, f, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
     )
-    return _pdf(gerar_assinaturas_pdf(r), "assinaturas", inline)
+    emissao = await emissao_de(db, tenant_id=tenant_id, usuario=user)
+    return _pdf(gerar_assinaturas_pdf(r, emissao), "assinaturas", inline)
 
 
 # ---------- Opções do filtro de serviço ----------

@@ -19,8 +19,7 @@ from reportlab.platypus import (
 )
 
 from ..schemas.relatorio_assinaturas import RelatorioAssinaturasResposta
-from ..utils.relogio import agora_utc
-from .relatorios_comum import hora_local
+from .pdf_emissao import Emissao, canvas_numerado
 
 APRIMORA = HexColor("#1e3a5f")
 GRAY = HexColor("#6b7280")
@@ -55,7 +54,8 @@ _STATUS_LABEL = {
 }
 
 
-def gerar_assinaturas_pdf(r: RelatorioAssinaturasResposta) -> bytes:
+def gerar_assinaturas_pdf(r: RelatorioAssinaturasResposta, emissao: Emissao | None = None) -> bytes:
+    emissao = emissao or Emissao()
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -73,13 +73,8 @@ def gerar_assinaturas_pdf(r: RelatorioAssinaturasResposta) -> bytes:
     normal = ParagraphStyle("normal", parent=styles["Normal"], fontSize=9, leading=11)
 
     story: list = []
-    story.append(Paragraph("APRIMORA — Relatório de assinaturas", h1))
-    story.append(
-        Paragraph(
-            f"Emitido em {hora_local(agora_utc()).strftime('%d/%m/%Y %H:%M')} (hora de Brasília)",
-            small,
-        )
-    )
+    story.append(Paragraph(html.escape(emissao.titulo("Relatório de assinaturas")), h1))
+    story.append(Paragraph(html.escape(emissao.linha()), small))
     story.append(Spacer(1, 0.3 * cm))
 
     # Recorte — o mesmo texto da tela e do CSV (SI-34), escapado.
@@ -200,7 +195,7 @@ def gerar_assinaturas_pdf(r: RelatorioAssinaturasResposta) -> bytes:
     else:
         story.append(Paragraph("Nenhuma solicitação no recorte.", small))
 
-    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    doc.build(story, canvasmaker=canvas_numerado(emissao))
     return buf.getvalue()
 
 
