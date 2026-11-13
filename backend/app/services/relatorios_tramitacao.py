@@ -19,6 +19,7 @@ minutos e de atraso roda em UTC, como está no banco.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, func, or_, select
@@ -87,6 +88,164 @@ def _filter_processos(
     return stmt.where(
         or_(and_(*abertura), select(Encaminhamento.id).where(*recebimento).exists())
     )
+
+
+@dataclass
+class ResumoTramitacao:
+    """As etapas de um processo e o que se conta delas. Datas em UTC, como no
+    banco: quem mostra converte (`hora_local`)."""
+
+    etapas: list[TramitacaoEtapa]
+    teve_atraso: bool
+    qtd_atrasos: int
+    minutos_total: int
+    minutos_em_andamento: int
+    qtd_encaminhamentos: int
+    qtd_unidades_visitadas: int
+    ultimo_envio: datetime | None
+
+
+async def resumir_tramitacao(
+    db: AsyncSession,
+    processos: list[tuple[int, datetime, int | None, str | None]],
+    *,
+    tenant_id: int,
+    agora: datetime,
+) -> dict[int, ResumoTramitacao]:
+    """Etapas de cada processo — (id, abertura, id e nome da unidade dona).
+
+    Uma regra só para a Tramitação e para o relatório montado (SI-35): o
+    "tem etapa atrasada" de um tem de ser o do outro. Não aplica recorte
+    nenhum; quem chama já filtrou os processos (sigilo inclusive).
+    """
+    processo_ids = [p[0] for p in processos]
+    if not processo_ids:
+        return {}
+
+    # Carrega movimentações + acao em batch
+    mov_stmt = (
+        select(Movimentacao, Acao.flag)
+        .join(Acao, Acao.id == Movimentacao.id_acao)
+        .where(
+            Movimentacao.id_processo.in_(processo_ids),
+            Movimentacao.tenant_id == tenant_id,
+            Movimentacao.excluido.is_(False),
+        )
+        .order_by(Movimentacao.data_hora_movimentacao.asc())
+    )
+    mov_rows = (await db.execute(mov_stmt)).all()
+    movs_por_proc: dict[int, list[tuple[Movimentacao, str]]] = defaultdict(list)
+    for mov, flag in mov_rows:
+        movs_por_proc[mov.id_processo].append((mov, flag))
+
+    # Carrega encaminhamentos por processo + nomes unidades
+    UDest = aliased(UnidadeTrabalho, name="udest")
+    enc_stmt = (
+        select(Encaminhamento, UDest.unidade_trabalho)
+        .join(UDest, UDest.id == Encaminhamento.id_unidade_destino)
+        .where(
+            Encaminhamento.id_processo.in_(processo_ids),
+            Encaminhamento.tenant_id == tenant_id,
+            Encaminhamento.excluido.is_(False),
+            Encaminhamento.cancelado.is_(False),
+        )
+        .order_by(Encaminhamento.id_movimentacao.asc())
+    )
+    enc_rows = (await db.execute(enc_stmt)).all()
+    enc_por_mov: dict[int, tuple[Encaminhamento, str]] = {}
+    for enc, ud_nome in enc_rows:
+        if enc.id_movimentacao is not None:
+            enc_por_mov[enc.id_movimentacao] = (enc, ud_nome)
+
+    now = agora
+    resumos: dict[int, ResumoTramitacao] = {}
+    for pid, abertura, ut_propr_id, ut_propr in processos:
+        movs = movs_por_proc.get(pid, [])
+
+        etapas: list[TramitacaoEtapa] = []
+        # Etapa 0
+        etapa_atual = TramitacaoEtapa(
+            id_unidade=ut_propr_id,
+            unidade=ut_propr,
+            chegou_em=abertura,
+            saiu_em=None,
+            minutos_no_local=None,
+            prazo_estipulado=None,
+            atrasou=False,
+        )
+
+        for mov, flag in movs:
+            if flag != "ENCAMINHAMENTO":
+                continue
+            enc_info = enc_por_mov.get(mov.id)
+            if enc_info is None:
+                continue
+            enc, ud_nome = enc_info
+
+            # encerra etapa atual
+            etapa_atual.saiu_em = mov.data_hora_movimentacao
+            etapa_atual.minutos_no_local = _delta_min(
+                etapa_atual.chegou_em, etapa_atual.saiu_em
+            )
+            etapas.append(etapa_atual)
+
+            if enc.recebido and enc.data_hora_recebimento is not None:
+                # nova etapa em unidade destino; o prazo (fim do dia local, em
+                # UTC) é o dela — `atrasou` só se decide quando ela termina.
+                etapa_atual = TramitacaoEtapa(
+                    id_unidade=enc.id_unidade_destino,
+                    unidade=ud_nome,
+                    chegou_em=enc.data_hora_recebimento,
+                    saiu_em=None,
+                    minutos_no_local=None,
+                    prazo_estipulado=(
+                        intervalo_utc(None, enc.data_prazo)[1] if enc.data_prazo else None
+                    ),
+                    atrasou=False,
+                )
+            else:
+                # em trânsito; cria etapa aberta sem chegada e sai
+                etapas.append(
+                    TramitacaoEtapa(
+                        id_unidade=enc.id_unidade_destino,
+                        unidade=f"(em trânsito → {ud_nome})",
+                        chegou_em=None,
+                        saiu_em=None,
+                        minutos_no_local=None,
+                        prazo_estipulado=None,
+                        atrasou=False,
+                    )
+                )
+                etapa_atual = None  # type: ignore
+                break
+
+        if etapa_atual is not None:
+            etapas.append(etapa_atual)
+
+        # Atraso: saiu (ou segue lá) depois do fim do dia do prazo.
+        for e in etapas:
+            if e.prazo_estipulado is not None and e.chegou_em is not None:
+                e.atrasou = (e.saiu_em or now) >= e.prazo_estipulado
+
+        minutos_total = sum(e.minutos_no_local or 0 for e in etapas if e.saiu_em is not None)
+        # tempo em aberto na última etapa
+        ultima = etapas[-1] if etapas else None
+        minutos_em_andamento = 0
+        if ultima and ultima.saiu_em is None and ultima.chegou_em is not None:
+            minutos_em_andamento = _delta_min(ultima.chegou_em, now) or 0
+
+        envios = [m.data_hora_movimentacao for m, fl in movs if fl == "ENCAMINHAMENTO"]
+        resumos[pid] = ResumoTramitacao(
+            etapas=etapas,
+            teve_atraso=any(e.atrasou for e in etapas),
+            qtd_atrasos=sum(1 for e in etapas if e.atrasou),
+            minutos_total=minutos_total,
+            minutos_em_andamento=minutos_em_andamento,
+            qtd_encaminhamentos=len(envios),
+            qtd_unidades_visitadas=len({e.id_unidade for e in etapas if e.id_unidade is not None}),
+            ultimo_envio=max(envios) if envios else None,
+        )
+    return resumos
 
 
 TETO_FILTRO_ATRASO = 10000
@@ -171,127 +330,26 @@ async def gerar_tramitacao(
             processos=[],
         )
 
-    # Carrega movimentações + acao em batch
-    mov_stmt = (
-        select(Movimentacao, Acao.flag)
-        .join(Acao, Acao.id == Movimentacao.id_acao)
-        .where(
-            Movimentacao.id_processo.in_(processo_ids),
-            Movimentacao.tenant_id == tenant_id,
-            Movimentacao.excluido.is_(False),
-        )
-        .order_by(Movimentacao.data_hora_movimentacao.asc())
-    )
-    mov_rows = (await db.execute(mov_stmt)).all()
-    movs_por_proc: dict[int, list[tuple[Movimentacao, str]]] = defaultdict(list)
-    for mov, flag in mov_rows:
-        movs_por_proc[mov.id_processo].append((mov, flag))
-
-    # Carrega encaminhamentos por processo + nomes unidades
-    UDest = aliased(UnidadeTrabalho, name="udest")
-    enc_stmt = (
-        select(Encaminhamento, UDest.unidade_trabalho)
-        .join(UDest, UDest.id == Encaminhamento.id_unidade_destino)
-        .where(
-            Encaminhamento.id_processo.in_(processo_ids),
-            Encaminhamento.tenant_id == tenant_id,
-            Encaminhamento.excluido.is_(False),
-            Encaminhamento.cancelado.is_(False),
-        )
-        .order_by(Encaminhamento.id_movimentacao.asc())
-    )
-    enc_rows = (await db.execute(enc_stmt)).all()
-    enc_por_mov: dict[int, tuple[Encaminhamento, str]] = {}
-    for enc, ud_nome in enc_rows:
-        if enc.id_movimentacao is not None:
-            enc_por_mov[enc.id_movimentacao] = (enc, ud_nome)
-
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    resumos = await resumir_tramitacao(
+        db,
+        [(row[0].id, row[0].data_hora_abertura, row.ut_propr_id, row.ut_propr) for row in proc_rows],
+        tenant_id=tenant_id,
+        agora=now,
+    )
 
     processos_out: list[TramitacaoProcesso] = []
 
     for row in proc_rows:
         p: Processo = row[0]
-        movs = movs_por_proc.get(p.id, [])
-
-        etapas: list[TramitacaoEtapa] = []
-        # Etapa 0
-        prazo_pendente: datetime | None = None
-        etapa_atual = TramitacaoEtapa(
-            id_unidade=row.ut_propr_id,
-            unidade=row.ut_propr,
-            chegou_em=p.data_hora_abertura,
-            saiu_em=None,
-            minutos_no_local=None,
-            prazo_estipulado=None,
-            atrasou=False,
-        )
-
-        for mov, flag in movs:
-            if flag != "ENCAMINHAMENTO":
-                continue
-            enc_info = enc_por_mov.get(mov.id)
-            if enc_info is None:
-                continue
-            enc, ud_nome = enc_info
-
-            # encerra etapa atual
-            etapa_atual.saiu_em = mov.data_hora_movimentacao
-            etapa_atual.minutos_no_local = _delta_min(
-                etapa_atual.chegou_em, etapa_atual.saiu_em
-            )
-            etapas.append(etapa_atual)
-
-            if enc.recebido and enc.data_hora_recebimento is not None:
-                # nova etapa em unidade destino; o prazo (fim do dia local, em
-                # UTC) é o dela — `atrasou` só se decide quando ela termina.
-                etapa_atual = TramitacaoEtapa(
-                    id_unidade=enc.id_unidade_destino,
-                    unidade=ud_nome,
-                    chegou_em=enc.data_hora_recebimento,
-                    saiu_em=None,
-                    minutos_no_local=None,
-                    prazo_estipulado=(
-                        intervalo_utc(None, enc.data_prazo)[1] if enc.data_prazo else None
-                    ),
-                    atrasou=False,
-                )
-            else:
-                # em trânsito; cria etapa aberta sem chegada e sai
-                etapas.append(
-                    TramitacaoEtapa(
-                        id_unidade=enc.id_unidade_destino,
-                        unidade=f"(em trânsito → {ud_nome})",
-                        chegou_em=None,
-                        saiu_em=None,
-                        minutos_no_local=None,
-                        prazo_estipulado=None,
-                        atrasou=False,
-                    )
-                )
-                etapa_atual = None  # type: ignore
-                break
-
-        if etapa_atual is not None:
-            etapas.append(etapa_atual)
-
-        # Atraso: saiu (ou segue lá) depois do fim do dia do prazo.
-        for e in etapas:
-            if e.prazo_estipulado is not None and e.chegou_em is not None:
-                e.atrasou = (e.saiu_em or now) >= e.prazo_estipulado
-
-        teve_atraso = any(e.atrasou for e in etapas)
-        qtd_atrasos = sum(1 for e in etapas if e.atrasou)
-
-        minutos_total = sum(e.minutos_no_local or 0 for e in etapas if e.saiu_em is not None)
-        # tempo em aberto na última etapa
-        ultima = etapas[-1] if etapas else None
-        minutos_em_andamento = 0
-        if ultima and ultima.saiu_em is None and ultima.chegou_em is not None:
-            minutos_em_andamento = _delta_min(ultima.chegou_em, now) or 0
-
-        qtd_encs = sum(1 for _, fl in movs if fl == "ENCAMINHAMENTO")
-        qtd_unid = len({e.id_unidade for e in etapas if e.id_unidade is not None})
+        r = resumos[p.id]
+        etapas = r.etapas
+        teve_atraso = r.teve_atraso
+        qtd_atrasos = r.qtd_atrasos
+        minutos_total = r.minutos_total
+        minutos_em_andamento = r.minutos_em_andamento
+        qtd_encs = r.qtd_encaminhamentos
+        qtd_unid = r.qtd_unidades_visitadas
 
         # Saída em hora local; os minutos já foram contados em UTC.
         for e in etapas:

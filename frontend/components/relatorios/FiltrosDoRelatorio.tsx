@@ -1,16 +1,16 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { api, organogramaApi, type ModoUnidadeRelatorio } from "@/lib/api";
-import { useAssuntosAll } from "@/lib/assuntos";
+import { type ModoUnidadeRelatorio } from "@/lib/api";
 import { ROTULO_MODO_UNIDADE, filtroParaUrl, type FiltroDaUrl } from "@/lib/relatorios";
+
+import { useOpcoesDoRecorte } from "./opcoesDoRecorte";
 
 /**
  * Barra do recorte comum dos relatórios (SI-34): período, unidade no sentido
@@ -60,39 +60,8 @@ export function FiltrosDoRelatorio({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => setRascunho(valor), [chave]);
 
-  const organogramaQ = useQuery({ queryKey: ["organograma"], queryFn: () => organogramaApi.tree() });
-  const tiposQ = useQuery({ queryKey: ["tipos-processo"], queryFn: () => api.tiposProcesso.list() });
-  const assuntosQ = useAssuntosAll();
-  // Rota dos relatórios, não `/servicos`: aquela exige administrar o catálogo.
-  const servicosQ = useQuery({ queryKey: ["relatorios-servicos"], queryFn: () => api.relatorios.servicos() });
-
-  const unidades = useMemo<ComboboxOption[]>(
-    () =>
-      (organogramaQ.data ?? [])
-        .map((u) => ({ value: u.id, label: u.unidade_trabalho, hint: u.sigla ?? undefined }))
-        .sort((a, b) => a.label.localeCompare(b.label, "pt-BR")),
-    [organogramaQ.data],
-  );
-  const tipos = useMemo<ComboboxOption[]>(
-    () => (tiposQ.data ?? []).map((t) => ({ value: t.id, label: t.tipo_processo })),
-    [tiposQ.data],
-  );
-  const assuntos = useMemo<ComboboxOption[]>(
-    () =>
-      (assuntosQ.data ?? [])
-        .filter((a) => !rascunho.id_tipo_processo || a.id_tipo_processo === rascunho.id_tipo_processo)
-        .map((a) => ({ value: a.id, label: a.assunto })),
-    [assuntosQ.data, rascunho.id_tipo_processo],
-  );
-
-  const servicos = useMemo<ComboboxOption[]>(
-    () =>
-      (servicosQ.data ?? []).map((s) => ({
-        value: s.id,
-        label: s.nome,
-        hint: s.ativo ? undefined : "inativo",
-      })),
-    [servicosQ.data],
+  const { unidades, tipos, assuntos, servicos, assuntoCombina, carregando } = useOpcoesDoRecorte(
+    rascunho.id_tipo_processo,
   );
 
   const periodoInvertido = !!(rascunho.desde && rascunho.ate && rascunho.desde > rascunho.ate);
@@ -137,16 +106,14 @@ export function FiltrosDoRelatorio({
             onChange={(v) => {
               const id_tipo_processo = num(v);
               // Assunto de outro tipo não combina com o tipo novo.
-              const assuntoFica = assuntosQ.data?.find((a) => a.id === rascunho.id_assunto)
-                ?.id_tipo_processo === id_tipo_processo;
               setRascunho({
                 ...rascunho,
                 id_tipo_processo,
-                id_assunto: !id_tipo_processo || assuntoFica ? rascunho.id_assunto : undefined,
+                id_assunto: assuntoCombina(rascunho.id_assunto, id_tipo_processo) ? rascunho.id_assunto : undefined,
               });
             }}
             placeholder="Todos"
-            loading={tiposQ.isLoading}
+            loading={carregando.tipos}
           />
         </div>
         <div>
@@ -157,7 +124,7 @@ export function FiltrosDoRelatorio({
             value={rascunho.id_assunto ?? null}
             onChange={(v) => setRascunho({ ...rascunho, id_assunto: num(v) })}
             placeholder="Todos"
-            loading={assuntosQ.isLoading}
+            loading={carregando.assuntos}
           />
         </div>
         <div className="md:col-span-2">
@@ -169,7 +136,7 @@ export function FiltrosDoRelatorio({
             onChange={(v) => setRascunho({ ...rascunho, id_servico: num(v) })}
             placeholder="Todos"
             searchPlaceholder="Nome do serviço…"
-            loading={servicosQ.isLoading}
+            loading={carregando.servicos}
           />
         </div>
         <div className="md:col-span-2">
@@ -181,7 +148,7 @@ export function FiltrosDoRelatorio({
             onChange={(v) => setRascunho({ ...rascunho, id_unidade: num(v) })}
             placeholder="Todas as unidades"
             searchPlaceholder="Nome ou sigla da unidade…"
-            loading={organogramaQ.isLoading}
+            loading={carregando.unidades}
           />
         </div>
         {rascunho.id_unidade ? (

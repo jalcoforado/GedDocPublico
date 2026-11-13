@@ -9,6 +9,8 @@ import {
   Inbox,
   List,
   PenLine,
+  Plus,
+  Star,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -27,19 +29,22 @@ import {
   ROTA_LISTA_DOCUMENTACAO,
   ROTA_LISTA_PROCESSOS,
   ROTA_LISTA_TRAMITACAO,
+  ROTA_MONTAR,
   filtroDaUrl,
   filtroParaUrl,
   fmtData,
   fmtDias,
   fmtMinutos,
   recorteComum,
+  fmtDataHora,
   type FiltroDaUrl,
+  urlDoMontador,
 } from "@/lib/relatorios";
 
 /**
  * Relatórios do protocolo — página gerencial (SI-34, decisão de 2026-11-11).
  *
- * Uma tela, filtro único no topo e quatro grupos — um por tela de destino:
+ * Uma tela, filtro único no topo e quatro grupos (mais "Meus relatórios", SI-35, acima do filtro) — um por tela de destino:
  * Processos (subgrupos Entrada e saída no tempo, Entrada, Andamento, Saída,
  * Prazos), Tramitação, Documentação e Assinaturas. Cada subgrupo conta pela SUA data e diz
  * qual é; Andamento é a situação de hoje. Um "ver lista" por grupo; na lista,
@@ -137,6 +142,57 @@ function Subgrupo({
   );
 }
 
+/**
+ * Meus relatórios (SI-35): os que a pessoa montou e salvou. Só ela vê — o
+ * backend devolve só os dela. Não seguem o filtro desta página: cada um tem
+ * o seu período e os seus filtros.
+ */
+function MeusRelatorios() {
+  const q = useQuery({ queryKey: ["relatorios-salvos"], queryFn: () => api.relatorios.salvos.list() });
+  return (
+    <Grupo
+      id="meus"
+      titulo="Meus relatórios"
+      descricao="Os que você montou e salvou, com as suas colunas e filtros. Só você vê; não seguem o filtro desta página."
+      icon={Star}
+      acao={
+        <Link
+          href={ROTA_MONTAR}
+          className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" /> Montar relatório
+        </Link>
+      }
+    >
+      <div className="p-4">
+        {q.isLoading ? (
+          <Carregando />
+        ) : q.error ? (
+          <p role="alert" className="text-sm text-danger">Não foi possível carregar os seus relatórios.</p>
+        ) : !q.data?.length ? (
+          <p className="text-sm text-foreground-muted">
+            Você ainda não salvou nenhum. Monte um com as colunas e os filtros que usa sempre, e ele fica aqui.
+          </p>
+        ) : (
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3" aria-label="Relatórios salvos">
+            {q.data.map((r) => (
+              <li key={r.id}>
+                <Link
+                  href={urlDoMontador(null, r.id)}
+                  className="block rounded-md border border-border px-3 py-2 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="block truncate text-sm font-medium text-foreground">{r.nome}</span>
+                  <span className="block text-xs text-foreground-muted">alterado em {fmtDataHora(r.atualizado_em)}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Grupo>
+  );
+}
+
 /** "78% no prazo" — só com base que sustente a porcentagem. */
 function percentual(noPrazo: number, atrasados: number): string | undefined {
   const base = noPrazo + atrasados;
@@ -182,6 +238,8 @@ export default function RelatoriosPage() {
           </a>
         }
       />
+
+      <MeusRelatorios />
 
       <FiltrosDoRelatorio valor={recorte} onAplicar={(f) => irPara({ ...f, dias_parado: filtro.dias_parado })} />
 

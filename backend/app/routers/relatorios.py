@@ -14,7 +14,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +39,15 @@ from ..schemas.relatorio_assinaturas import (
 )
 from ..schemas.relatorio_documentacao import RelatorioDocumentacaoResposta, VisaoDocumentacao
 from ..schemas.relatorio_gerencial import GerencialResposta
+from ..schemas.relatorio_montado import (
+    CatalogoMontado,
+    DefinicaoMontado,
+    RelatorioSalvoAtualizar,
+    RelatorioSalvoCriar,
+    RelatorioSalvoOut,
+    RelatorioSalvoResumo,
+    ResultadoMontado,
+)
 from ..schemas.relatorio_tramitacao import RelatorioTramitacaoResposta
 from ..services.pdf_relatorio import gerar_relatorio_pdf
 from ..services.pdf_relatorio_assinaturas import gerar_assinaturas_pdf
@@ -53,7 +62,11 @@ from ..services.relatorios_documentacao import (
     ROTULO_STATUS_DOC,
     gerar_documentacao,
 )
+from ..services import relatorios_salvos
+from ..services.pdf_relatorio_montado import formatar_valor, gerar_montado_pdf
 from ..services.relatorios_gerencial import gerar_gerencial
+from ..services.relatorios_montado import catalogo as catalogo_montado
+from ..services.relatorios_montado import executar_montado
 from ..services.relatorios_tramitacao import RecorteGrandeDemais, gerar_tramitacao
 from ..services.sigilo import niveis_acesso_usuario
 
@@ -601,3 +614,144 @@ async def documentacao_pdf(
         db, f, visao, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
     )
     return _pdf(gerar_documentacao_pdf(r), "documentacao", inline)
+
+
+# ---------- Relatório montado pela própria pessoa (SI-35) ----------
+#
+# A definição (colunas, filtros, período, agrupamento, ordem) vai em JSON no
+# parâmetro `d`, nas três saídas: assim o CSV e o PDF são links comuns, como
+# nas outras listas, e a tela guarda o que está montando na URL. Schema
+# fechado (`schemas/relatorio_montado.py`): coluna fora do catálogo é 422.
+
+
+def definicao_da_query(d: str = Query(..., max_length=8000)) -> DefinicaoMontado:
+    try:
+        return DefinicaoMontado.model_validate_json(d)
+    except ValidationError as e:
+        msgs = "; ".join(
+            f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" if err["loc"] else err["msg"]
+            for err in e.errors()
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Definição do relatório inválida — {msgs}",
+        ) from e
+
+
+async def _montado(db, user, tenant_id, d: DefinicaoMontado, max_rows: int) -> ResultadoMontado:
+    niveis = await niveis_acesso_usuario(db, user, tenant_id=tenant_id)
+    try:
+        return await executar_montado(
+            db, d, tenant_id=tenant_id, niveis_permitidos=niveis, max_rows=max_rows
+        )
+    except RecorteGrandeDemais as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
+
+
+@router.get("/montado/catalogo.json", response_model=CatalogoMontado, dependencies=ACESSO)
+async def montado_catalogo() -> CatalogoMontado:
+    """As colunas, ordens e agrupamentos que o montador oferece."""
+    return catalogo_montado()
+
+
+@router.get("/montado.json", response_model=ResultadoMontado, dependencies=ACESSO)
+async def montado_json(
+    d: DefinicaoMontado = Depends(definicao_da_query),
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    max_rows: int = Query(200, ge=1, le=1000),
+) -> ResultadoMontado:
+    return await _montado(db, user, tenant_id, d, max_rows)
+
+
+@router.get("/montado.csv", dependencies=ACESSO)
+async def montado_csv(
+    d: DefinicaoMontado = Depends(definicao_da_query),
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    max_rows: int = Query(50000, ge=1, le=50000),
+):
+    r = await _montado(db, user, tenant_id, d, max_rows)
+    _exige_completo(r.cortado, r.totais.total, max_rows, "CSV")
+    buf, w = _novo_csv()
+    _cabecalho_csv(w, r.descricao_filtros)
+    w.writerow(["Número", *(c.rotulo for c in r.colunas)])
+    for ln in r.linhas:
+        w.writerow([ln.numero_processo, *(formatar_valor(ln.valores.get(c.chave), c.tipo) for c in r.colunas)])
+    return _csv(buf, "relatorio-montado")
+
+
+@router.get("/montado.pdf", dependencies=ACESSO)
+async def montado_pdf(
+    d: DefinicaoMontado = Depends(definicao_da_query),
+    nome: str | None = Query(None, max_length=120),
+    inline: bool = Query(True),
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    max_rows: int = Query(1000, ge=1, le=5000),
+):
+    r = await _montado(db, user, tenant_id, d, max_rows)
+    return _pdf(gerar_montado_pdf(r, nome), "relatorio-montado", inline)
+
+
+# Os salvos são da pessoa: toda rota passa o `user.id`, e o de outra pessoa
+# responde 404 (`services/relatorios_salvos.py`).
+
+
+@router.get("/salvos", response_model=list[RelatorioSalvoResumo], dependencies=ACESSO)
+async def salvos_listar(
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[RelatorioSalvoResumo]:
+    return await relatorios_salvos.listar(db, tenant_id=tenant_id, id_usuario=user.id)
+
+
+@router.post(
+    "/salvos", response_model=RelatorioSalvoOut, status_code=status.HTTP_201_CREATED,
+    dependencies=ACESSO,
+)
+async def salvos_criar(
+    dados: RelatorioSalvoCriar,
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RelatorioSalvoOut:
+    return await relatorios_salvos.criar(db, dados, tenant_id=tenant_id, id_usuario=user.id)
+
+
+@router.get("/salvos/{id_salvo}", response_model=RelatorioSalvoOut, dependencies=ACESSO)
+async def salvos_obter(
+    id_salvo: int,
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RelatorioSalvoOut:
+    return await relatorios_salvos.obter(db, id_salvo, tenant_id=tenant_id, id_usuario=user.id)
+
+
+@router.put("/salvos/{id_salvo}", response_model=RelatorioSalvoOut, dependencies=ACESSO)
+async def salvos_atualizar(
+    id_salvo: int,
+    dados: RelatorioSalvoAtualizar,
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> RelatorioSalvoOut:
+    return await relatorios_salvos.atualizar(
+        db, id_salvo, dados, tenant_id=tenant_id, id_usuario=user.id
+    )
+
+
+@router.delete("/salvos/{id_salvo}", status_code=status.HTTP_204_NO_CONTENT, dependencies=ACESSO)
+async def salvos_excluir(
+    id_salvo: int,
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await relatorios_salvos.excluir(db, id_salvo, tenant_id=tenant_id, id_usuario=user.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
