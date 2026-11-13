@@ -2,6 +2,7 @@
 
 import { X } from "lucide-react";
 import { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
 
@@ -134,9 +135,13 @@ export function Dialog({ open, onClose, title, description, children, footer, si
 
   if (!open) return null;
 
-  return (
+  // Portal para o <body>, como o Popover: um ancestral com transform, filter
+  // ou animação de transform vira o bloco de contenção do `fixed inset-0`, e
+  // o fundo escuro cobria só aquele pedaço da tela (cabeçalho e menu lateral
+  // ficavam acesos). No body, o diálogo cobre a janela venha de onde vier.
+  const conteudo = (
     <div
-      className="fixed inset-0 z-modal flex items-end justify-center bg-black/50 p-0 animate-fade-in sm:items-center sm:p-4"
+      className="fixed inset-0 z-modal flex items-end justify-center bg-black/55 p-0 backdrop-blur-[2px] animate-fade-in sm:items-center sm:p-4"
       onMouseDown={(e) => {
         mousedownNoOverlay.current = e.target === e.currentTarget;
       }}
@@ -191,4 +196,6 @@ export function Dialog({ open, onClose, title, description, children, footer, si
       </div>
     </div>
   );
+
+  return typeof document === "undefined" ? conteudo : createPortal(conteudo, document.body);
 }
