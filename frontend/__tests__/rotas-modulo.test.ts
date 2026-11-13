@@ -320,12 +320,31 @@ describe("P5.2 — nenhuma tela de módulo fica órfã", () => {
       .join(String.fromCharCode(10));
   }
 
+  /**
+   * Página que só redireciona (ex.: `/m/pagamentos/contas-a-pagar/[id]` →
+   * `/solicitacoes/[id]`) é apelido de endereço antigo — existe para link
+   * salvo e e-mail velho continuarem abrindo. Ninguém deve apontar para ela:
+   * quem aponta passa por um 307 à toa. Ficar sem href é o estado CERTO dela.
+   * Reconhecida pelo corpo: chama `redirect(` e não tem JSX nenhum.
+   */
+  function soRedireciona(rota: string): boolean {
+    const arq = join(DIR_M, ...rota.split("/").filter(Boolean).slice(1), "page.tsx");
+    const src = readFileSync(arq, "utf-8");
+    return /\bredirect\(/.test(src) && !/<[A-Za-z]/.test(src);
+  }
+
+  it("página que só redireciona não conta como órfã (e as outras continuam contando)", () => {
+    expect(soRedireciona("/m/pagamentos/contas-a-pagar/[id]")).toBe(true);
+    expect(soRedireciona("/m/pagamentos/solicitacoes/[id]")).toBe(false);
+  });
+
   it("toda página sob m/ é citada em algum href da app", () => {
     const arquivos = arquivosDaApp();
     const orfas = paginasDeModulo(DIR_M).filter((rota) => {
       // A raiz do módulo (`/m/<slug>`) vem do menu e do launcher; o alvo aqui
       // são as subpáginas.
       if (rota.split("/").filter(Boolean).length <= 2) return false;
+      if (soRedireciona(rota)) return false;
       return !padraoDaRota(rota).test(fontesForaDe(rota, arquivos));
     });
 

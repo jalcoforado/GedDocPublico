@@ -9,7 +9,7 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const pushMock = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -77,15 +77,32 @@ vi.mock("@/components/ui/toast", () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn() }),
 }));
 
+const auth = { id_unidade_trabalho: 5 as number | null };
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ user: { id_unidade_trabalho: auth.id_unidade_trabalho } }),
+}));
+
 function comCliente(ui: React.ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
+
+/** Abre a lista do campo (Combobox com busca) e escolhe a opção. */
+async function escolher(rotulo: RegExp, opcao: RegExp) {
+  fireEvent.click(screen.getByLabelText(rotulo));
+  fireEvent.mouseDown(await screen.findByRole("option", { name: opcao }));
 }
 
 async function abrirEdicao() {
   const { EditarDebitoContent } = await import("@/components/pagamentos/EditarDebitoContent");
   comCliente(<EditarDebitoContent id={20} />);
 }
+
+// O formulário carrega muitos módulos (ícones, combobox, roteiro): a primeira
+// importação passava dos 5 s do teste. Aquecer aqui tira o custo dos testes.
+beforeAll(async () => {
+  await import("@/components/pagamentos/EditarDebitoContent");
+}, 30_000);
 
 beforeEach(() => {
   estado.tramitacao = "RASCUNHO";
@@ -97,6 +114,7 @@ beforeEach(() => {
   createMock.mockClear();
   updateMock.mockClear();
   pushMock.mockClear();
+  auth.id_unidade_trabalho = 5;
 });
 
 describe("editar solicitação de pagamento", () => {
@@ -104,12 +122,12 @@ describe("editar solicitação de pagamento", () => {
     await abrirEdicao();
     const descricao = await screen.findByLabelText(/Descrição/);
     expect(descricao).toHaveValue("Compra de material");
-    expect(screen.getByLabelText(/Vencimento da parcela/)).toHaveValue("2026-10-30");
-    // As opções chegam depois do débito: espera o select refletir o valor.
-    await waitFor(() => expect(screen.getByLabelText(/Fornecedor/)).toHaveValue("1"));
+    expect(screen.getByLabelText(/^Vencimento/)).toHaveValue("2026-10-30");
+    // As opções chegam depois do débito: espera o campo mostrar o escolhido.
+    await waitFor(() => expect(screen.getByLabelText(/^Fornecedor/)).toHaveTextContent("Fornecedor X"));
 
     fireEvent.change(descricao, { target: { value: "Compra de material de limpeza" } });
-    fireEvent.change(screen.getByLabelText(/^Categoria/), { target: { value: "BENS" } });
+    fireEvent.click(screen.getByRole("radio", { name: "Bens" }));
     fireEvent.click(screen.getByRole("button", { name: "Salvar alterações" }));
 
     await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
@@ -125,15 +143,17 @@ describe("editar solicitação de pagamento", () => {
     await abrirEdicao();
     await screen.findByLabelText(/Descrição/);
     fireEvent.click(screen.getByRole("button", { name: "Salvar alterações" }));
-    expect(await screen.findByText("Sem contrato, a categoria é obrigatória")).toBeInTheDocument();
+    expect(await screen.findByText(/Sem contrato, escolha a categoria/)).toBeInTheDocument();
     expect(updateMock).not.toHaveBeenCalled();
+    // O foco vai ao campo que falta (a primeira opção da categoria).
+    expect(screen.getByRole("radio", { name: "Bens" })).toHaveFocus();
   });
 
   it("com contrato, a categoria não é pedida nem enviada", async () => {
     estado.id_contrato = 9;
     await abrirEdicao();
     await screen.findByLabelText(/Descrição/);
-    expect(screen.queryByLabelText(/^Categoria/)).toBeNull();
+    expect(screen.queryByRole("group", { name: "Categoria" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Salvar alterações" }));
     await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
     expect(updateMock).toHaveBeenCalledWith(20, expect.objectContaining({
@@ -150,7 +170,7 @@ describe("editar solicitação de pagamento", () => {
     await abrirEdicao();
     await screen.findByLabelText(/Descrição/);
     expect(screen.getByLabelText(/Valor total/)).toBeDisabled();
-    expect(screen.queryByLabelText(/Vencimento da parcela/)).toBeNull();
+    expect(screen.queryByLabelText(/^Vencimento/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Salvar alterações" }));
     await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
     const corpo = updateMock.mock.calls[0][1] as Record<string, unknown>;
@@ -179,27 +199,54 @@ describe("nova solicitação", () => {
   it("envia a categoria escolhida", async () => {
     const { FormularioDebito } = await import("@/components/pagamentos/FormularioDebito");
     comCliente(<FormularioDebito />);
-    await screen.findByRole("option", { name: "Fornecedor X" });
-    await screen.findByRole("option", { name: "Secretaria de Saúde" });
-    await screen.findByRole("option", { name: "Material de consumo" });
-    await screen.findByRole("option", { name: "500 - Própria" });
 
-    fireEvent.change(screen.getByLabelText(/Fornecedor/), { target: { value: "1" } });
-    fireEvent.change(screen.getByLabelText(/Natureza/), { target: { value: "2" } });
-    fireEvent.change(screen.getByLabelText(/Fonte de recursos/), { target: { value: "3" } });
-    fireEvent.change(screen.getByLabelText(/^Categoria/), { target: { value: "OBRAS" } });
-    fireEvent.change(screen.getByLabelText(/Unidade solicitante/), { target: { value: "5" } });
+    await escolher(/^Fornecedor/, /Fornecedor X/);
+    await escolher(/^Natureza/, /Material de consumo/);
+    await escolher(/^Fonte de recursos/, /500 - Própria/);
+    fireEvent.click(screen.getByRole("radio", { name: "Obras" }));
     fireEvent.change(screen.getByLabelText(/Valor total/), { target: { value: "250.5" } });
     fireEvent.change(screen.getByLabelText(/Competência/), { target: { value: "2026-10" } });
-    fireEvent.change(screen.getByLabelText(/Vencimento da parcela/), { target: { value: "2026-11-05" } });
+    fireEvent.change(screen.getByLabelText(/^Vencimento/), { target: { value: "2026-11-05" } });
     fireEvent.change(screen.getByLabelText(/Descrição/), { target: { value: "Reforma" } });
-    fireEvent.click(screen.getByRole("button", { name: "Criar Solicitação" }));
+    // A unidade solicitante já vem com a do usuário.
+    await waitFor(() =>
+      expect(screen.getByLabelText(/^Unidade solicitante/)).toHaveTextContent("Secretaria de Saúde"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Criar solicitação" }));
 
     await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
     expect(createMock).toHaveBeenCalledWith(expect.objectContaining({
-      categoria: "OBRAS", id_contrato: null,
+      id_fornecedor: 1, id_natureza: 2, id_fonte_recursos: 3, id_unidade: 5,
+      categoria: "OBRAS", id_contrato: null, competencia: "2026-10",
       parcelas: [{ numero: 1, valor: 250.5, vencimento: "2026-11-05" }],
     }));
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/m/pagamentos/solicitacoes/31"));
+  });
+
+  it("não acusa erro ao abrir; acusa ao sair do campo vazio", async () => {
+    const { FormularioDebito } = await import("@/components/pagamentos/FormularioDebito");
+    comCliente(<FormularioDebito />);
+    const descricao = await screen.findByLabelText(/Descrição/);
+    expect(screen.queryByText("Descreva em uma linha o que está sendo pago.")).toBeNull();
+    expect(descricao).not.toHaveAttribute("aria-invalid", "true");
+
+    fireEvent.blur(descricao);
+    expect(await screen.findByText("Descreva em uma linha o que está sendo pago.")).toBeInTheDocument();
+    expect(descricao).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("ao criar com campos faltando, não envia, lista o que falta e foca o primeiro", async () => {
+    auth.id_unidade_trabalho = null;
+    const { FormularioDebito } = await import("@/components/pagamentos/FormularioDebito");
+    comCliente(<FormularioDebito />);
+    await screen.findByLabelText(/Descrição/);
+    fireEvent.click(screen.getByRole("button", { name: "Criar solicitação" }));
+
+    expect(await screen.findByText(/Faltam \d+ campos para continuar/)).toBeInTheDocument();
+    expect(screen.getByText("Escolha quem vai receber o pagamento.")).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Fornecedor/)).toHaveFocus();
+    expect(createMock).not.toHaveBeenCalled();
+    // A competência nasce no mês corrente: não está entre o que falta.
+    expect(screen.queryByText("Informe o mês a que a despesa se refere.")).toBeNull();
   });
 });

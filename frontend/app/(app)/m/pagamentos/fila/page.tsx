@@ -1,11 +1,13 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Flag, ListOrdered } from "lucide-react";
+import { ChevronDown, Flag, ListOrdered, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { FormField } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
@@ -65,57 +67,74 @@ export default function FilaCronologicaPage() {
   });
 
   const grupos = filaQ.data ?? [];
+  const filtrando = !!(idFonte || idUnidade || categoria || exercicio || incluirConcluidas);
+
+  function limparFiltros() {
+    setIdFonte("");
+    setIdUnidade("");
+    setCategoria("");
+    setExercicio("");
+    setIncluirConcluidas(false);
+  }
 
   return (
     <div className="space-y-4">
       <PageHeader
         icon={ListOrdered}
         title="Ordem cronológica"
-        description="Fila de pagamento de cada despesa, na ordem em que a LRF e a lei de licitações exigem — agrupada por unidade, fonte, categoria e exercício."
+        description="A ordem em que cada despesa deve ser paga, como a lei de licitações exige, por unidade, fonte, categoria e exercício."
       />
 
-      <div className="grid grid-cols-1 gap-3 rounded-lg border border-border bg-surface-1 p-4 sm:grid-cols-2 lg:grid-cols-5">
-        <FormField label="Fonte de recursos">
-          <Select value={idFonte} onChange={(e) => setIdFonte(e.target.value)}>
-            <option value="">Todas</option>
-            {(fontesQ.data ?? []).map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.codigo} — {f.descricao}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-        <FormField label="Unidade">
-          <Select value={idUnidade} onChange={(e) => setIdUnidade(e.target.value)}>
-            <option value="">Todas</option>
-            {(unidadesQ.data?.items ?? []).map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.unidade_trabalho}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-        <FormField label="Categoria">
-          <Select value={categoria} onChange={(e) => setCategoria(e.target.value)}>
-            <option value="">Todas</option>
-            {CATEGORIAS.map((c) => (
-              <option key={c} value={c}>
-                {CATEGORIA_CONTRATO_LABEL[c]}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-        <FormField label="Exercício">
-          <Select value={exercicio} onChange={(e) => setExercicio(e.target.value)}>
-            <option value="">Todos</option>
-            {anosRecentes().map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-        <div className="flex items-end">
+      <FilterBar>
+        <FilterBar.Group className="min-w-44 flex-1">
+          <FormField label="Fonte de recursos">
+            <Select value={idFonte} onChange={(e) => setIdFonte(e.target.value)}>
+              <option value="">Todas</option>
+              {(fontesQ.data ?? []).map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.codigo} — {f.descricao}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        </FilterBar.Group>
+        <FilterBar.Group className="min-w-44 flex-1">
+          <FormField label="Unidade">
+            <Select value={idUnidade} onChange={(e) => setIdUnidade(e.target.value)}>
+              <option value="">Todas</option>
+              {(unidadesQ.data?.items ?? []).map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.unidade_trabalho}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        </FilterBar.Group>
+        <FilterBar.Group className="min-w-44 flex-1">
+          <FormField label="Categoria">
+            <Select value={categoria} onChange={(e) => setCategoria(e.target.value)}>
+              <option value="">Todas</option>
+              {CATEGORIAS.map((c) => (
+                <option key={c} value={c}>
+                  {CATEGORIA_CONTRATO_LABEL[c]}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        </FilterBar.Group>
+        <FilterBar.Group className="min-w-32">
+          <FormField label="Exercício">
+            <Select value={exercicio} onChange={(e) => setExercicio(e.target.value)}>
+              <option value="">Todos</option>
+              {anosRecentes().map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        </FilterBar.Group>
+        <FilterBar.Group className="flex h-[var(--density-row-h)] items-center">
           <label className="flex items-center gap-2 text-sm text-foreground">
             <input
               type="checkbox"
@@ -125,8 +144,16 @@ export default function FilaCronologicaPage() {
             />
             Incluir concluídas
           </label>
-        </div>
-      </div>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              <X className="h-4 w-4" aria-hidden="true" />
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {filaQ.isLoading ? (
         <div className="space-y-3">
@@ -161,7 +188,7 @@ function GrupoFila({ grupo }: { grupo: FilaCronologicaGrupo }) {
       <header className="border-b border-border bg-surface-2 px-4 py-2.5">
         <h2 className="text-sm font-semibold text-foreground">{tituloGrupo(grupo)}</h2>
         <p className="text-xs text-foreground-muted">
-          {grupo.itens.length} débito(s) na fila
+          {grupo.itens.length === 1 ? "1 débito na fila" : `${grupo.itens.length} débitos na fila`}
         </p>
       </header>
       <div className="overflow-x-auto">

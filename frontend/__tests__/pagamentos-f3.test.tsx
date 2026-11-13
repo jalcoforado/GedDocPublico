@@ -387,11 +387,11 @@ describe("Contratos — categoria da fila cronológica obrigatória (F3)", () =>
     );
     renderComQueryClient(<ContratosPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Novo" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Novo contrato" }));
 
-    const selectCategoria = (await screen.findByLabelText(
-      /^categoria \(fila cronológica\)/i,
-    )) as HTMLSelectElement;
+    // Rótulo curto ("Categoria"); a fila cronológica fica na dica do campo.
+    const selectCategoria = (await screen.findByLabelText(/^categoria/i)) as HTMLSelectElement;
+
     expect(selectCategoria).toBeRequired();
 
     // As 4 categorias em português, além da opção vazia.

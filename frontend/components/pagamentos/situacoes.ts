@@ -277,3 +277,20 @@ export const ETAPA_POR_TRAMITACAO: Record<SituacaoTramitacao, EtapaFluxo> = {
   INDEFERIDA_AUTORIDADE: "AUTORIDADE",
   CANCELADA: "UNIDADE",
 };
+
+/** Criticidade da natureza de despesa / do débito. A urgência é vermelha como
+ *  o vencido: as duas pedem ação hoje. */
+export const CRITICIDADE_ROTULO: Record<string, Rotulo> = {
+  URGENTE: { label: "Urgente", intent: "danger", icon: AlertCircle },
+  ALTA: { label: "Alta", intent: "warning", icon: Flag },
+  MEDIA: { label: "Média", intent: "info", icon: Flag },
+  BAIXA: { label: "Baixa", intent: "neutral", icon: Minus },
+};
+
+/** Situação da parcela — o detalhe mostrava o código ("A_PAGAR") num selo cinza. */
+export const PARCELA_ROTULO: Record<string, Rotulo> = {
+  A_PAGAR: { label: "A pagar", intent: "neutral", icon: Clock },
+  LIBERADA: { label: "Liberada", intent: "info", icon: Send },
+  PAGA: { label: "Paga", intent: "success", icon: Check },
+  CANCELADA: { label: "Cancelada", intent: "neutral", icon: Ban },
+};

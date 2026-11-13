@@ -7,11 +7,12 @@ import { Download, FileSpreadsheet, Plus } from "lucide-react";
 import { useState } from "react";
 
 import { fmtData, fmtDataHora } from "@/components/pagamentos/format";
+import { useValidacaoCampos } from "@/components/pagamentos/useValidacaoCampos";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -32,6 +33,10 @@ export default function ExportContabilPage() {
 
   const [gerarOpen, setGerarOpen] = useState(false);
   const [ate, setAte] = useState(hojeIso());
+  const vGerar = useValidacaoCampos(
+    { ate: !ate && "Escolha até que data o lote vai." },
+    { ate: "contabil-ate" },
+  );
 
   const lotesQ = useQuery({
     queryKey: ["pag-contabil-lotes"],
@@ -60,6 +65,7 @@ export default function ExportContabilPage() {
 
   function abrirGerar() {
     setAte(hojeIso());
+    vGerar.reiniciar();
     setGerarOpen(true);
   }
 
@@ -72,7 +78,7 @@ export default function ExportContabilPage() {
           { label: "Export contábil" },
         ]}
         title="Export contábil"
-        description="Lotes imutáveis de eventos neutros (empenho, liquidação, pagamento, estorno, cancelamento) para o sistema contábil externo. Cada lote captura só o que ainda não entrou em outro lote."
+        description="Lotes de eventos (empenho, liquidação, pagamento, estorno) para o sistema contábil; cada lote leva só o que ainda não foi exportado."
         actions={
           <Button onClick={abrirGerar}>
             <Plus className="mr-2 h-4 w-4" />
@@ -83,7 +89,7 @@ export default function ExportContabilPage() {
 
       <SectionCard title="Lotes gerados">
         {lotesQ.isLoading ? (
-          <Carregando className="text-sm text-muted" />
+          <Carregando className="text-sm text-foreground-muted" />
         ) : lotes.length === 0 ? (
           <EmptyState
             icon={FileSpreadsheet}
@@ -140,25 +146,32 @@ export default function ExportContabilPage() {
             <Button variant="ghost" onClick={() => setGerarOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => gerar.mutate()} disabled={gerar.isPending || !ate}>
-              Gerar
+            <Button
+              onClick={() => {
+                if (vGerar.conferir()) gerar.mutate();
+              }}
+              loading={gerar.isPending}
+            >
+              Gerar lote
             </Button>
           </>
         }
       >
         <div className="space-y-4">
-          <div>
-            <Label htmlFor="contabil-ate">Data-limite</Label>
+          <FormField
+            label="Data-limite"
+            required
+            error={vGerar.erro("ate")}
+            hint="O lote leva os eventos pendentes até esta data, inclusive. Começa em hoje."
+          >
             <Input
               id="contabil-ate"
               type="date"
               value={ate}
               onChange={(e) => setAte(e.target.value)}
+              onBlur={vGerar.tocar("ate")}
             />
-            <p className="mt-1 text-xs text-muted">
-              O lote captura os eventos pendentes ocorridos até esta data (inclusive).
-            </p>
-          </div>
+          </FormField>
         </div>
       </Dialog>
     </div>

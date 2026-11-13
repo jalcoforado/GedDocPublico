@@ -10,8 +10,8 @@ import { cn } from "@/lib/utils";
 const RAIZ = "/m/pagamentos/solicitacoes";
 
 /**
- * As etapas de Solicitações como abas — "Todas", "Aguardando Gestor",
- * "Aguardando Validação", "Aguardando Autoridade", "Concluídas". Eram quatro
+ * As etapas de Solicitações como abas — "Todas", "Aguardando gestor",
+ * "Aguardando validação", "Aguardando autoridade", "Concluídas". Eram quatro
  * itens do menu lateral para recortes da mesma lista (o mesmo caso das caixas
  * do Protocolo, ver `AbasCaixas`).
  *

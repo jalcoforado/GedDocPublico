@@ -3,14 +3,22 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Eye, Pencil, Plus, Trash2, UserCircle } from "lucide-react";
 import { useState } from "react";
 
+import { fmtDataHora } from "@/components/pagamentos/format";
+import { useValidacaoCampos } from "@/components/pagamentos/useValidacaoCampos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
+import { PageHeader } from "@/components/ui/page-header";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, type Fornecedor, type DadosBancarios } from "@/lib/api";
@@ -46,16 +54,12 @@ const SITUACAO_LABEL: Record<Fornecedor["situacao_cadastral"], string> = {
 };
 
 function SituacaoBadge({ situacao }: { situacao: Fornecedor["situacao_cadastral"] }) {
-  const cls =
-    situacao === "REGULAR"
-      ? "bg-success-soft text-success-soft-foreground"
-      : situacao === "PENDENTE"
-        ? "bg-warning-soft text-warning-soft-foreground"
-        : "bg-danger-soft text-danger-soft-foreground";
+  const intent =
+    situacao === "REGULAR" ? "success" : situacao === "PENDENTE" ? "warning" : "danger";
   return (
-    <span className={`inline-block whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium ${cls}`}>
+    <Badge intent={intent} className="whitespace-nowrap">
       {SITUACAO_LABEL[situacao]}
-    </span>
+    </Badge>
   );
 }
 
@@ -84,10 +88,30 @@ export default function FornecedoresPage() {
     enabled: open && editId !== null,
   });
 
+  const v = useValidacaoCampos(
+    {
+      cnpj_cpf:
+        !form.cnpj_cpf.trim() &&
+        `Informe o ${form.tipo_pessoa === "JURIDICA" ? "CNPJ" : "CPF"} do fornecedor.`,
+      nome: !form.nome.trim() && "Informe o nome como está no documento.",
+      // O motivo é o que quem escolhe o fornecedor numa solicitação lê.
+      motivo_pendencia:
+        form.situacao_cadastral !== "REGULAR" &&
+        !form.motivo_pendencia.trim() &&
+        "Diga o que está pendente — ex.: qual certidão venceu.",
+    },
+    { cnpj_cpf: "cred-doc", nome: "cred-nome", motivo_pendencia: "cred-motivo" },
+  );
+
+  function salvar() {
+    if (v.conferir()) saveM.mutate();
+  }
+
   function openNew() {
     setEditId(null);
     setForm(EMPTY);
     setErr(null);
+    v.reiniciar();
     setOpen(true);
   }
 
@@ -105,6 +129,7 @@ export default function FornecedoresPage() {
       chave_pix: "",
     });
     setErr(null);
+    v.reiniciar();
     setOpen(true);
   }
 
@@ -173,14 +198,21 @@ export default function FornecedoresPage() {
   }
 
   const fornecedores = listQ.data ?? [];
-  const podeSalvar = form.cnpj_cpf.trim().length > 0 && form.nome.trim().length > 0;
+  const pj = form.tipo_pessoa === "JURIDICA";
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-aprimora">Fornecedores</h1>
-        <Button onClick={openNew}>Novo</Button>
-      </div>
+      <PageHeader
+        icon={UserCircle}
+        title="Fornecedores"
+        description="Quem recebe os pagamentos: documento, situação cadastral e dados bancários."
+        actions={
+          <Button onClick={openNew}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Novo fornecedor
+          </Button>
+        }
+      />
 
       <Table>
         <THead>
@@ -194,10 +226,23 @@ export default function FornecedoresPage() {
           </TR>
         </THead>
         <TBody>
+          {listQ.isLoading &&
+            Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={6} />)}
           {!listQ.isLoading && fornecedores.length === 0 && (
             <TR>
-              <TD colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
-                Nenhum fornecedor cadastrado.
+              <TD colSpan={6} className="p-0">
+                <EmptyState
+                  icon={UserCircle}
+                  title="Nenhum fornecedor cadastrado"
+                  description="Cadastre quem vai receber os pagamentos da prefeitura."
+                  action={
+                    <Button onClick={openNew}>
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                      Novo fornecedor
+                    </Button>
+                  }
+                  className="rounded-none border-0 bg-transparent"
+                />
               </TD>
             </TR>
           )}
@@ -211,24 +256,19 @@ export default function FornecedoresPage() {
               </TD>
               <TD>{c.tem_dados_bancarios ? "Sim" : "Não"}</TD>
               <TD className="text-right">
-                <div className="inline-flex gap-2">
-                  {c.tem_dados_bancarios && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => revelar(c)}
-                      disabled={revealLoading === c.id}
-                    >
-                      {revealLoading === c.id ? "Revelando..." : "Revelar dados bancários"}
-                    </Button>
-                  )}
-                  <Button variant="secondary" size="sm" onClick={() => openEdit(c)}>
-                    Editar
-                  </Button>
-                  <Button variant="danger" size="sm" onClick={() => excluir(c)}>
-                    Excluir
-                  </Button>
-                </div>
+                <AcoesDaLinha
+                  acoes={[
+                    { label: "Editar", icon: Pencil, onClick: () => openEdit(c) },
+                    {
+                      label: revealLoading === c.id ? "Revelando…" : "Revelar dados bancários",
+                      icon: Eye,
+                      onClick: () => revelar(c),
+                      disabled: revealLoading === c.id,
+                      oculta: !c.tem_dados_bancarios,
+                    },
+                    { label: "Excluir", icon: Trash2, perigo: true, onClick: () => excluir(c) },
+                  ]}
+                />
               </TD>
             </TR>
           ))}
@@ -242,135 +282,154 @@ export default function FornecedoresPage() {
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setOpen(false)}>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => saveM.mutate()} disabled={!podeSalvar || saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button onClick={salvar} loading={saveM.isPending}>
+              {editId === null ? "Cadastrar fornecedor" : "Salvar alterações"}
             </Button>
           </>
         }
       >
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label htmlFor="cred-tipo" required>
-              Tipo de pessoa
-            </Label>
-            <Select
-              id="cred-tipo"
-              value={form.tipo_pessoa}
-              onChange={(e) =>
-                setForm({ ...form, tipo_pessoa: e.target.value as FormState["tipo_pessoa"] })
-              }
-              required
-            >
-              <option value="FISICA">Física</option>
-              <option value="JURIDICA">Jurídica</option>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="cred-doc" required>
-              CNPJ/CPF
-            </Label>
-            <Input
-              id="cred-doc"
-              value={form.cnpj_cpf}
-              onChange={(e) => setForm({ ...form, cnpj_cpf: e.target.value })}
-              required
+        <div className="space-y-5">
+          {/* Quem é */}
+          <div className="space-y-4">
+            <EscolhaSegmentada
+              nome="cred-tipo"
+              titulo="Tipo de pessoa"
+              valor={form.tipo_pessoa}
+              onChange={(v) => setForm({ ...form, tipo_pessoa: v })}
+              opcoes={[
+                { valor: "JURIDICA", rotulo: "Pessoa jurídica", descricao: "Empresa, com CNPJ." },
+                { valor: "FISICA", rotulo: "Pessoa física", descricao: "Pessoa, com CPF." },
+              ]}
+              moldura={false}
             />
+            <GradeCampos>
+              <FormField
+                label={pj ? "CNPJ" : "CPF"}
+                required
+                error={v.erro("cnpj_cpf")}
+              >
+                <Input
+                  id="cred-doc"
+                  value={form.cnpj_cpf}
+                  onChange={(e) => setForm({ ...form, cnpj_cpf: e.target.value })}
+                  onBlur={v.tocar("cnpj_cpf")}
+                  inputMode={pj ? "text" : "numeric"}
+                  placeholder={pj ? "Ex.: 12.345.678/0001-90" : "Ex.: 123.456.789-09"}
+                />
+              </FormField>
+              <FormField label={pj ? "Razão social" : "Nome completo"} required error={v.erro("nome")}>
+                <Input
+                  id="cred-nome"
+                  value={form.nome}
+                  onChange={(e) => setForm({ ...form, nome: e.target.value })}
+                  onBlur={v.tocar("nome")}
+                  placeholder={pj ? "Ex.: Comercial Silva Ltda." : "Ex.: Maria da Silva"}
+                />
+              </FormField>
+            </GradeCampos>
           </div>
-          <div className="col-span-2">
-            <Label htmlFor="cred-nome" required>
-              Nome
-            </Label>
-            <Input
-              id="cred-nome"
-              value={form.nome}
-              onChange={(e) => setForm({ ...form, nome: e.target.value })}
-              required
-            />
-          </div>
-          <div>
-            <Label htmlFor="cred-situacao" required>
-              Situação cadastral
-            </Label>
-            <Select
-              id="cred-situacao"
-              value={form.situacao_cadastral}
-              onChange={(e) => {
-                const situacao = e.target.value as FormState["situacao_cadastral"];
+
+          {/* Situação cadastral */}
+          <div className="space-y-4 border-t border-border pt-4">
+            <EscolhaSegmentada
+              nome="cred-situacao"
+              titulo="Situação cadastral"
+              valor={form.situacao_cadastral}
+              onChange={(situacao) =>
                 setForm({
                   ...form,
                   situacao_cadastral: situacao,
                   motivo_pendencia: situacao === "REGULAR" ? "" : form.motivo_pendencia,
-                });
-              }}
-              required
-            >
-              <option value="REGULAR">Regular</option>
-              <option value="PENDENTE">Pendente</option>
-              <option value="IRREGULAR">Irregular</option>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="cred-motivo" required={form.situacao_cadastral !== "REGULAR"}>
-              Motivo da pendência
-            </Label>
-            <Input
-              id="cred-motivo"
-              value={form.motivo_pendencia}
-              onChange={(e) => setForm({ ...form, motivo_pendencia: e.target.value })}
-              disabled={form.situacao_cadastral === "REGULAR"}
-              required={form.situacao_cadastral !== "REGULAR"}
+                })
+              }
+              opcoes={[
+                { valor: "REGULAR", rotulo: "Regular", descricao: "Documentação em dia." },
+                {
+                  valor: "PENDENTE",
+                  rotulo: "Pendente",
+                  descricao: "Falta algum documento — diga qual no motivo.",
+                },
+                {
+                  valor: "IRREGULAR",
+                  rotulo: "Irregular",
+                  descricao: "Há impedimento para receber — diga qual no motivo.",
+                },
+              ]}
+              moldura={false}
             />
+            {form.situacao_cadastral !== "REGULAR" && (
+              <FormField
+                label={form.situacao_cadastral === "PENDENTE" ? "Motivo da pendência" : "Motivo da irregularidade"}
+                required
+                error={v.erro("motivo_pendencia")}
+                hint="Aparece para quem escolhe este fornecedor numa solicitação."
+              >
+                <Input
+                  id="cred-motivo"
+                  value={form.motivo_pendencia}
+                  onChange={(e) => setForm({ ...form, motivo_pendencia: e.target.value })}
+                  onBlur={v.tocar("motivo_pendencia")}
+                  placeholder="Ex.: Certidão do FGTS vencida em 10/10/2026"
+                />
+              </FormField>
+            )}
           </div>
 
-          <div className="col-span-2 mt-2 border-t border-border pt-3">
-            <p className="mb-2 text-sm font-semibold text-foreground">Dados bancários</p>
-            <p className="mb-2 text-xs text-muted-foreground">
-              Preencha para atualizar. Deixe em branco para manter os dados atuais.
+          {/* Dados bancários */}
+          <fieldset className="space-y-4 rounded-lg border border-border bg-surface-1 p-4">
+            <legend className="px-1 text-sm font-semibold text-foreground">Dados bancários</legend>
+            <p className="-mt-2 text-xs text-foreground-muted">
+              {editId === null
+                ? "Para onde vai o dinheiro. Informe a conta, a chave PIX ou as duas."
+                : "Por segurança, os dados atuais não aparecem aqui. Preencha só para trocar; em branco, ficam como estão."}
             </p>
-          </div>
-          <div>
-            <Label htmlFor="cred-banco">Banco</Label>
-            <Input
-              id="cred-banco"
-              value={form.banco}
-              onChange={(e) => setForm({ ...form, banco: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label htmlFor="cred-agencia">Agência</Label>
-            <Input
-              id="cred-agencia"
-              value={form.agencia}
-              onChange={(e) => setForm({ ...form, agencia: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label htmlFor="cred-conta">Conta</Label>
-            <Input
-              id="cred-conta"
-              value={form.conta}
-              onChange={(e) => setForm({ ...form, conta: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label htmlFor="cred-pix">Chave PIX</Label>
-            <Input
-              id="cred-pix"
-              value={form.chave_pix}
-              onChange={(e) => setForm({ ...form, chave_pix: e.target.value })}
-            />
-          </div>
+            <FormField label="Banco" opcional>
+              <Input
+                id="cred-banco"
+                value={form.banco}
+                onChange={(e) => setForm({ ...form, banco: e.target.value })}
+                placeholder="Ex.: 001 — Banco do Brasil"
+              />
+            </FormField>
+            <GradeCampos>
+              <FormField label="Agência" opcional>
+                <Input
+                  id="cred-agencia"
+                  value={form.agencia}
+                  onChange={(e) => setForm({ ...form, agencia: e.target.value })}
+                  inputMode="numeric"
+                  placeholder="Ex.: 1234-5"
+                />
+              </FormField>
+              <FormField label="Conta" opcional>
+                <Input
+                  id="cred-conta"
+                  value={form.conta}
+                  onChange={(e) => setForm({ ...form, conta: e.target.value })}
+                  inputMode="numeric"
+                  placeholder="Ex.: 12345-6"
+                />
+              </FormField>
+            </GradeCampos>
+            <FormField label="Chave PIX" opcional hint="CPF/CNPJ, e-mail, telefone ou chave aleatória.">
+              <Input
+                id="cred-pix"
+                value={form.chave_pix}
+                onChange={(e) => setForm({ ...form, chave_pix: e.target.value })}
+              />
+            </FormField>
+          </fieldset>
 
           {editId !== null && (
-            <div className="col-span-2 mt-2 border-t border-border pt-3">
+            <div className="border-t border-border pt-4">
               <p className="mb-2 text-sm font-semibold text-foreground">Histórico de situação</p>
               {historicoQ.isLoading ? (
-                <Carregando className="text-xs text-muted-foreground" />
+                <Carregando className="text-xs text-foreground-muted" />
               ) : (historicoQ.data ?? []).length === 0 ? (
-                <p className="text-xs text-muted-foreground">Sem registros.</p>
+                <p className="text-xs text-foreground-muted">Sem registros.</p>
               ) : (
                 <ul className="space-y-2">
                   {(historicoQ.data ?? []).map((h) => (
@@ -378,9 +437,7 @@ export default function FornecedoresPage() {
                       <SituacaoBadge situacao={h.situacao} />
                       <div className="min-w-0 flex-1">
                         {h.motivo && <p className="text-sm text-foreground">{h.motivo}</p>}
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(h.criado_em).toLocaleString("pt-BR")}
-                        </p>
+                        <p className="text-xs text-muted-foreground">{fmtDataHora(h.criado_em)}</p>
                       </div>
                     </li>
                   ))}
@@ -392,7 +449,7 @@ export default function FornecedoresPage() {
           {err && (
             <div
               role="alert"
-              className="col-span-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+              className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
             >
               {err}
             </div>

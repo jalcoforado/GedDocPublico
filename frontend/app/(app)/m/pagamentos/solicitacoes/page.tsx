@@ -8,8 +8,11 @@ import {
   ClipboardList,
   FileEdit,
   Gavel,
+  Plus,
+  Search,
   ShieldCheck,
   Users,
+  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -17,13 +20,14 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { AbasSolicitacoes } from "@/components/pagamentos/AbasSolicitacoes";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { SkeletonRow } from "@/components/ui/skeleton";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { TBody, TD, TH, THead, TR, TRLink, Table } from "@/components/ui/table";
 import { api, type SituacaoTramitacao } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
@@ -114,8 +118,8 @@ export default function SolicitacoesPage() {
     <div className="space-y-4">
       <PageHeader
         breadcrumbs={[{ label: "Pagamentos", href: "/m/pagamentos" }]}
-        title="Solicitações de Pagamento"
-        description="Acompanhe as solicitações no fluxo de aprovação"
+        title="Solicitações de pagamento"
+        description="Acompanhe cada solicitação pelas etapas de aprovação, do rascunho à autorização."
         icon={ClipboardList}
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -129,7 +133,10 @@ export default function SolicitacoesPage() {
             />
             {can("pagamento_solicitar") && (
               <Button asChild>
-                <Link href="/m/pagamentos/solicitacoes/novo">Nova Solicitação</Link>
+                <Link href="/m/pagamentos/solicitacoes/novo">
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                  Nova solicitação
+                </Link>
               </Button>
             )}
           </div>
@@ -163,15 +170,23 @@ export default function SolicitacoesPage() {
         ))}
       </div>
 
-      {/* Filtros */}
-      <div className="flex gap-3 flex-wrap">
-        <Input
-          aria-label="Pesquisar solicitações"
-          placeholder="Pesquisar por fornecedor, descrição, NF ou NE..."
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-          className="flex-1 min-w-64"
-        />
+      <FilterBar>
+        <FilterBar.Group label="Busca" className="min-w-64 flex-1">
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground-subtle"
+              aria-hidden="true"
+            />
+            <Input
+              aria-label="Pesquisar solicitações"
+              placeholder="Fornecedor, descrição, NF ou NE…"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+        </FilterBar.Group>
+        <FilterBar.Group label="Situação" className="min-w-56">
         <Select
           aria-label="Situação"
           value={situacaoFiltro}
@@ -183,18 +198,36 @@ export default function SolicitacoesPage() {
         >
           <option value="">Todas as situações</option>
           <option value="RASCUNHO">Rascunho</option>
-          <option value="AGUARDANDO_GESTOR">Aguardando Gestor</option>
-          <option value="AJUSTE_GESTOR">Ajuste (Gestor)</option>
-          <option value="AGUARDANDO_VALIDACAO">Aguardando Validação</option>
-          <option value="AJUSTE_VALIDACAO">Ajuste (Validação)</option>
-          <option value="AGUARDANDO_AUTORIDADE">Aguardando Autoridade</option>
-          <option value="AJUSTE_AUTORIDADE">Ajuste (Autoridade)</option>
+          <option value="AGUARDANDO_GESTOR">Aguardando gestor</option>
+          <option value="AJUSTE_GESTOR">Ajuste (gestor)</option>
+          <option value="AGUARDANDO_VALIDACAO">Aguardando validação</option>
+          <option value="AJUSTE_VALIDACAO">Ajuste (validação)</option>
+          <option value="AGUARDANDO_AUTORIDADE">Aguardando autoridade</option>
+          <option value="AJUSTE_AUTORIDADE">Ajuste (autoridade)</option>
           <option value="AUTORIZADA">Autorizada</option>
           <option value="REJEITADA_GESTOR">Rejeitada</option>
           <option value="INDEFERIDA_AUTORIDADE">Indeferida</option>
           <option value="CANCELADA">Cancelada</option>
         </Select>
-      </div>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setBusca("");
+                setQ("");
+                setSituacaoFiltro("");
+                setEtapaFiltro(null);
+                setPage(1);
+              }}
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       <p className="text-sm text-foreground-muted" role="status">
         {listQ.isError
@@ -240,8 +273,15 @@ export default function SolicitacoesPage() {
               </TR>
             )}
             {debitos.map((d) => (
-              <TR key={d.id}>
-                <TD className="font-mono text-sm">#{d.id}</TD>
+              <TRLink key={d.id} href={`/m/pagamentos/solicitacoes/${d.id}`}>
+                <TD className="font-mono text-sm">
+                  <Link
+                    href={`/m/pagamentos/solicitacoes/${d.id}`}
+                    className="text-primary hover:underline"
+                  >
+                    #{d.id}
+                  </Link>
+                </TD>
                 <TD>{d.nome_fornecedor}</TD>
                 <TD className="max-w-xs truncate">{d.descricao}</TD>
                 <TD className="text-right tabular-nums">{fmtMoeda(d.valor_total)}</TD>
@@ -253,7 +293,7 @@ export default function SolicitacoesPage() {
                     <Link href={`/m/pagamentos/solicitacoes/${d.id}`}>Ver</Link>
                   </Button>
                 </TD>
-              </TR>
+              </TRLink>
             ))}
           </TBody>
         </Table>

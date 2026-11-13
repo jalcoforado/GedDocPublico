@@ -1,9 +1,10 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, FileText } from "lucide-react";
 
 import { CrudPage } from "@/components/CrudPage";
+import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
 import { CATEGORIA_CONTRATO_LABEL, api, type Contrato } from "@/lib/api";
 
 const OPCOES_CATEGORIA = Object.entries(CATEGORIA_CONTRATO_LABEL).map(([value, label]) => ({
@@ -16,6 +17,11 @@ export default function ContratosPage() {
     queryKey: ["pag-fornecedores-select"],
     queryFn: () => api.pagamentos.cadastros.fornecedores.list(),
   });
+  // Mesma chave e tamanho da solicitação de pagamento: a lista vem do cache.
+  const unidadesQ = useQuery({
+    queryKey: ["unidades-all"],
+    queryFn: () => api.unidades.list({ page_size: 200 }),
+  });
   const contratosQ = useQuery({
     queryKey: ["pag-contratos-sem-categoria"],
     queryFn: () => api.pagamentos.cadastros.contratos.list(),
@@ -27,6 +33,9 @@ export default function ContratosPage() {
   return (
     <CrudPage<Contrato>
       title="Contratos"
+      icon={FileText}
+      description="Contratos com fornecedores: vigência, valor e a categoria da fila cronológica."
+      novoLabel="Novo contrato"
       queryKey={["pag-contratos"]}
       fetchList={() => api.pagamentos.cadastros.contratos.list()}
       createFn={api.pagamentos.cadastros.contratos.create}
@@ -46,7 +55,9 @@ export default function ContratosPage() {
       }
       emptyForm={{
         numero: "",
-        id_fornecedor: fornecedoresQ.data?.[0]?.id ?? null,
+        // Vazio, e não o primeiro da lista: pré-escolher um fornecedor
+        // qualquer fazia o contrato nascer com quem ninguém escolheu.
+        id_fornecedor: null,
         id_unidade: null,
         objeto: "",
         vigencia_inicio: "",
@@ -63,46 +74,73 @@ export default function ContratosPage() {
         { header: "Objeto", render: (r) => r.objeto },
         {
           header: "Vigência",
-          render: (r) => `${r.vigencia_inicio} a ${r.vigencia_fim}`,
+          render: (r) => `${fmtData(r.vigencia_inicio)} a ${fmtData(r.vigencia_fim)}`,
+          className: "whitespace-nowrap tabular-nums",
         },
-        { header: "Valor total", render: (r) => r.valor_total },
+        {
+          header: "Valor total",
+          render: (r) => fmtMoeda(r.valor_total),
+          className: "whitespace-nowrap text-right tabular-nums",
+        },
         {
           header: "Categoria",
           render: (r) => (r.categoria ? CATEGORIA_CONTRATO_LABEL[r.categoria] : "—"),
         },
       ]}
+      // Ordem: com quem (fornecedor) → qual contrato → para quem (unidade) →
+      // por quanto tempo → por quanto → em que fila.
       fields={[
-        { name: "numero", label: "Número", type: "text", required: true },
         {
           name: "id_fornecedor",
           label: "Fornecedor",
           type: "select",
           required: true,
+          colSpan: 2,
           options: fornecedoresQ.data?.map((c) => ({ value: c.id, label: c.nome })),
         },
-        { name: "id_unidade", label: "ID da unidade", type: "number", required: true },
-        { name: "objeto", label: "Objeto", type: "textarea", required: true, colSpan: 2 },
         {
-          name: "vigencia_inicio",
-          label: "Vigência início (aaaa-mm-dd)",
+          name: "numero",
+          label: "Número",
           type: "text",
           required: true,
-          placeholder: "aaaa-mm-dd",
+          placeholder: "Ex.: 012/2026",
         },
         {
-          name: "vigencia_fim",
-          label: "Vigência fim (aaaa-mm-dd)",
-          type: "text",
+          name: "id_unidade",
+          label: "Unidade",
+          type: "select",
           required: true,
-          placeholder: "aaaa-mm-dd",
+          options: unidadesQ.data?.items.map((u) => ({
+            value: u.id,
+            label: u.sigla ? `${u.unidade_trabalho} (${u.sigla})` : u.unidade_trabalho,
+          })),
+          dica: "A unidade gestora do contrato.",
         },
-        { name: "valor_total", label: "Valor total", type: "number", required: true },
+        {
+          name: "objeto",
+          label: "Objeto",
+          type: "textarea",
+          required: true,
+          colSpan: 2,
+          placeholder: "Ex.: Fornecimento de gêneros alimentícios para a merenda escolar",
+        },
+        { name: "vigencia_inicio", label: "Início da vigência", type: "date", required: true },
+        { name: "vigencia_fim", label: "Fim da vigência", type: "date", required: true },
+        {
+          name: "valor_total",
+          label: "Valor total",
+          type: "number",
+          required: true,
+          prefixo: "R$",
+          placeholder: "0,00",
+        },
         {
           name: "categoria",
-          label: "Categoria (fila cronológica)",
+          label: "Categoria",
           type: "select",
           required: true,
           options: OPCOES_CATEGORIA,
+          dica: "A fila cronológica em que entram os pagamentos deste contrato.",
         },
       ]}
     />
