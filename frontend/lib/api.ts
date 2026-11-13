@@ -3383,17 +3383,23 @@ export const api = {
 
   // User-specific endpoints (current logged-in user)
   users: {
-    getGoogleCredential: async () => {
+    /**
+     * SI-32 — integração com o Google: `configurado` (o servidor tem client
+     * ID/secret) e `connected` (este usuário autorizou). Sem `configurado`, a
+     * tela explica em vez de oferecer um "Conectar" que levaria a um erro.
+     * Falha de rede = não conectado, mas configurado (não esconde a opção à toa).
+     */
+    getGoogleCredential: async (): Promise<{ connected: boolean; configurado: boolean }> => {
       try {
-        const res = await fetch(`${baseUrl()}/auth/users/me/google-credential`, {
+        const res = await fetch(`${baseUrl()}/auth/google/status`, {
           cache: "no-store",
           credentials: "include",
         });
-        if (res.status === 404) return { connected: false };
         if (!res.ok) throw new Error("Failed to fetch credential status");
-        return res.json();
-      } catch (err) {
-        return { connected: false };
+        const s = (await res.json()) as { configurado: boolean; conectado: boolean };
+        return { connected: s.conectado, configurado: s.configurado };
+      } catch {
+        return { connected: false, configurado: true };
       }
     },
   },
