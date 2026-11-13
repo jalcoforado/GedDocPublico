@@ -65,3 +65,22 @@ describe("PreVisualizacaoDocumento", () => {
     expect(camposPendentes("{{a}} {{a}} {{b.c}}")).toEqual(["{{a}}", "{{b.c}}"]);
   });
 });
+
+describe("PreVisualizacaoDocumento — prévia de MODELO (SI-31)", () => {
+  it("no modelo o campo é esperado: marcado como campo automático, sem o aviso de pendente", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <PreVisualizacaoDocumento titulo="" corpoHtml="<p>Processo {{processo.numero}}</p>" modelo />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(folha().querySelectorAll("mark.campo-modelo")).toHaveLength(1));
+    expect(folha().querySelector("mark.campo-pendente")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("montarFolha sem o modo modelo continua acusando pendente", () => {
+    expect(montarFolha("", "{{a.b}}")).toContain('class="campo-pendente"');
+    expect(montarFolha("", "{{a.b}}", true)).toContain('class="campo-modelo"');
+  });
+});

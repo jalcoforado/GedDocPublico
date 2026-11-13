@@ -77,6 +77,10 @@ mark.campo-pendente {
     background: #fde68a; color: #78350f; border-radius: 3px; padding: 0 2px;
     outline: 1px dashed #d97706;
 }
+mark.campo-modelo {
+    background: #dbeafe; color: #1e3a8a; border-radius: 3px; padding: 0 3px;
+    font-family: ui-monospace, monospace; font-size: 0.85em;
+}
 """
 
 # Casa com a URL que `api.editorImagens.upload` devolve (routers/minutas.py::imagens_router).

@@ -22,12 +22,13 @@ function escapar(s: string): string {
 }
 
 /** Conteúdo da folha: o mesmo `<h1 class="doc-titulo">` + corpo que `html_to_pdf_bytes` monta. */
-export function montarFolha(titulo: string, corpoHtml: string): string {
+export function montarFolha(titulo: string, corpoHtml: string, modelo = false): string {
   const cabecalho = titulo.trim() ? `<h1 class="doc-titulo">${escapar(titulo.trim())}</h1>` : "";
-  const corpo = corpoHtml.replace(
-    TOKEN,
-    (t) => `<mark class="campo-pendente" title="Campo não preenchido — sai assim no PDF">${t}</mark>`,
-  );
+  // No MODELO o campo é esperado (vira dado ao redigir); na minuta, sobrou.
+  const marca = modelo
+    ? (t: string) => `<mark class="campo-modelo" title="Campo automático — preenchido ao redigir">${t}</mark>`
+    : (t: string) => `<mark class="campo-pendente" title="Campo não preenchido — sai assim no PDF">${t}</mark>`;
+  const corpo = corpoHtml.replace(TOKEN, marca);
   return cabecalho + corpo;
 }
 
@@ -53,10 +54,13 @@ export function montarFolha(titulo: string, corpoHtml: string): string {
 export function PreVisualizacaoDocumento({
   titulo,
   corpoHtml,
+  modelo = false,
   className,
 }: {
   titulo: string;
   corpoHtml: string;
+  /** Prévia de um MODELO: `{{campo}}` é esperado — marcado como campo, sem o aviso. */
+  modelo?: boolean;
   className?: string;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -69,7 +73,7 @@ export function PreVisualizacaoDocumento({
   // valor atrasado quando há folga.
   const titulo_ = useDeferredValue(titulo);
   const corpo_ = useDeferredValue(corpoHtml);
-  const pendentes = camposPendentes(corpoHtml);
+  const pendentes = modelo ? [] : camposPendentes(corpoHtml);
 
   // Monta o esqueleto uma vez por estilo carregado.
   useEffect(() => {
@@ -87,8 +91,8 @@ export function PreVisualizacaoDocumento({
   // Escreve o conteúdo a cada mudança (sem recarregar: preserva a rolagem).
   useEffect(() => {
     const folha = iframeRef.current?.contentDocument?.querySelector(".folha");
-    if (folha) folha.innerHTML = montarFolha(titulo_, corpo_);
-  }, [titulo_, corpo_, estiloQ.data]);
+    if (folha) folha.innerHTML = montarFolha(titulo_, corpo_, modelo);
+  }, [titulo_, corpo_, modelo, estiloQ.data]);
 
   // Reduz a folha para caber na largura disponível.
   useEffect(() => {

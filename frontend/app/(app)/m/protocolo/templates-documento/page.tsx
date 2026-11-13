@@ -3,8 +3,11 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { Blocks, Type } from "lucide-react";
+import { useState } from "react";
 
+import { PreVisualizacaoDocumento } from "@/components/PreVisualizacaoDocumento";
+import { MontadorTemplate } from "@/components/protocolo/MontadorTemplate";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
@@ -14,6 +17,16 @@ import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { useToast } from "@/components/ui/toast";
 import { api, protocoloApi, type TemplateDocumento } from "@/lib/api";
+import { blocosParaHtml, htmlParaBlocos, type Bloco } from "@/lib/template-blocos";
+import { cn } from "@/lib/utils";
+
+/** Montar com blocos (SI-31) ou editar o HTML corrido no editor de texto. */
+type ModoEdicao = "blocos" | "livre";
+
+async function enviarImagem(file: File): Promise<string> {
+  const { url } = await api.editorImagens.upload(file);
+  return url;
+}
 
 interface FormState {
   nome: string;
@@ -41,6 +54,22 @@ export default function TemplatesDocumentoPage() {
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
+  const [modo, setModo] = useState<ModoEdicao>("blocos");
+  const [blocos, setBlocos] = useState<Bloco[]>([]);
+
+  // Em modo blocos o HTML gravado é sempre o dos blocos: uma fonte só.
+  function mudarBlocos(nova: Bloco[]) {
+    setBlocos(nova);
+    setForm((f) => ({ ...f, corpo_html: blocosParaHtml(nova) }));
+  }
+
+  function trocarModo(novo: ModoEdicao) {
+    if (novo === modo) return;
+    // Voltar do editor livre relê o HTML: o que ainda tem marca de bloco volta
+    // a ser bloco, o resto vira bloco de Texto.
+    if (novo === "blocos") setBlocos(htmlParaBlocos(form.corpo_html));
+    setModo(novo);
+  }
 
   const listQ = useQuery({
     queryKey: ["templates-documento"],
@@ -67,6 +96,8 @@ export default function TemplatesDocumentoPage() {
   function abrirNovo() {
     setEditId(null);
     setForm(EMPTY);
+    setBlocos([]);
+    setModo("blocos");
     setOpen(true);
   }
 
@@ -81,6 +112,9 @@ export default function TemplatesDocumentoPage() {
       corpo_html: t.corpo_html,
       ativo: t.ativo,
     });
+    // Modelo antigo (sem marca de bloco) abre como um bloco de Texto: nada se perde.
+    setBlocos(htmlParaBlocos(t.corpo_html));
+    setModo("blocos");
     setOpen(true);
   }
 
@@ -134,10 +168,6 @@ export default function TemplatesDocumentoPage() {
     ) {
       removeM.mutate(id);
     }
-  }
-
-  function inserirPlaceholder(chave: string) {
-    setForm((f) => ({ ...f, corpo_html: `${f.corpo_html}<p>{{${chave}}}</p>` }));
   }
 
   const templates = listQ.data ?? [];
@@ -221,7 +251,7 @@ export default function TemplatesDocumentoPage() {
         open={open}
         onClose={() => setOpen(false)}
         title={editId === null ? "Novo template" : "Editar template"}
-        size="xl"
+        size="2xl"
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setOpen(false)}>
@@ -300,35 +330,74 @@ export default function TemplatesDocumentoPage() {
             />
           </div>
 
-          <div className="space-y-1.5">
-            <Label>Campos automáticos (clique para inserir)</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {(placeholdersQ.data ?? []).map((p) => (
-                <button
-                  key={p.chave}
-                  type="button"
-                  onClick={() => inserirPlaceholder(p.chave)}
-                  title={p.descricao}
-                  className="rounded border border-border bg-muted px-2 py-0.5 text-xs text-foreground hover:bg-accent"
-                >
-                  {`{{${p.chave}}}`}
-                </button>
-              ))}
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <Label>Conteúdo do modelo</Label>
+                <p className="text-xs text-muted-foreground">
+                  {modo === "blocos"
+                    ? "Monte o documento com blocos; ao lado, como ele sai no PDF."
+                    : "Texto corrido. Voltar para blocos junta o que não for bloco num bloco de Texto."}
+                </p>
+              </div>
+              <div
+                role="group"
+                aria-label="Modo de edição do modelo"
+                className="inline-flex rounded-md border border-border bg-surface-1 p-0.5"
+              >
+                {(
+                  [
+                    ["blocos", "Montar com blocos", Blocks],
+                    ["livre", "Editor livre", Type],
+                  ] as const
+                ).map(([valor, nome, Icone]) => (
+                  <button
+                    key={valor}
+                    type="button"
+                    aria-pressed={modo === valor}
+                    onClick={() => trocarModo(valor)}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors duration-fast",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      modo === valor
+                        ? "bg-card text-foreground shadow-sm"
+                        : "text-foreground-muted hover:text-foreground",
+                    )}
+                  >
+                    <Icone className="h-3.5 w-3.5" aria-hidden="true" />
+                    {nome}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="space-y-1.5">
-            <Label>Conteúdo do modelo</Label>
-            <RichTextEditor
-              value={form.corpo_html}
-              onChange={(html) => setForm({ ...form, corpo_html: html })}
-              minHeight={280}
-              ariaLabel="Conteúdo do template"
-              onUploadImage={async (file) => {
-                const { url } = await api.editorImagens.upload(file);
-                return url;
-              }}
-            />
+            {modo === "blocos" ? (
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+                <MontadorTemplate
+                  blocos={blocos}
+                  onChange={mudarBlocos}
+                  campos={placeholdersQ.data ?? []}
+                  onUploadImage={enviarImagem}
+                />
+                <div className="xl:sticky xl:top-0 xl:self-start">
+                  <PreVisualizacaoDocumento
+                    titulo=""
+                    corpoHtml={form.corpo_html}
+                    modelo
+                    className="h-[32rem]"
+                  />
+                </div>
+              </div>
+            ) : (
+              <RichTextEditor
+                value={form.corpo_html}
+                onChange={(html) => setForm({ ...form, corpo_html: html })}
+                minHeight={280}
+                ariaLabel="Conteúdo do template"
+                campos={placeholdersQ.data ?? []}
+                onUploadImage={enviarImagem}
+              />
+            )}
           </div>
 
           <label className="flex items-center gap-2 text-sm">
