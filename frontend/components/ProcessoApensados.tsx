@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Dialog } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/form-field";
 import { Textarea } from "@/components/ui/textarea";
 import { useConfirm } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
@@ -388,17 +388,11 @@ function ApensarDialog({
   });
 
   const apensarM = useMutation({
-    mutationFn: () => {
-      if (idPrincipal == null || motivo.trim().length < 3) {
-        return Promise.reject(
-          new Error("Escolha o processo principal e informe motivo (≥3 chars)."),
-        );
-      }
-      return apensamentoApi.apensar(processoId, {
-        id_processo_principal: idPrincipal,
+    mutationFn: () =>
+      apensamentoApi.apensar(processoId, {
+        id_processo_principal: idPrincipal as number,
         motivo: motivo.trim(),
-      });
-    },
+      }),
     onSuccess: () => {
       toast.success("Processo apensado.");
       onSuccess();
@@ -406,27 +400,34 @@ function ApensarDialog({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Mesma regra de antes (principal escolhido, motivo com 3+ letras), mas o
+  // botão não fica cinza: clicar mostra o que falta, sob o campo.
+  const [tentou, setTentou] = useState(false);
+  const faltaPrincipal = idPrincipal == null;
+  const faltaMotivo = motivo.trim().length < 3;
+
+  function apensar() {
+    setTentou(true);
+    if (faltaPrincipal || faltaMotivo) {
+      document.getElementById(faltaPrincipal ? "apensar-principal" : "motivo-apensar")?.focus();
+      return;
+    }
+    apensarM.mutate();
+  }
+
   return (
     <Dialog
       open
       onClose={onClose}
       title={`Apensar ${numeroProcesso}`}
+      description="Este processo passa a andar junto (apensado) com o processo principal escolhido. O termo de apensamento é gerado sozinho."
       footer={
         <>
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
-          <Button
-            type="submit"
-            form={formId}
-            disabled={
-              idPrincipal == null || motivo.trim().length < 3 || apensarM.isPending
-            }
-          >
-            {apensarM.isPending && (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />
-            )}
-            <Paperclip className="mr-1 h-4 w-4" aria-hidden="true" />
+          <Button type="submit" form={formId} loading={apensarM.isPending}>
+            {!apensarM.isPending && <Paperclip className="h-4 w-4" aria-hidden="true" />}
             Apensar
           </Button>
         </>
@@ -434,43 +435,54 @@ function ApensarDialog({
     >
       <form
         id={formId}
+        noValidate
         onSubmit={(e) => {
           e.preventDefault();
-          apensarM.mutate();
+          apensar();
         }}
-        className="space-y-3"
+        className="space-y-4"
       >
-        <p className="text-xs text-foreground-muted">
-          Este processo ({numeroProcesso}) passará a ser apensado (filho) do
-          processo escolhido abaixo. Termo de apensamento é gerado automaticamente.
-        </p>
-
-        <div>
-          <Label>Processo principal (pai) <span className="text-danger">*</span></Label>
+        <FormField
+          label="Processo principal"
+          required
+          hint="O processo ao qual este fica apensado. Busque pelo número ou pelo manifestante."
+          error={
+            tentou && faltaPrincipal
+              ? "Escolha o processo principal."
+              : undefined
+          }
+        >
           <Combobox
+            id="apensar-principal"
             options={processoBusca.options}
             selectedOption={processoBusca.selectedOption}
             onQueryChange={processoBusca.onQueryChange}
             value={idPrincipal}
             onChange={(v) => setIdPrincipal(typeof v === "number" ? v : null)}
-            placeholder="Buscar por número ou manifestante…"
+            placeholder="Buscar processo…"
+            searchPlaceholder="Número ou manifestante…"
             loading={processoBusca.loading}
           />
-        </div>
+        </FormField>
 
-        <div>
-          <Label htmlFor="motivo-apensar">
-            Motivo <span className="text-danger">*</span>
-          </Label>
+        <FormField
+          label="Motivo"
+          required
+          error={
+            tentou && faltaMotivo
+              ? "Escreva o motivo do apensamento, com pelo menos 3 letras."
+              : undefined
+          }
+        >
           <Textarea
             id="motivo-apensar"
             value={motivo}
             onChange={(e) => setMotivo(e.target.value)}
             rows={3}
             maxLength={1000}
-            placeholder="Ex: documentos do mesmo objeto, mesmo manifestante, mesma licitação…"
+            placeholder="Ex.: Mesmo objeto e mesmo manifestante."
           />
-        </div>
+        </FormField>
       </form>
     </Dialog>
   );

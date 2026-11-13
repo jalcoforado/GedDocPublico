@@ -1,12 +1,14 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ExternalLink, FileText } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { RichTextEditor, RichTextView } from "@/components/ui/rich-text-editor";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
@@ -175,9 +177,22 @@ export function RedigirDocumentoDialog({
   // de volta), e "Salvar rascunho" sobrescreveria corpo_html com esse vazio.
   const ehGoogle = emEdicao ? minutaQ.data?.origem === "google" : origem === "google";
 
+  // Título é o único obrigatório. O botão não fica cinza esperando por ele:
+  // clicar sem título mostra o erro sob o campo.
+  const [tentouCriar, setTentouCriar] = useState(false);
+  const faltaTitulo = titulo.trim().length === 0;
+  function criar() {
+    setTentouCriar(true);
+    if (faltaTitulo) {
+      document.getElementById("minuta-titulo")?.focus();
+      return;
+    }
+    criarM.mutate();
+  }
+
   const footer = emEdicao && ehGoogle ? (
     <div className="flex justify-end gap-2">
-      <Button variant="secondary" onClick={onClose}>
+      <Button variant="ghost" onClick={onClose}>
         Fechar
       </Button>
       <Button
@@ -200,7 +215,7 @@ export function RedigirDocumentoDialog({
     </div>
   ) : emEdicao ? (
     <div className="flex justify-end gap-2">
-      <Button variant="secondary" onClick={onClose}>
+      <Button variant="ghost" onClick={onClose}>
         Fechar
       </Button>
       <Button onClick={() => salvarM.mutate()} disabled={salvarM.isPending || carregando}>
@@ -209,13 +224,10 @@ export function RedigirDocumentoDialog({
     </div>
   ) : (
     <div className="flex justify-end gap-2">
-      <Button variant="secondary" onClick={onClose}>
+      <Button variant="ghost" onClick={onClose}>
         Cancelar
       </Button>
-      <Button
-        onClick={() => criarM.mutate()}
-        disabled={criarM.isPending || criarGoogleM.isPending || titulo.trim().length === 0}
-      >
+      <Button onClick={criar} loading={criarM.isPending || criarGoogleM.isPending}>
         {criarM.isPending || criarGoogleM.isPending
           ? "Criando…"
           : origem === "google"
@@ -236,70 +248,87 @@ export function RedigirDocumentoDialog({
     >
       {!emEdicao ? (
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="minuta-titulo">Título do documento</Label>
+          <FormField
+            label="Título do documento"
+            required
+            error={
+              tentouCriar && faltaTitulo
+                ? "Dê um título ao documento, ex.: Despacho de encaminhamento."
+                : undefined
+            }
+          >
             <Input
               id="minuta-titulo"
               value={titulo}
               onChange={(e) => setTitulo(e.target.value)}
               placeholder="Ex.: Despacho de encaminhamento"
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="minuta-destinatario">Destinatário (opcional)</Label>
+          </FormField>
+          <FormField
+            label="Destinatário"
+            opcional
+            hint={
+              <>
+                Preenche o campo automático {"{{"}destinatario.nome{"}}"} do modelo, se houver.
+              </>
+            }
+          >
             <Input
               id="minuta-destinatario"
               value={destinatario}
               onChange={(e) => setDestinatario(e.target.value)}
               placeholder="Ex.: Secretaria de Obras"
             />
-            <p className="text-xs text-muted-foreground">
-              Preenche o campo automático {"{{"}destinatario.nome{"}}"} do modelo, se houver.
-            </p>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Plataforma de redação</Label>
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  value="interno"
-                  checked={origem === "interno"}
-                  onChange={(e) => setOrigem(e.target.value as "interno" | "google")}
-                  className="w-4 h-4"
-                />
-                <span className="text-sm">Plataforma (editor interno com templates)</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  value="google"
-                  checked={origem === "google"}
-                  onChange={(e) => setOrigem(e.target.value as "interno" | "google")}
-                  disabled={!hasGoogleCredentials}
-                  className="w-4 h-4"
-                />
-                <span className="text-sm">Google Docs (editor externo)</span>
-              </label>
-
-              {!hasGoogleCredentials && (
-                <div className="ml-6 text-xs text-amber-600 space-y-1">
-                  <p>⚠️ Você precisa conectar sua conta Google Docs primeiro.</p>
-                  <button
-                    type="button"
-                    onClick={() => setShowGoogleConnect(true)}
-                    className="text-blue-600 hover:underline font-medium"
-                  >
-                    Conectar agora →
-                  </button>
-                </div>
-              )}
-            </div>
+          </FormField>
+          <div>
+            {/* Google Docs sem conta conectada: escolher a opção abre a
+                conexão, em vez de deixar seguir para um "criar" que falharia. */}
+            <EscolhaSegmentada
+              nome="minuta-origem"
+              titulo="Onde redigir"
+              moldura={false}
+              valor={origem}
+              onChange={(v) => {
+                if (v === "google" && !hasGoogleCredentials) {
+                  setShowGoogleConnect(true);
+                  return;
+                }
+                setOrigem(v);
+              }}
+              opcoes={[
+                {
+                  valor: "interno",
+                  rotulo: "Editor da plataforma",
+                  icon: FileText,
+                  descricao: "Edita aqui mesmo, com os modelos de documento.",
+                },
+                {
+                  valor: "google",
+                  rotulo: "Google Docs",
+                  icon: ExternalLink,
+                  descricao: "Abre o documento no Google Docs, numa nova aba.",
+                },
+              ]}
+            />
+            {!hasGoogleCredentials && (
+              <p className="mt-1.5 text-xs text-foreground-muted">
+                Para usar o Google Docs, conecte sua conta primeiro.{" "}
+                <button
+                  type="button"
+                  onClick={() => setShowGoogleConnect(true)}
+                  className="font-medium text-primary hover:underline"
+                >
+                  Conectar agora
+                </button>
+              </p>
+            )}
           </div>
           {origem === "interno" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="minuta-template">Modelo (template)</Label>
+            <FormField
+              label="Modelo"
+              opcional
+              hint="Com um modelo, os dados do processo (número, requerente, data…) já entram preenchidos."
+            >
               <Select
                 id="minuta-template"
                 value={templateId}
@@ -312,11 +341,7 @@ export function RedigirDocumentoDialog({
                   </option>
                 ))}
               </Select>
-              <p className="text-xs text-muted-foreground">
-                Ao usar um modelo, os campos do processo (número, requerente, data…) são
-                preenchidos automaticamente.
-              </p>
-            </div>
+            </FormField>
           )}
         </div>
       ) : carregando ? (
@@ -352,39 +377,42 @@ export function RedigirDocumentoDialog({
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="minuta-titulo-edit">Título</Label>
-            <Input
-              id="minuta-titulo-edit"
-              value={titulo}
-              onChange={(e) => setTitulo(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="minuta-destinatario-edit">Destinatário (opcional)</Label>
-            <Input
-              id="minuta-destinatario-edit"
-              value={destinatario}
-              onChange={(e) => setDestinatario(e.target.value)}
-              placeholder="Ex.: Secretaria de Obras"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Conteúdo</Label>
-            <RichTextEditor
-              value={corpo}
-              onChange={setCorpo}
-              minHeight={320}
-              ariaLabel="Editor do documento"
-              onUploadImage={async (file) => {
-                const { url } = await api.editorImagens.upload(file);
-                return url;
-              }}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Versão atual: v{versao}. Cada "Salvar rascunho" registra uma nova versão.
-          </p>
+          <GradeCampos>
+            <FormField label="Título" required>
+              <Input
+                id="minuta-titulo-edit"
+                value={titulo}
+                onChange={(e) => setTitulo(e.target.value)}
+              />
+            </FormField>
+            <FormField label="Destinatário" opcional>
+              <Input
+                id="minuta-destinatario-edit"
+                value={destinatario}
+                onChange={(e) => setDestinatario(e.target.value)}
+                placeholder="Ex.: Secretaria de Obras"
+              />
+            </FormField>
+          </GradeCampos>
+          <FormField
+            label="Conteúdo"
+            hint={`Versão atual: v${versao}. Cada "Salvar rascunho" registra uma nova versão.`}
+          >
+            {/* O editor não aceita id: o rótulo aponta para o invólucro e o
+                nome acessível vem do ariaLabel. */}
+            <div>
+              <RichTextEditor
+                value={corpo}
+                onChange={setCorpo}
+                minHeight={320}
+                ariaLabel="Editor do documento"
+                onUploadImage={async (file) => {
+                  const { url } = await api.editorImagens.upload(file);
+                  return url;
+                }}
+              />
+            </div>
+          </FormField>
         </div>
       )}
     </Dialog>

@@ -6,7 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { DESPACHO_PADRAO } from "@/lib/despacho";
@@ -215,79 +215,102 @@ function EncaminharEmLote({
     enabled: open,
   });
   const valido = destino !== "" && prioridade !== "";
+  // Erro sob o campo só depois de tentar confirmar; o botão não fica cinza.
+  const [tentou, setTentou] = useState(false);
+
+  function confirmar() {
+    setTentou(true);
+    if (!valido) {
+      document.getElementById(destino === "" ? "lote-destino" : "lote-prioridade")?.focus();
+      return;
+    }
+    onConfirmar({
+      id_unidade_destino: Number(destino),
+      id_prioridade: Number(prioridade),
+      data_prazo: prazo || null,
+      despacho: despacho.trim() || null,
+    });
+  }
 
   return (
     <Dialog
       open={open}
       onClose={onClose}
       title={n === 1 ? "Encaminhar 1 processo" : `Encaminhar ${n} processos`}
+      description="Todos vão para o mesmo destino, com a mesma prioridade, prazo e despacho."
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Voltar
           </Button>
-          <Button
-            disabled={!valido || enviando}
-            onClick={() =>
-              onConfirmar({
-                id_unidade_destino: Number(destino),
-                id_prioridade: Number(prioridade),
-                data_prazo: prazo || null,
-                despacho: despacho.trim() || null,
-              })
-            }
-          >
-            {enviando ? "Encaminhando..." : "Confirmar encaminhamento"}
+          <Button loading={enviando} onClick={confirmar}>
+            {enviando ? "Encaminhando…" : "Confirmar encaminhamento"}
           </Button>
         </>
       }
     >
-      <p className="text-sm text-foreground-muted">
-        Todos vão para o mesmo destino, com a mesma prioridade, prazo e despacho. Processo com
-        fluxo obrigatório que não aceite esse destino fica de fora e aparece no resultado.
-      </p>
-      <div className="mt-3 space-y-3">
-        <div>
-          <Label htmlFor="lote-destino">Unidade de destino</Label>
+      <div className="space-y-4">
+        <p className="text-xs text-foreground-muted">
+          Processo com fluxo obrigatório que não aceite esse destino fica de fora e aparece
+          no resultado.
+        </p>
+        <FormField
+          label="Unidade de destino"
+          required
+          error={tentou && destino === "" ? "Escolha para qual unidade os processos vão." : undefined}
+        >
           <Select id="lote-destino" value={destino} onChange={(e) => setDestino(e.target.value)}>
-            <option value="">Selecione…</option>
+            <option value="">Escolha…</option>
             {(unidadesQ.data?.items ?? []).map((u) => (
               <option key={u.id} value={u.id}>
                 {u.unidade_trabalho}
               </option>
             ))}
           </Select>
-        </div>
-        <div>
-          <Label htmlFor="lote-prioridade">Prioridade</Label>
-          <Select id="lote-prioridade" value={prioridade} onChange={(e) => setPrioridade(e.target.value)}>
-            <option value="">Selecione…</option>
-            {(prioridadesQ.data ?? []).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.prioridade}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <Label htmlFor="lote-prazo">Prazo (opcional)</Label>
-          <Input id="lote-prazo" type="date" value={prazo} onChange={(e) => setPrazo(e.target.value)} />
-        </div>
-        <div>
-          <div className="flex items-center justify-between gap-2">
-            <Label htmlFor="lote-despacho">Despacho (opcional)</Label>
-            {!despacho && (
+        </FormField>
+        <GradeCampos>
+          <FormField
+            label="Prioridade"
+            required
+            error={tentou && prioridade === "" ? "Escolha a prioridade." : undefined}
+          >
+            <Select id="lote-prioridade" value={prioridade} onChange={(e) => setPrioridade(e.target.value)}>
+              <option value="">Escolha…</option>
+              {(prioridadesQ.data ?? []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.prioridade}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <FormField label="Prazo" opcional>
+            <Input id="lote-prazo" type="date" value={prazo} onChange={(e) => setPrazo(e.target.value)} />
+          </FormField>
+        </GradeCampos>
+        <FormField
+          label="Despacho"
+          opcional
+          hint="O mesmo texto vai em todos os processos."
+          acao={
+            !despacho ? (
               <button
                 type="button"
                 onClick={() => setDespacho(DESPACHO_PADRAO)}
-                className="rounded text-xs font-medium text-primary underline-offset-2 hover:underline"
+                className="font-medium text-primary underline-offset-2 hover:underline"
               >
                 Usar texto padrão
               </button>
-            )}
-          </div>
-          <Textarea id="lote-despacho" rows={3} value={despacho} onChange={(e) => setDespacho(e.target.value)} />
-        </div>
+            ) : undefined
+          }
+        >
+          <Textarea
+            id="lote-despacho"
+            rows={3}
+            value={despacho}
+            onChange={(e) => setDespacho(e.target.value)}
+            placeholder="Ex.: Encaminho para análise e parecer."
+          />
+        </FormField>
       </div>
       <ErroDoDialogo erro={erro} />
     </Dialog>
@@ -310,32 +333,53 @@ function ArquivarEmLote({
   onConfirmar: (a: NonNullable<LoteRequest["arquivar"]>) => void;
 }) {
   const [motivo, setMotivo] = useState("");
+  const [tentou, setTentou] = useState(false);
+  const faltaMotivo = motivo.trim().length < 3;
+
+  function confirmar() {
+    setTentou(true);
+    if (faltaMotivo) {
+      document.getElementById("lote-motivo")?.focus();
+      return;
+    }
+    onConfirmar({ motivo: motivo.trim() });
+  }
+
   return (
     <Dialog
       open={open}
       onClose={onClose}
       title={n === 1 ? "Arquivar 1 processo" : `Arquivar ${n} processos`}
+      description="Arquivar encerra os processos. O mesmo motivo fica registrado em todos."
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Voltar
           </Button>
-          <Button
-            disabled={motivo.trim().length < 3 || enviando}
-            onClick={() => onConfirmar({ motivo: motivo.trim() })}
-          >
-            {enviando ? "Arquivando..." : "Confirmar arquivamento"}
+          <Button loading={enviando} onClick={confirmar}>
+            {enviando ? "Arquivando…" : "Confirmar arquivamento"}
           </Button>
         </>
       }
     >
-      <p className="text-sm text-foreground-muted">
-        Arquivar encerra os processos. O mesmo motivo fica registrado em todos.
-      </p>
-      <div className="mt-3">
-        <Label htmlFor="lote-motivo">Motivo do arquivamento</Label>
-        <Textarea id="lote-motivo" rows={3} value={motivo} onChange={(e) => setMotivo(e.target.value)} />
-      </div>
+      <FormField
+        label="Motivo do arquivamento"
+        required
+        hint="Fica no histórico de cada processo."
+        error={
+          tentou && faltaMotivo
+            ? "Escreva o motivo, com pelo menos 3 letras."
+            : undefined
+        }
+      >
+        <Textarea
+          id="lote-motivo"
+          rows={3}
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          placeholder="Ex.: Demandas atendidas"
+        />
+      </FormField>
       <ErroDoDialogo erro={erro} />
     </Dialog>
   );

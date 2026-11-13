@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { MapPin } from "lucide-react";
 
 import { CrudPage } from "@/components/CrudPage";
 import { api, type Endereco } from "@/lib/api";
@@ -22,6 +23,9 @@ export default function EnderecosPage() {
   return (
     <CrudPage<Endereco>
       title="Endereços"
+      icon={MapPin}
+      description="Logradouros usados no endereço dos manifestantes."
+      novoLabel="Novo endereço"
       queryKey={["enderecos", q]}
       fetchList={({ page }) => api.enderecos.list({ q: q || undefined, page, page_size: 50 })}
       createFn={api.enderecos.create}
@@ -53,9 +57,9 @@ export default function EnderecosPage() {
         },
       ]}
       fields={[
-        { name: "rua", label: "Rua", type: "text", colSpan: 2 },
-        { name: "numero", label: "Número", type: "text" },
-        { name: "complemento", label: "Complemento", type: "text" },
+        { name: "rua", label: "Rua", type: "text", colSpan: 2, placeholder: "Ex.: Rua das Flores" },
+        { name: "numero", label: "Número", type: "text", placeholder: "Ex.: 120 ou S/N" },
+        { name: "complemento", label: "Complemento", type: "text", placeholder: "Ex.: Sala 2" },
         {
           name: "id_estado",
           label: "Estado",

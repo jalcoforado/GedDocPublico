@@ -19,6 +19,7 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Dialog } from "@/components/ui/dialog";
+import { COR_WF, TEMA_XYFLOW, estiloDoNo } from "@/components/workflow/cores";
 import { organogramaApi, type OrganogramaNo } from "@/lib/api";
 
 const NODE_WIDTH = 180;
@@ -231,8 +232,8 @@ function OrganogramaDialog({
           ),
         },
         style: {
-          border: isSelected ? "2px solid #f59e0b" : "1px solid var(--border, #d4d4d8)",
-          background: isSelected ? "#fef3c7" : "var(--card, #fff)",
+          ...estiloDoNo({ selecionado: isSelected }),
+          color: COR_WF.texto,
           borderRadius: 8,
           padding: 8,
           width: NODE_WIDTH,
@@ -248,8 +249,8 @@ function OrganogramaDialog({
         id: `e-${n.id_unidade_pai}-${n.id}`,
         source: String(n.id_unidade_pai),
         target: String(n.id),
-        style: { stroke: "#64748b", strokeWidth: 1.5 },
-        markerEnd: { type: MarkerType.ArrowClosed },
+        style: { stroke: COR_WF.transicao, strokeWidth: 1.5 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: COR_WF.transicao },
       }));
     return { nodes, edges };
   }, [dados, value]);
@@ -287,6 +288,7 @@ function OrganogramaDialog({
           )}
           {!carregando && dados.length > 0 && (
             <ReactFlow
+              style={TEMA_XYFLOW}
               nodes={nodes}
               edges={edges}
               fitView

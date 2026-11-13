@@ -1,22 +1,33 @@
 "use client";
 
-import { Carregando } from "@/components/ui/carregando";
-
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ChevronDown, ChevronUp, Download, FileText } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  Hourglass,
+  Inbox,
+  Timer,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { RelatoriosNav } from "@/components/RelatoriosNav";
+import { AcoesDoFiltro, RelatorioCabecalho, temFiltro } from "@/components/protocolo/RelatorioCabecalho";
+import { RankingEmBarras } from "@/components/protocolo/RankingEmBarras";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Carregando } from "@/components/ui/carregando";
 import { Checkbox } from "@/components/ui/checkbox";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
+import { KpiCard } from "@/components/ui/kpi-card";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+
 import { useToast } from "@/components/ui/toast";
 import {
   api,
@@ -26,6 +37,8 @@ import {
   type TramitacaoEtapa,
   type TramitacaoProcesso,
 } from "@/lib/api";
+import { useFiltroNaUrl } from "@/lib/filtro-na-url";
+import { tempoPorUnidade } from "@/lib/tempo-por-unidade";
 
 function fmtDateTime(s: string | null) {
   if (!s) return "—";
@@ -44,6 +57,8 @@ function fmtDate(s: string | null) {
 
 function fmtMin(m: number | null): string {
   if (m === null || m === undefined) return "—";
+  // Médias chegam fracionadas (123.4 min); sem arredondar saía "2h 03.4min".
+  m = Math.round(m);
   if (m < 60) return `${m} min`;
   const h = Math.floor(m / 60);
   const rem = m % 60;
@@ -56,8 +71,10 @@ function fmtMin(m: number | null): string {
 export default function RelatorioTramitacaoPage() {
   const router = useRouter();
   const toast = useToast();
-  const [draft, setDraft] = useState<RelatorioFiltroInput>({});
-  const [applied, setApplied] = useState<RelatorioFiltroInput>({});
+  // Filtro aplicado mora na URL: recarregar, voltar ou mandar o link reabre o mesmo recorte.
+  const [applied, aplicar] = useFiltroNaUrl<RelatorioFiltroInput>();
+  const [draft, setDraft] = useState<RelatorioFiltroInput>(applied);
+  useEffect(() => setDraft(applied), [applied]);
 
   const gerarBg = useMutation({
     mutationFn: () => api.jobs.relatorioTramitacao(applied),
@@ -81,32 +98,17 @@ export default function RelatorioTramitacaoPage() {
     queryKey: ["relatorio-tramitacao", applied],
     queryFn: () => api.relatorios.tramitacao(applied),
   });
+  const porUnidade = useMemo(() => tempoPorUnidade(relQ.data?.processos ?? []), [relQ.data]);
+  // Topo só quando há tempo de verdade: "Protocolo Geral — 0 min" não responde nada.
+  const topo = porUnidade[0] && porUnidade[0].medio > 0 ? porUnidade[0] : undefined;
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold text-primary">Relatórios</h1>
-      <RelatoriosNav />
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-lg font-semibold text-foreground">
-          Tramitação (tempo em cada unidade + atrasos)
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          <a
-            href={tramitacaoCsvUrl(applied)}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-muted px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Download className="h-4 w-4" aria-hidden="true" /> CSV
-          </a>
-          <a
-            href={tramitacaoPdfUrl(applied)}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-aprimora-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <FileText className="h-4 w-4" aria-hidden="true" /> PDF
-          </a>
+      <RelatorioCabecalho
+        subtitulo="Tramitação (tempo em cada unidade + atrasos)"
+        csvUrl={tramitacaoCsvUrl(applied)}
+        pdfUrl={tramitacaoPdfUrl(applied)}
+        acoesExtras={
           <Button
             variant="secondary"
             size="sm"
@@ -116,105 +118,97 @@ export default function RelatorioTramitacaoPage() {
           >
             {gerarBg.isPending ? "Enfileirando..." : "Gerar em background"}
           </Button>
-        </div>
-      </div>
+        }
+      />
 
-      <Card>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <div>
-              <Label htmlFor="unidade">Unidade</Label>
-              <Select
-                id="unidade"
-                value={draft.id_unidade ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    id_unidade: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-              >
-                <option value="">Todas</option>
-                {unidadesQ.data?.items.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.unidade_trabalho}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="tipo">Tipo de processo</Label>
-              <Select
-                id="tipo"
-                value={draft.id_tipo_processo ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    id_tipo_processo: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-              >
-                <option value="">Todos</option>
-                {tiposQ.data?.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.tipo_processo}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="desde">Aberto desde</Label>
-              <Input
-                id="desde"
-                type="date"
-                value={draft.desde?.slice(0, 10) ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    desde: e.target.value ? `${e.target.value}T00:00:00` : undefined,
-                  })
-                }
-              />
-            </div>
-            <div>
-              <Label htmlFor="ate">Aberto até</Label>
-              <Input
-                id="ate"
-                type="date"
-                value={draft.ate?.slice(0, 10) ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    ate: e.target.value ? `${e.target.value}T23:59:59` : undefined,
-                  })
-                }
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="ativos"
-                checked={!!draft.apenas_ativos}
-                onChange={(e) => setDraft({ ...draft, apenas_ativos: e.target.checked })}
-              />
-              <Label htmlFor="ativos" className="!mb-0">
-                Apenas ativos
-              </Label>
-            </div>
-            <div className="md:col-span-3 flex items-end gap-2">
-              <Button onClick={() => setApplied({ ...draft })}>Gerar relatório</Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setDraft({});
-                  setApplied({});
-                }}
-              >
-                Limpar
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <FilterBar>
+        <div className="w-full sm:w-56">
+          <Label htmlFor="unidade">Unidade</Label>
+          <Select
+            id="unidade"
+            value={draft.id_unidade ?? ""}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                id_unidade: e.target.value ? Number(e.target.value) : undefined,
+              })
+            }
+          >
+            <option value="">Todas</option>
+            {unidadesQ.data?.items.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.unidade_trabalho}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="w-full sm:w-48">
+          <Label htmlFor="tipo">Tipo de processo</Label>
+          <Select
+            id="tipo"
+            value={draft.id_tipo_processo ?? ""}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                id_tipo_processo: e.target.value ? Number(e.target.value) : undefined,
+              })
+            }
+          >
+            <option value="">Todos</option>
+            {tiposQ.data?.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.tipo_processo}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="w-full sm:w-40">
+          <Label htmlFor="desde">Aberto desde</Label>
+          <Input
+            id="desde"
+            type="date"
+            value={draft.desde?.slice(0, 10) ?? ""}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                desde: e.target.value ? `${e.target.value}T00:00:00` : undefined,
+              })
+            }
+          />
+        </div>
+        <div className="w-full sm:w-40">
+          <Label htmlFor="ate">Aberto até</Label>
+          <Input
+            id="ate"
+            type="date"
+            value={draft.ate?.slice(0, 10) ?? ""}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                ate: e.target.value ? `${e.target.value}T23:59:59` : undefined,
+              })
+            }
+          />
+        </div>
+        <div className="flex h-11 items-center gap-2">
+          <Checkbox
+            id="ativos"
+            checked={!!draft.apenas_ativos}
+            onChange={(e) => setDraft({ ...draft, apenas_ativos: e.target.checked })}
+          />
+          <Label htmlFor="ativos" className="!mb-0">
+            Apenas ativos
+          </Label>
+        </div>
+        <AcoesDoFiltro
+          filtrado={temFiltro(draft) || temFiltro(applied)}
+          onGerar={() => aplicar({ ...draft })}
+          onLimpar={() => {
+            setDraft({});
+            aplicar({});
+          }}
+        />
+      </FilterBar>
 
       {relQ.isLoading && <Carregando className="text-sm text-muted-foreground" />}
       {relQ.error && (
@@ -228,58 +222,104 @@ export default function RelatorioTramitacaoPage() {
 
       {relQ.data && (
         <>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-            <StatCard label="Processos" value={String(relQ.data.qtd_processos)} />
-            <StatCard
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <KpiCard label="Processos" value={relQ.data.qtd_processos} icon={FileText} />
+            <KpiCard
               label="Com atraso"
-              value={String(relQ.data.qtd_processos_com_atraso)}
-              danger={relQ.data.qtd_processos_com_atraso > 0}
+              value={relQ.data.qtd_processos_com_atraso}
+              icon={AlertTriangle}
+              intent={relQ.data.qtd_processos_com_atraso > 0 ? "danger" : "default"}
             />
-            <StatCard
+            <KpiCard
               label="Tempo médio por processo"
               value={fmtMin(relQ.data.minutos_medio_por_processo)}
+              icon={Timer}
+            />
+            <KpiCard
+              label="Onde mais demora"
+              value={topo ? topo.unidade : "—"}
+              hint={topo ? `${fmtMin(topo.medio)} em média por passagem` : "Sem tempo registrado"}
+              icon={Hourglass}
+              intent="warning"
             />
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Tempo por unidade</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {relQ.data.por_unidade.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Sem dados.</p>
-              ) : (
-                <Table>
-                  <THead>
-                    <TR>
-                      <TH>Unidade</TH>
-                      <TH className="text-right">Passagens</TH>
-                      <TH className="text-right">Atrasos</TH>
-                      <TH className="text-right">Tempo total</TH>
-                      <TH className="text-right">Tempo médio</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {relQ.data.por_unidade.map((u, i) => (
-                      <TR key={`${u.id_unidade ?? "null"}-${i}`}>
-                        <TD>{u.unidade ?? "—"}</TD>
-                        <TD className="text-right tabular-nums">{u.qtd_passagens}</TD>
-                        <TD className="text-right tabular-nums">
-                          {u.qtd_atrasos > 0 ? (
-                            <span className="font-semibold text-danger">{u.qtd_atrasos}</span>
-                          ) : (
-                            u.qtd_atrasos
-                          )}
-                        </TD>
-                        <TD className="text-right tabular-nums">{fmtMin(u.minutos_total)}</TD>
-                        <TD className="text-right tabular-nums">{fmtMin(u.minutos_medio)}</TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Onde o processo para?</CardTitle>
+                <CardDescription>
+                  Unidades pelo tempo médio que um processo fica nelas, contando quem está lá
+                  agora. Em vermelho, as que estouraram prazo.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <RankingEmBarras
+                  rotuloDoValor="tempo médio por passagem"
+                  vazio={<EmptyState icon={Inbox} title="Sem dados no recorte" className="p-6" />}
+                  itens={porUnidade.map((u) => ({
+                    chave: u.chave,
+                    rotulo: u.unidade,
+                    valor: u.medio,
+                    valorTexto: fmtMin(u.medio),
+                    alerta: u.atrasos > 0,
+                    detalhe: (
+                      <>
+                        {u.passagens} {u.passagens === 1 ? "passagem" : "passagens"}
+                        {u.paradosAgora > 0 &&
+                          ` · ${u.paradosAgora} ${u.paradosAgora === 1 ? "parado" : "parados"} aqui agora`}
+                        {u.atrasos > 0 && (
+                          <span className="font-semibold text-danger-soft-foreground">
+                            {" "}
+                            · {u.atrasos} {u.atrasos === 1 ? "atraso" : "atrasos"}
+                          </span>
+                        )}
+                      </>
+                    ),
+                  }))}
+                />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Quem está parado há mais tempo?</CardTitle>
+                <CardDescription>
+                  Processos ativos pelo tempo desde que chegaram onde estão agora.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <RankingEmBarras
+                  rotuloDoValor="parado há"
+                  vazio={
+                    <EmptyState icon={Inbox} title="Nenhum processo ativo parado" className="p-6" />
+                  }
+                  itens={relQ.data.processos
+                    .filter((p) => p.ativo && p.minutos_em_andamento > 0)
+                    .sort((a, b) => b.minutos_em_andamento - a.minutos_em_andamento)
+                    .map((p) => ({
+                      chave: p.id,
+                      rotulo: (
+                        <Link
+                          href={`/m/protocolo/processos/${p.id}`}
+                          className="font-mono text-primary hover:underline"
+                        >
+                          {p.numero_processo}
+                        </Link>
+                      ),
+                      valor: p.minutos_em_andamento,
+                      valorTexto: fmtMin(p.minutos_em_andamento),
+                      alerta: p.teve_atraso,
+                      detalhe: (
+                        <>
+                          em {p.local_atual ?? "—"} · {p.assunto ?? "—"}
+                        </>
+                      ),
+                    }))}
+                />
+              </CardContent>
+            </Card>
+          </div>
 
           <Card>
             <CardHeader>
@@ -287,7 +327,11 @@ export default function RelatorioTramitacaoPage() {
             </CardHeader>
             <CardContent>
               {relQ.data.processos.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Nenhum processo no recorte.</p>
+                <EmptyState
+                  icon={Inbox}
+                  title="Nenhum processo no recorte"
+                  description="Ajuste os filtros acima e gere o relatório de novo."
+                />
               ) : (
                 <div className="space-y-3">
                   {relQ.data.processos.map((p) => (
@@ -299,29 +343,6 @@ export default function RelatorioTramitacaoPage() {
           </Card>
         </>
       )}
-    </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  danger = false,
-}: {
-  label: string;
-  value: string;
-  danger?: boolean;
-}) {
-  return (
-    <div className="rounded-md border border-border bg-card p-3 text-center">
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </div>
-      <div
-        className={"text-xl font-bold tabular-nums " + (danger ? "text-danger" : "text-primary")}
-      >
-        {value}
-      </div>
     </div>
   );
 }
@@ -421,7 +442,7 @@ function EtapasTimeline({ etapas }: { etapas: TramitacaoEtapa[] }) {
             <span>
               prazo: {fmtDate(e.prazo_estipulado)}
               {e.atrasou && (
-                <span className="ml-1 font-semibold text-danger">ATRASO</span>
+                <span className="ml-1 font-semibold text-danger-soft-foreground">ATRASO</span>
               )}
             </span>
           </div>

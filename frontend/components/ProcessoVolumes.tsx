@@ -7,7 +7,7 @@ import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Textarea } from "@/components/ui/textarea";
 import { useConfirm } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
@@ -266,14 +266,11 @@ function VolumeForm({
       size="sm"
       footer={
         <>
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
-          <Button type="submit" form={formId} disabled={saveM.isPending}>
-            {saveM.isPending && (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />
-            )}
-            {editing ? "Salvar" : "Criar"}
+          <Button type="submit" form={formId} loading={saveM.isPending}>
+            {editing ? "Salvar alterações" : "Criar volume"}
           </Button>
         </>
       }
@@ -284,55 +281,63 @@ function VolumeForm({
           e.preventDefault();
           saveM.mutate();
         }}
-        className="space-y-3"
+        className="space-y-4"
       >
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <Label htmlFor="vol-num">
-              Número <span className="text-danger">*</span>
-            </Label>
-            <Input
-              id="vol-num"
-              type="number"
-              value={numero}
-              min={1}
-              max={999}
-              disabled={editing !== null}
-              onChange={(e) => setNumero(Number(e.target.value) || 1)}
-            />
-          </div>
-          <div>
-            <Label htmlFor="vol-pi">Pág. inicial</Label>
+        <FormField
+          label="Número"
+          required
+          hint={
+            editing
+              ? "O número do volume não muda depois de criado."
+              : "Já vem com o próximo da sequência."
+          }
+        >
+          <Input
+            id="vol-num"
+            type="number"
+            value={numero}
+            min={1}
+            max={999}
+            disabled={editing !== null}
+            onChange={(e) => setNumero(Number(e.target.value) || 1)}
+            className="w-28"
+          />
+        </FormField>
+
+        {/* Início e fim andam juntos: o intervalo de folhas do volume. */}
+        <GradeCampos>
+          <FormField label="Página inicial" opcional>
             <Input
               id="vol-pi"
               type="number"
               value={paginaInicial}
               min={1}
               onChange={(e) => setPaginaInicial(e.target.value)}
+              placeholder="Ex.: 1"
             />
-          </div>
-          <div>
-            <Label htmlFor="vol-pf">Pág. final</Label>
+          </FormField>
+          <FormField label="Página final" opcional>
             <Input
               id="vol-pf"
               type="number"
               value={paginaFinal}
               min={1}
               onChange={(e) => setPaginaFinal(e.target.value)}
+              placeholder="Ex.: 200"
             />
-          </div>
-        </div>
+          </FormField>
+        </GradeCampos>
 
-        <div>
-          <Label htmlFor="vol-obs">Observação (opcional)</Label>
+        <FormField label="Observação" opcional>
           <Textarea
             id="vol-obs"
             value={observacao}
             onChange={(e) => setObservacao(e.target.value)}
             rows={2}
             maxLength={500}
+            placeholder="Ex.: Volume aberto ao atingir 200 folhas."
           />
-        </div>
+        </FormField>
       </form>
     </Dialog>
   );

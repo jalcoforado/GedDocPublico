@@ -10,9 +10,9 @@ import {
   Hash,
   Info,
   LayoutTemplate,
-  Loader2,
   Lock,
   Mail,
+  Plus,
   Tag,
   Users,
 } from "lucide-react";
@@ -21,12 +21,20 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { PageHeader } from "@/components/ui/page-header";
+import { BarraAcoesFormulario } from "@/components/ui/barra-acoes-formulario";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { useConfirm } from "@/components/ui/confirm";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import {
+  LayoutFormulario,
+  RoteiroFormulario,
+  resumoDoQueFalta,
+  type EtapaRoteiro,
+} from "@/components/ui/roteiro-formulario";
 import { SectionCard } from "@/components/ui/section-card";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
@@ -39,7 +47,6 @@ import {
   type RascunhoUpdateInput,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { cn } from "@/lib/utils";
 import { useAssuntosAll } from "@/lib/assuntos";
 import { useManifestantesBusca } from "@/lib/manifestantes";
 import { telefoneParaExibir } from "@/lib/mascaras";
@@ -83,83 +90,6 @@ type FormState = {
 };
 
 const DRAFT_KEY = "aprimora.novo-processo.draft.v1";
-
-interface OpcaoConfig<V extends string> {
-  valor: V;
-  rotulo: string;
-  descricao: string;
-  icon: React.ComponentType<{ className?: string }>;
-}
-
-/**
- * Escolha entre dois valores com título fixo e as duas opções à vista.
- *
- * Substitui o interruptor (ToggleCard), cujo título trocava com o estado:
- * desligado, ele mostrava "Sigiloso" ou "Origem interna" com a chave
- * apagada — lido como "não sigiloso", "não interna", o oposto do gravado.
- * Interruptor é para ligar/desligar; escolher entre dois valores pede as
- * duas opções nomeadas. Por baixo são `<input type="radio">` nativos: setas,
- * Tab e leitor de tela funcionam sem código próprio.
- */
-function EscolhaConfig<V extends string>({
-  nome,
-  titulo,
-  valor,
-  opcoes,
-  onChange,
-}: {
-  nome: string;
-  titulo: string;
-  valor: V;
-  opcoes: [OpcaoConfig<V>, OpcaoConfig<V>];
-  onChange: (v: V) => void;
-}) {
-  const atual = opcoes.find((o) => o.valor === valor) ?? opcoes[0];
-  return (
-    <fieldset className="rounded-lg border border-border bg-surface-1 p-3">
-      <legend className="sr-only">{titulo}</legend>
-      <div aria-hidden="true" className="mb-2 text-sm font-medium text-foreground">
-        {titulo}
-      </div>
-      <div className="grid grid-cols-2 gap-1 rounded-md bg-surface-2 p-1">
-        {opcoes.map((o) => {
-          const marcada = o.valor === valor;
-          const Icon = o.icon;
-          return (
-            <label
-              key={o.valor}
-              className={cn(
-                // `relative` prende o rádio `sr-only` (absoluto) dentro da
-                // opção. Sem ele o rádio ficava ancorado longe, e o foco do
-                // clique rolava a página até lá.
-                "relative flex cursor-pointer items-center justify-center gap-1.5 rounded px-2 py-1.5 text-sm transition-colors duration-fast",
-                "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
-                marcada
-                  ? "bg-card font-medium text-foreground shadow-xs"
-                  : "text-foreground-muted hover:text-foreground",
-              )}
-            >
-              <input
-                type="radio"
-                name={nome}
-                value={o.valor}
-                checked={marcada}
-                onChange={() => onChange(o.valor)}
-                aria-describedby={marcada ? `${nome}-descricao` : undefined}
-                className="sr-only"
-              />
-              <Icon className={cn("h-4 w-4 shrink-0", marcada && "text-brand")} aria-hidden="true" />
-              {o.rotulo}
-            </label>
-          );
-        })}
-      </div>
-      <p id={`${nome}-descricao`} className="mt-2 text-xs text-foreground-muted">
-        {atual.descricao}
-      </p>
-    </fieldset>
-  );
-}
 
 /** O rascunho, como o formulário o mostra. */
 function formDoRascunho(p: ProcessoDetail): FormState {
@@ -422,10 +352,38 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
     return edicao;
   }
 
+  // O que falta, na ordem dos campos na tela. Alimenta o roteiro, o status da
+  // barra de ações e (depois da primeira tentativa de enviar) os erros sob
+  // cada campo — uma conta só, para os três nunca discordarem.
+  const faltando: EtapaRoteiro["faltando"] = [
+    ...(form.id_manifestante === "" ? [{ rotulo: "Manifestante", campoId: "manif" }] : []),
+    ...(form.id_assunto === "" ? [{ rotulo: "Assunto", campoId: "assunto" }] : []),
+    ...(form.id_unidade_proprietaria === ""
+      ? [{ rotulo: "Unidade proprietária", campoId: "unidade" }]
+      : []),
+  ];
+  const etapas: EtapaRoteiro[] = [
+    { id: "etapa-identificacao", titulo: "Identificação", faltando },
+    { id: "etapa-conteudo", titulo: "Conteúdo", faltando: [], opcional: true },
+    { id: "etapa-configuracoes", titulo: "Configurações", faltando: [], opcional: true },
+  ];
+
+  // Erro sob o campo só depois de tentar enviar: ao abrir a tela, campo vazio
+  // é o estado normal, não um erro.
+  const [tentouEnviar, setTentouEnviar] = useState(false);
+  const erroDe = (campoId: string, mensagem: string) =>
+    tentouEnviar && faltando.some((f) => f.campoId === campoId) ? mensagem : undefined;
+
   function validar(): boolean {
-    if (!form.id_assunto || !form.id_manifestante || !form.id_unidade_proprietaria) {
-      setErr("Preencha manifestante, assunto e unidade proprietária.");
-      window.scrollTo({ top: 0, behavior: "smooth" });
+    setTentouEnviar(true);
+    if (faltando.length > 0) {
+      // Os campos que faltam são combos (botões), que não carregam
+      // aria-invalid — por isso o foco vai pelo id, não por
+      // focarPrimeiroInvalido. Centraliza antes de focar: o foco sozinho
+      // deixava o campo colado na barra de ações fixa.
+      const el = document.getElementById(faltando[0].campoId);
+      el?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      el?.focus({ preventScroll: true });
       return false;
     }
     return true;
@@ -491,6 +449,7 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
       canal_entrada: "interno",
     });
     setErr(null);
+    setTentouEnviar(false);
     toast.info("Rascunho descartado.");
   }
 
@@ -536,10 +495,46 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
     }
   }
 
+  // A unidade sugerida pelo nome, não pelo número: quem preenche reconhece
+  // "Secretaria de Obras", não "#12". O nome vem das lotações do usuário e,
+  // na falta, do organograma (mesmo cache do UnidadePicker).
+  const minhaUnidadeId = user?.id_unidade_trabalho ?? null;
+  const minhaUnidadeNome =
+    minhaUnidadeId == null
+      ? null
+      : (user?.lotacoes?.find((l) => l.id === minhaUnidadeId)?.nome ??
+        organogramaQ.data?.find((u) => u.id === minhaUnidadeId)?.unidade_trabalho ??
+        null);
+  const usandoMinhaUnidade =
+    minhaUnidadeId != null && form.id_unidade_proprietaria === minhaUnidadeId;
+
+  const falta = resumoDoQueFalta(etapas);
+  const status = (
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {hasDraft && (
+        <span className="inline-flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3 text-success" aria-hidden="true" />
+          Rascunho salvo automaticamente.
+        </span>
+      )}
+      {falta ? (
+        <span className={tentouEnviar ? "font-medium text-warning-soft-foreground" : undefined}>
+          {falta}
+        </span>
+      ) : editando ? (
+        "Abrir o processo gera o número. Depois disso, ele não volta a ser rascunho."
+      ) : (
+        "Tudo pronto para abrir o processo."
+      )}
+    </span>
+  );
+
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
+    // O cabeçalho ocupa a largura da tela, como nas outras; o formulário fica
+    // na coluna de leitura e o roteiro ao lado, no espaço que sobrava em
+    // branco em telas largas.
+    <div className="space-y-4">
       <PageHeader
-        variant="hero"
         icon={FilePlus2}
         breadcrumbs={
           editando
@@ -557,7 +552,7 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
         description={
           editando
             ? "O rascunho continua sem número até você abrir o processo. Só você vê este rascunho."
-            : "O número definitivo será gerado automaticamente ao abrir. Suas alterações ficam em rascunho local enquanto você preenche."
+            : "O número é gerado ao abrir. Enquanto você preenche, o que já digitou fica guardado neste navegador."
         }
         actions={
           hasDraft && (
@@ -574,215 +569,254 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
         }
       />
 
-      {err && (
-        <div
-          role="alert"
-          className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger-soft-foreground"
-        >
-          <Info className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span>{err}</span>
-        </div>
-      )}
+      <form onSubmit={submit} noValidate>
+        <LayoutFormulario roteiro={<RoteiroFormulario etapas={etapas} />}>
+          {err && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger-soft-foreground"
+            >
+              <Info className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>{err}</span>
+            </div>
+          )}
 
-      <form onSubmit={submit} className="space-y-4" noValidate>
-        {/* === Passo 1: Identificação === */}
-        <SectionCard
-          step={1}
-          icon={Users}
-          title="Identificação"
-          description="Quem está abrindo o processo e onde ele vai tramitar."
-        >
-          <div>
-            <Label htmlFor="manif" required>
-              Manifestante
-            </Label>
-            <Combobox
-              id="manif"
-              options={manifestanteBusca.options}
-              selectedOption={manifestanteBusca.selectedOption}
-              onQueryChange={manifestanteBusca.onQueryChange}
-              value={form.id_manifestante === "" ? null : form.id_manifestante}
-              onChange={(v) =>
-                setForm({ ...form, id_manifestante: typeof v === "number" ? v : "" })
-              }
-              placeholder="Buscar por nome ou CPF/CNPJ…"
-              searchPlaceholder="Nome, CPF ou CNPJ…"
-              loading={manifestanteBusca.loading}
-              footer={
+          {/* === Etapa 1: quem pede, o quê, e quem cuida === */}
+          <SectionCard
+            id="etapa-identificacao"
+            step={1}
+            icon={Users}
+            title="Identificação"
+            description="Quem está pedindo, qual é o assunto e qual unidade cuida do processo."
+          >
+            <FormField
+              label="Manifestante"
+              required
+              hint="Quem pede: busque pelo nome, CPF ou CNPJ."
+              error={erroDe(
+                "manif",
+                "Escolha o manifestante. Se ele ainda não tem cadastro, use “Cadastrar novo”.",
+              )}
+              acao={
                 <Link
                   href="/m/protocolo/manifestantes"
-                  className="inline-flex items-center gap-1 text-brand hover:underline"
+                  className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
                 >
-                  <span aria-hidden="true">+</span> Cadastrar novo manifestante
+                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                  Cadastrar novo
                 </Link>
               }
-            />
-          </div>
-
-          <p className="flex items-start gap-1.5 text-xs text-foreground-subtle">
-            <Lock className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-            Manifestante e assunto não podem ser alterados depois que o processo for aberto.
-          </p>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="tipo">Tipo de processo</Label>
+            >
               <Combobox
-                id="tipo"
-                options={tipoOptions}
-                value={form.id_tipo_processo === "" ? null : form.id_tipo_processo}
-                onChange={handleTipoChange}
-                placeholder="(todos)"
-                searchPlaceholder="Buscar tipo…"
-                emptyText="Nenhum tipo de processo."
-                loading={tiposProcessoQ.isLoading}
-              />
-              <p className="mt-1 text-xs text-foreground-subtle">
-                Opcional. Filtra a lista de assuntos abaixo.
-              </p>
-            </div>
-
-            <div>
-              <Label htmlFor="assunto" required>
-                Assunto
-              </Label>
-              <Combobox
-                id="assunto"
-                options={assuntoOptions}
-                value={form.id_assunto === "" ? null : form.id_assunto}
+                id="manif"
+                options={manifestanteBusca.options}
+                selectedOption={manifestanteBusca.selectedOption}
+                onQueryChange={manifestanteBusca.onQueryChange}
+                value={form.id_manifestante === "" ? null : form.id_manifestante}
                 onChange={(v) =>
-                  setForm({ ...form, id_assunto: typeof v === "number" ? v : "" })
+                  setForm({ ...form, id_manifestante: typeof v === "number" ? v : "" })
                 }
-                placeholder="Buscar assunto…"
-                searchPlaceholder="Buscar assunto…"
-                emptyText={
-                  form.id_tipo_processo
-                    ? "Nenhum assunto neste tipo."
-                    : "Nenhum assunto cadastrado."
+                placeholder="Buscar manifestante…"
+                searchPlaceholder="Nome, CPF ou CNPJ…"
+                loading={manifestanteBusca.loading}
+                footer={
+                  <Link
+                    href="/m/protocolo/manifestantes"
+                    className="inline-flex items-center gap-1 text-primary hover:underline"
+                  >
+                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                    Cadastrar novo manifestante
+                  </Link>
                 }
-                loading={assuntosQ.isLoading}
               />
-            </div>
-          </div>
+            </FormField>
 
-          <div>
-            <Label htmlFor="unidade" required>
-              Unidade proprietária
-            </Label>
-            {/* Busca do Heitor (PR 146): nome ou sigla, sem acento, com o
-                caminho na hierarquia e o organograma a um clique. Escolhida
-                pelo PO em 2026-11-06 no lugar da lista simples do PR 144.
-                Sem cerquilha antes do número: o design:check a lê como cor. */}
-            <UnidadePicker
-              id="unidade"
-              value={
-                form.id_unidade_proprietaria === ""
-                  ? null
-                  : form.id_unidade_proprietaria
+            {/* Tipo e assunto andam juntos: o tipo só filtra a lista de assuntos. */}
+            <GradeCampos>
+              <FormField label="Tipo de processo" opcional hint="Só filtra a lista de assuntos.">
+                <Combobox
+                  id="tipo"
+                  options={tipoOptions}
+                  value={form.id_tipo_processo === "" ? null : form.id_tipo_processo}
+                  onChange={handleTipoChange}
+                  placeholder="Todos os tipos"
+                  searchPlaceholder="Buscar tipo…"
+                  emptyText="Nenhum tipo de processo."
+                  loading={tiposProcessoQ.isLoading}
+                />
+              </FormField>
+
+              <FormField
+                label="Assunto"
+                required
+                error={erroDe(
+                  "assunto",
+                  form.id_tipo_processo
+                    ? "Escolha o assunto. Não achou? Limpe o tipo de processo para ver todos."
+                    : "Escolha o assunto do pedido.",
+                )}
+              >
+                <Combobox
+                  id="assunto"
+                  options={assuntoOptions}
+                  value={form.id_assunto === "" ? null : form.id_assunto}
+                  onChange={(v) =>
+                    setForm({ ...form, id_assunto: typeof v === "number" ? v : "" })
+                  }
+                  placeholder="Buscar assunto…"
+                  searchPlaceholder="Buscar assunto…"
+                  emptyText={
+                    form.id_tipo_processo
+                      ? "Nenhum assunto neste tipo."
+                      : "Nenhum assunto cadastrado."
+                  }
+                  loading={assuntosQ.isLoading}
+                />
+              </FormField>
+            </GradeCampos>
+
+            <p className="flex items-start gap-1.5 text-xs text-foreground-subtle">
+              <Lock className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+              Manifestante e assunto não podem ser alterados depois que o processo for aberto.
+            </p>
+
+            <FormField
+              label="Unidade proprietária"
+              required
+              hint={
+                usandoMinhaUnidade
+                  ? `Preenchida com a sua unidade${minhaUnidadeNome ? ` (${minhaUnidadeNome})` : ""}. Troque se o processo for de outra.`
+                  : "A unidade responsável pelo processo. Busque pelo nome ou pela sigla."
               }
-              onChange={(v) => setForm({ ...form, id_unidade_proprietaria: v ?? "" })}
-              placeholder="Buscar a unidade proprietária"
-            />
-            <p className="mt-1 text-xs text-foreground-subtle">
-              Sugerida: sua unidade
-              {user?.id_unidade_trabalho ? ` (#${user.id_unidade_trabalho})` : ""}.
-            </p>
-          </div>
-        </SectionCard>
+              error={erroDe("unidade", "Escolha a unidade responsável pelo processo.")}
+              acao={
+                minhaUnidadeId != null && !usandoMinhaUnidade ? (
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, id_unidade_proprietaria: minhaUnidadeId })}
+                    title={minhaUnidadeNome ?? undefined}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    Usar a minha unidade
+                  </button>
+                ) : undefined
+              }
+            >
+              {/* Busca do Heitor (PR 146): nome ou sigla, sem acento, com o
+                  caminho na hierarquia e o organograma a um clique. Escolhida
+                  pelo PO em 2026-11-06 no lugar da lista simples do PR 144. */}
+              <UnidadePicker
+                id="unidade"
+                value={
+                  form.id_unidade_proprietaria === ""
+                    ? null
+                    : form.id_unidade_proprietaria
+                }
+                onChange={(v) => setForm({ ...form, id_unidade_proprietaria: v ?? "" })}
+                placeholder="Buscar unidade…"
+              />
+            </FormField>
+          </SectionCard>
 
-        {/* === Passo 2: Conteúdo === */}
-        <SectionCard
-          step={2}
-          icon={Tag}
-          title="Conteúdo"
-          description="Descrição breve e corpo completo do processo."
-        >
-          <div>
-            <Label htmlFor="obs">Observação</Label>
-            <Textarea
-              id="obs"
-              value={form.observacao}
-              onChange={(e) => setForm({ ...form, observacao: e.target.value })}
-              rows={2}
-              placeholder="Resumo curto que aparece nas listagens (uma linha basta)."
-            />
-            <p className="mt-1 text-xs text-foreground-subtle">
-              Texto simples. Usado em buscas e listagens.
-            </p>
-          </div>
+          {/* === Etapa 2: o pedido em si === */}
+          <SectionCard
+            id="etapa-conteudo"
+            step={2}
+            icon={Tag}
+            title="Conteúdo"
+            description="Um resumo para as listas e o texto completo do pedido."
+          >
+            <FormField
+              label="Observação"
+              opcional
+              hint="Uma linha que aparece nas listagens e nas buscas."
+            >
+              <Textarea
+                id="obs"
+                value={form.observacao}
+                onChange={(e) => setForm({ ...form, observacao: e.target.value })}
+                rows={2}
+                placeholder="Ex.: Poda de árvore em frente ao nº 120 da Rua das Flores"
+              />
+            </FormField>
 
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label htmlFor="corpo">Corpo do processo</Label>
-              {templateOptions.length > 0 && (
-                <div className="flex w-64 items-center gap-1.5">
-                  <LayoutTemplate
-                    className="h-4 w-4 shrink-0 text-foreground-subtle"
-                    aria-hidden="true"
-                  />
-                  <Combobox
-                    options={templateOptions}
-                    value={templateSelecionado === "" ? null : templateSelecionado}
-                    onChange={(v) => {
-                      if (typeof v === "number") {
-                        setTemplateSelecionado(v);
-                        void aplicarTemplate(v);
-                      }
-                    }}
-                    placeholder="Carregar de um modelo…"
-                    searchPlaceholder="Buscar modelo…"
-                    loading={templatesQ.isLoading}
-                  />
-                </div>
-              )}
-            </div>
-            <RichTextEditor
-              ariaLabel="Corpo do processo"
-              value={form.corpo}
-              onChange={(html) => setForm({ ...form, corpo: html })}
-              placeholder="Descreva o pedido com detalhes. Use Ctrl+B / Ctrl+I, listas, títulos…"
-              minHeight={200}
-              onUploadImage={async (file) => {
-                const { url } = await api.editorImagens.upload(file);
-                return url;
-              }}
-            />
-            <p className="mt-1 text-xs text-foreground-subtle">
-              Texto formatado. Aparece no PDF e na ficha do processo.
-            </p>
-          </div>
-        </SectionCard>
+            <FormField
+              label="Corpo do processo"
+              opcional
+              hint="Texto formatado. Aparece no PDF e na ficha do processo."
+              acao={
+                templateOptions.length > 0 ? (
+                  <div className="flex w-64 items-center gap-1.5">
+                    <LayoutTemplate
+                      className="h-4 w-4 shrink-0 text-foreground-subtle"
+                      aria-hidden="true"
+                    />
+                    <Combobox
+                      options={templateOptions}
+                      value={templateSelecionado === "" ? null : templateSelecionado}
+                      onChange={(v) => {
+                        if (typeof v === "number") {
+                          setTemplateSelecionado(v);
+                          void aplicarTemplate(v);
+                        }
+                      }}
+                      placeholder="Carregar de um modelo…"
+                      searchPlaceholder="Buscar modelo…"
+                      loading={templatesQ.isLoading}
+                    />
+                  </div>
+                ) : undefined
+              }
+            >
+              {/* O editor não aceita id: o rótulo aponta para o invólucro, e o
+                  nome acessível do editor vem do ariaLabel. */}
+              <div>
+                <RichTextEditor
+                  ariaLabel="Corpo do processo"
+                  value={form.corpo}
+                  onChange={(html) => setForm({ ...form, corpo: html })}
+                  placeholder="Descreva o pedido com detalhes. Use Ctrl+B / Ctrl+I, listas, títulos…"
+                  minHeight={200}
+                  onUploadImage={async (file) => {
+                    const { url } = await api.editorImagens.upload(file);
+                    return url;
+                  }}
+                />
+              </div>
+            </FormField>
+          </SectionCard>
 
-        {/* === Passo 3: Configurações === */}
-        <SectionCard
-          step={3}
-          icon={Hash}
-          title="Configurações"
-          description="Número de origem, visibilidade, origem e canal de entrada."
-        >
-          <div>
-            <Label htmlFor="origem">
-              Número de origem
-              <span className="ml-1 font-normal text-foreground-subtle">(opcional)</span>
-            </Label>
-            <Input
-              id="origem"
-              value={form.numero_origem}
-              onChange={(e) => setForm({ ...form, numero_origem: e.target.value })}
-              placeholder="Ex: protocolo externo, ofício, número de outro sistema"
-            />
-          </div>
+          {/* === Etapa 3: detalhes que quase sempre ficam no padrão === */}
+          <SectionCard
+            id="etapa-configuracoes"
+            step={3}
+            icon={Hash}
+            title="Configurações"
+            description="Já vêm no padrão mais comum. Mude só se o caso pedir."
+          >
+            <FormField
+              label="Número de origem"
+              opcional
+              hint="Número do documento em outro órgão ou sistema, se houver."
+            >
+              <Input
+                id="origem"
+                value={form.numero_origem}
+                onChange={(e) => setForm({ ...form, numero_origem: e.target.value })}
+                placeholder="Ex.: Ofício 123/2026"
+              />
+            </FormField>
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {/* Rótulos e textos mantidos de propósito (decisão de 2026-11-04):
                 hoje `publico=false` grava o nível `interno`
                 (services/sigilo.py), que todo servidor alcança pela credencial
                 padrão, e nenhum acesso é registrado em auditoria. O
                 comportamento do sigilo será ajustado em tarefa própria; ao
                 mudá-lo, revisar estes textos. */}
-            <EscolhaConfig
+            <EscolhaSegmentada
               nome="visibilidade"
               titulo="Visibilidade"
+              moldura={false}
               valor={form.publico ? "publico" : "sigiloso"}
               onChange={(v) => setForm({ ...form, publico: v === "publico" })}
               opcoes={[
@@ -800,9 +834,10 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
                 },
               ]}
             />
-            <EscolhaConfig
+            <EscolhaSegmentada
               nome="origem-processo"
               titulo="Origem"
+              moldura={false}
               valor={form.externo ? "externa" : "interna"}
               onChange={(v) => setForm({ ...form, externo: v === "externa" })}
               opcoes={[
@@ -820,9 +855,10 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
                 },
               ]}
             />
-            <EscolhaConfig
+            <EscolhaSegmentada
               nome="canal-entrada"
               titulo="Canal de entrada"
+              moldura={false}
               valor={form.canal_entrada}
               onChange={(v) => setForm({ ...form, canal_entrada: v })}
               opcoes={[
@@ -840,37 +876,21 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
                 },
               ]}
             />
-          </div>
-        </SectionCard>
+          </SectionCard>
 
-        {/* === Sticky footer com ações === */}
-        <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-1/95 px-4 py-3 backdrop-blur-md sm:mx-0 sm:rounded-xl sm:border">
-          <span className="text-xs text-foreground-subtle">
-            {editando ? (
-              "Abrir o processo gera o número. Depois disso, ele não volta a ser rascunho."
-            ) : hasDraft ? (
-              <span className="inline-flex items-center gap-1">
-                <CheckCircle2 className="h-3 w-3 text-success" aria-hidden="true" />
-                Rascunho salvo automaticamente.
-              </span>
-            ) : (
-              "Preencha os campos obrigatórios para abrir o processo."
-            )}
-          </span>
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href={
-                editando ? `/m/protocolo/processos/${rascunhoId}` : "/m/protocolo/processos"
-              }
-            >
-              <Button variant="ghost" type="button">
+          {/* O botão principal nunca fica desabilitado por validação: clicar é
+              o que mostra, sob cada campo, o que falta. Só trava enquanto envia. */}
+          <BarraAcoesFormulario status={status}>
+            <Button asChild variant="ghost">
+              <Link
+                href={editando ? `/m/protocolo/processos/${rascunhoId}` : "/m/protocolo/processos"}
+              >
                 Cancelar
-              </Button>
-            </Link>
+              </Link>
+            </Button>
             <Button
               type="button"
               variant="secondary"
-              size="md"
               disabled={salvando}
               onClick={salvarComoRascunho}
               title={
@@ -881,21 +901,12 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
             >
               {editando ? "Salvar rascunho" : "Salvar como rascunho"}
             </Button>
-            <Button type="submit" disabled={salvando} size="md">
-              {salvando ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  Salvando…
-                </>
-              ) : (
-                <>
-                  {editando ? "Salvar e abrir processo" : "Abrir processo"}
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </>
-              )}
+            <Button type="submit" loading={salvando}>
+              {salvando ? "Salvando…" : editando ? "Salvar e abrir processo" : "Abrir processo"}
+              {!salvando && <ArrowRight className="h-4 w-4" aria-hidden="true" />}
             </Button>
-          </div>
-        </div>
+          </BarraAcoesFormulario>
+        </LayoutFormulario>
       </form>
     </div>
   );

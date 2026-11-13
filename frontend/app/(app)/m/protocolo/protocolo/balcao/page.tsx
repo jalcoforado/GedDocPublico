@@ -4,13 +4,14 @@ import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  AlertCircle,
+  Check,
   CheckCircle2,
   ChevronRight,
   Clock,
   FileText,
-  Hash,
   Inbox,
-  Loader2,
+  Keyboard,
   Lock,
   Plus,
   Printer,
@@ -19,18 +20,20 @@ import {
   User,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { PageHeader } from "@/components/ui/page-header";
+import { BarraAcoesFormulario } from "@/components/ui/barra-acoes-formulario";
 import { Button } from "@/components/ui/button";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/form-field";
+import { resumoDoQueFalta } from "@/components/ui/roteiro-formulario";
+import { SectionCard } from "@/components/ui/section-card";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { UnidadePicker } from "@/components/UnidadePicker";
 import {
-  api,
   ccdApi,
   protocoloApi,
   protocoloComprovantePdfUrl,
@@ -112,10 +115,53 @@ function fmtHora(s: string | null) {
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+/** Tecla de atalho à vista (os atalhos são o que faz o balcão andar rápido). */
+function Tecla({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-border-strong bg-surface-2 px-1.5 font-mono text-[11px] font-medium leading-none text-foreground shadow-[inset_0_-1px_0_hsl(var(--border-strong))]">
+      {children}
+    </kbd>
+  );
+}
+
+/**
+ * Cartão da coluna lateral, com o mesmo cabeçalho dos cartões do formulário
+ * (ícone num quadrado, título, uma linha de descrição) — antes eram caixas
+ * com título solto e texto miúdo colado.
+ */
+function CartaoLateral({
+  icon: Icon,
+  titulo,
+  descricao,
+  children,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  titulo: string;
+  descricao?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-card border border-border bg-card shadow-card">
+      <header className="flex items-center gap-3 border-b border-border px-5 py-4">
+        <span
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand/8 text-brand"
+          aria-hidden="true"
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="min-w-0">
+          <h2 className="font-display text-sm font-semibold tracking-tight text-titulo">{titulo}</h2>
+          {descricao && <p className="mt-0.5 text-xs text-foreground-muted">{descricao}</p>}
+        </div>
+      </header>
+      <div className="px-5 py-4">{children}</div>
+    </section>
+  );
+}
+
 export default function ProtocoloBalcaoPage() {
   const toast = useToast();
   const { user } = useAuth();
-  const manifestanteRef = useRef<HTMLDivElement>(null);
 
   const especiesQ = useQuery({
     queryKey: ["especies-documentais"],
@@ -138,6 +184,7 @@ export default function ProtocoloBalcaoPage() {
     publico: true,
   });
   const [err, setErr] = useState<string | null>(null);
+  const [tentouEnviar, setTentouEnviar] = useState(false);
   const [recentes, setRecentes] = useState<ProtocoloRecente[]>([]);
   const [lastProtocolo, setLastProtocolo] = useState<ProtocoloBalcaoResult | null>(
     null,
@@ -196,21 +243,23 @@ export default function ProtocoloBalcaoPage() {
     return () => clearTimeout(t);
   }, [form.id_assunto, form.id_ccd_classe]);
 
+  // O que falta, na ordem da tela. O primeiro item recebe o foco quando se
+  // tenta protocolar; a barra de ações mostra o resumo o tempo todo.
+  const faltando: { rotulo: string; campoId: string }[] = [
+    ...(form.id_especie_documental === "" ? [{ rotulo: "Espécie", campoId: "especie-0" }] : []),
+    ...(form.id_manifestante === "" ? [{ rotulo: "Manifestante", campoId: "manifestante-cb" }] : []),
+    ...(form.id_assunto === "" ? [{ rotulo: "Assunto", campoId: "assunto-cb" }] : []),
+    ...(form.id_unidade_proprietaria === ""
+      ? [{ rotulo: "Unidade proprietária", campoId: "unidade-cb" }]
+      : []),
+  ];
+  // Erro sob o campo só depois da primeira tentativa de protocolar.
+  const falta = (campoId: string) =>
+    tentouEnviar && faltando.some((f) => f.campoId === campoId);
+
   const submitM = useMutation({
-    mutationFn: () => {
-      if (
-        !form.id_especie_documental ||
-        !form.id_manifestante ||
-        !form.id_assunto ||
-        !form.id_unidade_proprietaria
-      ) {
-        return Promise.reject(
-          new Error(
-            "Preencha espécie, manifestante, assunto e unidade proprietária.",
-          ),
-        );
-      }
-      return protocoloApi.protocolarBalcao({
+    mutationFn: () =>
+      protocoloApi.protocolarBalcao({
         id_especie_documental: Number(form.id_especie_documental),
         id_manifestante: Number(form.id_manifestante),
         id_assunto: Number(form.id_assunto),
@@ -219,8 +268,7 @@ export default function ProtocoloBalcaoPage() {
         numero_origem: form.numero_origem || null,
         observacao: form.observacao || null,
         publico: form.publico,
-      });
-    },
+      }),
     onSuccess: (data) => {
       setLastProtocolo(data);
       setRecentes((prev) =>
@@ -246,6 +294,16 @@ export default function ProtocoloBalcaoPage() {
 
   function submit(e?: React.FormEvent) {
     e?.preventDefault();
+    setErr(null);
+    setTentouEnviar(true);
+    if (faltando.length > 0) {
+      // Os campos obrigatórios são combos e botões, sem aria-invalid: o foco
+      // vai pelo id. Centraliza antes, para não parar sob a barra fixa.
+      const el = document.getElementById(faltando[0].campoId);
+      el?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      el?.focus({ preventScroll: true });
+      return;
+    }
     submitM.mutate();
   }
 
@@ -263,12 +321,10 @@ export default function ProtocoloBalcaoPage() {
     setSugestoes([]);
     setLastProtocolo(null);
     setErr(null);
-    // Foca manifestante combo
+    setTentouEnviar(false);
+    // Foca o manifestante: no balcão, é quem está na frente do atendente.
     requestAnimationFrame(() => {
-      const btn = manifestanteRef.current?.querySelector<HTMLButtonElement>(
-        "button[role='combobox']",
-      );
-      btn?.focus();
+      document.getElementById("manifestante-cb")?.focus();
     });
   }
 
@@ -285,17 +341,31 @@ export default function ProtocoloBalcaoPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [submitM.isPending, lastProtocolo, form]);
 
+  const minhaUnidadeId = user?.id_unidade_trabalho ?? null;
+  const minhaUnidadeNome =
+    minhaUnidadeId == null
+      ? null
+      : (user?.lotacoes?.find((l) => l.id === minhaUnidadeId)?.nome ?? null);
+  const usandoMinhaUnidade =
+    minhaUnidadeId != null && form.id_unidade_proprietaria === minhaUnidadeId;
+
+  const resumo = resumoDoQueFalta([{ id: "balcao", titulo: "Balcão", faltando }]);
+
   return (
     <div className="space-y-6">
       <PageHeader
         icon={Inbox}
-        title="Balcão de Protocolo"
-        description="Registre documentos recebidos pessoalmente, por mensageiro ou ofício externo. Cada protocolo gera número oficial automático."
+        title="Balcão de protocolo"
+        description="Registre o documento recebido no balcão, por mensageiro ou ofício. O número oficial sai na hora."
       />
 
       {err && (
-        <div className="rounded-md border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
-          {err}
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger-soft-foreground"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{err}</span>
         </div>
       )}
 
@@ -305,132 +375,164 @@ export default function ProtocoloBalcaoPage() {
           onNext={novoProtocolo}
         />
       ) : (
-        <form onSubmit={submit} className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-          <div className="space-y-5">
-            <section className="rounded-xl border border-border bg-card p-5 shadow-xs">
-              <header className="mb-4 flex items-center gap-2">
-                <FileText className="h-4 w-4 text-brand" aria-hidden="true" />
-                <h2 className="text-sm font-semibold tracking-tight">
-                  Espécie do documento
-                </h2>
-              </header>
-              <div className="flex flex-wrap gap-2">
-                {especiesQ.isLoading && (
-                  <Carregando className="text-sm text-foreground-muted" />
-                )}
-                {especies.map((esp) => {
-                  const isSelected = form.id_especie_documental === esp.id;
-                  return (
-                    <button
-                      key={esp.id}
-                      type="button"
-                      onClick={() =>
-                        setForm({ ...form, id_especie_documental: esp.id })
-                      }
-                      className={cn(
-                        "rounded-lg border px-3 py-1.5 text-sm transition-colors duration-fast",
-                        isSelected
-                          ? "border-brand bg-brand/10 font-medium text-brand"
-                          : "border-border bg-surface-1 text-foreground hover:border-border-strong hover:bg-surface-2",
-                      )}
-                    >
-                      {esp.nome}
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="rounded-xl border border-border bg-card p-5 shadow-xs">
-              <header className="mb-4 flex items-center gap-2">
-                <User className="h-4 w-4 text-brand" aria-hidden="true" />
-                <h2 className="text-sm font-semibold tracking-tight">
-                  Manifestante e classificação
-                </h2>
-              </header>
-
-              <div className="grid grid-cols-1 gap-4">
-                <div ref={manifestanteRef}>
-                  <Label htmlFor="manifestante-cb">
-                    Manifestante <span className="text-danger">*</span>
-                  </Label>
-                  <Combobox
-                    id="manifestante-cb"
-                    options={manifestanteBusca.options}
-                    selectedOption={manifestanteBusca.selectedOption}
-                    onQueryChange={manifestanteBusca.onQueryChange}
-                    value={form.id_manifestante || null}
-                    onChange={(v) =>
-                      setForm({
-                        ...form,
-                        id_manifestante: typeof v === "number" ? v : "",
-                      })
-                    }
-                    placeholder="Buscar por nome ou CPF/CNPJ…"
-                    loading={manifestanteBusca.loading}
-                    footer={
-                      <Link
-                        href="/m/protocolo/manifestantes"
-                        className="text-primary hover:underline"
-                      >
-                        + Cadastrar novo manifestante
-                      </Link>
-                    }
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div>
-                    <Label htmlFor="assunto-cb">
-                      Assunto <span className="text-danger">*</span>
-                    </Label>
-                    <Combobox
-                      id="assunto-cb"
-                      options={assuntoOptions}
-                      value={form.id_assunto || null}
-                      onChange={(v) =>
-                        setForm({
-                          ...form,
-                          id_assunto: typeof v === "number" ? v : "",
-                        })
-                      }
-                      placeholder="Selecione um assunto…"
-                      loading={assuntosQ.isLoading}
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="numero-origem">
-                      Nº de origem
-                      <span className="ml-1 text-xs text-foreground-muted">
-                        (opcional)
-                      </span>
-                    </Label>
-                    <div className="relative">
-                      <Hash
-                        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground-muted"
-                        aria-hidden="true"
-                      />
-                      <Input
-                        id="numero-origem"
-                        value={form.numero_origem}
-                        onChange={(e) =>
-                          setForm({ ...form, numero_origem: e.target.value })
+        <form
+          onSubmit={submit}
+          noValidate
+          className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]"
+        >
+          <div className="min-w-0 space-y-4">
+            <SectionCard
+              id="balcao-documento"
+              step={1}
+              icon={FileText}
+              title="Documento recebido"
+              description="O que chegou ao balcão."
+            >
+              {/* Espécies são poucas mas variam por prefeitura: ficam todas à
+                  vista (um clique), como botões de escolha única. */}
+              <fieldset aria-describedby={falta("especie-0") ? "especie-erro" : undefined}>
+                <legend className="mb-1.5 text-sm font-medium text-foreground">
+                  Espécie
+                  <span className="ml-0.5 text-danger" aria-hidden="true">
+                    *
+                  </span>
+                </legend>
+                <div className="flex flex-wrap gap-2">
+                  {especiesQ.isLoading && (
+                    <Carregando className="text-sm text-foreground-muted" />
+                  )}
+                  {especies.map((esp, i) => {
+                    const isSelected = form.id_especie_documental === esp.id;
+                    return (
+                      <button
+                        key={esp.id}
+                        id={i === 0 ? "especie-0" : undefined}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() =>
+                          setForm({ ...form, id_especie_documental: esp.id })
                         }
-                        placeholder="Ex: OFICIO 123/2026"
-                        className="pl-9"
-                      />
-                    </div>
-                  </div>
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          isSelected
+                            ? "border-brand bg-brand/10 font-medium text-brand"
+                            : "border-border bg-surface-1 text-foreground hover:border-border-strong hover:bg-surface-2",
+                        )}
+                      >
+                        {isSelected && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
+                        {esp.nome}
+                      </button>
+                    );
+                  })}
                 </div>
+                {falta("especie-0") && (
+                  <p
+                    id="especie-erro"
+                    className="mt-1.5 flex items-start gap-1 text-xs font-medium text-danger-soft-foreground"
+                  >
+                    <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    Escolha a espécie do documento (ofício, requerimento…).
+                  </p>
+                )}
+              </fieldset>
 
-                <div>
-                  <Label htmlFor="ccd-cb">
-                    Classe CCD
-                    <span className="ml-1 text-xs text-foreground-muted">
-                      (recomendado — define prazo de guarda)
-                    </span>
-                  </Label>
+              <FormField
+                label="Número de origem"
+                opcional
+                hint="O número que veio no documento, se houver."
+              >
+                <CampoComUnidade
+                  id="numero-origem"
+                  prefixo="Nº"
+                  value={form.numero_origem}
+                  onChange={(e) =>
+                    setForm({ ...form, numero_origem: e.target.value })
+                  }
+                  placeholder="Ex.: Ofício 123/2026"
+                />
+              </FormField>
+            </SectionCard>
+
+            <SectionCard
+              id="balcao-pedido"
+              step={2}
+              icon={User}
+              title="Quem pede e o quê"
+              description="Manifestante, assunto e a unidade que vai cuidar do processo."
+            >
+              <FormField
+                label="Manifestante"
+                required
+                hint="Busque pelo nome, CPF ou CNPJ."
+                error={
+                  falta("manifestante-cb")
+                    ? "Escolha o manifestante. Sem cadastro? Use “Cadastrar novo”."
+                    : undefined
+                }
+                acao={
+                  <Link
+                    href="/m/protocolo/manifestantes"
+                    className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                  >
+                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                    Cadastrar novo
+                  </Link>
+                }
+              >
+                <Combobox
+                  id="manifestante-cb"
+                  options={manifestanteBusca.options}
+                  selectedOption={manifestanteBusca.selectedOption}
+                  onQueryChange={manifestanteBusca.onQueryChange}
+                  value={form.id_manifestante || null}
+                  onChange={(v) =>
+                    setForm({
+                      ...form,
+                      id_manifestante: typeof v === "number" ? v : "",
+                    })
+                  }
+                  placeholder="Buscar manifestante…"
+                  searchPlaceholder="Nome, CPF ou CNPJ…"
+                  loading={manifestanteBusca.loading}
+                  footer={
+                    <Link
+                      href="/m/protocolo/manifestantes"
+                      className="inline-flex items-center gap-1 text-primary hover:underline"
+                    >
+                      <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                      Cadastrar novo manifestante
+                    </Link>
+                  }
+                />
+              </FormField>
+
+              <FormField
+                label="Assunto"
+                required
+                error={falta("assunto-cb") ? "Escolha o assunto do documento." : undefined}
+              >
+                <Combobox
+                  id="assunto-cb"
+                  options={assuntoOptions}
+                  value={form.id_assunto || null}
+                  onChange={(v) =>
+                    setForm({
+                      ...form,
+                      id_assunto: typeof v === "number" ? v : "",
+                    })
+                  }
+                  placeholder="Buscar assunto…"
+                  searchPlaceholder="Buscar assunto…"
+                  loading={assuntosQ.isLoading}
+                />
+              </FormField>
+
+              <div>
+                <FormField
+                  label="Classe CCD"
+                  opcional
+                  hint="Recomendado: a classe define o prazo de guarda do documento."
+                >
                   <Combobox
                     id="ccd-cb"
                     options={ccdOptions}
@@ -441,157 +543,183 @@ export default function ProtocoloBalcaoPage() {
                         id_ccd_classe: typeof v === "number" ? v : "",
                       })
                     }
-                    placeholder="Selecione a classe documental…"
+                    placeholder="Buscar classe pelo código ou nome…"
+                    searchPlaceholder="Código ou nome…"
                     loading={ccdTreeQ.isLoading}
                   />
-                  {!form.id_ccd_classe && sugestoes.length > 0 && (
-                    <div className="mt-2 space-y-1.5">
-                      <p className="text-xs text-foreground-muted">
-                        {loadingSugestoes
-                          ? "Buscando sugestões…"
-                          : "Sugestões baseadas no assunto:"}
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {sugestoes.map((s) => (
-                          <button
-                            key={s.id_ccd_classe}
-                            type="button"
-                            onClick={() =>
-                              setForm({ ...form, id_ccd_classe: s.id_ccd_classe })
-                            }
-                            className="inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/5 px-2.5 py-1 text-xs text-brand transition-colors hover:bg-brand/10"
-                            title={`Score: ${(s.score * 100).toFixed(0)}% · match: ${s.matched_keywords.join(", ")}`}
-                          >
-                            <span className="font-mono font-semibold">{s.codigo}</span>
-                            <span className="truncate">{s.nome}</span>
-                            <span className="text-[10px] text-foreground-muted">
-                              {(s.score * 100).toFixed(0)}%
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <Label>
-                    Unidade proprietária <span className="text-danger">*</span>
-                  </Label>
-                  <UnidadePicker
-                    value={
-                      typeof form.id_unidade_proprietaria === "number"
-                        ? form.id_unidade_proprietaria
-                        : null
-                    }
-                    onChange={(v) =>
-                      setForm({ ...form, id_unidade_proprietaria: v ?? "" })
-                    }
-                  />
-                  <p className="mt-1 text-xs text-foreground-muted">
-                    Sugerido: sua unidade. Use o picker pra escolher outra.
-                  </p>
-                </div>
-
-                <div>
-                  <Label htmlFor="observacao">
-                    Observação
-                    <span className="ml-1 text-xs text-foreground-muted">
-                      (opcional, livre)
-                    </span>
-                  </Label>
-                  <Textarea
-                    id="observacao"
-                    value={form.observacao}
-                    onChange={(e) =>
-                      setForm({ ...form, observacao: e.target.value })
-                    }
-                    placeholder="Resumo do conteúdo, exigência, contato adicional…"
-                    rows={3}
-                  />
-                </div>
-
-                <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border bg-surface-1 px-3 py-2 hover:bg-surface-2">
-                  <input
-                    type="checkbox"
-                    checked={!form.publico}
-                    onChange={(e) =>
-                      setForm({ ...form, publico: !e.target.checked })
-                    }
-                    className="mt-0.5 h-4 w-4 accent-brand"
-                  />
-                  <div className="flex-1 text-sm">
-                    <div className="flex items-center gap-2 font-medium text-foreground">
-                      <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-                      Sigiloso
-                    </div>
+                </FormField>
+                {!form.id_ccd_classe && (loadingSugestoes || sugestoes.length > 0) && (
+                  <div className="mt-2 space-y-1.5">
                     <p className="text-xs text-foreground-muted">
-                      Marque se o conteúdo é restrito (LGPD, sigilo profissional).
-                      Padrão é público.
+                      {loadingSugestoes
+                        ? "Buscando sugestões…"
+                        : "Sugestões para este assunto (um clique escolhe):"}
                     </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {sugestoes.map((s) => (
+                        <button
+                          key={s.id_ccd_classe}
+                          type="button"
+                          onClick={() =>
+                            setForm({ ...form, id_ccd_classe: s.id_ccd_classe })
+                          }
+                          className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-brand/30 bg-brand/5 px-2.5 py-1 text-xs text-brand transition-colors duration-fast hover:bg-brand/10"
+                          title={`Aderência: ${(s.score * 100).toFixed(0)}% · palavras em comum: ${s.matched_keywords.join(", ")}`}
+                        >
+                          <span className="font-mono font-semibold">{s.codigo}</span>
+                          <span className="truncate">{s.nome}</span>
+                          <span className="text-[10px] tabular-nums text-foreground-muted">
+                            {(s.score * 100).toFixed(0)}%
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </label>
-              </div>
-            </section>
-
-            <div className="flex flex-wrap items-center gap-3 pt-1">
-              <Button
-                type="submit"
-                disabled={submitM.isPending}
-                className="min-w-48"
-              >
-                {submitM.isPending ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-                    Protocolando…
-                  </>
-                ) : (
-                  <>
-                    <Receipt className="mr-2 h-4 w-4" aria-hidden="true" />
-                    Protocolar
-                  </>
                 )}
+              </div>
+
+              <FormField
+                label="Unidade proprietária"
+                required
+                hint={
+                  usandoMinhaUnidade
+                    ? `Preenchida com a sua unidade${minhaUnidadeNome ? ` (${minhaUnidadeNome})` : ""}. Troque se o documento for de outra.`
+                    : "A unidade responsável pelo processo. Busque pelo nome ou pela sigla."
+                }
+                error={
+                  falta("unidade-cb")
+                    ? "Escolha a unidade responsável pelo processo."
+                    : undefined
+                }
+                acao={
+                  minhaUnidadeId != null && !usandoMinhaUnidade ? (
+                    <button
+                      type="button"
+                      title={minhaUnidadeNome ?? undefined}
+                      onClick={() =>
+                        setForm({ ...form, id_unidade_proprietaria: minhaUnidadeId })
+                      }
+                      className="font-medium text-primary hover:underline"
+                    >
+                      Usar a minha unidade
+                    </button>
+                  ) : undefined
+                }
+              >
+                <UnidadePicker
+                  id="unidade-cb"
+                  value={
+                    typeof form.id_unidade_proprietaria === "number"
+                      ? form.id_unidade_proprietaria
+                      : null
+                  }
+                  onChange={(v) =>
+                    setForm({ ...form, id_unidade_proprietaria: v ?? "" })
+                  }
+                  placeholder="Buscar unidade…"
+                />
+              </FormField>
+
+              <FormField
+                label="Observação"
+                opcional
+                hint="Aparece nas listagens e nas buscas."
+              >
+                <Textarea
+                  id="observacao"
+                  value={form.observacao}
+                  onChange={(e) =>
+                    setForm({ ...form, observacao: e.target.value })
+                  }
+                  placeholder="Ex.: Entregue pelo próprio requerente; pede retorno por telefone."
+                  rows={3}
+                />
+              </FormField>
+
+              {/* Ligar/desligar: checkbox, com o padrão (público) dito no texto. */}
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border bg-surface-1 px-3 py-2.5 transition-colors duration-fast hover:bg-surface-2">
+                <input
+                  type="checkbox"
+                  checked={!form.publico}
+                  onChange={(e) =>
+                    setForm({ ...form, publico: !e.target.checked })
+                  }
+                  className="mt-0.5 h-4 w-4 accent-brand"
+                />
+                <span className="flex-1 text-sm">
+                  <span className="flex items-center gap-2 font-medium text-foreground">
+                    <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                    Sigiloso
+                  </span>
+                  <span className="block text-xs text-foreground-muted">
+                    Marque se o conteúdo é restrito (LGPD, sigilo profissional).
+                    Sem marcar, o processo é público.
+                  </span>
+                </span>
+              </label>
+            </SectionCard>
+
+            {/* O botão nunca fica desabilitado por validação: clicar (ou
+                Ctrl+Enter) é o que mostra, sob cada campo, o que falta. */}
+            <BarraAcoesFormulario
+              status={
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {resumo ? (
+                    <span
+                      className={
+                        tentouEnviar ? "font-medium text-warning-soft-foreground" : undefined
+                      }
+                    >
+                      {resumo}
+                    </span>
+                  ) : (
+                    <span>Tudo pronto.</span>
+                  )}
+                  <span>
+                    <Tecla>Ctrl + Enter</Tecla> protocola
+                  </span>
+                </span>
+              }
+            >
+              <Button type="submit" loading={submitM.isPending} className="min-w-44">
+                {!submitM.isPending && <Receipt className="h-4 w-4" aria-hidden="true" />}
+                {submitM.isPending ? "Protocolando…" : "Protocolar"}
               </Button>
-              <span className="text-xs text-foreground-muted">
-                Atalho:{" "}
-                <kbd className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px]">
-                  Ctrl + Enter
-                </kbd>
-              </span>
-            </div>
+            </BarraAcoesFormulario>
           </div>
 
-          <aside className="space-y-4">
-            <div className="rounded-xl border border-border bg-card p-4 shadow-xs">
-              <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                <Clock className="h-4 w-4 text-foreground-muted" aria-hidden="true" />
-                Protocolos recentes (sessão)
-              </div>
+          <aside className="space-y-4 lg:sticky lg:top-24">
+            <CartaoLateral
+              icon={Clock}
+              titulo="Protocolos recentes"
+              descricao={
+                recentes.length > 0
+                  ? `Os últimos ${recentes.length} feitos neste navegador.`
+                  : undefined
+              }
+            >
               {recentes.length === 0 ? (
-                <p className="text-xs text-foreground-muted">
-                  Os últimos {HISTORY_MAX} protocolos desta sessão aparecem aqui.
+                <p className="text-sm leading-relaxed text-foreground-muted">
+                  Os últimos {HISTORY_MAX} protocolos feitos neste navegador aparecem aqui, para
+                  reabrir ou reimprimir sem procurar.
                 </p>
               ) : (
-                <ul className="space-y-1.5">
+                <ul className="-mx-2 divide-y divide-border">
                   {recentes.map((r) => (
-                    <li
-                      key={r.id}
-                      className="rounded-md border border-border bg-surface-1 px-2.5 py-1.5"
-                    >
+                    <li key={r.id}>
                       <Link
                         href={`/m/protocolo/processos/${r.id}`}
-                        className="flex items-center justify-between gap-2 text-xs"
+                        className="group flex items-start justify-between gap-3 rounded-md px-2 py-2.5 transition-colors duration-fast hover:bg-surface-2"
                       >
-                        <span className="min-w-0 flex-1 truncate">
-                          <span className="font-mono font-semibold text-primary">
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-mono text-sm font-semibold text-primary group-hover:underline">
                             {r.numero_processo}
                           </span>
-                          <span className="ml-1.5 text-foreground-muted">
-                            {r.especie_documental ?? "—"} ·{" "}
-                            {r.manifestante.slice(0, 28)}
+                          <span className="mt-0.5 block truncate text-xs text-foreground-muted">
+                            {r.especie_documental ?? "Sem espécie"} · {r.manifestante}
                           </span>
                         </span>
-                        <span className="shrink-0 text-foreground-muted">
+                        <span className="shrink-0 pt-0.5 text-xs tabular-nums text-foreground-subtle">
                           {fmtHora(r.data_recepcao)}
                         </span>
                       </Link>
@@ -599,33 +727,28 @@ export default function ProtocoloBalcaoPage() {
                   ))}
                 </ul>
               )}
-            </div>
+            </CartaoLateral>
 
-            <div className="rounded-xl border border-border bg-card p-4 text-xs text-foreground-muted shadow-xs">
-              <div className="mb-1.5 font-semibold text-foreground">
-                Atalhos rápidos
-              </div>
-              <ul className="space-y-1">
-                <li>
-                  <kbd className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px]">
-                    Ctrl + Enter
-                  </kbd>{" "}
-                  protocola
-                </li>
-                <li>
-                  <kbd className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px]">
-                    Tab
-                  </kbd>{" "}
-                  avança campo
-                </li>
-                <li>
-                  <kbd className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px]">
-                    Esc
-                  </kbd>{" "}
-                  fecha popups
-                </li>
-              </ul>
-            </div>
+            <CartaoLateral icon={Keyboard} titulo="Atalhos" descricao="Para protocolar sem tirar a mão do teclado.">
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-3 text-sm">
+                <dt className="flex items-center gap-1">
+                  <Tecla>Ctrl</Tecla>
+                  <span className="text-xs text-foreground-subtle">+</span>
+                  <Tecla>Enter</Tecla>
+                </dt>
+                <dd className="leading-snug text-foreground-muted">
+                  Protocola — e, depois, começa o próximo
+                </dd>
+                <dt>
+                  <Tecla>Tab</Tecla>
+                </dt>
+                <dd className="leading-snug text-foreground-muted">Vai para o próximo campo</dd>
+                <dt>
+                  <Tecla>Esc</Tecla>
+                </dt>
+                <dd className="leading-snug text-foreground-muted">Fecha a lista aberta</dd>
+              </dl>
+            </CartaoLateral>
           </aside>
         </form>
       )}
@@ -641,16 +764,16 @@ function SuccessCard({
   onNext: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-success/30 bg-success/5 p-6 shadow-xs">
+    <div className="rounded-card border border-success/30 bg-success-soft p-6 shadow-card">
       <div className="flex items-start gap-3">
         <span
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-success/10 text-success"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-success text-success-foreground"
           aria-hidden="true"
         >
           <CheckCircle2 className="h-5 w-5" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold uppercase tracking-wider text-success">
+          <p className="text-xs font-semibold uppercase tracking-wider text-success-soft-foreground">
             Protocolado{protocolo.nup ? " (NUP federal)" : ""}
           </p>
           <h2 className="mt-1 font-mono text-2xl font-bold tracking-tight text-foreground">
@@ -673,43 +796,39 @@ function SuccessCard({
 
       <div className="mt-5 flex flex-wrap gap-2">
         <Button onClick={onNext} className="min-w-44">
-          <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
+          <Plus className="h-4 w-4" aria-hidden="true" />
           Protocolar próximo
         </Button>
-        <a
-          href={protocoloEtiquetaPdfUrl(protocolo.id)}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Button variant="secondary">
-            <Tag className="mr-2 h-4 w-4" aria-hidden="true" />
+        <Button asChild variant="secondary">
+          <a
+            href={protocoloEtiquetaPdfUrl(protocolo.id)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Tag className="h-4 w-4" aria-hidden="true" />
             Etiqueta
-          </Button>
-        </a>
-        <a
-          href={protocoloComprovantePdfUrl(protocolo.id)}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Button variant="secondary">
-            <Printer className="mr-2 h-4 w-4" aria-hidden="true" />
+          </a>
+        </Button>
+        <Button asChild variant="secondary">
+          <a
+            href={protocoloComprovantePdfUrl(protocolo.id)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Printer className="h-4 w-4" aria-hidden="true" />
             Comprovante (2 vias)
-          </Button>
-        </a>
-        <Link href={`/m/protocolo/processos/${protocolo.id}`}>
-          <Button variant="secondary">
+          </a>
+        </Button>
+        <Button asChild variant="secondary">
+          <Link href={`/m/protocolo/processos/${protocolo.id}`}>
             Ver processo
-            <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
-          </Button>
-        </Link>
+            <ChevronRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </Button>
       </div>
 
       <p className="mt-4 text-xs text-foreground-muted">
-        Atalho:{" "}
-        <kbd className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px]">
-          Ctrl + Enter
-        </kbd>{" "}
-        para protocolar o próximo · etiqueta e comprovante abrem em nova aba.
+        <Tecla>Ctrl + Enter</Tecla> começa o próximo · etiqueta e comprovante abrem em nova aba.
       </p>
     </div>
   );

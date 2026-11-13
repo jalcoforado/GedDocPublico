@@ -139,8 +139,8 @@ export function ProcessoWorkflowPanel({ processoId }: Props) {
       )}
 
       {alertasPendentes.length > 0 && (
-        <div className="rounded border border-amber-300 bg-amber-50 p-3">
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-900">
+        <div className="rounded border border-warning/30 bg-warning-soft p-3 text-warning-soft-foreground">
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
             <AlertTriangle className="h-4 w-4" aria-hidden="true" />
             {alertasPendentes.length} alerta{alertasPendentes.length > 1 ? "s" : ""}{" "}
             de SLA pendente{alertasPendentes.length > 1 ? "s" : ""}
@@ -149,7 +149,7 @@ export function ProcessoWorkflowPanel({ processoId }: Props) {
             {alertasPendentes.map((a) => (
               <li
                 key={a.id}
-                className="flex items-center justify-between gap-2 text-sm text-amber-900"
+                className="flex items-center justify-between gap-2 text-sm"
               >
                 <span>
                   Estado <span className="font-mono">{a.estado}</span> — parado há{" "}
