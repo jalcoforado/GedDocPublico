@@ -1,16 +1,12 @@
 {
   "_comentario": "Ratchet do design:check. Números só podem CAIR. Regrave com `npm run design:check -- --update` ao queimar débito — nunca para acomodar código novo.",
-  "total": 37,
+  "total": 10,
   "arquivos": {
     "app/(app)/m/administracao/organograma/page.tsx": 3,
     "app/(app)/m/frota/solicitacoes/page.tsx": 1,
-    "app/(app)/m/transporte/relatorio/page.tsx": 17,
-    "app/(app)/m/transporte/veiculos/[id]/page.tsx": 4,
-    "app/(app)/m/transporte/veiculos/page.tsx": 1,
     "components/admin/TenantEditForm.tsx": 1,
     "components/organograma/OrganogramaDiagramView.tsx": 1,
     "components/organograma/OrganogramaListView.tsx": 1,
-    "components/organograma/UnidadeEditDrawer.tsx": 3,
-    "components/transporte-regulado/alvara-veiculos-modal.tsx": 5
+    "components/organograma/UnidadeEditDrawer.tsx": 3
   }
 }

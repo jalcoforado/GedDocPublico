@@ -3,20 +3,25 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Plus, Route } from "lucide-react";
+import { Inbox, Pencil, Plus, Route, SearchX, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { modoDoVinculo, type ModoVinculo } from "@/components/transporte/campo-vinculo";
+import { CamposLinha, comOperador, errosDaLinha, type CampoLinha } from "@/components/transporte/campos-linha";
+import { useValidacao } from "@/components/transporte/formulario";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import {
   api,
@@ -112,6 +117,7 @@ export default function LinhasPage() {
   const [editing, setEditing] = useState<LinhaTransporte | null>(null);
   const [form, setForm] = useState<LinhaForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
+  const [modoOperador, setModoOperador] = useState<ModoVinculo>("empresa");
 
   // Busca NO SERVIDOR, com debounce. Filtrar no cliente sobre a página
   // truncada faz a tela afirmar que uma linha não existe.
@@ -131,49 +137,6 @@ export default function LinhasPage() {
       }),
   });
 
-  // Seletor de operador — empresa e permissionário. Busca NO SERVIDOR com
-  // debounce, mesmo padrão do seletor de ocupante da P6
-  // (pontos/[id]/page.tsx): filtrar no cliente sobre a primeira página
-  // repete o bug "só enxerga os 50 primeiros".
-  const [buscaEmpresa, setBuscaEmpresa] = useState("");
-  const [buscaEmpresaAplicada, setBuscaEmpresaAplicada] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setBuscaEmpresaAplicada(buscaEmpresa.trim()), 300);
-    return () => clearTimeout(t);
-  }, [buscaEmpresa]);
-
-  const [buscaPerm, setBuscaPerm] = useState("");
-  const [buscaPermAplicada, setBuscaPermAplicada] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setBuscaPermAplicada(buscaPerm.trim()), 300);
-    return () => clearTimeout(t);
-  }, [buscaPerm]);
-
-  const empresasQ = useQuery({
-    queryKey: ["tr-empresas-busca", buscaEmpresaAplicada],
-    queryFn: () => api.empresas.list({ q: buscaEmpresaAplicada || undefined }),
-    enabled: dialogOpen,
-  });
-  const permsQ = useQuery({
-    queryKey: ["tr-perms-busca", buscaPermAplicada],
-    queryFn: () => api.permissionarios.list({ q: buscaPermAplicada || undefined }),
-    enabled: dialogOpen,
-  });
-
-  // Nome do operador já selecionado — busca dedicada por id, independente
-  // do texto de busca atual (ao editar, o selecionado pode não estar entre
-  // os resultados da busca corrente).
-  const empresaSelecionadaQ = useQuery({
-    queryKey: ["tr-empresa-selecionada", form.id_empresa],
-    queryFn: () => api.empresas.get(form.id_empresa as number),
-    enabled: form.id_empresa !== null,
-  });
-  const permSelecionadoQ = useQuery({
-    queryKey: ["tr-perm-selecionado", form.id_permissionario],
-    queryFn: () => api.permissionarios.get(form.id_permissionario as number),
-    enabled: form.id_permissionario !== null,
-  });
-
   function invalidar() {
     qc.invalidateQueries({ queryKey: ["tr-linhas"] });
   }
@@ -181,8 +144,8 @@ export default function LinhasPage() {
   const salvarM = useMutation({
     mutationFn: () =>
       editing
-        ? api.linhasTransporte.update(editing.id, paraPayload(form))
-        : api.linhasTransporte.create(paraPayload(form)),
+        ? api.linhasTransporte.update(editing.id, paraPayload(comOperador(form, modoOperador)))
+        : api.linhasTransporte.create(paraPayload(comOperador(form, modoOperador))),
     onSuccess: () => {
       toast.success(editing ? "Linha atualizada." : "Linha criada.");
       setDialogOpen(false);
@@ -203,22 +166,18 @@ export default function LinhasPage() {
   function abrirNovo() {
     setEditing(null);
     setForm(EMPTY);
+    setModoOperador("empresa");
     setErr(null);
-    setBuscaEmpresa("");
-    setBuscaEmpresaAplicada("");
-    setBuscaPerm("");
-    setBuscaPermAplicada("");
+    val.reiniciar();
     setDialogOpen(true);
   }
 
   function abrirEdicao(l: LinhaTransporte) {
     setEditing(l);
     setForm(paraForm(l));
+    setModoOperador(modoDoVinculo(String(l.id_permissionario ?? ""), String(l.id_empresa ?? "")));
     setErr(null);
-    setBuscaEmpresa("");
-    setBuscaEmpresaAplicada("");
-    setBuscaPerm("");
-    setBuscaPermAplicada("");
+    val.reiniciar();
     setDialogOpen(true);
   }
 
@@ -238,28 +197,23 @@ export default function LinhasPage() {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
-  function submeter(e: React.FormEvent) {
-    e.preventDefault();
+  // Ao menos um operador — o backend devolve 422 se nenhum vier; a escolha
+  // "operada por" diz qual campo falta antes do round-trip.
+  const val = useValidacao<CampoLinha>(errosDaLinha(form, modoOperador));
+
+  function submeter() {
     setErr(null);
-    // Ao menos um operador — o backend devolve 422 se nenhum vier, mas
-    // orientar antes do round-trip é melhor.
-    if (form.id_empresa === null && form.id_permissionario === null) {
-      setErr("Informe ao menos um operador: empresa ou permissionário.");
-      return;
-    }
+    if (!val.conferir()) return;
     salvarM.mutate();
   }
 
-  const empresaSelecionadaNome = empresaSelecionadaQ.data
-    ? empresaSelecionadaQ.data.nome_fantasia ?? empresaSelecionadaQ.data.razao_social
-    : form.id_empresa !== null
-      ? `Empresa #${form.id_empresa}`
-      : null;
-  const permSelecionadoNome = permSelecionadoQ.data
-    ? permSelecionadoQ.data.nome
-    : form.id_permissionario !== null
-      ? `Permissionário #${form.id_permissionario}`
-      : null;
+  const filtrando = buscaAplicada !== "" || tipoFiltro !== "" || situacaoFiltro !== "";
+
+  function limparFiltros() {
+    setBusca("");
+    setTipoFiltro("");
+    setSituacaoFiltro("");
+  }
 
   return (
     <div className="space-y-4">
@@ -281,48 +235,73 @@ export default function LinhasPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-2">
-        <Input
-          placeholder="Buscar por nome ou código..."
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-          className="max-w-xs"
-        />
-        <Select
-          value={tipoFiltro}
-          onChange={(e) => setTipoFiltro(e.target.value)}
-          className="max-w-[200px]"
-        >
-          <option value="">Todos os tipos</option>
-          {TIPOS.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </Select>
-        <Select
-          value={situacaoFiltro}
-          onChange={(e) => setSituacaoFiltro(e.target.value)}
-          className="max-w-[160px]"
-        >
-          <option value="">Todas</option>
-          <option value="ativa">Ativas</option>
-          <option value="inativa">Inativas</option>
-        </Select>
-      </div>
+      <FilterBar ariaLabel="Filtros das linhas">
+        <FilterBar.Group label="Busca" className="w-full sm:w-72">
+          <Input
+            aria-label="Buscar por nome ou código"
+            placeholder="Buscar por nome ou código..."
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
+        </FilterBar.Group>
+        <FilterBar.Group label="Tipo de serviço" className="w-full sm:w-56">
+          <Select
+            aria-label="Tipo de serviço"
+            value={tipoFiltro}
+            onChange={(e) => setTipoFiltro(e.target.value)}
+          >
+            <option value="">Todos os tipos</option>
+            {TIPOS.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </Select>
+        </FilterBar.Group>
+        <FilterBar.Group label="Situação" className="w-full sm:w-40">
+          <Select
+            aria-label="Situação"
+            value={situacaoFiltro}
+            onChange={(e) => setSituacaoFiltro(e.target.value)}
+          >
+            <option value="">Todas</option>
+            <option value="ativa">Ativas</option>
+            <option value="inativa">Inativas</option>
+          </Select>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {q.isLoading ? (
         <Carregando className="py-8 text-center text-muted-foreground" />
       ) : itens.length === 0 ? (
         <EmptyState
-          icon={Inbox}
-          title={buscaAplicada ? "Nenhuma linha encontrada" : "Nenhuma linha cadastrada"}
+          icon={filtrando ? SearchX : Inbox}
+          title={filtrando ? "Nenhuma linha encontrada" : "Nenhuma linha cadastrada"}
           // Com busca ativa, NÃO oferecer "cadastrar": convidaria a duplicar
           // uma linha que existe e a busca não achou.
           description={
-            buscaAplicada
-              ? "Nenhuma linha corresponde à busca. Revise o termo."
+            filtrando
+              ? "Nenhuma linha corresponde à busca ou aos filtros. Revise o termo."
               : "Cadastre as linhas de transporte regulado do município."
+          }
+          action={
+            filtrando ? (
+              <Button variant="secondary" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            ) : canCreate ? (
+              <Button onClick={abrirNovo}>
+                <Plus className="mr-1 h-4 w-4" />
+                Cadastrar linha
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -340,11 +319,11 @@ export default function LinhasPage() {
           </THead>
           <TBody>
             {itens.map((l) => (
-              <TR key={l.id}>
+              <TRLink key={l.id} href={`/m/transporte/linhas/${l.id}`}>
                 <TD className="font-medium">
                   <Link
                     href={`/m/transporte/linhas/${l.id}`}
-                    className="hover:underline"
+                    className="text-primary hover:underline"
                   >
                     {l.nome}
                   </Link>
@@ -367,19 +346,26 @@ export default function LinhasPage() {
                     {l.situacao === "ativa" ? "Ativa" : "Inativa"}
                   </Badge>
                 </TD>
-                <TD className="space-x-2 text-right">
-                  {canEdit && (
-                    <Button variant="ghost" size="sm" onClick={() => abrirEdicao(l)}>
-                      Editar
-                    </Button>
-                  )}
-                  {canDelete && (
-                    <Button variant="ghost" size="sm" onClick={() => pedirExclusao(l)}>
-                      Excluir
-                    </Button>
-                  )}
+                <TD className="text-right">
+                  <AcoesDaLinha
+                    acoes={[
+                      {
+                        label: "Editar",
+                        icon: Pencil,
+                        onClick: () => abrirEdicao(l),
+                        oculta: !canEdit,
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        onClick: () => pedirExclusao(l),
+                        oculta: !canDelete,
+                      },
+                    ]}
+                  />
                 </TD>
-              </TR>
+              </TRLink>
             ))}
           </TBody>
         </Table>
@@ -388,204 +374,36 @@ export default function LinhasPage() {
       <Dialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        title={editing ? "Editar linha" : "Nova linha"}
-      >
-        <form className="space-y-3" onSubmit={submeter}>
-          {err && (
-            <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
-              {err}
-            </div>
-          )}
-          <div>
-            <Label htmlFor="nome">Nome</Label>
-            <Input
-              id="nome"
-              required
-              value={form.nome}
-              onChange={(e) => set("nome", e.target.value)}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="codigo">Código</Label>
-              <Input
-                id="codigo"
-                value={form.codigo}
-                onChange={(e) => set("codigo", e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="tipo">Tipo de serviço</Label>
-              <Select
-                id="tipo"
-                value={form.tipo_servico}
-                onChange={(e) => set("tipo_servico", e.target.value as TipoServico)}
-              >
-                {TIPOS.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="origem">Origem</Label>
-              <Input
-                id="origem"
-                required
-                value={form.origem}
-                onChange={(e) => set("origem", e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="destino">Destino</Label>
-              <Input
-                id="destino"
-                required
-                value={form.destino}
-                onChange={(e) => set("destino", e.target.value)}
-              />
-            </div>
-          </div>
-          <div>
-            <Label htmlFor="situacao">Situação</Label>
-            <Select
-              id="situacao"
-              value={form.situacao}
-              onChange={(e) => set("situacao", e.target.value as LinhaSituacao)}
-            >
-              <option value="ativa">Ativa</option>
-              <option value="inativa">Inativa</option>
-            </Select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="buscaEmpresa">Empresa operadora</Label>
-              {form.id_empresa !== null ? (
-                <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
-                  <span className="truncate">{empresaSelecionadaNome}</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      set("id_empresa", null);
-                      setBuscaEmpresa("");
-                      setBuscaEmpresaAplicada("");
-                    }}
-                  >
-                    Limpar
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <Input
-                    id="buscaEmpresa"
-                    placeholder="Buscar por razão social/CNPJ..."
-                    value={buscaEmpresa}
-                    onChange={(e) => setBuscaEmpresa(e.target.value)}
-                  />
-                  <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
-                    {empresasQ.isLoading ? (
-                      <Carregando className="p-2 text-xs text-muted-foreground" />
-                    ) : (empresasQ.data?.items ?? []).length === 0 ? (
-                      <div className="p-2 text-xs text-muted-foreground">
-                        Nenhuma empresa encontrada.
-                      </div>
-                    ) : (
-                      (empresasQ.data?.items ?? []).map((emp) => (
-                        <button
-                          key={emp.id}
-                          type="button"
-                          className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
-                          onClick={() => set("id_empresa", emp.id)}
-                        >
-                          {emp.nome_fantasia ?? emp.razao_social}
-                          <span className="ml-2 text-xs text-muted-foreground">{emp.cnpj}</span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="buscaPerm">Permissionário operador</Label>
-              {form.id_permissionario !== null ? (
-                <div className="flex h-11 items-center justify-between rounded-input border border-input bg-card px-3 text-sm">
-                  <span className="truncate">{permSelecionadoNome}</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      set("id_permissionario", null);
-                      setBuscaPerm("");
-                      setBuscaPermAplicada("");
-                    }}
-                  >
-                    Limpar
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <Input
-                    id="buscaPerm"
-                    placeholder="Buscar por nome/CPF..."
-                    value={buscaPerm}
-                    onChange={(e) => setBuscaPerm(e.target.value)}
-                  />
-                  <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border">
-                    {permsQ.isLoading ? (
-                      <Carregando className="p-2 text-xs text-muted-foreground" />
-                    ) : (permsQ.data?.items ?? []).length === 0 ? (
-                      <div className="p-2 text-xs text-muted-foreground">
-                        Nenhum permissionário encontrado.
-                      </div>
-                    ) : (
-                      (permsQ.data?.items ?? []).map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
-                          onClick={() => set("id_permissionario", p.id)}
-                        >
-                          {p.nome}
-                          <span className="ml-2 text-xs text-muted-foreground">{p.cpf}</span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Informe ao menos um operador: empresa, permissionário, ou os dois.
-          </p>
-          <div>
-            <Label htmlFor="obs">Observações</Label>
-            <Input
-              id="obs"
-              value={form.observacoes}
-              onChange={(e) => set("observacoes", e.target.value)}
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setDialogOpen(false)}
-            >
+        title={editing ? `Editar linha — ${editing.nome}` : "Nova linha"}
+        description={
+          editing ? undefined : "O trajeto e quem opera. Paradas e horários se cadastram depois, na tela da linha."
+        }
+        size="lg"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={salvarM.isPending}>
-              {salvarM.isPending ? "Salvando..." : "Salvar"}
+            <Button onClick={submeter} loading={salvarM.isPending}>
+              {editing ? "Salvar alterações" : "Criar linha"}
             </Button>
-          </div>
-        </form>
+          </>
+        }
+      >
+        <div ref={val.ref} className="space-y-5">
+          <CamposLinha
+            form={form}
+            set={set}
+            tipos={TIPOS}
+            modoOperador={modoOperador}
+            onModoOperador={setModoOperador}
+            ativo={dialogOpen}
+            erro={val.erro}
+            sair={val.sair}
+          />
+
+          {err && <Alert intent="danger">{err}</Alert>}
+        </div>
       </Dialog>
     </div>
   );

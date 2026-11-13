@@ -9,6 +9,7 @@ import {
   CarFront,
   CheckCircle2,
   ClipboardCheck,
+  History,
   Inbox,
   RotateCcw,
   XCircle,
@@ -16,19 +17,23 @@ import {
 import Link from "next/link";
 import { use, useState } from "react";
 
+import { useValidacao } from "@/components/transporte/formulario";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { api, type RecadastramentoChecklistItem } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { WorkflowTimeline } from "@/components/transporte/WorkflowTimeline";
+import { dataHoraParaExibir, SITUACAO_CONVOCACAO } from "@/components/transporte/rotulos";
 
 interface PageParams {
   params: Promise<{ id: string; convocacaoId: string }>;
@@ -44,18 +49,47 @@ const ATO_TITULO: Record<Ato, string> = {
   reativar: "Reativar recadastramento",
 };
 
-const SITUACAO_INTENT: Record<string, "neutral" | "success" | "danger" | "info"> = {
-  convocado: "neutral",
-  em_analise: "info",
-  deferido: "success",
-  indeferido: "danger",
-  suspenso: "danger",
+// O botão do diálogo diz o ato ("Deferir"), não "Confirmar"; a descrição diz
+// o que acontece com a convocação.
+const ATO_VERBO: Record<Ato, string> = {
+  deferir: "Deferir",
+  indeferir: "Indeferir",
+  reabrir: "Reabrir",
+  suspender: "Suspender",
+  reativar: "Reativar",
 };
 
-const DECISAO_INTENT: Record<string, "success" | "danger" | "warning"> = {
+const ATO_CONSEQUENCIA: Record<Ato, string> = {
+  deferir: "A convocação passa a Deferida.",
+  indeferir: "A convocação passa a Indeferida; dá para reabrir depois.",
+  reabrir: "A convocação volta para análise.",
+  suspender: "A convocação fica suspensa.",
+  reativar: "A convocação volta para atendimento.",
+};
+
+const ATO_EXEMPLO: Record<Ato, string> = {
+  deferir: "Ex.: documentos conferidos e vistoria em dia.",
+  indeferir: "Ex.: CNH vencida; contrato não apresentado.",
+  reabrir: "Ex.: apresentou o documento que faltava.",
+  suspender: "Ex.: não compareceu até o fim do prazo.",
+  reativar: "Ex.: compareceu com justificativa aceita.",
+};
+
+const DECISAO_INTENT: Record<string, "success" | "danger" | "warning" | "info"> = {
   deferimento: "success",
   indeferimento: "danger",
   reabertura: "warning",
+  suspensao: "danger",
+  reativacao: "info",
+};
+
+// O histórico mostrava o tipo cru ("indeferimento", "suspensao").
+const DECISAO_LABEL: Record<string, string> = {
+  deferimento: "Deferimento",
+  indeferimento: "Indeferimento",
+  reabertura: "Reabertura",
+  suspensao: "Suspensão",
+  reativacao: "Reativação",
 };
 
 export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
@@ -72,6 +106,14 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
   const [parecer, setParecer] = useState("");
   const [atoErr, setAtoErr] = useState<string | null>(null);
   const [obs, setObs] = useState<Record<number, string>>({});
+  // Parecer obrigatório também no formulário: descobrir a regra por mensagem
+  // de erro depois de digitar tudo é pior do que saber antes.
+  const valAto = useValidacao<"parecer">({
+    parecer:
+      parecer.trim().length < 5
+        ? `Escreva o parecer: mínimo de 5 caracteres${parecer.trim() ? ` (faltam ${5 - parecer.trim().length})` : ""}.`
+        : undefined,
+  });
 
   const fichaQ = useQuery({
     queryKey: ["tr-recad-atendimento", convId],
@@ -138,6 +180,7 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
     setAto(qual);
     setParecer("");
     setAtoErr(null);
+    valAto.reiniciar();
   }
 
   function fecharAto() {
@@ -148,12 +191,7 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
 
   function submeterAto() {
     setAtoErr(null);
-    // Parecer obrigatório também no formulário: descobrir a regra por mensagem
-    // de erro depois de digitar tudo é pior do que saber antes.
-    if (parecer.trim().length < 5) {
-      setAtoErr("O parecer é obrigatório (mínimo de 5 caracteres).");
-      return;
-    }
+    if (!valAto.conferir()) return;
     atoM.mutate();
   }
 
@@ -198,7 +236,7 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
         ]}
         actions={
           canEdit ? (
-            <div className="flex flex-wrap gap-2">
+            <>
               {/* Suspensa tem UMA saída, e não duas: reativar. Oferecer
                   "Reabrir" aqui deixaria a trilha ambígua — uma suspensão
                   desfeita por reabertura não se distingue de um indeferimento
@@ -228,8 +266,10 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
                     Deferir
                   </Button>
                   {/* Indeferir NUNCA desabilita: indeferir por falta de
-                      documento é justamente o caso real do balcão. */}
-                  <Button variant="danger" onClick={() => abrirAto("indeferir")}>
+                      documento é justamente o caso real do balcão.
+                      Contorno vermelho, não cheio: o vermelho cheio fica no
+                      "Confirmar" do diálogo, que é onde o ato acontece. */}
+                  <Button variant="danger-outline" onClick={() => abrirAto("indeferir")}>
                     <XCircle className="mr-1 h-4 w-4" />
                     Indeferir
                   </Button>
@@ -238,7 +278,7 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
                       receber erro é armadilha. */}
                   {vencida && (
                     <Button
-                      variant="danger"
+                      variant="danger-outline"
                       onClick={() => abrirAto("suspender")}
                     >
                       <Ban className="mr-1 h-4 w-4" />
@@ -247,14 +287,14 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
                   )}
                 </>
               )}
-            </div>
+            </>
           ) : undefined
         }
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <Badge intent={SITUACAO_INTENT[ficha.situacao] ?? "neutral"}>
-          {ficha.situacao.replace("_", " ")}
+        <Badge intent={SITUACAO_CONVOCACAO[ficha.situacao]?.intent ?? "neutral"}>
+          {SITUACAO_CONVOCACAO[ficha.situacao]?.label ?? ficha.situacao}
         </Badge>
         {!decidida && !ficha.pode_deferir && (
           <span className="text-sm text-muted-foreground">
@@ -270,10 +310,15 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
       </div>
 
       {/* ---------------------------------------------------------- checklist */}
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-muted-foreground">
-          Documentos exigidos
-        </h2>
+      <SectionCard
+        title="Documentos exigidos"
+        icon={ClipboardCheck}
+        description={
+          ficha.itens.length === 0
+            ? undefined
+            : `${ficha.itens.filter((i) => i.marcado !== null).length} de ${ficha.itens.length} conferidos. Marque cada um como em ordem ou não apresentado; a observação é opcional.`
+        }
+      >
         {ficha.itens.length === 0 ? (
           <EmptyState
             icon={Inbox}
@@ -301,18 +346,18 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
                   <TD className="font-medium">
                     <div className="flex flex-wrap items-center gap-2">
                       {i.descricao}
-                      {i.obrigatorio && <Badge intent="warning">obrigatório</Badge>}
+                      {i.obrigatorio && <Badge intent="warning">Obrigatório</Badge>}
                     </div>
                   </TD>
                   <TD>
                     {/* Três estados, não dois: `null` é "ninguém olhou", que
                         não é a mesma coisa que "olhou e não está em ordem". */}
                     {i.marcado === null ? (
-                      <Badge intent="neutral">não conferido</Badge>
+                      <Badge intent="neutral">Não conferido</Badge>
                     ) : i.marcado ? (
-                      <Badge intent="success">em ordem</Badge>
+                      <Badge intent="success">Em ordem</Badge>
                     ) : (
-                      <Badge intent="danger">não apresentado</Badge>
+                      <Badge intent="danger">Não apresentado</Badge>
                     )}
                   </TD>
                   <TD className="text-sm text-muted-foreground">
@@ -320,10 +365,11 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
                   </TD>
                   <TD className="text-right">
                     {canEdit && !decidida && (
-                      <div className="inline-flex flex-wrap justify-end items-center gap-2">
+                      <div className="inline-flex flex-nowrap items-center justify-end gap-2">
                         <Input
                           className="w-44"
-                          placeholder="Observação"
+                          aria-label={`Observação sobre ${i.descricao}`}
+                          placeholder="Observação (opcional)"
                           value={obs[i.id_item] ?? ""}
                           onChange={(e) =>
                             setObs({ ...obs, [i.id_item]: e.target.value })
@@ -365,13 +411,10 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
             </TBody>
           </Table>
         )}
-      </section>
+      </SectionCard>
 
       {/* --------------------------------------------------------- vistorias */}
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-muted-foreground">
-          Vistoria dos veículos
-        </h2>
+      <SectionCard title="Vistoria dos veículos" icon={CarFront}>
         {/* TRÊS estados distintos, e não um selo verde para dois deles.
             "Nenhum veículo cadastrado" satisfaz a regra por vacuidade, mas
             não é a mesma coisa que "todos em dia" — colapsar os dois
@@ -412,26 +455,30 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
             </ul>
           </div>
         )}
-      </section>
+      </SectionCard>
 
       {/* ---------------------------------------------------------- workflow */}
       <WorkflowTimeline entidadeTipo="convocacao" entidadeId={convId} />
 
       {/* --------------------------------------------------------- histórico */}
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-muted-foreground">
-          Histórico de decisões
-        </h2>
+      <SectionCard title="Histórico de decisões" icon={History}>
         {(decisoesQ.data?.length ?? 0) === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhuma decisão registrada.</p>
+          <EmptyState
+            icon={History}
+            title="Nenhuma decisão registrada"
+            description="Deferimentos, indeferimentos e reaberturas desta convocação aparecem aqui."
+            className="p-6"
+          />
         ) : (
           <ul className="space-y-2">
             {decisoesQ.data?.map((d) => (
-              <li key={d.id} className="rounded-md border p-3 text-sm">
+              <li key={d.id} className="rounded-md border border-border p-3 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge intent={DECISAO_INTENT[d.tipo] ?? "neutral"}>{d.tipo}</Badge>
+                  <Badge intent={DECISAO_INTENT[d.tipo] ?? "neutral"}>
+                    {DECISAO_LABEL[d.tipo] ?? d.tipo}
+                  </Badge>
                   <span className="text-muted-foreground">
-                    {new Date(d.criado_em).toLocaleString("pt-BR")}
+                    {dataHoraParaExibir(d.criado_em)}
                   </span>
                 </div>
                 <p className="mt-1 whitespace-pre-wrap">{d.parecer}</p>
@@ -439,61 +486,63 @@ export default function AtendimentoRecadastramentoPage({ params }: PageParams) {
             ))}
           </ul>
         )}
-      </section>
+      </SectionCard>
 
       <Dialog
         open={ato !== null}
         onClose={fecharAto}
         title={ato ? ATO_TITULO[ato] : ""}
+        description={ato ? `${ficha.nome_regulado}. ${ATO_CONSEQUENCIA[ato]}` : undefined}
         footer={
           <>
-            <Button variant="secondary" onClick={fecharAto}>
+            <Button variant="ghost" onClick={fecharAto}>
               Cancelar
             </Button>
             <Button
               onClick={submeterAto}
-              disabled={atoM.isPending}
-              variant={ato === "indeferir" ? "danger" : "primary"}
+              loading={atoM.isPending}
+              variant={ato === "indeferir" || ato === "suspender" ? "danger" : "primary"}
             >
-              {atoM.isPending ? "Registrando..." : "Confirmar"}
+              {ato ? ATO_VERBO[ato] : "Confirmar"}
             </Button>
           </>
         }
       >
-        <div className="space-y-3">
-          {atoErr && <div className="text-sm text-danger">{atoErr}</div>}
+        <div ref={valAto.ref} className="space-y-4">
           {ato === "suspender" && (
-            <p className="text-sm text-muted-foreground">
-              A suspensão vale para <strong>esta convocação</strong>: não altera a
-              situação do cadastro do regulado nem os alvarás. Enquanto suspensa,
-              a ficha não aceita marcação nem decisão.
-            </p>
+            <Alert intent="warning">
+              A suspensão vale para <strong>esta convocação</strong>: não altera a situação do
+              cadastro do regulado nem os alvarás. Enquanto suspensa, a ficha não aceita marcação
+              nem decisão.
+            </Alert>
           )}
           {ato === "reativar" && (
-            <p className="text-sm text-muted-foreground">
-              Reativar devolve a convocação para atendimento. As marcações já
-              feitas continuam valendo, e a suspensão permanece no histórico.
-            </p>
+            <Alert intent="info">
+              Reativar devolve a convocação para atendimento. As marcações já feitas continuam
+              valendo, e a suspensão permanece no histórico.
+            </Alert>
           )}
           {ato === "reabrir" && (
-            <p className="text-sm text-muted-foreground">
-              A decisão anterior permanece no histórico. Reabrir devolve a convocação
-              para análise.
-            </p>
+            <Alert intent="info">
+              A decisão anterior permanece no histórico. Reabrir devolve a convocação para análise.
+            </Alert>
           )}
-          <div>
-            <Label htmlFor="parecer">Parecer</Label>
+          <FormField
+            label="Parecer"
+            required
+            error={valAto.erro("parecer")}
+            hint="Fica registrado com autor e data."
+          >
             <Textarea
               id="parecer"
               rows={4}
               value={parecer}
               onChange={(e) => setParecer(e.target.value)}
-              placeholder="Fundamente a decisão."
+              onBlur={valAto.sair("parecer")}
+              placeholder={ato ? ATO_EXEMPLO[ato] : undefined}
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Obrigatório. Fica registrado com autor e data.
-            </p>
-          </div>
+          </FormField>
+          {atoErr && <Alert intent="danger">{atoErr}</Alert>}
         </div>
       </Dialog>
     </div>

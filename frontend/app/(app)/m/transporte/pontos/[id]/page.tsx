@@ -3,17 +3,20 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MapPin, UserPlus } from "lucide-react";
+import { History, MapPin, UserPlus } from "lucide-react";
 import { use, useState } from "react";
 
+import { useValidacao } from "@/components/transporte/formulario";
+import { documentoParaExibir } from "@/components/transporte/rotulos";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FormField } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
-import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, type PontoVaga } from "@/lib/api";
@@ -53,7 +56,14 @@ export default function PontoDetalhePage({ params }: PageParams) {
   const [vagaAlvo, setVagaAlvo] = useState<number | null>(null);
   const [buscaPerm, setBuscaPerm] = useState("");
   const [permEscolhido, setPermEscolhido] = useState<number | null>(null);
+  // A opção escolhida fica guardada: a busca no servidor troca a lista a
+  // cada tecla, e sem ela o campo voltaria ao placeholder.
+  const [permOpcao, setPermOpcao] = useState<ComboboxOption | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  // O botão não fica desabilitado sem escolha: clicar é o que diz o que falta.
+  const valOcupar = useValidacao<"permissionario">({
+    permissionario: permEscolhido === null ? "Escolha o permissionário que vai ocupar a vaga." : undefined,
+  });
 
   const mapaQ = useQuery({
     queryKey: ["tr-ponto-mapa", pontoId],
@@ -92,6 +102,7 @@ export default function PontoDetalhePage({ params }: PageParams) {
       toast.success(`Vaga ${vagaAlvo} ocupada.`);
       setVagaAlvo(null);
       setPermEscolhido(null);
+      setPermOpcao(null);
       setBuscaPerm("");
       invalidar();
     },
@@ -111,6 +122,12 @@ export default function PontoDetalhePage({ params }: PageParams) {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  function ocupar() {
+    setErro(null);
+    if (!valOcupar.conferir()) return;
+    ocuparM.mutate();
+  }
 
   async function pedirLiberacao(vaga: PontoVaga) {
     const oc = vaga.ocupacao;
@@ -145,7 +162,10 @@ export default function PontoDetalhePage({ params }: PageParams) {
       />
 
       {mapa && mapa.situacao === "inativo" && (
-        <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
+        <div
+          role="status"
+          className="rounded-md border border-warning/40 bg-warning-soft p-3 text-sm text-warning-soft-foreground"
+        >
           Ponto <strong>inativo</strong>: não recebe novas ocupações. Quem já está
           na vaga permanece até ser liberado.
         </div>
@@ -202,6 +222,7 @@ export default function PontoDetalhePage({ params }: PageParams) {
                       onClick={() => {
                         setVagaAlvo(v.numero_vaga);
                         setErro(null);
+                        valOcupar.reiniciar();
                       }}
                     >
                       <UserPlus className="mr-1 h-4 w-4" />
@@ -216,11 +237,13 @@ export default function PontoDetalhePage({ params }: PageParams) {
       )}
 
       <div>
-        <h2 className="mb-2 mt-6 font-semibold">Histórico de ocupação</h2>
+        <h2 className="mb-2 mt-6 font-semibold text-foreground">Histórico de ocupação</h2>
         {historico.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Nenhuma ocupação registrada neste ponto.
-          </p>
+          <EmptyState
+            icon={History}
+            title="Nenhuma ocupação registrada"
+            description="Quem ocupou e liberou cada vaga deste ponto aparece aqui."
+          />
         ) : (
           <Table>
             <THead>
@@ -239,7 +262,7 @@ export default function PontoDetalhePage({ params }: PageParams) {
                   <TD className="font-medium">{o.nome_permissionario}</TD>
                   <TD className="text-sm">{formataData(o.desde)}</TD>
                   <TD className="text-sm">
-                    {o.ate ? formataData(o.ate) : <Badge intent="success">vigente</Badge>}
+                    {o.ate ? formataData(o.ate) : <Badge intent="success">Vigente</Badge>}
                   </TD>
                   <TD className="text-sm text-muted-foreground">
                     {o.motivo_liberacao ? MOTIVO_LABEL[o.motivo_liberacao] ?? o.motivo_liberacao : "—"}
@@ -255,53 +278,42 @@ export default function PontoDetalhePage({ params }: PageParams) {
         open={vagaAlvo !== null}
         onClose={() => setVagaAlvo(null)}
         title={`Ocupar a vaga ${vagaAlvo ?? ""}`}
-      >
-        <div className="space-y-3">
-          {erro && (
-            <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
-              {erro}
-            </div>
-          )}
-          <div>
-            <Label htmlFor="buscaPerm">Permissionário</Label>
-            <Input
-              id="buscaPerm"
-              placeholder="Buscar por nome..."
-              value={buscaPerm}
-              onChange={(e) => setBuscaPerm(e.target.value)}
-            />
-          </div>
-          <Select
-            value={permEscolhido ?? ""}
-            onChange={(e) =>
-              setPermEscolhido(e.target.value ? Number(e.target.value) : null)
-            }
-          >
-            <option value="">Selecione...</option>
-            {perms.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nome} — {p.cpf}
-              </option>
-            ))}
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            Um permissionário ocupa no máximo uma vaga. Se já estiver lotado em
-            outro ponto, o sistema informa onde.
-          </p>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setVagaAlvo(null)}>
+        description="Cada permissionário ocupa no máximo uma vaga. Se já estiver em outro ponto, o sistema diz onde."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setVagaAlvo(null)}>
               Cancelar
             </Button>
-            <Button
-              onClick={() => {
-                setErro(null);
-                ocuparM.mutate();
-              }}
-              disabled={permEscolhido === null || ocuparM.isPending}
-            >
-              {ocuparM.isPending ? "Ocupando..." : "Ocupar"}
+            <Button onClick={ocupar} loading={ocuparM.isPending}>
+              Ocupar vaga {vagaAlvo ?? ""}
             </Button>
-          </div>
+          </>
+        }
+      >
+        <div ref={valOcupar.ref} className="space-y-4">
+          <FormField
+            label="Permissionário"
+            required
+            error={valOcupar.erro("permissionario")}
+            hint="Só aparecem permissionários ativos. Busque pelo nome ou CPF."
+          >
+            <Combobox
+              id="buscaPerm"
+              options={perms.map((p) => ({ value: p.id, label: p.nome, hint: documentoParaExibir(p.cpf) }))}
+              value={permEscolhido}
+              selectedOption={permOpcao}
+              onChange={(v, opt) => {
+                setPermEscolhido(v == null ? null : Number(v));
+                setPermOpcao(opt);
+              }}
+              onQueryChange={setBuscaPerm}
+              loading={permsQ.isFetching}
+              placeholder="Escolha o permissionário…"
+              searchPlaceholder="Nome ou CPF…"
+              emptyText="Nenhum permissionário ativo com esse nome."
+            />
+          </FormField>
+          {erro && <Alert intent="danger">{erro}</Alert>}
         </div>
       </Dialog>
     </div>

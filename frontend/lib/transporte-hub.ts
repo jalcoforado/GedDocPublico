@@ -64,7 +64,7 @@ export const CARDS: HubCard[] = [
   {
     href: "/m/transporte/relatorio",
     icon: BarChart3,
-    title: "Relatórios",
+    title: "Relatório de alvarás",
     desc: "KPIs e análise de alvarás regulados, com exportação.",
     ready: true,
   },
