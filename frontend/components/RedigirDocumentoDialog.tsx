@@ -93,6 +93,8 @@ export function RedigirDocumentoDialog({
     throwOnError: false,
   });
   const hasGoogleCredentials = credentialQ.data?.connected === true;
+  // SI-32: sem client ID/secret no servidor não há o que conectar.
+  const googleConfigurado = credentialQ.data?.configurado !== false;
 
   useEffect(() => {
     if (open) {
@@ -319,7 +321,8 @@ export function RedigirDocumentoDialog({
           </FormField>
           <div>
             {/* Google Docs sem conta conectada: escolher a opção abre a
-                conexão, em vez de deixar seguir para um "criar" que falharia. */}
+                conexão (se o servidor tiver a integração configurada), em vez
+                de deixar seguir para um "criar" que falharia. */}
             <EscolhaSegmentada
               nome="minuta-origem"
               titulo="Onde redigir"
@@ -327,7 +330,7 @@ export function RedigirDocumentoDialog({
               valor={origem}
               onChange={(v) => {
                 if (v === "google" && !hasGoogleCredentials) {
-                  setShowGoogleConnect(true);
+                  if (googleConfigurado) setShowGoogleConnect(true);
                   return;
                 }
                 setOrigem(v);
@@ -347,7 +350,13 @@ export function RedigirDocumentoDialog({
                 },
               ]}
             />
-            {!hasGoogleCredentials && (
+            {!hasGoogleCredentials && !googleConfigurado && (
+              <p className="mt-1.5 text-xs text-foreground-muted">
+                A integração com o Google Docs ainda não foi configurada neste servidor. Fale
+                com o administrador do sistema.
+              </p>
+            )}
+            {!hasGoogleCredentials && googleConfigurado && (
               <p className="mt-1.5 text-xs text-foreground-muted">
                 Para usar o Google Docs, conecte sua conta primeiro.{" "}
                 <button
